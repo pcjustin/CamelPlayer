@@ -88,11 +88,15 @@ public class InteractiveMode {
                 print("Volume set to \(Int(level * 100))%")
 
             case .add(let paths):
+                var addedCount = 0
                 for path in paths {
-                    let url = URL(fileURLWithPath: path)
-                    controller.addToPlaylist(url: url)
+                    let urls = expandPath(path)
+                    for url in urls {
+                        controller.addToPlaylist(url: url)
+                        addedCount += 1
+                    }
                 }
-                print("Added \(paths.count) file(s) to playlist")
+                print("Added \(addedCount) file(s) to playlist")
 
             case .list:
                 printPlaylist()
@@ -220,7 +224,7 @@ public class InteractiveMode {
           seek <time>          - Seek to time (seconds or MM:SS)
 
         Playlist Management:
-          add, a <path>        - Add file(s) to playlist
+          add, a <path>        - Add file(s) or folder to playlist (auto-scans folders)
           list, l              - Show playlist
           remove, rm <index>   - Remove item from playlist
           clear                - Clear playlist
@@ -244,5 +248,49 @@ public class InteractiveMode {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private func expandPath(_ path: String) -> [URL] {
+        let fileManager = FileManager.default
+        let url = URL(fileURLWithPath: path)
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            print("Warning: Path does not exist: \(path)")
+            return []
+        }
+
+        if isDirectory.boolValue {
+            return scanDirectory(url)
+        } else {
+            return isAudioFile(url) ? [url] : []
+        }
+    }
+
+    private func scanDirectory(_ directoryURL: URL) -> [URL] {
+        let fileManager = FileManager.default
+        var audioFiles: [URL] = []
+
+        guard let enumerator = fileManager.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .nameKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        for case let fileURL as URL in enumerator {
+            if isAudioFile(fileURL) {
+                audioFiles.append(fileURL)
+            }
+        }
+
+        return audioFiles.sorted { $0.path < $1.path }
+    }
+
+    private func isAudioFile(_ url: URL) -> Bool {
+        let audioExtensions = ["mp3", "wav", "m4a", "flac", "alac", "aac", "aiff", "caf"]
+        let ext = url.pathExtension.lowercased()
+        return audioExtensions.contains(ext)
     }
 }

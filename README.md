@@ -64,7 +64,7 @@ camelplayer interactive
 - `seek <time>` - Seek to position (seconds or MM:SS format)
 
 **Playlist Management:**
-- `add <path>` or `a <path>` - Add file(s) to playlist
+- `add <path>` or `a <path>` - Add file(s) or folder to playlist (automatically scans folders for audio files)
 - `list` or `l` - Show playlist
 - `remove <index>` or `rm <index>` - Remove item from playlist
 - `clear` - Clear entire playlist
