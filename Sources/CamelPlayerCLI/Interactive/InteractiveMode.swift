@@ -127,6 +127,18 @@ public class InteractiveMode {
                     }
                 }
 
+            case .bitPerfect(let enabled):
+                if let enable = enabled {
+                    controller.bitPerfectMode = enable
+                    print("Bit-perfect mode: \(enable ? "ON" : "OFF")")
+                } else {
+                    let isEnabled = controller.bitPerfectMode
+                    print("Bit-perfect mode: \(isEnabled ? "ON" : "OFF")")
+                }
+
+            case .info:
+                printAudioInfo()
+
             case .status:
                 printStatus()
 
@@ -193,6 +205,7 @@ public class InteractiveMode {
         print("  State: \(state)")
         print("  Volume: \(volume)%")
         print("  Mode: \(mode)")
+        print("  Bit-perfect: \(controller.bitPerfectMode ? "ON" : "OFF")")
 
         if let item = controller.currentItem {
             print("  Current: \(item.title)")
@@ -206,6 +219,36 @@ public class InteractiveMode {
         }
 
         print("  Playlist: \(controller.getPlaylistCount()) items")
+    }
+
+    private func printAudioInfo() {
+        do {
+            let deviceSampleRate = try controller.getCurrentDeviceSampleRate()
+            print("\nAudio Information:")
+            print("  Device sample rate: \(Int(deviceSampleRate)) Hz")
+
+            if let fileSampleRate = controller.getFileSampleRate() {
+                print("  File sample rate: \(Int(fileSampleRate)) Hz")
+
+                if abs(deviceSampleRate - fileSampleRate) < 0.1 {
+                    print("  ✓ Sample rates match (Bit-perfect)")
+                } else {
+                    print("  ⚠ Sample rates differ (Resampling active)")
+                }
+            }
+
+            if let format = controller.getFileFormat() {
+                print("  File format: \(format)")
+            }
+
+            if let item = controller.currentItem {
+                print("  Current file: \(item.title)")
+            }
+
+            print("  Bit-perfect mode: \(controller.bitPerfectMode ? "ON" : "OFF")")
+        } catch {
+            print("Error getting audio info: \(error.localizedDescription)")
+        }
     }
 
     private func printHelp() {
@@ -233,8 +276,10 @@ public class InteractiveMode {
           volume, vol, v <0-100> - Set volume
           mode, m <mode>       - Set playback mode (sequential, loop, loopone, shuffle)
           device, dev, d [id]  - List or set output device
+          bitperfect, bp [on|off] - Enable/disable bit-perfect mode (auto-matches sample rate)
 
         Information:
+          info, i              - Show audio format and bit-perfect status
           status, st           - Show playback status
           help, h, ?           - Show this help
 

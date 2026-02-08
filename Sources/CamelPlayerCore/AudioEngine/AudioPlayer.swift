@@ -23,6 +23,7 @@ public class AudioPlayer {
 
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
+    public var bitPerfectMode: Bool = true
 
     public var mixerNode: AVAudioMixerNode {
         engine.mainMixerNode
@@ -67,6 +68,23 @@ public class AudioPlayer {
         try deviceManager.getDefaultOutputDevice()
     }
 
+    public func getCurrentDeviceSampleRate() throws -> Float64 {
+        try deviceManager.getCurrentDeviceSampleRate()
+    }
+
+    public func getFileSampleRate() -> Float64? {
+        audioFile?.processingFormat.sampleRate
+    }
+
+    public func getFileFormat() -> String? {
+        guard let file = audioFile else { return nil }
+        let format = file.processingFormat
+        let sampleRate = Int(format.sampleRate)
+        let bitDepth = format.settings[AVLinearPCMBitDepthKey] as? Int ?? 0
+        let channels = Int(format.channelCount)
+        return "\(sampleRate) Hz / \(bitDepth) bit / \(channels)ch"
+    }
+
     public func load(url: URL) throws {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw AudioPlayerError.fileNotFound
@@ -100,6 +118,20 @@ public class AudioPlayer {
 
         if engine.isRunning {
             engine.stop()
+        }
+
+        if bitPerfectMode {
+            do {
+                let currentDeviceID = try deviceManager.getCurrentOutputDevice()
+                let currentSampleRate = try deviceManager.getDeviceSampleRate(deviceID: currentDeviceID)
+                let fileSampleRate = format.sampleRate
+
+                if abs(currentSampleRate - fileSampleRate) > 0.1 {
+                    try deviceManager.setDeviceSampleRate(deviceID: currentDeviceID, sampleRate: fileSampleRate)
+                }
+            } catch {
+                print("Warning: Failed to set bit-perfect sample rate: \(error.localizedDescription)")
+            }
         }
 
         engine.disconnectNodeOutput(playerNode)

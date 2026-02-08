@@ -4,14 +4,15 @@ A Swift CLI audio player for macOS featuring independent audio output device con
 
 ## Features
 
+- **Bit-Perfect Playback**: Automatic hardware sample rate matching for zero-resampling playback
 - **Independent Output Device Control**: Select and control audio output device independently from system settings using Core Audio
-- **Multiple Audio Formats**: Support for MP3, WAV, M4A, FLAC, and ALAC
-- **Playlist Management**: Add, remove, and navigate through multiple tracks
+- **Multiple Audio Formats**: Support for MP3, WAV, M4A, FLAC, and ALAC (including high-res 192kHz/24bit)
+- **Playlist Management**: Add files or entire folders, navigate through multiple tracks
 - **Playback Control**: Play, pause, resume, stop, seek, next, and previous
 - **Volume Control**: Independent volume control that doesn't affect system volume
 - **Playback Modes**: Sequential, loop, loop-one, and shuffle
 - **Hybrid CLI Interface**: Both command-line arguments and interactive mode
-- **Real-time Status**: View current playback state, progress, and playlist information
+- **Real-time Status**: View playback state, audio format, and bit-perfect status
 
 ## Requirements
 
@@ -77,8 +78,10 @@ camelplayer interactive
   - `loopone` or `one` - Loop current track
   - `shuffle` or `sh` - Random playback
 - `device [id]` or `dev [id]` - List or set output device
+- `bitperfect [on|off]` or `bp [on|off]` - Enable/disable bit-perfect mode (default: ON)
 
 **Information:**
+- `info` or `i` - Show audio format and bit-perfect status
 - `status` or `st` - Show playback status
 - `help` or `h` or `?` - Show help message
 

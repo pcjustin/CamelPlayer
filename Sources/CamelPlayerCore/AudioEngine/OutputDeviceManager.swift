@@ -206,4 +206,59 @@ public class OutputDeviceManager {
 
         return deviceID
     }
+
+    public func getDeviceSampleRate(deviceID: AudioDeviceID) throws -> Float64 {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var sampleRate: Float64 = 0
+        var dataSize = UInt32(MemoryLayout<Float64>.size)
+
+        let status = AudioObjectGetPropertyData(
+            deviceID,
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &sampleRate
+        )
+
+        guard status == kAudioHardwareNoError else {
+            throw OutputDeviceError.propertyAccessFailed("Failed to get device sample rate")
+        }
+
+        return sampleRate
+    }
+
+    public func setDeviceSampleRate(deviceID: AudioDeviceID, sampleRate: Float64) throws {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var newSampleRate = sampleRate
+        let dataSize = UInt32(MemoryLayout<Float64>.size)
+
+        let status = AudioObjectSetPropertyData(
+            deviceID,
+            &propertyAddress,
+            0,
+            nil,
+            dataSize,
+            &newSampleRate
+        )
+
+        guard status == kAudioHardwareNoError else {
+            throw OutputDeviceError.deviceSetupFailed("Failed to set device sample rate to \(sampleRate) Hz (error: \(status))")
+        }
+    }
+
+    public func getCurrentDeviceSampleRate() throws -> Float64 {
+        let deviceID = try getCurrentOutputDevice()
+        return try getDeviceSampleRate(deviceID: deviceID)
+    }
 }

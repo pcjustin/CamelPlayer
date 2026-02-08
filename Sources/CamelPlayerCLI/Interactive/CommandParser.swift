@@ -16,6 +16,8 @@ public enum PlayerCommand {
     case clear
     case mode(PlaybackMode)
     case device(id: UInt32?)
+    case bitPerfect(enabled: Bool?)
+    case info
     case status
     case help
     case quit
@@ -113,6 +115,22 @@ public struct CommandParser {
                 return .device(id: deviceID)
             }
             return .unknown("Invalid device ID")
+
+        case "bitperfect", "bp":
+            if args.isEmpty {
+                return .bitPerfect(enabled: nil)
+            }
+            switch args.lowercased() {
+            case "on", "true", "1", "enable", "enabled":
+                return .bitPerfect(enabled: true)
+            case "off", "false", "0", "disable", "disabled":
+                return .bitPerfect(enabled: false)
+            default:
+                return .unknown("Use: bitperfect [on|off]")
+            }
+
+        case "info", "i":
+            return .info
 
         case "status", "st":
             return .status

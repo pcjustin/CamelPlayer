@@ -130,4 +130,21 @@ public class PlaybackController {
     public func removeFromPlaylist(at index: Int) {
         playlist.remove(at: index)
     }
+
+    public var bitPerfectMode: Bool {
+        get { player.bitPerfectMode }
+        set { player.bitPerfectMode = newValue }
+    }
+
+    public func getCurrentDeviceSampleRate() throws -> Float64 {
+        try player.getCurrentDeviceSampleRate()
+    }
+
+    public func getFileSampleRate() -> Float64? {
+        player.getFileSampleRate()
+    }
+
+    public func getFileFormat() -> String? {
+        player.getFileFormat()
+    }
 }
