@@ -36,16 +36,7 @@ public class PlaybackController {
     public init() throws {
         player = try AudioPlayer()
         playlist = Playlist()
-
-        let engine = Mirror(reflecting: player)
-            .children
-            .first(where: { $0.label == "engine" })?.value as? AVAudioEngine
-
-        guard let audioEngine = engine else {
-            throw AudioPlayerError.audioEngineError("Failed to access audio engine")
-        }
-
-        volumeController = VolumeController(mixerNode: audioEngine.mainMixerNode)
+        volumeController = VolumeController(mixerNode: player.mixerNode)
     }
 
     public func addToPlaylist(url: URL) {

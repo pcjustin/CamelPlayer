@@ -24,6 +24,10 @@ public class AudioPlayer {
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
 
+    public var mixerNode: AVAudioMixerNode {
+        engine.mainMixerNode
+    }
+
     public var duration: TimeInterval? {
         guard let file = audioFile else { return nil }
         let sampleRate = file.processingFormat.sampleRate
@@ -44,13 +48,7 @@ public class AudioPlayer {
 
     public init() throws {
         deviceManager = OutputDeviceManager(engine: engine)
-
         engine.attach(playerNode)
-
-        let mainMixer = engine.mainMixerNode
-        engine.connect(playerNode, to: mainMixer, format: nil)
-
-        try engine.start()
     }
 
     public func listOutputDevices() throws -> [AudioDevice] {
@@ -97,14 +95,26 @@ public class AudioPlayer {
 
         playerNode.stop()
 
+        let mainMixer = engine.mainMixerNode
+        let format = file.processingFormat
+
+        if engine.isRunning {
+            engine.stop()
+        }
+
+        engine.disconnectNodeOutput(playerNode)
+        engine.connect(playerNode, to: mainMixer, format: format)
+
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
                 self?.state = .stopped
             }
         }
 
-        if !engine.isRunning {
+        do {
             try engine.start()
+        } catch {
+            throw AudioPlayerError.audioEngineError("Failed to start audio engine: \(error.localizedDescription)")
         }
 
         playerNode.play()

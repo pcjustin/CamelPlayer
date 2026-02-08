@@ -76,7 +76,7 @@ public struct CommandParser {
             return .unknown("Invalid volume level. Use 0-100")
 
         case "add", "a":
-            let paths = args.split(separator: " ").map { String($0) }
+            let paths = parsePaths(args)
             return .add(paths: paths)
 
         case "list", "l":
@@ -142,5 +142,45 @@ public struct CommandParser {
         }
 
         return nil
+    }
+
+    private func parsePaths(_ input: String) -> [String] {
+        var paths: [String] = []
+        var currentPath = ""
+        var inQuotes = false
+        var escapeNext = false
+
+        for char in input {
+            if escapeNext {
+                currentPath.append(char)
+                escapeNext = false
+                continue
+            }
+
+            if char == "\\" {
+                escapeNext = true
+                continue
+            }
+
+            if char == "\"" {
+                inQuotes.toggle()
+                continue
+            }
+
+            if char == " " && !inQuotes {
+                if !currentPath.isEmpty {
+                    paths.append(currentPath.trimmingCharacters(in: .whitespaces))
+                    currentPath = ""
+                }
+            } else {
+                currentPath.append(char)
+            }
+        }
+
+        if !currentPath.isEmpty {
+            paths.append(currentPath.trimmingCharacters(in: .whitespaces))
+        }
+
+        return paths.isEmpty ? [input] : paths
     }
 }
