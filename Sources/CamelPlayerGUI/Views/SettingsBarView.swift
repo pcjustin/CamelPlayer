@@ -12,6 +12,7 @@ struct SettingsBarView: View {
                 Text("Device:")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .trailing)
 
                 Picker("", selection: Binding(
                     get: { viewModel.currentDeviceID ?? 0 },
@@ -32,6 +33,7 @@ struct SettingsBarView: View {
                 Text("Mode:")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .trailing)
 
                 Picker("", selection: Binding(
                     get: { viewModel.playbackMode },
