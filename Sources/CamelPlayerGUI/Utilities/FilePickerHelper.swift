@@ -56,6 +56,9 @@ struct FilePickerHelper {
             }
         }
 
-        return audioFiles.sorted { $0.path < $1.path }
+        // Use natural sorting (1, 2, 3, 10, 11) instead of lexical (1, 10, 11, 2, 3)
+        return audioFiles.sorted {
+            $0.path.localizedStandardCompare($1.path) == .orderedAscending
+        }
     }
 }
