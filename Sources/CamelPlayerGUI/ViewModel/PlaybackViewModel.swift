@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import CamelPlayerCore
 import CoreAudio
+import AVFoundation
 
 @MainActor
 class PlaybackViewModel: ObservableObject {
@@ -88,31 +89,67 @@ class PlaybackViewModel: ObservableObject {
             return
         }
 
-        let folderURL = currentItem.url.deletingLastPathComponent()
-        let folderPath = folderURL.path
-
-        // Skip if we already loaded cover from this folder
-        if lastLoadedCoverPath == folderPath {
+        // Skip if we already loaded cover from this file
+        if lastLoadedCoverPath == currentItem.url.path {
             return
         }
 
-        // Look for cover.jpg or cover.jpeg in the same folder
-        let coverNames = ["cover.jpg", "cover.jpeg", "Cover.jpg", "Cover.jpeg"]
+        let folderURL = currentItem.url.deletingLastPathComponent()
 
+        // 1. First, look for cover.jpg or cover.jpeg in the same folder (faster)
+        let coverNames = ["cover.jpg", "cover.jpeg", "Cover.jpg", "Cover.jpeg"]
         for coverName in coverNames {
             let coverURL = folderURL.appendingPathComponent(coverName)
             if FileManager.default.fileExists(atPath: coverURL.path) {
                 if let image = NSImage(contentsOf: coverURL) {
                     albumArt = image
-                    lastLoadedCoverPath = folderPath
+                    lastLoadedCoverPath = currentItem.url.path
                     return
                 }
             }
         }
 
-        // No cover found
+        // 2. If no external cover found, try to load embedded artwork from file metadata
+        if let embeddedArt = loadEmbeddedArtwork(from: currentItem.url) {
+            albumArt = embeddedArt
+            lastLoadedCoverPath = currentItem.url.path
+            return
+        }
+
+        // 3. No cover found
         albumArt = nil
-        lastLoadedCoverPath = folderPath
+        lastLoadedCoverPath = currentItem.url.path
+    }
+
+    private func loadEmbeddedArtwork(from url: URL) -> NSImage? {
+        let asset = AVAsset(url: url)
+
+        // Get all metadata formats
+        for format in asset.availableMetadataFormats {
+            let metadata = asset.metadata(forFormat: format)
+
+            // Search for artwork
+            for item in metadata {
+                // Try commonKeyArtwork (standard key)
+                if item.commonKey == .commonKeyArtwork {
+                    if let data = item.dataValue {
+                        return NSImage(data: data)
+                    }
+                }
+
+                // Also try other possible keys
+                if let key = item.key as? String,
+                   (key.lowercased().contains("artwork") ||
+                    key.lowercased().contains("picture") ||
+                    key == "covr") {
+                    if let data = item.dataValue {
+                        return NSImage(data: data)
+                    }
+                }
+            }
+        }
+
+        return nil
     }
 
     private func loadInitialState() {
