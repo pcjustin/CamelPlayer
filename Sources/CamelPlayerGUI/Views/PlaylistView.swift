@@ -17,8 +17,21 @@ struct PlaylistView: View {
                 Text("\(viewModel.playlistItems.count) tracks")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .padding(.horizontal)
                     .padding(.vertical, 8)
+
+                // Clear button
+                if !viewModel.playlistItems.isEmpty {
+                    Button(action: {
+                        viewModel.clearPlaylist()
+                    }) {
+                        Image(systemName: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help("Clear Playlist")
+                    .padding(.horizontal, 8)
+                }
             }
             .background(Color(NSColor.controlBackgroundColor))
 
