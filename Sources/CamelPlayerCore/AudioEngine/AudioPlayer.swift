@@ -115,26 +115,44 @@ public class AudioPlayer {
 
         let mainMixer = engine.mainMixerNode
         let format = file.processingFormat
+        let wasRunning = engine.isRunning
 
-        if engine.isRunning {
+        if wasRunning {
             engine.stop()
         }
+
+        engine.disconnectNodeOutput(playerNode)
 
         if bitPerfectMode {
             do {
                 let currentDeviceID = try deviceManager.getCurrentOutputDevice()
-                let currentSampleRate = try deviceManager.getDeviceSampleRate(deviceID: currentDeviceID)
+
+                let currentFormat = try deviceManager.getDeviceStreamFormat(deviceID: currentDeviceID)
                 let fileSampleRate = format.sampleRate
 
-                if abs(currentSampleRate - fileSampleRate) > 0.1 {
-                    try deviceManager.setDeviceSampleRate(deviceID: currentDeviceID, sampleRate: fileSampleRate)
+                let needsFormatChange = abs(currentFormat.mSampleRate - fileSampleRate) > 0.1
+
+                if needsFormatChange {
+                    try deviceManager.setDeviceStreamFormat(deviceID: currentDeviceID, format: format)
+                    Thread.sleep(forTimeInterval: 0.15)
                 }
             } catch {
-                print("Warning: Failed to set bit-perfect sample rate: \(error.localizedDescription)")
+                print("Warning: Failed to set bit-perfect format: \(error.localizedDescription)")
+                do {
+                    let currentDeviceID = try deviceManager.getCurrentOutputDevice()
+                    let currentSampleRate = try deviceManager.getDeviceSampleRate(deviceID: currentDeviceID)
+                    let fileSampleRate = format.sampleRate
+
+                    if abs(currentSampleRate - fileSampleRate) > 0.1 {
+                        try deviceManager.setDeviceSampleRate(deviceID: currentDeviceID, sampleRate: fileSampleRate)
+                        Thread.sleep(forTimeInterval: 0.15)
+                    }
+                } catch {
+                    print("Warning: Fallback to sample rate only also failed: \(error.localizedDescription)")
+                }
             }
         }
 
-        engine.disconnectNodeOutput(playerNode)
         engine.connect(playerNode, to: mainMixer, format: format)
 
         playerNode.scheduleFile(file, at: nil) { [weak self] in

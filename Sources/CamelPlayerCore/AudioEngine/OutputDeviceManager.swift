@@ -261,4 +261,58 @@ public class OutputDeviceManager {
         let deviceID = try getCurrentOutputDevice()
         return try getDeviceSampleRate(deviceID: deviceID)
     }
+
+    public func setDeviceStreamFormat(deviceID: AudioDeviceID, format: AVAudioFormat) throws {
+        guard let streamDescription = format.streamDescription.pointee as AudioStreamBasicDescription? else {
+            throw OutputDeviceError.deviceSetupFailed("Invalid audio format")
+        }
+
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamFormat,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: 0
+        )
+
+        var newFormat = streamDescription
+        let dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+
+        let status = AudioObjectSetPropertyData(
+            deviceID,
+            &propertyAddress,
+            0,
+            nil,
+            dataSize,
+            &newFormat
+        )
+
+        guard status == kAudioHardwareNoError else {
+            throw OutputDeviceError.deviceSetupFailed("Failed to set device stream format (error: \(status))")
+        }
+    }
+
+    public func getDeviceStreamFormat(deviceID: AudioDeviceID) throws -> AudioStreamBasicDescription {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamFormat,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: 0
+        )
+
+        var streamFormat = AudioStreamBasicDescription()
+        var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+
+        let status = AudioObjectGetPropertyData(
+            deviceID,
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &streamFormat
+        )
+
+        guard status == kAudioHardwareNoError else {
+            throw OutputDeviceError.propertyAccessFailed("Failed to get device stream format (error: \(status))")
+        }
+
+        return streamFormat
+    }
 }
