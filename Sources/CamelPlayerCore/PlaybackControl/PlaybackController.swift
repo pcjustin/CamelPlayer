@@ -6,6 +6,8 @@ public class PlaybackController {
     private let player: AudioPlayer
     private let playlist: Playlist
     private let volumeController: VolumeController
+    private var lastPlayStartTime: Date?
+    private let minimumPlayDuration: TimeInterval = 0.5 // 最小播放時間閾值
 
     public var currentState: PlaybackState {
         player.state
@@ -45,14 +47,24 @@ public class PlaybackController {
     }
 
     private func playNextIfAvailable() {
+        // 檢查上一首歌曲是否播放了足夠長的時間
+        // 如果播放時間太短，可能是文件加載失敗，停止自動播放以避免連續跳轉
+        if let startTime = lastPlayStartTime {
+            let playDuration = Date().timeIntervalSince(startTime)
+            if playDuration < minimumPlayDuration {
+                print("Warning: Track played for only \(playDuration)s, stopping auto-play to prevent rapid skipping")
+                return
+            }
+        }
+
         guard let nextItem = playlist.next() else {
             // No next item available
             return
         }
 
         do {
-            try player.load(url: nextItem.url)
-            try player.play()
+            lastPlayStartTime = Date()
+            try player.loadAndPlay(url: nextItem.url)
         } catch {
             // Silently fail - could log error in future
             print("Error auto-playing next track: \(error.localizedDescription)")
@@ -68,11 +80,25 @@ public class PlaybackController {
     }
 
     public func play() throws {
+        // 如果已經在播放，直接返回
+        if player.state == .playing {
+            return
+        }
+
+        // 如果是暫停狀態，直接恢復播放
+        if player.state == .paused {
+            lastPlayStartTime = Date()
+            try player.play()
+            return
+        }
+
+        // 否則是 stopped 狀態，需要加載文件
         guard let item = playlist.currentItem else {
             throw AudioPlayerError.fileLoadError("No items in playlist")
         }
 
         try player.load(url: item.url)
+        lastPlayStartTime = Date()
         try player.play()
     }
 
@@ -81,8 +107,8 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("Invalid playlist index")
         }
 
-        try player.load(url: item.url)
-        try player.play()
+        lastPlayStartTime = Date()
+        try player.loadAndPlay(url: item.url)
     }
 
     public func pause() {
@@ -102,8 +128,8 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("No next item")
         }
 
-        try player.load(url: item.url)
-        try player.play()
+        lastPlayStartTime = Date()
+        try player.loadAndPlay(url: item.url)
     }
 
     public func previous() throws {
@@ -111,8 +137,8 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("No previous item")
         }
 
-        try player.load(url: item.url)
-        try player.play()
+        lastPlayStartTime = Date()
+        try player.loadAndPlay(url: item.url)
     }
 
     public func seek(to time: TimeInterval) throws {

@@ -1,22 +1,26 @@
 # CamelPlayer
 
-A Swift CLI audio player for macOS featuring independent audio output device control using Core Audio APIs.
+A Swift audio player for macOS with both **CLI** and **native GUI** interfaces, featuring independent audio output device control and bit-perfect playback using Core Audio APIs.
 
 ## Features
+
+### Core Audio Features
 
 - **Bit-Perfect Playback**: Automatic hardware sample rate matching for zero-resampling playback
 - **Independent Output Device Control**: Select and control audio output device independently from system settings using Core Audio
 - **Multiple Audio Formats**: Support for MP3, WAV, M4A, FLAC, and ALAC (including high-res 192kHz/24bit)
-- **Playlist Management**: Add files or entire folders, navigate through multiple tracks
-- **Playback Control**: Play, pause, resume, stop, seek, next, and previous
 - **Volume Control**: Independent volume control that doesn't affect system volume
 - **Playback Modes**: Sequential, loop, loop-one, and shuffle
-- **Hybrid CLI Interface**: Both command-line arguments and interactive mode
-- **Real-time Status**: View playback state, audio format, and bit-perfect status
+
+### Interface Options
+
+- **Native macOS GUI**: SwiftUI-based graphical interface with reactive controls
+- **Interactive CLI**: Terminal-based interface with command shortcuts
+- **Command-Line Mode**: Direct playback via command-line arguments
 
 ## Requirements
 
-- macOS 10.15 or later
+- macOS 12.0 or later (GUI) / macOS 10.15 or later (CLI only)
 - Swift 5.9 or later
 - Xcode Command Line Tools
 
@@ -29,18 +33,50 @@ A Swift CLI audio player for macOS featuring independent audio output device con
 git clone https://github.com/yourusername/camelplayer.git
 cd camelplayer
 
-# Build the project
+# Build CLI version
 swift build -c release
 
-# Install to /usr/local/bin (optional)
+# Install CLI to /usr/local/bin (optional)
 sudo cp .build/release/CamelPlayer /usr/local/bin/camelplayer
+
+# Build GUI version
+./build_gui_app.sh
 ```
 
 ## Usage
 
-### Interactive Mode (Default)
+### GUI Mode (Recommended)
 
-Start CamelPlayer in interactive mode for full control:
+Launch the native macOS app:
+
+```bash
+# Quick launch (auto-builds if needed)
+./run_gui.sh
+
+# Or open directly
+open CamelPlayer.app
+
+# Install to Applications folder
+cp -r CamelPlayer.app /Applications/
+```
+
+#### GUI Features
+
+- **Now Playing Display**: Shows current track, audio format, and bit-perfect status indicator
+- **Playback Controls**: Large touch-friendly play/pause, next, previous, and stop buttons
+- **Interactive Seek Bar**: Click or drag to seek to any position with time display
+- **Volume Slider**: Visual volume control with percentage display
+- **Playlist View**: Scrollable track list with current track highlighting
+- **Settings Panel**:
+  - Audio output device selection dropdown
+  - Playback mode selector (Sequential, Loop All, Loop One, Shuffle)
+  - Bit-perfect mode toggle
+  - Add files and folders buttons
+- **Error Handling**: User-friendly error alerts for unsupported formats or missing files
+
+### Interactive CLI Mode
+
+Start CamelPlayer in interactive mode for full terminal control:
 
 ```bash
 camelplayer
@@ -119,7 +155,7 @@ Output example:
 Available audio output devices:
 
   [84] LG IPS FULLHD
-* [72] MacBook Air的揚聲器
+* [72] MacBook Air Speakers
   [123] CADefaultDeviceAggregate-29235-0
 
 Legend:
@@ -134,9 +170,24 @@ Legend:
 ```
 CamelPlayer/
 ├── Sources/
-│   ├── CamelPlayer/           # Executable entry point
+│   ├── CamelPlayer/           # CLI executable entry point
 │   │   └── main.swift
-│   ├── CamelPlayerCore/       # Core library
+│   ├── CamelPlayerGUI/        # GUI executable (SwiftUI)
+│   │   ├── CamelPlayerGUIApp.swift
+│   │   ├── ViewModel/
+│   │   │   └── PlaybackViewModel.swift
+│   │   ├── Views/
+│   │   │   ├── ContentView.swift
+│   │   │   ├── NowPlayingView.swift
+│   │   │   ├── PlaybackControlsView.swift
+│   │   │   ├── SeekBarView.swift
+│   │   │   ├── VolumeControlView.swift
+│   │   │   ├── PlaylistView.swift
+│   │   │   └── SettingsBarView.swift
+│   │   └── Utilities/
+│   │       ├── TimeFormatter.swift
+│   │       └── FilePickerHelper.swift
+│   ├── CamelPlayerCore/       # Core library (shared)
 │   │   ├── AudioEngine/       # Audio playback engine
 │   │   │   ├── AudioPlayer.swift
 │   │   │   ├── OutputDeviceManager.swift
@@ -156,12 +207,34 @@ CamelPlayer/
 │       └── Interactive/       # Interactive mode
 │           ├── InteractiveMode.swift
 │           └── CommandParser.swift
-└── Tests/
-    └── CamelPlayerCoreTests/
+├── Tests/
+│   └── CamelPlayerCoreTests/
+├── build_gui_app.sh           # GUI build script
+└── run_gui.sh                 # GUI quick launcher
 ```
+
+### GUI Architecture (MVVM Pattern)
+
+The GUI uses a **Model-View-ViewModel** architecture with timer-based state synchronization:
+
+```
+SwiftUI Views ←→ PlaybackViewModel (ObservableObject) ←→ PlaybackController (Core API)
+                      ↑
+                   Timer (100ms polling)
+```
+
+**Key Components:**
+
+- **Views**: SwiftUI views for the user interface (declarative, reactive)
+- **PlaybackViewModel**: Bridges synchronous `PlaybackController` API with SwiftUI's reactive framework
+  - Uses `@Published` properties to drive UI updates
+  - Polls `PlaybackController` every 100ms to sync state
+  - Handles user actions and errors
+- **PlaybackController**: Core playback logic (shared with CLI)
 
 ### Core Technologies
 
+- **SwiftUI**: Modern declarative UI framework for the GUI
 - **AVFoundation**: Audio file handling and playback engine (AVAudioEngine, AVAudioPlayerNode)
 - **Core Audio**: Independent output device control using AudioUnit API
 - **Swift ArgumentParser**: Command-line interface and argument parsing
@@ -188,12 +261,39 @@ AudioUnitSetProperty(
 
 This allows the player to route audio to a specific device regardless of the system's default output device setting.
 
+#### Atomic loadAndPlay() for Race-Free Track Switching
+
+To prevent UI flickering during track changes, `AudioPlayer` provides an atomic `loadAndPlay()` method:
+
+```swift
+public func loadAndPlay(url: URL) throws {
+    // Set state to .playing immediately to avoid UI reading .stopped state
+    state = .playing
+
+    // Load and play atomically
+    let file = try AVAudioFile(forReading: url)
+    audioFile = file
+    currentURL = url
+    try playInternal()
+}
+```
+
+This ensures that state remains `.playing` throughout the entire load-play cycle, eliminating race conditions with the ViewModel's polling timer.
+
 ## Development
 
 ### Build for Development
 
 ```bash
+# Build CLI
 swift build
+
+# Build GUI
+swift build --product CamelPlayerGUI
+
+# Or use Xcode
+open Package.swift
+# Select CamelPlayerGUI or CamelPlayer scheme
 ```
 
 ### Run Tests
@@ -205,7 +305,12 @@ swift test
 ### Run in Debug Mode
 
 ```bash
+# CLI
 swift run CamelPlayer
+
+# GUI (note: requires building .app bundle)
+./build_gui_app.sh
+open CamelPlayer.app
 ```
 
 ## Supported Audio Formats
@@ -218,6 +323,38 @@ swift run CamelPlayer
 
 All formats are supported natively through AVFoundation.
 
+## Known Limitations
+
+### GUI
+- No album art extraction (shows placeholder icon)
+- No drag-and-drop support (use file picker buttons)
+- No media key support (hardware play/pause keys)
+- No waveform visualization
+
+These features may be added in future versions.
+
+## Troubleshooting
+
+### GUI App Won't Launch
+
+macOS GUI applications must be packaged as `.app` bundles. Do not run the binary directly:
+
+```bash
+# ❌ Wrong: will not show GUI window
+./.build/debug/CamelPlayerGUI
+
+# ✅ Correct: build .app bundle first
+./build_gui_app.sh
+open CamelPlayer.app
+```
+
+### Playback Issues
+
+If tracks skip or won't play:
+1. Check file format is supported (MP3, WAV, M4A, FLAC, ALAC)
+2. Verify file is not corrupted
+3. Check Console.app for error messages
+
 ## License
 
 MIT License
@@ -228,4 +365,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Acknowledgments
 
-Built with Swift and Core Audio for macOS.
+Built with Swift, Core Audio, and SwiftUI for macOS.

@@ -27,6 +27,7 @@ public class AudioPlayer {
     public private(set) var currentURL: URL?
     public var bitPerfectMode: Bool = true
     public var onPlaybackFinished: (() -> Void)?
+    private var isManuallyStopped = false
 
     public var mixerNode: AVAudioMixerNode {
         engine.mainMixerNode
@@ -103,16 +104,33 @@ public class AudioPlayer {
         }
     }
 
-    public func play() throws {
-        guard let file = audioFile else {
-            throw AudioPlayerError.fileLoadError("No audio file loaded")
+    /// 原子地加載並播放文件，避免中間狀態導致的 UI 閃爍
+    public func loadAndPlay(url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw AudioPlayerError.fileNotFound
         }
 
-        if state == .paused {
-            playerNode.play()
-            state = .playing
-            startMonitoring()
-            return
+        // 立即設置狀態為 playing，避免 UI 讀取到 stopped 狀態
+        state = .playing
+
+        do {
+            let file = try AVAudioFile(forReading: url)
+            audioFile = file
+            currentURL = url
+            // 不設置 state = .stopped，保持 .playing
+        } catch {
+            state = .stopped
+            throw AudioPlayerError.fileLoadError(error.localizedDescription)
+        }
+
+        // 調用內部播放邏輯
+        try playInternal()
+    }
+
+    private func playInternal() throws {
+        guard let file = audioFile else {
+            state = .stopped
+            throw AudioPlayerError.fileLoadError("No audio file loaded")
         }
 
         playerNode.stop()
@@ -159,22 +177,56 @@ public class AudioPlayer {
 
         engine.connect(playerNode, to: mainMixer, format: format)
 
+        // 記錄當前文件URL，用於檢查 completion handler 是否對應當前播放
+        let scheduledURL = currentURL
+
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
-                self?.state = .stopped
-                self?.onPlaybackFinished?()
+                guard let self = self else { return }
+
+                // 只有在 completion handler 對應當前播放的文件時才處理
+                // 避免舊文件的 completion handler 干擾新文件的播放狀態
+                guard self.currentURL == scheduledURL else {
+                    return
+                }
+
+                self.state = .stopped
+                // 只有在非手動停止時才觸發自動播放下一首
+                if !self.isManuallyStopped {
+                    self.onPlaybackFinished?()
+                }
+                self.isManuallyStopped = false
             }
         }
 
         do {
             try engine.start()
         } catch {
+            state = .stopped
             throw AudioPlayerError.audioEngineError("Failed to start audio engine: \(error.localizedDescription)")
         }
 
         playerNode.play()
+        // 確保狀態為 playing（即使之前已設置，也重新確認）
         state = .playing
         startMonitoring()
+    }
+
+    public func play() throws {
+        guard let _ = audioFile else {
+            throw AudioPlayerError.fileLoadError("No audio file loaded")
+        }
+
+        if state == .paused {
+            playerNode.play()
+            state = .playing
+            startMonitoring()
+            return
+        }
+
+        // 提前設置狀態為 playing，避免 UI 讀取到中間的 stopped 狀態
+        state = .playing
+        try playInternal()
     }
 
     public func pause() {
@@ -185,6 +237,7 @@ public class AudioPlayer {
     }
 
     public func stop() {
+        isManuallyStopped = true
         playerNode.stop()
         state = .stopped
         stopMonitoring()
