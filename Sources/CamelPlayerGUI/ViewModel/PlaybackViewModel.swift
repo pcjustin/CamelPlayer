@@ -21,11 +21,13 @@ class PlaybackViewModel: ObservableObject {
     @Published var showError: Bool = false
     @Published var formatInfo: String?
     @Published var lastError: String?
+    @Published var albumArt: NSImage?
 
     // Private properties
     private let controller: PlaybackController
     private var updateTimer: Timer?
     private let updateInterval: TimeInterval = 0.1 // 100ms
+    private var lastLoadedCoverPath: String?
 
     // Initialization
     init() {
@@ -74,6 +76,43 @@ class PlaybackViewModel: ObservableObject {
         bitPerfectMode = controller.bitPerfectMode
         playbackMode = controller.playbackMode
         volume = controller.volume
+
+        // Load album art if current track changed
+        loadAlbumArt()
+    }
+
+    private func loadAlbumArt() {
+        guard let currentItem = currentItem else {
+            albumArt = nil
+            lastLoadedCoverPath = nil
+            return
+        }
+
+        let folderURL = currentItem.url.deletingLastPathComponent()
+        let folderPath = folderURL.path
+
+        // Skip if we already loaded cover from this folder
+        if lastLoadedCoverPath == folderPath {
+            return
+        }
+
+        // Look for cover.jpg or cover.jpeg in the same folder
+        let coverNames = ["cover.jpg", "cover.jpeg", "Cover.jpg", "Cover.jpeg"]
+
+        for coverName in coverNames {
+            let coverURL = folderURL.appendingPathComponent(coverName)
+            if FileManager.default.fileExists(atPath: coverURL.path) {
+                if let image = NSImage(contentsOf: coverURL) {
+                    albumArt = image
+                    lastLoadedCoverPath = folderPath
+                    return
+                }
+            }
+        }
+
+        // No cover found
+        albumArt = nil
+        lastLoadedCoverPath = folderPath
     }
 
     private func loadInitialState() {
