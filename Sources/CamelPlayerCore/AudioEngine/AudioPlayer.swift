@@ -20,10 +20,13 @@ public class AudioPlayer {
     private let playerNode = AVAudioPlayerNode()
     private var audioFile: AVAudioFile?
     private let deviceManager: OutputDeviceManager
+    private var monitorQueue: DispatchQueue?
+    private var isMonitoring = false
 
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
     public var bitPerfectMode: Bool = true
+    public var onPlaybackFinished: (() -> Void)?
 
     public var mixerNode: AVAudioMixerNode {
         engine.mainMixerNode
@@ -108,6 +111,7 @@ public class AudioPlayer {
         if state == .paused {
             playerNode.play()
             state = .playing
+            startMonitoring()
             return
         }
 
@@ -158,6 +162,7 @@ public class AudioPlayer {
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
                 self?.state = .stopped
+                self?.onPlaybackFinished?()
             }
         }
 
@@ -169,17 +174,61 @@ public class AudioPlayer {
 
         playerNode.play()
         state = .playing
+        startMonitoring()
     }
 
     public func pause() {
         guard state == .playing else { return }
         playerNode.pause()
         state = .paused
+        stopMonitoring()
     }
 
     public func stop() {
         playerNode.stop()
         state = .stopped
+        stopMonitoring()
+    }
+
+    private func startMonitoring() {
+        stopMonitoring()
+        isMonitoring = true
+
+        let queue = DispatchQueue(label: "com.camelplayer.monitor", qos: .userInitiated)
+        monitorQueue = queue
+
+        queue.async { [weak self] in
+            while self?.isMonitoring == true {
+                Thread.sleep(forTimeInterval: 0.1)
+                self?.checkPlaybackStatus()
+            }
+        }
+    }
+
+    private func stopMonitoring() {
+        isMonitoring = false
+        monitorQueue = nil
+    }
+
+    private func checkPlaybackStatus() {
+        guard state == .playing else {
+            return
+        }
+
+        guard let duration = duration else {
+            return
+        }
+
+        let current = currentTime
+
+        if current >= duration - 0.1 {
+            // Playback has finished
+            isMonitoring = false
+            state = .stopped
+
+            // Call the callback directly (not on main thread in CLI apps)
+            onPlaybackFinished?()
+        }
     }
 
     public func seek(to time: TimeInterval) throws {
@@ -206,18 +255,21 @@ public class AudioPlayer {
                                    at: nil) { [weak self] in
             DispatchQueue.main.async {
                 self?.state = .stopped
+                self?.onPlaybackFinished?()
             }
         }
 
         if wasPlaying {
             playerNode.play()
             state = .playing
+            startMonitoring()
         } else {
             state = .stopped
         }
     }
 
     deinit {
+        stopMonitoring()
         stop()
         engine.stop()
     }

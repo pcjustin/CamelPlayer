@@ -37,6 +37,26 @@ public class PlaybackController {
         player = try AudioPlayer()
         playlist = Playlist()
         volumeController = VolumeController(mixerNode: player.mixerNode)
+
+        // Set up auto-play next track when current track finishes
+        player.onPlaybackFinished = { [weak self] in
+            self?.playNextIfAvailable()
+        }
+    }
+
+    private func playNextIfAvailable() {
+        guard let nextItem = playlist.next() else {
+            // No next item available
+            return
+        }
+
+        do {
+            try player.load(url: nextItem.url)
+            try player.play()
+        } catch {
+            // Silently fail - could log error in future
+            print("Error auto-playing next track: \(error.localizedDescription)")
+        }
     }
 
     public func addToPlaylist(url: URL) {
