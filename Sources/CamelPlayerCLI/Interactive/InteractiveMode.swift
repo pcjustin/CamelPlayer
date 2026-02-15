@@ -43,15 +43,21 @@ public class InteractiveMode {
         do {
             switch command {
             case .play(let index):
-                if let idx = index {
-                    try controller.playItem(at: idx)
-                    if let item = controller.currentItem {
-                        print("Playing: \(item.title)")
-                    }
-                } else {
-                    try controller.play()
-                    if let item = controller.currentItem {
-                        print("Playing: \(item.title)")
+                Task {
+                    do {
+                        if let idx = index {
+                            try await controller.playItem(at: idx)
+                            if let item = controller.currentItem {
+                                print("Playing: \(item.title)")
+                            }
+                        } else {
+                            try await controller.play()
+                            if let item = controller.currentItem {
+                                print("Playing: \(item.title)")
+                            }
+                        }
+                    } catch {
+                        handleError(error)
                     }
                 }
 
@@ -60,28 +66,52 @@ public class InteractiveMode {
                 print("Paused")
 
             case .resume:
-                try controller.resume()
-                print("Resumed")
+                Task {
+                    do {
+                        try await controller.resume()
+                        print("Resumed")
+                    } catch {
+                        handleError(error)
+                    }
+                }
 
             case .stop:
                 controller.stop()
                 print("Stopped")
 
             case .next:
-                try controller.next()
-                if let item = controller.currentItem {
-                    print("Playing: \(item.title)")
+                Task {
+                    do {
+                        try await controller.next()
+                        if let item = controller.currentItem {
+                            print("Playing: \(item.title)")
+                        }
+                    } catch {
+                        handleError(error)
+                    }
                 }
 
             case .previous:
-                try controller.previous()
-                if let item = controller.currentItem {
-                    print("Playing: \(item.title)")
+                Task {
+                    do {
+                        try await controller.previous()
+                        if let item = controller.currentItem {
+                            print("Playing: \(item.title)")
+                        }
+                    } catch {
+                        handleError(error)
+                    }
                 }
 
             case .seek(let time):
-                try controller.seek(to: time)
-                print("Seeked to \(formatTime(time))")
+                Task {
+                    do {
+                        try await controller.seek(to: time)
+                        print("Seeked to \(formatTime(time))")
+                    } catch {
+                        handleError(error)
+                    }
+                }
 
             case .volume(let level):
                 controller.volume = level
@@ -340,5 +370,31 @@ public class InteractiveMode {
         let audioExtensions = ["mp3", "wav", "m4a", "flac", "alac", "aac", "aiff", "caf"]
         let ext = url.pathExtension.lowercased()
         return audioExtensions.contains(ext)
+    }
+
+    private func handleError(_ error: Error) {
+        if let playerError = error as? AudioPlayerError {
+            switch playerError {
+            case .fileNotFound:
+                print("Error: File not found")
+            case .unsupportedFormat:
+                print("Error: Unsupported audio format")
+            case .audioEngineError(let message):
+                print("Error: Audio engine error - \(message)")
+            case .fileLoadError(let message):
+                print("Error: Failed to load file - \(message)")
+            }
+        } else if let deviceError = error as? OutputDeviceError {
+            switch deviceError {
+            case .deviceNotFound:
+                print("Error: Audio device not found")
+            case .deviceSetupFailed(let message):
+                print("Error: Device setup failed - \(message)")
+            case .propertyAccessFailed(let message):
+                print("Error: Property access failed - \(message)")
+            }
+        } else {
+            print("Error: \(error.localizedDescription)")
+        }
     }
 }

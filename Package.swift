@@ -9,7 +9,8 @@ let package = Package(
         .macOS(.v12)
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        .package(url: "https://github.com/httpswift/swifter.git", from: "1.5.0")
     ],
     targets: [
         .executableTarget(
@@ -25,7 +26,10 @@ let package = Package(
             path: "Sources/CamelPlayerGUI"
         ),
         .target(
-            name: "CamelPlayerCore"
+            name: "CamelPlayerCore",
+            dependencies: [
+                .product(name: "Swifter", package: "swifter")
+            ]
         ),
         .target(
             name: "CamelPlayerCLI",

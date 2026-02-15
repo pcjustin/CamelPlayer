@@ -5,6 +5,20 @@ import CamelPlayerCore
 struct SettingsBarView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
 
+    private var localDevices: [OutputDevice] {
+        viewModel.outputDevices.filter {
+            if case .local = $0.type { return true }
+            return false
+        }
+    }
+
+    private var upnpDevices: [OutputDevice] {
+        viewModel.outputDevices.filter {
+            if case .upnp = $0.type { return true }
+            return false
+        }
+    }
+
     var body: some View {
         HStack(spacing: 16) {
             // Device Picker
@@ -15,14 +29,39 @@ struct SettingsBarView: View {
                     .frame(width: 50, alignment: .trailing)
 
                 Picker("", selection: Binding(
-                    get: { viewModel.currentDeviceID ?? 0 },
-                    set: { viewModel.setOutputDevice($0) }
+                    get: { viewModel.currentOutputDevice?.id ?? "" },
+                    set: { deviceID in
+                        if let device = viewModel.outputDevices.first(where: { $0.id == deviceID }) {
+                            viewModel.setOutputDevice(device)
+                        }
+                    }
                 )) {
-                    ForEach(viewModel.audioDevices, id: \.id) { device in
-                        Text(device.name).tag(device.id)
+                    Section(header: Text("Local Devices")) {
+                        ForEach(localDevices) { device in
+                            Label(device.name, systemImage: "speaker.wave.2")
+                                .tag(device.id)
+                        }
+                    }
+
+                    if !upnpDevices.isEmpty {
+                        Section(header: Text("Network Devices (UPnP)")) {
+                            ForEach(upnpDevices) { device in
+                                Label(device.name, systemImage: "network")
+                                    .tag(device.id)
+                            }
+                        }
                     }
                 }
-                .frame(width: 200)
+                .frame(width: 250)
+
+                // Refresh UPnP devices button
+                Button(action: {
+                    viewModel.refreshUPnPDevices()
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh network devices")
             }
 
             Divider()

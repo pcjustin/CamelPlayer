@@ -18,6 +18,8 @@ class PlaybackViewModel: ObservableObject {
     @Published var bitPerfectMode: Bool = true
     @Published var audioDevices: [AudioDevice] = []
     @Published var currentDeviceID: AudioDeviceID?
+    @Published var outputDevices: [OutputDevice] = []
+    @Published var currentOutputDevice: OutputDevice?
     @Published var errorMessage: String?
     @Published var showError: Bool = false
     @Published var formatInfo: String?
@@ -160,14 +162,16 @@ class PlaybackViewModel: ObservableObject {
     // MARK: - Playback Control
 
     func play() {
-        do {
-            try controller.play()
-            // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
-            updateState()
-        } catch let error as AudioPlayerError {
-            handleAudioPlayerError(error)
-        } catch {
-            handleError(error.localizedDescription)
+        Task {
+            do {
+                try await controller.play()
+                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                updateState()
+            } catch let error as AudioPlayerError {
+                handleAudioPlayerError(error)
+            } catch {
+                handleError(error.localizedDescription)
+            }
         }
     }
 
@@ -178,14 +182,16 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func resume() {
-        do {
-            try controller.resume()
-            // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
-            updateState()
-        } catch let error as AudioPlayerError {
-            handleAudioPlayerError(error)
-        } catch {
-            handleError(error.localizedDescription)
+        Task {
+            do {
+                try await controller.resume()
+                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                updateState()
+            } catch let error as AudioPlayerError {
+                handleAudioPlayerError(error)
+            } catch {
+                handleError(error.localizedDescription)
+            }
         }
     }
 
@@ -196,36 +202,42 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func next() {
-        do {
-            try controller.next()
-            // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
-            updateState()
-        } catch let error as AudioPlayerError {
-            handleAudioPlayerError(error)
-        } catch {
-            handleError(error.localizedDescription)
+        Task {
+            do {
+                try await controller.next()
+                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                updateState()
+            } catch let error as AudioPlayerError {
+                handleAudioPlayerError(error)
+            } catch {
+                handleError(error.localizedDescription)
+            }
         }
     }
 
     func previous() {
-        do {
-            try controller.previous()
-            // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
-            updateState()
-        } catch let error as AudioPlayerError {
-            handleAudioPlayerError(error)
-        } catch {
-            handleError(error.localizedDescription)
+        Task {
+            do {
+                try await controller.previous()
+                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                updateState()
+            } catch let error as AudioPlayerError {
+                handleAudioPlayerError(error)
+            } catch {
+                handleError(error.localizedDescription)
+            }
         }
     }
 
     func seek(to time: TimeInterval) {
-        do {
-            try controller.seek(to: time)
-        } catch let error as AudioPlayerError {
-            handleAudioPlayerError(error)
-        } catch {
-            handleError(error.localizedDescription)
+        Task {
+            do {
+                try await controller.seek(to: time)
+            } catch let error as AudioPlayerError {
+                handleAudioPlayerError(error)
+            } catch {
+                handleError(error.localizedDescription)
+            }
         }
     }
 
@@ -237,14 +249,16 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func playItem(at index: Int) {
-        do {
-            try controller.playItem(at: index)
-            // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
-            updateState()
-        } catch let error as AudioPlayerError {
-            handleAudioPlayerError(error)
-        } catch {
-            handleError(error.localizedDescription)
+        Task {
+            do {
+                try await controller.playItem(at: index)
+                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                updateState()
+            } catch let error as AudioPlayerError {
+                handleAudioPlayerError(error)
+            } catch {
+                handleError(error.localizedDescription)
+            }
         }
     }
 
@@ -267,12 +281,33 @@ class PlaybackViewModel: ObservableObject {
         } catch {
             handleError("Failed to list audio devices: \(error.localizedDescription)")
         }
+
+        // Also refresh UPnP devices
+        outputDevices = controller.listAllOutputDevices()
+        currentOutputDevice = controller.currentOutputDevice
+    }
+
+    func refreshUPnPDevices() {
+        controller.refreshUPnPDevices()
+        // Wait a bit for devices to be discovered, then update the list
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.refreshDevices()
+        }
     }
 
     func setOutputDevice(_ deviceID: AudioDeviceID) {
         do {
             try controller.setOutputDevice(deviceID: deviceID)
             currentDeviceID = deviceID
+        } catch {
+            handleError("Failed to set output device: \(error.localizedDescription)")
+        }
+    }
+
+    func setOutputDevice(_ device: OutputDevice) {
+        do {
+            try controller.setOutputDevice(device)
+            currentOutputDevice = device
         } catch {
             handleError("Failed to set output device: \(error.localizedDescription)")
         }

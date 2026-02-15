@@ -7,7 +7,7 @@ struct CamelPlayer: ParsableCommand {
         commandName: "camelplayer",
         abstract: "A Swift CLI audio player for macOS with independent output device control",
         version: "0.1.0",
-        subcommands: [InteractiveCommand.self, PlayCommand.self, DevicesCommand.self],
+        subcommands: [InteractiveCommand.self, PlayCommand.self, DevicesCommand.self, UPnPTestCommand.self],
         defaultSubcommand: InteractiveCommand.self
     )
 }
