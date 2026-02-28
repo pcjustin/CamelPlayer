@@ -1,7 +1,7 @@
 import Foundation
 
 /// UPnP-based playback engine for controlling remote MediaRenderer devices
-public class UPnPPlaybackEngine: PlaybackEngine {
+public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     private let device: UPnPDevice
     private let mediaServer: LocalMediaServer
     private var avTransport: AVTransportService?

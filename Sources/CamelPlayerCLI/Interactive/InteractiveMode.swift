@@ -145,14 +145,22 @@ public class InteractiveMode {
 
             case .device(let deviceID):
                 if let id = deviceID {
-                    try controller.setOutputDevice(deviceID: id)
-                    print("Output device set to ID: \(id)")
+                    let devices = controller.listAllOutputDevices()
+                    if let device = devices.first(where: { d in
+                        if case .local(let dID) = d.type { return dID == id }
+                        return false
+                    }) {
+                        try controller.setOutputDevice(device)
+                        print("Output device set to: \(device.name)")
+                    } else {
+                        print("No local device found with ID \(id)")
+                    }
                 } else {
-                    let devices = try controller.listOutputDevices()
-                    let currentID = try controller.getCurrentOutputDevice()
+                    let devices = controller.listAllOutputDevices()
+                    let current = controller.currentOutputDevice
                     print("\nAvailable output devices:")
                     for device in devices {
-                        let marker = device.id == currentID ? "*" : " "
+                        let marker = device.id == current.id ? "*" : " "
                         print("  \(marker) [\(device.id)] \(device.name)")
                     }
                 }

@@ -2,7 +2,7 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-public enum PlaybackState {
+public enum PlaybackState: Sendable {
     case stopped
     case playing
     case paused

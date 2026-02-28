@@ -8,7 +8,7 @@ public protocol SSDPDiscoveryDelegate: AnyObject {
 }
 
 /// SSDP (Simple Service Discovery Protocol) implementation for UPnP device discovery
-public class SSDPDiscovery {
+public class SSDPDiscovery: @unchecked Sendable {
     private static let multicastGroup = "239.255.255.250"
     private static let multicastPort: UInt16 = 1900
     private static let searchTarget = "urn:schemas-upnp-org:device:MediaRenderer:1"

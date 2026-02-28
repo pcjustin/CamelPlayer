@@ -16,8 +16,6 @@ class PlaybackViewModel: ObservableObject {
     @Published var volume: Float = 0.7
     @Published var playbackMode: PlaybackMode = .sequential
     @Published var bitPerfectMode: Bool = true
-    @Published var audioDevices: [AudioDevice] = []
-    @Published var currentDeviceID: AudioDeviceID?
     @Published var outputDevices: [OutputDevice] = []
     @Published var currentOutputDevice: OutputDevice?
     @Published var errorMessage: String?
@@ -275,14 +273,6 @@ class PlaybackViewModel: ObservableObject {
     // MARK: - Device Management
 
     func refreshDevices() {
-        do {
-            audioDevices = try controller.listOutputDevices()
-            currentDeviceID = try controller.getCurrentOutputDevice()
-        } catch {
-            handleError("Failed to list audio devices: \(error.localizedDescription)")
-        }
-
-        // Also refresh UPnP devices
         outputDevices = controller.listAllOutputDevices()
         currentOutputDevice = controller.currentOutputDevice
     }
@@ -292,15 +282,6 @@ class PlaybackViewModel: ObservableObject {
         // Wait a bit for devices to be discovered, then update the list
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             self?.refreshDevices()
-        }
-    }
-
-    func setOutputDevice(_ deviceID: AudioDeviceID) {
-        do {
-            try controller.setOutputDevice(deviceID: deviceID)
-            currentDeviceID = deviceID
-        } catch {
-            handleError("Failed to set output device: \(error.localizedDescription)")
         }
     }
 
