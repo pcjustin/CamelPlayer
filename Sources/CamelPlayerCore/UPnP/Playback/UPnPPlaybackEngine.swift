@@ -15,6 +15,12 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
     private var pollingTimer: Timer?
     private var sharedFileURL: URL?
+    /// Bumped on each loadAndPlay so a poll started before a track switch can't
+    /// mistake our own stop() for the previous track finishing.
+    private var generation = 0
+    /// True once the renderer has confirmed PLAYING since the last loadAndPlay,
+    /// so a transient STOPPED right after starting isn't read as a finish.
+    private var hasStartedPlaying = false
 
     public var state: PlaybackState {
         _state
@@ -73,7 +79,10 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             throw UPnPPlaybackError.serviceNotAvailable
         }
 
-        // Stop current playback if any
+        // Stop current playback if any. Bump the generation first so any poll
+        // already in flight ignores the stop() below.
+        generation += 1
+        hasStartedPlaying = false
         stopPolling()
         try? await avTransport.stop()
 
@@ -180,17 +189,24 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     private func updateStatus() async {
         guard let avTransport = avTransport else { return }
 
+        let myGeneration = generation
         do {
             // Get transport state
             let transportState = try await avTransport.getTransportState()
+            // A track switch happened while this poll was in flight; its result
+            // is stale (our own stop() looks like a finish), so ignore it.
+            guard myGeneration == generation else { return }
             let newState = convertTransportState(transportState)
+            if newState == .playing { hasStartedPlaying = true }
 
             let previousState = _state
             if newState != previousState {
                 _state = newState
 
-                // A transition from playing to stopped means the track finished.
-                let didFinish = previousState == .playing && newState == .stopped
+                // A finish is playing -> stopped, but only once the renderer has
+                // actually started this track (otherwise a transient STOPPED at
+                // start would be misread as the track finishing).
+                let didFinish = hasStartedPlaying && previousState == .playing && newState == .stopped
                 if didFinish {
                     stopPolling()
                 }
