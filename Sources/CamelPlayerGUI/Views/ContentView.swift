@@ -6,19 +6,29 @@ struct ContentView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     @State private var isDropTargeted = false
     @State private var spaceMonitor: Any?
+    @State private var leftPaneWidth: CGFloat =
+        CGFloat(UserDefaults.standard.object(forKey: Self.leftWidthKey) as? Double ?? 260)
+    @State private var dragStartWidth: CGFloat?
+
+    private static let leftWidthKey = "ui.leftPaneWidth"
+    private let minLeftWidth: CGFloat = 200
+    private let maxLeftWidth: CGFloat = 420
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Now Playing (left) + Playlist (right)
-                HSplitView {
+                // Now Playing (left) + Playlist (right), with a persisted divider
+                HStack(spacing: 0) {
                     NowPlayingView()
                         .padding()
-                        .frame(minWidth: 220, idealWidth: 260, maxWidth: 360, maxHeight: .infinity)
+                        .frame(width: leftPaneWidth)
+                        .frame(maxHeight: .infinity)
                         .background(Color(NSColor.windowBackgroundColor))
 
+                    paneDivider
+
                     PlaylistView()
-                        .frame(minWidth: 260)
+                        .frame(minWidth: 260, maxWidth: .infinity)
                 }
                 .frame(minHeight: 240)
 
@@ -72,6 +82,7 @@ struct ContentView: View {
             BrowseView()
                 .environmentObject(viewModel)
         }
+        .background(WindowConfigurator(autosaveName: "CamelPlayerMainWindow"))
         .onAppear { installSpaceMonitor() }
         .onDisappear {
             if let monitor = spaceMonitor {
@@ -79,6 +90,32 @@ struct ContentView: View {
                 spaceMonitor = nil
             }
         }
+    }
+
+    /// Draggable divider that resizes and persists the left pane width.
+    private var paneDivider: some View {
+        ZStack {
+            Divider()
+            Color.clear
+                .frame(width: 8)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            if dragStartWidth == nil { dragStartWidth = leftPaneWidth }
+                            let proposed = (dragStartWidth ?? leftPaneWidth) + value.translation.width
+                            leftPaneWidth = min(maxLeftWidth, max(minLeftWidth, proposed))
+                        }
+                        .onEnded { _ in
+                            dragStartWidth = nil
+                            UserDefaults.standard.set(Double(leftPaneWidth), forKey: Self.leftWidthKey)
+                        }
+                )
+        }
+        .frame(width: 8)
     }
 
     /// Space toggles play/pause globally, overriding focused-button activation,

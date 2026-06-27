@@ -8,7 +8,7 @@ struct CamelPlayerGUIApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(viewModel)
-                .frame(minWidth: 600, minHeight: 800)
+                .frame(minWidth: 600, minHeight: 560)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
