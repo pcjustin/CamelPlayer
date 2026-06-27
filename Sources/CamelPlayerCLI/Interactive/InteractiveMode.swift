@@ -192,29 +192,7 @@ public class InteractiveMode {
                 }
             }
         } catch {
-            if let playerError = error as? AudioPlayerError {
-                switch playerError {
-                case .fileNotFound:
-                    print("Error: File not found")
-                case .unsupportedFormat:
-                    print("Error: Unsupported audio format")
-                case .audioEngineError(let message):
-                    print("Error: Audio engine error - \(message)")
-                case .fileLoadError(let message):
-                    print("Error: Failed to load file - \(message)")
-                }
-            } else if let deviceError = error as? OutputDeviceError {
-                switch deviceError {
-                case .deviceNotFound:
-                    print("Error: Audio device not found")
-                case .deviceSetupFailed(let message):
-                    print("Error: Device setup failed - \(message)")
-                case .propertyAccessFailed(let message):
-                    print("Error: Property access failed - \(message)")
-                }
-            } else {
-                print("Error: \(error.localizedDescription)")
-            }
+            handleError(error)
         }
     }
 

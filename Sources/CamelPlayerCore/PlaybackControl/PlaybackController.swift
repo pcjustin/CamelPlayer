@@ -227,7 +227,8 @@ public class PlaybackController {
 
     /// Sets the output device (local or UPnP)
     public func setOutputDevice(_ device: OutputDevice) throws {
-        // Stop current playback
+        // Stop current playback and carry the current volume over to the new engine.
+        let currentVolume = currentEngine.volume
         currentEngine.stop()
 
         switch device.type {
@@ -246,6 +247,8 @@ public class PlaybackController {
             currentEngine = upnpEngine
             currentOutputDevice = device
         }
+
+        currentEngine.volume = currentVolume
 
         // Resume playback if there was something playing
         if let currentItem = playlist.currentItem {

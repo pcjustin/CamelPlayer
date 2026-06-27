@@ -151,10 +151,14 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     private func startPolling() {
         stopPolling()
 
-        // Poll every second
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task {
-                await self?.updateStatus()
+        // Poll every second. Schedule on the main run loop so the timer fires
+        // regardless of which thread loadAndPlay/play was invoked from.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                Task {
+                    await self?.updateStatus()
+                }
             }
         }
     }
@@ -172,14 +176,20 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             let transportState = try await avTransport.getTransportState()
             let newState = convertTransportState(transportState)
 
-            if newState != _state {
+            let previousState = _state
+            if newState != previousState {
                 _state = newState
+
+                // A transition from playing to stopped means the track finished.
+                let didFinish = previousState == .playing && newState == .stopped
+                if didFinish {
+                    stopPolling()
+                }
+
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.onStateChanged?(newState)
-
-                    // Check if playback finished
-                    if newState == .stopped && self._state != .stopped {
+                    if didFinish {
                         self.onPlaybackFinished?()
                     }
                 }
@@ -211,7 +221,12 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             return .playing
         case .paused:
             return .paused
-        case .stopped, .noMediaPresent, .transitioning, .unknown:
+        case .transitioning:
+            // Transitioning is an active, in-progress state (e.g. buffering at
+            // start or while seeking); treat it as playing so it is not mistaken
+            // for the track having finished.
+            return .playing
+        case .stopped, .noMediaPresent, .unknown:
             return .stopped
         }
     }

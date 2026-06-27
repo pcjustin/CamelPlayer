@@ -6,7 +6,9 @@ public class LocalMediaServer {
     private let server: HttpServer
     private var sharedFiles: [String: URL] = [:]
     private var nextID = 1
-    private let port: UInt16
+    private let preferredPort: UInt16
+    private let portRange: UInt16 = 10
+    private var activePort: UInt16
 
     public var isRunning: Bool {
         // Swifter doesn't provide a public API to check if running, so we track it ourselves
@@ -15,12 +17,16 @@ public class LocalMediaServer {
     private var _isRunning = false
 
     /// Initializes the media server
-    /// - Parameter port: Port to listen on (default 8080)
+    /// - Parameter port: Preferred port to listen on (default 8080)
     public init(port: UInt16 = 8080) {
-        self.port = port
+        self.preferredPort = port
+        self.activePort = port
         self.server = HttpServer()
         setupRoutes()
     }
+
+    /// Chunk size used when streaming files to clients.
+    private static let chunkSize = 64 * 1024
 
     /// Sets up HTTP routes
     private func setupRoutes() {
@@ -35,19 +41,18 @@ public class LocalMediaServer {
                 return .notFound
             }
 
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let mimeType = self.getMimeType(for: fileURL)
-
-                // Support range requests for seeking
-                if let rangeHeader = request.headers["range"] {
-                    return self.handleRangeRequest(data: data, range: rangeHeader, mimeType: mimeType)
-                }
-
-                return .ok(.data(data, contentType: mimeType))
-            } catch {
+            guard let fileSize = self.fileSize(of: fileURL) else {
                 return .internalServerError
             }
+
+            let mimeType = self.getMimeType(for: fileURL)
+
+            // Support range requests for seeking
+            if let rangeHeader = request.headers["range"] {
+                return self.handleRangeRequest(fileURL: fileURL, fileSize: fileSize, range: rangeHeader, mimeType: mimeType)
+            }
+
+            return self.streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1, fileSize: fileSize, mimeType: mimeType, partial: false)
         }
 
         // Health check endpoint
@@ -57,72 +62,103 @@ public class LocalMediaServer {
     }
 
     /// Handles HTTP range requests for seeking support
-    private func handleRangeRequest(data: Data, range: String, mimeType: String) -> HttpResponse {
+    private func handleRangeRequest(fileURL: URL, fileSize: Int, range: String, mimeType: String) -> HttpResponse {
         // Parse range header (format: "bytes=start-end")
         let rangePattern = "bytes=(\\d+)-(\\d*)"
         guard let regex = try? NSRegularExpression(pattern: rangePattern),
-              let match = regex.firstMatch(in: range, range: NSRange(range.startIndex..., in: range)) else {
-            return .ok(.data(data, contentType: mimeType))
-        }
-
-        let startRange = match.range(at: 1)
-        let endRange = match.range(at: 2)
-
-        guard let startString = Range(startRange, in: range).map({ String(range[$0]) }),
+              let match = regex.firstMatch(in: range, range: NSRange(range.startIndex..., in: range)),
+              let startString = Range(match.range(at: 1), in: range).map({ String(range[$0]) }),
               let start = Int(startString) else {
-            return .ok(.data(data, contentType: mimeType))
+            return streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1, fileSize: fileSize, mimeType: mimeType, partial: false)
         }
 
         let end: Int
-        if let endString = Range(endRange, in: range).map({ String(range[$0]) }),
+        if let endString = Range(match.range(at: 2), in: range).map({ String(range[$0]) }),
            !endString.isEmpty,
            let parsedEnd = Int(endString) {
-            end = min(parsedEnd, data.count - 1)
+            end = min(parsedEnd, fileSize - 1)
         } else {
-            end = data.count - 1
+            end = fileSize - 1
         }
 
-        guard start <= end && start < data.count else {
-            return .ok(.data(data, contentType: mimeType))
+        guard start <= end && start < fileSize else {
+            return streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1, fileSize: fileSize, mimeType: mimeType, partial: false)
         }
 
-        let rangeData = data.subdata(in: start..<(end + 1))
-        let contentRange = "bytes \(start)-\(end)/\(data.count)"
+        return streamResponse(fileURL: fileURL, start: start, end: end, fileSize: fileSize, mimeType: mimeType, partial: true)
+    }
 
-        return HttpResponse.raw(206, "Partial Content", [
+    /// Streams the requested byte range of a file to the client in chunks,
+    /// avoiding loading the whole file into memory.
+    private func streamResponse(fileURL: URL, start: Int, end: Int, fileSize: Int, mimeType: String, partial: Bool) -> HttpResponse {
+        let length = end - start + 1
+        var headers = [
             "Content-Type": mimeType,
-            "Content-Length": String(rangeData.count),
-            "Content-Range": contentRange,
+            "Content-Length": String(length),
             "Accept-Ranges": "bytes"
-        ]) { writer in
-            try writer.write(rangeData)
+        ]
+        if partial {
+            headers["Content-Range"] = "bytes \(start)-\(end)/\(fileSize)"
         }
+
+        let statusCode = partial ? 206 : 200
+        let statusText = partial ? "Partial Content" : "OK"
+
+        return HttpResponse.raw(statusCode, statusText, headers) { writer in
+            guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return }
+            defer { try? handle.close() }
+            try handle.seek(toOffset: UInt64(start))
+
+            var remaining = length
+            while remaining > 0 {
+                let toRead = min(Self.chunkSize, remaining)
+                let chunk = handle.readData(ofLength: toRead)
+                if chunk.isEmpty { break }
+                try writer.write(chunk)
+                remaining -= chunk.count
+            }
+        }
+    }
+
+    /// Returns the size of a file in bytes, or nil if it cannot be determined.
+    private func fileSize(of url: URL) -> Int? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = (attributes[.size] as? NSNumber)?.intValue else {
+            return nil
+        }
+        return size
     }
 
     /// Starts the HTTP server
     public func start() throws {
         guard !_isRunning else {
-            print("HTTP Server: Already running on port \(port)")
+            print("HTTP Server: Already running on port \(activePort)")
             return
         }
 
-        print("HTTP Server: Starting on port \(port)...")
+        var lastError: Error?
+        for candidate in preferredPort...(preferredPort + portRange) {
+            print("HTTP Server: Starting on port \(candidate)...")
+            do {
+                try server.start(candidate, forceIPv4: true)
+                activePort = candidate
+                _isRunning = true
+                print("HTTP Server: Successfully started on port \(candidate)")
 
-        do {
-            try server.start(port, forceIPv4: true)
-            _isRunning = true
-            print("HTTP Server: Successfully started on port \(port)")
-
-            // Test IP address retrieval
-            if let ip = getLocalIPAddress() {
-                print("HTTP Server: Server accessible at http://\(ip):\(port)")
-            } else {
-                print("HTTP Server: WARNING - Could not determine local IP address!")
+                if let ip = getLocalIPAddress() {
+                    print("HTTP Server: Server accessible at http://\(ip):\(candidate)")
+                } else {
+                    print("HTTP Server: WARNING - Could not determine local IP address!")
+                }
+                return
+            } catch {
+                lastError = error
+                print("HTTP Server: Port \(candidate) unavailable: \(error)")
             }
-        } catch {
-            print("HTTP Server: Failed to start: \(error)")
-            throw ServerError.failedToStart(error)
         }
+
+        print("HTTP Server: Failed to start on any port in range \(preferredPort)-\(preferredPort + portRange)")
+        throw ServerError.failedToStart(lastError ?? ServerError.cannotDetermineIP)
     }
 
     /// Stops the HTTP server
@@ -149,7 +185,7 @@ public class LocalMediaServer {
             throw ServerError.cannotDetermineIP
         }
 
-        let urlString = "http://\(ip):\(port)/media/\(id)"
+        let urlString = "http://\(ip):\(activePort)/media/\(id)"
         guard let url = URL(string: urlString) else {
             print("HTTP Server: ERROR - Invalid URL: \(urlString)")
             throw ServerError.invalidURL

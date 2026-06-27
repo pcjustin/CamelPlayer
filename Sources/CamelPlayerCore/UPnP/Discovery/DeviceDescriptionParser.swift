@@ -90,7 +90,11 @@ public class DeviceDescriptionParser: NSObject {
         // Construct absolute URL
         if urlString.hasPrefix("/") {
             // Absolute path
-            return baseURL.scheme! + "://" + baseURL.host! + (baseURL.port.map { ":\($0)" } ?? "") + urlString
+            guard let scheme = baseURL.scheme, let host = baseURL.host else {
+                return urlString
+            }
+            let portPart = baseURL.port.map { ":\($0)" } ?? ""
+            return "\(scheme)://\(host)\(portPart)\(urlString)"
         } else {
             // Relative path
             return baseURL.appendingPathComponent(urlString).absoluteString

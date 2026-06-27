@@ -20,14 +20,16 @@ public class AudioPlayer {
     private let playerNode = AVAudioPlayerNode()
     private var audioFile: AVAudioFile?
     private let deviceManager: OutputDeviceManager
-    private var monitorQueue: DispatchQueue?
-    private var isMonitoring = false
 
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
     public var bitPerfectMode: Bool = true
     public var onPlaybackFinished: (() -> Void)?
     private var isManuallyStopped = false
+
+    /// Frame offset of the currently scheduled segment, used so currentTime
+    /// reflects the absolute position after a seek.
+    private var segmentStartFrame: AVAudioFramePosition = 0
 
     public var mixerNode: AVAudioMixerNode {
         engine.mainMixerNode
@@ -48,7 +50,7 @@ public class AudioPlayer {
         }
 
         let sampleRate = file.processingFormat.sampleRate
-        return Double(playerTime.sampleTime) / sampleRate
+        return Double(playerTime.sampleTime + segmentStartFrame) / sampleRate
     }
 
     public init() throws {
@@ -177,6 +179,8 @@ public class AudioPlayer {
 
         engine.connect(playerNode, to: mainMixer, format: format)
 
+        segmentStartFrame = 0
+
         // 記錄當前文件URL，用於檢查 completion handler 是否對應當前播放
         let scheduledURL = currentURL
 
@@ -209,7 +213,6 @@ public class AudioPlayer {
         playerNode.play()
         // 確保狀態為 playing（即使之前已設置，也重新確認）
         state = .playing
-        startMonitoring()
     }
 
     public func play() throws {
@@ -220,7 +223,6 @@ public class AudioPlayer {
         if state == .paused {
             playerNode.play()
             state = .playing
-            startMonitoring()
             return
         }
 
@@ -233,55 +235,12 @@ public class AudioPlayer {
         guard state == .playing else { return }
         playerNode.pause()
         state = .paused
-        stopMonitoring()
     }
 
     public func stop() {
         isManuallyStopped = true
         playerNode.stop()
         state = .stopped
-        stopMonitoring()
-    }
-
-    private func startMonitoring() {
-        stopMonitoring()
-        isMonitoring = true
-
-        let queue = DispatchQueue(label: "com.camelplayer.monitor", qos: .userInitiated)
-        monitorQueue = queue
-
-        queue.async { [weak self] in
-            while self?.isMonitoring == true {
-                Thread.sleep(forTimeInterval: 0.1)
-                self?.checkPlaybackStatus()
-            }
-        }
-    }
-
-    private func stopMonitoring() {
-        isMonitoring = false
-        monitorQueue = nil
-    }
-
-    private func checkPlaybackStatus() {
-        guard state == .playing else {
-            return
-        }
-
-        guard let duration = duration else {
-            return
-        }
-
-        let current = currentTime
-
-        if current >= duration - 0.1 {
-            // Playback has finished
-            isMonitoring = false
-            state = .stopped
-
-            // Call the callback directly (not on main thread in CLI apps)
-            onPlaybackFinished?()
-        }
     }
 
     public func seek(to time: TimeInterval) throws {
@@ -297,32 +256,41 @@ public class AudioPlayer {
         }
 
         let wasPlaying = state == .playing
+        let scheduledURL = currentURL
 
         playerNode.stop()
 
         let frameCount = AVAudioFrameCount(file.length - startFrame)
+        segmentStartFrame = startFrame
 
         playerNode.scheduleSegment(file,
                                    startingFrame: startFrame,
                                    frameCount: frameCount,
                                    at: nil) { [weak self] in
             DispatchQueue.main.async {
-                self?.state = .stopped
-                self?.onPlaybackFinished?()
+                guard let self = self else { return }
+                // Ignore completions from a segment that is no longer current.
+                guard self.currentURL == scheduledURL else { return }
+
+                self.state = .stopped
+                if !self.isManuallyStopped {
+                    self.onPlaybackFinished?()
+                }
+                self.isManuallyStopped = false
             }
         }
 
+        // Preserve the prior state: only resume the node if we were playing.
         if wasPlaying {
+            if !engine.isRunning {
+                try engine.start()
+            }
             playerNode.play()
             state = .playing
-            startMonitoring()
-        } else {
-            state = .stopped
         }
     }
 
     deinit {
-        stopMonitoring()
         stop()
         engine.stop()
     }
