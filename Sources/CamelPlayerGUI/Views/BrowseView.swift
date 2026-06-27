@@ -21,21 +21,30 @@ struct BrowseView: View {
     @State private var isLoadingMore = false
     @State private var sortCaps: [String] = []
     @State private var sortCriteria = ""
+    @State private var searchText = ""
+    @State private var searchQuery = ""   // non-empty = showing search results
+
+    private var isSearching: Bool { !searchQuery.isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             if selectedServer != nil {
-                breadcrumb
-                actionBar
+                searchField
+                if !isSearching {
+                    breadcrumb
+                    actionBar
+                } else {
+                    searchInfo
+                }
             }
             Divider()
             content
         }
-        .frame(minWidth: 460, minHeight: 520)
+        .frame(minWidth: 460, minHeight: 540)
     }
 
-    // MARK: - Header
+    // MARK: - Header / search
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -51,6 +60,31 @@ struct BrowseView: View {
         .padding()
     }
 
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+            TextField("Search this server", text: $searchText)
+                .textFieldStyle(.plain)
+                .onSubmit(runSearch)
+            if !searchText.isEmpty {
+                Button(action: clearSearch) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundColor(.secondary)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+        .padding(.horizontal).padding(.bottom, 8)
+    }
+
+    private var searchInfo: some View {
+        HStack {
+            Text("Results for “\(searchQuery)” (\(totalMatches))")
+                .font(.caption).foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal).padding(.bottom, 8)
+    }
+
     private var breadcrumb: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
@@ -64,8 +98,7 @@ struct BrowseView: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 6)
+            .padding(.horizontal).padding(.bottom, 6)
         }
     }
 
@@ -74,10 +107,7 @@ struct BrowseView: View {
             if sortOptions.count > 1 {
                 Menu {
                     ForEach(sortOptions, id: \.criteria) { option in
-                        Button(option.label) {
-                            sortCriteria = option.criteria
-                            reload()
-                        }
+                        Button(option.label) { sortCriteria = option.criteria; reload() }
                     }
                 } label: {
                     Label(currentSortLabel, systemImage: "arrow.up.arrow.down")
@@ -94,8 +124,7 @@ struct BrowseView: View {
             .buttonStyle(.bordered)
             .help("Add all tracks in this folder to the playlist")
         }
-        .padding(.horizontal)
-        .padding(.bottom, 8)
+        .padding(.horizontal).padding(.bottom, 8)
     }
 
     // MARK: - Content
@@ -107,7 +136,8 @@ struct BrowseView: View {
         } else if isLoading {
             VStack { Spacer(); ProgressView("Loading…"); Spacer() }.frame(maxWidth: .infinity)
         } else if objects.isEmpty {
-            emptyState(icon: "folder", text: "Empty folder", hint: nil)
+            emptyState(icon: isSearching ? "magnifyingglass" : "folder",
+                       text: isSearching ? "No matches" : "Empty folder", hint: nil)
         } else {
             objectList
         }
@@ -163,8 +193,15 @@ struct BrowseView: View {
                     Text("\(n)").font(.caption).foregroundColor(.secondary)
                 }
                 Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
-            } else if let d = object.duration {
-                Text(TimeFormatter.formatTime(d)).font(.caption).foregroundColor(.secondary)
+            } else {
+                if let d = object.duration {
+                    Text(TimeFormatter.formatTime(d)).font(.caption).foregroundColor(.secondary)
+                }
+                Button { viewModel.addTrack(object) } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Add this track to the playlist")
             }
         }
     }
@@ -210,8 +247,6 @@ struct BrowseView: View {
             ("upnp:album", "Album", "+upnp:album"),
             ("upnp:originalTrackNumber", "Track #", "+upnp:originalTrackNumber")
         ]
-        // Some servers (e.g. MinimServer) report empty SortCaps but still honor
-        // standard criteria, so fall back to offering all when caps are empty.
         for entry in known where sortCaps.isEmpty || sortCaps.contains(entry.cap) {
             options.append((entry.label, entry.criteria))
         }
@@ -222,18 +257,28 @@ struct BrowseView: View {
         sortOptions.first { $0.criteria == sortCriteria }?.label ?? "Sort"
     }
 
-    // MARK: - Navigation / loading
+    // MARK: - Navigation / search
 
     private func open(_ server: UPnPDevice) {
         selectedServer = server
         path = [Crumb(objectID: "0", title: server.friendlyName)]
         sortCriteria = ""
+        searchText = ""
+        searchQuery = ""
         Task { sortCaps = await viewModel.sortCapabilities(server: server) }
         reload()
     }
 
     private func descend(into container: MediaObject) {
-        path.append(Crumb(objectID: container.id, title: container.title))
+        if isSearching {
+            // Tapping an album/folder in search results browses into it.
+            searchText = ""
+            searchQuery = ""
+            let root = path.first ?? Crumb(objectID: "0", title: selectedServer?.friendlyName ?? "")
+            path = [root, Crumb(objectID: container.id, title: container.title)]
+        } else {
+            path.append(Crumb(objectID: container.id, title: container.title))
+        }
         reload()
     }
 
@@ -244,7 +289,9 @@ struct BrowseView: View {
     }
 
     private func goBack() {
-        if path.count > 1 {
+        if isSearching {
+            clearSearch()
+        } else if path.count > 1 {
             path.removeLast()
             reload()
         } else {
@@ -255,15 +302,39 @@ struct BrowseView: View {
         }
     }
 
+    private func runSearch() {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        searchQuery = trimmed
+        reload()
+    }
+
+    private func clearSearch() {
+        searchText = ""
+        searchQuery = ""
+        reload()
+    }
+
+    // MARK: - Paged loading (browse or search)
+
+    private func loadPage(at index: Int) async -> PlaybackController.BrowsePage? {
+        guard let server = selectedServer else { return nil }
+        if isSearching {
+            return await viewModel.search(server: server, query: searchQuery,
+                                          startingIndex: index, requestedCount: pageSize)
+        }
+        guard let current = path.last else { return nil }
+        return await viewModel.browse(server: server, objectID: current.objectID,
+                                      startingIndex: index, requestedCount: pageSize,
+                                      sortCriteria: sortCriteria)
+    }
+
     private func reload() {
-        guard let server = selectedServer, let current = path.last else { return }
+        guard selectedServer != nil else { return }
         isLoading = true
         objects = []
         Task {
-            let page = await viewModel.browse(
-                server: server, objectID: current.objectID,
-                startingIndex: 0, requestedCount: pageSize, sortCriteria: sortCriteria
-            )
+            let page = await loadPage(at: 0)
             objects = page?.objects ?? []
             totalMatches = page?.totalMatches ?? objects.count
             isLoading = false
@@ -273,14 +344,10 @@ struct BrowseView: View {
     private func loadMoreIfNeeded(_ object: MediaObject) {
         guard object.id == objects.last?.id,
               !isLoadingMore,
-              objects.count < totalMatches,
-              let server = selectedServer, let current = path.last else { return }
+              objects.count < totalMatches else { return }
         isLoadingMore = true
         Task {
-            let page = await viewModel.browse(
-                server: server, objectID: current.objectID,
-                startingIndex: objects.count, requestedCount: pageSize, sortCriteria: sortCriteria
-            )
+            let page = await loadPage(at: objects.count)
             if let page = page {
                 objects.append(contentsOf: page.objects)
                 totalMatches = page.totalMatches

@@ -321,6 +321,31 @@ class PlaybackViewModel: ObservableObject {
         }
     }
 
+    func search(
+        server: UPnPDevice,
+        query: String,
+        startingIndex: Int = 0,
+        requestedCount: Int = 200
+    ) async -> PlaybackController.BrowsePage? {
+        do {
+            return try await controller.search(
+                server: server, query: query,
+                startingIndex: startingIndex, requestedCount: requestedCount
+            )
+        } catch {
+            handleError("Search failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func addTrack(_ object: MediaObject) {
+        if controller.addTrackToPlaylist(object) {
+            updateState()
+        } else {
+            handleError("This item has no playable source")
+        }
+    }
+
     func sortCapabilities(server: UPnPDevice) async -> [String] {
         await controller.sortCapabilities(server: server)
     }
