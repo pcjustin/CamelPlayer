@@ -11,7 +11,10 @@ public protocol SSDPDiscoveryDelegate: AnyObject {
 public class SSDPDiscovery: @unchecked Sendable {
     private static let multicastGroup = "239.255.255.250"
     private static let multicastPort: UInt16 = 1900
-    private static let searchTarget = "urn:schemas-upnp-org:device:MediaRenderer:1"
+    private static let searchTargets = [
+        "urn:schemas-upnp-org:device:MediaRenderer:1",
+        "urn:schemas-upnp-org:device:MediaServer:1"
+    ]
 
     public weak var delegate: SSDPDiscoveryDelegate?
 
@@ -196,17 +199,23 @@ public class SSDPDiscovery: @unchecked Sendable {
 
     /// Sends M-SEARCH multicast request
     private func sendMSearch() {
+        for target in Self.searchTargets {
+            sendMSearch(target: target)
+        }
+    }
+
+    private func sendMSearch(target: String) {
         let message = """
         M-SEARCH * HTTP/1.1\r
         HOST: \(Self.multicastGroup):\(Self.multicastPort)\r
         MAN: "ssdp:discover"\r
         MX: 1\r
-        ST: \(Self.searchTarget)\r
+        ST: \(target)\r
         \r
 
         """
 
-        print("SSDP: Sending M-SEARCH for MediaRenderer devices...")
+        print("SSDP: Sending M-SEARCH for \(target)...")
 
         guard let messageData = message.data(using: .utf8) else { return }
 
@@ -287,11 +296,10 @@ public class SSDPDiscovery: @unchecked Sendable {
 
         print("SSDP: Found device - ST: \(st), Location: \(location)")
 
-        // Check if it's a MediaRenderer (or accept all for debugging)
-        let isMediaRenderer = st.contains("MediaRenderer")
-        if !isMediaRenderer {
-            print("SSDP: Device is not a MediaRenderer (ST: \(st)), but will try to parse anyway")
-            // Continue anyway for debugging
+        // We care about MediaRenderer and MediaServer devices; parse others
+        // anyway and let the description decide whether they are usable.
+        if !st.contains("MediaRenderer") && !st.contains("MediaServer") {
+            print("SSDP: Device ST not a renderer/server (\(st)), parsing anyway")
         }
 
         // Extract UUID from USN
@@ -336,15 +344,15 @@ public class SSDPDiscovery: @unchecked Sendable {
                 print("  AVTransport URL: \(device.avTransportURL ?? "nil")")
                 print("  RenderingControl URL: \(device.renderingControlURL ?? "nil")")
 
-                // Only add devices that have AVTransport service
-                if device.avTransportURL != nil {
-                    print("SSDP: Device has AVTransport service, adding to list")
+                // Keep renderers (AVTransport) and servers (ContentDirectory).
+                if device.avTransportURL != nil || device.contentDirectoryURL != nil {
+                    print("SSDP: Adding \(device.deviceType) device to list")
                     discoveredDevices[uuid] = device
                     DispatchQueue.main.async {
                         self.delegate?.ssdpDiscovery(self, didDiscoverDevice: device)
                     }
                 } else {
-                    print("SSDP: Device lacks AVTransport service, ignoring")
+                    print("SSDP: Device has no usable service, ignoring")
                 }
             } else {
                 print("SSDP: Failed to parse device description")

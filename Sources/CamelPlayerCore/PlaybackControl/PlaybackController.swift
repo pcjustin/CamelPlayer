@@ -38,8 +38,11 @@ public class PlaybackController {
     private var localEngine: LocalPlaybackEngine
     private(set) public var currentOutputDevice: OutputDevice
 
-    /// Called when the set of available UPnP devices changes (discovery is async).
+    /// Called when the set of available UPnP renderers changes (discovery is async).
     public var onUPnPDevicesChanged: (() -> Void)?
+
+    /// Called when the set of available UPnP media servers changes.
+    public var onUPnPServersChanged: (() -> Void)?
 
     public var currentState: PlaybackState {
         currentEngine.state
@@ -87,9 +90,9 @@ public class PlaybackController {
             type: .local(defaultDeviceID)
         )
 
-        // Notify when discovery adds/removes devices so the UI can refresh live
-        upnpManager.onDeviceAdded = { [weak self] _ in self?.onUPnPDevicesChanged?() }
-        upnpManager.onDeviceRemoved = { [weak self] _ in self?.onUPnPDevicesChanged?() }
+        // Notify when discovery changes the device lists so the UI can refresh live
+        upnpManager.onRenderersChanged = { [weak self] in self?.onUPnPDevicesChanged?() }
+        upnpManager.onServersChanged = { [weak self] in self?.onUPnPServersChanged?() }
 
         // Start HTTP server and UPnP discovery
         try? mediaServer.start()
@@ -216,8 +219,8 @@ public class PlaybackController {
             }
         }
 
-        // Add UPnP devices
-        for upnpDevice in upnpManager.availableDevices {
+        // Add UPnP renderers
+        for upnpDevice in upnpManager.availableRenderers {
             devices.append(OutputDevice(
                 id: "upnp-\(upnpDevice.id)",
                 name: upnpDevice.friendlyName,
@@ -268,6 +271,36 @@ public class PlaybackController {
     /// Refreshes the UPnP device list
     public func refreshUPnPDevices() {
         upnpManager.refresh()
+    }
+
+    // MARK: - Media Server Browsing
+
+    /// UPnP media servers (sources) discovered on the network.
+    public var availableMediaServers: [UPnPDevice] {
+        upnpManager.availableServers
+    }
+
+    /// Browses a container on a media server. Root container ID is "0".
+    public func browse(server: UPnPDevice, objectID: String = "0") async throws -> [MediaObject] {
+        guard let controlURL = server.contentDirectoryURL else {
+            throw MediaBrowseError.serverHasNoContentDirectory
+        }
+        let service = ContentDirectoryService(controlURL: controlURL)
+        return try await service.browse(objectID: objectID).objects
+    }
+
+    /// Adds all playable tracks directly inside a container to the playlist.
+    /// Returns the number of tracks added. (P1: immediate children only.)
+    @discardableResult
+    public func addContainerToPlaylist(server: UPnPDevice, objectID: String) async throws -> Int {
+        let objects = try await browse(server: server, objectID: objectID)
+        var added = 0
+        for object in objects where !object.isContainer {
+            guard let res = object.resURL, let url = URL(string: res) else { continue }
+            playlist.add(PlaylistItem(url: url, title: object.title))
+            added += 1
+        }
+        return added
     }
 
     public func getPlaylistItems() -> [PlaylistItem] {

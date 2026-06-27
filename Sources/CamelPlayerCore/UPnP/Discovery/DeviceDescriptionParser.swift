@@ -9,10 +9,12 @@ public class DeviceDescriptionParser: NSObject {
     private var friendlyName = ""
     private var manufacturer = ""
     private var modelName = ""
+    private var rootDeviceType = ""
 
     // Service URLs
     private var avTransportControlURL: String?
     private var renderingControlControlURL: String?
+    private var contentDirectoryControlURL: String?
 
     // Current service being parsed
     private var currentServiceType = ""
@@ -56,6 +58,16 @@ public class DeviceDescriptionParser: NSObject {
         // Resolve relative URLs
         let avTransportURL = resolveURL(avTransportControlURL)
         let renderingControlURL = resolveURL(renderingControlControlURL)
+        let contentDirectoryURL = resolveURL(contentDirectoryControlURL)
+
+        let deviceType: UPnPDeviceType
+        if rootDeviceType.contains("MediaServer") {
+            deviceType = .server
+        } else if rootDeviceType.contains("MediaRenderer") {
+            deviceType = .renderer
+        } else {
+            deviceType = .other
+        }
 
         let device = UPnPDevice(
             id: uuid,
@@ -63,8 +75,10 @@ public class DeviceDescriptionParser: NSObject {
             manufacturer: manufacturer.isEmpty ? "Unknown" : manufacturer,
             modelName: modelName.isEmpty ? "Unknown" : modelName,
             location: location,
+            deviceType: deviceType,
             avTransportURL: avTransportURL,
-            renderingControlURL: renderingControlURL
+            renderingControlURL: renderingControlURL,
+            contentDirectoryURL: contentDirectoryURL
         )
 
         parsedDevice = device
@@ -108,8 +122,10 @@ public class DeviceDescriptionParser: NSObject {
         friendlyName = ""
         manufacturer = ""
         modelName = ""
+        rootDeviceType = ""
         avTransportControlURL = nil
         renderingControlControlURL = nil
+        contentDirectoryControlURL = nil
         currentServiceType = ""
         currentControlURL = ""
         parsedDevice = nil
@@ -132,6 +148,10 @@ extension DeviceDescriptionParser: XMLParserDelegate {
         let value = currentValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch elementName {
+        case "deviceType":
+            if rootDeviceType.isEmpty { // Root device type, not embedded devices
+                rootDeviceType = value
+            }
         case "friendlyName":
             if friendlyName.isEmpty { // Only set first occurrence (device, not service)
                 friendlyName = value
@@ -154,6 +174,8 @@ extension DeviceDescriptionParser: XMLParserDelegate {
                 avTransportControlURL = currentControlURL
             } else if currentServiceType.contains("RenderingControl") {
                 renderingControlControlURL = currentControlURL
+            } else if currentServiceType.contains("ContentDirectory") {
+                contentDirectoryControlURL = currentControlURL
             }
             currentServiceType = ""
             currentControlURL = ""

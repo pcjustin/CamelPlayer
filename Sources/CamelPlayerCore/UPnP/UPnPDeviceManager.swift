@@ -3,13 +3,18 @@ import Foundation
 /// Manager for UPnP device discovery and management
 public class UPnPDeviceManager: SSDPDiscoveryDelegate {
     private let discovery: SSDPDiscovery
-    private(set) public var availableDevices: [UPnPDevice] = []
 
-    /// Callback when a device is added
-    public var onDeviceAdded: ((UPnPDevice) -> Void)?
+    /// Renderers (sinks) — devices we can send audio to via AVTransport.
+    private(set) public var availableRenderers: [UPnPDevice] = []
 
-    /// Callback when a device is removed
-    public var onDeviceRemoved: ((UPnPDevice) -> Void)?
+    /// Media servers (sources) — devices we can browse via ContentDirectory.
+    private(set) public var availableServers: [UPnPDevice] = []
+
+    /// Called when the renderer list changes.
+    public var onRenderersChanged: (() -> Void)?
+
+    /// Called when the media server list changes.
+    public var onServersChanged: (() -> Void)?
 
     public init() {
         self.discovery = SSDPDiscovery()
@@ -24,7 +29,8 @@ public class UPnPDeviceManager: SSDPDiscoveryDelegate {
     /// Stops device discovery
     public func stopDiscovery() {
         discovery.stopDiscovery()
-        availableDevices.removeAll()
+        availableRenderers.removeAll()
+        availableServers.removeAll()
     }
 
     /// Refreshes device list (stops and restarts discovery)
@@ -36,25 +42,41 @@ public class UPnPDeviceManager: SSDPDiscoveryDelegate {
         }
     }
 
-    /// Gets a device by ID
-    public func getDevice(id: String) -> UPnPDevice? {
-        return availableDevices.first { $0.id == id }
+    /// Gets a renderer by ID
+    public func getRenderer(id: String) -> UPnPDevice? {
+        return availableRenderers.first { $0.id == id }
+    }
+
+    /// Gets a server by ID
+    public func getServer(id: String) -> UPnPDevice? {
+        return availableServers.first { $0.id == id }
     }
 
     // MARK: - SSDPDiscoveryDelegate
 
     public func ssdpDiscovery(_ discovery: SSDPDiscovery, didDiscoverDevice device: UPnPDevice) {
-        // Avoid duplicates
-        guard !availableDevices.contains(where: { $0.id == device.id }) else {
-            return
+        // Classify by capability so a device exposing both services lands in
+        // both lists, regardless of how its deviceType parsed.
+        if device.avTransportURL != nil,
+           !availableRenderers.contains(where: { $0.id == device.id }) {
+            availableRenderers.append(device)
+            onRenderersChanged?()
         }
-
-        availableDevices.append(device)
-        onDeviceAdded?(device)
+        if device.contentDirectoryURL != nil,
+           !availableServers.contains(where: { $0.id == device.id }) {
+            availableServers.append(device)
+            onServersChanged?()
+        }
     }
 
     public func ssdpDiscovery(_ discovery: SSDPDiscovery, didRemoveDevice device: UPnPDevice) {
-        availableDevices.removeAll { $0.id == device.id }
-        onDeviceRemoved?(device)
+        if availableRenderers.contains(where: { $0.id == device.id }) {
+            availableRenderers.removeAll { $0.id == device.id }
+            onRenderersChanged?()
+        }
+        if availableServers.contains(where: { $0.id == device.id }) {
+            availableServers.removeAll { $0.id == device.id }
+            onServersChanged?()
+        }
     }
 }

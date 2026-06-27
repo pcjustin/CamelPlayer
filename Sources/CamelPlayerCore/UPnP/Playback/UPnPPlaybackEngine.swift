@@ -77,16 +77,25 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         stopPolling()
         try? await avTransport.stop()
 
-        // Share the file via HTTP
-        sharedFileURL = try mediaServer.shareFile(url)
         _currentURL = url
 
-        guard let httpURL = sharedFileURL else {
-            throw UPnPPlaybackError.failedToShareFile
+        // Local files are served over our own HTTP bridge; remote URLs (e.g. a
+        // NAS/MinimServer res URL) are handed to the renderer as-is so it pulls
+        // directly from the source.
+        let uri: String
+        if url.isFileURL {
+            sharedFileURL = try mediaServer.shareFile(url)
+            guard let httpURL = sharedFileURL else {
+                throw UPnPPlaybackError.failedToShareFile
+            }
+            uri = httpURL.absoluteString
+        } else {
+            sharedFileURL = nil
+            uri = url.absoluteString
         }
 
         // Set URI and play
-        try await avTransport.setAVTransportURI(uri: httpURL.absoluteString, metadata: "")
+        try await avTransport.setAVTransportURI(uri: uri, metadata: "")
         try await avTransport.play()
 
         // Update state

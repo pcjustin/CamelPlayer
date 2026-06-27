@@ -20,19 +20,6 @@ public struct UPnPTestCommand: ParsableCommand {
         print()
 
         let manager = UPnPDeviceManager()
-        var foundDevices = false
-
-        manager.onDeviceAdded = { device in
-            foundDevices = true
-            print("✅ Found device:")
-            print("   Name: \(device.friendlyName)")
-            print("   Manufacturer: \(device.manufacturer)")
-            print("   Model: \(device.modelName)")
-            print("   Location: \(device.location)")
-            print("   AVTransport: \(device.avTransportURL ?? "N/A")")
-            print("   RenderingControl: \(device.renderingControlURL ?? "N/A")")
-            print()
-        }
 
         manager.startDiscovery()
 
@@ -50,9 +37,24 @@ public struct UPnPTestCommand: ParsableCommand {
 
         print()
         print("Discovery complete!")
-        print("Total devices found: \(manager.availableDevices.count)")
 
-        if !foundDevices {
+        for device in manager.availableRenderers {
+            print("✅ Renderer: \(device.friendlyName)")
+            print("   Model: \(device.modelName) (\(device.manufacturer))")
+            print("   AVTransport: \(device.avTransportURL ?? "N/A")")
+            print()
+        }
+        for device in manager.availableServers {
+            print("✅ Media Server: \(device.friendlyName)")
+            print("   Model: \(device.modelName) (\(device.manufacturer))")
+            print("   ContentDirectory: \(device.contentDirectoryURL ?? "N/A")")
+            print()
+        }
+
+        let total = manager.availableRenderers.count + manager.availableServers.count
+        print("Total devices found: \(total)")
+
+        if total == 0 {
             print()
             print("⚠️  No UPnP MediaRenderer devices found.")
             print()
