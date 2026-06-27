@@ -24,6 +24,8 @@ class PlaybackViewModel: ObservableObject {
     @Published var lastError: String?
     @Published var albumArt: NSImage?
     @Published var mediaServers: [UPnPDevice] = []
+    @Published var favoriteAlbums: [AlbumRef] = []
+    @Published var favoriteTracks: [TrackRef] = []
 
     // Private properties
     private let controller: PlaybackController
@@ -39,6 +41,8 @@ class PlaybackViewModel: ObservableObject {
         static let bitPerfect = "settings.bitPerfect"
         static let playbackMode = "settings.playbackMode"
         static let outputDeviceID = "settings.outputDeviceID"
+        static let favoriteAlbums = "library.favoriteAlbums"
+        static let favoriteTracks = "library.favoriteTracks"
     }
 
     private static func mode(from string: String?) -> PlaybackMode? {
@@ -195,6 +199,96 @@ class PlaybackViewModel: ObservableObject {
         refreshDevices()
         refreshMediaServers()
         loadCoverCache()
+        loadFavorites()
+    }
+
+    // MARK: - Favorites
+
+    private func loadFavorites() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Keys.favoriteAlbums),
+           let decoded = try? JSONDecoder().decode([AlbumRef].self, from: data) {
+            favoriteAlbums = decoded
+        }
+        if let data = defaults.data(forKey: Keys.favoriteTracks),
+           let decoded = try? JSONDecoder().decode([TrackRef].self, from: data) {
+            favoriteTracks = decoded
+        }
+    }
+
+    private func persistFavorites() {
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(favoriteAlbums) {
+            defaults.set(data, forKey: Keys.favoriteAlbums)
+        }
+        if let data = try? JSONEncoder().encode(favoriteTracks) {
+            defaults.set(data, forKey: Keys.favoriteTracks)
+        }
+    }
+
+    func isFavoriteAlbum(_ id: String) -> Bool {
+        favoriteAlbums.contains { $0.id == id }
+    }
+
+    func toggleFavoriteAlbum(_ album: MediaObject) {
+        if let index = favoriteAlbums.firstIndex(where: { $0.id == album.id }) {
+            favoriteAlbums.remove(at: index)
+        } else {
+            favoriteAlbums.insert(AlbumRef(album: album), at: 0)
+        }
+        persistFavorites()
+    }
+
+    func isFavoriteTrack(_ url: String) -> Bool {
+        favoriteTracks.contains { $0.url == url }
+    }
+
+    private func toggleFavoriteTrack(_ ref: TrackRef) {
+        if let index = favoriteTracks.firstIndex(where: { $0.url == ref.url }) {
+            favoriteTracks.remove(at: index)
+        } else {
+            favoriteTracks.insert(ref, at: 0)
+        }
+        persistFavorites()
+    }
+
+    func toggleFavoriteTrack(_ object: MediaObject) {
+        guard let res = object.resURL else { return }
+        toggleFavoriteTrack(TrackRef(
+            url: res, title: object.title,
+            album: object.album, albumArtURI: object.albumArtURI,
+            metadata: DIDLBuilder.metadata(for: object)
+        ))
+    }
+
+    func toggleFavoriteTrack(_ item: PlaylistItem) {
+        // Recover album/cover from the track's DIDL metadata if available.
+        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
+        toggleFavoriteTrack(TrackRef(
+            url: item.url.absoluteString, title: item.title,
+            album: parsed?.album, albumArtURI: parsed?.albumArtURI,
+            metadata: item.metadata
+        ))
+    }
+
+    func addTrack(_ ref: TrackRef) {
+        guard let url = URL(string: ref.url) else { return }
+        controller.addTrack(url: url, title: ref.title, metadata: ref.metadata)
+        updateState()
+    }
+
+    func openFavoriteAlbum(_ ref: AlbumRef) -> MediaObject {
+        MediaObject(id: ref.id, parentID: "", title: ref.title, isContainer: true, artist: ref.artist)
+    }
+
+    func unfavoriteTrack(_ ref: TrackRef) {
+        favoriteTracks.removeAll { $0.url == ref.url }
+        persistFavorites()
+    }
+
+    func unfavoriteAlbum(_ ref: AlbumRef) {
+        favoriteAlbums.removeAll { $0.id == ref.id }
+        persistFavorites()
     }
 
     // MARK: - Playback Control

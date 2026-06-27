@@ -14,7 +14,7 @@ struct ContentView: View {
     private let minLeftWidth: CGFloat = 200
     private let maxLeftWidth: CGFloat = 420
 
-    private enum Section { case albums, browse, queue }
+    private enum Section { case albums, favorites, browse, queue }
     @State private var section: Section = .albums
 
     var body: some View {
@@ -23,12 +23,13 @@ struct ContentView: View {
                 // Section switcher — album wall is the default main screen
                 Picker("", selection: $section) {
                     Text("Albums").tag(Section.albums)
+                    Text("Favorites").tag(Section.favorites)
                     Text("Browse").tag(Section.browse)
                     Text("Queue").tag(Section.queue)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 360)
+                .frame(maxWidth: 420)
                 .padding(8)
 
                 Divider()
@@ -37,6 +38,7 @@ struct ContentView: View {
                 Group {
                     switch section {
                     case .albums: AlbumsView(embedded: true)
+                    case .favorites: FavoritesView()
                     case .browse: BrowseView(embedded: true)
                     case .queue: queueSection
                     }

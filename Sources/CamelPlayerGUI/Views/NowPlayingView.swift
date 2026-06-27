@@ -50,6 +50,17 @@ struct NowPlayingView: View {
                         .help("Bit-perfect mode active")
                 }
             }
+
+            // Favorite current track
+            if let item = viewModel.currentItem {
+                Button(action: { viewModel.toggleFavoriteTrack(item) }) {
+                    let fav = viewModel.isFavoriteTrack(item.url.absoluteString)
+                    Image(systemName: fav ? "star.fill" : "star")
+                        .foregroundColor(fav ? .yellow : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Favorite track")
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical)

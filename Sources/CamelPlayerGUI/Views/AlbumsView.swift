@@ -103,7 +103,7 @@ struct AlbumsView: View {
     }
 }
 
-private struct AlbumCell: View {
+struct AlbumCell: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     let album: MediaObject
     @State private var coverURL: URL?
@@ -134,7 +134,7 @@ private struct AlbumCell: View {
     }
 }
 
-private struct AlbumDetailView: View {
+struct AlbumDetailView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     let album: MediaObject
 
@@ -159,10 +159,18 @@ private struct AlbumDetailView: View {
                     Text(album.title).font(.title3.weight(.semibold)).lineLimit(2)
                     if let artist = album.artist { Text(artist).foregroundColor(.secondary) }
                     Text("\(tracks.count) tracks").font(.caption).foregroundColor(.secondary)
-                    Button(action: { viewModel.playAlbum(albumID: album.id) }) {
-                        Label("Play Album", systemImage: "play.fill")
+                    HStack(spacing: 10) {
+                        Button(action: { viewModel.playAlbum(albumID: album.id) }) {
+                            Label("Play Album", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button(action: { viewModel.toggleFavoriteAlbum(album) }) {
+                            Image(systemName: viewModel.isFavoriteAlbum(album.id) ? "star.fill" : "star")
+                                .foregroundColor(viewModel.isFavoriteAlbum(album.id) ? .yellow : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Favorite album")
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 Spacer()
             }
@@ -178,6 +186,12 @@ private struct AlbumDetailView: View {
                         if let d = track.duration {
                             Text(TimeFormatter.formatTime(d)).font(.caption).foregroundColor(.secondary)
                         }
+                        Button { viewModel.toggleFavoriteTrack(track) } label: {
+                            Image(systemName: trackIsFavorite(track) ? "star.fill" : "star")
+                                .foregroundColor(trackIsFavorite(track) ? .yellow : .secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Favorite track")
                         Button { viewModel.addTrack(track) } label: { Image(systemName: "plus.circle") }
                             .buttonStyle(.borderless)
                             .help("Add to playlist")
@@ -189,5 +203,10 @@ private struct AlbumDetailView: View {
             tracks = await viewModel.albumTracks(albumID: album.id)
             coverURL = await viewModel.albumArtURL(forAlbum: album.id)
         }
+    }
+
+    private func trackIsFavorite(_ track: MediaObject) -> Bool {
+        guard let res = track.resURL else { return false }
+        return viewModel.isFavoriteTrack(res)
     }
 }
