@@ -50,14 +50,11 @@ sudo cp .build/release/CamelPlayer /usr/local/bin/camelplayer
 Launch the native macOS app:
 
 ```bash
-# Quick launch (auto-builds if needed)
-./run_gui.sh
+# Build the .app bundle (prompts to install to /Applications)
+./build_gui_app.sh
 
-# Or open directly
+# Then open it
 open CamelPlayer.app
-
-# Install to Applications folder
-cp -r CamelPlayer.app /Applications/
 ```
 
 #### GUI Features
@@ -164,54 +161,6 @@ Legend:
 ```
 
 ## Architecture
-
-### Project Structure
-
-```
-CamelPlayer/
-├── Sources/
-│   ├── CamelPlayer/           # CLI executable entry point
-│   │   └── main.swift
-│   ├── CamelPlayerGUI/        # GUI executable (SwiftUI)
-│   │   ├── CamelPlayerGUIApp.swift
-│   │   ├── ViewModel/
-│   │   │   └── PlaybackViewModel.swift
-│   │   ├── Views/
-│   │   │   ├── ContentView.swift
-│   │   │   ├── NowPlayingView.swift
-│   │   │   ├── PlaybackControlsView.swift
-│   │   │   ├── SeekBarView.swift
-│   │   │   ├── VolumeControlView.swift
-│   │   │   ├── PlaylistView.swift
-│   │   │   └── SettingsBarView.swift
-│   │   └── Utilities/
-│   │       ├── TimeFormatter.swift
-│   │       └── FilePickerHelper.swift
-│   ├── CamelPlayerCore/       # Core library (shared)
-│   │   ├── AudioEngine/       # Audio playback engine
-│   │   │   ├── AudioPlayer.swift
-│   │   │   ├── OutputDeviceManager.swift
-│   │   │   └── VolumeController.swift
-│   │   ├── PlaybackControl/   # Playback orchestration
-│   │   │   └── PlaybackController.swift
-│   │   ├── Playlist/          # Playlist management
-│   │   │   ├── Playlist.swift
-│   │   │   └── PlaylistItem.swift
-│   │   ├── Format/            # Audio format support
-│   │   └── Display/           # Status display
-│   └── CamelPlayerCLI/        # CLI interface layer
-│       ├── Commands/          # ArgumentParser commands
-│       │   ├── PlayCommand.swift
-│       │   ├── DevicesCommand.swift
-│       │   └── InteractiveCommand.swift
-│       └── Interactive/       # Interactive mode
-│           ├── InteractiveMode.swift
-│           └── CommandParser.swift
-├── Tests/
-│   └── CamelPlayerCoreTests/
-├── build_gui_app.sh           # GUI build script
-└── run_gui.sh                 # GUI quick launcher
-```
 
 ### GUI Architecture (MVVM Pattern)
 

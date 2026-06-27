@@ -1,9 +1,42 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Build the GUI in release mode
-echo "Building CamelPlayerGUI..."
-swift build -c release --product CamelPlayerGUI
+# Usage: ./build_gui_app.sh [--debug|--release] [--install|--no-install]
+#   --release      (default) optimized build; slower to compile
+#   --debug        fast incremental build for local iteration
+#   --install, -y  install to /Applications without prompting
+#   --no-install   skip the /Applications install prompt
+# When run interactively without an install flag, the script asks whether to
+# install to /Applications after a successful build.
+CONFIG="release"
+INSTALL_CHOICE="prompt"
+for arg in "$@"; do
+    case "$arg" in
+        --debug) CONFIG="debug" ;;
+        --release) CONFIG="release" ;;
+        --install|-y) INSTALL_CHOICE="yes" ;;
+        --no-install) INSTALL_CHOICE="no" ;;
+        -h|--help)
+            echo "Usage: $0 [--debug|--release] [--install|--no-install]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$CONFIG" = "release" ]; then
+    echo "Building CamelPlayerGUI (release, optimized — this can take a few minutes)..."
+else
+    echo "Building CamelPlayerGUI (debug)..."
+fi
+
+swift build -c "$CONFIG" --product CamelPlayerGUI
+
+# Locate the built binary instead of hardcoding the path
+BIN_PATH="$(swift build -c "$CONFIG" --product CamelPlayerGUI --show-bin-path 2>/dev/null)"
 
 # Create .app bundle structure
 APP_NAME="CamelPlayer.app"
@@ -18,38 +51,48 @@ mkdir -p "$RESOURCES_DIR"
 
 # Copy the executable
 echo "Copying executable..."
-cp .build/release/CamelPlayerGUI "$MACOS_DIR/CamelPlayer"
+cp "$BIN_PATH/CamelPlayerGUI" "$MACOS_DIR/CamelPlayer"
 
-# Generate app icon from logo.png
+# Generate app icon from logo.png, caching the .icns so it is only regenerated
+# when logo.png changes (the bundle is recreated on every run).
+ICON_CACHE=".build/AppIcon.icns"
 if [ -f "logo.png" ]; then
-    echo "Generating app icon..."
-    ICONSET="AppIcon.iconset"
-    rm -rf "$ICONSET"
-    mkdir -p "$ICONSET"
+    if [ ! -f "$ICON_CACHE" ] || [ "logo.png" -nt "$ICON_CACHE" ]; then
+        echo "Generating app icon..."
+        ICONSET="$(mktemp -d)/AppIcon.iconset"
+        mkdir -p "$ICONSET"
 
-    # Generate different icon sizes
-    sips -z 16 16     logo.png --out "$ICONSET/icon_16x16.png" > /dev/null 2>&1
-    sips -z 32 32     logo.png --out "$ICONSET/icon_16x16@2x.png" > /dev/null 2>&1
-    sips -z 32 32     logo.png --out "$ICONSET/icon_32x32.png" > /dev/null 2>&1
-    sips -z 64 64     logo.png --out "$ICONSET/icon_32x32@2x.png" > /dev/null 2>&1
-    sips -z 128 128   logo.png --out "$ICONSET/icon_128x128.png" > /dev/null 2>&1
-    sips -z 256 256   logo.png --out "$ICONSET/icon_128x128@2x.png" > /dev/null 2>&1
-    sips -z 256 256   logo.png --out "$ICONSET/icon_256x256.png" > /dev/null 2>&1
-    sips -z 512 512   logo.png --out "$ICONSET/icon_256x256@2x.png" > /dev/null 2>&1
-    sips -z 512 512   logo.png --out "$ICONSET/icon_512x512.png" > /dev/null 2>&1
-    sips -z 1024 1024 logo.png --out "$ICONSET/icon_512x512@2x.png" > /dev/null 2>&1
+        sips -z 16 16     logo.png --out "$ICONSET/icon_16x16.png" > /dev/null 2>&1
+        sips -z 32 32     logo.png --out "$ICONSET/icon_16x16@2x.png" > /dev/null 2>&1
+        sips -z 32 32     logo.png --out "$ICONSET/icon_32x32.png" > /dev/null 2>&1
+        sips -z 64 64     logo.png --out "$ICONSET/icon_32x32@2x.png" > /dev/null 2>&1
+        sips -z 128 128   logo.png --out "$ICONSET/icon_128x128.png" > /dev/null 2>&1
+        sips -z 256 256   logo.png --out "$ICONSET/icon_128x128@2x.png" > /dev/null 2>&1
+        sips -z 256 256   logo.png --out "$ICONSET/icon_256x256.png" > /dev/null 2>&1
+        sips -z 512 512   logo.png --out "$ICONSET/icon_256x256@2x.png" > /dev/null 2>&1
+        sips -z 512 512   logo.png --out "$ICONSET/icon_512x512.png" > /dev/null 2>&1
+        sips -z 1024 1024 logo.png --out "$ICONSET/icon_512x512@2x.png" > /dev/null 2>&1
 
-    # Convert to .icns
-    iconutil -c icns "$ICONSET" -o "$RESOURCES_DIR/AppIcon.icns"
-    rm -rf "$ICONSET"
-    echo "✅ App icon created"
+        iconutil -c icns "$ICONSET" -o "$ICON_CACHE"
+        rm -rf "$ICONSET"
+    else
+        echo "Reusing cached app icon..."
+    fi
+    cp "$ICON_CACHE" "$RESOURCES_DIR/AppIcon.icns"
+    echo "✅ App icon ready"
 else
     echo "⚠️  logo.png not found, skipping icon generation"
 fi
 
+# Derive version metadata from git when available
+SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+SHORT_VERSION="${SHORT_VERSION:-1.0.0}"
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+YEAR="$(date +%Y)"
+
 # Create Info.plist
 echo "Creating Info.plist..."
-cat > "$APP_DIR/Info.plist" << 'EOF'
+cat > "$APP_DIR/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -69,15 +112,15 @@ cat > "$APP_DIR/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>$SHORT_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2025</string>
+    <string>Copyright © $YEAR</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.music</string>
     <key>NSPrincipalClass</key>
@@ -89,10 +132,48 @@ EOF
 # Make executable
 chmod +x "$MACOS_DIR/CamelPlayer"
 
+# Re-sign the assembled bundle (ad-hoc). Modifying the bundle invalidates the
+# binary's original signature, and its identifier did not match the bundle id.
+echo "Signing app bundle..."
+codesign --force --sign - "$APP_NAME"
+
 echo "✅ App bundle created successfully: $APP_NAME"
-echo ""
-echo "To run the app:"
-echo "  open $APP_NAME"
-echo ""
-echo "To install to Applications:"
-echo "  cp -r $APP_NAME /Applications/"
+
+# Optionally install to /Applications, prompting first (with an extra warning
+# when an existing copy would be replaced).
+DEST="/Applications/$APP_NAME"
+do_install="$INSTALL_CHOICE"
+
+if [ "$do_install" = "prompt" ]; then
+    if [ ! -t 0 ]; then
+        # Non-interactive: don't hang waiting for input.
+        echo "ℹ️  Not running interactively; skipping /Applications install."
+        echo "    Install manually with: cp -R $APP_NAME /Applications/"
+        do_install="no"
+    else
+        if [ -d "$DEST" ]; then
+            echo "⚠️  $DEST already exists and will be replaced."
+            read -r -p "Replace the existing app in /Applications? [y/N] " ans || ans=""
+        else
+            read -r -p "Install to /Applications? [y/N] " ans || ans=""
+        fi
+        case "$ans" in
+            y|Y|yes|YES) do_install="yes" ;;
+            *) do_install="no" ;;
+        esac
+    fi
+fi
+
+if [ "$do_install" = "yes" ]; then
+    echo "Installing to /Applications..."
+    if rm -rf "$DEST" 2>/dev/null && cp -R "$APP_NAME" "$DEST" 2>/dev/null; then
+        echo "✅ Installed: $DEST"
+    else
+        echo "⚠️  Could not write to /Applications (permission denied?)."
+        echo "    Try: sudo cp -R $APP_NAME /Applications/"
+    fi
+else
+    echo ""
+    echo "To run the app:        open $APP_NAME"
+    echo "To install manually:   cp -R $APP_NAME /Applications/"
+fi
