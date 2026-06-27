@@ -42,5 +42,9 @@ let package = Package(
             name: "CamelPlayerCoreTests",
             dependencies: ["CamelPlayerCore"]
         ),
+        .testTarget(
+            name: "CamelPlayerCLITests",
+            dependencies: ["CamelPlayerCLI", "CamelPlayerCore"]
+        ),
     ]
 )
