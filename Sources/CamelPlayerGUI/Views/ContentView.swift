@@ -1,9 +1,11 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     @State private var isDropTargeted = false
+    @State private var spaceMonitor: Any?
 
     var body: some View {
         ZStack {
@@ -69,6 +71,29 @@ struct ContentView: View {
         .sheet(isPresented: $viewModel.showBrowser) {
             BrowseView()
                 .environmentObject(viewModel)
+        }
+        .onAppear { installSpaceMonitor() }
+        .onDisappear {
+            if let monitor = spaceMonitor {
+                NSEvent.removeMonitor(monitor)
+                spaceMonitor = nil
+            }
+        }
+    }
+
+    /// Space toggles play/pause globally, overriding focused-button activation,
+    /// except while typing in a text field (e.g. the browse search box).
+    private func installSpaceMonitor() {
+        guard spaceMonitor == nil else { return }
+        spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 49 else { return event } // 49 = space
+            // Let the space through while typing (e.g. the browse search box).
+            if NSApp.keyWindow?.firstResponder is NSText { return event }
+            if !viewModel.playlistItems.isEmpty, !viewModel.currentTrackNeedsRenderer {
+                viewModel.togglePlayPause()
+            }
+            // Always swallow space otherwise so it never activates a focused button.
+            return nil
         }
     }
 

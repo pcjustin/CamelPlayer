@@ -11,5 +11,8 @@ struct CamelPlayerGUIApp: App {
                 .frame(minWidth: 600, minHeight: 800)
         }
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            PlaybackCommands(viewModel: viewModel)
+        }
     }
 }
