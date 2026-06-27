@@ -101,6 +101,15 @@ struct SettingsBarView: View {
 
             Spacer()
 
+            // Album wall (network media server library)
+            Button(action: {
+                viewModel.showAlbums = true
+            }) {
+                Label("Albums", systemImage: "square.stack")
+            }
+            .buttonStyle(.bordered)
+            .help("Browse the library by album")
+
             // Browse NAS / network media servers
             Button(action: {
                 viewModel.showBrowser = true

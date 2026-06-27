@@ -82,6 +82,10 @@ struct ContentView: View {
             BrowseView()
                 .environmentObject(viewModel)
         }
+        .sheet(isPresented: $viewModel.showAlbums) {
+            AlbumsView()
+                .environmentObject(viewModel)
+        }
         .background(WindowConfigurator(autosaveName: "CamelPlayerMainWindow"))
         .onAppear { installSpaceMonitor() }
         .onDisappear {

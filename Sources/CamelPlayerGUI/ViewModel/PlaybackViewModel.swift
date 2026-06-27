@@ -25,6 +25,7 @@ class PlaybackViewModel: ObservableObject {
     @Published var albumArt: NSImage?
     @Published var mediaServers: [UPnPDevice] = []
     @Published var showBrowser: Bool = false
+    @Published var showAlbums: Bool = false
 
     // Private properties
     private let controller: PlaybackController
@@ -415,6 +416,49 @@ class PlaybackViewModel: ObservableObject {
 
     func sortCapabilities(server: UPnPDevice) async -> [String] {
         await controller.sortCapabilities(server: server)
+    }
+
+    // MARK: - Album-centric browsing
+
+    private var albumArtCache: [String: String] = [:]
+
+    /// The media server used for album browsing (first discovered for now).
+    var libraryServer: UPnPDevice? { mediaServers.first }
+
+    func albums(startingIndex: Int = 0, requestedCount: Int = 100) async -> PlaybackController.BrowsePage? {
+        guard let server = libraryServer else { return nil }
+        do {
+            return try await controller.albums(server: server, startingIndex: startingIndex, requestedCount: requestedCount)
+        } catch {
+            handleError("Failed to load albums: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func albumArtURL(forAlbum id: String) async -> URL? {
+        if let cached = albumArtCache[id] { return URL(string: cached) }
+        guard let server = libraryServer,
+              let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
+        albumArtCache[id] = uri
+        return URL(string: uri)
+    }
+
+    func albumTracks(albumID: String) async -> [MediaObject] {
+        guard let server = libraryServer,
+              let page = await browse(server: server, objectID: albumID) else { return [] }
+        return page.objects
+    }
+
+    func playAlbum(albumID: String) {
+        guard let server = libraryServer else { return }
+        Task {
+            do {
+                try await controller.playAlbum(server: server, objectID: albumID)
+                updateState()
+            } catch {
+                handleError("Failed to play album: \(error.localizedDescription)")
+            }
+        }
     }
 
     func addContainerToPlaylist(server: UPnPDevice, objectID: String, sortCriteria: String = "") async {
