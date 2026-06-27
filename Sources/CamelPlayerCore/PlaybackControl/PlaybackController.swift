@@ -140,6 +140,10 @@ public class PlaybackController {
         playlist.addAll(urls: urls)
     }
 
+    public func addTrack(url: URL, title: String, metadata: String?) {
+        playlist.add(PlaylistItem(url: url, title: title, metadata: metadata))
+    }
+
     public func play() async throws {
         if currentEngine.state == .playing {
             return

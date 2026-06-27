@@ -2,8 +2,8 @@ import Foundation
 
 /// Builds DIDL-Lite metadata for a track, sent to a renderer as
 /// CurrentURIMetaData so it can display title/artist/album/art.
-enum DIDLBuilder {
-    static func metadata(for object: MediaObject) -> String? {
+public enum DIDLBuilder {
+    public static func metadata(for object: MediaObject) -> String? {
         guard let res = object.resURL else { return nil }
         return metadata(
             resURL: res,

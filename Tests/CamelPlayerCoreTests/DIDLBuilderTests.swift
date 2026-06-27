@@ -30,6 +30,21 @@ final class DIDLBuilderTests: XCTestCase {
         XCTAssertFalse(didl.contains("<mix>"))
     }
 
+    func testRoundTripRecoversAlbumAndArt() {
+        // Favoriting the current track parses album/cover back out of its DIDL.
+        let object = MediaObject(
+            id: "t", parentID: "0", title: "So What", isContainer: false,
+            artist: "Miles Davis", album: "Kind of Blue",
+            albumArtURI: "http://nas/art.jpg", duration: 562, resURL: "http://nas/track.flac"
+        )
+        let didl = DIDLBuilder.metadata(for: object)!
+        let parsed = DIDLParser().parse(didl).first!
+        XCTAssertEqual(parsed.title, "So What")
+        XCTAssertEqual(parsed.album, "Kind of Blue")
+        XCTAssertEqual(parsed.albumArtURI, "http://nas/art.jpg")
+        XCTAssertEqual(parsed.resURL, "http://nas/track.flac")
+    }
+
     func testNilWithoutResURL() {
         let object = MediaObject(id: "c", parentID: "0", title: "Album", isContainer: true)
         XCTAssertNil(DIDLBuilder.metadata(for: object))
