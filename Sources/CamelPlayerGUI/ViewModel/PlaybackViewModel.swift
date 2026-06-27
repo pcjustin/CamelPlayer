@@ -166,7 +166,7 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.play()
-                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
             } catch let error as AudioPlayerError {
                 handleAudioPlayerError(error)
@@ -178,7 +178,7 @@ class PlaybackViewModel: ObservableObject {
 
     func pause() {
         controller.pause()
-        // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+        // Update immediately so the UI doesn't wait for the poll timer.
         updateState()
     }
 
@@ -186,7 +186,7 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.resume()
-                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
             } catch let error as AudioPlayerError {
                 handleAudioPlayerError(error)
@@ -198,7 +198,7 @@ class PlaybackViewModel: ObservableObject {
 
     func stop() {
         controller.stop()
-        // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+        // Update immediately so the UI doesn't wait for the poll timer.
         updateState()
     }
 
@@ -206,7 +206,7 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.next()
-                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
             } catch let error as AudioPlayerError {
                 handleAudioPlayerError(error)
@@ -220,7 +220,7 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.previous()
-                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
             } catch let error as AudioPlayerError {
                 handleAudioPlayerError(error)
@@ -253,7 +253,7 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.playItem(at: index)
-                // 立即更新狀態，避免 timer 延遲導致的 UI 不同步
+                // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
             } catch let error as AudioPlayerError {
                 handleAudioPlayerError(error)

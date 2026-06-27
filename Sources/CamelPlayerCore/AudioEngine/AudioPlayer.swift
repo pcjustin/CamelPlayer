@@ -106,26 +106,25 @@ public class AudioPlayer {
         }
     }
 
-    /// 原子地加載並播放文件，避免中間狀態導致的 UI 閃爍
+    /// Loads and plays a file atomically, avoiding an intermediate stopped
+    /// state that would make the UI flicker.
     public func loadAndPlay(url: URL) throws {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw AudioPlayerError.fileNotFound
         }
 
-        // 立即設置狀態為 playing，避免 UI 讀取到 stopped 狀態
+        // Set playing up front so the UI never observes a stopped state.
         state = .playing
 
         do {
             let file = try AVAudioFile(forReading: url)
             audioFile = file
             currentURL = url
-            // 不設置 state = .stopped，保持 .playing
         } catch {
             state = .stopped
             throw AudioPlayerError.fileLoadError(error.localizedDescription)
         }
 
-        // 調用內部播放邏輯
         try playInternal()
     }
 
@@ -181,21 +180,20 @@ public class AudioPlayer {
 
         segmentStartFrame = 0
 
-        // 記錄當前文件URL，用於檢查 completion handler 是否對應當前播放
+        // Capture the URL so a stale completion handler from a previous file
+        // can't clobber the state of the current playback.
         let scheduledURL = currentURL
 
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
                 guard let self = self else { return }
 
-                // 只有在 completion handler 對應當前播放的文件時才處理
-                // 避免舊文件的 completion handler 干擾新文件的播放狀態
                 guard self.currentURL == scheduledURL else {
                     return
                 }
 
                 self.state = .stopped
-                // 只有在非手動停止時才觸發自動播放下一首
+                // Only auto-advance when playback ended on its own.
                 if !self.isManuallyStopped {
                     self.onPlaybackFinished?()
                 }
@@ -211,7 +209,6 @@ public class AudioPlayer {
         }
 
         playerNode.play()
-        // 確保狀態為 playing（即使之前已設置，也重新確認）
         state = .playing
     }
 
@@ -226,7 +223,7 @@ public class AudioPlayer {
             return
         }
 
-        // 提前設置狀態為 playing，避免 UI 讀取到中間的 stopped 狀態
+        // Set playing up front so the UI never observes a stopped state.
         state = .playing
         try playInternal()
     }

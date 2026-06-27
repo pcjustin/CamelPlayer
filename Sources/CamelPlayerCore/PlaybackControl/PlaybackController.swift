@@ -28,9 +28,8 @@ public struct OutputDevice: Identifiable, Hashable {
 public class PlaybackController {
     private let player: AudioPlayer
     private let playlist: Playlist
-    private let volumeController: VolumeController
     private var lastPlayStartTime: Date?
-    private let minimumPlayDuration: TimeInterval = 0.5 // 最小播放時間閾值
+    private let minimumPlayDuration: TimeInterval = 0.5 // minimum play time threshold
 
     // UPnP support
     private let upnpManager: UPnPDeviceManager
@@ -71,7 +70,6 @@ public class PlaybackController {
     public init() throws {
         player = try AudioPlayer()
         playlist = Playlist()
-        volumeController = VolumeController(mixerNode: player.mixerNode)
 
         // Initialize UPnP components
         upnpManager = UPnPDeviceManager()
@@ -104,8 +102,8 @@ public class PlaybackController {
     }
 
     private func playNextIfAvailable() {
-        // 檢查上一首歌曲是否播放了足夠長的時間
-        // 如果播放時間太短，可能是文件加載失敗，停止自動播放以避免連續跳轉
+        // If the previous track played too briefly it likely failed to load;
+        // stop auto-advancing to avoid rapidly skipping through the playlist.
         if let startTime = lastPlayStartTime {
             let playDuration = Date().timeIntervalSince(startTime)
             if playDuration < minimumPlayDuration {
@@ -139,19 +137,17 @@ public class PlaybackController {
     }
 
     public func play() async throws {
-        // 如果已經在播放，直接返回
         if currentEngine.state == .playing {
             return
         }
 
-        // 如果是暫停狀態，直接恢復播放
         if currentEngine.state == .paused {
             lastPlayStartTime = Date()
             try await currentEngine.play()
             return
         }
 
-        // 否則是 stopped 狀態，需要加載文件
+        // Stopped: load the current item before playing.
         guard let item = playlist.currentItem else {
             throw AudioPlayerError.fileLoadError("No items in playlist")
         }
@@ -272,21 +268,6 @@ public class PlaybackController {
     /// Refreshes the UPnP device list
     public func refreshUPnPDevices() {
         upnpManager.refresh()
-    }
-
-    @available(*, deprecated, message: "Use listAllOutputDevices() instead")
-    public func listOutputDevices() throws -> [AudioDevice] {
-        try player.listOutputDevices()
-    }
-
-    @available(*, deprecated, message: "Use setOutputDevice(_ device: OutputDevice) instead")
-    public func setOutputDevice(deviceID: AudioDeviceID) throws {
-        try player.setOutputDevice(deviceID: deviceID)
-    }
-
-    @available(*, deprecated, message: "Use currentOutputDevice instead")
-    public func getCurrentOutputDevice() throws -> AudioDeviceID {
-        try player.getCurrentOutputDevice()
     }
 
     public func getPlaylistItems() -> [PlaylistItem] {
