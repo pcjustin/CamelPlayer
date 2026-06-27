@@ -24,8 +24,6 @@ class PlaybackViewModel: ObservableObject {
     @Published var lastError: String?
     @Published var albumArt: NSImage?
     @Published var mediaServers: [UPnPDevice] = []
-    @Published var showBrowser: Bool = false
-    @Published var showAlbums: Bool = false
 
     // Private properties
     private let controller: PlaybackController

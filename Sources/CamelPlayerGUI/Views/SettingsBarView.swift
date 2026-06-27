@@ -101,24 +101,6 @@ struct SettingsBarView: View {
 
             Spacer()
 
-            // Album wall (network media server library)
-            Button(action: {
-                viewModel.showAlbums = true
-            }) {
-                Label("Albums", systemImage: "square.stack")
-            }
-            .buttonStyle(.bordered)
-            .help("Browse the library by album")
-
-            // Browse NAS / network media servers
-            Button(action: {
-                viewModel.showBrowser = true
-            }) {
-                Label("Browse NAS", systemImage: "server.rack")
-            }
-            .buttonStyle(.bordered)
-            .help("Browse music on network media servers (MinimServer/DLNA)")
-
             // Add Files Button
             Button(action: {
                 let urls = FilePickerHelper.selectAudioFiles()

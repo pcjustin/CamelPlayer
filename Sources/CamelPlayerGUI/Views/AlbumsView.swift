@@ -5,6 +5,7 @@ struct AlbumsView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     @Environment(\.dismiss) private var dismiss
 
+    var embedded = false
     private let pageSize = 100
 
     @State private var albums: [MediaObject] = []
@@ -19,8 +20,11 @@ struct AlbumsView: View {
             Divider()
             content
         }
-        .frame(minWidth: 640, minHeight: 560)
-        .task { if albums.isEmpty { await reload() } }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: embedded ? nil : 640, minHeight: embedded ? nil : 560)
+        // Re-run when the library server appears (discovery is async, so it may
+        // be nil on first launch and become available a moment later).
+        .task(id: viewModel.libraryServer?.id) { await reload() }
     }
 
     private var header: some View {
@@ -36,7 +40,7 @@ struct AlbumsView: View {
                 }
             }
             Spacer()
-            Button("Done") { dismiss() }
+            if !embedded { Button("Done") { dismiss() } }
         }
         .padding()
     }

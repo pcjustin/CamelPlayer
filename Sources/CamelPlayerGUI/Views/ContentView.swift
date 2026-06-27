@@ -14,23 +14,34 @@ struct ContentView: View {
     private let minLeftWidth: CGFloat = 200
     private let maxLeftWidth: CGFloat = 420
 
+    private enum Section { case albums, browse, queue }
+    @State private var section: Section = .albums
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Now Playing (left) + Playlist (right), with a persisted divider
-                HStack(spacing: 0) {
-                    NowPlayingView()
-                        .padding()
-                        .frame(width: leftPaneWidth)
-                        .frame(maxHeight: .infinity)
-                        .background(Color(NSColor.windowBackgroundColor))
-
-                    paneDivider
-
-                    PlaylistView()
-                        .frame(minWidth: 260, maxWidth: .infinity)
+                // Section switcher — album wall is the default main screen
+                Picker("", selection: $section) {
+                    Text("Albums").tag(Section.albums)
+                    Text("Browse").tag(Section.browse)
+                    Text("Queue").tag(Section.queue)
                 }
-                .frame(minHeight: 240)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 360)
+                .padding(8)
+
+                Divider()
+
+                // Section content
+                Group {
+                    switch section {
+                    case .albums: AlbumsView(embedded: true)
+                    case .browse: BrowseView(embedded: true)
+                    case .queue: queueSection
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
 
@@ -78,14 +89,6 @@ struct ContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
-        .sheet(isPresented: $viewModel.showBrowser) {
-            BrowseView()
-                .environmentObject(viewModel)
-        }
-        .sheet(isPresented: $viewModel.showAlbums) {
-            AlbumsView()
-                .environmentObject(viewModel)
-        }
         .background(WindowConfigurator(autosaveName: "CamelPlayerMainWindow"))
         .onAppear { installSpaceMonitor() }
         .onDisappear {
@@ -93,6 +96,22 @@ struct ContentView: View {
                 NSEvent.removeMonitor(monitor)
                 spaceMonitor = nil
             }
+        }
+    }
+
+    /// Now Playing (left) + Playlist (right) with a persisted divider.
+    private var queueSection: some View {
+        HStack(spacing: 0) {
+            NowPlayingView()
+                .padding()
+                .frame(width: leftPaneWidth)
+                .frame(maxHeight: .infinity)
+                .background(Color(NSColor.windowBackgroundColor))
+
+            paneDivider
+
+            PlaylistView()
+                .frame(minWidth: 260, maxWidth: .infinity)
         }
     }
 

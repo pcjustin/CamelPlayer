@@ -11,6 +11,7 @@ struct BrowseView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     @Environment(\.dismiss) private var dismiss
 
+    var embedded = false
     private let pageSize = 200
 
     @State private var selectedServer: UPnPDevice?
@@ -41,7 +42,8 @@ struct BrowseView: View {
             Divider()
             content
         }
-        .frame(minWidth: 460, minHeight: 540)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: embedded ? nil : 460, minHeight: embedded ? nil : 540)
     }
 
     // MARK: - Header / search
@@ -55,7 +57,7 @@ struct BrowseView: View {
             Text(selectedServer == nil ? "Network Servers" : (selectedServer?.friendlyName ?? ""))
                 .font(.headline).lineLimit(1)
             Spacer()
-            Button("Done") { dismiss() }
+            if !embedded { Button("Done") { dismiss() } }
         }
         .padding()
     }
