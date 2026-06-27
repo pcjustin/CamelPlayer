@@ -309,6 +309,44 @@ public class PlaybackController {
         return BrowsePage(objects: result.objects, totalMatches: result.totalMatches)
     }
 
+    /// Searches a server's whole library for audio tracks matching a free-text
+    /// query (title, artist or album contains the text).
+    public func search(
+        server: UPnPDevice,
+        query: String,
+        startingIndex: Int = 0,
+        requestedCount: Int = 200
+    ) async throws -> BrowsePage {
+        guard let controlURL = server.contentDirectoryURL else {
+            throw MediaBrowseError.serverHasNoContentDirectory
+        }
+        // Strip quotes so they can't break the criteria expression; SOAPClient
+        // XML-escapes the rest. No class filter, so both tracks and albums
+        // match (a class OR-expression is rejected by some servers).
+        let safe = query.replacingOccurrences(of: "\"", with: "")
+        let criteria = "dc:title contains \"\(safe)\""
+            + " or upnp:artist contains \"\(safe)\""
+            + " or upnp:album contains \"\(safe)\""
+        let service = ContentDirectoryService(controlURL: controlURL)
+        let result = try await service.search(
+            searchCriteria: criteria,
+            startingIndex: startingIndex,
+            requestedCount: requestedCount
+        )
+        return BrowsePage(objects: result.objects, totalMatches: result.totalMatches)
+    }
+
+    /// Adds a single track object to the playlist. Returns false if it is not
+    /// a playable item.
+    @discardableResult
+    public func addTrackToPlaylist(_ object: MediaObject) -> Bool {
+        guard !object.isContainer, let res = object.resURL, let url = URL(string: res) else {
+            return false
+        }
+        playlist.add(PlaylistItem(url: url, title: object.title))
+        return true
+    }
+
     /// Sort fields the server supports, or an empty array if none/unavailable.
     public func sortCapabilities(server: UPnPDevice) async -> [String] {
         guard let controlURL = server.contentDirectoryURL else { return [] }
