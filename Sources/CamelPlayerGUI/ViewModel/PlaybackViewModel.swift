@@ -219,6 +219,16 @@ class PlaybackViewModel: ObservableObject {
         updateState()
     }
 
+    func togglePlayPause() {
+        if isPlaying {
+            pause()
+        } else if isPaused {
+            resume()
+        } else {
+            play()
+        }
+    }
+
     func resume() {
         Task {
             do {
@@ -303,6 +313,31 @@ class PlaybackViewModel: ObservableObject {
     func removeFromPlaylist(at index: Int) {
         controller.removeFromPlaylist(at: index)
         updateState()
+    }
+
+    func movePlaylistItem(fromOffsets: IndexSet, toOffset: Int) {
+        controller.movePlaylistItem(fromOffsets: fromOffsets, toOffset: toOffset)
+        updateState()
+    }
+
+    func savePlaylist() {
+        guard let url = FilePickerHelper.savePlaylistPanel() else { return }
+        do {
+            try controller.exportPlaylist(to: url)
+        } catch {
+            handleError("Failed to save playlist: \(error.localizedDescription)")
+        }
+    }
+
+    func loadPlaylist() {
+        guard let url = FilePickerHelper.openPlaylistPanel() else { return }
+        do {
+            let count = try controller.importPlaylist(from: url)
+            updateState()
+            if count == 0 { handleError("No tracks in playlist file") }
+        } catch {
+            handleError("Failed to load playlist: \(error.localizedDescription)")
+        }
     }
 
     func clearPlaylist() {

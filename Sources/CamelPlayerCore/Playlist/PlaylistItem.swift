@@ -1,6 +1,7 @@
 import Foundation
 
-public struct PlaylistItem {
+public struct PlaylistItem: Identifiable {
+    public let id = UUID()
     public let url: URL
     public let title: String
     /// Pre-built DIDL-Lite metadata for UPnP renderers (nil for local files).

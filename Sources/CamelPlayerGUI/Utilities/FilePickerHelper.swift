@@ -1,7 +1,26 @@
 import Foundation
 import AppKit
+import UniformTypeIdentifiers
 
 struct FilePickerHelper {
+    static func savePlaylistPanel() -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "Playlist.json"
+        panel.title = "Save Playlist"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    static func openPlaylistPanel() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json]
+        panel.title = "Load Playlist"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     static func selectAudioFiles() -> [URL] {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true

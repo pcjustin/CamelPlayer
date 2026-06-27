@@ -19,8 +19,25 @@ struct PlaylistView: View {
                     .foregroundColor(.secondary)
                     .padding(.vertical, 8)
 
-                // Clear button
+                // Load playlist
+                Button(action: { viewModel.loadPlaylist() }) {
+                    Image(systemName: "square.and.arrow.down").font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Load Playlist")
+                .padding(.leading, 8)
+
+                // Save / Clear (only with tracks)
                 if !viewModel.playlistItems.isEmpty {
+                    Button(action: { viewModel.savePlaylist() }) {
+                        Image(systemName: "square.and.arrow.up").font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help("Save Playlist")
+                    .padding(.leading, 8)
+
                     Button(action: {
                         viewModel.clearPlaylist()
                     }) {
@@ -54,10 +71,14 @@ struct PlaylistView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 List {
-                    ForEach(Array(viewModel.playlistItems.enumerated()), id: \.offset) { index, item in
+                    // Iterate the Identifiable collection directly (not an
+                    // enumerated() wrapper) so macOS List drag-to-reorder works.
+                    ForEach(viewModel.playlistItems) { item in
+                        let index = viewModel.playlistItems.firstIndex { $0.id == item.id } ?? 0
+                        let isCurrent = viewModel.currentItem?.id == item.id
                         HStack {
                             // Play indicator
-                            if index == viewModel.currentPosition {
+                            if isCurrent {
                                 Image(systemName: viewModel.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
                                     .foregroundColor(.accentColor)
                                     .font(.caption)
@@ -72,13 +93,33 @@ struct PlaylistView: View {
                             // Track title
                             Text(item.title)
                                 .lineLimit(1)
-                                .foregroundColor(index == viewModel.currentPosition ? .accentColor : .primary)
-                                .font(index == viewModel.currentPosition ? .body.weight(.semibold) : .body)
+                                .foregroundColor(isCurrent ? .accentColor : .primary)
+                                .font(isCurrent ? .body.weight(.semibold) : .body)
 
                             Spacer()
+
+                            // Reorder buttons (native List drag is unreliable on macOS)
+                            Button {
+                                viewModel.movePlaylistItem(fromOffsets: IndexSet(integer: index), toOffset: index - 1)
+                            } label: {
+                                Image(systemName: "chevron.up").font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(index == 0)
+                            .help("Move up")
+
+                            Button {
+                                viewModel.movePlaylistItem(fromOffsets: IndexSet(integer: index), toOffset: index + 2)
+                            } label: {
+                                Image(systemName: "chevron.down").font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(index == viewModel.playlistItems.count - 1)
+                            .help("Move down")
                         }
                         .contentShape(Rectangle())
-                        .onTapGesture {
+                        // Double-click to play.
+                        .onTapGesture(count: 2) {
                             viewModel.playItem(at: index)
                         }
                     }
@@ -86,6 +127,9 @@ struct PlaylistView: View {
                         for index in indexSet {
                             viewModel.removeFromPlaylist(at: index)
                         }
+                    }
+                    .onMove { from, to in
+                        viewModel.movePlaylistItem(fromOffsets: from, toOffset: to)
                     }
                 }
                 .listStyle(.inset)

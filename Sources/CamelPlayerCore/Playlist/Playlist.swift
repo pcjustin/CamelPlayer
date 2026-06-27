@@ -150,6 +150,25 @@ public class Playlist {
         return index
     }
 
+    /// Reorders items, keeping the currently playing track current.
+    /// Offsets follow SwiftUI's onMove semantics (toOffset is in the pre-move
+    /// index space).
+    public func move(fromOffsets source: IndexSet, toOffset destination: Int) {
+        withLock {
+            let currentID = currentItemLocked?.id
+            let moving = source.sorted().map { items[$0] }
+            for index in source.sorted(by: >) {
+                items.remove(at: index)
+            }
+            let adjusted = destination - source.filter { $0 < destination }.count
+            items.insert(contentsOf: moving, at: adjusted)
+            if let currentID = currentID,
+               let newIndex = items.firstIndex(where: { $0.id == currentID }) {
+                currentIndex = newIndex
+            }
+        }
+    }
+
     public func jumpTo(index: Int) -> PlaylistItem? {
         withLock {
             guard index >= 0 && index < items.count else { return nil }

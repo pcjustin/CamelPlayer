@@ -421,6 +421,39 @@ public class PlaybackController {
         playlist.remove(at: index)
     }
 
+    public func movePlaylistItem(fromOffsets: IndexSet, toOffset: Int) {
+        playlist.move(fromOffsets: fromOffsets, toOffset: toOffset)
+    }
+
+    private struct PlaylistEntry: Codable {
+        let url: String
+        let title: String
+        let metadata: String?
+    }
+
+    /// Writes the current playlist to a JSON file.
+    public func exportPlaylist(to fileURL: URL) throws {
+        let entries = playlist.allItems().map {
+            PlaylistEntry(url: $0.url.absoluteString, title: $0.title, metadata: $0.metadata)
+        }
+        let data = try JSONEncoder().encode(entries)
+        try data.write(to: fileURL)
+    }
+
+    /// Appends tracks from a JSON playlist file. Returns the number added.
+    @discardableResult
+    public func importPlaylist(from fileURL: URL) throws -> Int {
+        let data = try Data(contentsOf: fileURL)
+        let entries = try JSONDecoder().decode([PlaylistEntry].self, from: data)
+        var added = 0
+        for entry in entries {
+            guard let url = URL(string: entry.url) else { continue }
+            playlist.add(PlaylistItem(url: url, title: entry.title, metadata: entry.metadata))
+            added += 1
+        }
+        return added
+    }
+
     public var bitPerfectMode: Bool {
         get { player.bitPerfectMode }
         set { player.bitPerfectMode = newValue }
