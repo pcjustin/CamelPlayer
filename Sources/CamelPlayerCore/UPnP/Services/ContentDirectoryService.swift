@@ -64,4 +64,19 @@ public class ContentDirectoryService {
 
         return BrowseResult(objects: objects, numberReturned: numberReturned, totalMatches: totalMatches)
     }
+
+    /// Returns the sort fields the server supports (e.g. "dc:title", "upnp:artist").
+    /// An empty array means the server reports no sortable fields.
+    public func getSortCapabilities() async throws -> [String] {
+        let response = try await soapClient.call(
+            controlURL: controlURL,
+            action: "GetSortCapabilities",
+            serviceType: serviceType
+        )
+        let caps = response["SortCaps"] ?? ""
+        return caps
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
 }

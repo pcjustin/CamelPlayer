@@ -280,25 +280,69 @@ public class PlaybackController {
         upnpManager.availableServers
     }
 
-    /// Browses a container on a media server. Root container ID is "0".
-    public func browse(server: UPnPDevice, objectID: String = "0") async throws -> [MediaObject] {
+    /// One page of a Browse result.
+    public struct BrowsePage {
+        public let objects: [MediaObject]
+        public let totalMatches: Int
+    }
+
+    private static let browsePageSize = 200
+
+    /// Browses one page of a container. Root container ID is "0".
+    public func browse(
+        server: UPnPDevice,
+        objectID: String = "0",
+        startingIndex: Int = 0,
+        requestedCount: Int = 200,
+        sortCriteria: String = ""
+    ) async throws -> BrowsePage {
         guard let controlURL = server.contentDirectoryURL else {
             throw MediaBrowseError.serverHasNoContentDirectory
         }
         let service = ContentDirectoryService(controlURL: controlURL)
-        return try await service.browse(objectID: objectID).objects
+        let result = try await service.browse(
+            objectID: objectID,
+            startingIndex: startingIndex,
+            requestedCount: requestedCount,
+            sortCriteria: sortCriteria
+        )
+        return BrowsePage(objects: result.objects, totalMatches: result.totalMatches)
     }
 
-    /// Adds all playable tracks directly inside a container to the playlist.
-    /// Returns the number of tracks added. (P1: immediate children only.)
+    /// Sort fields the server supports, or an empty array if none/unavailable.
+    public func sortCapabilities(server: UPnPDevice) async -> [String] {
+        guard let controlURL = server.contentDirectoryURL else { return [] }
+        let service = ContentDirectoryService(controlURL: controlURL)
+        return (try? await service.getSortCapabilities()) ?? []
+    }
+
+    /// Adds every playable track directly inside a container to the playlist,
+    /// paging through the whole container. Returns the number of tracks added.
+    /// (Immediate children only — nested folders are not recursed.)
     @discardableResult
-    public func addContainerToPlaylist(server: UPnPDevice, objectID: String) async throws -> Int {
-        let objects = try await browse(server: server, objectID: objectID)
+    public func addContainerToPlaylist(
+        server: UPnPDevice,
+        objectID: String,
+        sortCriteria: String = ""
+    ) async throws -> Int {
         var added = 0
-        for object in objects where !object.isContainer {
-            guard let res = object.resURL, let url = URL(string: res) else { continue }
-            playlist.add(PlaylistItem(url: url, title: object.title))
-            added += 1
+        var index = 0
+        while true {
+            let page = try await browse(
+                server: server,
+                objectID: objectID,
+                startingIndex: index,
+                requestedCount: Self.browsePageSize,
+                sortCriteria: sortCriteria
+            )
+            guard !page.objects.isEmpty else { break }
+            for object in page.objects where !object.isContainer {
+                guard let res = object.resURL, let url = URL(string: res) else { continue }
+                playlist.add(PlaylistItem(url: url, title: object.title))
+                added += 1
+            }
+            index += page.objects.count
+            if index >= page.totalMatches || page.objects.count < Self.browsePageSize { break }
         }
         return added
     }
