@@ -84,6 +84,20 @@ public class AVTransportService {
         )
     }
 
+    /// Sets the next URI for gapless playback. An empty uri clears it.
+    public func setNextAVTransportURI(uri: String, metadata: String = "") async throws {
+        _ = try await soapClient.call(
+            controlURL: controlURL,
+            action: "SetNextAVTransportURI",
+            serviceType: serviceType,
+            arguments: [
+                "InstanceID": instanceID,
+                "NextURI": uri,
+                "NextURIMetaData": metadata
+            ]
+        )
+    }
+
     /// Starts playback
     /// - Parameter speed: Playback speed (usually "1")
     public func play(speed: String = "1") async throws {

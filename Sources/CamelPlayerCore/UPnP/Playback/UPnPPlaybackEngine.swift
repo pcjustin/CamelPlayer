@@ -53,6 +53,12 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
     public var onPlaybackFinished: (() -> Void)?
     public var onStateChanged: ((PlaybackState) -> Void)?
+    public var onAdvancedToNext: (() -> Void)?
+
+    // Gapless: the URI currently set on the renderer, plus the preloaded next.
+    private var currentURI: String?
+    private var nextURI: String?
+    private var nextOriginalURL: URL?
 
     public init(device: UPnPDevice, mediaServer: LocalMediaServer) {
         self.device = device
@@ -104,6 +110,9 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         }
 
         // Set URI and play. DIDL metadata lets the renderer show track info.
+        currentURI = uri
+        nextURI = nil
+        nextOriginalURL = nil
         try await avTransport.setAVTransportURI(uri: uri, metadata: metadata ?? "")
         try await avTransport.play()
 
@@ -113,6 +122,28 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
         // Start polling for status
         startPolling()
+    }
+
+    public func setNextTrack(url: URL?, metadata: String?) {
+        guard let avTransport = avTransport else { return }
+        Task {
+            guard let url = url else {
+                nextURI = nil
+                nextOriginalURL = nil
+                try? await avTransport.setNextAVTransportURI(uri: "", metadata: "")
+                return
+            }
+            let uri: String
+            if url.isFileURL {
+                guard let shared = try? mediaServer.shareFile(url) else { return }
+                uri = shared.absoluteString
+            } else {
+                uri = url.absoluteString
+            }
+            nextURI = uri
+            nextOriginalURL = url
+            try? await avTransport.setNextAVTransportURI(uri: uri, metadata: metadata ?? "")
+        }
     }
 
     public func play() async throws {
@@ -205,8 +236,10 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
                 // A finish is playing -> stopped, but only once the renderer has
                 // actually started this track (otherwise a transient STOPPED at
-                // start would be misread as the track finishing).
-                let didFinish = hasStartedPlaying && previousState == .playing && newState == .stopped
+                // start would be misread as the track finishing). When a gapless
+                // next is queued, a stop is part of the transition, not a finish.
+                let didFinish = hasStartedPlaying && previousState == .playing
+                    && newState == .stopped && nextURI == nil
                 if didFinish {
                     stopPolling()
                 }
@@ -223,6 +256,18 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             // Get position info if playing
             if newState == .playing || newState == .paused {
                 let positionInfo = try await avTransport.getCurrentPosition()
+                guard myGeneration == generation else { return }
+
+                // Gapless: the renderer moved on to the preloaded next track.
+                if let next = nextURI, next != currentURI,
+                   !positionInfo.trackURI.isEmpty, positionInfo.trackURI == next {
+                    currentURI = next
+                    _currentURL = nextOriginalURL ?? _currentURL
+                    nextURI = nil
+                    nextOriginalURL = nil
+                    DispatchQueue.main.async { [weak self] in self?.onAdvancedToNext?() }
+                }
+
                 _currentTime = positionInfo.trackPosition
                 _duration = positionInfo.trackDuration > 0 ? positionInfo.trackDuration : nil
             }

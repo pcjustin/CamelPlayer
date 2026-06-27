@@ -23,6 +23,12 @@ public protocol PlaybackEngine: AnyObject {
     /// Callback when state changes
     var onStateChanged: ((PlaybackState) -> Void)? { get set }
 
+    /// Called when a gapless renderer auto-advanced to the preloaded next track.
+    var onAdvancedToNext: (() -> Void)? { get set }
+
+    /// Preloads the next track for gapless playback (nil clears it).
+    func setNextTrack(url: URL?, metadata: String?)
+
     /// Loads and plays a track atomically. `metadata` is optional DIDL-Lite
     /// passed to UPnP renderers; local playback ignores it.
     func loadAndPlay(url: URL, metadata: String?) async throws
@@ -84,10 +90,14 @@ public class LocalPlaybackEngine: PlaybackEngine {
     }
 
     public var onStateChanged: ((PlaybackState) -> Void)?
+    public var onAdvancedToNext: (() -> Void)?
 
     public init(audioPlayer: AudioPlayer) {
         self.audioPlayer = audioPlayer
     }
+
+    // Local playback isn't gapless yet; preloading is a no-op.
+    public func setNextTrack(url: URL?, metadata: String?) {}
 
     public func loadAndPlay(url: URL, metadata: String?) async throws {
         // Local Core Audio playback can only read local files; a network (NAS)

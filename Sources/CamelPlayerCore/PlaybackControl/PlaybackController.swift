@@ -103,6 +103,9 @@ public class PlaybackController {
         currentEngine.onPlaybackFinished = { [weak self] in
             self?.playNextIfAvailable()
         }
+        currentEngine.onAdvancedToNext = { [weak self] in
+            self?.handleAdvancedToNext()
+        }
     }
 
     private func playNextIfAvailable() {
@@ -123,13 +126,32 @@ public class PlaybackController {
 
         Task {
             do {
-                lastPlayStartTime = Date()
-                try await currentEngine.loadAndPlay(url: nextItem.url, metadata: nextItem.metadata)
+                try await startPlaying(nextItem)
             } catch {
                 // Silently fail - could log error in future
                 coreLog("Error auto-playing next track: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Loads/plays an item and preloads the next one for gapless playback.
+    private func startPlaying(_ item: PlaylistItem) async throws {
+        lastPlayStartTime = Date()
+        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
+        setNextOnEngine()
+    }
+
+    private func setNextOnEngine() {
+        let next = playlist.peekNext()
+        currentEngine.setNextTrack(url: next?.url, metadata: next?.metadata)
+    }
+
+    /// The renderer gaplessly advanced to the preloaded next track: move our
+    /// pointer to match and preload the following one.
+    private func handleAdvancedToNext() {
+        _ = playlist.next()
+        lastPlayStartTime = Date()
+        setNextOnEngine()
     }
 
     public func addToPlaylist(url: URL) {
@@ -160,8 +182,7 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("No items in playlist")
         }
 
-        lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
+        try await startPlaying(item)
     }
 
     public func playItem(at index: Int) async throws {
@@ -169,8 +190,7 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("Invalid playlist index")
         }
 
-        lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
+        try await startPlaying(item)
     }
 
     public func pause() {
@@ -190,8 +210,7 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("No next item")
         }
 
-        lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
+        try await startPlaying(item)
     }
 
     public func previous() async throws {
@@ -199,8 +218,7 @@ public class PlaybackController {
             throw AudioPlayerError.fileLoadError("No previous item")
         }
 
-        lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
+        try await startPlaying(item)
     }
 
     public func seek(to time: TimeInterval) async throws {
@@ -255,6 +273,9 @@ public class PlaybackController {
             upnpEngine.onPlaybackFinished = { [weak self] in
                 self?.playNextIfAvailable()
             }
+            upnpEngine.onAdvancedToNext = { [weak self] in
+                self?.handleAdvancedToNext()
+            }
             currentEngine = upnpEngine
             currentOutputDevice = device
         }
@@ -265,7 +286,7 @@ public class PlaybackController {
         if let currentItem = playlist.currentItem {
             Task {
                 do {
-                    try await currentEngine.loadAndPlay(url: currentItem.url, metadata: currentItem.metadata)
+                    try await startPlaying(currentItem)
                 } catch {
                     coreLog("Error resuming playback on new device: \(error)")
                 }
@@ -390,8 +411,7 @@ public class PlaybackController {
         playlist.clear()
         _ = try await addContainerToPlaylist(server: server, objectID: objectID)
         guard let item = playlist.jumpTo(index: 0) else { return }
-        lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
+        try await startPlaying(item)
     }
 
     /// Sort fields the server supports, or an empty array if none/unavailable.

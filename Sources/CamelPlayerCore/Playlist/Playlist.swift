@@ -113,6 +113,22 @@ public class Playlist {
         }
     }
 
+    /// The next item without advancing, for gapless preloading. Only sequential
+    /// and loop are eligible (shuffle/loopOne return nil and use normal advance).
+    public func peekNext() -> PlaylistItem? {
+        withLock {
+            guard !items.isEmpty else { return nil }
+            switch _mode {
+            case .sequential:
+                return currentIndex + 1 < items.count ? items[currentIndex + 1] : nil
+            case .loop:
+                return items[(currentIndex + 1) % items.count]
+            case .loopOne, .shuffle:
+                return nil
+            }
+        }
+    }
+
     public func previous() -> PlaylistItem? {
         withLock {
             guard !items.isEmpty else { return nil }
