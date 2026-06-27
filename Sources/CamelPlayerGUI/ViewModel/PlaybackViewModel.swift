@@ -31,13 +31,44 @@ class PlaybackViewModel: ObservableObject {
     private var updateTimer: Timer?
     private let updateInterval: TimeInterval = 0.1 // 100ms
     private var lastLoadedCoverPath: String?
+    private var hasRestoredOutputDevice = false
+
+    // MARK: - Persisted settings
+
+    private enum Keys {
+        static let volume = "settings.volume"
+        static let bitPerfect = "settings.bitPerfect"
+        static let playbackMode = "settings.playbackMode"
+        static let outputDeviceID = "settings.outputDeviceID"
+    }
+
+    private static func mode(from string: String?) -> PlaybackMode? {
+        switch string {
+        case "sequential": return .sequential
+        case "loop": return .loop
+        case "loopOne": return .loopOne
+        case "shuffle": return .shuffle
+        default: return nil
+        }
+    }
+
+    private static func string(for mode: PlaybackMode) -> String {
+        switch mode {
+        case .sequential: return "sequential"
+        case .loop: return "loop"
+        case .loopOne: return "loopOne"
+        case .shuffle: return "shuffle"
+        }
+    }
 
     // Initialization
     init() {
         do {
             controller = try PlaybackController()
-            controller.volume = 0.7
-            controller.bitPerfectMode = true
+            let defaults = UserDefaults.standard
+            controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 0.7
+            controller.bitPerfectMode = defaults.object(forKey: Keys.bitPerfect) as? Bool ?? true
+            controller.playbackMode = Self.mode(from: defaults.string(forKey: Keys.playbackMode)) ?? .sequential
             controller.onUPnPDevicesChanged = { [weak self] in
                 Task { @MainActor in self?.refreshDevices() }
             }
@@ -284,6 +315,7 @@ class PlaybackViewModel: ObservableObject {
     func refreshDevices() {
         outputDevices = controller.listAllOutputDevices()
         currentOutputDevice = controller.currentOutputDevice
+        restoreOutputDeviceIfNeeded()
     }
 
     func refreshUPnPDevices() {
@@ -368,9 +400,19 @@ class PlaybackViewModel: ObservableObject {
         do {
             try controller.setOutputDevice(device)
             currentOutputDevice = device
+            UserDefaults.standard.set(device.id, forKey: Keys.outputDeviceID)
         } catch {
             handleError("Failed to set output device: \(error.localizedDescription)")
         }
+    }
+
+    private func restoreOutputDeviceIfNeeded() {
+        guard !hasRestoredOutputDevice,
+              let savedID = UserDefaults.standard.string(forKey: Keys.outputDeviceID),
+              savedID != currentOutputDevice?.id,
+              let device = outputDevices.first(where: { $0.id == savedID }) else { return }
+        hasRestoredOutputDevice = true
+        setOutputDevice(device)
     }
 
     // MARK: - Settings
@@ -378,16 +420,19 @@ class PlaybackViewModel: ObservableObject {
     func setVolume(_ newVolume: Float) {
         controller.volume = newVolume
         volume = newVolume
+        UserDefaults.standard.set(Double(newVolume), forKey: Keys.volume)
     }
 
     func setPlaybackMode(_ mode: PlaybackMode) {
         controller.playbackMode = mode
         playbackMode = mode
+        UserDefaults.standard.set(Self.string(for: mode), forKey: Keys.playbackMode)
     }
 
     func setBitPerfectMode(_ enabled: Bool) {
         controller.bitPerfectMode = enabled
         bitPerfectMode = enabled
+        UserDefaults.standard.set(enabled, forKey: Keys.bitPerfect)
     }
 
     // MARK: - Error Handling
