@@ -658,6 +658,12 @@ class PlaybackViewModel: ObservableObject {
         return URL(string: uri)
     }
 
+    /// Searches the library server (album wall). Caller splits albums vs tracks.
+    func searchLibrary(query: String, requestedCount: Int = 100) async -> [MediaObject] {
+        guard let server = libraryServer else { return [] }
+        return (await search(server: server, query: query, requestedCount: requestedCount))?.objects ?? []
+    }
+
     func albumTracks(albumID: String) async -> [MediaObject] {
         guard let server = libraryServer,
               let page = await browse(server: server, objectID: albumID) else { return [] }

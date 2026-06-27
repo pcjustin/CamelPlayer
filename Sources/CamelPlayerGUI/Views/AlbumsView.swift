@@ -13,10 +13,17 @@ struct AlbumsView: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var selectedAlbum: MediaObject?
+    @State private var searchText = ""
+    @State private var searchQuery = ""
+    @State private var resultAlbums: [MediaObject] = []
+    @State private var resultTracks: [MediaObject] = []
+
+    private var isSearching: Bool { !searchQuery.isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
             header
+            if selectedAlbum == nil { searchField }
             Divider()
             content
         }
@@ -25,6 +32,22 @@ struct AlbumsView: View {
         // Re-run when the library server appears (discovery is async, so it may
         // be nil on first launch and become available a moment later).
         .task(id: viewModel.libraryServer?.id) { await reload() }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+            TextField("Search albums, artists, songs", text: $searchText)
+                .textFieldStyle(.plain)
+                .onSubmit(runSearch)
+            if !searchText.isEmpty {
+                Button(action: clearSearch) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundColor(.secondary)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+        .padding(.horizontal).padding(.bottom, 8)
     }
 
     private var header: some View {
@@ -49,6 +72,8 @@ struct AlbumsView: View {
     private var content: some View {
         if let album = selectedAlbum {
             AlbumDetailView(album: album)
+        } else if isSearching {
+            searchResults
         } else if isLoading {
             VStack { Spacer(); ProgressView("Loading albums…"); Spacer() }.frame(maxWidth: .infinity)
         } else if albums.isEmpty {
@@ -62,6 +87,87 @@ struct AlbumsView: View {
         } else {
             grid
         }
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        if resultAlbums.isEmpty && resultTracks.isEmpty {
+            VStack(spacing: 12) {
+                Spacer()
+                Image(systemName: "magnifyingglass").font(.system(size: 40)).foregroundColor(.secondary)
+                Text("No matches").foregroundColor(.secondary)
+                Spacer()
+            }.frame(maxWidth: .infinity)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !resultAlbums.isEmpty {
+                        Text("Albums").font(.headline).padding(.horizontal)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
+                            ForEach(resultAlbums) { album in
+                                AlbumCell(album: album)
+                                    .onTapGesture { selectedAlbum = album }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    if !resultTracks.isEmpty {
+                        Text("Tracks").font(.headline).padding(.horizontal).padding(.top, 8)
+                        ForEach(resultTracks) { track in
+                            HStack(spacing: 10) {
+                                trackThumb(track)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(track.title).lineLimit(1)
+                                    if let album = track.album, !album.isEmpty {
+                                        Text(album).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Button { viewModel.addTrack(track) } label: { Image(systemName: "plus.circle") }
+                                    .buttonStyle(.borderless).help("Add to playlist")
+                            }
+                            .padding(.horizontal)
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) { viewModel.playTrack(track) }
+                        }
+                    }
+                }
+                .padding(.vertical)
+            }
+        }
+    }
+
+    private func trackThumb(_ track: MediaObject) -> some View {
+        let fallback = Image(systemName: "music.note").foregroundColor(.secondary)
+        return Group {
+            if let s = track.albumArtURI, let url = URL(string: s) {
+                CachedAsyncImage(url: url) { fallback }
+            } else {
+                fallback
+            }
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func runSearch() {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        searchQuery = query
+        resultAlbums = []
+        resultTracks = []
+        Task {
+            let objects = await viewModel.searchLibrary(query: query)
+            resultAlbums = objects.filter { $0.isContainer }
+            resultTracks = objects.filter { !$0.isContainer }
+        }
+    }
+
+    private func clearSearch() {
+        searchText = ""
+        searchQuery = ""
+        resultAlbums = []
+        resultTracks = []
     }
 
     private var grid: some View {
