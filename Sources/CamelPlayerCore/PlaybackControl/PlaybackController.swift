@@ -29,6 +29,7 @@ public class PlaybackController {
     private let player: AudioPlayer
     private let playlist: Playlist
     private var lastPlayStartTime: Date?
+    private var albumContainerIDCache: [String: String] = [:]
     private let minimumPlayDuration: TimeInterval = 0.5 // minimum play time threshold
 
     // UPnP support
@@ -345,6 +346,48 @@ public class PlaybackController {
         }
         playlist.add(PlaylistItem(url: url, title: object.title, metadata: DIDLBuilder.metadata(for: object)))
         return true
+    }
+
+    // MARK: - Album-centric browsing
+
+    /// Finds the server's all-albums container id (MinimServer: "0$albums").
+    private func albumContainerID(server: UPnPDevice) async -> String? {
+        if let cached = albumContainerIDCache[server.id] { return cached }
+        guard let page = try? await browse(server: server, objectID: "0", requestedCount: 100) else {
+            return nil
+        }
+        // ponytail: heuristic for MinimServer/DLNA; a richer match can come with
+        // the route-B local index.
+        let match = page.objects.first {
+            $0.isContainer && ($0.id.hasSuffix("$albums") || $0.title.lowercased().hasSuffix("albums"))
+        }
+        if let id = match?.id { albumContainerIDCache[server.id] = id }
+        return match?.id
+    }
+
+    /// Lists albums (paged) from the server's album index.
+    public func albums(server: UPnPDevice, startingIndex: Int = 0, requestedCount: Int = 100) async throws -> BrowsePage {
+        guard let containerID = await albumContainerID(server: server) else {
+            return BrowsePage(objects: [], totalMatches: 0)
+        }
+        return try await browse(server: server, objectID: containerID, startingIndex: startingIndex, requestedCount: requestedCount)
+    }
+
+    /// Fetches an album's cover URL via BrowseMetadata (album lists omit it).
+    public func albumArtURI(server: UPnPDevice, objectID: String) async -> String? {
+        guard let controlURL = server.contentDirectoryURL else { return nil }
+        let service = ContentDirectoryService(controlURL: controlURL)
+        let result = try? await service.browse(objectID: objectID, flag: .metadata, requestedCount: 1)
+        return result?.objects.first?.albumArtURI
+    }
+
+    /// Replaces the playlist with an album's tracks and starts playback.
+    public func playAlbum(server: UPnPDevice, objectID: String) async throws {
+        playlist.clear()
+        _ = try await addContainerToPlaylist(server: server, objectID: objectID)
+        guard let item = playlist.jumpTo(index: 0) else { return }
+        lastPlayStartTime = Date()
+        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
     }
 
     /// Sort fields the server supports, or an empty array if none/unavailable.
