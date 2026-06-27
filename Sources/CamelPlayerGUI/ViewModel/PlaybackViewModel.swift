@@ -194,6 +194,7 @@ class PlaybackViewModel: ObservableObject {
         updateState()
         refreshDevices()
         refreshMediaServers()
+        loadCoverCache()
     }
 
     // MARK: - Playback Control
@@ -419,6 +420,34 @@ class PlaybackViewModel: ObservableObject {
     // MARK: - Album-centric browsing
 
     private var albumArtCache: [String: String] = [:]
+    private var coverSaveTask: Task<Void, Never>?
+
+    private var coverCacheFile: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CamelPlayer", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("coverURLs.json")
+    }
+
+    private func loadCoverCache() {
+        if let data = try? Data(contentsOf: coverCacheFile),
+           let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+            albumArtCache = decoded
+        }
+    }
+
+    private func scheduleCoverCacheSave() {
+        coverSaveTask?.cancel()
+        let snapshot = albumArtCache
+        let file = coverCacheFile
+        coverSaveTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            if let data = try? JSONEncoder().encode(snapshot) {
+                try? data.write(to: file)
+            }
+        }
+    }
 
     /// The media server used for album browsing (first discovered for now).
     var libraryServer: UPnPDevice? { mediaServers.first }
@@ -438,6 +467,7 @@ class PlaybackViewModel: ObservableObject {
         guard let server = libraryServer,
               let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
         albumArtCache[id] = uri
+        scheduleCoverCacheSave()
         return URL(string: uri)
     }
 
