@@ -34,11 +34,11 @@ public class SSDPDiscovery: @unchecked Sendable {
         guard !isDiscovering else { return }
 
         isDiscovering = true
-        print("SSDP: Starting discovery...")
+        coreLog("SSDP: Starting discovery...")
 
         // Create UDP socket
         if !createSocket() {
-            print("SSDP: Failed to create socket")
+            coreLog("SSDP: Failed to create socket")
             isDiscovering = false
             return
         }
@@ -69,7 +69,7 @@ public class SSDPDiscovery: @unchecked Sendable {
     public func stopDiscovery() {
         guard isDiscovering else { return }
 
-        print("SSDP: Stopping discovery...")
+        coreLog("SSDP: Stopping discovery...")
         isDiscovering = false
 
         searchTimer?.invalidate()
@@ -84,21 +84,21 @@ public class SSDPDiscovery: @unchecked Sendable {
         // Create UDP socket
         socketFD = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard socketFD >= 0 else {
-            print("SSDP: Failed to create socket: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to create socket: \(String(cString: strerror(errno)))")
             return false
         }
 
         // Allow socket reuse
         var reuseAddr: Int32 = 1
         guard setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuseAddr, socklen_t(MemoryLayout<Int32>.size)) >= 0 else {
-            print("SSDP: Failed to set SO_REUSEADDR: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to set SO_REUSEADDR: \(String(cString: strerror(errno)))")
             closeSocket()
             return false
         }
 
         var reusePort: Int32 = 1
         guard setsockopt(socketFD, SOL_SOCKET, SO_REUSEPORT, &reusePort, socklen_t(MemoryLayout<Int32>.size)) >= 0 else {
-            print("SSDP: Failed to set SO_REUSEPORT: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to set SO_REUSEPORT: \(String(cString: strerror(errno)))")
             closeSocket()
             return false
         }
@@ -116,7 +116,7 @@ public class SSDPDiscovery: @unchecked Sendable {
         }
 
         guard bindResult >= 0 else {
-            print("SSDP: Failed to bind socket: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to bind socket: \(String(cString: strerror(errno)))")
             closeSocket()
             return false
         }
@@ -127,7 +127,7 @@ public class SSDPDiscovery: @unchecked Sendable {
         mreq.imr_interface.s_addr = INADDR_ANY.bigEndian
 
         guard setsockopt(socketFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) >= 0 else {
-            print("SSDP: Failed to join multicast group: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to join multicast group: \(String(cString: strerror(errno)))")
             closeSocket()
             return false
         }
@@ -137,11 +137,11 @@ public class SSDPDiscovery: @unchecked Sendable {
         timeout.tv_sec = 1
         timeout.tv_usec = 0
         if setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) < 0 {
-            print("SSDP: Failed to set socket timeout: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to set socket timeout: \(String(cString: strerror(errno)))")
             // Continue anyway - timeout is optional
         }
 
-        print("SSDP: Socket created and bound to port \(Self.multicastPort)")
+        coreLog("SSDP: Socket created and bound to port \(Self.multicastPort)")
         return true
     }
 
@@ -163,7 +163,7 @@ public class SSDPDiscovery: @unchecked Sendable {
 
     /// Listens for SSDP responses
     private func listenForResponses() {
-        print("SSDP: Listener thread started")
+        coreLog("SSDP: Listener thread started")
 
         let bufferSize = 8192
         var buffer = [UInt8](repeating: 0, count: bufferSize)
@@ -181,20 +181,20 @@ public class SSDPDiscovery: @unchecked Sendable {
                 if let message = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
                     // Get source IP for debugging
                     let sourceIP = String(cString: inet_ntoa(addr.sin_addr))
-                    print("SSDP: Received \(bytesRead) bytes from \(sourceIP)")
+                    coreLog("SSDP: Received \(bytesRead) bytes from \(sourceIP)")
                     parseResponse(message)
                 }
             } else if bytesRead < 0 {
                 let error = errno
                 if error != EAGAIN && error != EWOULDBLOCK {
-                    print("SSDP: Receive error: \(String(cString: strerror(error)))")
+                    coreLog("SSDP: Receive error: \(String(cString: strerror(error)))")
                 }
             }
             // No sleep needed: recvfrom blocks up to the 1s SO_RCVTIMEO, so the
             // loop never busy-spins, and responses are handled with no added delay.
         }
 
-        print("SSDP: Listener thread stopped")
+        coreLog("SSDP: Listener thread stopped")
     }
 
     /// Sends M-SEARCH multicast request
@@ -215,7 +215,7 @@ public class SSDPDiscovery: @unchecked Sendable {
 
         """
 
-        print("SSDP: Sending M-SEARCH for \(target)...")
+        coreLog("SSDP: Sending M-SEARCH for \(target)...")
 
         guard let messageData = message.data(using: .utf8) else { return }
 
@@ -234,9 +234,9 @@ public class SSDPDiscovery: @unchecked Sendable {
         }
 
         if bytesSent > 0 {
-            print("SSDP: M-SEARCH sent successfully (\(bytesSent) bytes)")
+            coreLog("SSDP: M-SEARCH sent successfully (\(bytesSent) bytes)")
         } else {
-            print("SSDP: Failed to send M-SEARCH: \(String(cString: strerror(errno)))")
+            coreLog("SSDP: Failed to send M-SEARCH: \(String(cString: strerror(errno)))")
         }
     }
 
@@ -248,16 +248,16 @@ public class SSDPDiscovery: @unchecked Sendable {
         guard let firstLine = lines.first else { return }
 
         if firstLine.hasPrefix("NOTIFY") {
-            print("SSDP: Received NOTIFY (ignored)")
+            coreLog("SSDP: Received NOTIFY (ignored)")
             return
         }
 
         guard firstLine.hasPrefix("HTTP/1.1 200 OK") else {
-            print("SSDP: Received unknown message type: \(firstLine)")
+            coreLog("SSDP: Received unknown message type: \(firstLine)")
             return
         }
 
-        print("SSDP: Received HTTP 200 OK response")
+        coreLog("SSDP: Received HTTP 200 OK response")
 
         var location: String?
         var usn: String?
@@ -287,19 +287,19 @@ public class SSDPDiscovery: @unchecked Sendable {
               let location = location,
               let locationURL = URL(string: location),
               let usn = usn else {
-            print("SSDP: Response missing required fields")
-            print("  ST: \(st ?? "nil")")
-            print("  Location: \(location ?? "nil")")
-            print("  USN: \(usn ?? "nil")")
+            coreLog("SSDP: Response missing required fields")
+            coreLog("  ST: \(st ?? "nil")")
+            coreLog("  Location: \(location ?? "nil")")
+            coreLog("  USN: \(usn ?? "nil")")
             return
         }
 
-        print("SSDP: Found device - ST: \(st), Location: \(location)")
+        coreLog("SSDP: Found device - ST: \(st), Location: \(location)")
 
         // We care about MediaRenderer and MediaServer devices; parse others
         // anyway and let the description decide whether they are usable.
         if !st.contains("MediaRenderer") && !st.contains("MediaServer") {
-            print("SSDP: Device ST not a renderer/server (\(st)), parsing anyway")
+            coreLog("SSDP: Device ST not a renderer/server (\(st)), parsing anyway")
         }
 
         // Extract UUID from USN
@@ -307,7 +307,7 @@ public class SSDPDiscovery: @unchecked Sendable {
 
         // Avoid duplicates
         guard discoveredDevices[uuid] == nil else {
-            print("SSDP: Device already discovered: \(uuid)")
+            coreLog("SSDP: Device already discovered: \(uuid)")
             return
         }
 
@@ -331,34 +331,34 @@ public class SSDPDiscovery: @unchecked Sendable {
 
     /// Fetches and parses device description XML
     private func fetchDeviceDescription(uuid: String, location: URL) async {
-        print("SSDP: Fetching device description from \(location)")
+        coreLog("SSDP: Fetching device description from \(location)")
         do {
             let (data, _) = try await URLSession.shared.data(from: location)
 
             guard let parser = deviceParser else { return }
 
             if let device = await parser.parse(data: data, location: location, uuid: uuid) {
-                print("SSDP: Parsed device: \(device.friendlyName)")
-                print("  Manufacturer: \(device.manufacturer)")
-                print("  Model: \(device.modelName)")
-                print("  AVTransport URL: \(device.avTransportURL ?? "nil")")
-                print("  RenderingControl URL: \(device.renderingControlURL ?? "nil")")
+                coreLog("SSDP: Parsed device: \(device.friendlyName)")
+                coreLog("  Manufacturer: \(device.manufacturer)")
+                coreLog("  Model: \(device.modelName)")
+                coreLog("  AVTransport URL: \(device.avTransportURL ?? "nil")")
+                coreLog("  RenderingControl URL: \(device.renderingControlURL ?? "nil")")
 
                 // Keep renderers (AVTransport) and servers (ContentDirectory).
                 if device.avTransportURL != nil || device.contentDirectoryURL != nil {
-                    print("SSDP: Adding \(device.deviceType) device to list")
+                    coreLog("SSDP: Adding \(device.deviceType) device to list")
                     discoveredDevices[uuid] = device
                     DispatchQueue.main.async {
                         self.delegate?.ssdpDiscovery(self, didDiscoverDevice: device)
                     }
                 } else {
-                    print("SSDP: Device has no usable service, ignoring")
+                    coreLog("SSDP: Device has no usable service, ignoring")
                 }
             } else {
-                print("SSDP: Failed to parse device description")
+                coreLog("SSDP: Failed to parse device description")
             }
         } catch {
-            print("SSDP: Failed to fetch device description from \(location): \(error)")
+            coreLog("SSDP: Failed to fetch device description from \(location): \(error)")
         }
     }
 

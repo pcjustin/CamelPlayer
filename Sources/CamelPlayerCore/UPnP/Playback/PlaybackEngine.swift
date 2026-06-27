@@ -89,6 +89,11 @@ public class LocalPlaybackEngine: PlaybackEngine {
     }
 
     public func loadAndPlay(url: URL) async throws {
+        // Local Core Audio playback can only read local files; a network (NAS)
+        // track must be played through a UPnP renderer.
+        guard url.isFileURL else {
+            throw AudioPlayerError.remoteURLRequiresRenderer
+        }
         try audioPlayer.loadAndPlay(url: url)
         onStateChanged?(audioPlayer.state)
     }

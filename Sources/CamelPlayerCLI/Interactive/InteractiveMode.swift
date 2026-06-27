@@ -369,6 +369,8 @@ public class InteractiveMode {
                 print("Error: Audio engine error - \(message)")
             case .fileLoadError(let message):
                 print("Error: Failed to load file - \(message)")
+            case .remoteURLRequiresRenderer:
+                print("Error: Network tracks require a UPnP renderer as the output device")
             }
         } else if let deviceError = error as? OutputDeviceError {
             switch deviceError {

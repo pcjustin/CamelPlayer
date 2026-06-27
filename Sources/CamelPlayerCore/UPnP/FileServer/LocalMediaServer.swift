@@ -132,32 +132,32 @@ public class LocalMediaServer {
     /// Starts the HTTP server
     public func start() throws {
         guard !_isRunning else {
-            print("HTTP Server: Already running on port \(activePort)")
+            coreLog("HTTP Server: Already running on port \(activePort)")
             return
         }
 
         var lastError: Error?
         for candidate in preferredPort...(preferredPort + portRange) {
-            print("HTTP Server: Starting on port \(candidate)...")
+            coreLog("HTTP Server: Starting on port \(candidate)...")
             do {
                 try server.start(candidate, forceIPv4: true)
                 activePort = candidate
                 _isRunning = true
-                print("HTTP Server: Successfully started on port \(candidate)")
+                coreLog("HTTP Server: Successfully started on port \(candidate)")
 
                 if let ip = getLocalIPAddress() {
-                    print("HTTP Server: Server accessible at http://\(ip):\(candidate)")
+                    coreLog("HTTP Server: Server accessible at http://\(ip):\(candidate)")
                 } else {
-                    print("HTTP Server: WARNING - Could not determine local IP address!")
+                    coreLog("HTTP Server: WARNING - Could not determine local IP address!")
                 }
                 return
             } catch {
                 lastError = error
-                print("HTTP Server: Port \(candidate) unavailable: \(error)")
+                coreLog("HTTP Server: Port \(candidate) unavailable: \(error)")
             }
         }
 
-        print("HTTP Server: Failed to start on any port in range \(preferredPort)-\(preferredPort + portRange)")
+        coreLog("HTTP Server: Failed to start on any port in range \(preferredPort)-\(preferredPort + portRange)")
         throw ServerError.failedToStart(lastError ?? ServerError.cannotDetermineIP)
     }
 
@@ -173,7 +173,7 @@ public class LocalMediaServer {
     /// - Parameter fileURL: Local file URL
     /// - Returns: HTTP URL that UPnP devices can access
     public func shareFile(_ fileURL: URL) throws -> URL {
-        print("HTTP Server: Sharing file: \(fileURL.lastPathComponent)")
+        coreLog("HTTP Server: Sharing file: \(fileURL.lastPathComponent)")
 
         let id = String(nextID)
         nextID += 1
@@ -181,17 +181,17 @@ public class LocalMediaServer {
         sharedFiles[id] = fileURL
 
         guard let ip = getLocalIPAddress() else {
-            print("HTTP Server: ERROR - Cannot determine local IP address")
+            coreLog("HTTP Server: ERROR - Cannot determine local IP address")
             throw ServerError.cannotDetermineIP
         }
 
         let urlString = "http://\(ip):\(activePort)/media/\(id)"
         guard let url = URL(string: urlString) else {
-            print("HTTP Server: ERROR - Invalid URL: \(urlString)")
+            coreLog("HTTP Server: ERROR - Invalid URL: \(urlString)")
             throw ServerError.invalidURL
         }
 
-        print("HTTP Server: File shared at: \(url)")
+        coreLog("HTTP Server: File shared at: \(url)")
         return url
     }
 
@@ -216,17 +216,17 @@ public class LocalMediaServer {
         // Get list of all interfaces on the local machine
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddr) == 0 else {
-            print("HTTP Server: Failed to get network interfaces")
+            coreLog("HTTP Server: Failed to get network interfaces")
             return nil
         }
         guard let firstAddr = ifaddr else {
-            print("HTTP Server: No network interfaces found")
+            coreLog("HTTP Server: No network interfaces found")
             return nil
         }
 
         defer { freeifaddrs(ifaddr) }
 
-        print("HTTP Server: Scanning network interfaces for IP address...")
+        coreLog("HTTP Server: Scanning network interfaces for IP address...")
 
         // Iterate through linked list of interfaces
         for ifptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
@@ -244,7 +244,7 @@ public class LocalMediaServer {
                            nil, socklen_t(0), NI_NUMERICHOST)
                 let ipAddress = String(cString: hostname)
 
-                print("HTTP Server: Found interface \(name) with IP \(ipAddress)")
+                coreLog("HTTP Server: Found interface \(name) with IP \(ipAddress)")
 
                 // Skip localhost
                 if ipAddress == "127.0.0.1" {
@@ -254,11 +254,11 @@ public class LocalMediaServer {
                 // Prefer en0 (Wi-Fi) or en1 (Ethernet)
                 if name == "en0" {
                     preferredAddress = ipAddress
-                    print("HTTP Server: Using preferred interface en0: \(ipAddress)")
+                    coreLog("HTTP Server: Using preferred interface en0: \(ipAddress)")
                     break
                 } else if name == "en1" && preferredAddress == nil {
                     preferredAddress = ipAddress
-                    print("HTTP Server: Using preferred interface en1: \(ipAddress)")
+                    coreLog("HTTP Server: Using preferred interface en1: \(ipAddress)")
                 } else if fallbackAddress == nil {
                     // Use any other non-localhost IPv4 as fallback
                     fallbackAddress = ipAddress
@@ -269,10 +269,10 @@ public class LocalMediaServer {
         let finalAddress = preferredAddress ?? fallbackAddress
 
         if let addr = finalAddress {
-            print("HTTP Server: Selected IP address: \(addr)")
+            coreLog("HTTP Server: Selected IP address: \(addr)")
         } else {
-            print("HTTP Server: ERROR - No valid IP address found!")
-            print("HTTP Server: Make sure you're connected to a network (Wi-Fi or Ethernet)")
+            coreLog("HTTP Server: ERROR - No valid IP address found!")
+            coreLog("HTTP Server: Make sure you're connected to a network (Wi-Fi or Ethernet)")
         }
 
         return finalAddress

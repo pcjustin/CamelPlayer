@@ -13,6 +13,7 @@ public enum AudioPlayerError: Error {
     case unsupportedFormat
     case audioEngineError(String)
     case fileLoadError(String)
+    case remoteURLRequiresRenderer
 }
 
 public class AudioPlayer {
@@ -160,7 +161,7 @@ public class AudioPlayer {
                     Thread.sleep(forTimeInterval: 0.15)
                 }
             } catch {
-                print("Warning: Failed to set bit-perfect format: \(error.localizedDescription)")
+                coreLog("Warning: Failed to set bit-perfect format: \(error.localizedDescription)")
                 do {
                     let currentDeviceID = try deviceManager.getCurrentOutputDevice()
                     let currentSampleRate = try deviceManager.getDeviceSampleRate(deviceID: currentDeviceID)
@@ -171,7 +172,7 @@ public class AudioPlayer {
                         Thread.sleep(forTimeInterval: 0.15)
                     }
                 } catch {
-                    print("Warning: Fallback to sample rate only also failed: \(error.localizedDescription)")
+                    coreLog("Warning: Fallback to sample rate only also failed: \(error.localizedDescription)")
                 }
             }
         }

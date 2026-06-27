@@ -220,7 +220,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             }
 
         } catch {
-            print("UPnP: Failed to update status: \(error)")
+            coreLog("UPnP: Failed to update status: \(error)")
         }
     }
 

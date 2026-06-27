@@ -30,8 +30,10 @@ struct PlaybackControlsView: View {
                     .font(.system(size: 44))
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.playlistItems.isEmpty)
-            .help(viewModel.isPlaying ? "Pause" : "Play")
+            .disabled(viewModel.playlistItems.isEmpty || viewModel.currentTrackNeedsRenderer)
+            .help(viewModel.currentTrackNeedsRenderer
+                  ? "Select a network renderer to play this network track"
+                  : (viewModel.isPlaying ? "Pause" : "Play"))
 
             // Next
             Button(action: {

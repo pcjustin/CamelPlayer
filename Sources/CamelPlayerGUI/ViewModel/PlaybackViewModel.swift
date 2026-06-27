@@ -377,6 +377,8 @@ class PlaybackViewModel: ObservableObject {
             handleError("Audio engine error: \(msg)")
         case .fileLoadError(let msg):
             handleError("Failed to load file: \(msg)")
+        case .remoteURLRequiresRenderer:
+            handleError("This track is on a network server. Choose a network renderer as the output device to play it.")
         }
     }
 
@@ -406,5 +408,13 @@ class PlaybackViewModel: ObservableObject {
 
     var isStopped: Bool {
         return playbackState == .stopped
+    }
+
+    /// True when the current track lives on a network server but the selected
+    /// output is local — it can only play through a UPnP renderer.
+    var currentTrackNeedsRenderer: Bool {
+        guard let item = currentItem, !item.url.isFileURL else { return false }
+        if case .local = currentOutputDevice?.type { return true }
+        return false
     }
 }

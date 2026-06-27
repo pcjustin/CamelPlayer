@@ -110,7 +110,7 @@ public class PlaybackController {
         if let startTime = lastPlayStartTime {
             let playDuration = Date().timeIntervalSince(startTime)
             if playDuration < minimumPlayDuration {
-                print("Warning: Track played for only \(playDuration)s, stopping auto-play to prevent rapid skipping")
+                coreLog("Warning: Track played for only \(playDuration)s, stopping auto-play to prevent rapid skipping")
                 return
             }
         }
@@ -126,7 +126,7 @@ public class PlaybackController {
                 try await currentEngine.loadAndPlay(url: nextItem.url)
             } catch {
                 // Silently fail - could log error in future
-                print("Error auto-playing next track: \(error.localizedDescription)")
+                coreLog("Error auto-playing next track: \(error.localizedDescription)")
             }
         }
     }
@@ -262,7 +262,7 @@ public class PlaybackController {
                 do {
                     try await currentEngine.loadAndPlay(url: currentItem.url)
                 } catch {
-                    print("Error resuming playback on new device: \(error)")
+                    coreLog("Error resuming playback on new device: \(error)")
                 }
             }
         }

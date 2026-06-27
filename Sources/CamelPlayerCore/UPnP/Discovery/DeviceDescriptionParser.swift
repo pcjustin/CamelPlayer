@@ -45,13 +45,13 @@ public class DeviceDescriptionParser: NSObject {
         parser.delegate = self
 
         guard parser.parse() else {
-            print("DeviceParser: Failed to parse XML")
+            coreLog("DeviceParser: Failed to parse XML")
             return nil
         }
 
         // Construct device
         guard !friendlyName.isEmpty else {
-            print("DeviceParser: Missing friendlyName")
+            coreLog("DeviceParser: Missing friendlyName")
             return nil
         }
 
@@ -188,6 +188,6 @@ extension DeviceDescriptionParser: XMLParserDelegate {
     }
 
     public func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
-        print("DeviceParser: Parse error: \(parseError)")
+        coreLog("DeviceParser: Parse error: \(parseError)")
     }
 }
