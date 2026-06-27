@@ -26,6 +26,8 @@ class PlaybackViewModel: ObservableObject {
     @Published var mediaServers: [UPnPDevice] = []
     @Published var favoriteAlbums: [AlbumRef] = []
     @Published var favoriteTracks: [TrackRef] = []
+    @Published var recentAlbums: [AlbumRef] = []
+    @Published var recentTracks: [TrackRef] = []
 
     // Private properties
     private let controller: PlaybackController
@@ -43,7 +45,12 @@ class PlaybackViewModel: ObservableObject {
         static let outputDeviceID = "settings.outputDeviceID"
         static let favoriteAlbums = "library.favoriteAlbums"
         static let favoriteTracks = "library.favoriteTracks"
+        static let recentAlbums = "library.recentAlbums"
+        static let recentTracks = "library.recentTracks"
     }
+
+    private let recentLimit = 50
+    private var lastRecordedURL: String?
 
     private static func mode(from string: String?) -> PlaybackMode? {
         switch string {
@@ -119,6 +126,12 @@ class PlaybackViewModel: ObservableObject {
         bitPerfectMode = controller.bitPerfectMode
         playbackMode = controller.playbackMode
         volume = controller.volume
+
+        // Record into recently played when the current track changes.
+        if let item = currentItem, item.url.absoluteString != lastRecordedURL {
+            lastRecordedURL = item.url.absoluteString
+            recordTrackPlayed(item)
+        }
 
         // Load album art if current track changed
         loadAlbumArt()
@@ -200,6 +213,57 @@ class PlaybackViewModel: ObservableObject {
         refreshMediaServers()
         loadCoverCache()
         loadFavorites()
+        loadRecent()
+    }
+
+    // MARK: - Recently played
+
+    private func loadRecent() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Keys.recentAlbums),
+           let decoded = try? JSONDecoder().decode([AlbumRef].self, from: data) {
+            recentAlbums = decoded
+        }
+        if let data = defaults.data(forKey: Keys.recentTracks),
+           let decoded = try? JSONDecoder().decode([TrackRef].self, from: data) {
+            recentTracks = decoded
+        }
+    }
+
+    private func persistRecent() {
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(recentAlbums) {
+            defaults.set(data, forKey: Keys.recentAlbums)
+        }
+        if let data = try? JSONEncoder().encode(recentTracks) {
+            defaults.set(data, forKey: Keys.recentTracks)
+        }
+    }
+
+    private func recordTrackPlayed(_ item: PlaylistItem) {
+        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
+        let ref = TrackRef(
+            url: item.url.absoluteString, title: item.title,
+            album: parsed?.album, albumArtURI: parsed?.albumArtURI, metadata: item.metadata
+        )
+        recentTracks.removeAll { $0.url == ref.url }
+        recentTracks.insert(ref, at: 0)
+        if recentTracks.count > recentLimit { recentTracks = Array(recentTracks.prefix(recentLimit)) }
+        persistRecent()
+    }
+
+    private func recordAlbumPlayed(_ album: MediaObject) {
+        let ref = AlbumRef(album: album)
+        recentAlbums.removeAll { $0.id == ref.id }
+        recentAlbums.insert(ref, at: 0)
+        if recentAlbums.count > recentLimit { recentAlbums = Array(recentAlbums.prefix(recentLimit)) }
+        persistRecent()
+    }
+
+    func clearRecentlyPlayed() {
+        recentTracks = []
+        recentAlbums = []
+        persistRecent()
     }
 
     // MARK: - Favorites
@@ -275,6 +339,26 @@ class PlaybackViewModel: ObservableObject {
         guard let url = URL(string: ref.url) else { return }
         controller.addTrack(url: url, title: ref.title, metadata: ref.metadata)
         updateState()
+    }
+
+    func playTrack(_ object: MediaObject) {
+        guard let res = object.resURL else { return }
+        playTrack(TrackRef(
+            url: res, title: object.title,
+            album: object.album, albumArtURI: object.albumArtURI,
+            metadata: DIDLBuilder.metadata(for: object)
+        ))
+    }
+
+    /// Plays a track now: jumps to it if already queued, otherwise appends and plays.
+    func playTrack(_ ref: TrackRef) {
+        guard let url = URL(string: ref.url) else { return }
+        if let index = controller.getPlaylistItems().firstIndex(where: { $0.url.absoluteString == ref.url }) {
+            playItem(at: index)
+        } else {
+            controller.addTrack(url: url, title: ref.title, metadata: ref.metadata)
+            playItem(at: controller.getPlaylistCount() - 1)
+        }
     }
 
     func openFavoriteAlbum(_ ref: AlbumRef) -> MediaObject {
@@ -571,11 +655,12 @@ class PlaybackViewModel: ObservableObject {
         return page.objects
     }
 
-    func playAlbum(albumID: String) {
+    func playAlbum(_ album: MediaObject) {
+        recordAlbumPlayed(album)
         guard let server = libraryServer else { return }
         Task {
             do {
-                try await controller.playAlbum(server: server, objectID: albumID)
+                try await controller.playAlbum(server: server, objectID: album.id)
                 updateState()
             } catch {
                 handleError("Failed to play album: \(error.localizedDescription)")

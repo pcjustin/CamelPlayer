@@ -1,7 +1,7 @@
 import SwiftUI
 import CamelPlayerCore
 
-struct FavoritesView: View {
+struct RecentView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     @State private var selectedAlbum: MediaObject?
 
@@ -25,23 +25,27 @@ struct FavoritesView: View {
 
     @ViewBuilder
     private var list: some View {
-        if viewModel.favoriteAlbums.isEmpty && viewModel.favoriteTracks.isEmpty {
+        if viewModel.recentAlbums.isEmpty && viewModel.recentTracks.isEmpty {
             VStack(spacing: 12) {
                 Spacer()
-                Image(systemName: "star").font(.system(size: 40)).foregroundColor(.secondary)
-                Text("No favorites yet").foregroundColor(.secondary)
-                Text("Star an album or track to add it here")
-                    .font(.caption).foregroundColor(.secondary)
+                Image(systemName: "clock").font(.system(size: 40)).foregroundColor(.secondary)
+                Text("Nothing played yet").foregroundColor(.secondary)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    if !viewModel.favoriteAlbums.isEmpty {
+                    HStack {
+                        Spacer()
+                        Button("Clear") { viewModel.clearRecentlyPlayed() }.font(.caption)
+                    }
+                    .padding(.horizontal)
+
+                    if !viewModel.recentAlbums.isEmpty {
                         Text("Albums").font(.headline).padding(.horizontal)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
-                            ForEach(viewModel.favoriteAlbums) { ref in
+                            ForEach(viewModel.recentAlbums) { ref in
                                 AlbumCell(album: viewModel.openFavoriteAlbum(ref))
                                     .onTapGesture { selectedAlbum = viewModel.openFavoriteAlbum(ref) }
                             }
@@ -49,9 +53,9 @@ struct FavoritesView: View {
                         .padding(.horizontal)
                     }
 
-                    if !viewModel.favoriteTracks.isEmpty {
+                    if !viewModel.recentTracks.isEmpty {
                         Text("Tracks").font(.headline).padding(.horizontal).padding(.top, 8)
-                        ForEach(viewModel.favoriteTracks) { ref in
+                        ForEach(viewModel.recentTracks) { ref in
                             HStack(spacing: 10) {
                                 trackThumb(ref)
                                 VStack(alignment: .leading, spacing: 2) {
@@ -61,14 +65,8 @@ struct FavoritesView: View {
                                     }
                                 }
                                 Spacer()
-                                Button { viewModel.unfavoriteTrack(ref) } label: {
-                                    Image(systemName: "star.fill").foregroundColor(.yellow)
-                                }
-                                .buttonStyle(.borderless).help("Remove from favorites")
-                                Button { viewModel.addTrack(ref) } label: {
-                                    Image(systemName: "plus.circle")
-                                }
-                                .buttonStyle(.borderless).help("Add to playlist")
+                                Button { viewModel.addTrack(ref) } label: { Image(systemName: "plus.circle") }
+                                    .buttonStyle(.borderless).help("Add to playlist")
                             }
                             .padding(.horizontal)
                             .contentShape(Rectangle())

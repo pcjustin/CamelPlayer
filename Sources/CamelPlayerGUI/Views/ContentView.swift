@@ -14,7 +14,7 @@ struct ContentView: View {
     private let minLeftWidth: CGFloat = 200
     private let maxLeftWidth: CGFloat = 420
 
-    private enum Section { case albums, favorites, browse, queue }
+    private enum Section { case albums, favorites, recent, browse, queue }
     @State private var section: Section = .albums
 
     var body: some View {
@@ -24,12 +24,13 @@ struct ContentView: View {
                 Picker("", selection: $section) {
                     Text("Albums").tag(Section.albums)
                     Text("Favorites").tag(Section.favorites)
+                    Text("Recent").tag(Section.recent)
                     Text("Browse").tag(Section.browse)
                     Text("Queue").tag(Section.queue)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 500)
                 .padding(8)
 
                 Divider()
@@ -39,6 +40,7 @@ struct ContentView: View {
                     switch section {
                     case .albums: AlbumsView(embedded: true)
                     case .favorites: FavoritesView()
+                    case .recent: RecentView()
                     case .browse: BrowseView(embedded: true)
                     case .queue: queueSection
                     }

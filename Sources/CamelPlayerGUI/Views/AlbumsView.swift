@@ -160,7 +160,7 @@ struct AlbumDetailView: View {
                     if let artist = album.artist { Text(artist).foregroundColor(.secondary) }
                     Text("\(tracks.count) tracks").font(.caption).foregroundColor(.secondary)
                     HStack(spacing: 10) {
-                        Button(action: { viewModel.playAlbum(albumID: album.id) }) {
+                        Button(action: { viewModel.playAlbum(album) }) {
                             Label("Play Album", systemImage: "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
@@ -196,6 +196,8 @@ struct AlbumDetailView: View {
                             .buttonStyle(.borderless)
                             .help("Add to playlist")
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { viewModel.playTrack(track) }
                 }
             }
         }
