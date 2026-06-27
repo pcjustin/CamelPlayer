@@ -210,9 +210,7 @@ struct BrowseView: View {
     private func thumbnail(_ object: MediaObject) -> some View {
         let fallback = Image(systemName: object.isContainer ? "folder.fill" : "music.note")
         if let s = object.albumArtURI, let url = URL(string: s) {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
+            CachedAsyncImage(url: url) {
                 fallback.foregroundColor(.secondary)
             }
             .frame(width: 36, height: 36)
