@@ -8,35 +8,27 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Now Playing
-                NowPlayingView()
-                    .padding()
-                    .background(Color(NSColor.windowBackgroundColor))
+                // Now Playing (left) + Playlist (right)
+                HSplitView {
+                    NowPlayingView()
+                        .padding()
+                        .frame(minWidth: 220, idealWidth: 260, maxWidth: 360, maxHeight: .infinity)
+                        .background(Color(NSColor.windowBackgroundColor))
+
+                    PlaylistView()
+                        .frame(minWidth: 260)
+                }
+                .frame(minHeight: 240)
 
                 Divider()
 
-                // Seek Bar
-                SeekBarView()
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-
-                Divider()
-
-                // Playback Controls
-                PlaybackControlsView()
-                    .padding()
-
-                Divider()
-
-                // Volume Control
-                VolumeControlView()
-                    .padding()
-
-                Divider()
-
-                // Playlist
-                PlaylistView()
-                    .frame(minHeight: 200)
+                // Transport Bar
+                HStack(spacing: 20) {
+                    PlaybackControlsView()
+                    SeekBarView()
+                    VolumeControlView()
+                }
+                .padding()
 
                 Divider()
 

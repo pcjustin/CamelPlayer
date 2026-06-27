@@ -18,7 +18,7 @@ struct VolumeControlView: View {
                 ),
                 in: 0.0...1.0
             )
-            .frame(maxWidth: 300)
+            .frame(width: 110)
 
             // Volume percentage
             Text("\(Int(viewModel.volume * 100))%")
@@ -26,7 +26,7 @@ struct VolumeControlView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 40, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity)
+        .fixedSize()
     }
 
     private var volumeIcon: String {

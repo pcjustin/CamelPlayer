@@ -4,7 +4,7 @@ struct PlaybackControlsView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
 
     var body: some View {
-        HStack(spacing: 32) {
+        HStack(spacing: 18) {
             // Previous
             Button(action: {
                 viewModel.previous()
@@ -27,7 +27,7 @@ struct PlaybackControlsView: View {
                 }
             }) {
                 Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
+                    .font(.system(size: 44))
             }
             .buttonStyle(.plain)
             .disabled(viewModel.playlistItems.isEmpty)
@@ -44,9 +44,6 @@ struct PlaybackControlsView: View {
             .disabled(!viewModel.canGoNext)
             .help("Next Track")
 
-            Spacer()
-                .frame(width: 20)
-
             // Stop
             Button(action: {
                 viewModel.stop()
@@ -58,6 +55,6 @@ struct PlaybackControlsView: View {
             .disabled(viewModel.isStopped)
             .help("Stop")
         }
-        .frame(maxWidth: .infinity)
+        .fixedSize()
     }
 }
