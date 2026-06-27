@@ -1,7 +1,7 @@
 import Foundation
 
-struct TimeFormatter {
-    static func formatTime(_ time: TimeInterval) -> String {
+public struct TimeFormatter {
+    public static func formatTime(_ time: TimeInterval) -> String {
         guard !time.isNaN && !time.isInfinite else {
             return "0:00"
         }

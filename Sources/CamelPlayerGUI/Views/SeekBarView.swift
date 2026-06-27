@@ -1,4 +1,5 @@
 import SwiftUI
+import CamelPlayerCore
 
 struct SeekBarView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
