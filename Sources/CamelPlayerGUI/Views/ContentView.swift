@@ -49,11 +49,14 @@ struct ContentView: View {
 
                 Divider()
 
-                // Transport Bar
-                HStack(spacing: 20) {
-                    PlaybackControlsView()
-                    SeekBarView()
-                    VolumeControlView()
+                // Transport controls, with the now-playing display below them
+                VStack(spacing: 10) {
+                    HStack(spacing: 20) {
+                        PlaybackControlsView()
+                        SeekBarView()
+                        VolumeControlView()
+                    }
+                    MiniNowPlayingView()
                 }
                 .padding()
 

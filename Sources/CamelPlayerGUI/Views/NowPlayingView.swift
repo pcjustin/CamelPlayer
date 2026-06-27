@@ -5,9 +5,14 @@ struct NowPlayingView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // Album Art
+            // Album Art — remote cover for network tracks, local image otherwise
             Group {
-                if let albumArt = viewModel.albumArt {
+                if let coverURL = viewModel.currentCoverURL {
+                    CachedAsyncImage(url: coverURL) { placeholderArt }
+                        .frame(width: 180, height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(radius: 4)
+                } else if let albumArt = viewModel.albumArt {
                     Image(nsImage: albumArt)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -15,16 +20,7 @@ struct NowPlayingView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .shadow(radius: 4)
                 } else {
-                    Image(systemName: "music.note")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 120, height: 120)
-                        .foregroundColor(.secondary)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(NSColor.controlBackgroundColor))
-                        )
+                    placeholderArt
                 }
             }
 
@@ -34,6 +30,15 @@ struct NowPlayingView: View {
                 .fontWeight(.semibold)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
+
+            // Album Name
+            if let album = viewModel.currentAlbum, !album.isEmpty {
+                Text(album)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+            }
 
             // Format Info
             HStack(spacing: 8) {
@@ -64,5 +69,18 @@ struct NowPlayingView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical)
+    }
+
+    private var placeholderArt: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color(NSColor.controlBackgroundColor))
+            .overlay(
+                Image(systemName: "music.note")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
+                    .foregroundColor(.secondary)
+            )
+            .frame(width: 180, height: 180)
     }
 }

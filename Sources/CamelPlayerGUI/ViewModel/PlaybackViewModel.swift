@@ -23,6 +23,8 @@ class PlaybackViewModel: ObservableObject {
     @Published var formatInfo: String?
     @Published var lastError: String?
     @Published var albumArt: NSImage?
+    @Published var currentAlbum: String?
+    @Published var currentCoverURL: URL?
     @Published var mediaServers: [UPnPDevice] = []
     @Published var favoriteAlbums: [AlbumRef] = []
     @Published var favoriteTracks: [TrackRef] = []
@@ -140,6 +142,8 @@ class PlaybackViewModel: ObservableObject {
     private func loadAlbumArt() {
         guard let currentItem = currentItem else {
             albumArt = nil
+            currentAlbum = nil
+            currentCoverURL = nil
             lastLoadedCoverPath = nil
             return
         }
@@ -148,6 +152,11 @@ class PlaybackViewModel: ObservableObject {
         if lastLoadedCoverPath == currentItem.url.path {
             return
         }
+
+        // Album name + remote cover (for network tracks) come from the DIDL.
+        let parsed = currentItem.metadata.flatMap { DIDLParser().parse($0).first }
+        currentAlbum = parsed?.album
+        currentCoverURL = parsed?.albumArtURI.flatMap { URL(string: $0) }
 
         let folderURL = currentItem.url.deletingLastPathComponent()
 
