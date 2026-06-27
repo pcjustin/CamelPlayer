@@ -300,18 +300,36 @@ class PlaybackViewModel: ObservableObject {
         mediaServers = controller.availableMediaServers
     }
 
-    func browse(server: UPnPDevice, objectID: String) async -> [MediaObject] {
+    func browse(
+        server: UPnPDevice,
+        objectID: String,
+        startingIndex: Int = 0,
+        requestedCount: Int = 200,
+        sortCriteria: String = ""
+    ) async -> PlaybackController.BrowsePage? {
         do {
-            return try await controller.browse(server: server, objectID: objectID)
+            return try await controller.browse(
+                server: server,
+                objectID: objectID,
+                startingIndex: startingIndex,
+                requestedCount: requestedCount,
+                sortCriteria: sortCriteria
+            )
         } catch {
             handleError("Browse failed: \(error.localizedDescription)")
-            return []
+            return nil
         }
     }
 
-    func addContainerToPlaylist(server: UPnPDevice, objectID: String) async {
+    func sortCapabilities(server: UPnPDevice) async -> [String] {
+        await controller.sortCapabilities(server: server)
+    }
+
+    func addContainerToPlaylist(server: UPnPDevice, objectID: String, sortCriteria: String = "") async {
         do {
-            let count = try await controller.addContainerToPlaylist(server: server, objectID: objectID)
+            let count = try await controller.addContainerToPlaylist(
+                server: server, objectID: objectID, sortCriteria: sortCriteria
+            )
             updateState()
             if count == 0 {
                 handleError("No playable tracks in this folder")
