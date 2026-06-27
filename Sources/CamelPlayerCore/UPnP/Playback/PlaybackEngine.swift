@@ -23,8 +23,9 @@ public protocol PlaybackEngine: AnyObject {
     /// Callback when state changes
     var onStateChanged: ((PlaybackState) -> Void)? { get set }
 
-    /// Loads and plays a file atomically
-    func loadAndPlay(url: URL) async throws
+    /// Loads and plays a track atomically. `metadata` is optional DIDL-Lite
+    /// passed to UPnP renderers; local playback ignores it.
+    func loadAndPlay(url: URL, metadata: String?) async throws
 
     /// Starts or resumes playback
     func play() async throws
@@ -88,9 +89,9 @@ public class LocalPlaybackEngine: PlaybackEngine {
         self.audioPlayer = audioPlayer
     }
 
-    public func loadAndPlay(url: URL) async throws {
+    public func loadAndPlay(url: URL, metadata: String?) async throws {
         // Local Core Audio playback can only read local files; a network (NAS)
-        // track must be played through a UPnP renderer.
+        // track must be played through a UPnP renderer. Metadata is unused here.
         guard url.isFileURL else {
             throw AudioPlayerError.remoteURLRequiresRenderer
         }

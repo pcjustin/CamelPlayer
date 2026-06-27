@@ -123,7 +123,7 @@ public class PlaybackController {
         Task {
             do {
                 lastPlayStartTime = Date()
-                try await currentEngine.loadAndPlay(url: nextItem.url)
+                try await currentEngine.loadAndPlay(url: nextItem.url, metadata: nextItem.metadata)
             } catch {
                 // Silently fail - could log error in future
                 coreLog("Error auto-playing next track: \(error.localizedDescription)")
@@ -156,7 +156,7 @@ public class PlaybackController {
         }
 
         lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url)
+        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
     }
 
     public func playItem(at index: Int) async throws {
@@ -165,7 +165,7 @@ public class PlaybackController {
         }
 
         lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url)
+        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
     }
 
     public func pause() {
@@ -186,7 +186,7 @@ public class PlaybackController {
         }
 
         lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url)
+        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
     }
 
     public func previous() async throws {
@@ -195,7 +195,7 @@ public class PlaybackController {
         }
 
         lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url)
+        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
     }
 
     public func seek(to time: TimeInterval) async throws {
@@ -260,7 +260,7 @@ public class PlaybackController {
         if let currentItem = playlist.currentItem {
             Task {
                 do {
-                    try await currentEngine.loadAndPlay(url: currentItem.url)
+                    try await currentEngine.loadAndPlay(url: currentItem.url, metadata: currentItem.metadata)
                 } catch {
                     coreLog("Error resuming playback on new device: \(error)")
                 }
@@ -343,7 +343,7 @@ public class PlaybackController {
         guard !object.isContainer, let res = object.resURL, let url = URL(string: res) else {
             return false
         }
-        playlist.add(PlaylistItem(url: url, title: object.title))
+        playlist.add(PlaylistItem(url: url, title: object.title, metadata: DIDLBuilder.metadata(for: object)))
         return true
     }
 
@@ -354,15 +354,29 @@ public class PlaybackController {
         return (try? await service.getSortCapabilities()) ?? []
     }
 
-    /// Adds every playable track directly inside a container to the playlist,
-    /// paging through the whole container. Returns the number of tracks added.
-    /// (Immediate children only — nested folders are not recursed.)
+    private static let maxAddDepth = 8
+
+    /// Adds every playable track in a container subtree to the playlist, paging
+    /// through each container and recursing into sub-containers. Returns the
+    /// number of tracks added.
     @discardableResult
     public func addContainerToPlaylist(
         server: UPnPDevice,
         objectID: String,
         sortCriteria: String = ""
     ) async throws -> Int {
+        try await addContainer(server: server, objectID: objectID, sortCriteria: sortCriteria, depth: 0)
+    }
+
+    private func addContainer(
+        server: UPnPDevice,
+        objectID: String,
+        sortCriteria: String,
+        depth: Int
+    ) async throws -> Int {
+        // ponytail: depth cap guards against pathological trees; raise it or add
+        // a track-count limit/cancel if recursing huge tag containers bites.
+        guard depth <= Self.maxAddDepth else { return 0 }
         var added = 0
         var index = 0
         while true {
@@ -374,10 +388,12 @@ public class PlaybackController {
                 sortCriteria: sortCriteria
             )
             guard !page.objects.isEmpty else { break }
-            for object in page.objects where !object.isContainer {
-                guard let res = object.resURL, let url = URL(string: res) else { continue }
-                playlist.add(PlaylistItem(url: url, title: object.title))
-                added += 1
+            for object in page.objects {
+                if object.isContainer {
+                    added += try await addContainer(server: server, objectID: object.id, sortCriteria: sortCriteria, depth: depth + 1)
+                } else if addTrackToPlaylist(object) {
+                    added += 1
+                }
             }
             index += page.objects.count
             if index >= page.totalMatches || page.objects.count < Self.browsePageSize { break }

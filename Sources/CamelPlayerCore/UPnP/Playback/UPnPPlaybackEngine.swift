@@ -68,7 +68,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
     // MARK: - PlaybackEngine Implementation
 
-    public func loadAndPlay(url: URL) async throws {
+    public func loadAndPlay(url: URL, metadata: String?) async throws {
         guard let avTransport = avTransport else {
             throw UPnPPlaybackError.serviceNotAvailable
         }
@@ -94,8 +94,8 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             uri = url.absoluteString
         }
 
-        // Set URI and play
-        try await avTransport.setAVTransportURI(uri: uri, metadata: "")
+        // Set URI and play. DIDL metadata lets the renderer show track info.
+        try await avTransport.setAVTransportURI(uri: uri, metadata: metadata ?? "")
         try await avTransport.play()
 
         // Update state
