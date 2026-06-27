@@ -23,6 +23,8 @@ class PlaybackViewModel: ObservableObject {
     @Published var formatInfo: String?
     @Published var lastError: String?
     @Published var albumArt: NSImage?
+    @Published var mediaServers: [UPnPDevice] = []
+    @Published var showBrowser: Bool = false
 
     // Private properties
     private let controller: PlaybackController
@@ -38,6 +40,9 @@ class PlaybackViewModel: ObservableObject {
             controller.bitPerfectMode = true
             controller.onUPnPDevicesChanged = { [weak self] in
                 Task { @MainActor in self?.refreshDevices() }
+            }
+            controller.onUPnPServersChanged = { [weak self] in
+                Task { @MainActor in self?.refreshMediaServers() }
             }
             loadInitialState()
             startPolling()
@@ -158,6 +163,7 @@ class PlaybackViewModel: ObservableObject {
     private func loadInitialState() {
         updateState()
         refreshDevices()
+        refreshMediaServers()
     }
 
     // MARK: - Playback Control
@@ -285,6 +291,33 @@ class PlaybackViewModel: ObservableObject {
         // Wait a bit for devices to be discovered, then update the list
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             self?.refreshDevices()
+        }
+    }
+
+    // MARK: - Media Server Browsing
+
+    func refreshMediaServers() {
+        mediaServers = controller.availableMediaServers
+    }
+
+    func browse(server: UPnPDevice, objectID: String) async -> [MediaObject] {
+        do {
+            return try await controller.browse(server: server, objectID: objectID)
+        } catch {
+            handleError("Browse failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func addContainerToPlaylist(server: UPnPDevice, objectID: String) async {
+        do {
+            let count = try await controller.addContainerToPlaylist(server: server, objectID: objectID)
+            updateState()
+            if count == 0 {
+                handleError("No playable tracks in this folder")
+            }
+        } catch {
+            handleError("Failed to add folder: \(error.localizedDescription)")
         }
     }
 

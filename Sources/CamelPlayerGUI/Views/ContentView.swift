@@ -66,6 +66,10 @@ struct ContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+        .sheet(isPresented: $viewModel.showBrowser) {
+            BrowseView()
+                .environmentObject(viewModel)
+        }
     }
 
     private func handleDrop(providers: [NSItemProvider]) {
