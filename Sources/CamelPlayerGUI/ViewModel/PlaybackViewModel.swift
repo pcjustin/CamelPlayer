@@ -36,6 +36,9 @@ class PlaybackViewModel: ObservableObject {
             controller = try PlaybackController()
             controller.volume = 0.7
             controller.bitPerfectMode = true
+            controller.onUPnPDevicesChanged = { [weak self] in
+                Task { @MainActor in self?.refreshDevices() }
+            }
             loadInitialState()
             startPolling()
         } catch {

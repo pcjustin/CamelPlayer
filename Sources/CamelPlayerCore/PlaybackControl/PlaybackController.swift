@@ -39,6 +39,9 @@ public class PlaybackController {
     private var localEngine: LocalPlaybackEngine
     private(set) public var currentOutputDevice: OutputDevice
 
+    /// Called when the set of available UPnP devices changes (discovery is async).
+    public var onUPnPDevicesChanged: (() -> Void)?
+
     public var currentState: PlaybackState {
         currentEngine.state
     }
@@ -85,6 +88,10 @@ public class PlaybackController {
             name: "Default Output",
             type: .local(defaultDeviceID)
         )
+
+        // Notify when discovery adds/removes devices so the UI can refresh live
+        upnpManager.onDeviceAdded = { [weak self] _ in self?.onUPnPDevicesChanged?() }
+        upnpManager.onDeviceRemoved = { [weak self] _ in self?.onUPnPDevicesChanged?() }
 
         // Start HTTP server and UPnP discovery
         try? mediaServer.start()

@@ -43,9 +43,15 @@ public class SSDPDiscovery: @unchecked Sendable {
         // Start listener thread
         startListenerThread()
 
-        // Send initial M-SEARCH
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.sendMSearch()
+        // Send an initial burst of M-SEARCH packets right away. SSDP runs over
+        // UDP and may drop packets, so a few quick repeats speed up and harden
+        // initial discovery instead of waiting for the 30s periodic timer.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            for i in 0..<3 {
+                guard self?.isDiscovering == true else { return }
+                self?.sendMSearch()
+                if i < 2 { Thread.sleep(forTimeInterval: 0.1) }
+            }
         }
 
         // Send periodic M-SEARCH messages
@@ -181,9 +187,8 @@ public class SSDPDiscovery: @unchecked Sendable {
                     print("SSDP: Receive error: \(String(cString: strerror(error)))")
                 }
             }
-
-            // Small delay to avoid busy loop
-            Thread.sleep(forTimeInterval: 0.1)
+            // No sleep needed: recvfrom blocks up to the 1s SO_RCVTIMEO, so the
+            // loop never busy-spins, and responses are handled with no added delay.
         }
 
         print("SSDP: Listener thread stopped")
@@ -195,7 +200,7 @@ public class SSDPDiscovery: @unchecked Sendable {
         M-SEARCH * HTTP/1.1\r
         HOST: \(Self.multicastGroup):\(Self.multicastPort)\r
         MAN: "ssdp:discover"\r
-        MX: 3\r
+        MX: 1\r
         ST: \(Self.searchTarget)\r
         \r
 
