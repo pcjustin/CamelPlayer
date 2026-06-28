@@ -77,7 +77,7 @@ class PlaybackViewModel: ObservableObject {
         do {
             controller = try PlaybackController()
             let defaults = UserDefaults.standard
-            controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 0.7
+            controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 1.0
             controller.bitPerfectMode = true
             controller.playbackMode = Self.mode(from: defaults.string(forKey: Keys.playbackMode)) ?? .sequential
             controller.onUPnPDevicesChanged = { [weak self] in
