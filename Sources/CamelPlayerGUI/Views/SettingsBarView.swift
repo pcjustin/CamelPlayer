@@ -86,19 +86,6 @@ struct SettingsBarView: View {
                 .frame(width: 120)
             }
 
-            Divider()
-                .frame(height: 20)
-
-            // Bit-Perfect Toggle
-            Toggle(isOn: Binding(
-                get: { viewModel.bitPerfectMode },
-                set: { viewModel.setBitPerfectMode($0) }
-            )) {
-                Text("Bit-Perfect")
-                    .font(.caption)
-            }
-            .toggleStyle(.checkbox)
-
             Spacer()
 
             // Add Files Button

@@ -42,7 +42,6 @@ class PlaybackViewModel: ObservableObject {
 
     private enum Keys {
         static let volume = "settings.volume"
-        static let bitPerfect = "settings.bitPerfect"
         static let playbackMode = "settings.playbackMode"
         static let outputDeviceID = "settings.outputDeviceID"
         static let favoriteAlbums = "library.favoriteAlbums"
@@ -79,7 +78,7 @@ class PlaybackViewModel: ObservableObject {
             controller = try PlaybackController()
             let defaults = UserDefaults.standard
             controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 0.7
-            controller.bitPerfectMode = defaults.object(forKey: Keys.bitPerfect) as? Bool ?? true
+            controller.bitPerfectMode = true
             controller.playbackMode = Self.mode(from: defaults.string(forKey: Keys.playbackMode)) ?? .sequential
             controller.onUPnPDevicesChanged = { [weak self] in
                 Task { @MainActor in self?.refreshDevices() }
@@ -728,12 +727,6 @@ class PlaybackViewModel: ObservableObject {
         controller.playbackMode = mode
         playbackMode = mode
         UserDefaults.standard.set(Self.string(for: mode), forKey: Keys.playbackMode)
-    }
-
-    func setBitPerfectMode(_ enabled: Bool) {
-        controller.bitPerfectMode = enabled
-        bitPerfectMode = enabled
-        UserDefaults.standard.set(enabled, forKey: Keys.bitPerfect)
     }
 
     // MARK: - Error Handling
