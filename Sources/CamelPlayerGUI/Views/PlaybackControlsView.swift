@@ -5,6 +5,17 @@ struct PlaybackControlsView: View {
 
     var body: some View {
         HStack(spacing: 18) {
+            // Shuffle
+            Button(action: {
+                viewModel.setShuffle(!viewModel.shuffle)
+            }) {
+                Image(systemName: "shuffle")
+                    .font(.title3)
+                    .foregroundColor(viewModel.shuffle ? .accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Shuffle")
+
             // Previous
             Button(action: {
                 viewModel.previous()
@@ -56,6 +67,17 @@ struct PlaybackControlsView: View {
             .buttonStyle(.plain)
             .disabled(viewModel.isStopped)
             .help("Stop")
+
+            // Loop (off → all → one)
+            Button(action: {
+                viewModel.cycleLoop()
+            }) {
+                Image(systemName: viewModel.loopMode == .one ? "repeat.1" : "repeat")
+                    .font(.title3)
+                    .foregroundColor(viewModel.loopMode == .off ? .secondary : .accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Loop: off / all / one")
         }
         .fixedSize()
     }

@@ -14,7 +14,8 @@ class PlaybackViewModel: ObservableObject {
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval?
     @Published var volume: Float = 0.7
-    @Published var playbackMode: PlaybackMode = .sequential
+    @Published var shuffle: Bool = false
+    @Published var loopMode: LoopMode = .off
     @Published var bitPerfectMode: Bool = true
     @Published var outputDevices: [OutputDevice] = []
     @Published var currentOutputDevice: OutputDevice?
@@ -42,7 +43,8 @@ class PlaybackViewModel: ObservableObject {
 
     private enum Keys {
         static let volume = "settings.volume"
-        static let playbackMode = "settings.playbackMode"
+        static let shuffle = "settings.shuffle"
+        static let loopMode = "settings.loopMode"
         static let outputDeviceID = "settings.outputDeviceID"
         static let favoriteAlbums = "library.favoriteAlbums"
         static let favoriteTracks = "library.favoriteTracks"
@@ -53,22 +55,19 @@ class PlaybackViewModel: ObservableObject {
     private let recentLimit = 50
     private var lastRecordedURL: String?
 
-    private static func mode(from string: String?) -> PlaybackMode? {
+    private static func loopMode(from string: String?) -> LoopMode {
         switch string {
-        case "sequential": return .sequential
-        case "loop": return .loop
-        case "loopOne": return .loopOne
-        case "shuffle": return .shuffle
-        default: return nil
+        case "all": return .all
+        case "one": return .one
+        default: return .off
         }
     }
 
-    private static func string(for mode: PlaybackMode) -> String {
-        switch mode {
-        case .sequential: return "sequential"
-        case .loop: return "loop"
-        case .loopOne: return "loopOne"
-        case .shuffle: return "shuffle"
+    private static func string(for loop: LoopMode) -> String {
+        switch loop {
+        case .off: return "off"
+        case .all: return "all"
+        case .one: return "one"
         }
     }
 
@@ -79,7 +78,8 @@ class PlaybackViewModel: ObservableObject {
             let defaults = UserDefaults.standard
             controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 1.0
             controller.bitPerfectMode = true
-            controller.playbackMode = Self.mode(from: defaults.string(forKey: Keys.playbackMode)) ?? .sequential
+            controller.shuffle = defaults.bool(forKey: Keys.shuffle)
+            controller.loopMode = Self.loopMode(from: defaults.string(forKey: Keys.loopMode))
             controller.onUPnPDevicesChanged = { [weak self] in
                 Task { @MainActor in self?.refreshDevices() }
             }
@@ -125,7 +125,8 @@ class PlaybackViewModel: ObservableObject {
         playlistItems = controller.getPlaylistItems()
         formatInfo = controller.getFileFormat()
         bitPerfectMode = controller.bitPerfectMode
-        playbackMode = controller.playbackMode
+        shuffle = controller.shuffle
+        loopMode = controller.loopMode
         volume = controller.volume
 
         // Record into recently played when the current track changes.
@@ -723,10 +724,23 @@ class PlaybackViewModel: ObservableObject {
         UserDefaults.standard.set(Double(newVolume), forKey: Keys.volume)
     }
 
-    func setPlaybackMode(_ mode: PlaybackMode) {
-        controller.playbackMode = mode
-        playbackMode = mode
-        UserDefaults.standard.set(Self.string(for: mode), forKey: Keys.playbackMode)
+    func setShuffle(_ on: Bool) {
+        controller.shuffle = on
+        shuffle = on
+        UserDefaults.standard.set(on, forKey: Keys.shuffle)
+    }
+
+    /// Cycles the loop control: off → all → one → off.
+    func cycleLoop() {
+        let next: LoopMode
+        switch loopMode {
+        case .off: next = .all
+        case .all: next = .one
+        case .one: next = .off
+        }
+        controller.loopMode = next
+        loopMode = next
+        UserDefaults.standard.set(Self.string(for: next), forKey: Keys.loopMode)
     }
 
     // MARK: - Error Handling
@@ -755,7 +769,7 @@ class PlaybackViewModel: ObservableObject {
 
     var canGoNext: Bool {
         let count = controller.getPlaylistCount()
-        return currentPosition < count - 1 || playbackMode == .loop || playbackMode == .shuffle
+        return currentPosition < count - 1 || loopMode != .off || shuffle
     }
 
     var canGoPrevious: Bool {

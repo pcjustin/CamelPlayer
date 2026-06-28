@@ -58,6 +58,16 @@ public class PlaybackController {
         set { playlist.mode = newValue }
     }
 
+    public var shuffle: Bool {
+        get { playlist.shuffle }
+        set { playlist.shuffle = newValue }
+    }
+
+    public var loopMode: LoopMode {
+        get { playlist.loopMode }
+        set { playlist.loopMode = newValue }
+    }
+
     public var volume: Float {
         get { currentEngine.volume }
         set { currentEngine.volume = newValue }

@@ -64,28 +64,6 @@ struct SettingsBarView: View {
                 .help("Refresh network devices")
             }
 
-            Divider()
-                .frame(height: 20)
-
-            // Playback Mode Picker
-            HStack(spacing: 4) {
-                Text("Mode:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(width: 50, alignment: .trailing)
-
-                Picker("", selection: Binding(
-                    get: { viewModel.playbackMode },
-                    set: { viewModel.setPlaybackMode($0) }
-                )) {
-                    Text("Sequential").tag(PlaybackMode.sequential)
-                    Text("Loop All").tag(PlaybackMode.loop)
-                    Text("Loop One").tag(PlaybackMode.loopOne)
-                    Text("Shuffle").tag(PlaybackMode.shuffle)
-                }
-                .frame(width: 120)
-            }
-
             Spacer()
 
             // Add Files Button
