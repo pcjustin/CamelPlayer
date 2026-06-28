@@ -50,6 +50,20 @@ struct AlbumsView: View {
         .padding(.horizontal).padding(.bottom, 8)
     }
 
+    private var serverPicker: some View {
+        Picker("", selection: Binding(
+            get: { viewModel.libraryServer?.id ?? "" },
+            set: { viewModel.setLibraryServer($0) }
+        )) {
+            ForEach(viewModel.mediaServers) { server in
+                Text(server.friendlyName).tag(server.id)
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 200)
+        .help("Library server")
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             if let album = selectedAlbum {
@@ -63,6 +77,9 @@ struct AlbumsView: View {
                 }
             }
             Spacer()
+            if selectedAlbum == nil && viewModel.mediaServers.count > 1 {
+                serverPicker
+            }
             if !embedded { Button("Done") { dismiss() } }
         }
         .padding()

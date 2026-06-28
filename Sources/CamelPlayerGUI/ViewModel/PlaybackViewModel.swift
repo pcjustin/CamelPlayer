@@ -27,6 +27,7 @@ class PlaybackViewModel: ObservableObject {
     @Published var currentAlbum: String?
     @Published var currentCoverURL: URL?
     @Published var mediaServers: [UPnPDevice] = []
+    @Published var libraryServerID: String? = UserDefaults.standard.string(forKey: Keys.libraryServerID)
     @Published var favoriteAlbums: [AlbumRef] = []
     @Published var favoriteTracks: [TrackRef] = []
     @Published var recentAlbums: [AlbumRef] = []
@@ -46,6 +47,7 @@ class PlaybackViewModel: ObservableObject {
         static let shuffle = "settings.shuffle"
         static let loopMode = "settings.loopMode"
         static let outputDeviceID = "settings.outputDeviceID"
+        static let libraryServerID = "settings.libraryServerID"
         static let favoriteAlbums = "library.favoriteAlbums"
         static let favoriteTracks = "library.favoriteTracks"
         static let recentAlbums = "library.recentAlbums"
@@ -636,8 +638,16 @@ class PlaybackViewModel: ObservableObject {
         }
     }
 
-    /// The media server used for album browsing (first discovered for now).
-    var libraryServer: UPnPDevice? { mediaServers.first }
+    /// The media server used for album browsing: the user-selected one if it is
+    /// currently discovered, otherwise the first discovered server.
+    var libraryServer: UPnPDevice? {
+        mediaServers.first { $0.id == libraryServerID } ?? mediaServers.first
+    }
+
+    func setLibraryServer(_ id: String) {
+        libraryServerID = id
+        UserDefaults.standard.set(id, forKey: Keys.libraryServerID)
+    }
 
     func albums(startingIndex: Int = 0, requestedCount: Int = 100) async -> PlaybackController.BrowsePage? {
         guard let server = libraryServer else { return nil }
