@@ -267,6 +267,7 @@ public class PlaybackController {
     /// Sets the output device (local or UPnP)
     public func setOutputDevice(_ device: OutputDevice) throws {
         // Stop current playback and carry the current volume over to the new engine.
+        let wasPlaying = currentEngine.state == .playing
         let currentVolume = currentEngine.volume
         currentEngine.stop()
 
@@ -292,8 +293,8 @@ public class PlaybackController {
 
         currentEngine.volume = currentVolume
 
-        // Resume playback if there was something playing
-        if let currentItem = playlist.currentItem {
+        // Resume playback only if something was actually playing
+        if wasPlaying, let currentItem = playlist.currentItem {
             Task {
                 do {
                     try await startPlaying(currentItem)

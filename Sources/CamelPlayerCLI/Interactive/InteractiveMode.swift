@@ -15,16 +15,25 @@ public class InteractiveMode {
         isRunning = true
         printWelcome()
 
-        while isRunning {
-            print("\n> ", terminator: "")
-            fflush(stdout)
+        // Read commands on a background thread so the main run loop stays free
+        // to deliver main-queue callbacks (track auto-advance, UPnP discovery).
+        Thread.detachNewThread { [self] in
+            while isRunning {
+                print("\n> ", terminator: "")
+                fflush(stdout)
 
-            guard let input = readLine() else {
-                break
+                guard let input = readLine() else {
+                    break
+                }
+
+                let command = parser.parse(input)
+                handleCommand(command)
             }
+            isRunning = false
+        }
 
-            let command = parser.parse(input)
-            handleCommand(command)
+        while isRunning {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
         }
 
         print("Goodbye!")

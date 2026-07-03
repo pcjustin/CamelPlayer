@@ -46,7 +46,9 @@ public struct PlayCommand: ParsableCommand {
                 print(String(format: "\rProgress: %.1f / %.1f seconds", current, total), terminator: "")
                 fflush(stdout)
 
-                Thread.sleep(forTimeInterval: 0.1)
+                // Pump the run loop so the main-queue completion that flips
+                // state to .stopped can actually run.
+                RunLoop.main.run(until: Date().addingTimeInterval(0.1))
             }
             print("\nPlayback finished.")
         } else {

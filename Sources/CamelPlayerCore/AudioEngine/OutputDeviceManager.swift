@@ -94,8 +94,14 @@ public class OutputDeviceManager {
             throw OutputDeviceError.propertyAccessFailed("Failed to get stream configuration size")
         }
 
-        let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
-        defer { bufferList.deallocate() }
+        // The property returns a variable-length AudioBufferList; allocate the
+        // reported size, not a single struct.
+        let rawBuffer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { rawBuffer.deallocate() }
+        let bufferList = rawBuffer.bindMemory(to: AudioBufferList.self, capacity: 1)
 
         status = AudioObjectGetPropertyData(
             deviceID,
