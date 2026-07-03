@@ -134,7 +134,8 @@ public class OutputDeviceManager {
         )
 
         let name: String
-        if status == kAudioHardwareNoError, let cfString = cfName?.takeUnretainedValue() {
+        // The Get call transfers ownership of the CFString to us.
+        if status == kAudioHardwareNoError, let cfString = cfName?.takeRetainedValue() {
             name = cfString as String
         } else {
             name = "Unknown Device"
