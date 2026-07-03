@@ -20,14 +20,14 @@ public class SSDPDiscovery: @unchecked Sendable {
 
     private var socketFD: Int32 = -1
     private var isDiscovering = false
+    /// Guarded by devicesLock: read on the listener thread, written from
+    /// concurrent description-fetch tasks.
     private var discoveredDevices: [String: UPnPDevice] = [:]
-    private var deviceParser: DeviceDescriptionParser?
+    private let devicesLock = NSLock()
     private var listenerThread: Thread?
     private var searchTimer: Timer?
 
-    public init() {
-        self.deviceParser = DeviceDescriptionParser()
-    }
+    public init() {}
 
     /// Starts SSDP discovery
     public func startDiscovery() {
@@ -76,7 +76,9 @@ public class SSDPDiscovery: @unchecked Sendable {
         searchTimer = nil
 
         closeSocket()
+        devicesLock.lock()
         discoveredDevices.removeAll()
+        devicesLock.unlock()
     }
 
     /// Creates a UDP socket for SSDP
@@ -306,7 +308,10 @@ public class SSDPDiscovery: @unchecked Sendable {
         let uuid = extractUUID(from: usn)
 
         // Avoid duplicates
-        guard discoveredDevices[uuid] == nil else {
+        devicesLock.lock()
+        let alreadyDiscovered = discoveredDevices[uuid] != nil
+        devicesLock.unlock()
+        guard !alreadyDiscovered else {
             coreLog("SSDP: Device already discovered: \(uuid)")
             return
         }
@@ -335,7 +340,9 @@ public class SSDPDiscovery: @unchecked Sendable {
         do {
             let (data, _) = try await URLSession.shared.data(from: location)
 
-            guard let parser = deviceParser else { return }
+            // Fresh parser per fetch: concurrent fetches sharing one stateful
+            // parser corrupt each other's fields.
+            let parser = DeviceDescriptionParser()
 
             if let device = await parser.parse(data: data, location: location, uuid: uuid) {
                 coreLog("SSDP: Parsed device: \(device.friendlyName)")
@@ -347,7 +354,7 @@ public class SSDPDiscovery: @unchecked Sendable {
                 // Keep renderers (AVTransport) and servers (ContentDirectory).
                 if device.avTransportURL != nil || device.contentDirectoryURL != nil {
                     coreLog("SSDP: Adding \(device.deviceType) device to list")
-                    discoveredDevices[uuid] = device
+                    storeDevice(device, uuid: uuid)
                     DispatchQueue.main.async {
                         self.delegate?.ssdpDiscovery(self, didDiscoverDevice: device)
                     }
@@ -362,8 +369,17 @@ public class SSDPDiscovery: @unchecked Sendable {
         }
     }
 
+    /// Records a parsed device (sync so the lock is usable from async callers).
+    private func storeDevice(_ device: UPnPDevice, uuid: String) {
+        devicesLock.lock()
+        discoveredDevices[uuid] = device
+        devicesLock.unlock()
+    }
+
     /// Gets all discovered devices
     public func getDiscoveredDevices() -> [UPnPDevice] {
+        devicesLock.lock()
+        defer { devicesLock.unlock() }
         return Array(discoveredDevices.values)
     }
 
