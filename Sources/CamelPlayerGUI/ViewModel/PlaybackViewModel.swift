@@ -188,6 +188,9 @@ class PlaybackViewModel: ObservableObject {
     }
 
     private func loadEmbeddedArtwork(from url: URL) -> NSImage? {
+        // AVAsset metadata loading is synchronous; for a remote URL it would
+        // block the main thread on network I/O. Remote covers come from DIDL.
+        guard url.isFileURL else { return nil }
         let asset = AVAsset(url: url)
 
         // Get all metadata formats
