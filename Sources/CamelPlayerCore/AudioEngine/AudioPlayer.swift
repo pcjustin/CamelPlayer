@@ -26,7 +26,12 @@ public class AudioPlayer {
     public private(set) var currentURL: URL?
     public var bitPerfectMode: Bool = true
     public var onPlaybackFinished: (() -> Void)?
-    private var isManuallyStopped = false
+
+    /// Bumped on every (re)schedule and stop. AVAudioPlayerNode fires pending
+    /// completion handlers when the node is stopped, so each handler captures
+    /// the generation it was scheduled under and ignores the callback if it is
+    /// no longer current (our own stop/seek/replay, not a natural finish).
+    private var scheduleGeneration = 0
 
     /// Frame offset of the currently scheduled segment, used so currentTime
     /// reflects the absolute position after a seek.
@@ -135,6 +140,10 @@ public class AudioPlayer {
             throw AudioPlayerError.fileLoadError("No audio file loaded")
         }
 
+        // Invalidate any pending completion before stop() fires it.
+        scheduleGeneration += 1
+        let generation = scheduleGeneration
+
         playerNode.stop()
 
         let mainMixer = engine.mainMixerNode
@@ -181,24 +190,11 @@ public class AudioPlayer {
 
         segmentStartFrame = 0
 
-        // Capture the URL so a stale completion handler from a previous file
-        // can't clobber the state of the current playback.
-        let scheduledURL = currentURL
-
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
-                guard let self = self else { return }
-
-                guard self.currentURL == scheduledURL else {
-                    return
-                }
-
+                guard let self = self, self.scheduleGeneration == generation else { return }
                 self.state = .stopped
-                // Only auto-advance when playback ended on its own.
-                if !self.isManuallyStopped {
-                    self.onPlaybackFinished?()
-                }
-                self.isManuallyStopped = false
+                self.onPlaybackFinished?()
             }
         }
 
@@ -236,7 +232,7 @@ public class AudioPlayer {
     }
 
     public func stop() {
-        isManuallyStopped = true
+        scheduleGeneration += 1
         playerNode.stop()
         state = .stopped
     }
@@ -254,7 +250,10 @@ public class AudioPlayer {
         }
 
         let wasPlaying = state == .playing
-        let scheduledURL = currentURL
+
+        // Invalidate the pending completion before stop() fires it.
+        scheduleGeneration += 1
+        let generation = scheduleGeneration
 
         playerNode.stop()
 
@@ -266,15 +265,9 @@ public class AudioPlayer {
                                    frameCount: frameCount,
                                    at: nil) { [weak self] in
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                // Ignore completions from a segment that is no longer current.
-                guard self.currentURL == scheduledURL else { return }
-
+                guard let self = self, self.scheduleGeneration == generation else { return }
                 self.state = .stopped
-                if !self.isManuallyStopped {
-                    self.onPlaybackFinished?()
-                }
-                self.isManuallyStopped = false
+                self.onPlaybackFinished?()
             }
         }
 
