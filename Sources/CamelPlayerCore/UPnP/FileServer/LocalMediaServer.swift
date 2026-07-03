@@ -4,8 +4,10 @@ import Swifter
 /// HTTP server for sharing local media files with UPnP devices
 public class LocalMediaServer {
     private let server: HttpServer
+    /// Guarded by filesLock: written by callers, read on Swifter's request threads.
     private var sharedFiles: [String: URL] = [:]
     private var nextID = 1
+    private let filesLock = NSLock()
     private let preferredPort: UInt16
     private let portRange: UInt16 = 10
     private var activePort: UInt16
@@ -36,8 +38,10 @@ public class LocalMediaServer {
                 return .notFound
             }
 
-            guard let id = request.params[":id"],
-                  let fileURL = self.sharedFiles[id] else {
+            self.filesLock.lock()
+            let sharedURL = request.params[":id"].flatMap { self.sharedFiles[$0] }
+            self.filesLock.unlock()
+            guard let fileURL = sharedURL else {
                 return .notFound
             }
 
@@ -166,7 +170,9 @@ public class LocalMediaServer {
         guard _isRunning else { return }
         server.stop()
         _isRunning = false
+        filesLock.lock()
         sharedFiles.removeAll()
+        filesLock.unlock()
     }
 
     /// Shares a local file and returns its HTTP URL
@@ -175,10 +181,17 @@ public class LocalMediaServer {
     public func shareFile(_ fileURL: URL) throws -> URL {
         coreLog("HTTP Server: Sharing file: \(fileURL.lastPathComponent)")
 
-        let id = String(nextID)
-        nextID += 1
-
-        sharedFiles[id] = fileURL
+        filesLock.lock()
+        let id: String
+        if let existing = sharedFiles.first(where: { $0.value == fileURL })?.key {
+            // Already shared (e.g. re-played or preloaded): reuse the entry.
+            id = existing
+        } else {
+            id = String(nextID)
+            nextID += 1
+            sharedFiles[id] = fileURL
+        }
+        filesLock.unlock()
 
         guard let ip = getLocalIPAddress() else {
             coreLog("HTTP Server: ERROR - Cannot determine local IP address")
@@ -198,13 +211,17 @@ public class LocalMediaServer {
     /// Removes a shared file
     /// - Parameter id: File ID to remove
     public func unshareFile(id: String) {
+        filesLock.lock()
         sharedFiles.removeValue(forKey: id)
+        filesLock.unlock()
     }
 
     /// Removes all shared files
     public func unshareAll() {
+        filesLock.lock()
         sharedFiles.removeAll()
         nextID = 1
+        filesLock.unlock()
     }
 
     /// Gets the local IP address
@@ -232,14 +249,17 @@ public class LocalMediaServer {
         for ifptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
             let interface = ifptr.pointee
 
+            // Some interfaces (utun, awdl) report no address at all.
+            guard let ifaAddr = interface.ifa_addr else { continue }
+
             // Check for IPv4 interface
-            let addrFamily = interface.ifa_addr.pointee.sa_family
+            let addrFamily = ifaAddr.pointee.sa_family
             if addrFamily == UInt8(AF_INET) {
                 // Get interface name
                 let name = String(cString: interface.ifa_name)
 
                 var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                getnameinfo(ifaAddr, socklen_t(ifaAddr.pointee.sa_len),
                            &hostname, socklen_t(hostname.count),
                            nil, socklen_t(0), NI_NUMERICHOST)
                 let ipAddress = String(cString: hostname)
