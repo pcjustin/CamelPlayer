@@ -15,6 +15,9 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
     private var pollingTimer: Timer?
     private var sharedFileURL: URL?
+    /// When the volume was last set locally; the poll skips reading the
+    /// renderer volume shortly after so it doesn't snap the slider back.
+    private var lastVolumeSetAt = Date.distantPast
     /// Bumped on each loadAndPlay so a poll started before a track switch can't
     /// mistake our own stop() for the previous track finishing.
     private var generation = 0
@@ -44,6 +47,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         }
         set {
             _volume = max(0, min(1, newValue))
+            lastVolumeSetAt = Date()
             let volumeInt = Int(_volume * 100)
             Task {
                 try? await renderingControl?.setVolume(volumeInt)
@@ -273,7 +277,8 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             }
 
             // Get volume if available
-            if let renderingControl = renderingControl {
+            if let renderingControl = renderingControl,
+               Date().timeIntervalSince(lastVolumeSetAt) > 2 {
                 let volumeInt = try? await renderingControl.getVolume()
                 if let volumeInt = volumeInt {
                     _volume = Float(volumeInt) / 100.0

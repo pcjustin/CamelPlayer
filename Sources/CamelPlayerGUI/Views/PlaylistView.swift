@@ -70,11 +70,13 @@ struct PlaylistView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
+                let indexByID = Dictionary(uniqueKeysWithValues:
+                    viewModel.playlistItems.enumerated().map { ($1.id, $0) })
                 List {
                     // Iterate the Identifiable collection directly (not an
                     // enumerated() wrapper) so macOS List drag-to-reorder works.
                     ForEach(viewModel.playlistItems) { item in
-                        let index = viewModel.playlistItems.firstIndex { $0.id == item.id } ?? 0
+                        let index = indexByID[item.id] ?? 0
                         let isCurrent = viewModel.currentItem?.id == item.id
                         HStack {
                             // Play indicator
