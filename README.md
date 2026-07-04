@@ -159,7 +159,6 @@ All formats are supported natively through AVFoundation.
 ## Known Limitations
 
 ### GUI
-- No media key support (hardware play/pause keys)
 - No waveform visualization
 
 These features may be added in future versions.
