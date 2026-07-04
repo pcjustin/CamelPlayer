@@ -151,6 +151,13 @@ public class PlaybackController {
         currentEngine.setNextTrack(url: next?.url, metadata: next?.metadata)
     }
 
+    /// Re-syncs the preloaded next track after anything that changes what
+    /// peekNext returns (shuffle/loop toggles, playlist edits).
+    public func refreshPreloadedNext() {
+        guard currentEngine.state != .stopped else { return }
+        setNextOnEngine()
+    }
+
     /// The renderer gaplessly advanced to the preloaded next track: move our
     /// pointer to match and preload the following one.
     private func handleAdvancedToNext() {

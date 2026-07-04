@@ -90,14 +90,24 @@ public class LocalPlaybackEngine: PlaybackEngine {
     }
 
     public var onStateChanged: ((PlaybackState) -> Void)?
-    public var onAdvancedToNext: (() -> Void)?
+
+    public var onAdvancedToNext: (() -> Void)? {
+        get {
+            audioPlayer.onAdvancedToNext
+        }
+        set {
+            audioPlayer.onAdvancedToNext = newValue
+        }
+    }
 
     public init(audioPlayer: AudioPlayer) {
         self.audioPlayer = audioPlayer
     }
 
-    // Local playback isn't gapless yet; preloading is a no-op.
-    public func setNextTrack(url: URL?, metadata: String?) {}
+    // Metadata is DIDL for UPnP renderers; local playback doesn't need it.
+    public func setNextTrack(url: URL?, metadata: String?) {
+        audioPlayer.setNextTrack(url: url)
+    }
 
     public func loadAndPlay(url: URL, metadata: String?) async throws {
         // Local Core Audio playback can only read local files; a network (NAS)
