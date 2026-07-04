@@ -20,7 +20,7 @@ A Swift audio player for macOS with both **CLI** and **native GUI** interfaces, 
 
 ## Requirements
 
-- macOS 12.0 or later (GUI) / macOS 10.15 or later (CLI only)
+- macOS 12.0 or later
 - Swift 5.9 or later
 - Xcode Command Line Tools
 
@@ -64,10 +64,9 @@ open CamelPlayer.app
 - **Interactive Seek Bar**: Click or drag to seek to any position with time display
 - **Volume Slider**: Visual volume control with percentage display
 - **Playlist View**: Scrollable track list with current track highlighting
+- **Shuffle and Loop Toggles**: Independent shuffle and loop (off / all / one) controls in the transport bar
 - **Settings Panel**:
-  - Audio output device selection dropdown
-  - Playback mode selector (Sequential, Loop All, Loop One, Shuffle)
-  - Bit-perfect mode toggle
+  - Audio output device selection dropdown (local and UPnP renderers)
   - Add files and folders buttons
 - **Error Handling**: User-friendly error alerts for unsupported formats or missing files
 
@@ -275,8 +274,6 @@ All formats are supported natively through AVFoundation.
 ## Known Limitations
 
 ### GUI
-- No album art extraction (shows placeholder icon)
-- No drag-and-drop support (use file picker buttons)
 - No media key support (hardware play/pause keys)
 - No waveform visualization
 
