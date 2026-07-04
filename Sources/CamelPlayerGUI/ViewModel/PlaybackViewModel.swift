@@ -17,7 +17,6 @@ class PlaybackViewModel: ObservableObject {
     @Published var volume: Float = 0.7
     @Published var shuffle: Bool = false
     @Published var loopMode: LoopMode = .off
-    @Published var bitPerfectMode: Bool = true
     @Published var outputDevices: [OutputDevice] = []
     @Published var currentOutputDevice: OutputDevice?
     @Published var errorMessage: String?
@@ -83,7 +82,6 @@ class PlaybackViewModel: ObservableObject {
             controller = try PlaybackController()
             let defaults = UserDefaults.standard
             controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 1.0
-            controller.bitPerfectMode = true
             controller.shuffle = defaults.bool(forKey: Keys.shuffle)
             controller.loopMode = Self.loopMode(from: defaults.string(forKey: Keys.loopMode))
             controller.onUPnPDevicesChanged = { [weak self] in
@@ -142,7 +140,6 @@ class PlaybackViewModel: ObservableObject {
             saveQueue()
         }
         formatInfo = controller.getFileFormat()
-        bitPerfectMode = controller.bitPerfectMode
         shuffle = controller.shuffle
         loopMode = controller.loopMode
         volume = controller.volume

@@ -48,11 +48,11 @@ struct NowPlayingView: View {
                         .foregroundColor(.secondary)
                 }
 
-                if viewModel.bitPerfectMode && viewModel.formatInfo != nil {
+                if viewModel.formatInfo != nil {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                         .font(.caption)
-                        .help("Bit-perfect mode active")
+                        .help("Bit-perfect playback")
                 }
             }
 

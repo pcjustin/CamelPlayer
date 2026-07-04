@@ -533,11 +533,6 @@ public class PlaybackController {
         return added
     }
 
-    public var bitPerfectMode: Bool {
-        get { player.bitPerfectMode }
-        set { player.bitPerfectMode = newValue }
-    }
-
     public func getCurrentDeviceSampleRate() throws -> Float64 {
         try player.getCurrentDeviceSampleRate()
     }
