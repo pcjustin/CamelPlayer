@@ -24,7 +24,6 @@ public class AudioPlayer {
 
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
-    public var bitPerfectMode: Bool = true
     public var onPlaybackFinished: (() -> Void)?
 
     /// Bumped on every (re)schedule and stop. AVAudioPlayerNode fires pending
@@ -161,33 +160,33 @@ public class AudioPlayer {
 
         engine.disconnectNodeOutput(playerNode)
 
-        if bitPerfectMode {
+        // Bit-perfect: match the device stream format to the file so playback
+        // needs no resampling. Always on.
+        do {
+            let currentDeviceID = try deviceManager.getCurrentOutputDevice()
+
+            let currentFormat = try deviceManager.getDeviceStreamFormat(deviceID: currentDeviceID)
+            let fileSampleRate = format.sampleRate
+
+            let needsFormatChange = abs(currentFormat.mSampleRate - fileSampleRate) > 0.1
+
+            if needsFormatChange {
+                try deviceManager.setDeviceStreamFormat(deviceID: currentDeviceID, format: format)
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+        } catch {
+            coreLog("Warning: Failed to set bit-perfect format: \(error.localizedDescription)")
             do {
                 let currentDeviceID = try deviceManager.getCurrentOutputDevice()
-
-                let currentFormat = try deviceManager.getDeviceStreamFormat(deviceID: currentDeviceID)
+                let currentSampleRate = try deviceManager.getDeviceSampleRate(deviceID: currentDeviceID)
                 let fileSampleRate = format.sampleRate
 
-                let needsFormatChange = abs(currentFormat.mSampleRate - fileSampleRate) > 0.1
-
-                if needsFormatChange {
-                    try deviceManager.setDeviceStreamFormat(deviceID: currentDeviceID, format: format)
+                if abs(currentSampleRate - fileSampleRate) > 0.1 {
+                    try deviceManager.setDeviceSampleRate(deviceID: currentDeviceID, sampleRate: fileSampleRate)
                     Thread.sleep(forTimeInterval: 0.15)
                 }
             } catch {
-                coreLog("Warning: Failed to set bit-perfect format: \(error.localizedDescription)")
-                do {
-                    let currentDeviceID = try deviceManager.getCurrentOutputDevice()
-                    let currentSampleRate = try deviceManager.getDeviceSampleRate(deviceID: currentDeviceID)
-                    let fileSampleRate = format.sampleRate
-
-                    if abs(currentSampleRate - fileSampleRate) > 0.1 {
-                        try deviceManager.setDeviceSampleRate(deviceID: currentDeviceID, sampleRate: fileSampleRate)
-                        Thread.sleep(forTimeInterval: 0.15)
-                    }
-                } catch {
-                    coreLog("Warning: Fallback to sample rate only also failed: \(error.localizedDescription)")
-                }
+                coreLog("Warning: Fallback to sample rate only also failed: \(error.localizedDescription)")
             }
         }
 
