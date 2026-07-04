@@ -250,7 +250,7 @@ public class SSDPDiscovery: @unchecked Sendable {
         guard let firstLine = lines.first else { return }
 
         if firstLine.hasPrefix("NOTIFY") {
-            coreLog("SSDP: Received NOTIFY (ignored)")
+            handleNotify(lines)
             return
         }
 
@@ -319,6 +319,33 @@ public class SSDPDiscovery: @unchecked Sendable {
         // Fetch and parse device description
         Task {
             await fetchDeviceDescription(uuid: uuid, location: locationURL)
+        }
+    }
+
+    /// Handles NOTIFY messages: ssdp:byebye drops the device and informs the
+    /// delegate. ssdp:alive is ignored — M-SEARCH already finds devices.
+    private func handleNotify(_ lines: [String]) {
+        var nts: String?
+        var usn: String?
+        for line in lines {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].trimmingCharacters(in: .whitespaces).uppercased()
+            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            if key == "NTS" { nts = value } else if key == "USN" { usn = value }
+        }
+
+        guard nts?.contains("byebye") == true, let usn = usn else { return }
+
+        let uuid = extractUUID(from: usn)
+        devicesLock.lock()
+        let removed = discoveredDevices.removeValue(forKey: uuid)
+        devicesLock.unlock()
+        guard let device = removed else { return }
+
+        coreLog("SSDP: Device left the network: \(device.friendlyName)")
+        DispatchQueue.main.async {
+            self.delegate?.ssdpDiscovery(self, didRemoveDevice: device)
         }
     }
 
