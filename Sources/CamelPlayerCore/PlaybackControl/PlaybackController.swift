@@ -486,6 +486,12 @@ public class PlaybackController {
         playlist.currentPosition
     }
 
+    /// Moves the current-track pointer without starting playback (used when
+    /// restoring a saved queue).
+    public func setPlaylistPosition(_ index: Int) {
+        _ = playlist.jumpTo(index: index)
+    }
+
     public func clearPlaylist() {
         playlist.clear()
     }
