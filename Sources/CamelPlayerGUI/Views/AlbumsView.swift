@@ -48,6 +48,14 @@ struct AlbumsView: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
         .padding(.horizontal).padding(.bottom, 8)
+        // Debounced search-as-you-type; changing the text cancels the task.
+        .task(id: searchText) {
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard query != searchQuery else { return }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            if query.isEmpty { clearSearch() } else { runSearch() }
+        }
     }
 
     private var serverPicker: some View {
