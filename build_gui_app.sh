@@ -53,25 +53,26 @@ mkdir -p "$RESOURCES_DIR"
 echo "Copying executable..."
 cp "$BIN_PATH/CamelPlayerGUI" "$MACOS_DIR/CamelPlayer"
 
-# Generate app icon from logo.png, caching the .icns so it is only regenerated
-# when logo.png changes (the bundle is recreated on every run).
+# Generate app icon from logo.jpg, caching the .icns so it is only regenerated
+# when logo.jpg changes (the bundle is recreated on every run).
 ICON_CACHE=".build/AppIcon.icns"
-if [ -f "logo.png" ]; then
-    if [ ! -f "$ICON_CACHE" ] || [ "logo.png" -nt "$ICON_CACHE" ]; then
+if [ -f "logo.jpg" ]; then
+    if [ ! -f "$ICON_CACHE" ] || [ "logo.jpg" -nt "$ICON_CACHE" ]; then
         echo "Generating app icon..."
         ICONSET="$(mktemp -d)/AppIcon.iconset"
         mkdir -p "$ICONSET"
 
-        sips -z 16 16     logo.png --out "$ICONSET/icon_16x16.png" > /dev/null 2>&1
-        sips -z 32 32     logo.png --out "$ICONSET/icon_16x16@2x.png" > /dev/null 2>&1
-        sips -z 32 32     logo.png --out "$ICONSET/icon_32x32.png" > /dev/null 2>&1
-        sips -z 64 64     logo.png --out "$ICONSET/icon_32x32@2x.png" > /dev/null 2>&1
-        sips -z 128 128   logo.png --out "$ICONSET/icon_128x128.png" > /dev/null 2>&1
-        sips -z 256 256   logo.png --out "$ICONSET/icon_128x128@2x.png" > /dev/null 2>&1
-        sips -z 256 256   logo.png --out "$ICONSET/icon_256x256.png" > /dev/null 2>&1
-        sips -z 512 512   logo.png --out "$ICONSET/icon_256x256@2x.png" > /dev/null 2>&1
-        sips -z 512 512   logo.png --out "$ICONSET/icon_512x512.png" > /dev/null 2>&1
-        sips -z 1024 1024 logo.png --out "$ICONSET/icon_512x512@2x.png" > /dev/null 2>&1
+        # -s format png: iconutil needs real PNGs, not JPEG data in .png names.
+        sips -s format png -z 16 16     logo.jpg --out "$ICONSET/icon_16x16.png" > /dev/null 2>&1
+        sips -s format png -z 32 32     logo.jpg --out "$ICONSET/icon_16x16@2x.png" > /dev/null 2>&1
+        sips -s format png -z 32 32     logo.jpg --out "$ICONSET/icon_32x32.png" > /dev/null 2>&1
+        sips -s format png -z 64 64     logo.jpg --out "$ICONSET/icon_32x32@2x.png" > /dev/null 2>&1
+        sips -s format png -z 128 128   logo.jpg --out "$ICONSET/icon_128x128.png" > /dev/null 2>&1
+        sips -s format png -z 256 256   logo.jpg --out "$ICONSET/icon_128x128@2x.png" > /dev/null 2>&1
+        sips -s format png -z 256 256   logo.jpg --out "$ICONSET/icon_256x256.png" > /dev/null 2>&1
+        sips -s format png -z 512 512   logo.jpg --out "$ICONSET/icon_256x256@2x.png" > /dev/null 2>&1
+        sips -s format png -z 512 512   logo.jpg --out "$ICONSET/icon_512x512.png" > /dev/null 2>&1
+        sips -s format png -z 1024 1024 logo.jpg --out "$ICONSET/icon_512x512@2x.png" > /dev/null 2>&1
 
         iconutil -c icns "$ICONSET" -o "$ICON_CACHE"
         rm -rf "$ICONSET"
@@ -81,7 +82,7 @@ if [ -f "logo.png" ]; then
     cp "$ICON_CACHE" "$RESOURCES_DIR/AppIcon.icns"
     echo "✅ App icon ready"
 else
-    echo "⚠️  logo.png not found, skipping icon generation"
+    echo "⚠️  logo.jpg not found, skipping icon generation"
 fi
 
 # Derive version metadata from git when available

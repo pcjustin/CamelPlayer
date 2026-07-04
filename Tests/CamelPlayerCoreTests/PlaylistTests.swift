@@ -115,6 +115,22 @@ final class PlaylistTests: XCTestCase {
         }
     }
 
+    func testShufflePreviousWalksHistory() {
+        let urls = (1...5).map { URL(fileURLWithPath: "/test/song\($0).mp3") }
+        urls.forEach { playlist.add(url: $0) }
+        playlist.mode = .shuffle
+
+        let first = playlist.currentItem
+        let second = playlist.next()
+        _ = playlist.next()
+
+        // previous() retraces the actual play order, not a random jump.
+        XCTAssertEqual(playlist.previous()?.id, second?.id)
+        XCTAssertEqual(playlist.previous()?.id, first?.id)
+        // History exhausted: stay on the current track.
+        XCTAssertEqual(playlist.previous()?.id, first?.id)
+    }
+
     func testShuffleSingleItemReturnsItself() {
         let url = URL(fileURLWithPath: "/test/only.mp3")
         playlist.add(url: url)

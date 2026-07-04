@@ -48,11 +48,13 @@ struct NowPlayingView: View {
                         .foregroundColor(.secondary)
                 }
 
-                if viewModel.formatInfo != nil {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                if let bitPerfect = viewModel.isBitPerfect {
+                    Image(systemName: bitPerfect ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(bitPerfect ? .green : .yellow)
                         .font(.caption)
-                        .help("Bit-perfect playback")
+                        .help(bitPerfect
+                              ? "Bit-perfect: device sample rate matches the file"
+                              : "Resampling: device sample rate does not match the file")
                 }
             }
 

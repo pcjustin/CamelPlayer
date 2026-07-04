@@ -25,6 +25,15 @@ public class AudioPlayer {
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
     public var onPlaybackFinished: (() -> Void)?
+    /// Fired when playback advanced gaplessly into the preloaded next track.
+    public var onAdvancedToNext: (() -> Void)?
+
+    // Gapless: the preloaded next track. Only files matching the current
+    // format can be queued on the node; others go through the normal
+    // finish path (a sample-rate switch needs a full engine reconnect).
+    private var nextFile: AVAudioFile?
+    private var nextURL: URL?
+    private var nextScheduled = false
 
     /// Bumped on every (re)schedule and stop. AVAudioPlayerNode fires pending
     /// completion handlers when the node is stopped, so each handler captures
@@ -149,6 +158,10 @@ public class AudioPlayer {
         let generation = scheduleGeneration
 
         playerNode.stop()
+        // stop() cleared the node queue, so any preloaded next is gone.
+        nextFile = nil
+        nextURL = nil
+        nextScheduled = false
 
         let mainMixer = engine.mainMixerNode
         let format = file.processingFormat
@@ -197,9 +210,7 @@ public class AudioPlayer {
 
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
-                guard let self = self, self.scheduleGeneration == generation else { return }
-                self.state = .stopped
-                self.onPlaybackFinished?()
+                self?.handleFileCompleted(generation: generation)
             }
         }
 
@@ -239,6 +250,9 @@ public class AudioPlayer {
     public func stop() {
         scheduleGeneration += 1
         playerNode.stop()
+        nextFile = nil
+        nextURL = nil
+        nextScheduled = false
         state = .stopped
     }
 
@@ -271,11 +285,13 @@ public class AudioPlayer {
                                    frameCount: frameCount,
                                    at: nil) { [weak self] in
             DispatchQueue.main.async {
-                guard let self = self, self.scheduleGeneration == generation else { return }
-                self.state = .stopped
-                self.onPlaybackFinished?()
+                self?.handleFileCompleted(generation: generation)
             }
         }
+
+        // stop() above cleared the node queue; requeue the preloaded next.
+        nextScheduled = false
+        scheduleNextIfNeeded()
 
         // Preserve the prior state: only resume the node if we were playing.
         if wasPlaying {
@@ -284,6 +300,76 @@ public class AudioPlayer {
             }
             playerNode.play()
             state = .playing
+        }
+    }
+
+    // MARK: - Gapless preloading
+
+    /// Preloads the next track. Only local files whose format matches the
+    /// current one are queued on the node; anything else clears the preload
+    /// so that track goes through the normal finish path instead.
+    public func setNextTrack(url: URL?) {
+        if url == nextURL { return }
+
+        let mustReanchor = nextScheduled
+        // Clear the preload before re-anchoring so seek() doesn't requeue it.
+        nextFile = nil
+        nextURL = nil
+        nextScheduled = false
+        if mustReanchor {
+            // The old next is already queued on the node and the only way to
+            // unqueue it is to stop and re-anchor the current file.
+            try? seek(to: currentTime)
+        }
+
+        guard let url = url, url.isFileURL,
+              let current = audioFile,
+              let file = try? AVAudioFile(forReading: url),
+              abs(file.processingFormat.sampleRate - current.processingFormat.sampleRate) < 0.1,
+              file.processingFormat.channelCount == current.processingFormat.channelCount else {
+            return
+        }
+
+        nextFile = file
+        nextURL = url
+        scheduleNextIfNeeded()
+    }
+
+    private func scheduleNextIfNeeded() {
+        guard !nextScheduled, let file = nextFile, state != .stopped else { return }
+        nextScheduled = true
+        let generation = scheduleGeneration
+        playerNode.scheduleFile(file, at: nil) { [weak self] in
+            DispatchQueue.main.async {
+                self?.handleFileCompleted(generation: generation)
+            }
+        }
+    }
+
+    /// A scheduled file finished rendering: either hand over to the queued
+    /// next track (the node is already playing it) or report the finish.
+    private func handleFileCompleted(generation: Int) {
+        guard scheduleGeneration == generation else { return }
+
+        if let file = nextFile, let url = nextURL, nextScheduled {
+            audioFile = file
+            currentURL = url
+            nextFile = nil
+            nextURL = nil
+            nextScheduled = false
+            // Re-zero currentTime: playerTime keeps counting across queued
+            // files, so offset by what has been rendered so far.
+            if let nodeTime = playerNode.lastRenderTime,
+               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
+                segmentStartFrame = -playerTime.sampleTime
+            } else {
+                segmentStartFrame = 0
+            }
+            lastKnownTime = 0
+            onAdvancedToNext?()
+        } else {
+            state = .stopped
+            onPlaybackFinished?()
         }
     }
 
