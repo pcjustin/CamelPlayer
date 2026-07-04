@@ -9,17 +9,9 @@ let package = Package(
         .macOS(.v12)
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
         .package(url: "https://github.com/httpswift/swifter.git", from: "1.5.0")
     ],
     targets: [
-        .executableTarget(
-            name: "CamelPlayer",
-            dependencies: [
-                "CamelPlayerCore",
-                "CamelPlayerCLI"
-            ]
-        ),
         .executableTarget(
             name: "CamelPlayerGUI",
             dependencies: ["CamelPlayerCore"],
@@ -31,20 +23,9 @@ let package = Package(
                 .product(name: "Swifter", package: "swifter")
             ]
         ),
-        .target(
-            name: "CamelPlayerCLI",
-            dependencies: [
-                "CamelPlayerCore",
-                .product(name: "ArgumentParser", package: "swift-argument-parser")
-            ]
-        ),
         .testTarget(
             name: "CamelPlayerCoreTests",
             dependencies: ["CamelPlayerCore"]
-        ),
-        .testTarget(
-            name: "CamelPlayerCLITests",
-            dependencies: ["CamelPlayerCLI", "CamelPlayerCore"]
         ),
     ]
 )

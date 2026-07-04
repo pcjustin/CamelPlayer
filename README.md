@@ -1,6 +1,6 @@
 # CamelPlayer
 
-A Swift audio player for macOS with both **CLI** and **native GUI** interfaces, featuring independent audio output device control and bit-perfect playback using Core Audio APIs.
+A native macOS audio player featuring independent audio output device control and bit-perfect playback using Core Audio APIs.
 
 ## Features
 
@@ -11,12 +11,6 @@ A Swift audio player for macOS with both **CLI** and **native GUI** interfaces, 
 - **Multiple Audio Formats**: Support for MP3, WAV, M4A, FLAC, and ALAC (including high-res 192kHz/24bit)
 - **Volume Control**: Independent volume control that doesn't affect system volume
 - **Playback Modes**: Sequential, loop, loop-one, and shuffle
-
-### Interface Options
-
-- **Native macOS GUI**: SwiftUI-based graphical interface with reactive controls
-- **Interactive CLI**: Terminal-based interface with command shortcuts
-- **Command-Line Mode**: Direct playback via command-line arguments
 
 ## Requirements
 
@@ -33,31 +27,19 @@ A Swift audio player for macOS with both **CLI** and **native GUI** interfaces, 
 git clone https://github.com/yourusername/camelplayer.git
 cd camelplayer
 
-# Build CLI version
-swift build -c release
-
-# Install CLI to /usr/local/bin (optional)
-sudo cp .build/release/CamelPlayer /usr/local/bin/camelplayer
-
-# Build GUI version
+# Build the .app bundle (prompts to install to /Applications)
 ./build_gui_app.sh
 ```
 
 ## Usage
 
-### GUI Mode (Recommended)
-
-Launch the native macOS app:
+Launch the app:
 
 ```bash
-# Build the .app bundle (prompts to install to /Applications)
-./build_gui_app.sh
-
-# Then open it
 open CamelPlayer.app
 ```
 
-#### GUI Features
+### GUI Features
 
 - **Now Playing Display**: Shows current track, audio format, and bit-perfect status indicator
 - **Playback Controls**: Large touch-friendly play/pause, next, previous, and stop buttons
@@ -69,95 +51,6 @@ open CamelPlayer.app
   - Audio output device selection dropdown (local and UPnP renderers)
   - Add files and folders buttons
 - **Error Handling**: User-friendly error alerts for unsupported formats or missing files
-
-### Interactive CLI Mode
-
-Start CamelPlayer in interactive mode for full terminal control:
-
-```bash
-camelplayer
-```
-
-or explicitly:
-
-```bash
-camelplayer interactive
-```
-
-#### Interactive Commands
-
-**Playback Control:**
-- `play` or `p` - Play current track
-- `play <index>` - Play track at specified index
-- `pause` - Pause playback
-- `resume` or `r` - Resume playback
-- `stop` or `s` - Stop playback
-- `next` or `n` - Play next track
-- `previous` or `prev` - Play previous track
-- `seek <time>` - Seek to position (seconds or MM:SS format)
-
-**Playlist Management:**
-- `add <path>` or `a <path>` - Add file(s) or folder to playlist (automatically scans folders for audio files)
-- `list` or `l` - Show playlist
-- `remove <index>` or `rm <index>` - Remove item from playlist
-- `clear` - Clear entire playlist
-
-**Settings:**
-- `volume <0-100>` or `vol <0-100>` - Set volume
-- `mode <mode>` or `m <mode>` - Set playback mode
-  - `sequential` or `seq` - Play tracks in order
-  - `loop` or `l` - Loop entire playlist
-  - `loopone` or `one` - Loop current track
-  - `shuffle` or `sh` - Random playback
-- `device [id]` or `dev [id]` - List or set output device
-- `bitperfect [on|off]` or `bp [on|off]` - Enable/disable bit-perfect mode (default: ON)
-
-**Information:**
-- `info` or `i` - Show audio format and bit-perfect status
-- `status` or `st` - Show playback status
-- `help` or `h` or `?` - Show help message
-
-**Other:**
-- `quit` or `q` or `exit` - Exit interactive mode
-
-### Command-Line Mode
-
-#### Play a Single File
-
-```bash
-camelplayer play song.mp3
-```
-
-Wait for playback to finish:
-
-```bash
-camelplayer play --wait song.mp3
-```
-
-Play on specific output device:
-
-```bash
-camelplayer play --device 72 song.mp3
-```
-
-#### List Audio Devices
-
-```bash
-camelplayer devices
-```
-
-Output example:
-```
-Available audio output devices:
-
-  [84] LG IPS FULLHD
-* [72] MacBook Air Speakers
-  [123] CADefaultDeviceAggregate-29235-0
-
-Legend:
-  * Current device
-  → System default device
-```
 
 ## Architecture
 
@@ -178,14 +71,13 @@ SwiftUI Views ←→ PlaybackViewModel (ObservableObject) ←→ PlaybackControl
   - Uses `@Published` properties to drive UI updates
   - Polls `PlaybackController` every 100ms to sync state
   - Handles user actions and errors
-- **PlaybackController**: Core playback logic (shared with CLI)
+- **PlaybackController**: Core playback logic
 
 ### Core Technologies
 
 - **SwiftUI**: Modern declarative UI framework for the GUI
 - **AVFoundation**: Audio file handling and playback engine (AVAudioEngine, AVAudioPlayerNode)
 - **Core Audio**: Independent output device control using AudioUnit API
-- **Swift ArgumentParser**: Command-line interface and argument parsing
 - **Swift Package Manager**: Build system and dependency management
 
 ### Key Technical Implementation
@@ -233,15 +125,11 @@ This ensures that state remains `.playing` throughout the entire load-play cycle
 ### Build for Development
 
 ```bash
-# Build CLI
 swift build
-
-# Build GUI
-swift build --product CamelPlayerGUI
 
 # Or use Xcode
 open Package.swift
-# Select CamelPlayerGUI or CamelPlayer scheme
+# Select the CamelPlayerGUI scheme
 ```
 
 ### Run Tests
@@ -253,10 +141,7 @@ swift test
 ### Run in Debug Mode
 
 ```bash
-# CLI
-swift run CamelPlayer
-
-# GUI (note: requires building .app bundle)
+# The GUI must run from an .app bundle
 ./build_gui_app.sh
 open CamelPlayer.app
 ```
