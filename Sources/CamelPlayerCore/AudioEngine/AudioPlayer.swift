@@ -48,15 +48,20 @@ public class AudioPlayer {
         return frameCount / sampleRate
     }
 
+    /// Last position computed while the node was rendering; reported while
+    /// paused, when playerTime(forNodeTime:) is unavailable.
+    private var lastKnownTime: TimeInterval = 0
+
     public var currentTime: TimeInterval {
         guard let nodeTime = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
               let file = audioFile else {
-            return 0
+            return state == .stopped ? 0 : lastKnownTime
         }
 
         let sampleRate = file.processingFormat.sampleRate
-        return Double(playerTime.sampleTime + segmentStartFrame) / sampleRate
+        lastKnownTime = Double(playerTime.sampleTime + segmentStartFrame) / sampleRate
+        return lastKnownTime
     }
 
     public init() throws {
@@ -189,6 +194,7 @@ public class AudioPlayer {
         engine.connect(playerNode, to: mainMixer, format: format)
 
         segmentStartFrame = 0
+        lastKnownTime = 0
 
         playerNode.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
@@ -259,6 +265,7 @@ public class AudioPlayer {
 
         let frameCount = AVAudioFrameCount(file.length - startFrame)
         segmentStartFrame = startFrame
+        lastKnownTime = time
 
         playerNode.scheduleSegment(file,
                                    startingFrame: startFrame,
