@@ -124,7 +124,12 @@ class PlaybackViewModel: ObservableObject {
         currentTime = controller.currentTime
         duration = controller.duration
         currentPosition = controller.getCurrentPosition()
-        playlistItems = controller.getPlaylistItems()
+        // Reassign only on change: publishing a fresh array every 100ms makes
+        // SwiftUI re-diff the whole list constantly.
+        let items = controller.getPlaylistItems()
+        if items.map(\.id) != playlistItems.map(\.id) {
+            playlistItems = items
+        }
         formatInfo = controller.getFileFormat()
         bitPerfectMode = controller.bitPerfectMode
         shuffle = controller.shuffle
