@@ -17,6 +17,9 @@ class PlaybackViewModel: ObservableObject {
     @Published var volume: Float = 0.7
     @Published var shuffle: Bool = false
     @Published var loopMode: LoopMode = .off
+    /// True when the device sample rate matches the file (no resampling),
+    /// false when it does not, nil when unknown (stopped or UPnP output).
+    @Published var isBitPerfect: Bool?
     @Published var outputDevices: [OutputDevice] = []
     @Published var currentOutputDevice: OutputDevice?
     @Published var errorMessage: String?
@@ -138,8 +141,11 @@ class PlaybackViewModel: ObservableObject {
         if items.map(\.id) != playlistItems.map(\.id) {
             playlistItems = items
             saveQueue()
+            // Any edit can change which track comes next.
+            controller.refreshPreloadedNext()
         }
         formatInfo = controller.getFileFormat()
+        updateBitPerfectStatus()
         shuffle = controller.shuffle
         loopMode = controller.loopMode
         volume = controller.volume
@@ -228,6 +234,21 @@ class PlaybackViewModel: ObservableObject {
 
         center.nowPlayingInfo = info
         center.playbackState = isPlaying ? .playing : (isPaused ? .paused : .stopped)
+    }
+
+    /// Compares the device and file sample rates so the indicator reports
+    /// whether playback is actually bit-perfect, not just attempted.
+    private func updateBitPerfectStatus() {
+        var status: Bool?
+        if case .local = controller.currentOutputDevice.type,
+           playbackState != .stopped,
+           let fileRate = controller.getFileSampleRate(),
+           let deviceRate = try? controller.getCurrentDeviceSampleRate() {
+            status = abs(fileRate - deviceRate) < 0.1
+        }
+        if status != isBitPerfect {
+            isBitPerfect = status
+        }
     }
 
     private func loadAlbumArt() {
@@ -856,6 +877,7 @@ class PlaybackViewModel: ObservableObject {
     func setShuffle(_ on: Bool) {
         controller.shuffle = on
         shuffle = on
+        controller.refreshPreloadedNext()
         UserDefaults.standard.set(on, forKey: Keys.shuffle)
     }
 
@@ -869,6 +891,7 @@ class PlaybackViewModel: ObservableObject {
         }
         controller.loopMode = next
         loopMode = next
+        controller.refreshPreloadedNext()
         UserDefaults.standard.set(Self.string(for: next), forKey: Keys.loopMode)
     }
 
@@ -902,7 +925,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     var canGoPrevious: Bool {
-        return currentPosition > 0
+        return currentPosition > 0 || shuffle
     }
 
     var isPlaying: Bool {
