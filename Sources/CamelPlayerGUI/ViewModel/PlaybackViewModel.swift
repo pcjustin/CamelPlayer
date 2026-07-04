@@ -47,6 +47,7 @@ class PlaybackViewModel: ObservableObject {
         static let shuffle = "settings.shuffle"
         static let loopMode = "settings.loopMode"
         static let outputDeviceID = "settings.outputDeviceID"
+        static let queuePosition = "queue.position"
         static let libraryServerID = "settings.libraryServerID"
         static let favoriteAlbums = "library.favoriteAlbums"
         static let favoriteTracks = "library.favoriteTracks"
@@ -123,12 +124,18 @@ class PlaybackViewModel: ObservableObject {
         currentItem = controller.currentItem
         currentTime = controller.currentTime
         duration = controller.duration
-        currentPosition = controller.getCurrentPosition()
+        let position = controller.getCurrentPosition()
+        if position != currentPosition {
+            currentPosition = position
+            UserDefaults.standard.set(position, forKey: Keys.queuePosition)
+        }
         // Reassign only on change: publishing a fresh array every 100ms makes
-        // SwiftUI re-diff the whole list constantly.
+        // SwiftUI re-diff the whole list constantly. Persist the queue on the
+        // same signal so it survives quits and crashes.
         let items = controller.getPlaylistItems()
         if items.map(\.id) != playlistItems.map(\.id) {
             playlistItems = items
+            saveQueue()
         }
         formatInfo = controller.getFileFormat()
         bitPerfectMode = controller.bitPerfectMode
@@ -227,12 +234,35 @@ class PlaybackViewModel: ObservableObject {
     }
 
     private func loadInitialState() {
+        restoreQueue()
         updateState()
         refreshDevices()
         refreshMediaServers()
         loadCoverCache()
         loadFavorites()
         loadRecent()
+    }
+
+    // MARK: - Queue persistence
+
+    private var queueFile: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CamelPlayer", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("queue.json")
+    }
+
+    private func saveQueue() {
+        try? controller.exportPlaylist(to: queueFile)
+    }
+
+    private func restoreQueue() {
+        let restored = (try? controller.importPlaylist(from: queueFile)) ?? 0
+        guard restored > 0 else { return }
+        let position = UserDefaults.standard.integer(forKey: Keys.queuePosition)
+        controller.setPlaylistPosition(min(max(0, position), restored - 1))
+        // Remember the restored track so it isn't re-recorded as newly played.
+        lastRecordedURL = controller.currentItem?.url.absoluteString
     }
 
     // MARK: - Recently played

@@ -72,69 +72,76 @@ struct PlaylistView: View {
             } else {
                 let indexByID = Dictionary(uniqueKeysWithValues:
                     viewModel.playlistItems.enumerated().map { ($1.id, $0) })
-                List {
-                    // Iterate the Identifiable collection directly (not an
-                    // enumerated() wrapper) so macOS List drag-to-reorder works.
-                    ForEach(viewModel.playlistItems) { item in
-                        let index = indexByID[item.id] ?? 0
-                        let isCurrent = viewModel.currentItem?.id == item.id
-                        HStack {
-                            // Play indicator
-                            if isCurrent {
-                                Image(systemName: viewModel.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-                                    .foregroundColor(.accentColor)
-                                    .font(.caption)
-                                    .frame(width: 20)
-                            } else {
-                                Text("\(index + 1)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 20)
+                ScrollViewReader { proxy in
+                    List {
+                        // Iterate the Identifiable collection directly (not an
+                        // enumerated() wrapper) so macOS List drag-to-reorder works.
+                        ForEach(viewModel.playlistItems) { item in
+                            let index = indexByID[item.id] ?? 0
+                            let isCurrent = viewModel.currentItem?.id == item.id
+                            HStack {
+                                // Play indicator
+                                if isCurrent {
+                                    Image(systemName: viewModel.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+                                        .foregroundColor(.accentColor)
+                                        .font(.caption)
+                                        .frame(width: 20)
+                                } else {
+                                    Text("\(index + 1)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 20)
+                                }
+
+                                // Track title
+                                Text(item.title)
+                                    .lineLimit(1)
+                                    .foregroundColor(isCurrent ? .accentColor : .primary)
+                                    .font(isCurrent ? .body.weight(.semibold) : .body)
+
+                                Spacer()
+
+                                // Reorder buttons (native List drag is unreliable on macOS)
+                                Button {
+                                    viewModel.movePlaylistItem(fromOffsets: IndexSet(integer: index), toOffset: index - 1)
+                                } label: {
+                                    Image(systemName: "chevron.up").font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(index == 0)
+                                .help("Move up")
+
+                                Button {
+                                    viewModel.movePlaylistItem(fromOffsets: IndexSet(integer: index), toOffset: index + 2)
+                                } label: {
+                                    Image(systemName: "chevron.down").font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(index == viewModel.playlistItems.count - 1)
+                                .help("Move down")
                             }
-
-                            // Track title
-                            Text(item.title)
-                                .lineLimit(1)
-                                .foregroundColor(isCurrent ? .accentColor : .primary)
-                                .font(isCurrent ? .body.weight(.semibold) : .body)
-
-                            Spacer()
-
-                            // Reorder buttons (native List drag is unreliable on macOS)
-                            Button {
-                                viewModel.movePlaylistItem(fromOffsets: IndexSet(integer: index), toOffset: index - 1)
-                            } label: {
-                                Image(systemName: "chevron.up").font(.caption)
+                            .contentShape(Rectangle())
+                            // Double-click to play.
+                            .onTapGesture(count: 2) {
+                                viewModel.playItem(at: index)
                             }
-                            .buttonStyle(.borderless)
-                            .disabled(index == 0)
-                            .help("Move up")
-
-                            Button {
-                                viewModel.movePlaylistItem(fromOffsets: IndexSet(integer: index), toOffset: index + 2)
-                            } label: {
-                                Image(systemName: "chevron.down").font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(index == viewModel.playlistItems.count - 1)
-                            .help("Move down")
                         }
-                        .contentShape(Rectangle())
-                        // Double-click to play.
-                        .onTapGesture(count: 2) {
-                            viewModel.playItem(at: index)
+                        .onDelete { indexSet in
+                            for index in indexSet {
+                                viewModel.removeFromPlaylist(at: index)
+                            }
+                        }
+                        .onMove { from, to in
+                            viewModel.movePlaylistItem(fromOffsets: from, toOffset: to)
                         }
                     }
-                    .onDelete { indexSet in
-                        for index in indexSet {
-                            viewModel.removeFromPlaylist(at: index)
-                        }
-                    }
-                    .onMove { from, to in
-                        viewModel.movePlaylistItem(fromOffsets: from, toOffset: to)
+                    .listStyle(.inset)
+                    // Keep the playing track visible when it changes.
+                    .onChange(of: viewModel.currentPosition) { _ in
+                        guard let id = viewModel.currentItem?.id else { return }
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
-                .listStyle(.inset)
             }
         }
     }
