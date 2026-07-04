@@ -53,11 +53,6 @@ public class PlaybackController {
         playlist.currentItem
     }
 
-    public var playbackMode: PlaybackMode {
-        get { playlist.mode }
-        set { playlist.mode = newValue }
-    }
-
     public var shuffle: Bool {
         get { playlist.shuffle }
         set { playlist.shuffle = newValue }
