@@ -5,8 +5,8 @@ import Swifter
 public class LocalMediaServer {
     private let server: HttpServer
     /// Guarded by filesLock: written by callers, read on Swifter's request threads.
+    /// Keys are random UUIDs so LAN peers cannot enumerate shared files.
     private var sharedFiles: [String: URL] = [:]
-    private var nextID = 1
     private let filesLock = NSLock()
     private let preferredPort: UInt16
     private let portRange: UInt16 = 10
@@ -187,8 +187,7 @@ public class LocalMediaServer {
             // Already shared (e.g. re-played or preloaded): reuse the entry.
             id = existing
         } else {
-            id = String(nextID)
-            nextID += 1
+            id = UUID().uuidString
             sharedFiles[id] = fileURL
         }
         filesLock.unlock()
@@ -220,7 +219,6 @@ public class LocalMediaServer {
     public func unshareAll() {
         filesLock.lock()
         sharedFiles.removeAll()
-        nextID = 1
         filesLock.unlock()
     }
 
