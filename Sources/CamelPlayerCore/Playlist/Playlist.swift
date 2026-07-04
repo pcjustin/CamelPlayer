@@ -21,10 +21,17 @@ public class Playlist {
     private var _shuffle: Bool = false
     private var _loop: LoopMode = .off
     private var _shufflePlayed: Set<UUID> = []
+    private var _shuffleHistory: [UUID] = []
 
     public var shuffle: Bool {
         get { withLock { _shuffle } }
-        set { withLock { _shuffle = newValue; _shufflePlayed.removeAll() } }
+        set {
+            withLock {
+                _shuffle = newValue
+                _shufflePlayed.removeAll()
+                _shuffleHistory.removeAll()
+            }
+        }
     }
 
     public var loopMode: LoopMode {
@@ -49,6 +56,7 @@ public class Playlist {
         set {
             withLock {
                 _shufflePlayed.removeAll()
+                _shuffleHistory.removeAll()
                 switch newValue {
                 case .sequential: _shuffle = false; _loop = .off
                 case .loop: _shuffle = false; _loop = .all
@@ -126,6 +134,7 @@ public class Playlist {
             items.removeAll()
             currentIndex = -1
             _shufflePlayed.removeAll()
+            _shuffleHistory.removeAll()
         }
     }
 
@@ -151,7 +160,10 @@ public class Playlist {
     /// Random next within the current shuffle cycle. A track is not repeated
     /// until the cycle is exhausted; then loop-all refills it and loop-off stops.
     private func shuffleNextLocked() -> PlaylistItem? {
-        if let current = currentItemLocked { _shufflePlayed.insert(current.id) }
+        if let current = currentItemLocked {
+            _shufflePlayed.insert(current.id)
+            _shuffleHistory.append(current.id)
+        }
         var candidates = items.indices.filter {
             $0 != currentIndex && !_shufflePlayed.contains(items[$0].id)
         }
@@ -182,9 +194,15 @@ public class Playlist {
 
             if _loop == .one { return items[currentIndex] }
             if _shuffle {
-                // ponytail: previous in shuffle = fresh random jump, no back-history
-                currentIndex = randomIndexLocked()
-                return items[currentIndex]
+                // Walk back through the shuffle history, skipping tracks that
+                // have since been removed. No history left = stay put.
+                while let lastID = _shuffleHistory.popLast() {
+                    if let index = items.firstIndex(where: { $0.id == lastID }) {
+                        currentIndex = index
+                        return items[currentIndex]
+                    }
+                }
+                return currentItemLocked
             }
 
             if currentIndex > 0 {
@@ -197,17 +215,6 @@ public class Playlist {
             }
             return nil
         }
-    }
-
-    /// Picks a random index, avoiding an immediate repeat of the current track
-    /// when more than one item is available.
-    private func randomIndexLocked() -> Int {
-        guard items.count > 1 else { return 0 }
-        var index = Int.random(in: 0..<items.count)
-        while index == currentIndex {
-            index = Int.random(in: 0..<items.count)
-        }
-        return index
     }
 
     /// Reorders items, keeping the currently playing track current.
@@ -234,6 +241,7 @@ public class Playlist {
             guard index >= 0 && index < items.count else { return nil }
             currentIndex = index
             _shufflePlayed.removeAll()
+            _shuffleHistory.removeAll()
             return items[currentIndex]
         }
     }
