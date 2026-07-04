@@ -3,6 +3,7 @@ import Foundation
 import CamelPlayerCore
 import CoreAudio
 import AVFoundation
+import MediaPlayer
 
 @MainActor
 class PlaybackViewModel: ObservableObject {
@@ -39,6 +40,8 @@ class PlaybackViewModel: ObservableObject {
     private let updateInterval: TimeInterval = 0.1 // 100ms
     private var lastLoadedCoverPath: String?
     private var hasRestoredOutputDevice = false
+    private var currentArtist: String?
+    private var lastNowPlayingKey: String?
 
     // MARK: - Persisted settings
 
@@ -90,6 +93,7 @@ class PlaybackViewModel: ObservableObject {
                 Task { @MainActor in self?.refreshMediaServers() }
             }
             loadInitialState()
+            setupRemoteCommands()
             startPolling()
         } catch {
             fatalError("Failed to initialize PlaybackController: \(error)")
@@ -151,12 +155,89 @@ class PlaybackViewModel: ObservableObject {
 
         // Load album art if current track changed
         loadAlbumArt()
+
+        // Refresh the system Now Playing panel only when state or track
+        // changes; the system extrapolates elapsed time from the rate.
+        let nowPlayingKey = "\(playbackState)-\(currentItem?.id.uuidString ?? "none")"
+        if nowPlayingKey != lastNowPlayingKey {
+            lastNowPlayingKey = nowPlayingKey
+            updateNowPlaying()
+        }
+    }
+
+    // MARK: - System Now Playing / media keys
+
+    private func setupRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, !self.isPlaying else { return }
+                self.togglePlayPause()
+            }
+            return .success
+        }
+        center.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.pause() }
+            return .success
+        }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.togglePlayPause() }
+            return .success
+        }
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.next() }
+            return .success
+        }
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.previous() }
+            return .success
+        }
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
+            }
+            Task { @MainActor in self?.seek(to: event.positionTime) }
+            return .success
+        }
+    }
+
+    private func updateNowPlaying() {
+        let center = MPNowPlayingInfoCenter.default()
+        guard let item = currentItem else {
+            center.nowPlayingInfo = nil
+            center.playbackState = .stopped
+            return
+        }
+
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: item.title,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0
+        ]
+        if let album = currentAlbum, !album.isEmpty {
+            info[MPMediaItemPropertyAlbumTitle] = album
+        }
+        if let artist = currentArtist, !artist.isEmpty {
+            info[MPMediaItemPropertyArtist] = artist
+        }
+        if let duration = duration {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+        }
+        // Local/embedded art, or a remote cover the UI has already cached.
+        if let image = albumArt
+            ?? currentCoverURL.flatMap({ ImageCache.memory.object(forKey: $0 as NSURL) }) {
+            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        }
+
+        center.nowPlayingInfo = info
+        center.playbackState = isPlaying ? .playing : (isPaused ? .paused : .stopped)
     }
 
     private func loadAlbumArt() {
         guard let currentItem = currentItem else {
             albumArt = nil
             currentAlbum = nil
+            currentArtist = nil
             currentCoverURL = nil
             lastLoadedCoverPath = nil
             return
@@ -170,6 +251,7 @@ class PlaybackViewModel: ObservableObject {
         // Album name + remote cover (for network tracks) come from the DIDL.
         let parsed = currentItem.metadata.flatMap { DIDLParser().parse($0).first }
         currentAlbum = parsed?.album
+        currentArtist = parsed?.artist
         currentCoverURL = parsed?.albumArtURI.flatMap { URL(string: $0) }
 
         let folderURL = currentItem.url.deletingLastPathComponent()
@@ -508,6 +590,8 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.seek(to: time)
+                // Re-anchor the system panel's extrapolated elapsed time.
+                updateNowPlaying()
             } catch let error as AudioPlayerError {
                 handleAudioPlayerError(error)
             } catch {
