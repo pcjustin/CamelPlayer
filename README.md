@@ -1,6 +1,6 @@
 # CamelPlayer
 
-A native macOS audio player featuring independent audio output device control and bit-perfect playback using Core Audio APIs.
+A native audio player featuring independent audio output device control and bit-perfect playback, for macOS (Core Audio / SwiftUI) and Linux (ALSA / GTK4).
 
 ## Features
 
@@ -14,13 +14,24 @@ A native macOS audio player featuring independent audio output device control an
 
 ## Requirements
 
+### macOS
+
 - macOS 12.0 or later
 - Swift 5.9 or later
 - Xcode Command Line Tools
 
+### Linux (Ubuntu)
+
+- Swift 6 (`sudo apt install swiftlang` on Ubuntu 24.10 or later)
+- GTK4, ALSA and libsndfile development packages:
+
+```bash
+sudo apt install libgtk-4-dev libasound2-dev libsndfile1-dev
+```
+
 ## Installation
 
-### Build from Source
+### Build from Source (macOS)
 
 ```bash
 # Clone the repository
@@ -31,12 +42,26 @@ cd camelplayer
 ./build_gui_app.sh
 ```
 
+### Build from Source (Linux)
+
+```bash
+git clone https://github.com/yourusername/camelplayer.git
+cd camelplayer
+swift build
+```
+
 ## Usage
 
-Launch the app:
+Launch the app on macOS:
 
 ```bash
 open CamelPlayer.app
+```
+
+Launch the app on Linux:
+
+```bash
+swift run CamelPlayerGTK
 ```
 
 ### GUI Features
@@ -75,10 +100,24 @@ SwiftUI Views ←→ PlaybackViewModel (ObservableObject) ←→ PlaybackControl
 
 ### Core Technologies
 
-- **SwiftUI**: Modern declarative UI framework for the GUI
-- **AVFoundation**: Audio file handling and playback engine (AVAudioEngine, AVAudioPlayerNode)
-- **Core Audio**: Independent output device control using AudioUnit API
+- **SwiftUI**: Modern declarative UI framework for the GUI (macOS)
+- **AVFoundation**: Audio file handling and playback engine (AVAudioEngine, AVAudioPlayerNode) (macOS)
+- **Core Audio**: Independent output device control using AudioUnit API (macOS)
+- **GTK4**: GUI toolkit for the Linux front end, called through a small C shim
+- **ALSA + libsndfile**: Decoding and bit-perfect PCM output on Linux
 - **Swift Package Manager**: Build system and dependency management
+
+### Linux Port
+
+`CamelPlayerCore` (playlist, UPnP discovery/browsing/playback, media server)
+is shared between both platforms. Platform differences are confined to:
+
+- `AudioPlayer`: AVAudioEngine on macOS, ALSA + libsndfile on Linux. The
+  Linux backend opens the PCM device at the file's sample rate with software
+  resampling disabled (S32_LE preferred), so `hw:` devices play bit-perfect.
+- The GUI: SwiftUI (`CamelPlayerGUI`) on macOS, GTK4 (`CamelPlayerGTK`) on
+  Linux. The GTK front end covers transport controls, seek, volume, the
+  playlist and output device selection.
 
 ### Key Technical Implementation
 
@@ -150,16 +189,22 @@ open CamelPlayer.app
 
 - **MP3**: MPEG Audio Layer 3
 - **WAV**: Waveform Audio File Format
-- **M4A**: MPEG-4 Audio
-- **ALAC**: Apple Lossless Audio Codec
+- **M4A**: MPEG-4 Audio (macOS only)
+- **ALAC**: Apple Lossless Audio Codec (macOS only)
 - **FLAC**: Free Lossless Audio Codec (macOS 10.13+)
 
-All formats are supported natively through AVFoundation.
+macOS decodes through AVFoundation; Linux decodes through libsndfile, which
+does not read M4A/ALAC.
 
 ## Known Limitations
 
 ### GUI
 - No waveform visualization
+
+### Linux
+- No M4A/ALAC decoding
+- No gapless playback for local files
+- Selecting a `hw:` device opens it exclusively while playing
 
 These features may be added in future versions.
 
