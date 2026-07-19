@@ -73,10 +73,18 @@ public class LocalPlaybackEngine: PlaybackEngine {
 
     public var volume: Float {
         get {
+            #if os(macOS)
             audioPlayer.mixerNode.outputVolume
+            #else
+            audioPlayer.volume
+            #endif
         }
         set {
+            #if os(macOS)
             audioPlayer.mixerNode.outputVolume = newValue
+            #else
+            audioPlayer.volume = newValue
+            #endif
         }
     }
 

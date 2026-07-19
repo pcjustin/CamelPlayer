@@ -1,6 +1,8 @@
+import Foundation
+#if os(macOS)
 import AVFoundation
 import CoreAudio
-import Foundation
+#endif
 
 // MARK: - Output Device Types
 

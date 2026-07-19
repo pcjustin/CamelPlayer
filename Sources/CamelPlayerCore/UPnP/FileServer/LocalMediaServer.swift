@@ -252,12 +252,13 @@ public class LocalMediaServer {
 
             // Check for IPv4 interface
             let addrFamily = ifaAddr.pointee.sa_family
-            if addrFamily == UInt8(AF_INET) {
+            if addrFamily == sa_family_t(AF_INET) {
                 // Get interface name
                 let name = String(cString: interface.ifa_name)
 
                 var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                getnameinfo(ifaAddr, socklen_t(ifaAddr.pointee.sa_len),
+                // sockaddr.sa_len is BSD-only; AF_INET length is sockaddr_in on all platforms.
+                getnameinfo(ifaAddr, socklen_t(MemoryLayout<sockaddr_in>.size),
                            &hostname, socklen_t(hostname.count),
                            nil, socklen_t(0), NI_NUMERICHOST)
                 let ipAddress = String(cString: hostname)

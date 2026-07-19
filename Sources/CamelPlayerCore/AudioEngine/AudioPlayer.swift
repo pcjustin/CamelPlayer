@@ -1,6 +1,8 @@
+import Foundation
+#if os(macOS)
 import AVFoundation
 import CoreAudio
-import Foundation
+#endif
 
 public enum PlaybackState: Sendable {
     case stopped
@@ -15,6 +17,8 @@ public enum AudioPlayerError: Error {
     case fileLoadError(String)
     case remoteURLRequiresRenderer
 }
+
+#if os(macOS)
 
 public class AudioPlayer {
     private let engine = AVAudioEngine()
@@ -378,3 +382,52 @@ public class AudioPlayer {
         engine.stop()
     }
 }
+
+#else
+
+// ponytail: stub so Core builds on Linux; UPnP playback works without it.
+// Replace with an ALSA backend for local playback.
+public class AudioPlayer {
+    public private(set) var state: PlaybackState = .stopped
+    public private(set) var currentURL: URL?
+    public var onPlaybackFinished: (() -> Void)?
+    public var onAdvancedToNext: (() -> Void)?
+    public var volume: Float = 1.0
+
+    public var duration: TimeInterval? { nil }
+    public var currentTime: TimeInterval { 0 }
+
+    public init() throws {}
+
+    public func listOutputDevices() throws -> [AudioDevice] { [] }
+    public func setOutputDevice(deviceID: AudioDeviceID) throws {}
+    public func getCurrentOutputDevice() throws -> AudioDeviceID { 0 }
+    public func getDefaultOutputDevice() throws -> AudioDeviceID { 0 }
+    public func getCurrentDeviceSampleRate() throws -> Float64 { 0 }
+    public func getFileSampleRate() -> Float64? { nil }
+    public func getFileFormat() -> String? { nil }
+
+    public func load(url: URL) throws {
+        throw AudioPlayerError.audioEngineError("Local playback is not supported on Linux yet")
+    }
+
+    public func loadAndPlay(url: URL) throws {
+        throw AudioPlayerError.audioEngineError("Local playback is not supported on Linux yet")
+    }
+
+    public func play() throws {
+        throw AudioPlayerError.audioEngineError("Local playback is not supported on Linux yet")
+    }
+
+    public func pause() {}
+
+    public func stop() {
+        state = .stopped
+    }
+
+    public func seek(to time: TimeInterval) throws {}
+
+    public func setNextTrack(url: URL?) {}
+}
+
+#endif
