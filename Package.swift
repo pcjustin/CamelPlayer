@@ -16,7 +16,7 @@ var targets: [Target] = [
     ),
 ]
 
-// The SwiftUI GUI only builds on macOS; Linux uses CamelPlayerCore directly.
+// The SwiftUI GUI only builds on macOS; Linux gets a GTK4 front end.
 #if os(macOS)
 targets.append(
     .executableTarget(
@@ -25,6 +25,18 @@ targets.append(
         path: "Sources/CamelPlayerGUI"
     )
 )
+#else
+targets.append(contentsOf: [
+    .systemLibrary(
+        name: "CGtk4",
+        pkgConfig: "gtk4",
+        providers: [.apt(["libgtk-4-dev"])]
+    ),
+    .executableTarget(
+        name: "CamelPlayerGTK",
+        dependencies: ["CGtk4", "CamelPlayerCore"]
+    ),
+])
 #endif
 
 let package = Package(
