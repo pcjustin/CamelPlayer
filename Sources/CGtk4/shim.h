@@ -114,6 +114,26 @@ static inline int cp_list_box_row_index(gpointer row) {
     return gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(row));
 }
 
+static inline GtkWidget *cp_notebook_new(void) {
+    return gtk_notebook_new();
+}
+
+static inline void cp_notebook_append(GtkWidget *nb, GtkWidget *child, const char *label) {
+    gtk_notebook_append_page(GTK_NOTEBOOK(nb), child, gtk_label_new(label));
+}
+
+static inline const char *cp_editable_get_text(GtkWidget *w) {
+    return gtk_editable_get_text(GTK_EDITABLE(w));
+}
+
+static inline void cp_editable_set_text(GtkWidget *w, const char *t) {
+    gtk_editable_set_text(GTK_EDITABLE(w), t);
+}
+
+static inline void cp_label_ellipsize_end(GtkWidget *label) {
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+}
+
 static inline void cp_file_dialog_open_multiple(GtkWidget *parent,
                                                 GAsyncReadyCallback cb, gpointer data) {
     GtkFileDialog *d = gtk_file_dialog_new();
