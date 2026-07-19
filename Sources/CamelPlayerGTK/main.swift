@@ -32,6 +32,48 @@ private func connect(_ widget: UnsafeMutablePointer<GtkWidget>?, _ signal: Strin
     connectRaw(UnsafeMutableRawPointer(widget), signal, notify: notify, handler)
 }
 
+private final class ValueBox {
+    let handler: (Double) -> Void
+    init(_ handler: @escaping (Double) -> Void) { self.handler = handler }
+}
+
+/* change-value carries (GtkScrollType, double) and fires only on user
+   interaction, so programmatic set_value cannot loop back into a seek. */
+private func connectChangeValue(_ widget: UnsafeMutablePointer<GtkWidget>?,
+                                _ handler: @escaping (Double) -> Void) {
+    let box = Unmanaged.passRetained(ValueBox(handler)).toOpaque()
+    let call: @convention(c) (UnsafeMutableRawPointer?, UInt32, Double, UnsafeMutableRawPointer?) -> gboolean = { _, _, value, data in
+        Unmanaged<ValueBox>.fromOpaque(data!).takeUnretainedValue().handler(value)
+        return 0
+    }
+    let drop: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void = { data, _ in
+        Unmanaged<ValueBox>.fromOpaque(data!).release()
+    }
+    _ = cp_signal_connect(UnsafeMutableRawPointer(widget), "change-value",
+                          unsafeBitCast(call, to: GCallback.self), box,
+                          unsafeBitCast(drop, to: GClosureNotify.self))
+}
+
+private final class RowBox {
+    let handler: (Int) -> Void
+    init(_ handler: @escaping (Int) -> Void) { self.handler = handler }
+}
+
+private func connectRowActivated(_ widget: UnsafeMutablePointer<GtkWidget>?,
+                                 _ handler: @escaping (Int) -> Void) {
+    let box = Unmanaged.passRetained(RowBox(handler)).toOpaque()
+    let call: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void = { _, row, data in
+        Unmanaged<RowBox>.fromOpaque(data!).takeUnretainedValue()
+            .handler(Int(cp_list_box_row_index(row)))
+    }
+    let drop: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void = { data, _ in
+        Unmanaged<RowBox>.fromOpaque(data!).release()
+    }
+    _ = cp_signal_connect(UnsafeMutableRawPointer(widget), "row-activated",
+                          unsafeBitCast(call, to: GCallback.self), box,
+                          unsafeBitCast(drop, to: GClosureNotify.self))
+}
+
 final class PlayerApp {
     private let controller: PlaybackController
 
@@ -40,9 +82,16 @@ final class PlayerApp {
     private var statusLabel: UnsafeMutablePointer<GtkWidget>?
     private var playButton: UnsafeMutablePointer<GtkWidget>?
     private var deviceDropdown: UnsafeMutablePointer<GtkWidget>?
+    private var seekScale: UnsafeMutablePointer<GtkWidget>?
+    private var volumeScale: UnsafeMutablePointer<GtkWidget>?
+    private var playlistBox: UnsafeMutablePointer<GtkWidget>?
 
     private var devices: [OutputDevice] = []
     private var updatingDevices = false
+    private var lastPlaylistCount = -1
+    private var lastPosition = -1
+    /// While the user drags the seek bar, tick updates would fight the drag.
+    private var suppressSeekUntil = Date.distantPast
 
     init(controller: PlaybackController) {
         self.controller = controller
@@ -51,7 +100,7 @@ final class PlayerApp {
     func activate(_ app: UnsafeMutableRawPointer?) {
         window = cp_app_window_new(app)
         cp_window_set_title(window, "CamelPlayer")
-        cp_window_set_default_size(window, 480, 220)
+        cp_window_set_default_size(window, 480, 600)
 
         let root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12)
         gtk_widget_set_margin_top(root, 16)
@@ -64,6 +113,9 @@ final class PlayerApp {
         cp_box_append(root, titleLabel)
         cp_box_append(root, statusLabel)
 
+        seekScale = cp_scale_new(0, 1, 1)
+        cp_box_append(root, seekScale)
+
         let transport = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8)
         gtk_widget_set_halign(transport, GTK_ALIGN_CENTER)
         let prevButton = gtk_button_new_with_label("Prev")
@@ -75,6 +127,19 @@ final class PlayerApp {
         cp_box_append(transport, stopButton)
         cp_box_append(transport, nextButton)
         cp_box_append(root, transport)
+
+        playlistBox = gtk_list_box_new()
+        let scroller = cp_scrolled_window(playlistBox)
+        gtk_widget_set_vexpand(scroller, 1)
+        cp_box_append(root, scroller)
+
+        let volumeRow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8)
+        cp_box_append(volumeRow, gtk_label_new("Volume"))
+        volumeScale = cp_scale_new(0, 1, 0.01)
+        gtk_widget_set_hexpand(volumeScale, 1)
+        cp_range_set_value(volumeScale, Double(controller.volume))
+        cp_box_append(volumeRow, volumeScale)
+        cp_box_append(root, volumeRow)
 
         let bottom = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8)
         let addButton = gtk_button_new_with_label("Add Files")
@@ -105,6 +170,19 @@ final class PlayerApp {
         }
         connect(deviceDropdown, "notify::selected", notify: true) { [weak self] in
             self?.deviceSelected()
+        }
+        connectChangeValue(seekScale) { [weak self] value in
+            guard let self else { return }
+            self.suppressSeekUntil = Date().addingTimeInterval(0.5)
+            Task { try? await self.controller.seek(to: value) }
+        }
+        connect(volumeScale, "value-changed") { [weak self] in
+            guard let self else { return }
+            self.controller.volume = Float(cp_range_get_value(self.volumeScale))
+        }
+        connectRowActivated(playlistBox) { [weak self] index in
+            guard let self else { return }
+            Task { try? await self.controller.playItem(at: index) }
         }
 
         controller.onUPnPDevicesChanged = { [weak self] in self?.refreshDevices() }
@@ -145,6 +223,31 @@ final class PlayerApp {
         }
         cp_label_set_text(statusLabel, status)
         cp_button_set_label(playButton, state == .playing ? "Pause" : "Play")
+
+        if Date() >= suppressSeekUntil {
+            if let duration = controller.duration, duration > 0 {
+                cp_range_set_range(seekScale, 0, duration)
+                cp_range_set_value(seekScale, min(controller.currentTime, duration))
+            } else {
+                cp_range_set_range(seekScale, 0, 1)
+                cp_range_set_value(seekScale, 0)
+            }
+        }
+
+        let count = controller.getPlaylistCount()
+        if count != lastPlaylistCount {
+            lastPlaylistCount = count
+            cp_list_box_remove_all(playlistBox)
+            for item in controller.getPlaylistItems() {
+                cp_list_box_append_label(playlistBox, item.title)
+            }
+            lastPosition = -1
+        }
+        let position = controller.getCurrentPosition()
+        if position != lastPosition {
+            lastPosition = position
+            cp_list_box_select_index(playlistBox, Int32(position))
+        }
     }
 
     private func playPause() {

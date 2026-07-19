@@ -73,6 +73,47 @@ static inline unsigned int cp_drop_down_get_selected(GtkWidget *dd) {
     return gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
 }
 
+static inline GtkWidget *cp_scale_new(double min, double max, double step) {
+    return gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, min, max, step);
+}
+
+static inline double cp_range_get_value(GtkWidget *w) {
+    return gtk_range_get_value(GTK_RANGE(w));
+}
+
+static inline void cp_range_set_value(GtkWidget *w, double v) {
+    gtk_range_set_value(GTK_RANGE(w), v);
+}
+
+static inline void cp_range_set_range(GtkWidget *w, double min, double max) {
+    gtk_range_set_range(GTK_RANGE(w), min, max);
+}
+
+static inline GtkWidget *cp_scrolled_window(GtkWidget *child) {
+    GtkWidget *sw = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), child);
+    return sw;
+}
+
+static inline void cp_list_box_append_label(GtkWidget *list, const char *text) {
+    GtkWidget *label = gtk_label_new(text);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_list_box_append(GTK_LIST_BOX(list), label);
+}
+
+static inline void cp_list_box_remove_all(GtkWidget *list) {
+    gtk_list_box_remove_all(GTK_LIST_BOX(list));
+}
+
+static inline void cp_list_box_select_index(GtkWidget *list, int i) {
+    GtkListBoxRow *row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(list), i);
+    if (row) gtk_list_box_select_row(GTK_LIST_BOX(list), row);
+}
+
+static inline int cp_list_box_row_index(gpointer row) {
+    return gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(row));
+}
+
 static inline void cp_file_dialog_open_multiple(GtkWidget *parent,
                                                 GAsyncReadyCallback cb, gpointer data) {
     GtkFileDialog *d = gtk_file_dialog_new();
