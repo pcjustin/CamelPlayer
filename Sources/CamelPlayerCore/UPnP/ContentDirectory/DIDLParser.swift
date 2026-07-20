@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 /// A single entry in a UPnP ContentDirectory result: either a container
 /// (folder/album/artist) or a playable item (track).

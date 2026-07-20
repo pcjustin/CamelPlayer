@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 /// Parser for UPnP device description XML
 public class DeviceDescriptionParser: NSObject {

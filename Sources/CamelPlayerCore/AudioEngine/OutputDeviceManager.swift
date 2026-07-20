@@ -1,6 +1,11 @@
+import Foundation
+#if os(macOS)
 import AVFoundation
 import CoreAudio
-import Foundation
+#else
+// Placeholder id type until a Linux (ALSA) device backend exists.
+public typealias AudioDeviceID = UInt32
+#endif
 
 public struct AudioDevice {
     public let id: AudioDeviceID
@@ -20,6 +25,7 @@ public enum OutputDeviceError: Error {
     case propertyAccessFailed(String)
 }
 
+#if os(macOS)
 public class OutputDeviceManager {
     private let engine: AVAudioEngine
 
@@ -323,3 +329,4 @@ public class OutputDeviceManager {
         return streamFormat
     }
 }
+#endif

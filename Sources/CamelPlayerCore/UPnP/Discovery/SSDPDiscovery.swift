@@ -1,5 +1,12 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Protocol for SSDP discovery delegate
 public protocol SSDPDiscoveryDelegate: AnyObject {
@@ -84,7 +91,11 @@ public class SSDPDiscovery: @unchecked Sendable {
     /// Creates a UDP socket for SSDP
     private func createSocket() -> Bool {
         // Create UDP socket
+        #if canImport(Darwin)
         socketFD = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        #else
+        socketFD = socket(AF_INET, Int32(SOCK_DGRAM.rawValue), Int32(IPPROTO_UDP))
+        #endif
         guard socketFD >= 0 else {
             coreLog("SSDP: Failed to create socket: \(String(cString: strerror(errno)))")
             return false
@@ -112,8 +123,12 @@ public class SSDPDiscovery: @unchecked Sendable {
         addr.sin_addr.s_addr = INADDR_ANY.bigEndian
 
         let bindResult = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                Darwin.bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                #if canImport(Darwin)
+                Darwin.bind(socketFD, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                #else
+                Glibc.bind(socketFD, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                #endif
             }
         }
 
@@ -128,7 +143,7 @@ public class SSDPDiscovery: @unchecked Sendable {
         mreq.imr_multiaddr.s_addr = inet_addr(Self.multicastGroup)
         mreq.imr_interface.s_addr = INADDR_ANY.bigEndian
 
-        guard setsockopt(socketFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) >= 0 else {
+        guard setsockopt(socketFD, Int32(IPPROTO_IP), IP_ADD_MEMBERSHIP, &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) >= 0 else {
             coreLog("SSDP: Failed to join multicast group: \(String(cString: strerror(errno)))")
             closeSocket()
             return false
