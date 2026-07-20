@@ -116,8 +116,10 @@ is shared between both platforms. Platform differences are confined to:
   Linux backend opens the PCM device at the file's sample rate with software
   resampling disabled (S32_LE preferred), so `hw:` devices play bit-perfect.
 - The GUI: SwiftUI (`CamelPlayerGUI`) on macOS, GTK4 (`CamelPlayerGTK`) on
-  Linux. The GTK front end covers transport controls, seek, volume, the
-  playlist and output device selection.
+  Linux. The GTK front end mirrors the macOS layout: Albums / Favorites /
+  Recent / Browse / Queue sections, album art, live search, favorites and
+  recently played, transport with shuffle and loop, seek, volume, and output
+  device selection. Favorites, the queue and settings persist across runs.
 
 ### Key Technical Implementation
 
@@ -205,6 +207,8 @@ does not read M4A/ALAC.
 - No M4A/ALAC decoding
 - No gapless playback for local files
 - Selecting a `hw:` device opens it exclusively while playing
+- Embedded artwork is not read; local covers come from cover.jpg in the
+  track's folder
 
 These features may be added in future versions.
 
