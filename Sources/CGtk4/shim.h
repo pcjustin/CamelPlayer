@@ -206,6 +206,84 @@ static inline void cp_widget_bind_object(GtkWidget *w, gpointer data, GDestroyNo
     g_object_set_data_full(G_OBJECT(w), "cp-swift-object", data, destroy);
 }
 
+/* Registers a D-Bus object with a heap vtable (GDBus keeps a reference to the
+   vtable for the lifetime of the registration). */
+static inline guint cp_dbus_register_object(GDBusConnection *conn, const char *path,
+                                            GDBusInterfaceInfo *info,
+                                            GDBusInterfaceMethodCallFunc method_call,
+                                            GDBusInterfaceGetPropertyFunc get_property,
+                                            GDBusInterfaceSetPropertyFunc set_property,
+                                            gpointer user_data) {
+    GDBusInterfaceVTable *vtable = g_new0(GDBusInterfaceVTable, 1);
+    vtable->method_call = method_call;
+    vtable->get_property = get_property;
+    vtable->set_property = set_property;
+    return g_dbus_connection_register_object(conn, path, info, vtable, user_data, NULL, NULL);
+}
+
+static inline void cp_widget_add_file_drop(GtkWidget *w, GCallback cb, gpointer data) {
+    GtkDropTarget *target = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+    g_signal_connect_data(target, "drop", cb, data, NULL, 0);
+    gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(target));
+}
+
+/* Returns a g_strfreev-able NULL-terminated path array, or NULL. */
+static inline char **cp_drop_value_paths(GValue *value) {
+    if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST)) return NULL;
+    GdkFileList *file_list = g_value_get_boxed(value);
+    GSList *files = gdk_file_list_get_files(file_list);
+    guint n = g_slist_length(files);
+    char **paths = g_new0(char *, n + 1);
+    guint i = 0;
+    for (GSList *l = files; l; l = l->next) {
+        char *path = g_file_get_path(G_FILE(l->data));
+        if (path) paths[i++] = path;
+    }
+    return paths;
+}
+
+static inline void cp_widget_add_key_handler(GtkWidget *w, GCallback cb, gpointer data) {
+    GtkEventController *key = gtk_event_controller_key_new();
+    g_signal_connect_data(key, "key-pressed", cb, data, NULL, 0);
+    gtk_widget_add_controller(w, key);
+}
+
+static inline int cp_window_focus_is_text(GtkWidget *window) {
+    GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(window));
+    return focus && (GTK_IS_EDITABLE(focus) || GTK_IS_TEXT(focus));
+}
+
+static inline GtkWidget *cp_paned_new(GtkWidget *start, GtkWidget *end) {
+    GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_start_child(GTK_PANED(paned), start);
+    gtk_paned_set_end_child(GTK_PANED(paned), end);
+    gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
+    gtk_paned_set_shrink_end_child(GTK_PANED(paned), FALSE);
+    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
+    gtk_paned_set_resize_end_child(GTK_PANED(paned), TRUE);
+    return paned;
+}
+
+static inline int cp_paned_get_position(GtkWidget *paned) {
+    return gtk_paned_get_position(GTK_PANED(paned));
+}
+
+static inline void cp_paned_set_position(GtkWidget *paned, int pos) {
+    gtk_paned_set_position(GTK_PANED(paned), pos);
+}
+
+/* Centers the row at the given index in the list box's visible area. */
+static inline void cp_list_box_scroll_to_index(GtkWidget *list, int i) {
+    GtkListBoxRow *row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(list), i);
+    if (!row) return;
+    graphene_rect_t bounds;
+    if (!gtk_widget_compute_bounds(GTK_WIDGET(row), list, &bounds)) return;
+    GtkAdjustment *adj = gtk_list_box_get_adjustment(GTK_LIST_BOX(list));
+    if (!adj) return;
+    double target = bounds.origin.y - (gtk_adjustment_get_page_size(adj) - bounds.size.height) / 2;
+    gtk_adjustment_set_value(adj, target);
+}
+
 /* Debug helper: renders a realized widget into a PNG file. */
 static inline int cp_snapshot_widget_to_png(GtkWidget *widget, const char *path) {
     int width = gtk_widget_get_width(widget);
@@ -348,9 +426,28 @@ static inline void cp_label_ellipsize_end(GtkWidget *label) {
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
 }
 
+static inline void cp_file_dialog_set_audio_filter(GtkFileDialog *d) {
+    GtkFileFilter *audio = gtk_file_filter_new();
+    gtk_file_filter_set_name(audio, "Audio Files");
+    const char *suffixes[] = {"mp3", "wav", "m4a", "flac", "alac", "aac", "aiff", NULL};
+    for (const char **s = suffixes; *s; s++) gtk_file_filter_add_suffix(audio, *s);
+    GtkFileFilter *all = gtk_file_filter_new();
+    gtk_file_filter_set_name(all, "All Files");
+    gtk_file_filter_add_pattern(all, "*");
+    GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    g_list_store_append(filters, audio);
+    g_list_store_append(filters, all);
+    gtk_file_dialog_set_filters(d, G_LIST_MODEL(filters));
+    gtk_file_dialog_set_default_filter(d, audio);
+    g_object_unref(filters);
+    g_object_unref(audio);
+    g_object_unref(all);
+}
+
 static inline void cp_file_dialog_open_multiple(GtkWidget *parent,
                                                 GAsyncReadyCallback cb, gpointer data) {
     GtkFileDialog *d = gtk_file_dialog_new();
+    cp_file_dialog_set_audio_filter(d);
     gtk_file_dialog_open_multiple(d, GTK_WINDOW(parent), NULL, cb, data);
 }
 

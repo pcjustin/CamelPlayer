@@ -30,14 +30,16 @@ final class QueuePane {
 
     private var renderedKey = ""
     private var nowPlayingKey = ""
+    private var lastPanedPosition: Int32 = 0
+    private var lastScrolledPosition = -1
+    private var scrollCountdown = 0
 
     init(model: PlayerModel) {
         self.model = model
-        root = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0)
 
         // Left: now playing
         let left = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12)
-        gtk_widget_set_size_request(left, 260, -1)
+        gtk_widget_set_size_request(left, 200, -1)
         gtk_widget_set_margin_top(left, 16)
         gtk_widget_set_margin_bottom(left, 16)
         gtk_widget_set_margin_start(left, 16)
@@ -59,9 +61,6 @@ final class QueuePane {
         cp_button_set_has_frame(starButton, 0)
         gtk_widget_set_halign(starButton, GTK_ALIGN_CENTER)
         cp_box_append(left, starButton)
-        cp_box_append(root, left)
-
-        cp_box_append(root, gtk_separator_new(GTK_ORIENTATION_VERTICAL))
 
         // Right: playlist
         let right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0)
@@ -108,7 +107,12 @@ final class QueuePane {
         cp_stack_add(listStack, listPage, "list", nil)
         cp_stack_add(listStack, emptyPage, "empty", nil)
         cp_box_append(right, listStack)
-        cp_box_append(root, right)
+
+        // Draggable divider with the persisted width, same key as macOS.
+        root = cp_paned_new(left, right)
+        let savedWidth = UserDefaults.standard.object(forKey: "ui.leftPaneWidth") as? Double ?? 260
+        lastPanedPosition = Int32(min(420, max(200, savedWidth)))
+        cp_paned_set_position(root, lastPanedPosition)
 
         connect(starButton, "clicked") { [weak self] in
             guard let self = self, let item = self.model.currentItem else { return }
@@ -125,6 +129,25 @@ final class QueuePane {
     func refresh() {
         refreshNowPlaying(force: false)
         refreshPlaylist()
+
+        let position = cp_paned_get_position(root)
+        if position != lastPanedPosition, position > 0 {
+            lastPanedPosition = position
+            UserDefaults.standard.set(Double(position), forKey: "ui.leftPaneWidth")
+        }
+
+        // Keep the playing track visible; wait a tick after rebuild so rows
+        // have an allocation to scroll to.
+        if model.currentPosition != lastScrolledPosition, model.currentPosition >= 0 {
+            lastScrolledPosition = model.currentPosition
+            scrollCountdown = 2
+        }
+        if scrollCountdown > 0 {
+            scrollCountdown -= 1
+            if scrollCountdown == 0 {
+                cp_list_box_scroll_to_index(listBox, Int32(model.currentPosition))
+            }
+        }
     }
 
     private func refreshNowPlaying(force: Bool) {

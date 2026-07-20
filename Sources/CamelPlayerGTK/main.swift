@@ -38,6 +38,8 @@ final class PlayerApp {
     // Settings bar
     private var deviceDropdown: Widget
 
+    private var mpris: MPRIS!
+
     private var devices: [OutputDevice] = []
     private var deviceKey = ""
     private var updatingDevices = false
@@ -45,6 +47,7 @@ final class PlayerApp {
     private var updatingVolume = false
     private var suppressSeekUntil = Date.distantPast
     private var miniKey = ""
+    private var savedWindowSize = (width: Int32(0), height: Int32(0))
 
     init(model: PlayerModel) {
         self.model = model
@@ -95,7 +98,11 @@ final class PlayerApp {
 
         window = cp_app_window_new(app)
         cp_window_set_title(window, "CamelPlayer")
-        cp_window_set_default_size(window, 920, 700)
+        let defaults = UserDefaults.standard
+        let savedWidth = Int32(defaults.integer(forKey: "ui.windowWidth"))
+        let savedHeight = Int32(defaults.integer(forKey: "ui.windowHeight"))
+        savedWindowSize = (savedWidth > 0 ? savedWidth : 920, savedHeight > 0 ? savedHeight : 700)
+        cp_window_set_default_size(window, savedWindowSize.width, savedWindowSize.height)
 
         let root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0)
 
@@ -135,6 +142,45 @@ final class PlayerApp {
         connect(sectionStack, "notify::visible-child", notify: true) { [weak self] in
             self?.sectionChanged()
         }
+
+        mpris = MPRIS(model: model)
+
+        // Dropping audio files or folders anywhere on the window queues them.
+        let dropCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutablePointer<GValue>?, Double, Double, UnsafeMutableRawPointer?) -> gboolean = { _, value, _, _, data in
+            guard let paths = cp_drop_value_paths(value) else { return 0 }
+            defer { g_strfreev(paths) }
+            var urls: [URL] = []
+            var i = 0
+            while let path = paths[i] {
+                i += 1
+                let url = URL(fileURLWithPath: String(cString: path))
+                var isDirectory: ObjCBool = false
+                FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                if isDirectory.boolValue {
+                    urls.append(contentsOf: scanFolder(url))
+                } else if audioExtensions.contains(url.pathExtension.lowercased()) {
+                    urls.append(url)
+                }
+            }
+            guard !urls.isEmpty else { return 0 }
+            Unmanaged<PlayerApp>.fromOpaque(data!).takeUnretainedValue().model.addFiles(urls)
+            return 1
+        }
+        cp_widget_add_file_drop(window, unsafeBitCast(dropCallback, to: GCallback.self),
+                                Unmanaged.passUnretained(self).toOpaque())
+
+        // Space toggles play/pause globally, except while typing in a text field.
+        let keyCallback: @convention(c) (UnsafeMutableRawPointer?, UInt32, UInt32, UInt32, UnsafeMutableRawPointer?) -> gboolean = { _, keyval, _, _, data in
+            guard keyval == 32 else { return 0 }
+            let app = Unmanaged<PlayerApp>.fromOpaque(data!).takeUnretainedValue()
+            guard cp_window_focus_is_text(app.window) == 0,
+                  !app.model.playlistItems.isEmpty,
+                  !app.model.currentTrackNeedsRenderer else { return 0 }
+            app.model.togglePlayPause()
+            return 1
+        }
+        cp_widget_add_key_handler(window, unsafeBitCast(keyCallback, to: GCallback.self),
+                                  Unmanaged.passUnretained(self).toOpaque())
 
         refreshDevices()
         albumsPane.refreshIfNeeded()
@@ -349,6 +395,15 @@ final class PlayerApp {
 
         queuePane.refresh()
         refreshDeviceListIfChanged()
+        mpris.tick()
+
+        let width = gtk_widget_get_width(window)
+        let height = gtk_widget_get_height(window)
+        if width > 0, height > 0, (width, height) != savedWindowSize {
+            savedWindowSize = (width, height)
+            UserDefaults.standard.set(Int(width), forKey: "ui.windowWidth")
+            UserDefaults.standard.set(Int(height), forKey: "ui.windowHeight")
+        }
     }
 
     private func volumeIconName(_ volume: Float) -> String {

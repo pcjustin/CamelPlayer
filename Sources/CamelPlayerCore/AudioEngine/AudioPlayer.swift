@@ -391,8 +391,9 @@ public class AudioPlayer {
 // ALSA + libsndfile playback. Bit-perfect: the PCM device is opened at the
 // file's sample rate with software resampling disabled, S32_LE preferred.
 // libsndfile covers WAV/FLAC/MP3; M4A/ALAC files fail to open.
-// ponytail: no gapless preload on Linux yet; setNextTrack is a no-op and
-// tracks advance through the normal finish path.
+// Gapless: a preloaded next track with the same sample rate and channel
+// count is swapped in at EOF without draining the PCM; format changes go
+// through the normal finish path.
 public class AudioPlayer {
     private let cond = NSCondition()
     /// Bumped to signal the feeder thread to exit. Guarded by cond, as are
@@ -406,6 +407,11 @@ public class AudioPlayer {
     private var useS16 = false
     /// File frames handed to ALSA; currentTime subtracts the driver delay.
     private var framesPlayed: sf_count_t = 0
+
+    /// Preloaded next track (gapless). Guarded by cond.
+    private var nextFile: OpaquePointer?
+    private var nextInfo = SF_INFO()
+    private var nextURL: URL?
 
     private var pcmNames = ["default"]
     private var currentDevice: AudioDeviceID = 0
@@ -584,6 +590,9 @@ public class AudioPlayer {
         state = .stopped
         cond.broadcast()
         while feederRunning { cond.wait() }
+        if let next = nextFile { sf_close(next) }
+        nextFile = nil
+        nextURL = nil
         cond.unlock()
         if let pcm = pcm { snd_pcm_drop(pcm) }
         if let file = file { sf_seek(file, 0, SEEK_SET) }
@@ -613,7 +622,24 @@ public class AudioPlayer {
         if wasPlaying { startFeeder() }
     }
 
-    public func setNextTrack(url: URL?) {}
+    public func setNextTrack(url: URL?) {
+        cond.lock()
+        defer { cond.unlock() }
+        if url == nextURL { return }
+        if let next = nextFile { sf_close(next) }
+        nextFile = nil
+        nextURL = nil
+        guard let url = url, url.isFileURL, file != nil else { return }
+        var info = SF_INFO()
+        guard let handle = sf_open(url.path, Int32(SFM_READ), &info) else { return }
+        if info.samplerate == fileInfo.samplerate && info.channels == fileInfo.channels {
+            nextFile = handle
+            nextInfo = info
+            nextURL = url
+        } else {
+            sf_close(handle)
+        }
+    }
 
     // MARK: - Internals
 
@@ -698,7 +724,7 @@ public class AudioPlayer {
             cond.broadcast()
             cond.unlock()
         }
-        guard let file = file, let pcm = pcm else { return }
+        guard var currentFile = file, let pcm = pcm else { return }
 
         let chunkFrames = 4096
         let channels = Int(fileInfo.channels)
@@ -712,8 +738,26 @@ public class AudioPlayer {
             cond.unlock()
             guard live else { return }
 
-            let frames = sf_readf_int(file, &buffer, sf_count_t(chunkFrames))
+            let frames = sf_readf_int(currentFile, &buffer, sf_count_t(chunkFrames))
             if frames <= 0 {
+                // Gapless: swap in the preloaded next track without draining,
+                // so ALSA keeps rendering continuously.
+                cond.lock()
+                if gen == generation, let next = nextFile {
+                    sf_close(currentFile)
+                    file = next
+                    fileInfo = nextInfo
+                    currentURL = nextURL
+                    nextFile = nil
+                    nextURL = nil
+                    framesPlayed = 0
+                    currentFile = next
+                    cond.unlock()
+                    DispatchQueue.main.async { [weak self] in self?.onAdvancedToNext?() }
+                    continue
+                }
+                cond.unlock()
+
                 snd_pcm_drain(pcm)
                 var finished = false
                 cond.lock()
