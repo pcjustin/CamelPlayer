@@ -310,9 +310,20 @@ struct AlbumDetailView: View {
 
             List {
                 ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                    let isCurrent = trackIsCurrent(track)
                     HStack {
-                        Text("\(index + 1)").font(.caption).foregroundColor(.secondary).frame(width: 24)
-                        Text(track.title).lineLimit(1)
+                        if isCurrent {
+                            Image(systemName: viewModel.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+                                .foregroundColor(.accentColor)
+                                .font(.caption)
+                                .frame(width: 24)
+                        } else {
+                            Text("\(index + 1)").font(.caption).foregroundColor(.secondary).frame(width: 24)
+                        }
+                        Text(track.title)
+                            .lineLimit(1)
+                            .foregroundColor(isCurrent ? .accentColor : .primary)
+                            .font(isCurrent ? .body.weight(.semibold) : .body)
                         Spacer()
                         if let d = track.duration {
                             Text(TimeFormatter.formatTime(d)).font(.caption).foregroundColor(.secondary)
@@ -341,5 +352,10 @@ struct AlbumDetailView: View {
     private func trackIsFavorite(_ track: MediaObject) -> Bool {
         guard let res = track.resURL else { return false }
         return viewModel.isFavoriteTrack(res)
+    }
+
+    private func trackIsCurrent(_ track: MediaObject) -> Bool {
+        guard let res = track.resURL else { return false }
+        return viewModel.currentItem?.url.absoluteString == res
     }
 }
