@@ -50,6 +50,18 @@ cd camelplayer
 swift build
 ```
 
+To also install CamelPlayer system-wide with an application launcher entry
+(prompts for sudo):
+
+```bash
+./install_linux.sh
+```
+
+This builds `CamelPlayerGTK`, installs the binary to `/usr/local/bin`, and
+registers a desktop entry and icon (converted from `logo.jpg`) so CamelPlayer
+appears in the application launcher. Run `./install_linux.sh --help` for
+build/install options.
+
 ## Usage
 
 Launch the app on macOS:
@@ -63,6 +75,9 @@ Launch the app on Linux:
 ```bash
 swift run CamelPlayerGTK
 ```
+
+If installed via `./install_linux.sh`, launch it from the application
+launcher or run `camelplayer`.
 
 ### GUI Features
 
