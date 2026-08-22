@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import CamelPlayerCore
 
 struct FilePickerHelper {
     static func savePlaylistPanel() -> URL? {
@@ -66,11 +67,10 @@ struct FilePickerHelper {
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
-        let audioExtensions = ["mp3", "wav", "m4a", "flac", "alac", "aac", "aiff"]
         var audioFiles: [URL] = []
 
         for case let fileURL as URL in enumerator {
-            if audioExtensions.contains(fileURL.pathExtension.lowercased()) {
+            if audioFileExtensions.contains(fileURL.pathExtension.lowercased()) {
                 audioFiles.append(fileURL)
             }
         }
