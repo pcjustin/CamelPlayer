@@ -429,7 +429,7 @@ static inline void cp_label_ellipsize_end(GtkWidget *label) {
 static inline void cp_file_dialog_set_audio_filter(GtkFileDialog *d) {
     GtkFileFilter *audio = gtk_file_filter_new();
     gtk_file_filter_set_name(audio, "Audio Files");
-    const char *suffixes[] = {"mp3", "wav", "m4a", "flac", "alac", "aac", "aiff", NULL};
+    const char *suffixes[] = {"mp3", "wav", "m4a", "flac", "aac", "aiff", NULL};
     for (const char **s = suffixes; *s; s++) gtk_file_filter_add_suffix(audio, *s);
     GtkFileFilter *all = gtk_file_filter_new();
     gtk_file_filter_set_name(all, "All Files");
