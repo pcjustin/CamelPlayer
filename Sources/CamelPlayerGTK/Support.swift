@@ -139,14 +139,12 @@ func markupEscape(_ text: String) -> String {
 
 // MARK: - Folder scanning (port of FilePickerHelper.scanFolder)
 
-let audioExtensions = ["mp3", "wav", "m4a", "flac", "alac", "aac", "aiff"]
-
 func scanFolder(_ url: URL) -> [URL] {
     guard let enumerator = FileManager.default.enumerator(
         at: url, includingPropertiesForKeys: nil) else { return [] }
     var files: [URL] = []
     for case let file as URL in enumerator
-        where audioExtensions.contains(file.pathExtension.lowercased()) {
+        where audioFileExtensions.contains(file.pathExtension.lowercased()) {
         files.append(file)
     }
     return files.sorted { $0.path < $1.path }

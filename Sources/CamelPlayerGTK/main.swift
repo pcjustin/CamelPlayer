@@ -158,7 +158,7 @@ final class PlayerApp {
                 FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
                 if isDirectory.boolValue {
                     urls.append(contentsOf: scanFolder(url))
-                } else if audioExtensions.contains(url.pathExtension.lowercased()) {
+                } else if audioFileExtensions.contains(url.pathExtension.lowercased()) {
                     urls.append(url)
                 }
             }

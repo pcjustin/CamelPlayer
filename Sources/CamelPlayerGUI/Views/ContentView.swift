@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import CamelPlayerCore
 
 struct ContentView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
@@ -179,8 +180,7 @@ struct ContentView: View {
                     let files = FilePickerHelper.scanFolder(url)
                     resolvedURLs.append(contentsOf: files)
                 } else {
-                    let audioExtensions = ["mp3", "wav", "m4a", "flac", "alac", "aac", "aiff"]
-                    if audioExtensions.contains(url.pathExtension.lowercased()) {
+                    if audioFileExtensions.contains(url.pathExtension.lowercased()) {
                         resolvedURLs.append(url)
                     }
                 }
