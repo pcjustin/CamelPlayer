@@ -35,7 +35,7 @@ public enum DIDLBuilder {
         if let art = albumArtURI, !art.isEmpty {
             fields += "<upnp:albumArtURI>\(escape(art))</upnp:albumArtURI>"
         }
-        let durationAttr = duration.map { " duration=\"\(formatDuration($0))\"" } ?? ""
+        let durationAttr = duration.flatMap { formatDuration($0) }.map { " duration=\"\($0)\"" } ?? ""
         fields += "<res protocolInfo=\"http-get:*:*:*\"\(durationAttr)>\(escape(resURL))</res>"
 
         return "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\""
@@ -53,8 +53,8 @@ public enum DIDLBuilder {
             .replacingOccurrences(of: "'", with: "&apos;")
     }
 
-    private static func formatDuration(_ time: TimeInterval) -> String {
-        let total = Int(time)
-        return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+    private static func formatDuration(_ time: TimeInterval) -> String? {
+        guard time.isFinite, time >= 0, let total = Int(exactly: time.rounded(.towardZero)) else { return nil }
+        return "\(total / 3600):" + String(format: "%02d:%02d", (total % 3600) / 60, total % 60)
     }
 }

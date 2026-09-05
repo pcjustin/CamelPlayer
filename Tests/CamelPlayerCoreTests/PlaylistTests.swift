@@ -189,4 +189,44 @@ final class PlaylistTests: XCTestCase {
         XCTAssertEqual(playlist.count, 0)
         XCTAssertNil(playlist.currentItem)
     }
+    func testShuffleWithoutLoopPlaysEachTrackOnceThenStops() {
+        playlist.addAll(urls: (0..<5).map { URL(fileURLWithPath: "/test/\($0).wav") })
+        playlist.shuffle = true
+        playlist.loopMode = .off
+        var ids = Set([playlist.currentItem!.id])
+        for _ in 1..<5 {
+            guard let item = playlist.next() else { return XCTFail("Shuffle stopped early") }
+            XCTAssertTrue(ids.insert(item.id).inserted)
+        }
+        XCTAssertNil(playlist.next())
+        XCTAssertEqual(ids.count, 5)
+    }
+
+    func testPeekDoesNotAdvanceAndRespectsModes() {
+        let urls = (0..<2).map { URL(fileURLWithPath: "/test/\($0).wav") }
+        playlist.addAll(urls: urls)
+        XCTAssertEqual(playlist.peekNext()?.url, urls[1])
+        XCTAssertEqual(playlist.currentPosition, 0)
+        _ = playlist.next()
+        XCTAssertNil(playlist.peekNext())
+        playlist.loopMode = .all
+        XCTAssertEqual(playlist.peekNext()?.url, urls[0])
+        playlist.shuffle = true
+        XCTAssertNil(playlist.peekNext())
+        playlist.shuffle = false
+        playlist.loopMode = .one
+        XCTAssertNil(playlist.peekNext())
+    }
+
+    func testLoopOneRepeatsCurrentWithAndWithoutShuffle() {
+        playlist.addAll(urls: (0..<3).map { URL(fileURLWithPath: "/test/\($0).wav") })
+        let selected = playlist.jumpTo(index: 1)
+        playlist.loopMode = .one
+        for shuffle in [false, true] {
+            playlist.shuffle = shuffle
+            XCTAssertEqual(playlist.next()?.id, selected?.id)
+            XCTAssertEqual(playlist.previous()?.id, selected?.id)
+        }
+    }
+
 }

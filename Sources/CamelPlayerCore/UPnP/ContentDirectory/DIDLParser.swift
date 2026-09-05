@@ -92,8 +92,13 @@ public final class DIDLParser: NSObject {
         guard parts.count == 3,
               let h = Double(parts[0]),
               let m = Double(parts[1]),
-              let sec = Double(parts[2]) else { return nil }
-        return h * 3600 + m * 60 + sec
+              let sec = Double(parts[2]),
+              h.isFinite, h >= 0, h.rounded(.down) == h,
+              m.isFinite, m >= 0, m < 60, m.rounded(.down) == m,
+              sec.isFinite, sec >= 0, sec < 60 else { return nil }
+        let total = h * 3600 + m * 60 + sec
+        guard total.isFinite, Int(exactly: total.rounded(.towardZero)) != nil else { return nil }
+        return total
     }
 }
 

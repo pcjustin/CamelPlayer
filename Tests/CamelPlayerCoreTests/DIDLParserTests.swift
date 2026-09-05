@@ -56,4 +56,12 @@ final class DIDLParserTests: XCTestCase {
         XCTAssertNil(DIDLParser.parseDuration("bad"))
         XCTAssertNil(DIDLParser.parseDuration("1:02"))
     }
+    func testInvalidDurationComponentsAreRejected() {
+        for value in ["0:00:nan", "inf:00:00", "1e308:00:00", "-1:00:00",
+                      "0:60:00", "0:00:60", "0:-1:00", "0:00:-1", "1.5:00:00"] {
+            XCTAssertNil(DIDLParser.parseDuration(value), value)
+        }
+        XCTAssertEqual(DIDLParser.parseDuration("1:02:03.125"), 3723.125)
+    }
+
 }

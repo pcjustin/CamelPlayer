@@ -21,6 +21,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     /// Bumped on each loadAndPlay so a poll started before a track switch can't
     /// mistake our own stop() for the previous track finishing.
     private var generation = 0
+    private var preloadGeneration = 0
     /// True once the renderer has confirmed PLAYING since the last loadAndPlay,
     /// so a transient STOPPED right after starting isn't read as a finish.
     private var hasStartedPlaying = false
@@ -78,6 +79,13 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         }
     }
 
+    // Allows deterministic transport tests without opening network connections.
+    init(device: UPnPDevice, mediaServer: LocalMediaServer, avTransport: AVTransportService) {
+        self.device = device
+        self.mediaServer = mediaServer
+        self.avTransport = avTransport
+    }
+
     deinit {
         stopPolling()
     }
@@ -129,24 +137,33 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     }
 
     public func setNextTrack(url: URL?, metadata: String?) {
+        Task { await preloadNextTrack(url: url, metadata: metadata) }
+    }
+
+    func preloadNextTrack(url: URL?, metadata: String?) async {
         guard let avTransport = avTransport else { return }
-        Task {
-            guard let url = url else {
-                nextURI = nil
-                nextOriginalURL = nil
-                try? await avTransport.setNextAVTransportURI(uri: "", metadata: "")
-                return
-            }
+        preloadGeneration += 1
+        let request = preloadGeneration
+        let trackGeneration = generation
+        nextURI = nil
+        nextOriginalURL = nil
+        do {
             let uri: String
-            if url.isFileURL {
-                guard let shared = try? mediaServer.shareFile(url) else { return }
-                uri = shared.absoluteString
+            if let url = url {
+                uri = url.isFileURL ? try mediaServer.shareFile(url).absoluteString : url.absoluteString
             } else {
-                uri = url.absoluteString
+                uri = ""
             }
-            nextURI = uri
+            // Retain the candidate while the request is pending so a poll does
+            // not treat a gapless transition as a natural finish.
+            nextURI = url == nil ? nil : uri
             nextOriginalURL = url
-            try? await avTransport.setNextAVTransportURI(uri: uri, metadata: metadata ?? "")
+            try await avTransport.setNextAVTransportURI(uri: uri, metadata: metadata ?? "")
+        } catch {
+            guard trackGeneration == generation, request == preloadGeneration else { return }
+            nextURI = nil
+            nextOriginalURL = nil
+            coreLog("UPnP: Preloading failed; falling back to normal track advance: \(error)")
         }
     }
 
@@ -174,6 +191,9 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
     public func stop() {
         guard let avTransport = avTransport else { return }
+        generation += 1
+        hasStartedPlaying = false
+        stopPolling()
 
         Task {
             try? await avTransport.stop()
@@ -221,7 +241,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         pollingTimer = nil
     }
 
-    private func updateStatus() async {
+    func updateStatus() async {
         guard let avTransport = avTransport else { return }
 
         let myGeneration = generation
@@ -235,25 +255,19 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             if newState == .playing { hasStartedPlaying = true }
 
             let previousState = _state
-            if newState != previousState {
-                _state = newState
-
-                // A finish is playing -> stopped, but only once the renderer has
-                // actually started this track (otherwise a transient STOPPED at
-                // start would be misread as the track finishing). When a gapless
-                // next is queued, a stop is part of the transition, not a finish.
-                let didFinish = hasStartedPlaying && previousState == .playing
-                    && newState == .stopped && nextURI == nil
-                if didFinish {
-                    stopPolling()
-                }
-
+            _state = newState
+            // Also check when STOPPED was already observed while a preload
+            // request was pending and that request subsequently failed.
+            let didFinish = hasStartedPlaying && newState == .stopped && nextURI == nil
+            if didFinish {
+                hasStartedPlaying = false
+                stopPolling()
+            }
+            if newState != previousState || didFinish {
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    self.onStateChanged?(newState)
-                    if didFinish {
-                        self.onPlaybackFinished?()
-                    }
+                    guard let self = self, myGeneration == self.generation else { return }
+                    if newState != previousState { self.onStateChanged?(newState) }
+                    if didFinish { self.onPlaybackFinished?() }
                 }
             }
 
