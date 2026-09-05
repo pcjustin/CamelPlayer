@@ -215,7 +215,7 @@ public class AudioPlayer {
         segmentStartFrame = 0
         lastKnownTime = 0
 
-        playerNode.scheduleFile(file, at: nil) { [weak self] in
+        playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.handleFileCompleted(generation: generation)
             }
@@ -290,7 +290,7 @@ public class AudioPlayer {
         playerNode.scheduleSegment(file,
                                    startingFrame: startFrame,
                                    frameCount: frameCount,
-                                   at: nil) { [weak self] in
+                                   at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.handleFileCompleted(generation: generation)
             }
@@ -346,7 +346,7 @@ public class AudioPlayer {
         guard !nextScheduled, let file = nextFile, state != .stopped else { return }
         nextScheduled = true
         let generation = scheduleGeneration
-        playerNode.scheduleFile(file, at: nil) { [weak self] in
+        playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.handleFileCompleted(generation: generation)
             }

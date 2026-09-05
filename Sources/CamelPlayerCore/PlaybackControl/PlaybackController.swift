@@ -447,38 +447,43 @@ public class PlaybackController {
         objectID: String,
         sortCriteria: String = ""
     ) async throws -> Int {
-        try await addContainer(server: server, objectID: objectID, sortCriteria: sortCriteria, depth: 0)
+        guard let controlURL = server.contentDirectoryURL else {
+            throw MediaBrowseError.serverHasNoContentDirectory
+        }
+        let service = ContentDirectoryService(controlURL: controlURL)
+        return try await Self.addContainer(
+            objectID: objectID,
+            browse: { id, index, count in
+                try await service.browse(objectID: id, startingIndex: index,
+                                         requestedCount: count, sortCriteria: sortCriteria)
+            },
+            add: { self.addTrackToPlaylist($0) }
+        )
     }
 
-    private func addContainer(
-        server: UPnPDevice,
+    // Keep traversal independent of audio hardware and network discovery.
+    static func addContainer(
         objectID: String,
-        sortCriteria: String,
-        depth: Int
+        depth: Int = 0,
+        browse: (String, Int, Int) async throws -> ContentDirectoryService.BrowseResult,
+        add: (MediaObject) -> Bool
     ) async throws -> Int {
-        // ponytail: depth cap guards against pathological trees; raise it or add
-        // a track-count limit/cancel if recursing huge tag containers bites.
-        guard depth <= Self.maxAddDepth else { return 0 }
+        guard depth <= maxAddDepth else { return 0 }
         var added = 0
         var index = 0
         while true {
-            let page = try await browse(
-                server: server,
-                objectID: objectID,
-                startingIndex: index,
-                requestedCount: Self.browsePageSize,
-                sortCriteria: sortCriteria
-            )
-            guard !page.objects.isEmpty else { break }
+            let page = try await browse(objectID, index, browsePageSize)
+            guard page.numberReturned > 0, !page.objects.isEmpty else { break }
             for object in page.objects {
                 if object.isContainer {
-                    added += try await addContainer(server: server, objectID: object.id, sortCriteria: sortCriteria, depth: depth + 1)
-                } else if addTrackToPlaylist(object) {
+                    added += try await addContainer(objectID: object.id, depth: depth + 1,
+                                                    browse: browse, add: add)
+                } else if add(object) {
                     added += 1
                 }
             }
-            index += page.objects.count
-            if index >= page.totalMatches || page.objects.count < Self.browsePageSize { break }
+            index += page.numberReturned
+            if index >= page.totalMatches { break }
         }
         return added
     }

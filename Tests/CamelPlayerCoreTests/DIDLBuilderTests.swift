@@ -61,4 +61,23 @@ final class DIDLBuilderTests: XCTestCase {
         XCTAssertFalse(didl.contains("albumArtURI"))
         XCTAssertFalse(didl.contains("duration="))
     }
+    func testInvalidDurationsAreOmitted() {
+        for duration in [Double.nan, .infinity, -.infinity, -1, Double.greatestFiniteMagnitude, Double(Int.max)] {
+            let object = MediaObject(id: "t", parentID: "0", title: "Track", isContainer: false,
+                                     duration: duration, resURL: "http://nas/a.flac")
+            XCTAssertFalse(DIDLBuilder.metadata(for: object)!.contains("duration="), "\(duration)")
+        }
+    }
+
+    func testEmptyStringsAreOmittedAndZeroDurationIsKept() {
+        let object = MediaObject(id: "t", parentID: "0", title: "Track", isContainer: false,
+                                 artist: "", album: "", albumArtURI: "", duration: 0,
+                                 resURL: "http://nas/a.flac")
+        let xml = DIDLBuilder.metadata(for: object)!
+        XCTAssertFalse(xml.contains("<upnp:artist>"))
+        XCTAssertFalse(xml.contains("<upnp:album>"))
+        XCTAssertFalse(xml.contains("albumArtURI"))
+        XCTAssertTrue(xml.contains("duration=\"0:00:00\""))
+    }
+
 }
