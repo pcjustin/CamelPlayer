@@ -840,6 +840,14 @@ class PlaybackViewModel: ObservableObject {
         }
     }
 
+    func addAlbumToQueue(_ album: MediaObject) async {
+        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else {
+            handleError("The media server for this album is unavailable")
+            return
+        }
+        await addContainerToPlaylist(server: server, objectID: album.id)
+    }
+
     func addContainerToPlaylist(server: UPnPDevice, objectID: String, sortCriteria: String = "") async {
         do {
             let count = try await controller.addContainerToPlaylist(
@@ -847,10 +855,10 @@ class PlaybackViewModel: ObservableObject {
             )
             updateState()
             if count == 0 {
-                handleError("No playable tracks in this folder")
+                handleError("No playable tracks found")
             }
         } catch {
-            handleError("Failed to add folder: \(error.localizedDescription)")
+            handleError("Failed to add tracks: \(error.localizedDescription)")
         }
     }
 

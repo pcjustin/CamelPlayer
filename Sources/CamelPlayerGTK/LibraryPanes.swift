@@ -85,6 +85,7 @@ final class AlbumDetailPane {
     private var titleLabel: Widget
     private var artistLabel: Widget
     private var countLabel: Widget
+    private var queueButton: Widget
     private var starButton: Widget
     private var trackList: Widget
     private var album: MediaObject?
@@ -113,9 +114,12 @@ final class AlbumDetailPane {
         let actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10)
         let playButton = gtk_button_new_with_label("Play Album")
         gtk_widget_add_css_class(playButton, "suggested-action")
+        queueButton = gtk_button_new_with_label("Add to Queue")
+        gtk_widget_set_tooltip_text(queueButton, "Add every track in this album to the end of the queue")
         starButton = gtk_button_new_from_icon_name("non-starred-symbolic")
         cp_button_set_has_frame(starButton, 0)
         cp_box_append(actions, playButton)
+        cp_box_append(actions, queueButton)
         cp_box_append(actions, starButton)
         cp_box_append(info, actions)
         cp_box_append(top, info)
@@ -132,6 +136,16 @@ final class AlbumDetailPane {
         connect(playButton, "clicked") { [weak self] in
             guard let self = self, let album = self.album else { return }
             self.model.playAlbum(album)
+        }
+        connect(queueButton, "clicked") { [weak self] in
+            guard let self = self, let album = self.album else { return }
+            gtk_widget_set_sensitive(self.queueButton, 0)
+            cp_button_set_label(self.queueButton, "Adding…")
+            Task { @MainActor in
+                await self.model.addAlbumToQueue(album)
+                cp_button_set_label(self.queueButton, "Add to Queue")
+                gtk_widget_set_sensitive(self.queueButton, 1)
+            }
         }
         connect(starButton, "clicked") { [weak self] in
             guard let self = self, let album = self.album else { return }

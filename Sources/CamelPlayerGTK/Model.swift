@@ -570,15 +570,24 @@ final class PlayerModel {
     }
 
     @MainActor
+    func addAlbumToQueue(_ album: MediaObject) async {
+        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else {
+            report("The media server for this album is unavailable")
+            return
+        }
+        _ = await addContainerToPlaylist(server: server, objectID: album.id)
+    }
+
+    @MainActor
     func addContainerToPlaylist(server: UPnPDevice, objectID: String, sortCriteria: String = "") async -> Int {
         do {
             let count = try await controller.addContainerToPlaylist(
                 server: server, objectID: objectID, sortCriteria: sortCriteria)
             DispatchQueue.main.async { self.updateState() }
-            if count == 0 { report("No playable tracks in this folder") }
+            if count == 0 { report("No playable tracks found") }
             return count
         } catch {
-            report("Failed to add folder: \(error.localizedDescription)")
+            report("Failed to add tracks: \(error.localizedDescription)")
             return 0
         }
     }

@@ -296,6 +296,7 @@ struct AlbumDetailView: View {
 
     @State private var tracks: [MediaObject] = []
     @State private var coverURL: URL?
+    @State private var isAddingToQueue = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -320,6 +321,18 @@ struct AlbumDetailView: View {
                             Label("Play Album", systemImage: "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
+                        Button {
+                            isAddingToQueue = true
+                            Task { @MainActor in
+                                await viewModel.addAlbumToQueue(album)
+                                isAddingToQueue = false
+                            }
+                        } label: {
+                            Label(isAddingToQueue ? "Adding…" : "Add to Queue", systemImage: "text.badge.plus")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isAddingToQueue)
+                        .help("Add every track in this album to the end of the queue")
                         Button(action: { viewModel.toggleFavoriteAlbum(album) }) {
                             Image(systemName: viewModel.isFavoriteAlbum(album.id, serverID: album.serverID) ? "star.fill" : "star")
                                 .foregroundColor(viewModel.isFavoriteAlbum(album.id, serverID: album.serverID) ? .yellow : .secondary)

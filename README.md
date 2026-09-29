@@ -87,6 +87,7 @@ launcher or run `camelplayer`.
 - **Interactive Seek Bar**: Click or drag to seek to any position with time display
 - **Volume Slider**: Visual volume control with percentage display
 - **Playlist View**: Scrollable track list with current track highlighting
+- **Album Queueing**: Add every track from an album to the end of the current queue
 - **Shuffle and Loop Toggles**: Independent shuffle and loop (off / all / one) controls in the transport bar
 - **Settings Panel**:
   - Audio output device selection dropdown (local and UPnP renderers)
