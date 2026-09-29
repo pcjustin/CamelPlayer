@@ -127,7 +127,7 @@ struct PlaylistView: View {
                             }
                         }
                         .onDelete { indexSet in
-                            for index in indexSet {
+                            for index in indexSet.sorted(by: >) {
                                 viewModel.removeFromPlaylist(at: index)
                             }
                         }

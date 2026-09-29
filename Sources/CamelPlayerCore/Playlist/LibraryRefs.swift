@@ -24,16 +24,20 @@ public struct AlbumRef: Codable, Identifiable, Equatable {
     public let id: String
     public let title: String
     public let artist: String?
+    public let serverID: String?
+    public var identity: String { "\(serverID ?? "")|\(id)" }
 
-    public init(id: String, title: String, artist: String?) {
+    public init(id: String, title: String, artist: String?, serverID: String? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
+        self.serverID = serverID
     }
 
     public init(album: MediaObject) {
         self.id = album.id
         self.title = album.title
         self.artist = album.artist
+        self.serverID = album.serverID
     }
 }

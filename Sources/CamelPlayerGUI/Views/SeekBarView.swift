@@ -11,7 +11,7 @@ struct SeekBarView: View {
             // Slider
             Slider(
                 value: $seekPosition,
-                in: 0...(viewModel.duration ?? 1),
+                in: 0...max(1, viewModel.duration ?? 1),
                 onEditingChanged: { isEditing in
                     if isEditing {
                         isSeekingManually = true
@@ -21,10 +21,10 @@ struct SeekBarView: View {
                     }
                 }
             )
-            .disabled(viewModel.duration == nil)
+            .disabled((viewModel.duration ?? 0) <= 0 || viewModel.isStopped)
             .onChange(of: viewModel.currentTime) { newTime in
                 if !isSeekingManually {
-                    seekPosition = newTime
+                    seekPosition = max(0, min(newTime, viewModel.duration ?? 0))
                 }
             }
 

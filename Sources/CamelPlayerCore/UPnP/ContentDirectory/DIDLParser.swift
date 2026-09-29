@@ -17,6 +17,7 @@ public struct MediaObject: Identifiable, Sendable {
     /// HTTP URL of the media resource (items only).
     public let resURL: String?
     public let childCount: Int?
+    public let serverID: String?
 
     public init(
         id: String,
@@ -28,7 +29,8 @@ public struct MediaObject: Identifiable, Sendable {
         albumArtURI: String? = nil,
         duration: TimeInterval? = nil,
         resURL: String? = nil,
-        childCount: Int? = nil
+        childCount: Int? = nil,
+        serverID: String? = nil
     ) {
         self.id = id
         self.parentID = parentID
@@ -40,6 +42,13 @@ public struct MediaObject: Identifiable, Sendable {
         self.duration = duration
         self.resURL = resURL
         self.childCount = childCount
+        self.serverID = serverID
+    }
+
+    func sourced(from serverID: String) -> MediaObject {
+        MediaObject(id: id, parentID: parentID, title: title, isContainer: isContainer,
+                    artist: artist, album: album, albumArtURI: albumArtURI, duration: duration,
+                    resURL: resURL, childCount: childCount, serverID: serverID)
     }
 }
 
@@ -49,6 +58,7 @@ public final class DIDLParser: NSObject {
     private var value = ""
 
     private var inObject = false
+    private var documentElement: String?
     private var isContainer = false
     private var id = ""
     private var parentID = ""
@@ -66,11 +76,21 @@ public final class DIDLParser: NSObject {
 
     /// Parses a DIDL-Lite document. Returns the contained objects in document order.
     public func parse(_ didl: String) -> [MediaObject] {
+        (try? parseValidated(didl)) ?? []
+    }
+
+    /// Network callers must distinguish malformed data from an empty library.
+    func parseValidated(_ didl: String) throws -> [MediaObject] {
         objects = []
-        guard let data = didl.data(using: .utf8) else { return [] }
-        let parser = XMLParser(data: data)
+        inObject = false
+        documentElement = nil
+        resetObject()
+        let parser = XMLParser(data: Data(didl.utf8))
+        parser.shouldProcessNamespaces = true
         parser.delegate = self
-        parser.parse()
+        guard parser.parse(), documentElement == "DIDL-Lite" else {
+            throw SOAPError.parsingError(parser.parserError?.localizedDescription ?? "Invalid DIDL-Lite document")
+        }
         return objects
     }
 
@@ -88,7 +108,7 @@ public final class DIDLParser: NSObject {
     }
 
     static func parseDuration(_ s: String) -> TimeInterval? {
-        let parts = s.split(separator: ":")
+        let parts = s.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 3,
               let h = Double(parts[0]),
               let m = Double(parts[1]),
@@ -104,6 +124,7 @@ public final class DIDLParser: NSObject {
 
 extension DIDLParser: XMLParserDelegate {
     public func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        if documentElement == nil { documentElement = elementName }
         value = ""
         switch elementName {
         case "container", "item":
@@ -114,8 +135,8 @@ extension DIDLParser: XMLParserDelegate {
             parentID = attributeDict["parentID"] ?? ""
             if let cc = attributeDict["childCount"] { childCount = Int(cc) }
         case "res":
-            if let d = attributeDict["duration"] {
-                duration = DIDLParser.parseDuration(d)
+            if inObject, resURL == nil {
+                duration = attributeDict["duration"].flatMap(DIDLParser.parseDuration)
             }
         default:
             break
@@ -126,16 +147,21 @@ extension DIDLParser: XMLParserDelegate {
         value += string
     }
 
+    public func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        value += String(decoding: CDATABlock, as: UTF8.self)
+    }
+
     public func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        guard inObject else { return }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         switch elementName {
-        case "dc:title":
+        case "title":
             title = trimmed
-        case "upnp:artist", "dc:creator":
+        case "artist", "creator":
             if artist == nil || artist?.isEmpty == true { artist = trimmed }
-        case "upnp:album":
+        case "album":
             album = trimmed
-        case "upnp:albumArtURI":
+        case "albumArtURI":
             albumArtURI = trimmed
         case "res":
             if resURL == nil, !trimmed.isEmpty { resURL = trimmed }

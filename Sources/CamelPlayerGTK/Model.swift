@@ -90,7 +90,7 @@ final class PlayerModel {
 
     // MARK: - Polling
 
-    private var lastQueueIDs: [String] = []
+    private var lastQueueIDs: [UUID] = []
 
     func updateState() {
         playbackState = controller.currentState
@@ -104,7 +104,7 @@ final class PlayerModel {
             UserDefaults.standard.set(position, forKey: Keys.queuePosition)
         }
         let items = controller.getPlaylistItems()
-        let ids = items.map { $0.url.absoluteString }
+        let ids = items.map(\.id)
         if ids != lastQueueIDs {
             lastQueueIDs = ids
             playlistItems = items
@@ -115,7 +115,7 @@ final class PlayerModel {
         }
         updateBitPerfectStatus()
         updateCurrentCover()
-        if let item = currentItem, item.url.absoluteString != lastRecordedURL {
+        if playbackState == .playing, let item = currentItem, item.url.absoluteString != lastRecordedURL {
             lastRecordedURL = item.url.absoluteString
             recordTrackPlayed(item)
         }
@@ -217,7 +217,7 @@ final class PlayerModel {
 
     func recordAlbumPlayed(_ album: MediaObject) {
         let ref = AlbumRef(album: album)
-        recentAlbums.removeAll { $0.id == ref.id }
+        recentAlbums.removeAll { $0.identity == ref.identity }
         recentAlbums.insert(ref, at: 0)
         if recentAlbums.count > recentLimit { recentAlbums = Array(recentAlbums.prefix(recentLimit)) }
         persist(recentAlbums, key: Keys.recentAlbums)
@@ -230,12 +230,13 @@ final class PlayerModel {
         persist(recentAlbums, key: Keys.recentAlbums)
     }
 
-    func isFavoriteAlbum(_ id: String) -> Bool {
-        favoriteAlbums.contains { $0.id == id }
+    func isFavoriteAlbum(_ id: String, serverID: String? = nil) -> Bool {
+        let source = serverID ?? libraryServer?.id
+        return favoriteAlbums.contains { $0.id == id && ($0.serverID == source || $0.serverID == nil) }
     }
 
     func toggleFavoriteAlbum(_ album: MediaObject) {
-        if let index = favoriteAlbums.firstIndex(where: { $0.id == album.id }) {
+        if let index = favoriteAlbums.firstIndex(where: { $0.id == album.id && ($0.serverID == album.serverID || $0.serverID == nil) }) {
             favoriteAlbums.remove(at: index)
         } else {
             favoriteAlbums.insert(AlbumRef(album: album), at: 0)
@@ -244,7 +245,7 @@ final class PlayerModel {
     }
 
     func unfavoriteAlbum(_ ref: AlbumRef) {
-        favoriteAlbums.removeAll { $0.id == ref.id }
+        favoriteAlbums.removeAll { $0.identity == ref.identity }
         persist(favoriteAlbums, key: Keys.favoriteAlbums)
     }
 
@@ -281,16 +282,17 @@ final class PlayerModel {
     }
 
     func openAlbumRef(_ ref: AlbumRef) -> MediaObject {
-        MediaObject(id: ref.id, parentID: "", title: ref.title, isContainer: true, artist: ref.artist)
+        MediaObject(id: ref.id, parentID: "", title: ref.title, isContainer: true, artist: ref.artist, serverID: ref.serverID)
     }
 
     // MARK: - Playback control
 
-    private func run(_ label: String, _ body: @escaping () async throws -> Void) {
-        Task {
+    private func run(_ label: String, _ body: @escaping @MainActor () async throws -> Void) {
+        Task { @MainActor in
             do {
                 try await body()
                 DispatchQueue.main.async { self.updateState() }
+            } catch is CancellationError {
             } catch let error as AudioPlayerError {
                 self.report(Self.describe(error))
             } catch {
@@ -327,11 +329,11 @@ final class PlayerModel {
     }
 
     var canGoNext: Bool {
-        currentPosition < controller.getPlaylistCount() - 1 || loopMode != .off || shuffle
+        !playlistItems.isEmpty && (currentPosition < controller.getPlaylistCount() - 1 || loopMode != .off || shuffle)
     }
 
     var canGoPrevious: Bool {
-        currentPosition > 0 || shuffle
+        !playlistItems.isEmpty && (currentPosition > 0 || shuffle || loopMode != .off)
     }
 
     /// True when the current track lives on a network server but the selected
@@ -445,7 +447,7 @@ final class PlayerModel {
 
     func setVolume(_ volume: Float) {
         controller.volume = volume
-        UserDefaults.standard.set(Double(volume), forKey: Keys.volume)
+        UserDefaults.standard.set(Double(controller.volume), forKey: Keys.volume)
     }
 
     func setShuffle(_ on: Bool) {
@@ -514,6 +516,7 @@ final class PlayerModel {
         UserDefaults.standard.set(id, forKey: Keys.libraryServerID)
     }
 
+    @MainActor
     func albums(startingIndex: Int = 0, requestedCount: Int = 100) async -> PlaybackController.BrowsePage? {
         guard let server = libraryServer else { return nil }
         do {
@@ -524,15 +527,18 @@ final class PlayerModel {
         }
     }
 
-    func albumArtURL(forAlbum id: String) async -> URL? {
-        if let cached = albumArtCache[id] { return URL(string: cached) }
-        guard let server = libraryServer,
-              let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
-        albumArtCache[id] = uri
+    @MainActor
+    func albumArtURL(forAlbum id: String, serverID: String? = nil) async -> URL? {
+        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return nil }
+        let key = "\(server.id)|\(id)"
+        if let cached = albumArtCache[key] { return URL(string: cached) }
+        guard let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
+        albumArtCache[key] = uri
         scheduleCoverCacheSave()
         return URL(string: uri)
     }
 
+    @MainActor
     func searchLibrary(query: String, requestedCount: Int = 100) async -> [MediaObject] {
         guard let server = libraryServer else { return [] }
         do {
@@ -544,10 +550,11 @@ final class PlayerModel {
         }
     }
 
-    func albumTracks(albumID: String) async -> [MediaObject] {
-        guard let server = libraryServer else { return [] }
+    @MainActor
+    func albumTracks(albumID: String, serverID: String? = nil) async -> [MediaObject] {
+        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return [] }
         do {
-            return try await controller.browse(server: server, objectID: albumID).objects
+            return try await controller.albumTracks(server: server, objectID: albumID)
         } catch {
             report("Browse failed: \(error.localizedDescription)")
             return []
@@ -555,11 +562,14 @@ final class PlayerModel {
     }
 
     func playAlbum(_ album: MediaObject) {
-        recordAlbumPlayed(album)
-        guard let server = libraryServer else { return }
-        run("Play album") { try await self.controller.playAlbum(server: server, objectID: album.id) }
+        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else { return }
+        run("Play album") {
+            try await self.controller.playAlbum(server: server, objectID: album.id)
+            if self.controller.currentState == .playing { self.recordAlbumPlayed(album) }
+        }
     }
 
+    @MainActor
     func addContainerToPlaylist(server: UPnPDevice, objectID: String, sortCriteria: String = "") async -> Int {
         do {
             let count = try await controller.addContainerToPlaylist(
@@ -587,6 +597,8 @@ final class PlayerModel {
             return "Failed to load file: \(message)"
         case .remoteURLRequiresRenderer:
             return "This track is on a network server. Choose a network renderer as the output device to play it."
+        case .invalidSeekTime:
+            return "Invalid playback position"
         }
     }
 

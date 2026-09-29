@@ -180,7 +180,7 @@ final class QueuePane {
 
     private func refreshPlaylist() {
         let items = model.playlistItems
-        let key = items.map { $0.url.absoluteString }.joined(separator: "|")
+        let key = items.map { $0.id.uuidString }.joined(separator: "|")
             + "|\(model.currentPosition)|\(model.isPlaying)"
         guard key != renderedKey else { return }
         renderedKey = key

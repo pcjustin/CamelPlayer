@@ -27,6 +27,8 @@ for arg in "$@"; do
     esac
 done
 
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
 if [ "$CONFIG" = "release" ]; then
     echo "Building CamelPlayerGUI (release, optimized — this can take a few minutes)..."
 else
@@ -59,7 +61,9 @@ ICON_CACHE=".build/AppIcon.icns"
 if [ -f "logo.jpg" ]; then
     if [ ! -f "$ICON_CACHE" ] || [ "logo.jpg" -nt "$ICON_CACHE" ]; then
         echo "Generating app icon..."
-        ICONSET="$(mktemp -d)/AppIcon.iconset"
+        ICON_WORK_DIR="$(mktemp -d)"
+        trap 'rm -rf "$ICON_WORK_DIR"' EXIT
+        ICONSET="$ICON_WORK_DIR/AppIcon.iconset"
         mkdir -p "$ICONSET"
 
         # -s format png: iconutil needs real PNGs, not JPEG data in .png names.
@@ -75,7 +79,8 @@ if [ -f "logo.jpg" ]; then
         sips -s format png -z 1024 1024 logo.jpg --out "$ICONSET/icon_512x512@2x.png" > /dev/null 2>&1
 
         iconutil -c icns "$ICONSET" -o "$ICON_CACHE"
-        rm -rf "$ICONSET"
+        rm -rf "$ICON_WORK_DIR"
+        trap - EXIT
     else
         echo "Reusing cached app icon..."
     fi

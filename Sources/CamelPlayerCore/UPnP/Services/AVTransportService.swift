@@ -42,19 +42,7 @@ public class AVTransportService {
 
         /// Parses time in format "H:MM:SS" or "H:MM:SS.mmm"
         private static func parseTime(_ timeString: String) -> TimeInterval {
-            let components = timeString.split(separator: ":")
-            guard components.count >= 2 else { return 0 }
-
-            let hours = Double(components[0]) ?? 0
-            let minutes = Double(components[1]) ?? 0
-            let seconds: Double
-            if components.count >= 3 {
-                seconds = Double(components[2]) ?? 0
-            } else {
-                seconds = 0
-            }
-
-            return hours * 3600 + minutes * 60 + seconds
+            DIDLParser.parseDuration(timeString) ?? 0
         }
     }
 
@@ -76,6 +64,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "SetAVTransportURI",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "CurrentURI", "CurrentURIMetaData"],
             arguments: [
                 "InstanceID": instanceID,
                 "CurrentURI": uri,
@@ -90,6 +79,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "SetNextAVTransportURI",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "NextURI", "NextURIMetaData"],
             arguments: [
                 "InstanceID": instanceID,
                 "NextURI": uri,
@@ -105,6 +95,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "Play",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "Speed"],
             arguments: [
                 "InstanceID": instanceID,
                 "Speed": speed
@@ -118,6 +109,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "Pause",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID"],
             arguments: [
                 "InstanceID": instanceID
             ]
@@ -130,6 +122,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "Stop",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID"],
             arguments: [
                 "InstanceID": instanceID
             ]
@@ -143,6 +136,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "Seek",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "Unit", "Target"],
             arguments: [
                 "InstanceID": instanceID,
                 "Unit": "REL_TIME",
@@ -154,10 +148,11 @@ public class AVTransportService {
     /// Seeks to a specific time interval
     /// - Parameter time: Time in seconds
     public func seek(to time: TimeInterval) async throws {
-        let hours = Int(time) / 3600
-        let minutes = (Int(time) % 3600) / 60
-        let seconds = Int(time) % 60
-        let target = String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        guard time.isFinite, time >= 0,
+              let total = Int(exactly: time.rounded(.towardZero)) else {
+            throw AudioPlayerError.invalidSeekTime
+        }
+        let target = "\(total / 3600):" + String(format: "%02d:%02d", (total % 3600) / 60, total % 60)
         try await seek(target: target)
     }
 
@@ -170,6 +165,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "GetTransportInfo",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID"],
             arguments: [
                 "InstanceID": instanceID
             ]
@@ -191,6 +187,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "GetPositionInfo",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID"],
             arguments: [
                 "InstanceID": instanceID
             ]
@@ -215,6 +212,7 @@ public class AVTransportService {
             controlURL: controlURL,
             action: "GetMediaInfo",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID"],
             arguments: [
                 "InstanceID": instanceID
             ]

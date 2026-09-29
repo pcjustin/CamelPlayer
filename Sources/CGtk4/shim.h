@@ -63,6 +63,7 @@ static inline GtkWidget *cp_drop_down_new(void) {
 
 static inline void cp_drop_down_set_model(GtkWidget *dd, gpointer model) {
     gtk_drop_down_set_model(GTK_DROP_DOWN(dd), G_LIST_MODEL(model));
+    g_object_unref(model);
 }
 
 static inline void cp_drop_down_set_selected(GtkWidget *dd, unsigned int i) {
@@ -206,19 +207,18 @@ static inline void cp_widget_bind_object(GtkWidget *w, gpointer data, GDestroyNo
     g_object_set_data_full(G_OBJECT(w), "cp-swift-object", data, destroy);
 }
 
-/* Registers a D-Bus object with a heap vtable (GDBus keeps a reference to the
-   vtable for the lifetime of the registration). */
+/* GDBus copies the vtable during registration. */
 static inline guint cp_dbus_register_object(GDBusConnection *conn, const char *path,
                                             GDBusInterfaceInfo *info,
                                             GDBusInterfaceMethodCallFunc method_call,
                                             GDBusInterfaceGetPropertyFunc get_property,
                                             GDBusInterfaceSetPropertyFunc set_property,
                                             gpointer user_data) {
-    GDBusInterfaceVTable *vtable = g_new0(GDBusInterfaceVTable, 1);
-    vtable->method_call = method_call;
-    vtable->get_property = get_property;
-    vtable->set_property = set_property;
-    return g_dbus_connection_register_object(conn, path, info, vtable, user_data, NULL, NULL);
+    GDBusInterfaceVTable vtable = {0};
+    vtable.method_call = method_call;
+    vtable.get_property = get_property;
+    vtable.set_property = set_property;
+    return g_dbus_connection_register_object(conn, path, info, &vtable, user_data, NULL, NULL);
 }
 
 static inline void cp_widget_add_file_drop(GtkWidget *w, GCallback cb, gpointer data) {

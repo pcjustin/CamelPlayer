@@ -26,6 +26,7 @@ public class RenderingControlService {
             controlURL: controlURL,
             action: "SetVolume",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "Channel", "DesiredVolume"],
             arguments: [
                 "InstanceID": instanceID,
                 "Channel": channel,
@@ -42,6 +43,7 @@ public class RenderingControlService {
             controlURL: controlURL,
             action: "GetVolume",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "Channel"],
             arguments: [
                 "InstanceID": instanceID,
                 "Channel": channel
@@ -67,6 +69,7 @@ public class RenderingControlService {
             controlURL: controlURL,
             action: "SetMute",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "Channel", "DesiredMute"],
             arguments: [
                 "InstanceID": instanceID,
                 "Channel": channel,
@@ -83,6 +86,7 @@ public class RenderingControlService {
             controlURL: controlURL,
             action: "GetMute",
             serviceType: serviceType,
+            argumentOrder: ["InstanceID", "Channel"],
             arguments: [
                 "InstanceID": instanceID,
                 "Channel": channel

@@ -27,6 +27,8 @@ for arg in "$@"; do
     esac
 done
 
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
 if [ "$CONFIG" = "release" ]; then
     echo "Building CamelPlayerGTK (release, optimized - this can take a few minutes)..."
 else
@@ -44,13 +46,7 @@ BIN_DEST="/usr/local/bin/camelplayer"
 ICON_DEST="/usr/share/pixmaps/camelplayer.png"
 DESKTOP_DEST="/usr/share/applications/camelplayer.desktop"
 
-# Icon lookup (pixmaps fallback dir) only matches known raster formats, and
-# every icon already installed there is .png/.xpm, never .jpg - convert with
-# Pillow (already installed) so camelplayer.png follows the same convention.
 ICON_PNG=".build/camelplayer.png"
-if [ ! -f "$ICON_PNG" ] || [ "logo.jpg" -nt "$ICON_PNG" ]; then
-    python3 -c "from PIL import Image; Image.open('logo.jpg').convert('RGB').save('$ICON_PNG')"
-fi
 
 do_install="$INSTALL_CHOICE"
 if [ "$do_install" = "prompt" ]; then
@@ -68,6 +64,13 @@ if [ "$do_install" = "prompt" ]; then
 fi
 
 if [ "$do_install" = "yes" ]; then
+    if [ ! -f "$ICON_PNG" ] || [ "logo.jpg" -nt "$ICON_PNG" ]; then
+        if ! python3 -c "from PIL import Image" 2>/dev/null; then
+            echo "Icon installation requires Pillow: sudo apt install python3-pil" >&2
+            exit 1
+        fi
+        python3 -c "from PIL import Image; Image.open('logo.jpg').convert('RGB').save('$ICON_PNG')"
+    fi
     echo "Installing..."
     sudo install -Dm755 "$BIN_PATH/CamelPlayerGTK" "$BIN_DEST"
     sudo install -Dm644 "$ICON_PNG" "$ICON_DEST"

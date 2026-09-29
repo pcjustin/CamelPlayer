@@ -165,31 +165,36 @@ struct ContentView: View {
     }
 
     private func handleDrop(providers: [NSItemProvider]) {
-        var resolvedURLs: [URL] = []
+        var resolvedURLs = Array(repeating: [URL](), count: providers.count)
+        let lock = NSLock()
         let group = DispatchGroup()
 
-        for provider in providers {
+        for (index, provider) in providers.enumerated() {
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
                 defer { group.leave() }
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                let url = (item as? URL) ?? (item as? Data).flatMap {
+                    URL(dataRepresentation: $0, relativeTo: nil)
+                }
+                guard let url = url, url.isFileURL else { return }
                 var isDirectory: ObjCBool = false
                 FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                let files: [URL]
                 if isDirectory.boolValue {
-                    let files = FilePickerHelper.scanFolder(url)
-                    resolvedURLs.append(contentsOf: files)
+                    files = FilePickerHelper.scanFolder(url)
                 } else {
-                    if audioFileExtensions.contains(url.pathExtension.lowercased()) {
-                        resolvedURLs.append(url)
-                    }
+                    files = audioFileExtensions.contains(url.pathExtension.lowercased()) ? [url] : []
                 }
+                lock.lock()
+                resolvedURLs[index] = files
+                lock.unlock()
             }
         }
 
         group.notify(queue: .main) {
-            guard !resolvedURLs.isEmpty else { return }
-            viewModel.addFiles(resolvedURLs)
+            let files = resolvedURLs.flatMap { $0 }
+            guard !files.isEmpty else { return }
+            viewModel.addFiles(files)
         }
     }
 }

@@ -70,7 +70,8 @@ struct FilePickerHelper {
         var audioFiles: [URL] = []
 
         for case let fileURL as URL in enumerator {
-            if audioFileExtensions.contains(fileURL.pathExtension.lowercased()) {
+            if audioFileExtensions.contains(fileURL.pathExtension.lowercased()),
+               (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
                 audioFiles.append(fileURL)
             }
         }

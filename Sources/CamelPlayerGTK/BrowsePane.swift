@@ -131,9 +131,12 @@ final class BrowsePane {
         path = [(id: "0", title: device.friendlyName)]
         clearSearchField()
         sortCriteria = ""
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             let caps = await self?.model.controller.sortCapabilities(server: device) ?? []
-            DispatchQueue.main.async { self?.applySortCaps(caps) }
+            DispatchQueue.main.async {
+                guard self?.server?.id == device.id else { return }
+                self?.applySortCaps(caps)
+            }
         }
         reload()
     }
@@ -210,15 +213,13 @@ final class BrowsePane {
     private func addCurrentFolder() {
         guard let server = server, let current = path.last, searchQuery.isEmpty else { return }
         setInfo("Adding folder...")
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             let added = await self?.model.addContainerToPlaylist(
                 server: server, objectID: current.id, sortCriteria: self?.sortCriteria ?? "") ?? 0
             DispatchQueue.main.async { self?.setInfo("Added \(added) tracks") }
         }
     }
 
-    // ponytail: loads at most 1000 objects per folder/search; add paging on
-    // scroll if that ever bites.
     private func reload() {
         guard let server = server else { return }
         loadGeneration += 1
@@ -232,12 +233,13 @@ final class BrowsePane {
         cp_list_box_remove_all(listBox)
         objects = []
 
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
             do {
                 var all: [MediaObject] = []
                 var total = Int.max
-                while all.count < total && all.count < 1000 {
+                while all.count < total {
+                    guard generation == self.loadGeneration else { return }
                     let page: PlaybackController.BrowsePage
                     if query.isEmpty {
                         page = try await self.model.controller.browse(

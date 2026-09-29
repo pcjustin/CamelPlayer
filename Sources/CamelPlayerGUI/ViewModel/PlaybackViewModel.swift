@@ -151,7 +151,7 @@ class PlaybackViewModel: ObservableObject {
         volume = controller.volume
 
         // Record into recently played when the current track changes.
-        if let item = currentItem, item.url.absoluteString != lastRecordedURL {
+        if playbackState == .playing, let item = currentItem, item.url.absoluteString != lastRecordedURL {
             lastRecordedURL = item.url.absoluteString
             recordTrackPlayed(item)
         }
@@ -161,7 +161,7 @@ class PlaybackViewModel: ObservableObject {
 
         // Refresh the system Now Playing panel only when state or track
         // changes; the system extrapolates elapsed time from the rate.
-        let nowPlayingKey = "\(playbackState)-\(currentItem?.id.uuidString ?? "none")"
+        let nowPlayingKey = "\(playbackState)-\(currentItem?.id.uuidString ?? "none")-\(duration ?? 0)"
         if nowPlayingKey != lastNowPlayingKey {
             lastNowPlayingKey = nowPlayingKey
             updateNowPlaying()
@@ -262,7 +262,7 @@ class PlaybackViewModel: ObservableObject {
         }
 
         // Skip if we already loaded cover from this file
-        if lastLoadedCoverPath == currentItem.url.path {
+        if lastLoadedCoverPath == currentItem.url.absoluteString {
             return
         }
 
@@ -271,6 +271,9 @@ class PlaybackViewModel: ObservableObject {
         currentAlbum = parsed?.album
         currentArtist = parsed?.artist
         currentCoverURL = parsed?.albumArtURI.flatMap { URL(string: $0) }
+        albumArt = nil
+        lastLoadedCoverPath = currentItem.url.absoluteString
+        guard currentItem.url.isFileURL else { return }
 
         let folderURL = currentItem.url.deletingLastPathComponent()
 
@@ -281,7 +284,6 @@ class PlaybackViewModel: ObservableObject {
             if FileManager.default.fileExists(atPath: coverURL.path) {
                 if let image = NSImage(contentsOf: coverURL) {
                     albumArt = image
-                    lastLoadedCoverPath = currentItem.url.path
                     return
                 }
             }
@@ -290,13 +292,11 @@ class PlaybackViewModel: ObservableObject {
         // 2. If no external cover found, try to load embedded artwork from file metadata
         if let embeddedArt = loadEmbeddedArtwork(from: currentItem.url) {
             albumArt = embeddedArt
-            lastLoadedCoverPath = currentItem.url.path
             return
         }
 
         // 3. No cover found
         albumArt = nil
-        lastLoadedCoverPath = currentItem.url.path
     }
 
     private func loadEmbeddedArtwork(from url: URL) -> NSImage? {
@@ -403,7 +403,7 @@ class PlaybackViewModel: ObservableObject {
 
     private func recordAlbumPlayed(_ album: MediaObject) {
         let ref = AlbumRef(album: album)
-        recentAlbums.removeAll { $0.id == ref.id }
+        recentAlbums.removeAll { $0.identity == ref.identity }
         recentAlbums.insert(ref, at: 0)
         if recentAlbums.count > recentLimit { recentAlbums = Array(recentAlbums.prefix(recentLimit)) }
         persistRecent()
@@ -439,12 +439,13 @@ class PlaybackViewModel: ObservableObject {
         }
     }
 
-    func isFavoriteAlbum(_ id: String) -> Bool {
-        favoriteAlbums.contains { $0.id == id }
+    func isFavoriteAlbum(_ id: String, serverID: String? = nil) -> Bool {
+        let source = serverID ?? libraryServer?.id
+        return favoriteAlbums.contains { $0.id == id && ($0.serverID == source || $0.serverID == nil) }
     }
 
     func toggleFavoriteAlbum(_ album: MediaObject) {
-        if let index = favoriteAlbums.firstIndex(where: { $0.id == album.id }) {
+        if let index = favoriteAlbums.firstIndex(where: { $0.id == album.id && ($0.serverID == album.serverID || $0.serverID == nil) }) {
             favoriteAlbums.remove(at: index)
         } else {
             favoriteAlbums.insert(AlbumRef(album: album), at: 0)
@@ -511,7 +512,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func openFavoriteAlbum(_ ref: AlbumRef) -> MediaObject {
-        MediaObject(id: ref.id, parentID: "", title: ref.title, isContainer: true, artist: ref.artist)
+        MediaObject(id: ref.id, parentID: "", title: ref.title, isContainer: true, artist: ref.artist, serverID: ref.serverID)
     }
 
     func unfavoriteTrack(_ ref: TrackRef) {
@@ -520,7 +521,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func unfavoriteAlbum(_ ref: AlbumRef) {
-        favoriteAlbums.removeAll { $0.id == ref.id }
+        favoriteAlbums.removeAll { $0.identity == ref.identity }
         persistFavorites()
     }
 
@@ -608,6 +609,7 @@ class PlaybackViewModel: ObservableObject {
         Task {
             do {
                 try await controller.seek(to: time)
+                updateState()
                 // Re-anchor the system panel's extrapolated elapsed time.
                 updateNowPlaying()
             } catch let error as AudioPlayerError {
@@ -799,11 +801,12 @@ class PlaybackViewModel: ObservableObject {
         }
     }
 
-    func albumArtURL(forAlbum id: String) async -> URL? {
-        if let cached = albumArtCache[id] { return URL(string: cached) }
-        guard let server = libraryServer,
-              let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
-        albumArtCache[id] = uri
+    func albumArtURL(forAlbum id: String, serverID: String? = nil) async -> URL? {
+        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return nil }
+        let key = "\(server.id)|\(id)"
+        if let cached = albumArtCache[key] { return URL(string: cached) }
+        guard let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
+        albumArtCache[key] = uri
         scheduleCoverCacheSave()
         return URL(string: uri)
     }
@@ -814,18 +817,22 @@ class PlaybackViewModel: ObservableObject {
         return (await search(server: server, query: query, requestedCount: requestedCount))?.objects ?? []
     }
 
-    func albumTracks(albumID: String) async -> [MediaObject] {
-        guard let server = libraryServer,
-              let page = await browse(server: server, objectID: albumID) else { return [] }
-        return page.objects
+    func albumTracks(albumID: String, serverID: String? = nil) async -> [MediaObject] {
+        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return [] }
+        do {
+            return try await controller.albumTracks(server: server, objectID: albumID)
+        } catch {
+            if !Task.isCancelled { handleError("Browse failed: \(error.localizedDescription)") }
+            return []
+        }
     }
 
     func playAlbum(_ album: MediaObject) {
-        recordAlbumPlayed(album)
-        guard let server = libraryServer else { return }
+        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else { return }
         Task {
             do {
                 try await controller.playAlbum(server: server, objectID: album.id)
+                if controller.currentState == .playing { recordAlbumPlayed(album) }
                 updateState()
             } catch {
                 handleError("Failed to play album: \(error.localizedDescription)")
@@ -870,8 +877,8 @@ class PlaybackViewModel: ObservableObject {
 
     func setVolume(_ newVolume: Float) {
         controller.volume = newVolume
-        volume = newVolume
-        UserDefaults.standard.set(Double(newVolume), forKey: Keys.volume)
+        volume = controller.volume
+        UserDefaults.standard.set(Double(volume), forKey: Keys.volume)
     }
 
     func setShuffle(_ on: Bool) {
@@ -909,6 +916,8 @@ class PlaybackViewModel: ObservableObject {
             handleError("Failed to load file: \(msg)")
         case .remoteURLRequiresRenderer:
             handleError("This track is on a network server. Choose a network renderer as the output device to play it.")
+        case .invalidSeekTime:
+            handleError("Invalid playback position")
         }
     }
 
@@ -921,11 +930,11 @@ class PlaybackViewModel: ObservableObject {
 
     var canGoNext: Bool {
         let count = controller.getPlaylistCount()
-        return currentPosition < count - 1 || loopMode != .off || shuffle
+        return count > 0 && (currentPosition < count - 1 || loopMode != .off || shuffle)
     }
 
     var canGoPrevious: Bool {
-        return currentPosition > 0 || shuffle
+        return !playlistItems.isEmpty && (currentPosition > 0 || shuffle || loopMode != .off)
     }
 
     var isPlaying: Bool {

@@ -42,6 +42,14 @@ final class DeviceDescriptionParserTests: XCTestCase {
         XCTAssertEqual(device?.location, location)
     }
 
+    func testCDATADeviceFieldsAreDecoded() async {
+        let data = xml(friendlyName: "<![CDATA[Living & Dining]]>",
+                       avControlURL: "<![CDATA[/control?a=1&b=2]]>")
+        let device = await DeviceDescriptionParser().parse(data: data, location: location, uuid: "u")
+        XCTAssertEqual(device?.friendlyName, "Living & Dining")
+        XCTAssertEqual(device?.avTransportURL, "http://192.168.1.50:8080/control?a=1&b=2")
+    }
+
     func testResolvesAbsolutePathControlURL() async {
         // "/AVTransport/control" -> scheme://host:port + path
         let device = await DeviceDescriptionParser().parse(data: xml(), location: location, uuid: "u")
@@ -77,5 +85,20 @@ final class DeviceDescriptionParserTests: XCTestCase {
         let data = "<root><device><friendlyName>oops".data(using: .utf8)!
         let device = await DeviceDescriptionParser().parse(data: data, location: location, uuid: "u")
         XCTAssertNil(device)
+    }
+
+    func testURLBaseAndRelativeQueryAreResolvedAsURLs() async {
+        let data = String(decoding: xml(avControlURL: "../control?service=AVTransport"), as: UTF8.self)
+            .replacingOccurrences(of: "<device>", with: "<URLBase>http://10.0.0.2:9000/base/</URLBase><device>")
+        let device = await DeviceDescriptionParser().parse(data: Data(data.utf8), location: location, uuid: "u")
+        XCTAssertEqual(device?.avTransportURL, "http://10.0.0.2:9000/control?service=AVTransport")
+        XCTAssertEqual(device?.renderingControlURL, "http://10.0.0.2:9000/base/RenderingControl/control")
+    }
+
+    func testIPv6LocationAndQueryInControlURL() async {
+        let location = URL(string: "http://[::1]:8080/devices/desc.xml")!
+        let device = await DeviceDescriptionParser().parse(
+            data: xml(avControlURL: "/control?action=1"), location: location, uuid: "u")
+        XCTAssertEqual(device?.avTransportURL, "http://[::1]:8080/control?action=1")
     }
 }

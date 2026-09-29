@@ -41,7 +41,7 @@ struct FavoritesView: View {
                     if !viewModel.favoriteAlbums.isEmpty {
                         Text("Albums").font(.headline).padding(.horizontal)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
-                            ForEach(viewModel.favoriteAlbums) { ref in
+                            ForEach(viewModel.favoriteAlbums, id: \.identity) { ref in
                                 AlbumCell(album: viewModel.openFavoriteAlbum(ref))
                                     .onTapGesture { selectedAlbum = viewModel.openFavoriteAlbum(ref) }
                             }

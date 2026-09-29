@@ -14,7 +14,7 @@ public protocol SSDPDiscoveryDelegate: AnyObject {
     func ssdpDiscovery(_ discovery: SSDPDiscovery, didRemoveDevice device: UPnPDevice)
 }
 
-/// SSDP (Simple Service Discovery Protocol) implementation for UPnP device discovery
+/// SSDP lifecycle, sockets and discovery results are confined to one queue.
 public class SSDPDiscovery: @unchecked Sendable {
     private static let multicastGroup = "239.255.255.250"
     private static let multicastPort: UInt16 = 1900
@@ -24,68 +24,93 @@ public class SSDPDiscovery: @unchecked Sendable {
     ]
 
     public weak var delegate: SSDPDiscoveryDelegate?
-
+    private let queue = DispatchQueue(label: "CamelPlayer.SSDP")
+    private let queueKey = DispatchSpecificKey<Bool>()
     private var socketFD: Int32 = -1
-    private var isDiscovering = false
-    /// Guarded by devicesLock: read on the listener thread, written from
-    /// concurrent description-fetch tasks.
+    private var generation = 0
+    private var source: DispatchSourceRead?
+    private var searchTimer: DispatchSourceTimer?
     private var discoveredDevices: [String: UPnPDevice] = [:]
-    private let devicesLock = NSLock()
-    private var listenerThread: Thread?
-    private var searchTimer: Timer?
+    private var pendingRequests: [String: UUID] = [:]
+    private var fetchTasks: [String: Task<Void, Never>] = [:]
+    private let fetchDescription: (URL) async throws -> Data
 
-    public init() {}
+    public convenience init() {
+        self.init(fetchDescription: { url in
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SOAPError.invalidResponse }
+            return data
+        })
+    }
 
-    /// Starts SSDP discovery
+    init(fetchDescription: @escaping (URL) async throws -> Data) {
+        self.fetchDescription = fetchDescription
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    private func withQueue<T>(_ body: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return body() }
+        return queue.sync(execute: body)
+    }
+
     public func startDiscovery() {
-        guard !isDiscovering else { return }
-
-        isDiscovering = true
-        coreLog("SSDP: Starting discovery...")
-
-        // Create UDP socket
-        if !createSocket() {
-            coreLog("SSDP: Failed to create socket")
-            isDiscovering = false
-            return
-        }
-
-        // Start listener thread
-        startListenerThread()
-
-        // Send an initial burst of M-SEARCH packets right away. SSDP runs over
-        // UDP and may drop packets, so a few quick repeats speed up and harden
-        // initial discovery instead of waiting for the 30s periodic timer.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            for i in 0..<3 {
-                guard self?.isDiscovering == true else { return }
-                self?.sendMSearch()
-                if i < 2 { Thread.sleep(forTimeInterval: 0.1) }
+        withQueue {
+            guard socketFD < 0, createSocket() else { return }
+            generation += 1
+            let sessionGeneration = generation
+            let descriptor = socketFD
+            let reader = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
+            reader.setEventHandler { [weak self] in
+                guard let self = self, self.generation == sessionGeneration else { return }
+                self.readResponses(from: descriptor)
             }
-        }
+            reader.setCancelHandler { close(descriptor) }
+            source = reader
+            reader.resume()
 
-        // Send periodic M-SEARCH messages
-        DispatchQueue.main.async { [weak self] in
-            self?.searchTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-                self?.sendMSearch()
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: 30)
+            timer.setEventHandler { [weak self] in self?.sendMSearch() }
+            searchTimer = timer
+            timer.resume()
+            for delay in [0.1, 0.2] {
+                queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self = self, self.generation == sessionGeneration else { return }
+                    self.sendMSearch()
+                }
             }
         }
     }
 
-    /// Stops SSDP discovery
     public func stopDiscovery() {
-        guard isDiscovering else { return }
+        withQueue {
+            generation += 1
+            searchTimer?.cancel()
+            searchTimer = nil
+            source?.cancel()
+            source = nil
+            socketFD = -1
+            for task in fetchTasks.values { task.cancel() }
+            fetchTasks.removeAll()
+            pendingRequests.removeAll()
+            discoveredDevices.removeAll()
+        }
+    }
 
-        coreLog("SSDP: Stopping discovery...")
-        isDiscovering = false
+    private func readResponses(from descriptor: Int32) {
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        // Bound each dispatch event so an SSDP burst cannot starve stopDiscovery.
+        for _ in 0..<32 {
+            let count = recv(descriptor, &buffer, buffer.count, 0)
+            guard count > 0 else { return }
+            if let message = String(bytes: buffer.prefix(count), encoding: .utf8) { parseResponse(message) }
+        }
+    }
 
-        searchTimer?.invalidate()
-        searchTimer = nil
-
-        closeSocket()
-        devicesLock.lock()
-        discoveredDevices.removeAll()
-        devicesLock.unlock()
+    func receive(_ response: String) {
+        withQueue { parseResponse(response) }
     }
 
     /// Creates a UDP socket for SSDP
@@ -149,13 +174,9 @@ public class SSDPDiscovery: @unchecked Sendable {
             return false
         }
 
-        // Set socket timeout
-        var timeout = timeval()
-        timeout.tv_sec = 1
-        timeout.tv_usec = 0
-        if setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) < 0 {
-            coreLog("SSDP: Failed to set socket timeout: \(String(cString: strerror(errno)))")
-            // Continue anyway - timeout is optional
+        guard fcntl(socketFD, F_SETFL, O_NONBLOCK) >= 0 else {
+            closeSocket()
+            return false
         }
 
         coreLog("SSDP: Socket created and bound to port \(Self.multicastPort)")
@@ -168,50 +189,6 @@ public class SSDPDiscovery: @unchecked Sendable {
             close(socketFD)
             socketFD = -1
         }
-    }
-
-    /// Starts the listener thread
-    private func startListenerThread() {
-        listenerThread = Thread { [weak self] in
-            self?.listenForResponses()
-        }
-        listenerThread?.start()
-    }
-
-    /// Listens for SSDP responses
-    private func listenForResponses() {
-        coreLog("SSDP: Listener thread started")
-
-        let bufferSize = 8192
-        var buffer = [UInt8](repeating: 0, count: bufferSize)
-        var addr = sockaddr_in()
-        var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
-
-        while isDiscovering {
-            let bytesRead = withUnsafeMutablePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    recvfrom(socketFD, &buffer, bufferSize, 0, $0, &addrLen)
-                }
-            }
-
-            if bytesRead > 0 {
-                if let message = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
-                    // Get source IP for debugging
-                    let sourceIP = String(cString: inet_ntoa(addr.sin_addr))
-                    coreLog("SSDP: Received \(bytesRead) bytes from \(sourceIP)")
-                    parseResponse(message)
-                }
-            } else if bytesRead < 0 {
-                let error = errno
-                if error != EAGAIN && error != EWOULDBLOCK {
-                    coreLog("SSDP: Receive error: \(String(cString: strerror(error)))")
-                }
-            }
-            // No sleep needed: recvfrom blocks up to the 1s SO_RCVTIMEO, so the
-            // loop never busy-spins, and responses are handled with no added delay.
-        }
-
-        coreLog("SSDP: Listener thread stopped")
     }
 
     /// Sends M-SEARCH multicast request
@@ -322,18 +299,36 @@ public class SSDPDiscovery: @unchecked Sendable {
         // Extract UUID from USN
         let uuid = extractUUID(from: usn)
 
-        // Avoid duplicates
-        devicesLock.lock()
-        let alreadyDiscovered = discoveredDevices[uuid] != nil
-        devicesLock.unlock()
-        guard !alreadyDiscovered else {
-            coreLog("SSDP: Device already discovered: \(uuid)")
-            return
-        }
-
-        // Fetch and parse device description
-        Task {
-            await fetchDeviceDescription(uuid: uuid, location: locationURL)
+        guard discoveredDevices[uuid] == nil, pendingRequests[uuid] == nil,
+              ["http", "https"].contains(locationURL.scheme?.lowercased() ?? ""),
+              locationURL.host != nil else { return }
+        let token = UUID()
+        let sessionGeneration = generation
+        pendingRequests[uuid] = token
+        let fetch = fetchDescription
+        fetchTasks[uuid] = Task { [weak self] in
+            let device: UPnPDevice?
+            do {
+                let data = try await fetch(locationURL)
+                try Task.checkCancellation()
+                device = await DeviceDescriptionParser().parse(data: data, location: locationURL, uuid: uuid)
+            } catch {
+                device = nil
+            }
+            self?.queue.async { [weak self] in
+                guard let self = self, self.generation == sessionGeneration,
+                      self.pendingRequests[uuid] == token else { return }
+                self.pendingRequests.removeValue(forKey: uuid)
+                self.fetchTasks.removeValue(forKey: uuid)
+                guard let device = device,
+                      device.avTransportURL != nil || device.contentDirectoryURL != nil else { return }
+                self.discoveredDevices[uuid] = device
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self,
+                          self.withQueue({ self.generation == sessionGeneration && self.discoveredDevices[uuid] != nil }) else { return }
+                    self.delegate?.ssdpDiscovery(self, didDiscoverDevice: device)
+                }
+            }
         }
     }
 
@@ -353,13 +348,16 @@ public class SSDPDiscovery: @unchecked Sendable {
         guard nts?.contains("byebye") == true, let usn = usn else { return }
 
         let uuid = extractUUID(from: usn)
-        devicesLock.lock()
+        pendingRequests.removeValue(forKey: uuid)
+        fetchTasks.removeValue(forKey: uuid)?.cancel()
         let removed = discoveredDevices.removeValue(forKey: uuid)
-        devicesLock.unlock()
         guard let device = removed else { return }
 
         coreLog("SSDP: Device left the network: \(device.friendlyName)")
-        DispatchQueue.main.async {
+        let sessionGeneration = generation
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self,
+                  self.withQueue({ self.generation == sessionGeneration && self.discoveredDevices[uuid] == nil }) else { return }
             self.delegate?.ssdpDiscovery(self, didRemoveDevice: device)
         }
     }
@@ -376,56 +374,9 @@ public class SSDPDiscovery: @unchecked Sendable {
         return usn
     }
 
-    /// Fetches and parses device description XML
-    private func fetchDeviceDescription(uuid: String, location: URL) async {
-        coreLog("SSDP: Fetching device description from \(location)")
-        do {
-            let (data, _) = try await URLSession.shared.data(from: location)
-
-            // Fresh parser per fetch: concurrent fetches sharing one stateful
-            // parser corrupt each other's fields.
-            let parser = DeviceDescriptionParser()
-
-            if let device = await parser.parse(data: data, location: location, uuid: uuid) {
-                coreLog("SSDP: Parsed device: \(device.friendlyName)")
-                coreLog("  Manufacturer: \(device.manufacturer)")
-                coreLog("  Model: \(device.modelName)")
-                coreLog("  AVTransport URL: \(device.avTransportURL ?? "nil")")
-                coreLog("  RenderingControl URL: \(device.renderingControlURL ?? "nil")")
-
-                // Keep renderers (AVTransport) and servers (ContentDirectory).
-                if device.avTransportURL != nil || device.contentDirectoryURL != nil {
-                    coreLog("SSDP: Adding \(device.deviceType) device to list")
-                    storeDevice(device, uuid: uuid)
-                    DispatchQueue.main.async {
-                        self.delegate?.ssdpDiscovery(self, didDiscoverDevice: device)
-                    }
-                } else {
-                    coreLog("SSDP: Device has no usable service, ignoring")
-                }
-            } else {
-                coreLog("SSDP: Failed to parse device description")
-            }
-        } catch {
-            coreLog("SSDP: Failed to fetch device description from \(location): \(error)")
-        }
-    }
-
-    /// Records a parsed device (sync so the lock is usable from async callers).
-    private func storeDevice(_ device: UPnPDevice, uuid: String) {
-        devicesLock.lock()
-        discoveredDevices[uuid] = device
-        devicesLock.unlock()
-    }
-
-    /// Gets all discovered devices
     public func getDiscoveredDevices() -> [UPnPDevice] {
-        devicesLock.lock()
-        defer { devicesLock.unlock() }
-        return Array(discoveredDevices.values)
+        withQueue { Array(discoveredDevices.values) }
     }
 
-    deinit {
-        stopDiscovery()
-    }
+    deinit { stopDiscovery() }
 }

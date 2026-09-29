@@ -31,15 +31,14 @@ public class UPnPDeviceManager: SSDPDiscoveryDelegate {
         discovery.stopDiscovery()
         availableRenderers.removeAll()
         availableServers.removeAll()
+        onRenderersChanged?()
+        onServersChanged?()
     }
 
     /// Refreshes device list (stops and restarts discovery)
     public func refresh() {
         stopDiscovery()
-        // Small delay to ensure cleanup
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.startDiscovery()
-        }
+        startDiscovery()
     }
 
     /// Gets a renderer by ID

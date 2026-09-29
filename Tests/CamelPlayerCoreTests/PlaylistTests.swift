@@ -189,6 +189,25 @@ final class PlaylistTests: XCTestCase {
         XCTAssertEqual(playlist.count, 0)
         XCTAssertNil(playlist.currentItem)
     }
+
+    func testInvalidMoveLeavesPlaylistUnchanged() {
+        playlist.addAll(urls: (0..<3).map { URL(fileURLWithPath: "/test/\($0).wav") })
+        let ids = playlist.allItems().map(\.id)
+        playlist.move(fromOffsets: IndexSet(integer: 3), toOffset: 0)
+        playlist.move(fromOffsets: IndexSet(integer: 0), toOffset: -1)
+        playlist.move(fromOffsets: IndexSet(integer: 0), toOffset: 4)
+        XCTAssertEqual(playlist.allItems().map(\.id), ids)
+    }
+
+    func testExhaustedShuffleDoesNotAddPhantomHistory() {
+        playlist.addAll(urls: (0..<2).map { URL(fileURLWithPath: "/test/\($0).wav") })
+        playlist.shuffle = true
+        let first = playlist.currentItem
+        _ = playlist.next()
+        XCTAssertNil(playlist.next())
+        XCTAssertNil(playlist.next())
+        XCTAssertEqual(playlist.previous()?.id, first?.id)
+    }
     func testShuffleWithoutLoopPlaysEachTrackOnceThenStops() {
         playlist.addAll(urls: (0..<5).map { URL(fileURLWithPath: "/test/\($0).wav") })
         playlist.shuffle = true

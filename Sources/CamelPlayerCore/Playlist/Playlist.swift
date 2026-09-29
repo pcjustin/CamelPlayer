@@ -117,7 +117,9 @@ public class Playlist {
         withLock {
             guard index >= 0 && index < items.count else { return }
 
-            items.remove(at: index)
+            let removed = items.remove(at: index)
+            _shufflePlayed.remove(removed.id)
+            _shuffleHistory.removeAll { $0 == removed.id }
 
             if items.isEmpty {
                 currentIndex = -1
@@ -162,7 +164,6 @@ public class Playlist {
     private func shuffleNextLocked() -> PlaylistItem? {
         if let current = currentItemLocked {
             _shufflePlayed.insert(current.id)
-            _shuffleHistory.append(current.id)
         }
         var candidates = items.indices.filter {
             $0 != currentIndex && !_shufflePlayed.contains(items[$0].id)
@@ -173,6 +174,7 @@ public class Playlist {
             candidates = items.indices.filter { $0 != currentIndex }
             if candidates.isEmpty { candidates = Array(items.indices) }
         }
+        if let current = currentItemLocked { _shuffleHistory.append(current.id) }
         currentIndex = candidates.randomElement()!
         return items[currentIndex]
     }
@@ -222,6 +224,8 @@ public class Playlist {
     /// index space).
     public func move(fromOffsets source: IndexSet, toOffset destination: Int) {
         withLock {
+            guard (0...items.count).contains(destination),
+                  source.allSatisfy({ items.indices.contains($0) }) else { return }
             let currentID = currentItemLocked?.id
             let moving = source.sorted().map { items[$0] }
             for index in source.sorted(by: >) {

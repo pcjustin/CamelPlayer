@@ -19,6 +19,7 @@ public enum AudioPlayerError: Error {
     case audioEngineError(String)
     case fileLoadError(String)
     case remoteURLRequiresRenderer
+    case invalidSeekTime
 }
 
 #if os(macOS)
@@ -112,7 +113,7 @@ public class AudioPlayer {
         guard let file = audioFile else { return nil }
         let format = file.processingFormat
         let sampleRate = Int(format.sampleRate)
-        let bitDepth = format.settings[AVLinearPCMBitDepthKey] as? Int ?? 0
+        let bitDepth = file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int ?? 0
         let channels = Int(format.channelCount)
         return "\(sampleRate) Hz / \(bitDepth) bit / \(channels)ch"
     }
@@ -124,6 +125,7 @@ public class AudioPlayer {
 
         do {
             let file = try AVAudioFile(forReading: url)
+            stop()
             audioFile = file
             currentURL = url
             state = .stopped
@@ -139,8 +141,7 @@ public class AudioPlayer {
             throw AudioPlayerError.fileNotFound
         }
 
-        // Set playing up front so the UI never observes a stopped state.
-        state = .playing
+        stop()
 
         do {
             let file = try AVAudioFile(forReading: url)
@@ -269,7 +270,10 @@ public class AudioPlayer {
         }
 
         let sampleRate = file.processingFormat.sampleRate
-        let startFrame = AVAudioFramePosition(time * sampleRate)
+        guard time.isFinite, time >= 0,
+              let startFrame = AVAudioFramePosition(exactly: (time * sampleRate).rounded(.down)) else {
+            throw AudioPlayerError.invalidSeekTime
+        }
 
         guard startFrame >= 0 && startFrame < file.length else {
             return
@@ -283,17 +287,20 @@ public class AudioPlayer {
 
         playerNode.stop()
 
-        let frameCount = AVAudioFrameCount(file.length - startFrame)
         segmentStartFrame = startFrame
         lastKnownTime = time
 
-        playerNode.scheduleSegment(file,
-                                   startingFrame: startFrame,
-                                   frameCount: frameCount,
-                                   at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.handleFileCompleted(generation: generation)
+        var frame = startFrame
+        while frame < file.length {
+            let count = AVAudioFrameCount(min(file.length - frame, AVAudioFramePosition(UInt32.max)))
+            let isLastSegment = frame + AVAudioFramePosition(count) == file.length
+            playerNode.scheduleSegment(file, startingFrame: frame, frameCount: count,
+                                       at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                if isLastSegment {
+                    DispatchQueue.main.async { self?.handleFileCompleted(generation: generation) }
+                }
             }
+            frame += AVAudioFramePosition(count)
         }
 
         // stop() above cleared the node queue; requeue the preloaded next.
@@ -359,19 +366,12 @@ public class AudioPlayer {
         guard scheduleGeneration == generation else { return }
 
         if let file = nextFile, let url = nextURL, nextScheduled {
+            segmentStartFrame -= audioFile?.length ?? 0
             audioFile = file
             currentURL = url
             nextFile = nil
             nextURL = nil
             nextScheduled = false
-            // Re-zero currentTime: playerTime keeps counting across queued
-            // files, so offset by what has been rendered so far.
-            if let nodeTime = playerNode.lastRenderTime,
-               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
-                segmentStartFrame = -playerTime.sampleTime
-            } else {
-                segmentStartFrame = 0
-            }
             lastKnownTime = 0
             onAdvancedToNext?()
         } else {
@@ -397,8 +397,9 @@ public class AudioPlayer {
 public class AudioPlayer {
     private let cond = NSCondition()
     /// Bumped to signal the feeder thread to exit. Guarded by cond, as are
-    /// state, feederRunning and framesPlayed.
+    /// storedState, feederRunning and framesPlayed.
     private var generation = 0
+    private var playbackGeneration = 0
     private var feederRunning = false
 
     private var file: OpaquePointer?
@@ -417,15 +418,30 @@ public class AudioPlayer {
     private var currentDevice: AudioDeviceID = 0
     private var configuredRate: Float64 = 0
 
-    public private(set) var state: PlaybackState = .stopped
-    public private(set) var currentURL: URL?
+    private var storedState: PlaybackState = .stopped
+    private var storedURL: URL?
     public var onPlaybackFinished: (() -> Void)?
     public var onAdvancedToNext: (() -> Void)?
-    public var volume: Float = 1.0
+    private var storedVolume: Float = 1.0
 
     public init() throws {}
 
+    private func withLock<T>(_ body: () -> T) -> T {
+        cond.lock()
+        defer { cond.unlock() }
+        return body()
+    }
+
+    public var state: PlaybackState { withLock { storedState } }
+    public var currentURL: URL? { withLock { storedURL } }
+    public var volume: Float {
+        get { withLock { storedVolume } }
+        set { withLock { storedVolume = newValue.isFinite ? max(0, min(1, newValue)) : 0 } }
+    }
+
     public var duration: TimeInterval? {
+        cond.lock()
+        defer { cond.unlock() }
         guard file != nil, fileInfo.samplerate > 0 else { return nil }
         return Double(fileInfo.frames) / Double(fileInfo.samplerate)
     }
@@ -435,7 +451,7 @@ public class AudioPlayer {
         defer { cond.unlock() }
         guard fileInfo.samplerate > 0 else { return 0 }
         var played = framesPlayed
-        if state == .playing, let pcm = pcm {
+        if storedState == .playing, let pcm = pcm {
             var delay: snd_pcm_sframes_t = 0
             if snd_pcm_delay(pcm, &delay) == 0 && delay > 0 {
                 played -= sf_count_t(delay)
@@ -495,10 +511,12 @@ public class AudioPlayer {
     public func getCurrentDeviceSampleRate() throws -> Float64 { configuredRate }
 
     public func getFileSampleRate() -> Float64? {
-        file != nil ? Float64(fileInfo.samplerate) : nil
+        withLock { file != nil ? Float64(fileInfo.samplerate) : nil }
     }
 
     public func getFileFormat() -> String? {
+        cond.lock()
+        defer { cond.unlock() }
         guard file != nil else { return nil }
         let bits: Int
         switch Int(fileInfo.format) & Int(SF_FORMAT_SUBMASK) {
@@ -506,6 +524,7 @@ public class AudioPlayer {
         case Int(SF_FORMAT_PCM_16): bits = 16
         case Int(SF_FORMAT_PCM_24): bits = 24
         case Int(SF_FORMAT_PCM_32), Int(SF_FORMAT_FLOAT): bits = 32
+        case Int(SF_FORMAT_DOUBLE): bits = 64
         default: bits = 0
         }
         return "\(fileInfo.samplerate) Hz / \(bits) bit / \(fileInfo.channels)ch"
@@ -520,25 +539,30 @@ public class AudioPlayer {
 
     public func loadAndPlay(url: URL) throws {
         stop()
-        // Set playing up front so the UI never observes a stopped state.
-        cond.lock(); state = .playing; cond.unlock()
+        // Set playing up front so the UI never observes a stopped storedState.
+        cond.lock(); storedState = .playing; cond.unlock()
         do {
             try openFile(url: url)
             try openPCM()
         } catch {
-            cond.lock(); state = .stopped; cond.unlock()
+            cond.lock(); storedState = .stopped; cond.unlock()
             throw error
         }
         startFeeder()
     }
 
     public func play() throws {
-        if state == .paused {
+        let priorState = withLock { storedState }
+        guard priorState != .playing else { return }
+        cond.lock()
+        while feederRunning { cond.wait() }
+        cond.unlock()
+        if priorState == .paused {
             guard let pcm = pcm else {
                 throw AudioPlayerError.audioEngineError("No PCM device open")
             }
             snd_pcm_prepare(pcm)
-            cond.lock(); state = .playing; cond.unlock()
+            cond.lock(); storedState = .playing; cond.unlock()
             startFeeder()
             return
         }
@@ -548,7 +572,7 @@ public class AudioPlayer {
         }
 
         // Stopped: restart the loaded track from the beginning.
-        cond.lock(); state = .playing; cond.unlock()
+        cond.lock(); storedState = .playing; cond.unlock()
         do {
             if pcm == nil {
                 try openPCM()
@@ -556,7 +580,7 @@ public class AudioPlayer {
                 snd_pcm_prepare(pcm)
             }
         } catch {
-            cond.lock(); state = .stopped; cond.unlock()
+            cond.lock(); storedState = .stopped; cond.unlock()
             throw error
         }
         sf_seek(file, 0, SEEK_SET)
@@ -566,59 +590,58 @@ public class AudioPlayer {
 
     public func pause() {
         cond.lock()
-        guard state == .playing else { cond.unlock(); return }
-        state = .paused
-        generation += 1
-        cond.broadcast()
-        while feederRunning { cond.wait() }
-        cond.unlock()
-
-        // Rewind the file position by what ALSA had buffered but not played,
-        // so resume continues from the audible position.
+        defer { cond.unlock() }
+        guard storedState == .playing else { return }
+        var audibleFrame = framesPlayed
         if let pcm = pcm {
             var delay: snd_pcm_sframes_t = 0
-            snd_pcm_delay(pcm, &delay)
-            snd_pcm_drop(pcm)
-            if delay > 0 { framesPlayed = max(0, framesPlayed - sf_count_t(delay)) }
+            if snd_pcm_delay(pcm, &delay) == 0, delay > 0 { audibleFrame -= sf_count_t(delay) }
         }
+        storedState = .paused
+        generation += 1
+        if let pcm = pcm { snd_pcm_drop(pcm) }
+        while feederRunning { cond.wait() }
+        framesPlayed = max(0, audibleFrame)
         if let file = file { sf_seek(file, framesPlayed, SEEK_SET) }
     }
 
     public func stop() {
         cond.lock()
+        defer { cond.unlock() }
         generation += 1
-        state = .stopped
-        cond.broadcast()
+        playbackGeneration += 1
+        storedState = .stopped
+        if let pcm = pcm { snd_pcm_drop(pcm) }
         while feederRunning { cond.wait() }
         if let next = nextFile { sf_close(next) }
         nextFile = nil
         nextURL = nil
-        cond.unlock()
-        if let pcm = pcm { snd_pcm_drop(pcm) }
+        closePCM()
         if let file = file { sf_seek(file, 0, SEEK_SET) }
         framesPlayed = 0
     }
 
     public func seek(to time: TimeInterval) throws {
+        cond.lock()
         guard let file = file else {
+            cond.unlock()
             throw AudioPlayerError.fileLoadError("No audio file loaded")
         }
-        let target = sf_count_t(time * Double(fileInfo.samplerate))
-        guard target >= 0 && target < fileInfo.frames else { return }
-
-        let wasPlaying = state == .playing
-        cond.lock()
-        generation += 1
-        cond.broadcast()
-        while feederRunning { cond.wait() }
-        cond.unlock()
-
-        if let pcm = pcm {
-            snd_pcm_drop(pcm)
-            if wasPlaying { snd_pcm_prepare(pcm) }
+        guard time.isFinite, time >= 0,
+              let target = sf_count_t(exactly: (time * Double(fileInfo.samplerate)).rounded(.down)) else {
+            cond.unlock()
+            throw AudioPlayerError.invalidSeekTime
         }
+        guard target >= 0 && target < fileInfo.frames else { cond.unlock(); return }
+
+        let wasPlaying = storedState == .playing
+        generation += 1
+        if let pcm = pcm { snd_pcm_drop(pcm) }
+        while feederRunning { cond.wait() }
+        if wasPlaying, let pcm = pcm { snd_pcm_prepare(pcm) }
         sf_seek(file, target, SEEK_SET)
-        cond.lock(); framesPlayed = target; cond.unlock()
+        framesPlayed = target
+        cond.unlock()
         if wasPlaying { startFeeder() }
     }
 
@@ -654,7 +677,7 @@ public class AudioPlayer {
         }
         file = handle
         fileInfo = info
-        currentURL = url
+        storedURL = url
         framesPlayed = 0
     }
 
@@ -695,7 +718,7 @@ public class AudioPlayer {
         if let file = file { sf_close(file) }
         file = nil
         fileInfo = SF_INFO()
-        currentURL = nil
+        storedURL = nil
     }
 
     private func closePCM() {
@@ -707,9 +730,10 @@ public class AudioPlayer {
     private func startFeeder() {
         cond.lock()
         let gen = generation
+        let playback = playbackGeneration
         feederRunning = true
         cond.unlock()
-        let thread = Thread { [weak self] in self?.feederLoop(gen) }
+        let thread = Thread { [weak self] in self?.feederLoop(gen, playback: playback) }
         thread.name = "alsa-feeder"
         thread.start()
     }
@@ -717,7 +741,7 @@ public class AudioPlayer {
     /// Reads file chunks and writes them to ALSA until the track ends or the
     /// generation changes. Owns the file and pcm handles while running;
     /// control methods kill it (generation bump + wait) before touching them.
-    private func feederLoop(_ gen: Int) {
+    private func feederLoop(_ gen: Int, playback: Int) {
         defer {
             cond.lock()
             feederRunning = false
@@ -729,16 +753,28 @@ public class AudioPlayer {
         let chunkFrames = 4096
         let channels = Int(fileInfo.channels)
         var buffer = [Int32](repeating: 0, count: chunkFrames * channels)
+        var floatingBuffer = [Double](repeating: 0, count: chunkFrames * channels)
         var out16 = [Int16](repeating: 0, count: useS16 ? chunkFrames * channels : 0)
 
         while true {
             cond.lock()
-            let live = gen == generation && state == .playing
-            let vol = volume
+            let live = gen == generation && storedState == .playing
+            let vol = storedVolume
             cond.unlock()
             guard live else { return }
 
-            let frames = sf_readf_int(currentFile, &buffer, sf_count_t(chunkFrames))
+            let subtype = Int(fileInfo.format) & Int(SF_FORMAT_SUBMASK)
+            let frames: sf_count_t
+            if subtype == Int(SF_FORMAT_FLOAT) || subtype == Int(SF_FORMAT_DOUBLE) {
+                // sf_readf_int does not scale floating-point files to PCM range.
+                // Convert explicitly to preserve their level without peak normalization.
+                frames = sf_readf_double(currentFile, &floatingBuffer, sf_count_t(chunkFrames))
+                for i in 0..<(max(0, Int(frames)) * channels) {
+                    buffer[i] = PCMConversion.int32(floatingBuffer[i])
+                }
+            } else {
+                frames = sf_readf_int(currentFile, &buffer, sf_count_t(chunkFrames))
+            }
             if frames <= 0 {
                 // Gapless: swap in the preloaded next track without draining,
                 // so ALSA keeps rendering continuously.
@@ -747,13 +783,16 @@ public class AudioPlayer {
                     sf_close(currentFile)
                     file = next
                     fileInfo = nextInfo
-                    currentURL = nextURL
+                    storedURL = nextURL
                     nextFile = nil
                     nextURL = nil
                     framesPlayed = 0
                     currentFile = next
                     cond.unlock()
-                    DispatchQueue.main.async { [weak self] in self?.onAdvancedToNext?() }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self, self.withLock({ playback == self.playbackGeneration }) else { return }
+                        self.onAdvancedToNext?()
+                    }
                     continue
                 }
                 cond.unlock()
@@ -762,12 +801,15 @@ public class AudioPlayer {
                 var finished = false
                 cond.lock()
                 if gen == generation {
-                    state = .stopped
+                    storedState = .stopped
                     finished = true
                 }
                 cond.unlock()
                 if finished {
-                    DispatchQueue.main.async { [weak self] in self?.onPlaybackFinished?() }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self, self.withLock({ gen == self.generation }) else { return }
+                        self.onPlaybackFinished?()
+                    }
                 }
                 return
             }
@@ -788,7 +830,7 @@ public class AudioPlayer {
             var offset = 0
             while offset < Int(frames) {
                 cond.lock()
-                let stillLive = gen == generation && state == .playing
+                let stillLive = gen == generation && storedState == .playing
                 cond.unlock()
                 guard stillLive else { return }
 
@@ -807,19 +849,18 @@ public class AudioPlayer {
                     snd_pcm_prepare(pcm)
                     continue
                 }
-                if rc < 0 {
+                if rc <= 0 {
                     coreLog("ALSA: write failed: \(String(cString: snd_strerror(Int32(rc))))")
                     cond.lock()
-                    if gen == generation { state = .stopped }
+                    if gen == generation { storedState = .stopped }
                     cond.unlock()
                     return
                 }
                 offset += Int(rc)
+                cond.lock()
+                framesPlayed += sf_count_t(rc)
+                cond.unlock()
             }
-
-            cond.lock()
-            framesPlayed += frames
-            cond.unlock()
         }
     }
 

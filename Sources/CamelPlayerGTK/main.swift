@@ -71,6 +71,10 @@ final class PlayerApp {
     }
 
     func activate(_ app: UnsafeMutableRawPointer?) {
+        if window != nil {
+            cp_window_present(window)
+            return
+        }
         sectionStack = cp_stack_new()
         albumsPane = AlbumsPane(model: model)
         favoritesPane = FavoritesPane(model: model)
@@ -99,8 +103,8 @@ final class PlayerApp {
         window = cp_app_window_new(app)
         cp_window_set_title(window, "CamelPlayer")
         let defaults = UserDefaults.standard
-        let savedWidth = Int32(defaults.integer(forKey: "ui.windowWidth"))
-        let savedHeight = Int32(defaults.integer(forKey: "ui.windowHeight"))
+        let savedWidth = Int32(clamping: defaults.integer(forKey: "ui.windowWidth"))
+        let savedHeight = Int32(clamping: defaults.integer(forKey: "ui.windowHeight"))
         savedWindowSize = (savedWidth > 0 ? savedWidth : 920, savedHeight > 0 ? savedHeight : 700)
         cp_window_set_default_size(window, savedWindowSize.width, savedWindowSize.height)
 

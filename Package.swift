@@ -3,24 +3,15 @@
 
 import PackageDescription
 
+var coreDependencies: [Target.Dependency] = [.product(name: "Swifter", package: "swifter")]
+#if os(Linux)
+coreDependencies += ["CAlsa", "CSndFile"]
+#endif
+
 var targets: [Target] = [
     .target(
         name: "CamelPlayerCore",
-        dependencies: [
-            .product(name: "Swifter", package: "swifter"),
-            .target(name: "CAlsa", condition: .when(platforms: [.linux])),
-            .target(name: "CSndFile", condition: .when(platforms: [.linux])),
-        ]
-    ),
-    .systemLibrary(
-        name: "CAlsa",
-        pkgConfig: "alsa",
-        providers: [.apt(["libasound2-dev"])]
-    ),
-    .systemLibrary(
-        name: "CSndFile",
-        pkgConfig: "sndfile",
-        providers: [.apt(["libsndfile1-dev"])]
+        dependencies: coreDependencies
     ),
     .testTarget(
         name: "CamelPlayerCoreTests",
@@ -39,6 +30,16 @@ targets.append(
 )
 #else
 targets.append(contentsOf: [
+    .systemLibrary(
+        name: "CAlsa",
+        pkgConfig: "alsa",
+        providers: [.apt(["libasound2-dev"])]
+    ),
+    .systemLibrary(
+        name: "CSndFile",
+        pkgConfig: "sndfile",
+        providers: [.apt(["libsndfile1-dev"])]
+    ),
     .systemLibrary(
         name: "CGtk4",
         pkgConfig: "gtk4",

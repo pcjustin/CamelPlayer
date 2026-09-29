@@ -51,12 +51,15 @@ struct CachedAsyncImage<Placeholder: View>: View {
         // Disk read + network off the main actor; return Sendable Data.
         let data: Data? = await Task.detached(priority: .utility) {
             let file = ImageCache.fileURL(for: url)
-            if let onDisk = try? Data(contentsOf: file) { return onDisk }
-            guard let (downloaded, _) = try? await URLSession.shared.data(from: url) else { return nil }
-            try? downloaded.write(to: file)
+            if let onDisk = try? Data(contentsOf: file), NSImage(data: onDisk) != nil { return onDisk }
+            if url.isFileURL { return try? Data(contentsOf: url) }
+            guard let (downloaded, response) = try? await URLSession.shared.data(from: url),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  NSImage(data: downloaded) != nil else { return nil }
+            try? downloaded.write(to: file, options: .atomic)
             return downloaded
         }.value
-        guard let data = data, let loaded = NSImage(data: data) else { return }
+        guard !Task.isCancelled, let data = data, let loaded = NSImage(data: data) else { return }
         ImageCache.memory.setObject(loaded, forKey: key)
         image = loaded
     }

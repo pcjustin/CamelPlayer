@@ -45,4 +45,37 @@ final class ContainerTraversalTests: XCTestCase {
         XCTAssertEqual(count, 0)
         XCTAssertEqual(calls, 1)
     }
+
+    func testCyclicContainersDoNotRecurseOrDuplicateTracks() async throws {
+        var visited: [String] = []
+        var added: [String] = []
+        _ = try await PlaybackController.addContainer(objectID: "0", browse: { id, _, _ in
+            visited.append(id)
+            let child = id == "0" ? "album" : "0"
+            let objects = [MediaObject(id: child, parentID: id, title: child, isContainer: true), self.track(id)]
+            return .init(objects: objects, numberReturned: 2, totalMatches: 2)
+        }, add: { added.append($0.id); return true })
+        XCTAssertEqual(visited, ["0", "album"])
+        XCTAssertEqual(added, ["album", "0"])
+    }
+
+    @MainActor
+    func testCancelledBrowseDoesNotAddItsLateResponse() async throws {
+        let pending = expectation(description: "Browse pending")
+        var reply: CheckedContinuation<ContentDirectoryService.BrowseResult, Never>?
+        var added = 0
+        let task = Task {
+            try await PlaybackController.addContainer(objectID: "0", browse: { _, _, _ in
+                await withCheckedContinuation { reply = $0; pending.fulfill() }
+            }, add: { _ in added += 1; return true })
+        }
+        await fulfillment(of: [pending], timeout: 1)
+        task.cancel()
+        reply?.resume(returning: .init(objects: [track("late")], numberReturned: 1, totalMatches: 1))
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(added, 0)
+    }
 }

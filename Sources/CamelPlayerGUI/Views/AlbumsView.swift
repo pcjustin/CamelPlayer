@@ -17,6 +17,8 @@ struct AlbumsView: View {
     @State private var searchQuery = ""
     @State private var resultAlbums: [MediaObject] = []
     @State private var resultTracks: [MediaObject] = []
+    @State private var loadGeneration = 0
+    @State private var searchGeneration = 0
 
     private var isSearching: Bool { !searchQuery.isEmpty }
 
@@ -181,14 +183,20 @@ struct AlbumsView: View {
         searchQuery = query
         resultAlbums = []
         resultTracks = []
+        searchGeneration += 1
+        let generation = searchGeneration
+        let serverID = viewModel.libraryServer?.id
         Task {
             let objects = await viewModel.searchLibrary(query: query)
+            guard generation == searchGeneration, serverID == viewModel.libraryServer?.id,
+                  query == searchText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
             resultAlbums = objects.filter { $0.isContainer }
             resultTracks = objects.filter { !$0.isContainer }
         }
     }
 
     private func clearSearch() {
+        searchGeneration += 1
         searchText = ""
         searchQuery = ""
         resultAlbums = []
@@ -213,21 +221,33 @@ struct AlbumsView: View {
 
     @MainActor
     private func reload() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        selectedAlbum = nil
+        clearSearch()
+        albums = []
+        totalMatches = 0
+        isLoadingMore = false
         isLoading = true
         let page = await viewModel.albums(startingIndex: 0, requestedCount: pageSize)
+        guard !Task.isCancelled, generation == loadGeneration else { return }
         albums = page?.objects ?? []
         totalMatches = page?.totalMatches ?? albums.count
         isLoading = false
     }
 
     private func loadMoreIfNeeded(_ album: MediaObject) {
-        guard album.id == albums.last?.id, !isLoadingMore, albums.count < totalMatches else { return }
+        guard album.id == albums.last?.id, !isLoading, !isLoadingMore, albums.count < totalMatches else { return }
         isLoadingMore = true
+        let generation = loadGeneration
+        let serverID = viewModel.libraryServer?.id
+        let index = albums.count
         Task {
-            let page = await viewModel.albums(startingIndex: albums.count, requestedCount: pageSize)
+            let page = await viewModel.albums(startingIndex: index, requestedCount: pageSize)
+            guard generation == loadGeneration, serverID == viewModel.libraryServer?.id else { return }
             if let page = page {
                 albums.append(contentsOf: page.objects)
-                totalMatches = page.totalMatches
+                totalMatches = page.objects.isEmpty ? albums.count : page.totalMatches
             }
             isLoadingMore = false
         }
@@ -257,7 +277,12 @@ struct AlbumCell: View {
                 Text(artist).font(.caption2).foregroundColor(.secondary).lineLimit(1)
             }
         }
-        .task(id: album.id) { coverURL = await viewModel.albumArtURL(forAlbum: album.id) }
+        .task(id: "\(album.serverID ?? viewModel.libraryServer?.id ?? "")|\(album.id)") {
+            coverURL = nil
+            let url = await viewModel.albumArtURL(forAlbum: album.id, serverID: album.serverID)
+            guard !Task.isCancelled else { return }
+            coverURL = url
+        }
     }
 
     private var placeholder: some View {
@@ -296,8 +321,8 @@ struct AlbumDetailView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         Button(action: { viewModel.toggleFavoriteAlbum(album) }) {
-                            Image(systemName: viewModel.isFavoriteAlbum(album.id) ? "star.fill" : "star")
-                                .foregroundColor(viewModel.isFavoriteAlbum(album.id) ? .yellow : .secondary)
+                            Image(systemName: viewModel.isFavoriteAlbum(album.id, serverID: album.serverID) ? "star.fill" : "star")
+                                .foregroundColor(viewModel.isFavoriteAlbum(album.id, serverID: album.serverID) ? .yellow : .secondary)
                         }
                         .buttonStyle(.plain)
                         .help("Favorite album")
@@ -343,9 +368,15 @@ struct AlbumDetailView: View {
                 }
             }
         }
-        .task(id: album.id) {
-            tracks = await viewModel.albumTracks(albumID: album.id)
-            coverURL = await viewModel.albumArtURL(forAlbum: album.id)
+        .task(id: "\(album.serverID ?? viewModel.libraryServer?.id ?? "")|\(album.id)") {
+            tracks = []
+            coverURL = nil
+            let loadedTracks = await viewModel.albumTracks(albumID: album.id, serverID: album.serverID)
+            guard !Task.isCancelled else { return }
+            tracks = loadedTracks
+            let url = await viewModel.albumArtURL(forAlbum: album.id, serverID: album.serverID)
+            guard !Task.isCancelled else { return }
+            coverURL = url
         }
     }
 

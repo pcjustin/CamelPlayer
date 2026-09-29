@@ -23,4 +23,11 @@ final class TimeFormatterTests: XCTestCase {
         XCTAssertEqual(TimeFormatter.formatTime(.nan), "0:00")
         XCTAssertEqual(TimeFormatter.formatTime(.infinity), "0:00")
     }
+
+    func testInvalidAndVeryLargeTimesDoNotTrapOrOverflow() {
+        for time in [-1.0, Double.greatestFiniteMagnitude, Double(Int.max)] {
+            XCTAssertEqual(TimeFormatter.formatTime(time), "0:00")
+        }
+        XCTAssertEqual(TimeFormatter.formatTime(7_730_941_132_800), "2147483648:00:00")
+    }
 }

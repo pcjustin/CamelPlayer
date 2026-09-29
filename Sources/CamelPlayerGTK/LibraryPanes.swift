@@ -23,8 +23,8 @@ private func makeAlbumCell(_ model: PlayerModel, album: MediaObject) -> Widget {
         cover.setURL(url)
     } else {
         let albumID = album.id
-        Task {
-            let url = await model.albumArtURL(forAlbum: albumID)
+        Task { @MainActor in
+            let url = await model.albumArtURL(forAlbum: albumID, serverID: album.serverID)
             DispatchQueue.main.async { cover.setURL(url) }
         }
     }
@@ -157,10 +157,10 @@ final class AlbumDetailPane {
         cp_list_box_remove_all(trackList)
 
         let albumID = album.id
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
-            let tracks = await self.model.albumTracks(albumID: albumID)
-            let coverURL = await self.model.albumArtURL(forAlbum: albumID)
+            let tracks = await self.model.albumTracks(albumID: albumID, serverID: album.serverID)
+            let coverURL = await self.model.albumArtURL(forAlbum: albumID, serverID: album.serverID)
             DispatchQueue.main.async {
                 guard generation == self.loadGeneration else { return }
                 self.tracks = tracks
@@ -172,7 +172,7 @@ final class AlbumDetailPane {
 
     private func updateStar() {
         guard let album = album else { return }
-        cp_button_set_icon_name(starButton, model.isFavoriteAlbum(album.id)
+        cp_button_set_icon_name(starButton, model.isFavoriteAlbum(album.id, serverID: album.serverID)
             ? "starred-symbolic" : "non-starred-symbolic")
     }
 
@@ -419,13 +419,20 @@ final class AlbumsPane: LibraryPaneBase {
         loadGeneration += 1
         let generation = loadGeneration
         loadedServerID = model.libraryServer?.id
+        isLoadingMore = false
+        searchQuery = ""
+        updatingSearch = true
+        cp_editable_set_text(searchEntry, "")
+        updatingSearch = false
+        albums = []
+        totalMatches = 0
         guard model.libraryServer != nil else {
             showStatus("No media server found")
             return
         }
         showStatus("Loading albums...")
         albums = []
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
             let page = await self.model.albums(startingIndex: 0, requestedCount: self.pageSize)
             DispatchQueue.main.async {
@@ -443,18 +450,19 @@ final class AlbumsPane: LibraryPaneBase {
               searchQuery.isEmpty else { return }
         isLoadingMore = true
         let generation = loadGeneration
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
             let page = await self.model.albums(startingIndex: self.albums.count,
                                                requestedCount: self.pageSize)
             DispatchQueue.main.async {
+                guard generation == self.loadGeneration else { return }
                 self.isLoadingMore = false
-                guard generation == self.loadGeneration, let page = page else { return }
+                guard let page = page else { return }
                 for album in page.objects {
                     self.albums.append(album)
                     cp_flow_box_append(self.grid, makeAlbumCell(self.model, album: album))
                 }
-                self.totalMatches = page.totalMatches
+                self.totalMatches = page.objects.isEmpty ? self.albums.count : page.totalMatches
             }
         }
     }
@@ -477,14 +485,15 @@ final class AlbumsPane: LibraryPaneBase {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard text != searchQuery else { return }
         searchQuery = text
+        loadGeneration += 1
+        isLoadingMore = false
         if text.isEmpty {
-            rebuildGrid()
+            reload()
             return
         }
-        let generation = loadGeneration + 1
-        loadGeneration = generation
+        let generation = loadGeneration
         showStatus("Searching...")
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
             let objects = await self.model.searchLibrary(query: text)
             DispatchQueue.main.async {

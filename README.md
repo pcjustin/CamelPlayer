@@ -23,7 +23,7 @@ A native audio player featuring independent audio output device control and bit-
 ### Linux (Ubuntu)
 
 - Swift 6 (`sudo apt install swiftlang` on Ubuntu 24.10 or later)
-- GTK4, ALSA and libsndfile development packages:
+- GTK 4.12 or later, ALSA and libsndfile development packages:
 
 ```bash
 sudo apt install libgtk-4-dev libasound2-dev libsndfile1-dev
@@ -35,7 +35,7 @@ sudo apt install libgtk-4-dev libasound2-dev libsndfile1-dev
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/camelplayer.git
+git clone https://github.com/pcjustin/CamelPlayer.git camelplayer
 cd camelplayer
 
 # Build the .app bundle (prompts to install to /Applications)
@@ -45,7 +45,7 @@ cd camelplayer
 ### Build from Source (Linux)
 
 ```bash
-git clone https://github.com/yourusername/camelplayer.git
+git clone https://github.com/pcjustin/CamelPlayer.git camelplayer
 cd camelplayer
 swift build
 ```
@@ -57,6 +57,7 @@ To also install CamelPlayer system-wide with an application launcher entry
 ./install_linux.sh
 ```
 
+Installing the launcher icon also requires Pillow (`sudo apt install python3-pil`).
 This builds `CamelPlayerGTK`, installs the binary to `/usr/local/bin`, and
 registers a desktop entry and icon (converted from `logo.jpg`) so CamelPlayer
 appears in the application launcher. Run `./install_linux.sh --help` for
@@ -157,24 +158,12 @@ AudioUnitSetProperty(
 
 This allows the player to route audio to a specific device regardless of the system's default output device setting.
 
-#### Atomic loadAndPlay() for Race-Free Track Switching
+#### Track Switching
 
-To prevent UI flickering during track changes, `AudioPlayer` provides an atomic `loadAndPlay()` method:
-
-```swift
-public func loadAndPlay(url: URL) throws {
-    // Set state to .playing immediately to avoid UI reading .stopped state
-    state = .playing
-
-    // Load and play atomically
-    let file = try AVAudioFile(forReading: url)
-    audioFile = file
-    currentURL = url
-    try playInternal()
-}
-```
-
-This ensures that state remains `.playing` throughout the entire load-play cycle, eliminating race conditions with the ViewModel's polling timer.
+Asynchronous playback commands run on the main actor. Local playback stops the
+previous node schedule before loading a new file. UPnP commands are serialized,
+and requests superseded by a track switch or stop cannot restore stale playback
+state. Failed loads leave playback stopped.
 
 ## Development
 
@@ -220,7 +209,7 @@ does not read M4A/ALAC.
 
 ### Linux
 - No M4A/ALAC decoding
-- No gapless playback for local files
+- Gapless local playback requires matching sample rates and channel counts
 - Selecting a `hw:` device opens it exclusively while playing
 - Embedded artwork is not read; local covers come from cover.jpg in the
   track's folder

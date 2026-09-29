@@ -45,6 +45,7 @@ public class ContentDirectoryService {
             controlURL: controlURL,
             action: "Browse",
             serviceType: serviceType,
+            argumentOrder: ["ObjectID", "BrowseFlag", "Filter", "StartingIndex", "RequestedCount", "SortCriteria"],
             arguments: [
                 "ObjectID": objectID,
                 "BrowseFlag": flag.rawValue,
@@ -55,14 +56,7 @@ public class ContentDirectoryService {
             ]
         )
 
-        // SOAPClient already entity-decodes the Result element, so it is plain
-        // DIDL-Lite XML at this point.
-        let didl = response["Result"] ?? ""
-        let objects = DIDLParser().parse(didl)
-        let numberReturned = Int(response["NumberReturned"] ?? "") ?? objects.count
-        let totalMatches = Int(response["TotalMatches"] ?? "") ?? objects.count
-
-        return BrowseResult(objects: objects, numberReturned: numberReturned, totalMatches: totalMatches)
+        return try Self.parseResult(response)
     }
 
     /// Searches a container subtree (root "0" = whole library) with a UPnP
@@ -79,6 +73,7 @@ public class ContentDirectoryService {
             controlURL: controlURL,
             action: "Search",
             serviceType: serviceType,
+            argumentOrder: ["ContainerID", "SearchCriteria", "Filter", "StartingIndex", "RequestedCount", "SortCriteria"],
             arguments: [
                 "ContainerID": containerID,
                 "SearchCriteria": searchCriteria,
@@ -88,11 +83,30 @@ public class ContentDirectoryService {
                 "SortCriteria": sortCriteria
             ]
         )
-        let didl = response["Result"] ?? ""
-        let objects = DIDLParser().parse(didl)
-        let numberReturned = Int(response["NumberReturned"] ?? "") ?? objects.count
-        let totalMatches = Int(response["TotalMatches"] ?? "") ?? objects.count
+        return try Self.parseResult(response)
+    }
+
+    static func parseResult(_ response: [String: String]) throws -> BrowseResult {
+        // SOAPClient has already entity-decoded the Result element.
+        guard let didl = response["Result"] else { throw SOAPError.invalidResponse }
+        let objects = didl.isEmpty ? [] : try DIDLParser().parseValidated(didl)
+        func count(_ key: String) throws -> Int {
+            guard let value = response[key] else { return objects.count }
+            guard let count = Int(value), count >= 0 else { throw SOAPError.invalidResponse }
+            return count
+        }
+        let numberReturned = try count("NumberReturned")
+        let totalMatches = try count("TotalMatches")
+        guard numberReturned == objects.count else { throw SOAPError.invalidResponse }
         return BrowseResult(objects: objects, numberReturned: numberReturned, totalMatches: totalMatches)
+    }
+
+    static func textSearchCriteria(_ query: String) -> String {
+        let escaped = query.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        // No class filter: some servers reject class OR-expressions.
+        return ["dc:title", "upnp:artist", "upnp:album"]
+            .map { "\($0) contains \"\(escaped)\"" }.joined(separator: " or ")
     }
 
     /// Returns the sort fields the server supports (e.g. "dc:title", "upnp:artist").

@@ -28,17 +28,17 @@ public struct OutputDevice: Identifiable, Hashable {
 // MARK: - Playback Controller
 
 public class PlaybackController {
-    private let player: AudioPlayer
+    private let player: AudioPlayer?
     private let playlist: Playlist
-    private var lastPlayStartTime: Date?
+    private var playbackGeneration = 0
+    private var queueGeneration = 0
     private var albumContainerIDCache: [String: String] = [:]
-    private let minimumPlayDuration: TimeInterval = 0.5 // minimum play time threshold
 
     // UPnP support
     private let upnpManager: UPnPDeviceManager
     private let mediaServer: LocalMediaServer
     private var currentEngine: PlaybackEngine
-    private var localEngine: LocalPlaybackEngine
+    private var localEngine: PlaybackEngine
     private(set) public var currentOutputDevice: OutputDevice
 
     /// Called when the set of available UPnP renderers changes (discovery is async).
@@ -57,17 +57,17 @@ public class PlaybackController {
 
     public var shuffle: Bool {
         get { playlist.shuffle }
-        set { playlist.shuffle = newValue }
+        set { playlist.shuffle = newValue; refreshPreloadedNext() }
     }
 
     public var loopMode: LoopMode {
         get { playlist.loopMode }
-        set { playlist.loopMode = newValue }
+        set { playlist.loopMode = newValue; refreshPreloadedNext() }
     }
 
     public var volume: Float {
         get { currentEngine.volume }
-        set { currentEngine.volume = newValue }
+        set { currentEngine.volume = newValue.isFinite ? max(0, min(1, newValue)) : 0 }
     }
 
     public var currentTime: TimeInterval {
@@ -79,7 +79,8 @@ public class PlaybackController {
     }
 
     public init() throws {
-        player = try AudioPlayer()
+        let audioPlayer = try AudioPlayer()
+        player = audioPlayer
         playlist = Playlist()
 
         // Initialize UPnP components
@@ -87,11 +88,11 @@ public class PlaybackController {
         mediaServer = LocalMediaServer()
 
         // Set up playback engines
-        localEngine = LocalPlaybackEngine(audioPlayer: player)
+        localEngine = LocalPlaybackEngine(audioPlayer: audioPlayer)
         currentEngine = localEngine
 
         // Set default output device (local default device)
-        let defaultDeviceID = try player.getDefaultOutputDevice()
+        let defaultDeviceID = try audioPlayer.getDefaultOutputDevice()
         currentOutputDevice = OutputDevice(
             id: "local-\(defaultDeviceID)",
             name: "Default Output",
@@ -106,32 +107,46 @@ public class PlaybackController {
         try? mediaServer.start()
         upnpManager.startDiscovery()
 
-        // Set up auto-play next track when current track finishes
-        currentEngine.onPlaybackFinished = { [weak self] in
-            self?.playNextIfAvailable()
+        configureCallbacks(for: currentEngine)
+    }
+
+    init(engine: PlaybackEngine) {
+        player = nil
+        playlist = Playlist()
+        upnpManager = UPnPDeviceManager()
+        mediaServer = LocalMediaServer()
+        localEngine = engine
+        currentEngine = engine
+        currentOutputDevice = OutputDevice(id: "test", name: "Test", type: .local(0))
+        configureCallbacks(for: engine)
+    }
+
+    private func configureCallbacks(for engine: PlaybackEngine) {
+        engine.onPlaybackFinished = { [weak self, weak engine] in
+            guard let self = self else { return }
+            let generation = self.playbackGeneration
+            Task { @MainActor [weak self, weak engine] in
+                guard let self = self, let engine = engine,
+                      self.currentEngine === engine, generation == self.playbackGeneration else { return }
+                self.playNextIfAvailable()
+            }
         }
-        currentEngine.onAdvancedToNext = { [weak self] in
-            self?.handleAdvancedToNext()
+        engine.onAdvancedToNext = { [weak self, weak engine] in
+            guard let self = self, let engine = engine, self.currentEngine === engine else { return }
+            self.handleAdvancedToNext()
         }
     }
 
+    @MainActor
     private func playNextIfAvailable() {
-        // If the previous track played too briefly it likely failed to load;
-        // stop auto-advancing to avoid rapidly skipping through the playlist.
-        if let startTime = lastPlayStartTime {
-            let playDuration = Date().timeIntervalSince(startTime)
-            if playDuration < minimumPlayDuration {
-                coreLog("Warning: Track played for only \(playDuration)s, stopping auto-play to prevent rapid skipping")
-                return
-            }
-        }
-
         guard let nextItem = playlist.next() else {
             // No next item available
             return
         }
 
+        let generation = playbackGeneration
         Task {
+            guard generation == playbackGeneration else { return }
             do {
                 try await startPlaying(nextItem)
             } catch {
@@ -142,10 +157,19 @@ public class PlaybackController {
     }
 
     /// Loads/plays an item and preloads the next one for gapless playback.
+    @MainActor
     private func startPlaying(_ item: PlaylistItem) async throws {
-        lastPlayStartTime = Date()
-        try await currentEngine.loadAndPlay(url: item.url, metadata: item.metadata)
-        setNextOnEngine()
+        playbackGeneration += 1
+        let generation = playbackGeneration
+        let engine = currentEngine
+        do {
+            try await engine.loadAndPlay(url: item.url, metadata: item.metadata)
+            guard generation == playbackGeneration, currentEngine === engine else { return }
+            setNextOnEngine()
+        } catch {
+            guard generation == playbackGeneration else { return }
+            throw error
+        }
     }
 
     private func setNextOnEngine() {
@@ -164,30 +188,33 @@ public class PlaybackController {
     /// pointer to match and preload the following one.
     private func handleAdvancedToNext() {
         _ = playlist.next()
-        lastPlayStartTime = Date()
         setNextOnEngine()
     }
 
     public func addToPlaylist(url: URL) {
         playlist.add(url: url)
+        refreshPreloadedNext()
     }
 
     public func addToPlaylist(urls: [URL]) {
         playlist.addAll(urls: urls)
+        refreshPreloadedNext()
     }
 
     public func addTrack(url: URL, title: String, metadata: String?) {
         playlist.add(PlaylistItem(url: url, title: title, metadata: metadata))
+        refreshPreloadedNext()
     }
 
+    @MainActor
     public func play() async throws {
         if currentEngine.state == .playing {
             return
         }
 
         if currentEngine.state == .paused {
-            lastPlayStartTime = Date()
             try await currentEngine.play()
+            setNextOnEngine()
             return
         }
 
@@ -199,6 +226,7 @@ public class PlaybackController {
         try await startPlaying(item)
     }
 
+    @MainActor
     public func playItem(at index: Int) async throws {
         guard let item = playlist.jumpTo(index: index) else {
             throw AudioPlayerError.fileLoadError("Invalid playlist index")
@@ -211,14 +239,17 @@ public class PlaybackController {
         currentEngine.pause()
     }
 
+    @MainActor
     public func resume() async throws {
-        try await currentEngine.play()
+        try await play()
     }
 
     public func stop() {
+        playbackGeneration += 1
         currentEngine.stop()
     }
 
+    @MainActor
     public func next() async throws {
         guard let item = playlist.next() else {
             throw AudioPlayerError.fileLoadError("No next item")
@@ -227,6 +258,7 @@ public class PlaybackController {
         try await startPlaying(item)
     }
 
+    @MainActor
     public func previous() async throws {
         guard let item = playlist.previous() else {
             throw AudioPlayerError.fileLoadError("No previous item")
@@ -235,6 +267,7 @@ public class PlaybackController {
         try await startPlaying(item)
     }
 
+    @MainActor
     public func seek(to time: TimeInterval) async throws {
         try await currentEngine.seek(to: time)
     }
@@ -246,7 +279,7 @@ public class PlaybackController {
         var devices: [OutputDevice] = []
 
         // Add local audio devices
-        if let localDevices = try? player.listOutputDevices() {
+        if let localDevices = try? player?.listOutputDevices() {
             for device in localDevices {
                 devices.append(OutputDevice(
                     id: "local-\(device.id)",
@@ -270,14 +303,16 @@ public class PlaybackController {
 
     /// Sets the output device (local or UPnP)
     public func setOutputDevice(_ device: OutputDevice) throws {
+        guard device.id != currentOutputDevice.id else { return }
         // Stop current playback and carry the current volume over to the new engine.
         let wasPlaying = currentEngine.state == .playing
         let currentVolume = currentEngine.volume
-        currentEngine.stop()
+        stop()
 
         switch device.type {
         case .local(let deviceID):
             // Switch to local playback
+            guard let player = player else { throw OutputDeviceError.deviceNotFound }
             try player.setOutputDevice(deviceID: deviceID)
             currentEngine = localEngine
             currentOutputDevice = device
@@ -285,12 +320,7 @@ public class PlaybackController {
         case .upnp(let upnpDevice):
             // Switch to UPnP playback
             let upnpEngine = UPnPPlaybackEngine(device: upnpDevice, mediaServer: mediaServer)
-            upnpEngine.onPlaybackFinished = { [weak self] in
-                self?.playNextIfAvailable()
-            }
-            upnpEngine.onAdvancedToNext = { [weak self] in
-                self?.handleAdvancedToNext()
-            }
+            configureCallbacks(for: upnpEngine)
             currentEngine = upnpEngine
             currentOutputDevice = device
         }
@@ -299,7 +329,9 @@ public class PlaybackController {
 
         // Resume playback only if something was actually playing
         if wasPlaying, let currentItem = playlist.currentItem {
-            Task {
+            let generation = playbackGeneration
+            Task { @MainActor in
+                guard generation == playbackGeneration else { return }
                 do {
                     try await startPlaying(currentItem)
                 } catch {
@@ -330,6 +362,7 @@ public class PlaybackController {
     private static let browsePageSize = 200
 
     /// Browses one page of a container. Root container ID is "0".
+    @MainActor
     public func browse(
         server: UPnPDevice,
         objectID: String = "0",
@@ -347,11 +380,12 @@ public class PlaybackController {
             requestedCount: requestedCount,
             sortCriteria: sortCriteria
         )
-        return BrowsePage(objects: result.objects, totalMatches: result.totalMatches)
+        return BrowsePage(objects: result.objects.map { $0.sourced(from: server.id) }, totalMatches: result.totalMatches)
     }
 
     /// Searches a server's whole library for audio tracks matching a free-text
     /// query (title, artist or album contains the text).
+    @MainActor
     public func search(
         server: UPnPDevice,
         query: String,
@@ -361,36 +395,32 @@ public class PlaybackController {
         guard let controlURL = server.contentDirectoryURL else {
             throw MediaBrowseError.serverHasNoContentDirectory
         }
-        // Strip quotes so they can't break the criteria expression; SOAPClient
-        // XML-escapes the rest. No class filter, so both tracks and albums
-        // match (a class OR-expression is rejected by some servers).
-        let safe = query.replacingOccurrences(of: "\"", with: "")
-        let criteria = "dc:title contains \"\(safe)\""
-            + " or upnp:artist contains \"\(safe)\""
-            + " or upnp:album contains \"\(safe)\""
         let service = ContentDirectoryService(controlURL: controlURL)
         let result = try await service.search(
-            searchCriteria: criteria,
+            searchCriteria: ContentDirectoryService.textSearchCriteria(query),
             startingIndex: startingIndex,
             requestedCount: requestedCount
         )
-        return BrowsePage(objects: result.objects, totalMatches: result.totalMatches)
+        return BrowsePage(objects: result.objects.map { $0.sourced(from: server.id) }, totalMatches: result.totalMatches)
     }
 
     /// Adds a single track object to the playlist. Returns false if it is not
     /// a playable item.
     @discardableResult
     public func addTrackToPlaylist(_ object: MediaObject) -> Bool {
-        guard !object.isContainer, let res = object.resURL, let url = URL(string: res) else {
+        guard !object.isContainer, let res = object.resURL, let url = URL(string: res),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
             return false
         }
         playlist.add(PlaylistItem(url: url, title: object.title, metadata: DIDLBuilder.metadata(for: object)))
+        refreshPreloadedNext()
         return true
     }
 
     // MARK: - Album-centric browsing
 
     /// Finds the server's all-albums container id (MinimServer: "0$albums").
+    @MainActor
     private func albumContainerID(server: UPnPDevice) async -> String? {
         if let cached = albumContainerIDCache[server.id] { return cached }
         guard let page = try? await browse(server: server, objectID: "0", requestedCount: 100) else {
@@ -406,6 +436,7 @@ public class PlaybackController {
     }
 
     /// Lists albums (paged) from the server's album index.
+    @MainActor
     public func albums(server: UPnPDevice, startingIndex: Int = 0, requestedCount: Int = 100) async throws -> BrowsePage {
         guard let containerID = await albumContainerID(server: server) else {
             return BrowsePage(objects: [], totalMatches: 0)
@@ -414,6 +445,7 @@ public class PlaybackController {
     }
 
     /// Fetches an album's cover URL via BrowseMetadata (album lists omit it).
+    @MainActor
     public func albumArtURI(server: UPnPDevice, objectID: String) async -> String? {
         guard let controlURL = server.contentDirectoryURL else { return nil }
         let service = ContentDirectoryService(controlURL: controlURL)
@@ -422,14 +454,21 @@ public class PlaybackController {
     }
 
     /// Replaces the playlist with an album's tracks and starts playback.
+    @MainActor
     public func playAlbum(server: UPnPDevice, objectID: String) async throws {
-        playlist.clear()
-        _ = try await addContainerToPlaylist(server: server, objectID: objectID)
+        playbackGeneration += 1
+        let generation = playbackGeneration
+        let tracks = try await containerTracks(server: server, objectID: objectID)
+        guard generation == playbackGeneration else { return }
+        guard !tracks.isEmpty else { throw AudioPlayerError.fileLoadError("No playable tracks in this album") }
+        clearPlaylist()
+        for track in tracks { addTrackToPlaylist(track) }
         guard let item = playlist.jumpTo(index: 0) else { return }
         try await startPlaying(item)
     }
 
     /// Sort fields the server supports, or an empty array if none/unavailable.
+    @MainActor
     public func sortCapabilities(server: UPnPDevice) async -> [String] {
         guard let controlURL = server.contentDirectoryURL else { return [] }
         let service = ContentDirectoryService(controlURL: controlURL)
@@ -442,47 +481,76 @@ public class PlaybackController {
     /// through each container and recursing into sub-containers. Returns the
     /// number of tracks added.
     @discardableResult
+    @MainActor
     public func addContainerToPlaylist(
         server: UPnPDevice,
         objectID: String,
         sortCriteria: String = ""
     ) async throws -> Int {
+        let generation = queueGeneration
+        let tracks = try await containerTracks(server: server, objectID: objectID, sortCriteria: sortCriteria)
+        guard generation == queueGeneration else { return 0 }
+        for track in tracks { addTrackToPlaylist(track) }
+        return tracks.count
+    }
+
+    @MainActor
+    private func containerTracks(server: UPnPDevice, objectID: String, sortCriteria: String = "") async throws -> [MediaObject] {
         guard let controlURL = server.contentDirectoryURL else {
             throw MediaBrowseError.serverHasNoContentDirectory
         }
         let service = ContentDirectoryService(controlURL: controlURL)
-        return try await Self.addContainer(
+        var tracks: [MediaObject] = []
+        _ = try await Self.addContainer(
             objectID: objectID,
             browse: { id, index, count in
                 try await service.browse(objectID: id, startingIndex: index,
                                          requestedCount: count, sortCriteria: sortCriteria)
             },
-            add: { self.addTrackToPlaylist($0) }
+            add: { object in
+                guard let resource = object.resURL, let url = URL(string: resource),
+                      ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return false }
+                tracks.append(object)
+                return true
+            }
         )
+        return tracks.map { $0.sourced(from: server.id) }
+    }
+
+    @MainActor
+    public func albumTracks(server: UPnPDevice, objectID: String) async throws -> [MediaObject] {
+        try await containerTracks(server: server, objectID: objectID)
     }
 
     // Keep traversal independent of audio hardware and network discovery.
     static func addContainer(
         objectID: String,
         depth: Int = 0,
+        ancestors: Set<String> = [],
         browse: (String, Int, Int) async throws -> ContentDirectoryService.BrowseResult,
         add: (MediaObject) -> Bool
     ) async throws -> Int {
-        guard depth <= maxAddDepth else { return 0 }
+        try Task.checkCancellation()
+        guard depth <= maxAddDepth, !ancestors.contains(objectID) else { return 0 }
+        let ancestors = ancestors.union([objectID])
         var added = 0
         var index = 0
         while true {
+            try Task.checkCancellation()
             let page = try await browse(objectID, index, browsePageSize)
+            try Task.checkCancellation()
             guard page.numberReturned > 0, !page.objects.isEmpty else { break }
             for object in page.objects {
                 if object.isContainer {
                     added += try await addContainer(objectID: object.id, depth: depth + 1,
-                                                    browse: browse, add: add)
+                                                    ancestors: ancestors, browse: browse, add: add)
                 } else if add(object) {
                     added += 1
                 }
             }
-            index += page.numberReturned
+            let (nextIndex, overflow) = index.addingReportingOverflow(page.numberReturned)
+            guard !overflow else { break }
+            index = nextIndex
             if index >= page.totalMatches { break }
         }
         return added
@@ -507,15 +575,20 @@ public class PlaybackController {
     }
 
     public func clearPlaylist() {
+        stop()
+        queueGeneration += 1
         playlist.clear()
     }
 
     public func removeFromPlaylist(at index: Int) {
+        if index == playlist.currentPosition { stop() }
         playlist.remove(at: index)
+        refreshPreloadedNext()
     }
 
     public func movePlaylistItem(fromOffsets: IndexSet, toOffset: Int) {
         playlist.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        refreshPreloadedNext()
     }
 
     private struct PlaylistEntry: Codable {
@@ -530,7 +603,7 @@ public class PlaybackController {
             PlaylistEntry(url: $0.url.absoluteString, title: $0.title, metadata: $0.metadata)
         }
         let data = try JSONEncoder().encode(entries)
-        try data.write(to: fileURL)
+        try data.write(to: fileURL, options: .atomic)
     }
 
     /// Appends tracks from a JSON playlist file. Returns the number added.
@@ -544,15 +617,17 @@ public class PlaybackController {
             playlist.add(PlaylistItem(url: url, title: entry.title, metadata: entry.metadata))
             added += 1
         }
+        refreshPreloadedNext()
         return added
     }
 
     public func getCurrentDeviceSampleRate() throws -> Float64 {
-        try player.getCurrentDeviceSampleRate()
+        guard let player = player else { throw OutputDeviceError.deviceNotFound }
+        return try player.getCurrentDeviceSampleRate()
     }
 
     public func getFileSampleRate() -> Float64? {
-        player.getFileSampleRate()
+        player?.getFileSampleRate()
     }
 
     public func getFileFormat() -> String? {
@@ -560,6 +635,7 @@ public class PlaybackController {
     }
 
     deinit {
+        currentEngine.stop()
         upnpManager.stopDiscovery()
         mediaServer.stop()
     }

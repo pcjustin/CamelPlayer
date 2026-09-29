@@ -55,6 +55,8 @@ final class MPRIS {
     private let model: PlayerModel
     private var connection: OpaquePointer?
     private var nodeInfo: UnsafeMutablePointer<GDBusNodeInfo>?
+    private var ownerID: UInt32 = 0
+    private var registrations: [UInt32] = []
     private var lastEmittedKey = ""
     private static let dictType = g_variant_type_new("a{sv}")
 
@@ -64,14 +66,17 @@ final class MPRIS {
         let busAcquired: GBusAcquiredCallback = { connection, _, data in
             Unmanaged<MPRIS>.fromOpaque(data!).takeUnretainedValue().busAcquired(connection)
         }
-        _ = g_bus_own_name(G_BUS_TYPE_SESSION, Self.busName,
+        ownerID = g_bus_own_name(G_BUS_TYPE_SESSION, Self.busName,
                            GBusNameOwnerFlags(rawValue: 0),
                            busAcquired, nil, nil,
                            Unmanaged.passUnretained(self).toOpaque(), nil)
     }
 
     private func busAcquired(_ connection: OpaquePointer?) {
+        unregisterObjects()
+        if let connection = connection { _ = g_object_ref(UnsafeMutableRawPointer(connection)) }
         self.connection = connection
+        lastEmittedKey = ""
         var error: UnsafeMutablePointer<GError>?
         nodeInfo = g_dbus_node_info_new_for_xml(Self.introspectionXML, &error)
         guard let nodeInfo = nodeInfo else {
@@ -81,8 +86,12 @@ final class MPRIS {
 
         let methodCall: GDBusInterfaceMethodCallFunc = { _, _, _, _, method, _, invocation, data in
             let mpris = Unmanaged<MPRIS>.fromOpaque(data!).takeUnretainedValue()
-            mpris.handleMethod(String(cString: method!))
-            g_dbus_method_invocation_return_value(invocation, nil)
+            if mpris.handleMethod(String(cString: method!)) {
+                g_dbus_method_invocation_return_value(invocation, nil)
+            } else {
+                g_dbus_method_invocation_return_dbus_error(invocation,
+                    "org.freedesktop.DBus.Error.NotSupported", "This operation is not supported")
+            }
         }
         let getProperty: GDBusInterfaceGetPropertyFunc = { _, _, _, _, property, _, data in
             let mpris = Unmanaged<MPRIS>.fromOpaque(data!).takeUnretainedValue()
@@ -96,14 +105,15 @@ final class MPRIS {
 
         for interface in ["org.mpris.MediaPlayer2", "org.mpris.MediaPlayer2.Player"] {
             let info = g_dbus_node_info_lookup_interface(nodeInfo, interface)
-            _ = cp_dbus_register_object(connection, Self.objectPath, info,
+            let registration = cp_dbus_register_object(connection, Self.objectPath, info,
                                         methodCall, getProperty, setProperty,
                                         Unmanaged.passUnretained(self).toOpaque())
+            if registration != 0 { registrations.append(registration) }
         }
     }
 
     // GDBus delivers on the GLib main context, which is the GTK thread here.
-    private func handleMethod(_ method: String) {
+    private func handleMethod(_ method: String) -> Bool {
         switch method {
         case "PlayPause": model.togglePlayPause()
         case "Play": if !model.isPlaying { model.togglePlayPause() }
@@ -111,8 +121,9 @@ final class MPRIS {
         case "Stop": model.stop()
         case "Next": model.next()
         case "Previous": model.previous()
-        default: break
+        default: return false
         }
+        return true
     }
 
     private var playbackStatus: String {
@@ -142,12 +153,14 @@ final class MPRIS {
         case "Volume":
             return g_variant_new_double(Double(model.volume))
         case "Position":
-            return g_variant_new_int64(gint64(model.currentTime * 1_000_000))
+            return g_variant_new_int64(microseconds(model.currentTime))
         case "CanGoNext":
             return g_variant_new_boolean(model.canGoNext ? 1 : 0)
         case "CanGoPrevious":
             return g_variant_new_boolean(model.canGoPrevious ? 1 : 0)
-        case "CanPlay", "CanPause", "CanControl":
+        case "CanPlay", "CanPause":
+            return g_variant_new_boolean(!model.playlistItems.isEmpty && !model.currentTrackNeedsRenderer ? 1 : 0)
+        case "CanControl":
             return g_variant_new_boolean(1)
         default:
             return nil
@@ -171,10 +184,12 @@ final class MPRIS {
             g_variant_builder_add_value(builder,
                 g_variant_new_dict_entry(g_variant_new_string(key), g_variant_new_variant(value)))
         }
-        let track = model.currentPosition >= 0 ? model.currentPosition : 0
-        add("mpris:trackid", g_variant_new_object_path("/org/camelplayer/track/\(track)"))
+        let trackID = model.currentItem.map {
+            "/org/camelplayer/track/" + $0.id.uuidString.replacingOccurrences(of: "-", with: "_")
+        } ?? "/org/mpris/MediaPlayer2/TrackList/NoTrack"
+        add("mpris:trackid", g_variant_new_object_path(trackID))
         if let duration = model.duration {
-            add("mpris:length", g_variant_new_int64(gint64(duration * 1_000_000)))
+            add("mpris:length", g_variant_new_int64(microseconds(duration)))
         }
         add("xesam:title", g_variant_new_string(model.currentItem?.title ?? ""))
         if let album = model.currentAlbum, !album.isEmpty {
@@ -193,10 +208,14 @@ final class MPRIS {
         guard let connection = connection else { return }
         let key = [
             playbackStatus,
-            model.currentItem?.url.absoluteString ?? "",
+            model.currentItem?.id.uuidString ?? "",
             model.duration.map { String($0) } ?? "",
             String(model.canGoNext),
             String(model.canGoPrevious),
+            String(model.volume),
+            String(model.shuffle),
+            String(model.currentTrackNeedsRenderer),
+            model.currentCoverURL?.absoluteString ?? "",
         ].joined(separator: "|")
         guard key != lastEmittedKey else { return }
         lastEmittedKey = key
@@ -210,6 +229,11 @@ final class MPRIS {
         add("Metadata", buildMetadata())
         add("CanGoNext", g_variant_new_boolean(model.canGoNext ? 1 : 0))
         add("CanGoPrevious", g_variant_new_boolean(model.canGoPrevious ? 1 : 0))
+        add("Volume", g_variant_new_double(Double(model.volume)))
+        add("Shuffle", g_variant_new_boolean(model.shuffle ? 1 : 0))
+        let canPlay = !model.playlistItems.isEmpty && !model.currentTrackNeedsRenderer
+        add("CanPlay", g_variant_new_boolean(canPlay ? 1 : 0))
+        add("CanPause", g_variant_new_boolean(canPlay ? 1 : 0))
         let changed = g_variant_builder_end(builder)
         g_variant_builder_unref(builder)
 
@@ -225,5 +249,26 @@ final class MPRIS {
             connection, nil, Self.objectPath,
             "org.freedesktop.DBus.Properties", "PropertiesChanged",
             arguments, nil)
+    }
+
+    private func microseconds(_ seconds: TimeInterval) -> Int64 {
+        guard seconds.isFinite, seconds >= 0 else { return 0 }
+        return Int64(exactly: (seconds * 1_000_000).rounded(.down)) ?? 0
+    }
+
+    private func unregisterObjects() {
+        if let connection = connection {
+            for registration in registrations { g_dbus_connection_unregister_object(connection, registration) }
+            g_object_unref(UnsafeMutableRawPointer(connection))
+        }
+        connection = nil
+        registrations.removeAll()
+        if let nodeInfo = nodeInfo { g_dbus_node_info_unref(nodeInfo) }
+        nodeInfo = nil
+    }
+
+    deinit {
+        unregisterObjects()
+        if ownerID != 0 { g_bus_unown_name(ownerID) }
     }
 }

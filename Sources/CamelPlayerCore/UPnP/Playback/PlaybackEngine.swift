@@ -31,9 +31,11 @@ public protocol PlaybackEngine: AnyObject {
 
     /// Loads and plays a track atomically. `metadata` is optional DIDL-Lite
     /// passed to UPnP renderers; local playback ignores it.
+    @MainActor
     func loadAndPlay(url: URL, metadata: String?) async throws
 
     /// Starts or resumes playback
+    @MainActor
     func play() async throws
 
     /// Pauses playback
@@ -43,6 +45,7 @@ public protocol PlaybackEngine: AnyObject {
     func stop()
 
     /// Seeks to a specific time
+    @MainActor
     func seek(to time: TimeInterval) async throws
 
     /// Gets the file format description
@@ -117,9 +120,11 @@ public class LocalPlaybackEngine: PlaybackEngine {
         audioPlayer.setNextTrack(url: url)
     }
 
+    @MainActor
     public func loadAndPlay(url: URL, metadata: String?) async throws {
         // Local Core Audio playback can only read local files; a network (NAS)
         // track must be played through a UPnP renderer. Metadata is unused here.
+        audioPlayer.stop()
         guard url.isFileURL else {
             throw AudioPlayerError.remoteURLRequiresRenderer
         }
@@ -127,6 +132,7 @@ public class LocalPlaybackEngine: PlaybackEngine {
         onStateChanged?(audioPlayer.state)
     }
 
+    @MainActor
     public func play() async throws {
         try audioPlayer.play()
         onStateChanged?(audioPlayer.state)
@@ -142,6 +148,7 @@ public class LocalPlaybackEngine: PlaybackEngine {
         onStateChanged?(audioPlayer.state)
     }
 
+    @MainActor
     public func seek(to time: TimeInterval) async throws {
         try audioPlayer.seek(to: time)
         onStateChanged?(audioPlayer.state)

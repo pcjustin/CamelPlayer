@@ -1,238 +1,266 @@
 import Foundation
 
-/// UPnP-based playback engine for controlling remote MediaRenderer devices
+/// Playback mutations run on the UI thread; asynchronous commands use the main actor.
 public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
-    private let device: UPnPDevice
     private let mediaServer: LocalMediaServer
-    private var avTransport: AVTransportService?
-    private var renderingControl: RenderingControlService?
+    private let avTransport: AVTransportService?
+    private let renderingControl: RenderingControlService?
 
-    private var _state: PlaybackState = .stopped
-    private var _currentURL: URL?
-    private var _duration: TimeInterval?
-    private var _currentTime: TimeInterval = 0
-    private var _volume: Float = 0.5
+    public private(set) var state: PlaybackState = .stopped
+    public private(set) var currentURL: URL?
+    public private(set) var duration: TimeInterval?
+    public private(set) var currentTime: TimeInterval = 0
+    private var storedVolume: Float = 0.5
 
     private var pollingTimer: Timer?
-    private var sharedFileURL: URL?
-    /// When the volume was last set locally; the poll skips reading the
-    /// renderer volume shortly after so it doesn't snap the slider back.
-    private var lastVolumeSetAt = Date.distantPast
-    /// Bumped on each loadAndPlay so a poll started before a track switch can't
-    /// mistake our own stop() for the previous track finishing.
+    private var commandTail: Task<Void, Error>?
+    private var volumeTail: Task<Void, Never>?
     private var generation = 0
     private var preloadGeneration = 0
-    /// True once the renderer has confirmed PLAYING since the last loadAndPlay,
-    /// so a transient STOPPED right after starting isn't read as a finish.
+    private var volumeGeneration = 0
+    private var positionGeneration = 0
     private var hasStartedPlaying = false
-
-    public var state: PlaybackState {
-        _state
-    }
-
-    public var currentURL: URL? {
-        _currentURL
-    }
-
-    public var duration: TimeInterval? {
-        _duration
-    }
-
-    public var currentTime: TimeInterval {
-        _currentTime
-    }
-
-    public var volume: Float {
-        get {
-            _volume
-        }
-        set {
-            _volume = max(0, min(1, newValue))
-            lastVolumeSetAt = Date()
-            let volumeInt = Int(_volume * 100)
-            Task {
-                try? await renderingControl?.setVolume(volumeInt)
-            }
-        }
-    }
+    private var playAcknowledged = false
+    private var isPolling = false
+    private var isPreloading = false
+    private var stoppedPolls = 0
+    private var lastVolumeSetAt = Date.distantPast
+    private var currentURI: String?
+    private var currentMetadata: String?
+    private var nextURI: String?
+    private var nextOriginalURL: URL?
 
     public var onPlaybackFinished: (() -> Void)?
     public var onStateChanged: ((PlaybackState) -> Void)?
     public var onAdvancedToNext: (() -> Void)?
 
-    // Gapless: the URI currently set on the renderer, plus the preloaded next.
-    private var currentURI: String?
-    private var nextURI: String?
-    private var nextOriginalURL: URL?
+    public var volume: Float {
+        get { storedVolume }
+        set {
+            storedVolume = newValue.isFinite ? max(0, min(1, newValue)) : 0
+            lastVolumeSetAt = Date()
+            volumeGeneration += 1
+            let request = volumeGeneration
+            let value = Int(storedVolume * 100)
+            let previous = volumeTail
+            volumeTail = Task { @MainActor [weak self] in
+                await previous?.value
+                guard let self = self, request == self.volumeGeneration else { return }
+                try? await self.renderingControl?.setVolume(value)
+            }
+        }
+    }
 
     public init(device: UPnPDevice, mediaServer: LocalMediaServer) {
-        self.device = device
         self.mediaServer = mediaServer
-
-        // Initialize services
-        if let avTransportURL = device.avTransportURL {
-            self.avTransport = AVTransportService(controlURL: avTransportURL)
-        }
-
-        if let renderingControlURL = device.renderingControlURL {
-            self.renderingControl = RenderingControlService(controlURL: renderingControlURL)
-        }
+        avTransport = device.avTransportURL.map { AVTransportService(controlURL: $0) }
+        renderingControl = device.renderingControlURL.map { RenderingControlService(controlURL: $0) }
     }
 
-    // Allows deterministic transport tests without opening network connections.
     init(device: UPnPDevice, mediaServer: LocalMediaServer, avTransport: AVTransportService) {
-        self.device = device
         self.mediaServer = mediaServer
         self.avTransport = avTransport
+        renderingControl = nil
     }
 
-    deinit {
-        stopPolling()
+    private func enqueue(_ operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
+        let previous = commandTail
+        let task = Task { @MainActor in
+            _ = try? await previous?.value
+            try await operation()
+        }
+        commandTail = task
+        return task
     }
 
-    // MARK: - PlaybackEngine Implementation
-
-    public func loadAndPlay(url: URL, metadata: String?) async throws {
-        guard let avTransport = avTransport else {
-            throw UPnPPlaybackError.serviceNotAvailable
-        }
-
-        // Stop current playback if any. Bump the generation first so any poll
-        // already in flight ignores the stop() below.
-        generation += 1
-        hasStartedPlaying = false
-        stopPolling()
-        try? await avTransport.stop()
-
-        _currentURL = url
-
-        // Local files are served over our own HTTP bridge; remote URLs (e.g. a
-        // NAS/MinimServer res URL) are handed to the renderer as-is so it pulls
-        // directly from the source.
-        let uri: String
-        if url.isFileURL {
-            sharedFileURL = try mediaServer.shareFile(url)
-            guard let httpURL = sharedFileURL else {
-                throw UPnPPlaybackError.failedToShareFile
-            }
-            uri = httpURL.absoluteString
-        } else {
-            sharedFileURL = nil
-            uri = url.absoluteString
-        }
-
-        // Set URI and play. DIDL metadata lets the renderer show track info.
-        currentURI = uri
+    private func clearNext() {
+        preloadGeneration += 1
         nextURI = nil
         nextOriginalURL = nil
-        try await avTransport.setAVTransportURI(uri: uri, metadata: metadata ?? "")
-        try await avTransport.play()
+        isPreloading = false
+    }
 
-        // Update state
-        _state = .playing
-        onStateChanged?(.playing)
+    private func setState(_ newState: PlaybackState) {
+        guard state != newState else { return }
+        state = newState
+        onStateChanged?(newState)
+    }
 
-        // Start polling for status
-        startPolling()
+    @MainActor
+    public func loadAndPlay(url: URL, metadata: String?) async throws {
+        guard let transport = avTransport else { throw UPnPPlaybackError.serviceNotAvailable }
+        generation += 1
+        let request = generation
+        hasStartedPlaying = false
+        playAcknowledged = false
+        stoppedPolls = 0
+        stopPolling()
+        clearNext()
+        currentURL = url
+        currentMetadata = metadata
+        currentURI = nil
+        currentTime = 0
+        duration = nil
+        setState(.playing)
+
+        let command = enqueue { [self] in
+            guard request == generation else { throw CancellationError() }
+            try? await transport.stop()
+            guard request == generation else { throw CancellationError() }
+            let uri = try resourceURI(for: url)
+            try await transport.setAVTransportURI(uri: uri, metadata: metadata ?? "")
+            guard request == generation else { throw CancellationError() }
+            currentURI = uri
+            try await transport.play()
+        }
+        do {
+            try await command.value
+            guard request == generation else { return }
+            playAcknowledged = true
+            setState(.playing)
+            startPolling()
+        } catch {
+            guard request == generation else { return }
+            setState(.stopped)
+            throw error
+        }
+    }
+
+    private func resourceURI(for url: URL) throws -> String {
+        if url.isFileURL { return try mediaServer.shareFile(url).absoluteString }
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+            throw AudioPlayerError.fileLoadError("Invalid media URL")
+        }
+        return url.absoluteString
     }
 
     public func setNextTrack(url: URL?, metadata: String?) {
-        Task { await preloadNextTrack(url: url, metadata: metadata) }
-    }
-
-    func preloadNextTrack(url: URL?, metadata: String?) async {
-        guard let avTransport = avTransport else { return }
+        let trackGeneration = generation
         preloadGeneration += 1
         let request = preloadGeneration
+        Task { @MainActor [weak self] in
+            guard let self = self, trackGeneration == self.generation,
+                  request == self.preloadGeneration else { return }
+            await self.preloadNextTrack(url: url, metadata: metadata, request: request)
+        }
+    }
+
+    @MainActor
+    func preloadNextTrack(url: URL?, metadata: String?) async {
+        preloadGeneration += 1
+        await preloadNextTrack(url: url, metadata: metadata, request: preloadGeneration)
+    }
+
+    @MainActor
+    private func preloadNextTrack(url: URL?, metadata: String?, request: Int) async {
+        guard let transport = avTransport else { return }
         let trackGeneration = generation
         nextURI = nil
         nextOriginalURL = nil
+        isPreloading = true
         do {
-            let uri: String
-            if let url = url {
-                uri = url.isFileURL ? try mediaServer.shareFile(url).absoluteString : url.absoluteString
-            } else {
-                uri = ""
-            }
-            // Retain the candidate while the request is pending so a poll does
-            // not treat a gapless transition as a natural finish.
-            nextURI = url == nil ? nil : uri
-            nextOriginalURL = url
-            try await avTransport.setNextAVTransportURI(uri: uri, metadata: metadata ?? "")
+            // Identical URIs cannot identify a gapless transition in position
+            // reports. Use normal completion for repeat-one and duplicate files.
+            let preloadURL = url == currentURL ? nil : url
+            let uri = try preloadURL.map(resourceURI) ?? ""
+            nextURI = preloadURL == nil ? nil : uri
+            nextOriginalURL = preloadURL
+            try await enqueue { [self] in
+                guard trackGeneration == generation, request == preloadGeneration else { return }
+                try await transport.setNextAVTransportURI(uri: uri, metadata: preloadURL == nil ? "" : metadata ?? "")
+            }.value
+            guard trackGeneration == generation, request == preloadGeneration else { return }
+            isPreloading = false
         } catch {
             guard trackGeneration == generation, request == preloadGeneration else { return }
-            nextURI = nil
-            nextOriginalURL = nil
+            clearNext()
             coreLog("UPnP: Preloading failed; falling back to normal track advance: \(error)")
         }
     }
 
+    @MainActor
     public func play() async throws {
-        guard let avTransport = avTransport else {
-            throw UPnPPlaybackError.serviceNotAvailable
+        guard let transport = avTransport else { throw UPnPPlaybackError.serviceNotAvailable }
+        // A pause may invalidate a load before SetAVTransportURI completes.
+        if currentURI == nil, let url = currentURL {
+            try await loadAndPlay(url: url, metadata: currentMetadata)
+            return
         }
-
-        try await avTransport.play()
-        _state = .playing
-        onStateChanged?(.playing)
+        generation += 1
+        let request = generation
+        isPreloading = false
+        try await enqueue { [self] in
+            guard request == generation else { return }
+            try await transport.play()
+        }.value
+        guard request == generation else { return }
+        stoppedPolls = 0
+        playAcknowledged = true
+        setState(.playing)
         startPolling()
     }
 
     public func pause() {
-        guard let avTransport = avTransport else { return }
-
-        Task {
-            try? await avTransport.pause()
-            _state = .paused
-            onStateChanged?(.paused)
-            stopPolling()
+        guard let transport = avTransport, state == .playing else { return }
+        generation += 1
+        let request = generation
+        isPreloading = false
+        stopPolling()
+        setState(.paused)
+        _ = enqueue { [self] in
+            guard request == generation else { return }
+            do { try await transport.pause() }
+            catch {
+                guard request == generation else { return }
+                startPolling()
+                coreLog("UPnP: Pause failed: \(error)")
+            }
         }
     }
 
     public func stop() {
-        guard let avTransport = avTransport else { return }
         generation += 1
+        let request = generation
         hasStartedPlaying = false
+        playAcknowledged = false
         stopPolling()
-
-        Task {
-            try? await avTransport.stop()
-            _state = .stopped
-            onStateChanged?(.stopped)
-            stopPolling()
+        clearNext()
+        currentTime = 0
+        setState(.stopped)
+        guard let transport = avTransport else { return }
+        _ = enqueue { [self] in
+            guard request == generation else { return }
+            try await transport.stop()
         }
     }
 
+    @MainActor
     public func seek(to time: TimeInterval) async throws {
-        guard let avTransport = avTransport else {
-            throw UPnPPlaybackError.serviceNotAvailable
+        guard let transport = avTransport else { throw UPnPPlaybackError.serviceNotAvailable }
+        guard time.isFinite, time >= 0, Int(exactly: time.rounded(.down)) != nil else {
+            throw AudioPlayerError.invalidSeekTime
         }
-
-        try await avTransport.seek(to: time)
-        _currentTime = time
+        let target = duration.map { min(time, $0) } ?? time
+        positionGeneration += 1
+        let seekRequest = positionGeneration
+        let request = generation
+        try await enqueue { [self] in
+            guard request == generation else { return }
+            try await transport.seek(to: target)
+        }.value
+        guard request == generation, seekRequest == positionGeneration else { return }
+        currentTime = target
     }
 
     public func getFileFormat() -> String? {
-        // UPnP doesn't provide detailed format info easily
-        guard let url = currentURL else { return nil }
-        let ext = url.pathExtension.uppercased()
-        return "\(ext) (via UPnP)"
+        currentURL.map { "\($0.pathExtension.uppercased()) (via UPnP)" }
     }
 
-    // MARK: - Status Polling
-
+    @MainActor
     private func startPolling() {
         stopPolling()
-
-        // Poll every second. Schedule on the main run loop so the timer fires
-        // regardless of which thread loadAndPlay/play was invoked from.
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                Task {
-                    await self?.updateStatus()
-                }
-            }
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.updateStatus() }
         }
     }
 
@@ -241,87 +269,73 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         pollingTimer = nil
     }
 
+    @MainActor
     func updateStatus() async {
-        guard let avTransport = avTransport else { return }
-
-        let myGeneration = generation
+        guard let transport = avTransport, !isPolling else { return }
+        isPolling = true
+        defer { isPolling = false }
+        let request = generation
+        let positionRequest = positionGeneration
         do {
-            // Get transport state
-            let transportState = try await avTransport.getTransportState()
-            // A track switch happened while this poll was in flight; its result
-            // is stale (our own stop() looks like a finish), so ignore it.
-            guard myGeneration == generation else { return }
-            let newState = convertTransportState(transportState)
-            if newState == .playing { hasStartedPlaying = true }
-
-            let previousState = _state
-            _state = newState
-            // Also check when STOPPED was already observed while a preload
-            // request was pending and that request subsequently failed.
-            let didFinish = hasStartedPlaying && newState == .stopped && nextURI == nil
-            if didFinish {
+            let transportState = try await transport.getTransportState()
+            guard request == generation else { return }
+            let newState: PlaybackState
+            switch transportState {
+            case .playing:
+                hasStartedPlaying = true
+                newState = .playing
+            case .paused: newState = .paused
+            case .transitioning: return
+            case .unknown: return
+            case .stopped, .noMediaPresent: newState = .stopped
+            }
+            stoppedPolls = newState == .stopped ? stoppedPolls + 1 : 0
+            // Allow one transient STOPPED between gapless tracks. A renderer
+            // may accept SetNextAVTransportURI without ever using it.
+            // Very short tracks can finish between polls without ever reporting
+            // PLAYING. Two STOPPED polls after an acknowledged Play cover that case.
+            let playbackBegan = hasStartedPlaying || (playAcknowledged && stoppedPolls >= 2)
+            let finished = playbackBegan && newState == .stopped && !isPreloading
+                && (nextURI == nil || stoppedPolls >= 2)
+            setState(newState)
+            guard request == generation else { return }
+            if finished {
                 hasStartedPlaying = false
+                playAcknowledged = false
+                clearNext()
                 stopPolling()
-            }
-            if newState != previousState || didFinish {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, myGeneration == self.generation else { return }
-                    if newState != previousState { self.onStateChanged?(newState) }
-                    if didFinish { self.onPlaybackFinished?() }
-                }
+                onPlaybackFinished?()
+                return
             }
 
-            // Get position info if playing
             if newState == .playing || newState == .paused {
-                let positionInfo = try await avTransport.getCurrentPosition()
-                guard myGeneration == generation else { return }
-
-                // Gapless: the renderer moved on to the preloaded next track.
-                if let next = nextURI, next != currentURI,
-                   !positionInfo.trackURI.isEmpty, positionInfo.trackURI == next {
+                let position = try await transport.getCurrentPosition()
+                guard request == generation, positionRequest == positionGeneration else { return }
+                var advanced = false
+                if let next = nextURI, next != currentURI, position.trackURI == next {
                     currentURI = next
-                    _currentURL = nextOriginalURL ?? _currentURL
-                    nextURI = nil
-                    nextOriginalURL = nil
-                    DispatchQueue.main.async { [weak self] in self?.onAdvancedToNext?() }
+                    currentURL = nextOriginalURL ?? currentURL
+                    clearNext()
+                    advanced = true
                 }
-
-                _currentTime = positionInfo.trackPosition
-                _duration = positionInfo.trackDuration > 0 ? positionInfo.trackDuration : nil
+                currentTime = position.trackPosition
+                duration = position.trackDuration > 0 ? position.trackDuration : nil
+                if advanced { onAdvancedToNext?() }
             }
 
-            // Get volume if available
-            if let renderingControl = renderingControl,
-               Date().timeIntervalSince(lastVolumeSetAt) > 2 {
-                let volumeInt = try? await renderingControl.getVolume()
-                if let volumeInt = volumeInt {
-                    _volume = Float(volumeInt) / 100.0
-                }
+            if let renderingControl = renderingControl, Date().timeIntervalSince(lastVolumeSetAt) > 2 {
+                let volumeRequest = volumeGeneration
+                let value = try? await renderingControl.getVolume()
+                guard request == generation, volumeRequest == volumeGeneration else { return }
+                if let value = value { storedVolume = Float(max(0, min(100, value))) / 100 }
             }
-
         } catch {
             coreLog("UPnP: Failed to update status: \(error)")
         }
     }
 
-    private func convertTransportState(_ transportState: AVTransportService.TransportState) -> PlaybackState {
-        switch transportState {
-        case .playing:
-            return .playing
-        case .paused:
-            return .paused
-        case .transitioning:
-            // Transitioning is an active, in-progress state (e.g. buffering at
-            // start or while seeking); treat it as playing so it is not mistaken
-            // for the track having finished.
-            return .playing
-        case .stopped, .noMediaPresent, .unknown:
-            return .stopped
-        }
-    }
+    deinit { pollingTimer?.invalidate() }
 }
-
-// MARK: - UPnP Playback Errors
 
 public enum UPnPPlaybackError: Error {
     case serviceNotAvailable

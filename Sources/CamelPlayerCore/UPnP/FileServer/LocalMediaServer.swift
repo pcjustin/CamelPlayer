@@ -1,5 +1,10 @@
 import Foundation
 import Swifter
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 /// HTTP server for sharing local media files with UPnP devices
 public class LocalMediaServer {
@@ -45,18 +50,7 @@ public class LocalMediaServer {
                 return .notFound
             }
 
-            guard let fileSize = self.fileSize(of: fileURL) else {
-                return .internalServerError
-            }
-
-            let mimeType = self.getMimeType(for: fileURL)
-
-            // Support range requests for seeking
-            if let rangeHeader = request.headers["range"] {
-                return self.handleRangeRequest(fileURL: fileURL, fileSize: fileSize, range: rangeHeader, mimeType: mimeType)
-            }
-
-            return self.streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1, fileSize: fileSize, mimeType: mimeType, partial: false)
+            return self.response(for: fileURL, method: request.method, range: request.headers["range"])
         }
 
         // Health check endpoint
@@ -65,31 +59,41 @@ public class LocalMediaServer {
         }
     }
 
-    /// Handles HTTP range requests for seeking support
-    private func handleRangeRequest(fileURL: URL, fileSize: Int, range: String, mimeType: String) -> HttpResponse {
-        // Parse range header (format: "bytes=start-end")
-        let rangePattern = "bytes=(\\d+)-(\\d*)"
-        guard let regex = try? NSRegularExpression(pattern: rangePattern),
-              let match = regex.firstMatch(in: range, range: NSRange(range.startIndex..., in: range)),
-              let startString = Range(match.range(at: 1), in: range).map({ String(range[$0]) }),
-              let start = Int(startString) else {
-            return streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1, fileSize: fileSize, mimeType: mimeType, partial: false)
+    func response(for fileURL: URL, method: String = "GET", range: String? = nil) -> HttpResponse {
+        guard method == "GET" || method == "HEAD" else {
+            return .raw(405, "Method Not Allowed", ["Allow": "GET, HEAD", "Content-Length": "0"], nil)
         }
-
-        let end: Int
-        if let endString = Range(match.range(at: 2), in: range).map({ String(range[$0]) }),
-           !endString.isEmpty,
-           let parsedEnd = Int(endString) {
-            end = min(parsedEnd, fileSize - 1)
-        } else {
-            end = fileSize - 1
+        guard let fileSize = fileSize(of: fileURL) else { return .notFound }
+        let mimeType = getMimeType(for: fileURL)
+        if method == "HEAD" {
+            return .raw(200, "OK", ["Content-Type": mimeType, "Content-Length": String(fileSize),
+                                    "Accept-Ranges": "bytes"], nil)
         }
-
-        guard start <= end && start < fileSize else {
-            return streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1, fileSize: fileSize, mimeType: mimeType, partial: false)
+        if let range = range?.trimmingCharacters(in: .whitespaces), range.hasPrefix("bytes=") {
+            let parts = range.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
+            // Unsupported multipart and malformed ranges may be ignored.
+            if parts.count == 2, !(parts[0].isEmpty && parts[1].isEmpty),
+               parts.allSatisfy({ $0.utf8.allSatisfy { (48...57).contains($0) } }) {
+                let start: Int
+                let end: Int
+                if parts[0].isEmpty {
+                    let suffix = Int(parts[1]) ?? Int.max
+                    start = max(0, fileSize - suffix)
+                    end = fileSize - 1
+                } else {
+                    start = Int(parts[0]) ?? Int.max
+                    end = parts[1].isEmpty ? fileSize - 1 : min(Int(parts[1]) ?? Int.max, fileSize - 1)
+                }
+                guard start < fileSize, start <= end else {
+                    return .raw(416, "Range Not Satisfiable",
+                                ["Content-Range": "bytes */\(fileSize)", "Content-Length": "0"], nil)
+                }
+                return streamResponse(fileURL: fileURL, start: start, end: end,
+                                      fileSize: fileSize, mimeType: mimeType, partial: true)
+            }
         }
-
-        return streamResponse(fileURL: fileURL, start: start, end: end, fileSize: fileSize, mimeType: mimeType, partial: true)
+        return streamResponse(fileURL: fileURL, start: 0, end: fileSize - 1,
+                              fileSize: fileSize, mimeType: mimeType, partial: false)
     }
 
     /// Streams the requested byte range of a file to the client in chunks,
@@ -109,14 +113,14 @@ public class LocalMediaServer {
         let statusText = partial ? "Partial Content" : "OK"
 
         return HttpResponse.raw(statusCode, statusText, headers) { writer in
-            guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return }
+            let handle = try FileHandle(forReadingFrom: fileURL)
             defer { try? handle.close() }
             try handle.seek(toOffset: UInt64(start))
 
             var remaining = length
             while remaining > 0 {
                 let toRead = min(Self.chunkSize, remaining)
-                let chunk = handle.readData(ofLength: toRead)
+                let chunk = try handle.read(upToCount: toRead) ?? Data()
                 if chunk.isEmpty { break }
                 try writer.write(chunk)
                 remaining -= chunk.count
@@ -127,7 +131,8 @@ public class LocalMediaServer {
     /// Returns the size of a file in bytes, or nil if it cannot be determined.
     private func fileSize(of url: URL) -> Int? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = (attributes[.size] as? NSNumber)?.intValue else {
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = (attributes[.size] as? NSNumber)?.intValue, size >= 0 else {
             return nil
         }
         return size
@@ -141,11 +146,12 @@ public class LocalMediaServer {
         }
 
         var lastError: Error?
-        for candidate in preferredPort...(preferredPort + portRange) {
+        let lastPort = UInt16(min(Int(UInt16.max), Int(preferredPort) + Int(portRange)))
+        for candidate in preferredPort...lastPort {
             coreLog("HTTP Server: Starting on port \(candidate)...")
             do {
                 try server.start(candidate, forceIPv4: true)
-                activePort = candidate
+                activePort = UInt16(try server.port())
                 _isRunning = true
                 coreLog("HTTP Server: Successfully started on port \(candidate)")
 
@@ -161,7 +167,7 @@ public class LocalMediaServer {
             }
         }
 
-        coreLog("HTTP Server: Failed to start on any port in range \(preferredPort)-\(preferredPort + portRange)")
+        coreLog("HTTP Server: Failed to start on any port in range \(preferredPort)-\(lastPort)")
         throw ServerError.failedToStart(lastError ?? ServerError.cannotDetermineIP)
     }
 
@@ -181,6 +187,13 @@ public class LocalMediaServer {
     public func shareFile(_ fileURL: URL) throws -> URL {
         coreLog("HTTP Server: Sharing file: \(fileURL.lastPathComponent)")
 
+        guard fileURL.isFileURL, fileSize(of: fileURL) != nil,
+              FileManager.default.isReadableFile(atPath: fileURL.path) else {
+            throw ServerError.invalidFile
+        }
+        try start()
+        guard let ip = getLocalIPAddress() else { throw ServerError.cannotDetermineIP }
+
         filesLock.lock()
         let id: String
         if let existing = sharedFiles.first(where: { $0.value == fileURL })?.key {
@@ -191,11 +204,6 @@ public class LocalMediaServer {
             sharedFiles[id] = fileURL
         }
         filesLock.unlock()
-
-        guard let ip = getLocalIPAddress() else {
-            coreLog("HTTP Server: ERROR - Cannot determine local IP address")
-            throw ServerError.cannotDetermineIP
-        }
 
         let urlString = "http://\(ip):\(activePort)/media/\(id)"
         guard let url = URL(string: urlString) else {
@@ -246,6 +254,8 @@ public class LocalMediaServer {
         // Iterate through linked list of interfaces
         for ifptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
             let interface = ifptr.pointee
+            guard interface.ifa_flags & UInt32(IFF_UP) != 0,
+                  interface.ifa_flags & UInt32(IFF_LOOPBACK) == 0 else { continue }
 
             // Some interfaces (utun, awdl) report no address at all.
             guard let ifaAddr = interface.ifa_addr else { continue }
@@ -258,9 +268,9 @@ public class LocalMediaServer {
 
                 var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                 // sockaddr.sa_len is BSD-only; AF_INET length is sockaddr_in on all platforms.
-                getnameinfo(ifaAddr, socklen_t(MemoryLayout<sockaddr_in>.size),
+                guard getnameinfo(ifaAddr, socklen_t(MemoryLayout<sockaddr_in>.size),
                            &hostname, socklen_t(hostname.count),
-                           nil, socklen_t(0), NI_NUMERICHOST)
+                           nil, socklen_t(0), NI_NUMERICHOST) == 0 else { continue }
                 let ipAddress = String(cString: hostname)
 
                 coreLog("HTTP Server: Found interface \(name) with IP \(ipAddress)")
@@ -323,6 +333,8 @@ public class LocalMediaServer {
             return "application/octet-stream"
         }
     }
+
+    deinit { stop() }
 }
 
 // MARK: - Server Errors
@@ -331,4 +343,5 @@ public enum ServerError: Error {
     case failedToStart(Error)
     case cannotDetermineIP
     case invalidURL
+    case invalidFile
 }

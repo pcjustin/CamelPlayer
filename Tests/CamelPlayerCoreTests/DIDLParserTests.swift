@@ -56,9 +56,33 @@ final class DIDLParserTests: XCTestCase {
         XCTAssertNil(DIDLParser.parseDuration("bad"))
         XCTAssertNil(DIDLParser.parseDuration("1:02"))
     }
+
+    func testAlternateNamespacePrefixesAndResourceDurationStayTogether() {
+        let xml = """
+        <d:DIDL-Lite xmlns:d="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
+          xmlns:t="http://purl.org/dc/elements/1.1/" xmlns:u="urn:schemas-upnp-org:metadata-1-0/upnp/">
+          <d:item id="1" parentID="0"><t:title>Track</t:title><u:album>Album</u:album>
+            <d:res duration="0:01:00">http://nas/first.flac</d:res>
+            <d:res duration="0:02:00">http://nas/second.mp3</d:res>
+          </d:item>
+        </d:DIDL-Lite>
+        """
+        let track = DIDLParser().parse(xml).first
+        XCTAssertEqual(track?.title, "Track")
+        XCTAssertEqual(track?.album, "Album")
+        XCTAssertEqual(track?.resURL, "http://nas/first.flac")
+        XCTAssertEqual(track?.duration, 60)
+    }
+
+    func testMalformedDocumentDoesNotReturnPartialObjects() {
+        let parser = DIDLParser()
+        XCTAssertTrue(parser.parse(sample.replacingOccurrences(of: "</DIDL-Lite>", with: "")).isEmpty)
+        XCTAssertEqual(parser.parse(sample).count, 2)
+    }
     func testInvalidDurationComponentsAreRejected() {
         for value in ["0:00:nan", "inf:00:00", "1e308:00:00", "-1:00:00",
-                      "0:60:00", "0:00:60", "0:-1:00", "0:00:-1", "1.5:00:00"] {
+                      "0:60:00", "0:00:60", "0:-1:00", "0:00:-1", "1.5:00:00",
+                      ":1:02:03", "1::02:03", "1:02:03:"] {
             XCTAssertNil(DIDLParser.parseDuration(value), value)
         }
         XCTAssertEqual(DIDLParser.parseDuration("1:02:03.125"), 3723.125)

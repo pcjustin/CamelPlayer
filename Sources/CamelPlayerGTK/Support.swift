@@ -141,13 +141,14 @@ func markupEscape(_ text: String) -> String {
 
 func scanFolder(_ url: URL) -> [URL] {
     guard let enumerator = FileManager.default.enumerator(
-        at: url, includingPropertiesForKeys: nil) else { return [] }
+        at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
     var files: [URL] = []
     for case let file as URL in enumerator
-        where audioFileExtensions.contains(file.pathExtension.lowercased()) {
+        where audioFileExtensions.contains(file.pathExtension.lowercased())
+            && (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
         files.append(file)
     }
-    return files.sorted { $0.path < $1.path }
+    return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
 }
 
 // MARK: - Cover art cache
@@ -156,7 +157,7 @@ func scanFolder(_ url: URL) -> [URL] {
 /// Textures are cached for the lifetime of the process.
 enum CoverCache {
     private static var memory: [String: OpaquePointer] = [:]
-    private static var failed: Set<String> = []
+    private static var pending: [String: [(OpaquePointer?) -> Void]] = [:]
 
     private static let directory: URL = {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -179,40 +180,38 @@ enum CoverCache {
     static func load(_ url: URL, completion: @escaping (OpaquePointer?) -> Void) {
         let key = url.absoluteString
         if let texture = memory[key] { completion(texture); return }
-        if failed.contains(key) { completion(nil); return }
+        if pending[key] != nil {
+            pending[key]?.append(completion)
+            return
+        }
+        pending[key] = [completion]
 
-        Task.detached(priority: .utility) {
-            let data: Data?
-            if url.isFileURL {
-                data = try? Data(contentsOf: url)
-            } else {
-                let file = fileURL(for: url)
-                if let onDisk = try? Data(contentsOf: file) {
-                    data = onDisk
-                } else if let (downloaded, _) = try? await URLSession.shared.data(from: url) {
-                    try? downloaded.write(to: file)
-                    data = downloaded
-                } else {
-                    data = nil
-                }
-            }
-            DispatchQueue.main.async {
-                // Texture creation must happen on the GTK thread.
-                var texture: OpaquePointer?
-                if let data = data, !data.isEmpty {
-                    texture = data.withUnsafeBytes { buffer in
-                        cp_texture_from_data(
-                            buffer.baseAddress!.assumingMemoryBound(to: UInt8.self),
-                            UInt(buffer.count))
+        Task { @MainActor in
+            let file = url.isFileURL ? url : fileURL(for: url)
+            let data = await Task.detached(priority: .utility) {
+                try? Data(contentsOf: file)
+            }.value
+            var texture = data.flatMap(makeTexture)
+            if texture == nil, !url.isFileURL,
+               let (downloaded, response) = try? await URLSession.shared.data(from: url),
+               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                texture = makeTexture(downloaded)
+                if texture != nil {
+                    Task.detached(priority: .utility) {
+                        try? downloaded.write(to: file, options: .atomic)
                     }
                 }
-                if let texture = texture {
-                    memory[key] = texture
-                } else {
-                    failed.insert(key)
-                }
-                completion(texture)
             }
+            if let texture = texture { memory[key] = texture }
+            let completions = pending.removeValue(forKey: key) ?? []
+            completions.forEach { $0(texture) }
+        }
+    }
+
+    private static func makeTexture(_ data: Data) -> OpaquePointer? {
+        guard !data.isEmpty else { return nil }
+        return data.withUnsafeBytes { buffer in
+            cp_texture_from_data(buffer.baseAddress!.assumingMemoryBound(to: UInt8.self), UInt(buffer.count))
         }
     }
 }
@@ -233,12 +232,16 @@ final class CoverView {
         // this wrapper's lifetime to the widget or async loads hit a dead ref.
         let retained = Unmanaged.passRetained(self).toOpaque()
         let destroy: @convention(c) (UnsafeMutableRawPointer?) -> Void = { data in
-            Unmanaged<CoverView>.fromOpaque(data!).release()
+            let view = Unmanaged<CoverView>.fromOpaque(data!).takeRetainedValue()
+            view.widget = nil
+            view.picture = nil
+            view.currentKey = nil
         }
         cp_widget_bind_object(widget, retained, unsafeBitCast(destroy, to: GDestroyNotify.self))
     }
 
     func setURL(_ url: URL?) {
+        guard picture != nil else { return }
         let key = url?.absoluteString
         guard key != currentKey else { return }
         currentKey = key
@@ -249,7 +252,8 @@ final class CoverView {
 
     private static func loadInto(_ view: CoverView, url: URL, key: String?) {
         CoverCache.load(url) { [weak view] texture in
-            guard let view = view, view.currentKey == key, let texture = texture else { return }
+            guard let view = view, view.picture != nil,
+                  view.currentKey == key, let texture = texture else { return }
             cp_picture_set_texture(view.picture, texture)
         }
     }

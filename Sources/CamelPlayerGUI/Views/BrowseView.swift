@@ -24,6 +24,7 @@ struct BrowseView: View {
     @State private var sortCriteria = ""
     @State private var searchText = ""
     @State private var searchQuery = ""   // non-empty = showing search results
+    @State private var loadGeneration = 0
 
     private var isSearching: Bool { !searchQuery.isEmpty }
 
@@ -273,7 +274,12 @@ struct BrowseView: View {
         sortCriteria = ""
         searchText = ""
         searchQuery = ""
-        Task { sortCaps = await viewModel.sortCapabilities(server: server) }
+        sortCaps = []
+        Task {
+            let caps = await viewModel.sortCapabilities(server: server)
+            guard selectedServer?.id == server.id else { return }
+            sortCaps = caps
+        }
         reload()
     }
 
@@ -303,6 +309,9 @@ struct BrowseView: View {
             path.removeLast()
             reload()
         } else {
+            loadGeneration += 1
+            isLoading = false
+            isLoadingMore = false
             selectedServer = nil
             path = []
             objects = []
@@ -339,10 +348,15 @@ struct BrowseView: View {
 
     private func reload() {
         guard selectedServer != nil else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
+        isLoadingMore = false
         objects = []
         Task {
+            guard generation == loadGeneration else { return }
             let page = await loadPage(at: 0)
+            guard generation == loadGeneration else { return }
             objects = page?.objects ?? []
             totalMatches = page?.totalMatches ?? objects.count
             isLoading = false
@@ -351,14 +365,18 @@ struct BrowseView: View {
 
     private func loadMoreIfNeeded(_ object: MediaObject) {
         guard object.id == objects.last?.id,
-              !isLoadingMore,
+              !isLoading, !isLoadingMore,
               objects.count < totalMatches else { return }
         isLoadingMore = true
+        let generation = loadGeneration
+        let index = objects.count
         Task {
-            let page = await loadPage(at: objects.count)
+            guard generation == loadGeneration else { return }
+            let page = await loadPage(at: index)
+            guard generation == loadGeneration else { return }
             if let page = page {
                 objects.append(contentsOf: page.objects)
-                totalMatches = page.totalMatches
+                totalMatches = page.objects.isEmpty ? objects.count : page.totalMatches
             }
             isLoadingMore = false
         }

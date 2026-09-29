@@ -29,9 +29,11 @@ public class SOAPClient {
     ///   - serviceType: The UPnP service type URN
     ///   - arguments: Dictionary of argument names and values
     /// - Returns: The SOAP XML string
-    public func buildSOAPRequest(action: String, serviceType: String, arguments: [String: String] = [:]) -> String {
+    public func buildSOAPRequest(action: String, serviceType: String, argumentOrder: [String] = [], arguments: [String: String] = [:]) -> String {
         var argumentsXML = ""
-        for (key, value) in arguments {
+        let keys = argumentOrder + arguments.keys.filter { !argumentOrder.contains($0) }.sorted()
+        for key in keys {
+            guard let value = arguments[key] else { continue }
             let escapedValue = value
                 .replacingOccurrences(of: "&", with: "&amp;")
                 .replacingOccurrences(of: "<", with: "&lt;")
@@ -63,16 +65,20 @@ public class SOAPClient {
         controlURL: String,
         action: String,
         serviceType: String,
+        argumentOrder: [String] = [],
         arguments: [String: String] = [:]
     ) async throws -> [String: String] {
-        guard let url = URL(string: controlURL) else {
+        guard let url = URL(string: controlURL), url.host != nil,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
             throw SOAPError.invalidURL
         }
 
-        let soapBody = buildSOAPRequest(action: action, serviceType: serviceType, arguments: arguments)
+        let soapBody = buildSOAPRequest(action: action, serviceType: serviceType,
+                                       argumentOrder: argumentOrder, arguments: arguments)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 15
         request.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-Type")
         request.setValue("\"\(serviceType)#\(action)\"", forHTTPHeaderField: "SOAPACTION")
         request.httpBody = soapBody.data(using: .utf8)
@@ -99,7 +105,7 @@ public class SOAPClient {
     ///   - data: The response data
     ///   - action: The action name (to find the response element)
     /// - Returns: Dictionary of response values
-    private func parseSOAPResponse(data: Data, action: String) throws -> [String: String] {
+    func parseSOAPResponse(data: Data, action: String) throws -> [String: String] {
         let parser = SOAPResponseParser(action: action)
 
         guard let xmlParser = XMLParser(data: data) as XMLParser? else {
@@ -115,6 +121,10 @@ public class SOAPClient {
             throw SOAPError.parsingError("Unknown parsing error")
         }
 
+        guard parser.foundResponse else {
+            if let fault = try parseSOAPFault(from: data) { throw SOAPError.soapFault(fault) }
+            throw SOAPError.invalidResponse
+        }
         return parser.results
     }
 
@@ -138,6 +148,7 @@ public class SOAPClient {
 private class SOAPResponseParser: NSObject, XMLParserDelegate {
     let action: String
     var results: [String: String] = [:]
+    var foundResponse = false
 
     private var currentElement = ""
     private var currentValue = ""
@@ -150,6 +161,7 @@ private class SOAPResponseParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
         if elementName == "\(action)Response" || elementName.hasSuffix(":\(action)Response") {
             insideResponseElement = true
+            foundResponse = true
         } else if insideResponseElement {
             currentElement = elementName
             // Handle namespaced elements (e.g., "u:Volume")
@@ -164,6 +176,10 @@ private class SOAPResponseParser: NSObject, XMLParserDelegate {
         if insideResponseElement && !currentElement.isEmpty {
             currentValue += string
         }
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        self.parser(parser, foundCharacters: String(decoding: CDATABlock, as: UTF8.self))
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {

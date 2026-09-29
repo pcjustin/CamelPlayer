@@ -42,9 +42,10 @@ public class DeviceDescriptionParser: NSObject {
     public func parse(data: Data, location: URL, uuid: String) async -> UPnPDevice? {
         // Reset state
         reset()
-        baseURL = location.deletingLastPathComponent()
+        baseURL = location
 
         let parser = XMLParser(data: data)
+        parser.shouldProcessNamespaces = true
         parser.delegate = self
 
         guard parser.parse() else {
@@ -94,28 +95,10 @@ public class DeviceDescriptionParser: NSObject {
             return nil
         }
 
-        // If it's already an absolute URL, return as-is
-        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
-            return urlString
-        }
-
-        // Resolve relative URL
-        guard let baseURL = baseURL else {
-            return urlString
-        }
-
-        // Construct absolute URL
-        if urlString.hasPrefix("/") {
-            // Absolute path
-            guard let scheme = baseURL.scheme, let host = baseURL.host else {
-                return urlString
-            }
-            let portPart = baseURL.port.map { ":\($0)" } ?? ""
-            return "\(scheme)://\(host)\(portPart)\(urlString)"
-        } else {
-            // Relative path
-            return baseURL.appendingPathComponent(urlString).absoluteString
-        }
+        guard let url = URL(string: urlString, relativeTo: baseURL)?.absoluteURL,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil else { return nil }
+        return url.absoluteString
     }
 
     /// Resets parser state
@@ -147,10 +130,19 @@ extension DeviceDescriptionParser: XMLParserDelegate {
         currentValue += string
     }
 
+    public func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        currentValue += String(decoding: CDATABlock, as: UTF8.self)
+    }
+
     public func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         let value = currentValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch elementName {
+        case "URLBase":
+            if let url = URL(string: value), url.host != nil,
+               ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                baseURL = url
+            }
         case "deviceType":
             if rootDeviceType.isEmpty { // Root device type, not embedded devices
                 rootDeviceType = value
