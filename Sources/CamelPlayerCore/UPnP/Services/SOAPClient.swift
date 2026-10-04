@@ -42,12 +42,7 @@ public class SOAPClient {
         let keys = argumentOrder + arguments.keys.filter { !argumentOrder.contains($0) }.sorted()
         for key in keys {
             guard let value = arguments[key] else { continue }
-            let escapedValue = value
-                .replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "<", with: "&lt;")
-                .replacingOccurrences(of: ">", with: "&gt;")
-                .replacingOccurrences(of: "\"", with: "&quot;")
-            argumentsXML += "<\(key)>\(escapedValue)</\(key)>"
+            argumentsXML += "<\(key)>\(DIDLBuilder.escape(value))</\(key)>"
         }
 
         return """
