@@ -381,6 +381,10 @@ final class PlayerApp {
         }
         cp_label_set_text(volumePercentLabel, "\(Int(volume * 100))%")
         cp_image_set_icon(volumeIcon, volumeIconName(volume))
+        // Network renderers keep their own volume.
+        for widget in [volumeIcon, volumeScale, volumePercentLabel] {
+            gtk_widget_set_visible(widget, model.isLocalOutput ? 1 : 0)
+        }
 
         // Mini now playing
         let miniNow = [

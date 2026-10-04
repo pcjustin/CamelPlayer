@@ -14,9 +14,6 @@ public protocol PlaybackEngine: AnyObject {
     /// Current playback position
     var currentTime: TimeInterval { get }
 
-    /// Volume (0.0 to 1.0)
-    var volume: Float { get set }
-
     /// Callback when playback finishes
     var onPlaybackFinished: (() -> Void)? { get set }
 
@@ -69,23 +66,6 @@ public class LocalPlaybackEngine: PlaybackEngine {
 
     public var currentTime: TimeInterval {
         audioPlayer.currentTime
-    }
-
-    public var volume: Float {
-        get {
-            #if os(macOS)
-            audioPlayer.mixerNode.outputVolume
-            #else
-            audioPlayer.volume
-            #endif
-        }
-        set {
-            #if os(macOS)
-            audioPlayer.mixerNode.outputVolume = newValue
-            #else
-            audioPlayer.volume = newValue
-            #endif
-        }
     }
 
     public var onPlaybackFinished: (() -> Void)? {

@@ -33,8 +33,10 @@ struct PlaybackCommands: Commands {
 
             Button("Volume Up") { viewModel.setVolume(min(1, viewModel.volume + 0.05)) }
                 .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!viewModel.isLocalOutput)
             Button("Volume Down") { viewModel.setVolume(max(0, viewModel.volume - 0.05)) }
                 .keyboardShortcut(.downArrow, modifiers: .command)
+                .disabled(!viewModel.isLocalOutput)
         }
     }
 }

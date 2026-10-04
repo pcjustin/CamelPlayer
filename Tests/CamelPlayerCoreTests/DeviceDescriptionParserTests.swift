@@ -9,7 +9,7 @@ final class DeviceDescriptionParserTests: XCTestCase {
         manufacturer: String = "Acme",
         modelName: String = "SpeakerX",
         avControlURL: String = "/AVTransport/control",
-        renderingControlURL: String = "RenderingControl/control"
+        contentDirectoryURL: String = "ContentDirectory/control"
     ) -> Data {
         """
         <?xml version="1.0"?>
@@ -24,8 +24,8 @@ final class DeviceDescriptionParserTests: XCTestCase {
                 <controlURL>\(avControlURL)</controlURL>
               </service>
               <service>
-                <serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType>
-                <controlURL>\(renderingControlURL)</controlURL>
+                <serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>
+                <controlURL>\(contentDirectoryURL)</controlURL>
               </service>
             </serviceList>
           </device>
@@ -57,9 +57,9 @@ final class DeviceDescriptionParserTests: XCTestCase {
     }
 
     func testResolvesRelativeControlURL() async {
-        // "RenderingControl/control" -> appended to base directory
+        // "ContentDirectory/control" -> appended to base directory
         let device = await DeviceDescriptionParser().parse(data: xml(), location: location, uuid: "u")
-        XCTAssertEqual(device?.renderingControlURL, "http://192.168.1.50:8080/RenderingControl/control")
+        XCTAssertEqual(device?.contentDirectoryURL, "http://192.168.1.50:8080/ContentDirectory/control")
     }
 
     func testKeepsAbsoluteHTTPControlURL() async {
@@ -92,7 +92,7 @@ final class DeviceDescriptionParserTests: XCTestCase {
             .replacingOccurrences(of: "<device>", with: "<URLBase>http://10.0.0.2:9000/base/</URLBase><device>")
         let device = await DeviceDescriptionParser().parse(data: Data(data.utf8), location: location, uuid: "u")
         XCTAssertEqual(device?.avTransportURL, "http://10.0.0.2:9000/control?service=AVTransport")
-        XCTAssertEqual(device?.renderingControlURL, "http://10.0.0.2:9000/base/RenderingControl/control")
+        XCTAssertEqual(device?.contentDirectoryURL, "http://10.0.0.2:9000/base/ContentDirectory/control")
     }
 
     func testIPv6LocationAndQueryInControlURL() async {

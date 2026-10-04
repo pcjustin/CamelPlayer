@@ -65,9 +65,11 @@ public class PlaybackController {
         set { playlist.loopMode = newValue; refreshPreloadedNext() }
     }
 
+    /// Local output volume. Network renderers keep their own volume, so this
+    /// survives switching to one and back.
     public var volume: Float {
-        get { currentEngine.volume }
-        set { currentEngine.volume = newValue.isFinite ? max(0, min(1, newValue)) : 0 }
+        get { player?.volume ?? 1 }
+        set { player?.volume = newValue.isFinite ? max(0, min(1, newValue)) : 0 }
     }
 
     public var currentTime: TimeInterval {
@@ -291,9 +293,7 @@ public class PlaybackController {
     /// Sets the output device (local or UPnP)
     public func setOutputDevice(_ device: OutputDevice) throws {
         guard device.id != currentOutputDevice.id else { return }
-        // Stop current playback and carry the current volume over to the new engine.
         let wasPlaying = currentEngine.state == .playing
-        let currentVolume = currentEngine.volume
         stop()
 
         switch device.type {
@@ -311,8 +311,6 @@ public class PlaybackController {
             currentEngine = upnpEngine
             currentOutputDevice = device
         }
-
-        currentEngine.volume = currentVolume
 
         // Resume playback only if something was actually playing
         if wasPlaying, let currentItem = playlist.currentItem {

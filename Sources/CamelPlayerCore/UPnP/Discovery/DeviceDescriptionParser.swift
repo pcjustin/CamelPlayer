@@ -15,7 +15,6 @@ public class DeviceDescriptionParser: NSObject {
 
     // Service URLs
     private var avTransportControlURL: String?
-    private var renderingControlControlURL: String?
     private var contentDirectoryControlURL: String?
 
     // Current service being parsed
@@ -57,7 +56,6 @@ public class DeviceDescriptionParser: NSObject {
 
         // Resolve relative URLs
         let avTransportURL = resolveURL(avTransportControlURL)
-        let renderingControlURL = resolveURL(renderingControlControlURL)
         let contentDirectoryURL = resolveURL(contentDirectoryControlURL)
 
         return UPnPDevice(
@@ -67,7 +65,6 @@ public class DeviceDescriptionParser: NSObject {
             modelName: modelName.isEmpty ? "Unknown" : modelName,
             location: location,
             avTransportURL: avTransportURL,
-            renderingControlURL: renderingControlURL,
             contentDirectoryURL: contentDirectoryURL
         )
     }
@@ -90,7 +87,6 @@ public class DeviceDescriptionParser: NSObject {
         manufacturer = ""
         modelName = ""
         avTransportControlURL = nil
-        renderingControlControlURL = nil
         contentDirectoryControlURL = nil
         currentServiceType = ""
         currentControlURL = ""
@@ -141,8 +137,6 @@ extension DeviceDescriptionParser: XMLParserDelegate {
             // End of service element - save control URL if it's a service we care about
             if currentServiceType.contains("AVTransport") {
                 avTransportControlURL = currentControlURL
-            } else if currentServiceType.contains("RenderingControl") {
-                renderingControlControlURL = currentControlURL
             } else if currentServiceType.contains("ContentDirectory") {
                 contentDirectoryControlURL = currentControlURL
             }

@@ -69,8 +69,9 @@ public class AudioPlayer {
     /// reflects the absolute position after a seek.
     private var segmentStartFrame: AVAudioFramePosition = 0
 
-    public var mixerNode: AVAudioMixerNode {
-        engine.mainMixerNode
+    public var volume: Float {
+        get { engine.mainMixerNode.outputVolume }
+        set { engine.mainMixerNode.outputVolume = newValue }
     }
 
     public var duration: TimeInterval? {

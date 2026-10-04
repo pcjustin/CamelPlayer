@@ -847,6 +847,11 @@ class PlaybackViewModel: ObservableObject {
     /// output is local — it can only play through a UPnP renderer.
     var currentTrackNeedsRenderer: Bool {
         guard let item = currentItem, !item.url.isFileURL else { return false }
+        return isLocalOutput
+    }
+
+    /// Volume applies to local output only; network renderers keep their own.
+    var isLocalOutput: Bool {
         if case .local = currentOutputDevice?.type { return true }
         return false
     }

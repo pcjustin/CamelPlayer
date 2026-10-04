@@ -6,7 +6,6 @@ private final class PlaybackStub: PlaybackEngine {
     var currentURL: URL?
     var duration: TimeInterval? = 10
     var currentTime: TimeInterval = 0
-    var volume: Float = 1
     var onPlaybackFinished: (() -> Void)?
     var onAdvancedToNext: (() -> Void)?
     var nextURL: URL?

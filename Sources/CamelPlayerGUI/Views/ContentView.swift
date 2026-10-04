@@ -56,7 +56,9 @@ struct ContentView: View {
                         .frame(width: 200)
                     PlaybackControlsView()
                     SeekBarView()
-                    VolumeControlView()
+                    if viewModel.isLocalOutput {
+                        VolumeControlView()
+                    }
                 }
                 .padding()
 
