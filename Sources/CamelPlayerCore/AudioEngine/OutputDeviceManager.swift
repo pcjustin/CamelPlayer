@@ -9,11 +9,15 @@ public typealias AudioDeviceID = UInt32
 
 public struct AudioDevice {
     public let id: AudioDeviceID
+    /// Persistent identifier. Device IDs change when a device is reconnected
+    /// or the system restarts; the UID does not.
+    public let uid: String
     public let name: String
     public let isOutput: Bool
 
-    public init(id: AudioDeviceID, name: String, isOutput: Bool) {
+    public init(id: AudioDeviceID, uid: String, name: String, isOutput: Bool) {
         self.id = id
+        self.uid = uid
         self.name = name
         self.isOutput = isOutput
     }
@@ -129,32 +133,26 @@ public class OutputDeviceManager {
             throw OutputDeviceError.propertyAccessFailed("Failed to get stream configuration")
         }
 
-        let isOutput = bufferList.pointee.mNumberBuffers > 0
-
-        propertyAddress.mSelector = kAudioObjectPropertyName
-        propertyAddress.mScope = kAudioObjectPropertyScopeGlobal
-
-        var cfName: Unmanaged<CFString>?
-        dataSize = UInt32(MemoryLayout<CFString>.size)
-
-        status = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize,
-            &cfName
+        return AudioDevice(
+            id: deviceID,
+            uid: stringProperty(kAudioDevicePropertyDeviceUID, of: deviceID) ?? String(deviceID),
+            name: stringProperty(kAudioObjectPropertyName, of: deviceID) ?? "Unknown Device",
+            isOutput: bufferList.pointee.mNumberBuffers > 0
         )
+    }
 
-        let name: String
+    private func stringProperty(_ selector: AudioObjectPropertySelector, of deviceID: AudioDeviceID) -> String? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<CFString>.size)
+        guard AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &dataSize, &value)
+                == kAudioHardwareNoError else { return nil }
         // The Get call transfers ownership of the CFString to us.
-        if status == kAudioHardwareNoError, let cfString = cfName?.takeRetainedValue() {
-            name = cfString as String
-        } else {
-            name = "Unknown Device"
-        }
-
-        return AudioDevice(id: deviceID, name: name, isOutput: isOutput)
+        return value?.takeRetainedValue() as String?
     }
 
     public func setOutputDevice(deviceID: AudioDeviceID) throws {

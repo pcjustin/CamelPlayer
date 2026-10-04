@@ -525,7 +525,9 @@ public class AudioPlayer {
         cond.lock()
         pcmNames = names
         cond.unlock()
-        return labels.indices.map { AudioDevice(id: AudioDeviceID($0), name: labels[$0], isOutput: true) }
+        return labels.indices.map {
+            AudioDevice(id: AudioDeviceID($0), uid: names[$0], name: labels[$0], isOutput: true)
+        }
     }
 
     public func setOutputDevice(deviceID: AudioDeviceID) throws {

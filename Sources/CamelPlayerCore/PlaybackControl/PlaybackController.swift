@@ -93,9 +93,10 @@ public class PlaybackController {
 
         // Set default output device (local default device)
         let defaultDeviceID = try audioPlayer.getDefaultOutputDevice()
+        let defaultDevice = (try? audioPlayer.listOutputDevices())?.first { $0.id == defaultDeviceID }
         currentOutputDevice = OutputDevice(
-            id: "local-\(defaultDeviceID)",
-            name: "Default Output",
+            id: "local-\(defaultDevice?.uid ?? String(defaultDeviceID))",
+            name: defaultDevice?.name ?? "Default Output",
             type: .local(defaultDeviceID)
         )
 
@@ -268,7 +269,7 @@ public class PlaybackController {
         if let localDevices = try? player?.listOutputDevices() {
             for device in localDevices {
                 devices.append(OutputDevice(
-                    id: "local-\(device.id)",
+                    id: "local-\(device.uid)",
                     name: device.name,
                     type: .local(device.id)
                 ))
