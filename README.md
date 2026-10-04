@@ -201,9 +201,11 @@ open CamelPlayer.app
 - **M4A**: MPEG-4 Audio (macOS only)
 - **ALAC**: Apple Lossless Audio Codec (macOS only)
 - **FLAC**: Free Lossless Audio Codec (macOS 10.13+)
+- **AIFF**: Audio Interchange File Format (.aiff / .aif)
+- **AAC**: Advanced Audio Coding (macOS only)
 
 macOS decodes through AVFoundation; Linux decodes through libsndfile, which
-does not read M4A/ALAC.
+does not read M4A/ALAC/AAC.
 
 ## Known Limitations
 
