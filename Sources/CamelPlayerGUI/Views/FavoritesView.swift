@@ -6,20 +6,24 @@ struct FavoritesView: View {
     @State private var selectedAlbum: MediaObject?
 
     var body: some View {
-        if let album = selectedAlbum {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Button(action: { selectedAlbum = nil }) { Image(systemName: "chevron.left") }
-                        .buttonStyle(.borderless)
-                    Text(album.title).font(.headline).lineLimit(1)
-                    Spacer()
-                }
-                .padding()
-                Divider()
-                AlbumDetailView(album: album)
-            }
-        } else {
+        // Keep the list mounted under the detail so its scroll position survives going back.
+        ZStack {
             list
+                .opacity(selectedAlbum == nil ? 1 : 0)
+                .allowsHitTesting(selectedAlbum == nil)
+            if let album = selectedAlbum {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        Button(action: { selectedAlbum = nil }) { Image(systemName: "chevron.left") }
+                            .buttonStyle(.borderless)
+                        Text(album.title).font(.headline).lineLimit(1)
+                        Spacer()
+                    }
+                    .padding()
+                    Divider()
+                    AlbumDetailView(album: album)
+                }
+            }
         }
     }
 
