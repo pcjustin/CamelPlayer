@@ -191,11 +191,6 @@ public class PlaybackController {
         setNextOnEngine()
     }
 
-    public func addToPlaylist(url: URL) {
-        playlist.add(url: url)
-        refreshPreloadedNext()
-    }
-
     public func addToPlaylist(urls: [URL]) {
         playlist.addAll(urls: urls)
         refreshPreloadedNext()

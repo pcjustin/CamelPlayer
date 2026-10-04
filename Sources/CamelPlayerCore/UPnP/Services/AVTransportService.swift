@@ -204,18 +204,4 @@ public class AVTransportService {
             uri: info["TrackURI"] ?? ""
         )
     }
-
-    /// Gets media information
-    /// - Returns: Dictionary containing NrTracks, MediaDuration, CurrentURI, etc.
-    public func getMediaInfo() async throws -> [String: String] {
-        return try await soapClient.call(
-            controlURL: controlURL,
-            action: "GetMediaInfo",
-            serviceType: serviceType,
-            argumentOrder: ["InstanceID"],
-            arguments: [
-                "InstanceID": instanceID
-            ]
-        )
-    }
 }

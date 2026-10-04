@@ -23,7 +23,6 @@ final class PlaylistTests: XCTestCase {
 
         playlist.add(url: url1)
         playlist.add(url: url2)
-        playlist.mode = .sequential
 
         let nextItem = playlist.next()
         XCTAssertNotNil(nextItem)
@@ -36,7 +35,6 @@ final class PlaylistTests: XCTestCase {
 
         playlist.add(url: url1)
         playlist.add(url: url2)
-        playlist.mode = .sequential
 
         _ = playlist.next()
         let prevItem = playlist.previous()
@@ -50,7 +48,7 @@ final class PlaylistTests: XCTestCase {
 
         playlist.add(url: url1)
         playlist.add(url: url2)
-        playlist.mode = .loop
+        playlist.loopMode = .all
 
         _ = playlist.next()
         let loopItem = playlist.next()
@@ -105,7 +103,8 @@ final class PlaylistTests: XCTestCase {
     func testShuffleAvoidsImmediateRepeat() {
         let urls = (1...5).map { URL(fileURLWithPath: "/test/song\($0).mp3") }
         urls.forEach { playlist.add(url: $0) }
-        playlist.mode = .shuffle
+        playlist.shuffle = true
+        playlist.loopMode = .all
 
         // With more than one item, next() must never return the current track.
         for _ in 0..<100 {
@@ -118,7 +117,8 @@ final class PlaylistTests: XCTestCase {
     func testShufflePreviousWalksHistory() {
         let urls = (1...5).map { URL(fileURLWithPath: "/test/song\($0).mp3") }
         urls.forEach { playlist.add(url: $0) }
-        playlist.mode = .shuffle
+        playlist.shuffle = true
+        playlist.loopMode = .all
 
         let first = playlist.currentItem
         let second = playlist.next()
@@ -134,7 +134,8 @@ final class PlaylistTests: XCTestCase {
     func testShuffleSingleItemReturnsItself() {
         let url = URL(fileURLWithPath: "/test/only.mp3")
         playlist.add(url: url)
-        playlist.mode = .shuffle
+        playlist.shuffle = true
+        playlist.loopMode = .all
 
         XCTAssertEqual(playlist.next()?.url, url)
     }

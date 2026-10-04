@@ -20,9 +20,6 @@ public protocol PlaybackEngine: AnyObject {
     /// Callback when playback finishes
     var onPlaybackFinished: (() -> Void)? { get set }
 
-    /// Callback when state changes
-    var onStateChanged: ((PlaybackState) -> Void)? { get set }
-
     /// Called when a gapless renderer auto-advanced to the preloaded next track.
     var onAdvancedToNext: (() -> Void)? { get set }
 
@@ -100,8 +97,6 @@ public class LocalPlaybackEngine: PlaybackEngine {
         }
     }
 
-    public var onStateChanged: ((PlaybackState) -> Void)?
-
     public var onAdvancedToNext: (() -> Void)? {
         get {
             audioPlayer.onAdvancedToNext
@@ -129,37 +124,27 @@ public class LocalPlaybackEngine: PlaybackEngine {
             throw AudioPlayerError.remoteURLRequiresRenderer
         }
         try audioPlayer.loadAndPlay(url: url)
-        onStateChanged?(audioPlayer.state)
     }
 
     @MainActor
     public func play() async throws {
         try audioPlayer.play()
-        onStateChanged?(audioPlayer.state)
     }
 
     public func pause() {
         audioPlayer.pause()
-        onStateChanged?(audioPlayer.state)
     }
 
     public func stop() {
         audioPlayer.stop()
-        onStateChanged?(audioPlayer.state)
     }
 
     @MainActor
     public func seek(to time: TimeInterval) async throws {
         try audioPlayer.seek(to: time)
-        onStateChanged?(audioPlayer.state)
     }
 
     public func getFileFormat() -> String? {
         audioPlayer.getFileFormat()
-    }
-
-    /// Gets the underlying AudioPlayer for local-specific operations
-    public func getAudioPlayer() -> AudioPlayer {
-        return audioPlayer
     }
 }

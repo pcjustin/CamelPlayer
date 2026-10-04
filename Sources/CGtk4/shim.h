@@ -106,11 +106,6 @@ static inline void cp_list_box_remove_all(GtkWidget *list) {
     gtk_list_box_remove_all(GTK_LIST_BOX(list));
 }
 
-static inline void cp_list_box_select_index(GtkWidget *list, int i) {
-    GtkListBoxRow *row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(list), i);
-    if (row) gtk_list_box_select_row(GTK_LIST_BOX(list), row);
-}
-
 static inline int cp_list_box_row_index(gpointer row) {
     return gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(row));
 }
@@ -164,12 +159,6 @@ static inline void cp_flow_box_remove_all(GtkWidget *fb) {
 
 static inline int cp_flow_box_child_index(gpointer child) {
     return gtk_flow_box_child_get_index(GTK_FLOW_BOX_CHILD(child));
-}
-
-static inline GtkWidget *cp_picture_new(void) {
-    GtkWidget *p = gtk_picture_new();
-    gtk_picture_set_content_fit(GTK_PICTURE(p), GTK_CONTENT_FIT_COVER);
-    return p;
 }
 
 /* Fixed-size square cover: an icon placeholder with a clipped picture overlay.
@@ -319,10 +308,6 @@ static inline void cp_label_set_max_width_chars(GtkWidget *label, int n) {
 
 static inline void cp_label_justify_center(GtkWidget *label) {
     gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
-}
-
-static inline void cp_image_set_pixel_size(GtkWidget *image, int size) {
-    gtk_image_set_pixel_size(GTK_IMAGE(image), size);
 }
 
 static inline void cp_image_set_icon(GtkWidget *image, const char *icon) {

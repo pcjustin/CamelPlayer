@@ -31,7 +31,6 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     private var nextOriginalURL: URL?
 
     public var onPlaybackFinished: (() -> Void)?
-    public var onStateChanged: ((PlaybackState) -> Void)?
     public var onAdvancedToNext: (() -> Void)?
 
     public var volume: Float {
@@ -80,12 +79,6 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         isPreloading = false
     }
 
-    private func setState(_ newState: PlaybackState) {
-        guard state != newState else { return }
-        state = newState
-        onStateChanged?(newState)
-    }
-
     @MainActor
     public func loadAndPlay(url: URL, metadata: String?) async throws {
         guard let transport = avTransport else { throw UPnPPlaybackError.serviceNotAvailable }
@@ -101,7 +94,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         currentURI = nil
         currentTime = 0
         duration = nil
-        setState(.playing)
+        state = .playing
 
         let command = enqueue { [self] in
             guard request == generation else { throw CancellationError() }
@@ -117,11 +110,11 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             try await command.value
             guard request == generation else { return }
             playAcknowledged = true
-            setState(.playing)
+            state = .playing
             startPolling()
         } catch {
             guard request == generation else { return }
-            setState(.stopped)
+            state = .stopped
             throw error
         }
     }
@@ -196,7 +189,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         guard request == generation else { return }
         stoppedPolls = 0
         playAcknowledged = true
-        setState(.playing)
+        state = .playing
         startPolling()
     }
 
@@ -206,7 +199,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         let request = generation
         isPreloading = false
         stopPolling()
-        setState(.paused)
+        state = .paused
         _ = enqueue { [self] in
             guard request == generation else { return }
             do { try await transport.pause() }
@@ -226,7 +219,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
         stopPolling()
         clearNext()
         currentTime = 0
-        setState(.stopped)
+        state = .stopped
         guard let transport = avTransport else { return }
         _ = enqueue { [self] in
             guard request == generation else { return }
@@ -297,7 +290,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
             let playbackBegan = hasStartedPlaying || (playAcknowledged && stoppedPolls >= 2)
             let finished = playbackBegan && newState == .stopped && !isPreloading
                 && (nextURI == nil || stoppedPolls >= 2)
-            setState(newState)
+            state = newState
             guard request == generation else { return }
             if finished {
                 hasStartedPlaying = false

@@ -157,22 +157,6 @@ public class AudioPlayer {
         return [1: 16, 2: 20, 3: 24, 4: 32][format.mFormatFlags] ?? 0
     }
 
-    public func load(url: URL) throws {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw AudioPlayerError.fileNotFound
-        }
-
-        do {
-            let file = try AVAudioFile(forReading: url)
-            stop()
-            audioFile = file
-            currentURL = url
-            state = .stopped
-        } catch {
-            throw AudioPlayerError.fileLoadError(error.localizedDescription)
-        }
-    }
-
     /// Loads and plays a file atomically, avoiding an intermediate stopped
     /// state that would make the UI flicker.
     public func loadAndPlay(url: URL) throws {
@@ -581,11 +565,6 @@ public class AudioPlayer {
     }
 
     // MARK: - Transport
-
-    public func load(url: URL) throws {
-        stop()
-        try openFile(url: url)
-    }
 
     public func loadAndPlay(url: URL) throws {
         stop()

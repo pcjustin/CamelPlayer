@@ -41,21 +41,11 @@ public class UPnPDeviceManager: SSDPDiscoveryDelegate {
         startDiscovery()
     }
 
-    /// Gets a renderer by ID
-    public func getRenderer(id: String) -> UPnPDevice? {
-        return availableRenderers.first { $0.id == id }
-    }
-
-    /// Gets a server by ID
-    public func getServer(id: String) -> UPnPDevice? {
-        return availableServers.first { $0.id == id }
-    }
-
     // MARK: - SSDPDiscoveryDelegate
 
     public func ssdpDiscovery(_ discovery: SSDPDiscovery, didDiscoverDevice device: UPnPDevice) {
         // Classify by capability so a device exposing both services lands in
-        // both lists, regardless of how its deviceType parsed.
+        // both lists.
         if device.avTransportURL != nil,
            !availableRenderers.contains(where: { $0.id == device.id }) {
             availableRenderers.append(device)

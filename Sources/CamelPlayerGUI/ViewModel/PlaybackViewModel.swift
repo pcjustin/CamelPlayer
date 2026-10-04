@@ -25,7 +25,6 @@ class PlaybackViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var showError: Bool = false
     @Published var formatInfo: String?
-    @Published var lastError: String?
     @Published var albumArt: NSImage?
     @Published var currentAlbum: String?
     @Published var currentCoverURL: URL?
@@ -117,11 +116,6 @@ class PlaybackViewModel: ObservableObject {
             }
         }
         RunLoop.current.add(updateTimer!, forMode: .common)
-    }
-
-    private func stopPolling() {
-        updateTimer?.invalidate()
-        updateTimer = nil
     }
 
     private func updateState() {

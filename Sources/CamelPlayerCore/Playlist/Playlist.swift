@@ -1,12 +1,5 @@
 import Foundation
 
-public enum PlaybackMode {
-    case sequential
-    case loop
-    case loopOne
-    case shuffle
-}
-
 /// Loop is orthogonal to shuffle: off / all (wrap) / one (repeat current).
 public enum LoopMode {
     case off
@@ -37,34 +30,6 @@ public class Playlist {
     public var loopMode: LoopMode {
         get { withLock { _loop } }
         set { withLock { _loop = newValue } }
-    }
-
-    /// Compatibility view over the orthogonal shuffle + loop state, used by the
-    /// CLI and tests which still address the four exclusive modes. Legacy
-    /// `.shuffle` maps to shuffle + loop-all (infinite random).
-    public var mode: PlaybackMode {
-        get {
-            withLock {
-                if _shuffle { return .shuffle }
-                switch _loop {
-                case .off: return .sequential
-                case .all: return .loop
-                case .one: return .loopOne
-                }
-            }
-        }
-        set {
-            withLock {
-                _shufflePlayed.removeAll()
-                _shuffleHistory.removeAll()
-                switch newValue {
-                case .sequential: _shuffle = false; _loop = .off
-                case .loop: _shuffle = false; _loop = .all
-                case .loopOne: _shuffle = false; _loop = .one
-                case .shuffle: _shuffle = true; _loop = .all
-                }
-            }
-        }
     }
 
     public var count: Int {
