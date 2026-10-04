@@ -339,9 +339,18 @@ public class LocalMediaServer {
 
 // MARK: - Server Errors
 
-public enum ServerError: Error {
+public enum ServerError: LocalizedError {
     case failedToStart(Error)
     case cannotDetermineIP
     case invalidURL
     case invalidFile
+
+    public var errorDescription: String? {
+        switch self {
+        case .failedToStart(let error): return "Could not start the local media server: \(error.localizedDescription)"
+        case .cannotDetermineIP: return "No network address to share local files with the renderer"
+        case .invalidURL: return "Could not build a media URL for the renderer"
+        case .invalidFile: return "File not found or not readable"
+        }
+    }
 }

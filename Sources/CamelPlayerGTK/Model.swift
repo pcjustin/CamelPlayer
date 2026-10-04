@@ -294,7 +294,7 @@ final class PlayerModel {
                 DispatchQueue.main.async { self.updateState() }
             } catch is CancellationError {
             } catch let error as AudioPlayerError {
-                self.report(Self.describe(error))
+                self.report(error.localizedDescription)
             } catch {
                 self.report("\(label): \(error.localizedDescription)")
             }
@@ -593,23 +593,6 @@ final class PlayerModel {
     }
 
     // MARK: - Errors
-
-    private static func describe(_ error: AudioPlayerError) -> String {
-        switch error {
-        case .fileNotFound:
-            return "File not found"
-        case .unsupportedFormat:
-            return "Unsupported audio format"
-        case .audioEngineError(let message):
-            return "Audio engine error: \(message)"
-        case .fileLoadError(let message):
-            return "Failed to load file: \(message)"
-        case .remoteURLRequiresRenderer:
-            return "This track is on a network server. Choose a network renderer as the output device to play it."
-        case .invalidSeekTime:
-            return "Invalid playback position"
-        }
-    }
 
     private func report(_ message: String) {
         DispatchQueue.main.async { self.onError?(message) }

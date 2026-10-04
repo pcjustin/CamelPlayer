@@ -19,10 +19,17 @@ public struct AudioDevice {
     }
 }
 
-public enum OutputDeviceError: Error {
+public enum OutputDeviceError: LocalizedError {
     case deviceNotFound
     case deviceSetupFailed(String)
     case propertyAccessFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .deviceNotFound: return "Output device not found"
+        case .deviceSetupFailed(let message), .propertyAccessFailed(let message): return message
+        }
+    }
 }
 
 #if os(macOS)

@@ -533,8 +533,6 @@ class PlaybackViewModel: ObservableObject {
                 try await controller.play()
                 // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
@@ -563,8 +561,6 @@ class PlaybackViewModel: ObservableObject {
                 try await controller.resume()
                 // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
@@ -583,8 +579,6 @@ class PlaybackViewModel: ObservableObject {
                 try await controller.next()
                 // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
@@ -597,8 +591,6 @@ class PlaybackViewModel: ObservableObject {
                 try await controller.previous()
                 // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
@@ -612,8 +604,6 @@ class PlaybackViewModel: ObservableObject {
                 updateState()
                 // Re-anchor the system panel's extrapolated elapsed time.
                 updateNowPlaying()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
@@ -638,8 +628,6 @@ class PlaybackViewModel: ObservableObject {
                 try await controller.playItem(at: index)
                 // Update immediately so the UI doesn't wait for the poll timer.
                 updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
@@ -916,23 +904,6 @@ class PlaybackViewModel: ObservableObject {
     }
 
     // MARK: - Error Handling
-
-    private func handleAudioPlayerError(_ error: AudioPlayerError) {
-        switch error {
-        case .fileNotFound:
-            handleError("File not found")
-        case .unsupportedFormat:
-            handleError("Unsupported audio format")
-        case .audioEngineError(let msg):
-            handleError("Audio engine error: \(msg)")
-        case .fileLoadError(let msg):
-            handleError("Failed to load file: \(msg)")
-        case .remoteURLRequiresRenderer:
-            handleError("This track is on a network server. Choose a network renderer as the output device to play it.")
-        case .invalidSeekTime:
-            handleError("Invalid playback position")
-        }
-    }
 
     private func handleError(_ message: String) {
         errorMessage = message

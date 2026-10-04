@@ -337,8 +337,8 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     deinit { pollingTimer?.invalidate() }
 }
 
-public enum UPnPPlaybackError: Error {
+public enum UPnPPlaybackError: LocalizedError {
     case serviceNotAvailable
-    case failedToShareFile
-    case deviceNotResponding
+
+    public var errorDescription: String? { "This renderer does not accept playback commands" }
 }

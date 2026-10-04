@@ -7,12 +7,20 @@ import FoundationXML
 #endif
 
 /// Errors that can occur during SOAP communication
-public enum SOAPError: Error {
+public enum SOAPError: LocalizedError {
     case invalidURL
-    case networkError(Error)
     case invalidResponse
     case soapFault(String)
     case parsingError(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "Invalid device URL"
+        case .invalidResponse: return "The device sent an invalid response"
+        case .soapFault(let message): return "The device reported an error: \(message)"
+        case .parsingError(let message): return "Unreadable device response: \(message)"
+        }
+    }
 }
 
 /// A client for making SOAP requests to UPnP services

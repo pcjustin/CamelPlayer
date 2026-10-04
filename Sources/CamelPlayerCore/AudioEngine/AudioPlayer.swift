@@ -13,13 +13,23 @@ public enum PlaybackState: Sendable {
     case paused
 }
 
-public enum AudioPlayerError: Error {
+public enum AudioPlayerError: LocalizedError {
     case fileNotFound
-    case unsupportedFormat
     case audioEngineError(String)
     case fileLoadError(String)
     case remoteURLRequiresRenderer
     case invalidSeekTime
+
+    public var errorDescription: String? {
+        switch self {
+        case .fileNotFound: return "File not found"
+        case .audioEngineError(let message): return "Audio engine error: \(message)"
+        case .fileLoadError(let message): return "Failed to load file: \(message)"
+        case .remoteURLRequiresRenderer:
+            return "This track is on a network server. Choose a network renderer as the output device to play it."
+        case .invalidSeekTime: return "Invalid playback position"
+        }
+    }
 }
 
 /// "96000 Hz / 24 bit / 2ch"; lossy codecs have no bit depth to show.
