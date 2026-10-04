@@ -88,7 +88,7 @@ launcher or run `camelplayer`.
 - **Volume Slider**: Visual volume control with percentage display
 - **Playlist View**: Scrollable track list with current track highlighting
 - **Album Queueing**: Add every track from an album to the end of the current queue
-- **Shuffle and Loop Toggles**: Independent shuffle and loop (off / all / one) controls in the transport bar
+- **Shuffle and Loop Toggles**: Independent shuffle and loop (off / all / one) controls in the transport bar. Loop one repeats a track when it ends; Next and Previous still change tracks
 - **Settings Panel**:
   - Audio output device selection dropdown (local and UPnP renderers)
   - Add files and folders buttons

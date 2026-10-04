@@ -140,7 +140,7 @@ public class PlaybackController {
 
     @MainActor
     private func playNextIfAvailable() {
-        guard let nextItem = playlist.next() else {
+        guard let nextItem = playlist.next(afterFinish: true) else {
             // No next item available
             return
         }

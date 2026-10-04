@@ -65,6 +65,24 @@ final class PlaybackControllerTests: XCTestCase {
         await fulfillment(of: [advanced], timeout: 1)
     }
 
+    func testLoopOneReplaysAFinishedTrackButNextMovesOn() async throws {
+        let engine = PlaybackStub()
+        let controller = PlaybackController(engine: engine)
+        controller.addToPlaylist(urls: urls)
+        controller.loopMode = .one
+        try await controller.play()
+        try await controller.next()
+        XCTAssertEqual(engine.currentURL, urls[1])
+        let replayed = expectation(description: "Finished track replays")
+        engine.loaded = { [urls] url in
+            XCTAssertEqual(url, urls[1])
+            replayed.fulfill()
+        }
+        engine.state = .stopped
+        engine.onPlaybackFinished?()
+        await fulfillment(of: [replayed], timeout: 1)
+    }
+
     func testClearInvalidatesQueuedCompletion() async throws {
         let engine = PlaybackStub()
         let controller = PlaybackController(engine: engine)

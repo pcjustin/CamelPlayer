@@ -106,18 +106,20 @@ public class Playlist {
         }
     }
 
-    public func next() -> PlaylistItem? {
+    /// Loop-one repeats a track only when it finished on its own; a skip
+    /// still moves on, wrapping at the end like loop-all.
+    public func next(afterFinish: Bool = false) -> PlaylistItem? {
         withLock {
             guard !items.isEmpty else { return nil }
 
-            if _loop == .one { return items[currentIndex] }
+            if _loop == .one, afterFinish { return items[currentIndex] }
             if _shuffle { return shuffleNextLocked() }
 
             if currentIndex + 1 < items.count {
                 currentIndex += 1
                 return items[currentIndex]
             }
-            if _loop == .all {
+            if _loop != .off {
                 currentIndex = 0
                 return items[currentIndex]
             }
@@ -126,7 +128,7 @@ public class Playlist {
     }
 
     /// Random next within the current shuffle cycle. A track is not repeated
-    /// until the cycle is exhausted; then loop-all refills it and loop-off stops.
+    /// until the cycle is exhausted; then a loop refills it and loop-off stops.
     private func shuffleNextLocked() -> PlaylistItem? {
         if let current = currentItemLocked {
             _shufflePlayed.insert(current.id)
@@ -135,7 +137,7 @@ public class Playlist {
             $0 != currentIndex && !_shufflePlayed.contains(items[$0].id)
         }
         if candidates.isEmpty {
-            guard _loop == .all else { return nil }
+            guard _loop != .off else { return nil }
             _shufflePlayed.removeAll()
             candidates = items.indices.filter { $0 != currentIndex }
             if candidates.isEmpty { candidates = Array(items.indices) }
@@ -160,7 +162,6 @@ public class Playlist {
         withLock {
             guard !items.isEmpty else { return nil }
 
-            if _loop == .one { return items[currentIndex] }
             if _shuffle {
                 // Walk back through the shuffle history, skipping tracks that
                 // have since been removed. No history left = stay put.
@@ -177,7 +178,7 @@ public class Playlist {
                 currentIndex -= 1
                 return items[currentIndex]
             }
-            if _loop == .all {
+            if _loop != .off {
                 currentIndex = items.count - 1
                 return items[currentIndex]
             }
