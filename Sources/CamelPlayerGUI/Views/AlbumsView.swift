@@ -95,11 +95,21 @@ struct AlbumsView: View {
         .padding()
     }
 
-    @ViewBuilder
     private var content: some View {
-        if let album = selectedAlbum {
-            AlbumDetailView(album: album)
-        } else if isSearching {
+        // Keep the grid mounted under the detail so its scroll position survives going back.
+        ZStack {
+            browser
+                .opacity(selectedAlbum == nil ? 1 : 0)
+                .allowsHitTesting(selectedAlbum == nil)
+            if let album = selectedAlbum {
+                AlbumDetailView(album: album)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var browser: some View {
+        if isSearching {
             searchResults
         } else if isLoading {
             VStack { Spacer(); ProgressView("Loading albums…"); Spacer() }.frame(maxWidth: .infinity)
