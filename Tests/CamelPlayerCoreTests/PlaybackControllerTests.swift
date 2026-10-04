@@ -6,7 +6,6 @@ private final class PlaybackStub: PlaybackEngine {
     var currentURL: URL?
     var duration: TimeInterval? = 10
     var currentTime: TimeInterval = 0
-    var volume: Float = 1
     var onPlaybackFinished: (() -> Void)?
     var onAdvancedToNext: (() -> Void)?
     var nextURL: URL?
@@ -63,6 +62,24 @@ final class PlaybackControllerTests: XCTestCase {
         engine.state = .stopped
         engine.onPlaybackFinished?()
         await fulfillment(of: [advanced], timeout: 1)
+    }
+
+    func testLoopOneReplaysAFinishedTrackButNextMovesOn() async throws {
+        let engine = PlaybackStub()
+        let controller = PlaybackController(engine: engine)
+        controller.addToPlaylist(urls: urls)
+        controller.loopMode = .one
+        try await controller.play()
+        try await controller.next()
+        XCTAssertEqual(engine.currentURL, urls[1])
+        let replayed = expectation(description: "Finished track replays")
+        engine.loaded = { [urls] url in
+            XCTAssertEqual(url, urls[1])
+            replayed.fulfill()
+        }
+        engine.state = .stopped
+        engine.onPlaybackFinished?()
+        await fulfillment(of: [replayed], timeout: 1)
     }
 
     func testClearInvalidatesQueuedCompletion() async throws {

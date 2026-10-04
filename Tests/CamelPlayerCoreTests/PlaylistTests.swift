@@ -238,15 +238,21 @@ final class PlaylistTests: XCTestCase {
         XCTAssertNil(playlist.peekNext())
     }
 
-    func testLoopOneRepeatsCurrentWithAndWithoutShuffle() {
+    func testLoopOneRepeatsAFinishedTrackButSkipsMoveOn() {
         playlist.addAll(urls: (0..<3).map { URL(fileURLWithPath: "/test/\($0).wav") })
-        let selected = playlist.jumpTo(index: 1)
+        let items = playlist.allItems()
         playlist.loopMode = .one
         for shuffle in [false, true] {
             playlist.shuffle = shuffle
-            XCTAssertEqual(playlist.next()?.id, selected?.id)
-            XCTAssertEqual(playlist.previous()?.id, selected?.id)
+            let current = playlist.jumpTo(index: 2)
+            XCTAssertEqual(playlist.next(afterFinish: true)?.id, current?.id)
+            XCTAssertNotEqual(playlist.next()?.id, current?.id)
         }
+        playlist.shuffle = false
+        _ = playlist.jumpTo(index: 2)
+        // Skips wrap at the ends like loop-all.
+        XCTAssertEqual(playlist.next()?.id, items[0].id)
+        XCTAssertEqual(playlist.previous()?.id, items[2].id)
     }
 
 }

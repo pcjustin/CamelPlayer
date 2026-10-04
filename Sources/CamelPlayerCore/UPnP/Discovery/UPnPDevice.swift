@@ -8,7 +8,6 @@ public struct UPnPDevice: Identifiable, Hashable, Sendable {
     public let modelName: String
     public let location: URL
     public let avTransportURL: String?
-    public let renderingControlURL: String?
     public let contentDirectoryURL: String?
 
     public init(
@@ -18,7 +17,6 @@ public struct UPnPDevice: Identifiable, Hashable, Sendable {
         modelName: String,
         location: URL,
         avTransportURL: String? = nil,
-        renderingControlURL: String? = nil,
         contentDirectoryURL: String? = nil
     ) {
         self.id = id
@@ -27,7 +25,6 @@ public struct UPnPDevice: Identifiable, Hashable, Sendable {
         self.modelName = modelName
         self.location = location
         self.avTransportURL = avTransportURL
-        self.renderingControlURL = renderingControlURL
         self.contentDirectoryURL = contentDirectoryURL
     }
 

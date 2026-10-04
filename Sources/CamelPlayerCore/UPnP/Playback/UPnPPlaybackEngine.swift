@@ -4,27 +4,22 @@ import Foundation
 public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     private let mediaServer: LocalMediaServer
     private let avTransport: AVTransportService?
-    private let renderingControl: RenderingControlService?
 
     public private(set) var state: PlaybackState = .stopped
     public private(set) var currentURL: URL?
     public private(set) var duration: TimeInterval?
     public private(set) var currentTime: TimeInterval = 0
-    private var storedVolume: Float = 0.5
 
     private var pollingTimer: Timer?
     private var commandTail: Task<Void, Error>?
-    private var volumeTail: Task<Void, Never>?
     private var generation = 0
     private var preloadGeneration = 0
-    private var volumeGeneration = 0
     private var positionGeneration = 0
     private var hasStartedPlaying = false
     private var playAcknowledged = false
     private var isPolling = false
     private var isPreloading = false
     private var stoppedPolls = 0
-    private var lastVolumeSetAt = Date.distantPast
     private var currentURI: String?
     private var currentMetadata: String?
     private var nextURI: String?
@@ -33,33 +28,14 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     public var onPlaybackFinished: (() -> Void)?
     public var onAdvancedToNext: (() -> Void)?
 
-    public var volume: Float {
-        get { storedVolume }
-        set {
-            storedVolume = newValue.isFinite ? max(0, min(1, newValue)) : 0
-            lastVolumeSetAt = Date()
-            volumeGeneration += 1
-            let request = volumeGeneration
-            let value = Int(storedVolume * 100)
-            let previous = volumeTail
-            volumeTail = Task { @MainActor [weak self] in
-                await previous?.value
-                guard let self = self, request == self.volumeGeneration else { return }
-                try? await self.renderingControl?.setVolume(value)
-            }
-        }
-    }
-
     public init(device: UPnPDevice, mediaServer: LocalMediaServer) {
         self.mediaServer = mediaServer
         avTransport = device.avTransportURL.map { AVTransportService(controlURL: $0) }
-        renderingControl = device.renderingControlURL.map { RenderingControlService(controlURL: $0) }
     }
 
     init(device: UPnPDevice, mediaServer: LocalMediaServer, avTransport: AVTransportService) {
         self.mediaServer = mediaServer
         self.avTransport = avTransport
-        renderingControl = nil
     }
 
     private func enqueue(_ operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
@@ -312,13 +288,6 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
                 currentTime = position.trackPosition
                 duration = position.trackDuration > 0 ? position.trackDuration : nil
                 if advanced { onAdvancedToNext?() }
-            }
-
-            if let renderingControl = renderingControl, Date().timeIntervalSince(lastVolumeSetAt) > 2 {
-                let volumeRequest = volumeGeneration
-                let value = try? await renderingControl.getVolume()
-                guard request == generation, volumeRequest == volumeGeneration else { return }
-                if let value = value { storedVolume = Float(max(0, min(100, value))) / 100 }
             }
         } catch {
             coreLog("UPnP: Failed to update status: \(error)")

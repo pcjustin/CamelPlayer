@@ -9,7 +9,7 @@ A native audio player featuring independent audio output device control and bit-
 - **Bit-Perfect Playback**: Automatic hardware sample rate matching for zero-resampling playback
 - **Independent Output Device Control**: Select and control audio output device independently from system settings using Core Audio
 - **Multiple Audio Formats**: Support for MP3, WAV, M4A, FLAC, and ALAC (including high-res 192kHz/24bit)
-- **Volume Control**: Independent volume control that doesn't affect system volume
+- **Volume Control**: Independent local volume that doesn't affect system volume and is remembered across launches; network renderers keep their own volume
 - **Playback Modes**: Sequential, loop, loop-one, and shuffle
 
 ## Requirements
@@ -85,10 +85,10 @@ launcher or run `camelplayer`.
 - **Now Playing Display**: Shows current track, audio format, and bit-perfect status indicator
 - **Playback Controls**: Large touch-friendly play/pause, next, previous, and stop buttons
 - **Interactive Seek Bar**: Click or drag to seek to any position with time display
-- **Volume Slider**: Visual volume control with percentage display
+- **Volume Slider**: Local output volume with percentage display, hidden while a network renderer plays
 - **Playlist View**: Scrollable track list with current track highlighting
 - **Album Queueing**: Add every track from an album to the end of the current queue
-- **Shuffle and Loop Toggles**: Independent shuffle and loop (off / all / one) controls in the transport bar
+- **Shuffle and Loop Toggles**: Independent shuffle and loop (off / all / one) controls in the transport bar. Loop one repeats a track when it ends; Next and Previous still change tracks
 - **Settings Panel**:
   - Audio output device selection dropdown (local and UPnP renderers)
   - Add files and folders buttons

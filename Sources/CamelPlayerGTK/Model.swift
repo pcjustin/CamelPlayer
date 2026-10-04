@@ -306,6 +306,11 @@ final class PlayerModel {
     /// output is local.
     var currentTrackNeedsRenderer: Bool {
         guard let item = currentItem, !item.url.isFileURL else { return false }
+        return isLocalOutput
+    }
+
+    /// Volume applies to local output only; network renderers keep their own.
+    var isLocalOutput: Bool {
         if case .local = currentOutputDevice?.type { return true }
         return false
     }
@@ -410,6 +415,7 @@ final class PlayerModel {
     // MARK: - Settings
 
     func setVolume(_ volume: Float) {
+        guard isLocalOutput else { return }
         controller.volume = volume
         UserDefaults.standard.set(Double(controller.volume), forKey: Keys.volume)
     }
