@@ -80,9 +80,24 @@ public class AudioPlayer {
         return lastKnownTime
     }
 
+    private var configurationObserver: NSObjectProtocol?
+
     public init() throws {
         deviceManager = OutputDeviceManager(engine: engine)
         engine.attach(playerNode)
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            self?.engineConfigurationChanged()
+        }
+    }
+
+    /// A device or sample-rate change stops the engine underneath playback,
+    /// leaving the node silent. Hold the position as a pause; play() rebuilds
+    /// the chain from there.
+    private func engineConfigurationChanged() {
+        guard state == .playing, !engine.isRunning else { return }
+        state = .paused
     }
 
     public func listOutputDevices() throws -> [AudioDevice] {
@@ -155,7 +170,7 @@ public class AudioPlayer {
         try playInternal()
     }
 
-    private func playInternal() throws {
+    private func playInternal(from startTime: TimeInterval = 0) throws {
         guard let file = audioFile else {
             state = .stopped
             throw AudioPlayerError.fileLoadError("No audio file loaded")
@@ -163,7 +178,6 @@ public class AudioPlayer {
 
         // Invalidate any pending completion before stop() fires it.
         scheduleGeneration += 1
-        let generation = scheduleGeneration
 
         playerNode.stop()
         // stop() cleared the node queue, so any preloaded next is gone.
@@ -213,14 +227,8 @@ public class AudioPlayer {
 
         engine.connect(playerNode, to: mainMixer, format: format)
 
-        segmentStartFrame = 0
-        lastKnownTime = 0
-
-        playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.handleFileCompleted(generation: generation)
-            }
-        }
+        let startFrame = AVAudioFramePosition(startTime * format.sampleRate)
+        schedule(file, from: min(max(0, startFrame), max(0, file.length - 1)))
 
         do {
             try engine.start()
@@ -238,15 +246,18 @@ public class AudioPlayer {
             throw AudioPlayerError.fileLoadError("No audio file loaded")
         }
 
-        if state == .paused {
+        if state == .paused, engine.isRunning {
             playerNode.play()
             state = .playing
             return
         }
 
+        // A pause whose engine has since stopped resumes at its position with
+        // the device format matched again; a stopped track starts over.
+        let startTime = state == .paused ? lastKnownTime : 0
         // Set playing up front so the UI never observes a stopped state.
         state = .playing
-        try playInternal()
+        try playInternal(from: startTime)
     }
 
     public func pause() {
@@ -283,25 +294,9 @@ public class AudioPlayer {
 
         // Invalidate the pending completion before stop() fires it.
         scheduleGeneration += 1
-        let generation = scheduleGeneration
 
         playerNode.stop()
-
-        segmentStartFrame = startFrame
-        lastKnownTime = time
-
-        var frame = startFrame
-        while frame < file.length {
-            let count = AVAudioFrameCount(min(file.length - frame, AVAudioFramePosition(UInt32.max)))
-            let isLastSegment = frame + AVAudioFramePosition(count) == file.length
-            playerNode.scheduleSegment(file, startingFrame: frame, frameCount: count,
-                                       at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                if isLastSegment {
-                    DispatchQueue.main.async { self?.handleFileCompleted(generation: generation) }
-                }
-            }
-            frame += AVAudioFramePosition(count)
-        }
+        schedule(file, from: startFrame)
 
         // stop() above cleared the node queue; requeue the preloaded next.
         nextScheduled = false
@@ -314,6 +309,33 @@ public class AudioPlayer {
             }
             playerNode.play()
             state = .playing
+        }
+    }
+
+    /// Queues `file` from `startFrame` to its end on the stopped node, as one
+    /// file or as segments small enough for AVAudioFrameCount.
+    private func schedule(_ file: AVAudioFile, from startFrame: AVAudioFramePosition) {
+        scheduleGeneration += 1
+        let generation = scheduleGeneration
+        segmentStartFrame = startFrame
+        lastKnownTime = Double(startFrame) / file.processingFormat.sampleRate
+        let finished: AVAudioPlayerNodeCompletionHandler = { [weak self] _ in
+            DispatchQueue.main.async { self?.handleFileCompleted(generation: generation) }
+        }
+
+        guard startFrame > 0 else {
+            playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack,
+                                    completionHandler: finished)
+            return
+        }
+        var frame = startFrame
+        while frame < file.length {
+            let count = AVAudioFrameCount(min(file.length - frame, AVAudioFramePosition(UInt32.max)))
+            let isLastSegment = frame + AVAudioFramePosition(count) == file.length
+            playerNode.scheduleSegment(file, startingFrame: frame, frameCount: count, at: nil,
+                                       completionCallbackType: .dataPlayedBack,
+                                       completionHandler: isLastSegment ? finished : nil)
+            frame += AVAudioFramePosition(count)
         }
     }
 
@@ -381,6 +403,9 @@ public class AudioPlayer {
     }
 
     deinit {
+        if let observer = configurationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         stop()
         engine.stop()
     }
