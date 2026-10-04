@@ -359,7 +359,7 @@ final class PlayerApp {
 
         // Seek + time labels
         if Date() >= suppressSeekUntil {
-            if let duration = model.duration, duration > 0 {
+            if let duration = model.duration, duration > 0, !model.isStopped {
                 cp_range_set_range(seekScale, 0, duration)
                 cp_range_set_value(seekScale, min(model.currentTime, duration))
                 gtk_widget_set_sensitive(seekScale, 1)

@@ -57,46 +57,4 @@ public class RenderingControlService {
 
         return volume
     }
-
-    // MARK: - Mute Control
-
-    /// Sets the mute state
-    /// - Parameters:
-    ///   - mute: true to mute, false to unmute
-    ///   - channel: Audio channel (default "Master")
-    public func setMute(_ mute: Bool, channel: String = "Master") async throws {
-        _ = try await soapClient.call(
-            controlURL: controlURL,
-            action: "SetMute",
-            serviceType: serviceType,
-            argumentOrder: ["InstanceID", "Channel", "DesiredMute"],
-            arguments: [
-                "InstanceID": instanceID,
-                "Channel": channel,
-                "DesiredMute": mute ? "1" : "0"
-            ]
-        )
-    }
-
-    /// Gets the current mute state
-    /// - Parameter channel: Audio channel (default "Master")
-    /// - Returns: true if muted, false otherwise
-    public func getMute(channel: String = "Master") async throws -> Bool {
-        let response = try await soapClient.call(
-            controlURL: controlURL,
-            action: "GetMute",
-            serviceType: serviceType,
-            argumentOrder: ["InstanceID", "Channel"],
-            arguments: [
-                "InstanceID": instanceID,
-                "Channel": channel
-            ]
-        )
-
-        guard let muteString = response["CurrentMute"] else {
-            throw SOAPError.parsingError("Invalid mute response")
-        }
-
-        return muteString == "1" || muteString.lowercased() == "true"
-    }
 }

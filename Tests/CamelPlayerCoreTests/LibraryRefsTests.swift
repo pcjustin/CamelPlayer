@@ -11,6 +11,19 @@ final class LibraryRefsTests: XCTestCase {
         XCTAssertEqual(restored, first)
     }
 
+    func testTrackReferencesKeepAlbumAndCoverFromServerItemsAndQueue() throws {
+        let object = MediaObject(id: "t", parentID: "a", title: "So What", isContainer: false,
+                                 album: "Kind of Blue", albumArtURI: "http://nas/art.jpg",
+                                 resURL: "http://nas/track.flac")
+        let fromServer = try XCTUnwrap(TrackRef(object: object))
+        XCTAssertEqual(fromServer.url, "http://nas/track.flac")
+        XCTAssertEqual(fromServer.album, "Kind of Blue")
+        let item = PlaylistItem(url: URL(string: fromServer.url)!, title: fromServer.title,
+                                metadata: fromServer.metadata)
+        XCTAssertEqual(TrackRef(item: item), fromServer)
+        XCTAssertNil(TrackRef(object: MediaObject(id: "c", parentID: "0", title: "Album", isContainer: true)))
+    }
+
     func testLegacyFavoritesRemainReadable() throws {
         let data = Data(#"{"id":"1","title":"Album","artist":"Artist"}"#.utf8)
         let ref = try JSONDecoder().decode(AlbumRef.self, from: data)

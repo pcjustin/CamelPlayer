@@ -93,9 +93,10 @@ public class PlaybackController {
 
         // Set default output device (local default device)
         let defaultDeviceID = try audioPlayer.getDefaultOutputDevice()
+        let defaultDevice = (try? audioPlayer.listOutputDevices())?.first { $0.id == defaultDeviceID }
         currentOutputDevice = OutputDevice(
-            id: "local-\(defaultDeviceID)",
-            name: "Default Output",
+            id: "local-\(defaultDevice?.uid ?? String(defaultDeviceID))",
+            name: defaultDevice?.name ?? "Default Output",
             type: .local(defaultDeviceID)
         )
 
@@ -179,7 +180,7 @@ public class PlaybackController {
 
     /// Re-syncs the preloaded next track after anything that changes what
     /// peekNext returns (shuffle/loop toggles, playlist edits).
-    public func refreshPreloadedNext() {
+    private func refreshPreloadedNext() {
         guard currentEngine.state != .stopped else { return }
         setNextOnEngine()
     }
@@ -189,11 +190,6 @@ public class PlaybackController {
     private func handleAdvancedToNext() {
         _ = playlist.next()
         setNextOnEngine()
-    }
-
-    public func addToPlaylist(url: URL) {
-        playlist.add(url: url)
-        refreshPreloadedNext()
     }
 
     public func addToPlaylist(urls: [URL]) {
@@ -239,31 +235,22 @@ public class PlaybackController {
         currentEngine.pause()
     }
 
-    @MainActor
-    public func resume() async throws {
-        try await play()
-    }
-
     public func stop() {
         playbackGeneration += 1
         currentEngine.stop()
     }
 
+    /// Does nothing past the end of the queue: media keys and MPRIS call this
+    /// without checking whether a next track exists.
     @MainActor
     public func next() async throws {
-        guard let item = playlist.next() else {
-            throw AudioPlayerError.fileLoadError("No next item")
-        }
-
+        guard let item = playlist.next() else { return }
         try await startPlaying(item)
     }
 
     @MainActor
     public func previous() async throws {
-        guard let item = playlist.previous() else {
-            throw AudioPlayerError.fileLoadError("No previous item")
-        }
-
+        guard let item = playlist.previous() else { return }
         try await startPlaying(item)
     }
 
@@ -282,7 +269,7 @@ public class PlaybackController {
         if let localDevices = try? player?.listOutputDevices() {
             for device in localDevices {
                 devices.append(OutputDevice(
-                    id: "local-\(device.id)",
+                    id: "local-\(device.uid)",
                     name: device.name,
                     type: .local(device.id)
                 ))
@@ -408,8 +395,7 @@ public class PlaybackController {
     /// a playable item.
     @discardableResult
     public func addTrackToPlaylist(_ object: MediaObject) -> Bool {
-        guard !object.isContainer, let res = object.resURL, let url = URL(string: res),
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+        guard !object.isContainer, let url = object.resURL.flatMap(URL.init(string:)), url.isHTTP else {
             return false
         }
         playlist.add(PlaylistItem(url: url, title: object.title, metadata: DIDLBuilder.metadata(for: object)))
@@ -508,8 +494,7 @@ public class PlaybackController {
                                          requestedCount: count, sortCriteria: sortCriteria)
             },
             add: { object in
-                guard let resource = object.resURL, let url = URL(string: resource),
-                      ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return false }
+                guard let url = object.resURL.flatMap(URL.init(string:)), url.isHTTP else { return false }
                 tracks.append(object)
                 return true
             }

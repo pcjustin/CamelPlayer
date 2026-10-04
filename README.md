@@ -164,7 +164,9 @@ This allows the player to route audio to a specific device regardless of the sys
 Asynchronous playback commands run on the main actor. Local playback stops the
 previous node schedule before loading a new file. UPnP commands are serialized,
 and requests superseded by a track switch or stop cannot restore stale playback
-state. Failed loads leave playback stopped.
+state. Failed loads leave playback stopped. On macOS, a device or sample-rate
+change that stops the audio engine pauses playback at its position; Play
+resumes there with the device format matched again.
 
 ## Development
 
@@ -199,9 +201,11 @@ open CamelPlayer.app
 - **M4A**: MPEG-4 Audio (macOS only)
 - **ALAC**: Apple Lossless Audio Codec (macOS only)
 - **FLAC**: Free Lossless Audio Codec (macOS 10.13+)
+- **AIFF**: Audio Interchange File Format (.aiff / .aif)
+- **AAC**: Advanced Audio Coding (macOS only)
 
 macOS decodes through AVFoundation; Linux decodes through libsndfile, which
-does not read M4A/ALAC.
+does not read M4A/ALAC/AAC.
 
 ## Known Limitations
 

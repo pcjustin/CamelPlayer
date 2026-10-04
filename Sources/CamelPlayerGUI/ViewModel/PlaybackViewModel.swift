@@ -25,7 +25,6 @@ class PlaybackViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var showError: Bool = false
     @Published var formatInfo: String?
-    @Published var lastError: String?
     @Published var albumArt: NSImage?
     @Published var currentAlbum: String?
     @Published var currentCoverURL: URL?
@@ -63,22 +62,6 @@ class PlaybackViewModel: ObservableObject {
     private let recentLimit = 50
     private var lastRecordedURL: String?
 
-    private static func loopMode(from string: String?) -> LoopMode {
-        switch string {
-        case "all": return .all
-        case "one": return .one
-        default: return .off
-        }
-    }
-
-    private static func string(for loop: LoopMode) -> String {
-        switch loop {
-        case .off: return "off"
-        case .all: return "all"
-        case .one: return "one"
-        }
-    }
-
     // Initialization
     init() {
         do {
@@ -86,7 +69,7 @@ class PlaybackViewModel: ObservableObject {
             let defaults = UserDefaults.standard
             controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 1.0
             controller.shuffle = defaults.bool(forKey: Keys.shuffle)
-            controller.loopMode = Self.loopMode(from: defaults.string(forKey: Keys.loopMode))
+            controller.loopMode = defaults.string(forKey: Keys.loopMode).flatMap(LoopMode.init) ?? .off
             controller.onUPnPDevicesChanged = { [weak self] in
                 Task { @MainActor in self?.refreshDevices() }
             }
@@ -119,11 +102,6 @@ class PlaybackViewModel: ObservableObject {
         RunLoop.current.add(updateTimer!, forMode: .common)
     }
 
-    private func stopPolling() {
-        updateTimer?.invalidate()
-        updateTimer = nil
-    }
-
     private func updateState() {
         playbackState = controller.currentState
         currentItem = controller.currentItem
@@ -141,8 +119,6 @@ class PlaybackViewModel: ObservableObject {
         if items.map(\.id) != playlistItems.map(\.id) {
             playlistItems = items
             saveQueue()
-            // Any edit can change which track comes next.
-            controller.refreshPreloadedNext()
         }
         formatInfo = controller.getFileFormat()
         updateBitPerfectStatus()
@@ -390,11 +366,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     private func recordTrackPlayed(_ item: PlaylistItem) {
-        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
-        let ref = TrackRef(
-            url: item.url.absoluteString, title: item.title,
-            album: parsed?.album, albumArtURI: parsed?.albumArtURI, metadata: item.metadata
-        )
+        let ref = TrackRef(item: item)
         recentTracks.removeAll { $0.url == ref.url }
         recentTracks.insert(ref, at: 0)
         if recentTracks.count > recentLimit { recentTracks = Array(recentTracks.prefix(recentLimit)) }
@@ -467,22 +439,12 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func toggleFavoriteTrack(_ object: MediaObject) {
-        guard let res = object.resURL else { return }
-        toggleFavoriteTrack(TrackRef(
-            url: res, title: object.title,
-            album: object.album, albumArtURI: object.albumArtURI,
-            metadata: DIDLBuilder.metadata(for: object)
-        ))
+        guard let ref = TrackRef(object: object) else { return }
+        toggleFavoriteTrack(ref)
     }
 
     func toggleFavoriteTrack(_ item: PlaylistItem) {
-        // Recover album/cover from the track's DIDL metadata if available.
-        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
-        toggleFavoriteTrack(TrackRef(
-            url: item.url.absoluteString, title: item.title,
-            album: parsed?.album, albumArtURI: parsed?.albumArtURI,
-            metadata: item.metadata
-        ))
+        toggleFavoriteTrack(TrackRef(item: item))
     }
 
     func addTrack(_ ref: TrackRef) {
@@ -492,12 +454,8 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func playTrack(_ object: MediaObject) {
-        guard let res = object.resURL else { return }
-        playTrack(TrackRef(
-            url: res, title: object.title,
-            album: object.album, albumArtURI: object.albumArtURI,
-            metadata: DIDLBuilder.metadata(for: object)
-        ))
+        guard let ref = TrackRef(object: object) else { return }
+        playTrack(ref)
     }
 
     /// Plays a track now: jumps to it if already queued, otherwise appends and plays.
@@ -527,97 +485,51 @@ class PlaybackViewModel: ObservableObject {
 
     // MARK: - Playback Control
 
-    func play() {
+    /// Runs a playback command, then updates immediately so the UI doesn't
+    /// wait for the poll timer.
+    private func run(_ command: @escaping () async throws -> Void) {
         Task {
             do {
-                try await controller.play()
-                // Update immediately so the UI doesn't wait for the poll timer.
+                try await command()
                 updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
             } catch {
                 handleError(error.localizedDescription)
             }
+        }
+    }
+
+    /// Starts the current track, or resumes it when paused.
+    func play() { run { try await self.controller.play() } }
+    func next() { run { try await self.controller.next() } }
+    func previous() { run { try await self.controller.previous() } }
+    func playItem(at index: Int) { run { try await self.controller.playItem(at: index) } }
+
+    func seek(to time: TimeInterval) {
+        run {
+            try await self.controller.seek(to: time)
+            self.updateState()
+            // Re-anchor the system panel's extrapolated elapsed time.
+            self.updateNowPlaying()
         }
     }
 
     func pause() {
         controller.pause()
-        // Update immediately so the UI doesn't wait for the poll timer.
         updateState()
     }
 
     func togglePlayPause() {
-        if isPlaying {
-            pause()
-        } else if isPaused {
-            resume()
-        } else {
-            play()
-        }
-    }
-
-    func resume() {
-        Task {
-            do {
-                try await controller.resume()
-                // Update immediately so the UI doesn't wait for the poll timer.
-                updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
-            } catch {
-                handleError(error.localizedDescription)
-            }
-        }
+        if isPlaying { pause() } else { play() }
     }
 
     func stop() {
         controller.stop()
-        // Update immediately so the UI doesn't wait for the poll timer.
         updateState()
     }
 
-    func next() {
-        Task {
-            do {
-                try await controller.next()
-                // Update immediately so the UI doesn't wait for the poll timer.
-                updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
-            } catch {
-                handleError(error.localizedDescription)
-            }
-        }
-    }
-
-    func previous() {
-        Task {
-            do {
-                try await controller.previous()
-                // Update immediately so the UI doesn't wait for the poll timer.
-                updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
-            } catch {
-                handleError(error.localizedDescription)
-            }
-        }
-    }
-
-    func seek(to time: TimeInterval) {
-        Task {
-            do {
-                try await controller.seek(to: time)
-                updateState()
-                // Re-anchor the system panel's extrapolated elapsed time.
-                updateNowPlaying()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
-            } catch {
-                handleError(error.localizedDescription)
-            }
-        }
+    func seek(by delta: TimeInterval) {
+        guard let duration = duration else { return }
+        seek(to: max(0, min(duration, currentTime + delta)))
     }
 
     // MARK: - Playlist Management
@@ -625,20 +537,6 @@ class PlaybackViewModel: ObservableObject {
     func addFiles(_ urls: [URL]) {
         controller.addToPlaylist(urls: urls)
         updateState()
-    }
-
-    func playItem(at index: Int) {
-        Task {
-            do {
-                try await controller.playItem(at: index)
-                // Update immediately so the UI doesn't wait for the poll timer.
-                updateState()
-            } catch let error as AudioPlayerError {
-                handleAudioPlayerError(error)
-            } catch {
-                handleError(error.localizedDescription)
-            }
-        }
     }
 
     func removeFromPlaylist(at index: Int) {
@@ -786,6 +684,13 @@ class PlaybackViewModel: ObservableObject {
         mediaServers.first { $0.id == libraryServerID } ?? mediaServers.first
     }
 
+    /// The server an album came from. Favorites saved before servers were
+    /// recorded have no server and use the library server.
+    private func server(for serverID: String?) -> UPnPDevice? {
+        guard let serverID = serverID else { return libraryServer }
+        return mediaServers.first { $0.id == serverID }
+    }
+
     func setLibraryServer(_ id: String) {
         libraryServerID = id
         UserDefaults.standard.set(id, forKey: Keys.libraryServerID)
@@ -802,7 +707,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func albumArtURL(forAlbum id: String, serverID: String? = nil) async -> URL? {
-        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return nil }
+        guard let server = server(for: serverID) else { return nil }
         let key = "\(server.id)|\(id)"
         if let cached = albumArtCache[key] { return URL(string: cached) }
         guard let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
@@ -818,7 +723,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func albumTracks(albumID: String, serverID: String? = nil) async -> [MediaObject] {
-        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return [] }
+        guard let server = server(for: serverID) else { return [] }
         do {
             return try await controller.albumTracks(server: server, objectID: albumID)
         } catch {
@@ -828,7 +733,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func playAlbum(_ album: MediaObject) {
-        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else { return }
+        guard let server = server(for: album.serverID) else { return }
         Task {
             do {
                 try await controller.playAlbum(server: server, objectID: album.id)
@@ -841,7 +746,7 @@ class PlaybackViewModel: ObservableObject {
     }
 
     func addAlbumToQueue(_ album: MediaObject) async {
-        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else {
+        guard let server = server(for: album.serverID) else {
             handleError("The media server for this album is unavailable")
             return
         }
@@ -892,7 +797,6 @@ class PlaybackViewModel: ObservableObject {
     func setShuffle(_ on: Bool) {
         controller.shuffle = on
         shuffle = on
-        controller.refreshPreloadedNext()
         UserDefaults.standard.set(on, forKey: Keys.shuffle)
     }
 
@@ -906,28 +810,10 @@ class PlaybackViewModel: ObservableObject {
         }
         controller.loopMode = next
         loopMode = next
-        controller.refreshPreloadedNext()
-        UserDefaults.standard.set(Self.string(for: next), forKey: Keys.loopMode)
+        UserDefaults.standard.set(next.rawValue, forKey: Keys.loopMode)
     }
 
     // MARK: - Error Handling
-
-    private func handleAudioPlayerError(_ error: AudioPlayerError) {
-        switch error {
-        case .fileNotFound:
-            handleError("File not found")
-        case .unsupportedFormat:
-            handleError("Unsupported audio format")
-        case .audioEngineError(let msg):
-            handleError("Audio engine error: \(msg)")
-        case .fileLoadError(let msg):
-            handleError("Failed to load file: \(msg)")
-        case .remoteURLRequiresRenderer:
-            handleError("This track is on a network server. Choose a network renderer as the output device to play it.")
-        case .invalidSeekTime:
-            handleError("Invalid playback position")
-        }
-    }
 
     private func handleError(_ message: String) {
         errorMessage = message

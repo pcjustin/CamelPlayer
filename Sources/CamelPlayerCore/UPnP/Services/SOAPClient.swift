@@ -7,12 +7,20 @@ import FoundationXML
 #endif
 
 /// Errors that can occur during SOAP communication
-public enum SOAPError: Error {
+public enum SOAPError: LocalizedError {
     case invalidURL
-    case networkError(Error)
     case invalidResponse
     case soapFault(String)
     case parsingError(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "Invalid device URL"
+        case .invalidResponse: return "The device sent an invalid response"
+        case .soapFault(let message): return "The device reported an error: \(message)"
+        case .parsingError(let message): return "Unreadable device response: \(message)"
+        }
+    }
 }
 
 /// A client for making SOAP requests to UPnP services
@@ -34,12 +42,7 @@ public class SOAPClient {
         let keys = argumentOrder + arguments.keys.filter { !argumentOrder.contains($0) }.sorted()
         for key in keys {
             guard let value = arguments[key] else { continue }
-            let escapedValue = value
-                .replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "<", with: "&lt;")
-                .replacingOccurrences(of: ">", with: "&gt;")
-                .replacingOccurrences(of: "\"", with: "&quot;")
-            argumentsXML += "<\(key)>\(escapedValue)</\(key)>"
+            argumentsXML += "<\(key)>\(DIDLBuilder.escape(value))</\(key)>"
         }
 
         return """
@@ -68,10 +71,7 @@ public class SOAPClient {
         argumentOrder: [String] = [],
         arguments: [String: String] = [:]
     ) async throws -> [String: String] {
-        guard let url = URL(string: controlURL), url.host != nil,
-              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
-            throw SOAPError.invalidURL
-        }
+        guard let url = URL(string: controlURL), url.isHTTP else { throw SOAPError.invalidURL }
 
         let soapBody = buildSOAPRequest(action: action, serviceType: serviceType,
                                        argumentOrder: argumentOrder, arguments: arguments)
@@ -141,6 +141,12 @@ public class SOAPClient {
 
         return parser.faultMessage
     }
+}
+
+extension URL {
+    /// An absolute http(s) URL with a host: the only kind a UPnP device can
+    /// be reached at or fetch from.
+    var isHTTP: Bool { ["http", "https"].contains(scheme?.lowercased() ?? "") && host != nil }
 }
 
 // MARK: - SOAP Response Parser

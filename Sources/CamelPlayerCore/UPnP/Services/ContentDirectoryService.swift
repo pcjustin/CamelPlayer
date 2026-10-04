@@ -1,7 +1,9 @@
 import Foundation
 
-public enum MediaBrowseError: Error {
+public enum MediaBrowseError: LocalizedError {
     case serverHasNoContentDirectory
+
+    public var errorDescription: String? { "This server cannot be browsed" }
 }
 
 /// UPnP ContentDirectory service for browsing a MediaServer (e.g. MinimServer).

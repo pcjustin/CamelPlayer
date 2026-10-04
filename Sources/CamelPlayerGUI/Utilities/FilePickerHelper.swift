@@ -27,12 +27,7 @@ struct FilePickerHelper {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [
-            .mp3,
-            .wav,
-            .mpeg4Audio,
-            .audio
-        ]
+        panel.allowedContentTypes = audioFileExtensions.compactMap { UTType(filenameExtension: $0) }
         panel.title = "Select Audio Files"
         panel.message = "Choose one or more audio files to add to the playlist"
 

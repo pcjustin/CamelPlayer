@@ -148,11 +148,7 @@ public class AVTransportService {
     /// Seeks to a specific time interval
     /// - Parameter time: Time in seconds
     public func seek(to time: TimeInterval) async throws {
-        guard time.isFinite, time >= 0,
-              let total = Int(exactly: time.rounded(.towardZero)) else {
-            throw AudioPlayerError.invalidSeekTime
-        }
-        let target = "\(total / 3600):" + String(format: "%02d:%02d", (total % 3600) / 60, total % 60)
+        guard let target = DIDLBuilder.formatDuration(time) else { throw AudioPlayerError.invalidSeekTime }
         try await seek(target: target)
     }
 
@@ -202,20 +198,6 @@ public class AVTransportService {
             duration: info["TrackDuration"] ?? "0:00:00",
             position: info["RelTime"] ?? "0:00:00",
             uri: info["TrackURI"] ?? ""
-        )
-    }
-
-    /// Gets media information
-    /// - Returns: Dictionary containing NrTracks, MediaDuration, CurrentURI, etc.
-    public func getMediaInfo() async throws -> [String: String] {
-        return try await soapClient.call(
-            controlURL: controlURL,
-            action: "GetMediaInfo",
-            serviceType: serviceType,
-            argumentOrder: ["InstanceID"],
-            arguments: [
-                "InstanceID": instanceID
-            ]
         )
     }
 }

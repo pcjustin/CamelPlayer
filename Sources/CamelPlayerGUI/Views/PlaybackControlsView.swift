@@ -28,15 +28,7 @@ struct PlaybackControlsView: View {
             .help("Previous Track")
 
             // Play/Pause
-            Button(action: {
-                if viewModel.isPlaying {
-                    viewModel.pause()
-                } else if viewModel.isPaused {
-                    viewModel.resume()
-                } else {
-                    viewModel.play()
-                }
-            }) {
+            Button(action: viewModel.togglePlayPause) {
                 Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(size: 44))
             }

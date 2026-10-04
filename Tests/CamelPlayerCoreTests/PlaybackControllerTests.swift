@@ -8,7 +8,6 @@ private final class PlaybackStub: PlaybackEngine {
     var currentTime: TimeInterval = 0
     var volume: Float = 1
     var onPlaybackFinished: (() -> Void)?
-    var onStateChanged: ((PlaybackState) -> Void)?
     var onAdvancedToNext: (() -> Void)?
     var nextURL: URL?
     var loaded: ((URL) -> Void)?
@@ -77,6 +76,18 @@ final class PlaybackControllerTests: XCTestCase {
         for _ in 0..<5 { await Task.yield() }
         XCTAssertEqual(controller.currentState, .stopped)
         XCTAssertEqual(controller.getPlaylistCount(), 0)
+    }
+
+    func testNextAndPreviousPastTheQueueEndsDoNothing() async throws {
+        let engine = PlaybackStub()
+        let controller = PlaybackController(engine: engine)
+        controller.addToPlaylist(urls: urls)
+        try await controller.previous()
+        XCTAssertNil(engine.currentURL)
+        try await controller.playItem(at: 2)
+        try await controller.next()
+        XCTAssertEqual(engine.currentURL, urls[2])
+        XCTAssertEqual(controller.getCurrentPosition(), 2)
     }
 
     func testNetworkLibraryCannotShareLocalOrRelativeURLs() {

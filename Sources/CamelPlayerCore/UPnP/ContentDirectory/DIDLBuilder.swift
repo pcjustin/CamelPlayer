@@ -45,7 +45,7 @@ public enum DIDLBuilder {
             + "</DIDL-Lite>"
     }
 
-    private static func escape(_ s: String) -> String {
+    static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
@@ -53,7 +53,8 @@ public enum DIDLBuilder {
             .replacingOccurrences(of: "'", with: "&apos;")
     }
 
-    private static func formatDuration(_ time: TimeInterval) -> String? {
+    /// "H:MM:SS", the UPnP time format; nil for times that cannot be sent.
+    static func formatDuration(_ time: TimeInterval) -> String? {
         guard time.isFinite, time >= 0, let total = Int(exactly: time.rounded(.towardZero)) else { return nil }
         return "\(total / 3600):" + String(format: "%02d:%02d", (total % 3600) / 60, total % 60)
     }

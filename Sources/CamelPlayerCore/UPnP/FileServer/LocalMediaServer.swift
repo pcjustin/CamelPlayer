@@ -16,12 +16,7 @@ public class LocalMediaServer {
     private let preferredPort: UInt16
     private let portRange: UInt16 = 10
     private var activePort: UInt16
-
-    public var isRunning: Bool {
-        // Swifter doesn't provide a public API to check if running, so we track it ourselves
-        return _isRunning
-    }
-    private var _isRunning = false
+    private var isRunning = false
 
     /// Initializes the media server
     /// - Parameter port: Preferred port to listen on (default 8080)
@@ -140,7 +135,7 @@ public class LocalMediaServer {
 
     /// Starts the HTTP server
     public func start() throws {
-        guard !_isRunning else {
+        guard !isRunning else {
             coreLog("HTTP Server: Already running on port \(activePort)")
             return
         }
@@ -152,7 +147,7 @@ public class LocalMediaServer {
             do {
                 try server.start(candidate, forceIPv4: true)
                 activePort = UInt16(try server.port())
-                _isRunning = true
+                isRunning = true
                 coreLog("HTTP Server: Successfully started on port \(candidate)")
 
                 if let ip = getLocalIPAddress() {
@@ -173,9 +168,9 @@ public class LocalMediaServer {
 
     /// Stops the HTTP server
     public func stop() {
-        guard _isRunning else { return }
+        guard isRunning else { return }
         server.stop()
-        _isRunning = false
+        isRunning = false
         filesLock.lock()
         sharedFiles.removeAll()
         filesLock.unlock()
@@ -213,21 +208,6 @@ public class LocalMediaServer {
 
         coreLog("HTTP Server: File shared at: \(url)")
         return url
-    }
-
-    /// Removes a shared file
-    /// - Parameter id: File ID to remove
-    public func unshareFile(id: String) {
-        filesLock.lock()
-        sharedFiles.removeValue(forKey: id)
-        filesLock.unlock()
-    }
-
-    /// Removes all shared files
-    public func unshareAll() {
-        filesLock.lock()
-        sharedFiles.removeAll()
-        filesLock.unlock()
     }
 
     /// Gets the local IP address
@@ -339,9 +319,18 @@ public class LocalMediaServer {
 
 // MARK: - Server Errors
 
-public enum ServerError: Error {
+public enum ServerError: LocalizedError {
     case failedToStart(Error)
     case cannotDetermineIP
     case invalidURL
     case invalidFile
+
+    public var errorDescription: String? {
+        switch self {
+        case .failedToStart(let error): return "Could not start the local media server: \(error.localizedDescription)"
+        case .cannotDetermineIP: return "No network address to share local files with the renderer"
+        case .invalidURL: return "Could not build a media URL for the renderer"
+        case .invalidFile: return "File not found or not readable"
+        }
+    }
 }

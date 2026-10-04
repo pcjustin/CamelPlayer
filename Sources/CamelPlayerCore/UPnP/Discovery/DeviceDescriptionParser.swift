@@ -12,7 +12,6 @@ public class DeviceDescriptionParser: NSObject {
     private var friendlyName = ""
     private var manufacturer = ""
     private var modelName = ""
-    private var rootDeviceType = ""
 
     // Service URLs
     private var avTransportControlURL: String?
@@ -25,9 +24,6 @@ public class DeviceDescriptionParser: NSObject {
 
     // Base URL for relative URLs
     private var baseURL: URL?
-
-    // Result
-    private var parsedDevice: UPnPDevice?
 
     public override init() {
         super.init()
@@ -64,29 +60,16 @@ public class DeviceDescriptionParser: NSObject {
         let renderingControlURL = resolveURL(renderingControlControlURL)
         let contentDirectoryURL = resolveURL(contentDirectoryControlURL)
 
-        let deviceType: UPnPDeviceType
-        if rootDeviceType.contains("MediaServer") {
-            deviceType = .server
-        } else if rootDeviceType.contains("MediaRenderer") {
-            deviceType = .renderer
-        } else {
-            deviceType = .other
-        }
-
-        let device = UPnPDevice(
+        return UPnPDevice(
             id: uuid,
             friendlyName: friendlyName,
             manufacturer: manufacturer.isEmpty ? "Unknown" : manufacturer,
             modelName: modelName.isEmpty ? "Unknown" : modelName,
             location: location,
-            deviceType: deviceType,
             avTransportURL: avTransportURL,
             renderingControlURL: renderingControlURL,
             contentDirectoryURL: contentDirectoryURL
         )
-
-        parsedDevice = device
-        return device
     }
 
     /// Resolves a relative URL against the base URL
@@ -95,9 +78,7 @@ public class DeviceDescriptionParser: NSObject {
             return nil
         }
 
-        guard let url = URL(string: urlString, relativeTo: baseURL)?.absoluteURL,
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-              url.host != nil else { return nil }
+        guard let url = URL(string: urlString, relativeTo: baseURL)?.absoluteURL, url.isHTTP else { return nil }
         return url.absoluteString
     }
 
@@ -108,13 +89,11 @@ public class DeviceDescriptionParser: NSObject {
         friendlyName = ""
         manufacturer = ""
         modelName = ""
-        rootDeviceType = ""
         avTransportControlURL = nil
         renderingControlControlURL = nil
         contentDirectoryControlURL = nil
         currentServiceType = ""
         currentControlURL = ""
-        parsedDevice = nil
     }
 }
 
@@ -139,13 +118,8 @@ extension DeviceDescriptionParser: XMLParserDelegate {
 
         switch elementName {
         case "URLBase":
-            if let url = URL(string: value), url.host != nil,
-               ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            if let url = URL(string: value), url.isHTTP {
                 baseURL = url
-            }
-        case "deviceType":
-            if rootDeviceType.isEmpty { // Root device type, not embedded devices
-                rootDeviceType = value
             }
         case "friendlyName":
             if friendlyName.isEmpty { // Only set first occurrence (device, not service)

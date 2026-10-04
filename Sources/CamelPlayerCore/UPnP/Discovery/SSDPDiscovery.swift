@@ -299,9 +299,7 @@ public class SSDPDiscovery: @unchecked Sendable {
         // Extract UUID from USN
         let uuid = extractUUID(from: usn)
 
-        guard discoveredDevices[uuid] == nil, pendingRequests[uuid] == nil,
-              ["http", "https"].contains(locationURL.scheme?.lowercased() ?? ""),
-              locationURL.host != nil else { return }
+        guard discoveredDevices[uuid] == nil, pendingRequests[uuid] == nil, locationURL.isHTTP else { return }
         let token = UUID()
         let sessionGeneration = generation
         pendingRequests[uuid] = token

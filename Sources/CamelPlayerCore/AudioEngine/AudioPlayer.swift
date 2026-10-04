@@ -13,13 +13,29 @@ public enum PlaybackState: Sendable {
     case paused
 }
 
-public enum AudioPlayerError: Error {
+public enum AudioPlayerError: LocalizedError {
     case fileNotFound
-    case unsupportedFormat
     case audioEngineError(String)
     case fileLoadError(String)
     case remoteURLRequiresRenderer
     case invalidSeekTime
+
+    public var errorDescription: String? {
+        switch self {
+        case .fileNotFound: return "File not found"
+        case .audioEngineError(let message): return "Audio engine error: \(message)"
+        case .fileLoadError(let message): return "Failed to load file: \(message)"
+        case .remoteURLRequiresRenderer:
+            return "This track is on a network server. Choose a network renderer as the output device to play it."
+        case .invalidSeekTime: return "Invalid playback position"
+        }
+    }
+}
+
+/// "96000 Hz / 24 bit / 2ch"; lossy codecs have no bit depth to show.
+func audioFormatDescription(sampleRate: Int, bitDepth: Int, channels: Int) -> String {
+    let bits = bitDepth > 0 ? "\(bitDepth) bit / " : ""
+    return "\(sampleRate) Hz / \(bits)\(channels)ch"
 }
 
 #if os(macOS)
@@ -80,9 +96,24 @@ public class AudioPlayer {
         return lastKnownTime
     }
 
+    private var configurationObserver: NSObjectProtocol?
+
     public init() throws {
         deviceManager = OutputDeviceManager(engine: engine)
         engine.attach(playerNode)
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            self?.engineConfigurationChanged()
+        }
+    }
+
+    /// A device or sample-rate change stops the engine underneath playback,
+    /// leaving the node silent. Hold the position as a pause; play() rebuilds
+    /// the chain from there.
+    private func engineConfigurationChanged() {
+        guard state == .playing, !engine.isRunning else { return }
+        state = .paused
     }
 
     public func listOutputDevices() throws -> [AudioDevice] {
@@ -112,26 +143,18 @@ public class AudioPlayer {
     public func getFileFormat() -> String? {
         guard let file = audioFile else { return nil }
         let format = file.processingFormat
-        let sampleRate = Int(format.sampleRate)
-        let bitDepth = file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int ?? 0
-        let channels = Int(format.channelCount)
-        return "\(sampleRate) Hz / \(bitDepth) bit / \(channels)ch"
+        return audioFormatDescription(sampleRate: Int(format.sampleRate),
+                                      bitDepth: Self.sourceBitDepth(file.fileFormat.streamDescription.pointee),
+                                      channels: Int(format.channelCount))
     }
 
-    public func load(url: URL) throws {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw AudioPlayerError.fileNotFound
-        }
-
-        do {
-            let file = try AVAudioFile(forReading: url)
-            stop()
-            audioFile = file
-            currentURL = url
-            state = .stopped
-        } catch {
-            throw AudioPlayerError.fileLoadError(error.localizedDescription)
-        }
+    /// Bits per sample of the encoded file, 0 for lossy codecs. FLAC and ALAC
+    /// leave mBitsPerChannel at 0 and carry the source depth in their flags
+    /// (the kAppleLosslessFormatFlag_*BitSourceData values).
+    static func sourceBitDepth(_ format: AudioStreamBasicDescription) -> Int {
+        if format.mBitsPerChannel > 0 { return Int(format.mBitsPerChannel) }
+        guard [kAudioFormatFLAC, kAudioFormatAppleLossless].contains(format.mFormatID) else { return 0 }
+        return [1: 16, 2: 20, 3: 24, 4: 32][format.mFormatFlags] ?? 0
     }
 
     /// Loads and plays a file atomically, avoiding an intermediate stopped
@@ -155,7 +178,7 @@ public class AudioPlayer {
         try playInternal()
     }
 
-    private func playInternal() throws {
+    private func playInternal(from startTime: TimeInterval = 0) throws {
         guard let file = audioFile else {
             state = .stopped
             throw AudioPlayerError.fileLoadError("No audio file loaded")
@@ -163,7 +186,6 @@ public class AudioPlayer {
 
         // Invalidate any pending completion before stop() fires it.
         scheduleGeneration += 1
-        let generation = scheduleGeneration
 
         playerNode.stop()
         // stop() cleared the node queue, so any preloaded next is gone.
@@ -213,14 +235,8 @@ public class AudioPlayer {
 
         engine.connect(playerNode, to: mainMixer, format: format)
 
-        segmentStartFrame = 0
-        lastKnownTime = 0
-
-        playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.handleFileCompleted(generation: generation)
-            }
-        }
+        let startFrame = AVAudioFramePosition(startTime * format.sampleRate)
+        schedule(file, from: min(max(0, startFrame), max(0, file.length - 1)))
 
         do {
             try engine.start()
@@ -238,15 +254,18 @@ public class AudioPlayer {
             throw AudioPlayerError.fileLoadError("No audio file loaded")
         }
 
-        if state == .paused {
+        if state == .paused, engine.isRunning {
             playerNode.play()
             state = .playing
             return
         }
 
+        // A pause whose engine has since stopped resumes at its position with
+        // the device format matched again; a stopped track starts over.
+        let startTime = state == .paused ? lastKnownTime : 0
         // Set playing up front so the UI never observes a stopped state.
         state = .playing
-        try playInternal()
+        try playInternal(from: startTime)
     }
 
     public func pause() {
@@ -283,25 +302,9 @@ public class AudioPlayer {
 
         // Invalidate the pending completion before stop() fires it.
         scheduleGeneration += 1
-        let generation = scheduleGeneration
 
         playerNode.stop()
-
-        segmentStartFrame = startFrame
-        lastKnownTime = time
-
-        var frame = startFrame
-        while frame < file.length {
-            let count = AVAudioFrameCount(min(file.length - frame, AVAudioFramePosition(UInt32.max)))
-            let isLastSegment = frame + AVAudioFramePosition(count) == file.length
-            playerNode.scheduleSegment(file, startingFrame: frame, frameCount: count,
-                                       at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                if isLastSegment {
-                    DispatchQueue.main.async { self?.handleFileCompleted(generation: generation) }
-                }
-            }
-            frame += AVAudioFramePosition(count)
-        }
+        schedule(file, from: startFrame)
 
         // stop() above cleared the node queue; requeue the preloaded next.
         nextScheduled = false
@@ -314,6 +317,33 @@ public class AudioPlayer {
             }
             playerNode.play()
             state = .playing
+        }
+    }
+
+    /// Queues `file` from `startFrame` to its end on the stopped node, as one
+    /// file or as segments small enough for AVAudioFrameCount.
+    private func schedule(_ file: AVAudioFile, from startFrame: AVAudioFramePosition) {
+        scheduleGeneration += 1
+        let generation = scheduleGeneration
+        segmentStartFrame = startFrame
+        lastKnownTime = Double(startFrame) / file.processingFormat.sampleRate
+        let finished: AVAudioPlayerNodeCompletionHandler = { [weak self] _ in
+            DispatchQueue.main.async { self?.handleFileCompleted(generation: generation) }
+        }
+
+        guard startFrame > 0 else {
+            playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack,
+                                    completionHandler: finished)
+            return
+        }
+        var frame = startFrame
+        while frame < file.length {
+            let count = AVAudioFrameCount(min(file.length - frame, AVAudioFramePosition(UInt32.max)))
+            let isLastSegment = frame + AVAudioFramePosition(count) == file.length
+            playerNode.scheduleSegment(file, startingFrame: frame, frameCount: count, at: nil,
+                                       completionCallbackType: .dataPlayedBack,
+                                       completionHandler: isLastSegment ? finished : nil)
+            frame += AVAudioFramePosition(count)
         }
     }
 
@@ -381,6 +411,9 @@ public class AudioPlayer {
     }
 
     deinit {
+        if let observer = configurationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         stop()
         engine.stop()
     }
@@ -492,7 +525,9 @@ public class AudioPlayer {
         cond.lock()
         pcmNames = names
         cond.unlock()
-        return labels.indices.map { AudioDevice(id: AudioDeviceID($0), name: labels[$0], isOutput: true) }
+        return labels.indices.map {
+            AudioDevice(id: AudioDeviceID($0), uid: names[$0], name: labels[$0], isOutput: true)
+        }
     }
 
     public func setOutputDevice(deviceID: AudioDeviceID) throws {
@@ -527,15 +562,11 @@ public class AudioPlayer {
         case Int(SF_FORMAT_DOUBLE): bits = 64
         default: bits = 0
         }
-        return "\(fileInfo.samplerate) Hz / \(bits) bit / \(fileInfo.channels)ch"
+        return audioFormatDescription(sampleRate: Int(fileInfo.samplerate), bitDepth: bits,
+                                      channels: Int(fileInfo.channels))
     }
 
     // MARK: - Transport
-
-    public func load(url: URL) throws {
-        stop()
-        try openFile(url: url)
-    }
 
     public func loadAndPlay(url: URL) throws {
         stop()
