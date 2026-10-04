@@ -6,7 +6,7 @@ import CamelPlayerCore
 struct ContentView: View {
     @EnvironmentObject var viewModel: PlaybackViewModel
     @State private var isDropTargeted = false
-    @State private var spaceMonitor: Any?
+    @State private var keyMonitor: Any?
     @State private var leftPaneWidth: CGFloat =
         CGFloat(UserDefaults.standard.object(forKey: Self.leftWidthKey) as? Double ?? 260)
     @State private var dragStartWidth: CGFloat?
@@ -97,11 +97,11 @@ struct ContentView: View {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
         .background(WindowConfigurator(autosaveName: "CamelPlayerMainWindow"))
-        .onAppear { installSpaceMonitor() }
+        .onAppear { installKeyMonitor() }
         .onDisappear {
-            if let monitor = spaceMonitor {
+            if let monitor = keyMonitor {
                 NSEvent.removeMonitor(monitor)
-                spaceMonitor = nil
+                keyMonitor = nil
             }
         }
     }
@@ -148,18 +148,26 @@ struct ContentView: View {
         .frame(width: 8)
     }
 
-    /// Space toggles play/pause globally, overriding focused-button activation,
-    /// except while typing in a text field (e.g. the browse search box).
-    private func installSpaceMonitor() {
-        guard spaceMonitor == nil else { return }
-        spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.keyCode == 49 else { return event } // 49 = space
-            // Let the space through while typing (e.g. the browse search box).
+    /// Space toggles play/pause and ←/→ seek globally, overriding focused
+    /// controls, except while typing in a text field (e.g. the browse search
+    /// box). As menu shortcuts these keys would be taken from text fields too.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let seekDelta: TimeInterval? = [123: -5, 124: 5][event.keyCode] // ← / →
+            guard event.keyCode == 49 || seekDelta != nil else { return event } // 49 = space
+            // Let the key through while typing (e.g. the browse search box).
             if NSApp.keyWindow?.firstResponder is NSText { return event }
-            if !viewModel.playlistItems.isEmpty, !viewModel.currentTrackNeedsRenderer {
+            if let delta = seekDelta {
+                // ⌘← / ⌘→ belong to Previous / Next in the menu.
+                guard event.modifierFlags.isDisjoint(with: [.command, .option, .control, .shift]) else {
+                    return event
+                }
+                viewModel.seek(by: delta)
+            } else if !viewModel.playlistItems.isEmpty, !viewModel.currentTrackNeedsRenderer {
                 viewModel.togglePlayPause()
             }
-            // Always swallow space otherwise so it never activates a focused button.
+            // Always swallow the key otherwise so it never activates a focused control.
             return nil
         }
     }

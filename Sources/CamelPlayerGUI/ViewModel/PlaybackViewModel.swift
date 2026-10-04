@@ -620,6 +620,11 @@ class PlaybackViewModel: ObservableObject {
         }
     }
 
+    func seek(by delta: TimeInterval) {
+        guard let duration = duration else { return }
+        seek(to: max(0, min(duration, currentTime + delta)))
+    }
+
     // MARK: - Playlist Management
 
     func addFiles(_ urls: [URL]) {
