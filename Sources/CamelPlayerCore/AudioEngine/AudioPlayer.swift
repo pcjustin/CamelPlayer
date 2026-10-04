@@ -121,6 +121,10 @@ public class AudioPlayer {
         try deviceManager.listOutputDevices()
     }
 
+    public func observeDeviceList(_ handler: @escaping () -> Void) {
+        deviceManager.observeDeviceList(handler)
+    }
+
     public func setOutputDevice(deviceID: AudioDeviceID) throws {
         try deviceManager.setOutputDevice(deviceID: deviceID)
     }
