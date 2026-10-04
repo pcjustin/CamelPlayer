@@ -22,6 +22,12 @@ public enum AudioPlayerError: Error {
     case invalidSeekTime
 }
 
+/// "96000 Hz / 24 bit / 2ch"; lossy codecs have no bit depth to show.
+func audioFormatDescription(sampleRate: Int, bitDepth: Int, channels: Int) -> String {
+    let bits = bitDepth > 0 ? "\(bitDepth) bit / " : ""
+    return "\(sampleRate) Hz / \(bits)\(channels)ch"
+}
+
 #if os(macOS)
 
 public class AudioPlayer {
@@ -127,10 +133,18 @@ public class AudioPlayer {
     public func getFileFormat() -> String? {
         guard let file = audioFile else { return nil }
         let format = file.processingFormat
-        let sampleRate = Int(format.sampleRate)
-        let bitDepth = file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int ?? 0
-        let channels = Int(format.channelCount)
-        return "\(sampleRate) Hz / \(bitDepth) bit / \(channels)ch"
+        return audioFormatDescription(sampleRate: Int(format.sampleRate),
+                                      bitDepth: Self.sourceBitDepth(file.fileFormat.streamDescription.pointee),
+                                      channels: Int(format.channelCount))
+    }
+
+    /// Bits per sample of the encoded file, 0 for lossy codecs. FLAC and ALAC
+    /// leave mBitsPerChannel at 0 and carry the source depth in their flags
+    /// (the kAppleLosslessFormatFlag_*BitSourceData values).
+    static func sourceBitDepth(_ format: AudioStreamBasicDescription) -> Int {
+        if format.mBitsPerChannel > 0 { return Int(format.mBitsPerChannel) }
+        guard [kAudioFormatFLAC, kAudioFormatAppleLossless].contains(format.mFormatID) else { return 0 }
+        return [1: 16, 2: 20, 3: 24, 4: 32][format.mFormatFlags] ?? 0
     }
 
     public func load(url: URL) throws {
@@ -552,7 +566,8 @@ public class AudioPlayer {
         case Int(SF_FORMAT_DOUBLE): bits = 64
         default: bits = 0
         }
-        return "\(fileInfo.samplerate) Hz / \(bits) bit / \(fileInfo.channels)ch"
+        return audioFormatDescription(sampleRate: Int(fileInfo.samplerate), bitDepth: bits,
+                                      channels: Int(fileInfo.channels))
     }
 
     // MARK: - Transport
