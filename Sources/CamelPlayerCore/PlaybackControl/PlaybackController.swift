@@ -25,6 +25,13 @@ public struct OutputDevice: Identifiable, Hashable {
     }
 }
 
+extension OutputDevice {
+    /// Local devices are keyed by UID, which survives reconnects and restarts.
+    init(local device: AudioDevice) {
+        self.init(id: "local-\(device.uid)", name: device.name, type: .local(device.id))
+    }
+}
+
 // MARK: - Playback Controller
 
 public class PlaybackController {
@@ -46,6 +53,9 @@ public class PlaybackController {
 
     /// Called when the set of available UPnP media servers changes.
     public var onUPnPServersChanged: (() -> Void)?
+
+    /// Called when local output devices are added or removed (macOS).
+    public var onLocalDevicesChanged: (() -> Void)?
 
     public var currentState: PlaybackState {
         currentEngine.state
@@ -96,15 +106,15 @@ public class PlaybackController {
         // Set default output device (local default device)
         let defaultDeviceID = try audioPlayer.getDefaultOutputDevice()
         let defaultDevice = (try? audioPlayer.listOutputDevices())?.first { $0.id == defaultDeviceID }
-        currentOutputDevice = OutputDevice(
-            id: "local-\(defaultDevice?.uid ?? String(defaultDeviceID))",
-            name: defaultDevice?.name ?? "Default Output",
-            type: .local(defaultDeviceID)
-        )
+        currentOutputDevice = defaultDevice.map(OutputDevice.init(local:))
+            ?? OutputDevice(id: "local-\(defaultDeviceID)", name: "Default Output", type: .local(defaultDeviceID))
 
         // Notify when discovery changes the device lists so the UI can refresh live
         upnpManager.onRenderersChanged = { [weak self] in self?.onUPnPDevicesChanged?() }
         upnpManager.onServersChanged = { [weak self] in self?.onUPnPServersChanged?() }
+        #if os(macOS)
+        audioPlayer.observeDeviceList { [weak self] in self?.localDevicesChanged() }
+        #endif
 
         // Start HTTP server and UPnP discovery
         try? mediaServer.start()
@@ -269,13 +279,7 @@ public class PlaybackController {
 
         // Add local audio devices
         if let localDevices = try? player?.listOutputDevices() {
-            for device in localDevices {
-                devices.append(OutputDevice(
-                    id: "local-\(device.uid)",
-                    name: device.name,
-                    type: .local(device.id)
-                ))
-            }
+            devices += localDevices.map(OutputDevice.init(local:))
         }
 
         // Add UPnP renderers
@@ -324,6 +328,18 @@ public class PlaybackController {
                 }
             }
         }
+    }
+
+    /// A reconnected device comes back under a new device ID with the same
+    /// UID; keep the selected output pinned to it.
+    private func localDevicesChanged() {
+        defer { onLocalDevicesChanged?() }
+        guard case .local(let pinnedID) = currentOutputDevice.type,
+              let device = (try? player?.listOutputDevices())?.map(OutputDevice.init(local:))
+                  .first(where: { $0.id == currentOutputDevice.id }),
+              case .local(let deviceID) = device.type, deviceID != pinnedID else { return }
+        try? player?.setOutputDevice(deviceID: deviceID)
+        currentOutputDevice = device
     }
 
     /// Refreshes the UPnP device list

@@ -76,6 +76,9 @@ class PlaybackViewModel: ObservableObject {
             controller.onUPnPServersChanged = { [weak self] in
                 Task { @MainActor in self?.refreshMediaServers() }
             }
+            controller.onLocalDevicesChanged = { [weak self] in
+                Task { @MainActor in self?.refreshDevices() }
+            }
             loadInitialState()
             setupRemoteCommands()
             startPolling()

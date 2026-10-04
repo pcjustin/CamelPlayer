@@ -44,14 +44,35 @@ public class OutputDeviceManager {
         self.engine = engine
     }
 
-    public func listOutputDevices() throws -> [AudioDevice] {
-        var devices: [AudioDevice] = []
-
-        var propertyAddress = AudioObjectPropertyAddress(
+    private static var deviceListAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
+    }
+
+    private var deviceListListener: AudioObjectPropertyListenerBlock?
+
+    /// Calls `handler` on the main queue whenever devices are added or removed.
+    public func observeDeviceList(_ handler: @escaping () -> Void) {
+        var address = Self.deviceListAddress
+        let listener: AudioObjectPropertyListenerBlock = { _, _ in handler() }
+        guard AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener)
+                == noErr else { return }
+        deviceListListener = listener
+    }
+
+    deinit {
+        guard let listener = deviceListListener else { return }
+        var address = Self.deviceListAddress
+        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener)
+    }
+
+    public func listOutputDevices() throws -> [AudioDevice] {
+        var devices: [AudioDevice] = []
+
+        var propertyAddress = Self.deviceListAddress
 
         var dataSize: UInt32 = 0
         var status = AudioObjectGetPropertyDataSize(

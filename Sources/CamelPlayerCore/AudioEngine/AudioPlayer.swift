@@ -121,12 +121,12 @@ public class AudioPlayer {
         try deviceManager.listOutputDevices()
     }
 
-    public func setOutputDevice(deviceID: AudioDeviceID) throws {
-        try deviceManager.setOutputDevice(deviceID: deviceID)
+    public func observeDeviceList(_ handler: @escaping () -> Void) {
+        deviceManager.observeDeviceList(handler)
     }
 
-    public func getCurrentOutputDevice() throws -> AudioDeviceID {
-        try deviceManager.getCurrentOutputDevice()
+    public func setOutputDevice(deviceID: AudioDeviceID) throws {
+        try deviceManager.setOutputDevice(deviceID: deviceID)
     }
 
     public func getDefaultOutputDevice() throws -> AudioDeviceID {
@@ -449,7 +449,8 @@ public class AudioPlayer {
     private var nextURL: URL?
 
     private var pcmNames = ["default"]
-    private var currentDevice: AudioDeviceID = 0
+    /// Kept by name: list positions shift when cards come and go.
+    private var currentPCM = "default"
     private var configuredRate: Float64 = 0
 
     private var storedState: PlaybackState = .stopped
@@ -537,10 +538,8 @@ public class AudioPlayer {
         guard Int(deviceID) < pcmNames.count else {
             throw OutputDeviceError.deviceNotFound
         }
-        currentDevice = deviceID
+        currentPCM = pcmNames[Int(deviceID)]
     }
-
-    public func getCurrentOutputDevice() throws -> AudioDeviceID { currentDevice }
 
     public func getDefaultOutputDevice() throws -> AudioDeviceID { 0 }
 
@@ -715,9 +714,7 @@ public class AudioPlayer {
 
     private func openPCM() throws {
         closePCM()
-        cond.lock()
-        let device = Int(currentDevice) < pcmNames.count ? pcmNames[Int(currentDevice)] : "default"
-        cond.unlock()
+        let device = withLock { currentPCM }
 
         var handle: OpaquePointer?
         let rc = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, 0)
