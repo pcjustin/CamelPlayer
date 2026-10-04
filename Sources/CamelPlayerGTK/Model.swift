@@ -62,7 +62,7 @@ final class PlayerModel {
         let defaults = UserDefaults.standard
         controller.volume = (defaults.object(forKey: Keys.volume) as? Double).map(Float.init) ?? 1.0
         controller.shuffle = defaults.bool(forKey: Keys.shuffle)
-        controller.loopMode = Self.loopMode(from: defaults.string(forKey: Keys.loopMode))
+        controller.loopMode = defaults.string(forKey: Keys.loopMode).flatMap(LoopMode.init) ?? .off
         libraryServerID = defaults.string(forKey: Keys.libraryServerID)
         restoreQueue()
         loadRefs()
@@ -70,22 +70,6 @@ final class PlayerModel {
         refreshMediaServers()
         refreshDevices()
         updateState()
-    }
-
-    private static func loopMode(from string: String?) -> LoopMode {
-        switch string {
-        case "all": return .all
-        case "one": return .one
-        default: return .off
-        }
-    }
-
-    private static func string(for loop: LoopMode) -> String {
-        switch loop {
-        case .off: return "off"
-        case .all: return "all"
-        case .one: return "one"
-        }
     }
 
     // MARK: - Polling
@@ -103,15 +87,11 @@ final class PlayerModel {
             currentPosition = position
             UserDefaults.standard.set(position, forKey: Keys.queuePosition)
         }
-        let items = controller.getPlaylistItems()
-        let ids = items.map(\.id)
+        playlistItems = controller.getPlaylistItems()
+        let ids = playlistItems.map(\.id)
         if ids != lastQueueIDs {
             lastQueueIDs = ids
-            playlistItems = items
             saveQueue()
-            controller.refreshPreloadedNext()
-        } else {
-            playlistItems = items
         }
         updateBitPerfectStatus()
         updateCurrentCover()
@@ -205,10 +185,7 @@ final class PlayerModel {
     }
 
     private func recordTrackPlayed(_ item: PlaylistItem) {
-        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
-        let ref = TrackRef(url: item.url.absoluteString, title: item.title,
-                           album: parsed?.album, albumArtURI: parsed?.albumArtURI,
-                           metadata: item.metadata)
+        let ref = TrackRef(item: item)
         recentTracks.removeAll { $0.url == ref.url }
         recentTracks.insert(ref, at: 0)
         if recentTracks.count > recentLimit { recentTracks = Array(recentTracks.prefix(recentLimit)) }
@@ -263,17 +240,12 @@ final class PlayerModel {
     }
 
     func toggleFavoriteTrack(_ object: MediaObject) {
-        guard let res = object.resURL else { return }
-        toggleFavoriteTrack(TrackRef(url: res, title: object.title,
-                                     album: object.album, albumArtURI: object.albumArtURI,
-                                     metadata: DIDLBuilder.metadata(for: object)))
+        guard let ref = TrackRef(object: object) else { return }
+        toggleFavoriteTrack(ref)
     }
 
     func toggleFavoriteTrack(_ item: PlaylistItem) {
-        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
-        toggleFavoriteTrack(TrackRef(url: item.url.absoluteString, title: item.title,
-                                     album: parsed?.album, albumArtURI: parsed?.albumArtURI,
-                                     metadata: item.metadata))
+        toggleFavoriteTrack(TrackRef(item: item))
     }
 
     func unfavoriteTrack(_ ref: TrackRef) {
@@ -301,8 +273,8 @@ final class PlayerModel {
         }
     }
 
+    /// Starts the current track, or resumes it when paused.
     func play() { run("Play") { try await self.controller.play() } }
-    func resume() { run("Resume") { try await self.controller.resume() } }
     func next() { run("Next") { try await self.controller.next() } }
     func previous() { run("Previous") { try await self.controller.previous() } }
     func playItem(at index: Int) { run("Play") { try await self.controller.playItem(at: index) } }
@@ -319,13 +291,7 @@ final class PlayerModel {
     }
 
     func togglePlayPause() {
-        if isPlaying {
-            pause()
-        } else if isPaused {
-            resume()
-        } else {
-            play()
-        }
+        if isPlaying { pause() } else { play() }
     }
 
     var canGoNext: Bool {
@@ -366,10 +332,8 @@ final class PlayerModel {
     }
 
     func playTrack(_ object: MediaObject) {
-        guard let res = object.resURL else { return }
-        playTrack(TrackRef(url: res, title: object.title,
-                           album: object.album, albumArtURI: object.albumArtURI,
-                           metadata: DIDLBuilder.metadata(for: object)))
+        guard let ref = TrackRef(object: object) else { return }
+        playTrack(ref)
     }
 
     /// Plays a track now: jumps to it if already queued, otherwise appends and plays.
@@ -452,7 +416,6 @@ final class PlayerModel {
 
     func setShuffle(_ on: Bool) {
         controller.shuffle = on
-        controller.refreshPreloadedNext()
         UserDefaults.standard.set(on, forKey: Keys.shuffle)
     }
 
@@ -465,8 +428,7 @@ final class PlayerModel {
         case .one: next = .off
         }
         controller.loopMode = next
-        controller.refreshPreloadedNext()
-        UserDefaults.standard.set(Self.string(for: next), forKey: Keys.loopMode)
+        UserDefaults.standard.set(next.rawValue, forKey: Keys.loopMode)
     }
 
     // MARK: - Library (album wall)
@@ -511,6 +473,13 @@ final class PlayerModel {
         mediaServers.first { $0.id == libraryServerID } ?? mediaServers.first
     }
 
+    /// The server an album came from. Favorites saved before servers were
+    /// recorded have no server and use the library server.
+    private func server(for serverID: String?) -> UPnPDevice? {
+        guard let serverID = serverID else { return libraryServer }
+        return mediaServers.first { $0.id == serverID }
+    }
+
     func setLibraryServer(_ id: String) {
         libraryServerID = id
         UserDefaults.standard.set(id, forKey: Keys.libraryServerID)
@@ -529,7 +498,7 @@ final class PlayerModel {
 
     @MainActor
     func albumArtURL(forAlbum id: String, serverID: String? = nil) async -> URL? {
-        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return nil }
+        guard let server = server(for: serverID) else { return nil }
         let key = "\(server.id)|\(id)"
         if let cached = albumArtCache[key] { return URL(string: cached) }
         guard let uri = await controller.albumArtURI(server: server, objectID: id) else { return nil }
@@ -552,7 +521,7 @@ final class PlayerModel {
 
     @MainActor
     func albumTracks(albumID: String, serverID: String? = nil) async -> [MediaObject] {
-        guard let server = serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (serverID == nil ? libraryServer : nil) else { return [] }
+        guard let server = server(for: serverID) else { return [] }
         do {
             return try await controller.albumTracks(server: server, objectID: albumID)
         } catch {
@@ -562,7 +531,7 @@ final class PlayerModel {
     }
 
     func playAlbum(_ album: MediaObject) {
-        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else { return }
+        guard let server = server(for: album.serverID) else { return }
         run("Play album") {
             try await self.controller.playAlbum(server: server, objectID: album.id)
             if self.controller.currentState == .playing { self.recordAlbumPlayed(album) }
@@ -571,7 +540,7 @@ final class PlayerModel {
 
     @MainActor
     func addAlbumToQueue(_ album: MediaObject) async {
-        guard let server = album.serverID.flatMap({ id in mediaServers.first { $0.id == id } }) ?? (album.serverID == nil ? libraryServer : nil) else {
+        guard let server = server(for: album.serverID) else {
             report("The media server for this album is unavailable")
             return
         }

@@ -1,7 +1,8 @@
 import Foundation
 
 /// Loop is orthogonal to shuffle: off / all (wrap) / one (repeat current).
-public enum LoopMode {
+/// Raw values are what the front ends persist.
+public enum LoopMode: String {
     case off
     case all
     case one

@@ -17,6 +17,20 @@ public struct TrackRef: Codable, Identifiable, Equatable {
         self.albumArtURI = albumArtURI
         self.metadata = metadata
     }
+
+    /// A server track; nil when it has no resource to play.
+    public init?(object: MediaObject) {
+        guard let res = object.resURL else { return nil }
+        self.init(url: res, title: object.title, album: object.album,
+                  albumArtURI: object.albumArtURI, metadata: DIDLBuilder.metadata(for: object))
+    }
+
+    /// A queued track; album and cover come back out of its DIDL metadata.
+    public init(item: PlaylistItem) {
+        let parsed = item.metadata.flatMap { DIDLParser().parse($0).first }
+        self.init(url: item.url.absoluteString, title: item.title, album: parsed?.album,
+                  albumArtURI: parsed?.albumArtURI, metadata: item.metadata)
+    }
 }
 
 /// A persistable reference to a favorite album (a server container).

@@ -179,7 +179,7 @@ public class PlaybackController {
 
     /// Re-syncs the preloaded next track after anything that changes what
     /// peekNext returns (shuffle/loop toggles, playlist edits).
-    public func refreshPreloadedNext() {
+    private func refreshPreloadedNext() {
         guard currentEngine.state != .stopped else { return }
         setNextOnEngine()
     }
@@ -232,11 +232,6 @@ public class PlaybackController {
 
     public func pause() {
         currentEngine.pause()
-    }
-
-    @MainActor
-    public func resume() async throws {
-        try await play()
     }
 
     public func stop() {
@@ -399,8 +394,7 @@ public class PlaybackController {
     /// a playable item.
     @discardableResult
     public func addTrackToPlaylist(_ object: MediaObject) -> Bool {
-        guard !object.isContainer, let res = object.resURL, let url = URL(string: res),
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+        guard !object.isContainer, let url = object.resURL.flatMap(URL.init(string:)), url.isHTTP else {
             return false
         }
         playlist.add(PlaylistItem(url: url, title: object.title, metadata: DIDLBuilder.metadata(for: object)))
@@ -499,8 +493,7 @@ public class PlaybackController {
                                          requestedCount: count, sortCriteria: sortCriteria)
             },
             add: { object in
-                guard let resource = object.resURL, let url = URL(string: resource),
-                      ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return false }
+                guard let url = object.resURL.flatMap(URL.init(string:)), url.isHTTP else { return false }
                 tracks.append(object)
                 return true
             }

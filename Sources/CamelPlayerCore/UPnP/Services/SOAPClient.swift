@@ -76,10 +76,7 @@ public class SOAPClient {
         argumentOrder: [String] = [],
         arguments: [String: String] = [:]
     ) async throws -> [String: String] {
-        guard let url = URL(string: controlURL), url.host != nil,
-              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
-            throw SOAPError.invalidURL
-        }
+        guard let url = URL(string: controlURL), url.isHTTP else { throw SOAPError.invalidURL }
 
         let soapBody = buildSOAPRequest(action: action, serviceType: serviceType,
                                        argumentOrder: argumentOrder, arguments: arguments)
@@ -149,6 +146,12 @@ public class SOAPClient {
 
         return parser.faultMessage
     }
+}
+
+extension URL {
+    /// An absolute http(s) URL with a host: the only kind a UPnP device can
+    /// be reached at or fetch from.
+    var isHTTP: Bool { ["http", "https"].contains(scheme?.lowercased() ?? "") && host != nil }
 }
 
 // MARK: - SOAP Response Parser

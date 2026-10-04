@@ -121,9 +121,7 @@ public class UPnPPlaybackEngine: PlaybackEngine, @unchecked Sendable {
 
     private func resourceURI(for url: URL) throws -> String {
         if url.isFileURL { return try mediaServer.shareFile(url).absoluteString }
-        guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
-            throw AudioPlayerError.fileLoadError("Invalid media URL")
-        }
+        guard url.isHTTP else { throw AudioPlayerError.fileLoadError("Invalid media URL") }
         return url.absoluteString
     }
 

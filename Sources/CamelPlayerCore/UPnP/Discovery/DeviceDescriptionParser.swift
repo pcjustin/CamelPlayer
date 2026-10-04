@@ -78,9 +78,7 @@ public class DeviceDescriptionParser: NSObject {
             return nil
         }
 
-        guard let url = URL(string: urlString, relativeTo: baseURL)?.absoluteURL,
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-              url.host != nil else { return nil }
+        guard let url = URL(string: urlString, relativeTo: baseURL)?.absoluteURL, url.isHTTP else { return nil }
         return url.absoluteString
     }
 
@@ -120,8 +118,7 @@ extension DeviceDescriptionParser: XMLParserDelegate {
 
         switch elementName {
         case "URLBase":
-            if let url = URL(string: value), url.host != nil,
-               ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            if let url = URL(string: value), url.isHTTP {
                 baseURL = url
             }
         case "friendlyName":
