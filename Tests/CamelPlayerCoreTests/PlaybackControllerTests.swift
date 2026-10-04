@@ -79,6 +79,18 @@ final class PlaybackControllerTests: XCTestCase {
         XCTAssertEqual(controller.getPlaylistCount(), 0)
     }
 
+    func testNextAndPreviousPastTheQueueEndsDoNothing() async throws {
+        let engine = PlaybackStub()
+        let controller = PlaybackController(engine: engine)
+        controller.addToPlaylist(urls: urls)
+        try await controller.previous()
+        XCTAssertNil(engine.currentURL)
+        try await controller.playItem(at: 2)
+        try await controller.next()
+        XCTAssertEqual(engine.currentURL, urls[2])
+        XCTAssertEqual(controller.getCurrentPosition(), 2)
+    }
+
     func testNetworkLibraryCannotShareLocalOrRelativeURLs() {
         let controller = PlaybackController(engine: PlaybackStub())
         for uri in ["file:///etc/passwd", "relative.flac", "ftp://nas/track.flac"] {

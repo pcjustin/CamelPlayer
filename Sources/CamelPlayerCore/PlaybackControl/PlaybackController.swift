@@ -249,21 +249,17 @@ public class PlaybackController {
         currentEngine.stop()
     }
 
+    /// Does nothing past the end of the queue: media keys and MPRIS call this
+    /// without checking whether a next track exists.
     @MainActor
     public func next() async throws {
-        guard let item = playlist.next() else {
-            throw AudioPlayerError.fileLoadError("No next item")
-        }
-
+        guard let item = playlist.next() else { return }
         try await startPlaying(item)
     }
 
     @MainActor
     public func previous() async throws {
-        guard let item = playlist.previous() else {
-            throw AudioPlayerError.fileLoadError("No previous item")
-        }
-
+        guard let item = playlist.previous() else { return }
         try await startPlaying(item)
     }
 
