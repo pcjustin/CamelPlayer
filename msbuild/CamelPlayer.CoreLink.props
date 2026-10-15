@@ -1,0 +1,14 @@
+<Project>
+  <!-- Imported by executables that link Core (App, camelcli, tests), after CamelPlayer.Cpp.props. -->
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>$(CamelRoot)build\cargo\release\symphonia_ffi.lib;ws2_32.lib;userenv.lib;ntdll.lib;bcrypt.lib;advapi32.lib;ole32.lib;oleaut32.lib;uuid.lib;avrt.lib;winmm.lib;setupapi.lib;cfgmgr32.lib;secur32.lib;ncrypt.lib;crypt32.lib;mfuuid.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <Link>
+      <!-- symphonia_ffi.lib is always built against the release CRT -->
+      <IgnoreSpecificDefaultLibraries>msvcrt.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

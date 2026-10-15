@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Builds the Symphonia C ABI static library with cargo (docs/計劃書.md §16.3).
+     Always the release profile: it links against the release CRT, which Debug C++ builds tolerate via /NODEFAULTLIB:msvcrt. -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <ProjectGuid>{6B0F6E0A-5C1D-4E52-9A39-3D0C2C8E1A02}</ProjectGuid>
+    <RootNamespace>symphonia_ffi</RootNamespace>
+    <VcpkgEnabled>false</VcpkgEnabled>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <CamelCargo Condition="Exists('$(USERPROFILE)\.cargo\bin\cargo.exe')">"$(USERPROFILE)\.cargo\bin\cargo.exe"</CamelCargo>
+    <CamelCargo Condition="'$(CamelCargo)' == ''">cargo</CamelCargo>
+    <CamelCargoCmd>set CARGO_TARGET_DIR=$(CamelRoot)build\cargo&amp;&amp; cd /d "$(MSBuildProjectDirectory)" &amp;&amp; $(CamelCargo) build --release --locked</CamelCargoCmd>
+    <NMakeBuildCommandLine>$(CamelCargoCmd)</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>$(CamelCargoCmd)</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>set CARGO_TARGET_DIR=$(CamelRoot)build\cargo&amp;&amp; cd /d "$(MSBuildProjectDirectory)" &amp;&amp; $(CamelCargo) clean</NMakeCleanCommandLine>
+    <NMakeOutput>$(CamelRoot)build\cargo\release\symphonia_ffi.lib</NMakeOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="Cargo.toml" />
+    <None Include="src\lib.rs" />
+    <ClInclude Include="symphonia_ffi.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

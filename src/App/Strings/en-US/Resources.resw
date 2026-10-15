@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true" />
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Nav_NowPlaying.Content" xml:space="preserve"><value>Now Playing</value></data>
+  <data name="Nav_Albums.Content" xml:space="preserve"><value>Albums</value></data>
+  <data name="Nav_Artists.Content" xml:space="preserve"><value>Artists</value></data>
+  <data name="Nav_Composers.Content" xml:space="preserve"><value>Composers</value></data>
+  <data name="Nav_Genres.Content" xml:space="preserve"><value>Genres</value></data>
+  <data name="Nav_Years.Content" xml:space="preserve"><value>Years</value></data>
+  <data name="Nav_Tracks.Content" xml:space="preserve"><value>Tracks</value></data>
+  <data name="Nav_Folders.Content" xml:space="preserve"><value>Folders</value></data>
+  <data name="Nav_Playlists.Content" xml:space="preserve"><value>Playlists</value></data>
+  <data name="Nav_SmartPlaylists.Content" xml:space="preserve"><value>Smart Playlists</value></data>
+  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later milestone. The MVP plays one FLAC file at a time: use the open button below.</value></data>
+  <data name="Settings_Title.Text" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings_Playback.Text" xml:space="preserve"><value>Playback</value></data>
+  <data name="Settings_Backend.Header" xml:space="preserve"><value>Output backend</value></data>
+  <data name="Settings_Decoder.Header" xml:space="preserve"><value>FLAC decoder</value></data>
+  <data name="Settings_Device.Header" xml:space="preserve"><value>Output device</value></data>
+  <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>Driving mode (exclusive)</value></data>
+  <data name="Settings_Period.Header" xml:space="preserve"><value>Device period</value></data>
+  <data name="Settings_PeriodMs.Header" xml:space="preserve"><value>Custom period (ms)</value></data>
+  <data name="Settings_SampleFormat.Header" xml:space="preserve"><value>Sample format</value></data>
+  <data name="Settings_AsioDriver.Header" xml:space="preserve"><value>ASIO driver</value></data>
+  <data name="Settings_AsioPanel.Content" xml:space="preserve"><value>Open control panel</value></data>
+  <data name="Settings_AsioBuffer.Header" xml:space="preserve"><value>Buffer size (samples, 0 = driver preferred)</value></data>
+  <data name="Settings_AsioLeft.Header" xml:space="preserve"><value>Left → output channel</value></data>
+  <data name="Settings_AsioRight.Header" xml:space="preserve"><value>Right → output channel</value></data>
+  <data name="Settings_KsMode.Header" xml:space="preserve"><value>Streaming mode</value></data>
+  <data name="Settings_KsBuffer.Header" xml:space="preserve"><value>Buffer length (ms, WaveRT)</value></data>
+  <data name="Settings_KsPacketCount.Header" xml:space="preserve"><value>Packets (standard streaming)</value></data>
+  <data name="Settings_KsPacketMs.Header" xml:space="preserve"><value>Packet length (ms)</value></data>
+  <data name="Settings_KsNote.Text" xml:space="preserve"><value>While Kernel Streaming holds the device, Windows and other apps cannot play through it (system sounds included).</value></data>
+  <data name="Settings_Fixed.Text" xml:space="preserve"><value>Fixed in the MVP: MMCSS task "Pro Audio", 10 s pre-decode. Changes apply immediately and playback continues from the current position.</value></data>
+  <data name="Settings_Refresh.Content" xml:space="preserve"><value>Refresh device lists</value></data>
+  <data name="Settings_Status.Text" xml:space="preserve"><value>Status</value></data>
+  <data name="Settings_Interface.Text" xml:space="preserve"><value>Interface</value></data>
+  <data name="Settings_Language.Header" xml:space="preserve"><value>Language</value></data>
+  <data name="Settings_LanguageNote.Text" xml:space="preserve"><value>Restart CamelPlayer to switch the language.</value></data>
+  <data name="Mode_Event" xml:space="preserve"><value>Event driven</value></data>
+  <data name="Mode_Polling" xml:space="preserve"><value>Polling</value></data>
+  <data name="Period_Default" xml:space="preserve"><value>Default</value></data>
+  <data name="Period_Minimum" xml:space="preserve"><value>Minimum</value></data>
+  <data name="Period_Custom" xml:space="preserve"><value>Custom</value></data>
+  <data name="Format_Auto" xml:space="preserve"><value>Automatic (smallest lossless container)</value></data>
+  <data name="KsMode_Auto" xml:space="preserve"><value>Automatic</value></data>
+  <data name="KsMode_RtEvent" xml:space="preserve"><value>WaveRT event</value></data>
+  <data name="KsMode_RtPoll" xml:space="preserve"><value>WaveRT polling</value></data>
+  <data name="KsMode_Standard" xml:space="preserve"><value>Standard streaming</value></data>
+  <data name="Device_Default" xml:space="preserve"><value>Follow Windows default</value></data>
+  <data name="Device_None" xml:space="preserve"><value>(none found)</value></data>
+  <data name="Lang_System" xml:space="preserve"><value>Follow Windows</value></data>
+  <data name="NoFile" xml:space="preserve"><value>No file open</value></data>
+  <data name="Lamp_Idle" xml:space="preserve"><value>No output</value></data>
+  <data name="Status_Idle" xml:space="preserve"><value>No stream open.</value></data>
+  <data name="SignalPath_File" xml:space="preserve"><value>File</value></data>
+  <data name="SignalPath_Pad" xml:space="preserve"><value>integer zero padding</value></data>
+  <data name="Tip_Open" xml:space="preserve"><value>Open a FLAC file</value></data>
+  <data name="Tip_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
+  <data name="Tip_Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Error_FileOpen" xml:space="preserve"><value>Cannot open the file</value></data>
+  <data name="Error_UnsupportedStream" xml:space="preserve"><value>This decoder cannot play the file</value></data>
+  <data name="Error_DecodeFailed" xml:space="preserve"><value>The file is damaged</value></data>
+  <data name="Error_SeekFailed" xml:space="preserve"><value>Seeking failed</value></data>
+  <data name="Error_DeviceNotFound" xml:space="preserve"><value>Output device not found</value></data>
+  <data name="Error_DeviceInUse" xml:space="preserve"><value>The device is in use by another program; press play to retry</value></data>
+  <data name="Error_DeviceLost" xml:space="preserve"><value>The device was disconnected; press play when it is back</value></data>
+  <data name="Error_FormatNotSupported" xml:space="preserve"><value>The device cannot play this format bit-perfectly; skipped</value></data>
+  <data name="Error_DriverError" xml:space="preserve"><value>Driver error</value></data>
+  <data name="Error_Other" xml:space="preserve"><value>Playback error</value></data>
+</root>

@@ -1,0 +1,5 @@
+Microsoft Visual C++ V14 Redistributable and Runtime 2026
+Source: https://visualstudio.microsoft.com/license-terms/vs2026-ga-visualcpp-v14-redist-runtime/
+Document: https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx
+SHA-256: 08651651A7602FC7C0E2763DE0FDE1FF9F868DF2780597CD1775EE9D6441C783
+LICENSE.txt is a plain-text extraction of the original LICENSE.docx.

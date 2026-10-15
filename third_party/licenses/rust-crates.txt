@@ -1,0 +1,22 @@
+Rust dependency closure for CamelPlayer v2 through rust/symphonia_ffi (from Cargo.lock).
+Symphonia is MPL-2.0 (full text in MPL-2.0.txt; source: https://github.com/pdeljanov/Symphonia).
+The other crates use their MIT license option; encoding_rs additionally requires its WHATWG BSD-3-Clause notice. Full notices are preserved in the rust subdirectories. rustversion is a build-time procedural macro.
+
+arrayvec 0.7.8  (MIT OR Apache-2.0)  https://github.com/bluss/arrayvec
+bitflags 1.3.2  (MIT/Apache-2.0)  https://github.com/bitflags/bitflags
+bytemuck 1.25.2  (Zlib OR Apache-2.0 OR MIT)  https://github.com/Lokathor/bytemuck
+cfg-if 1.0.5  (MIT OR Apache-2.0)  https://github.com/rust-lang/cfg-if
+core_detect 1.0.0  (MIT/Apache-2.0)  https://github.com/thomcc/core_detect
+encoding_rs 0.8.42  ((Apache-2.0 OR MIT) AND BSD-3-Clause)  https://github.com/hsivonen/encoding_rs
+lazy_static 1.5.1  (MIT OR Apache-2.0)  https://github.com/rust-lang-nursery/lazy-static.rs
+log 0.4.34  (MIT OR Apache-2.0)  https://github.com/rust-lang/log
+multiversion_no_op 1.0.0  (Apache-2.0 OR MIT)  https://github.com/hsivonen/multiversion_no_op
+rustversion 1.0.23  (MIT OR Apache-2.0)  https://github.com/dtolnay/rustversion
+scopeguard 1.2.0  (MIT OR Apache-2.0)  https://github.com/bluss/scopeguard
+simdutf8 0.1.5  (MIT OR Apache-2.0)  https://github.com/rusticstuff/simdutf8
+symphonia 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+symphonia-bundle-flac 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+symphonia-core 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+symphonia-metadata 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+symphonia-utils-xiph 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+

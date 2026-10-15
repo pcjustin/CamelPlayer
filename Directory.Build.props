@@ -1,0 +1,26 @@
+<Project>
+  <!-- Shared by every project in the repo. C++ compile/link settings live in msbuild\CamelPlayer.Cpp.props,
+       which each vcxproj imports after Microsoft.Cpp.props so its defaults do not override them. -->
+  <PropertyGroup>
+    <CamelRoot>$(MSBuildThisFileDirectory)</CamelRoot>
+    <PlatformToolset>v145</PlatformToolset>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
+    <CharacterSet>Unicode</CharacterSet>
+    <OutDir>$(CamelRoot)build\$(Configuration)\$(MSBuildProjectName)\</OutDir>
+    <IntDir>$(CamelRoot)build\obj\$(Configuration)\$(MSBuildProjectName)\</IntDir>
+  </PropertyGroup>
+
+  <!-- vcpkg manifest mode with the VS-bundled vcpkg (docs/計劃書.md §15.1, §15.4 item 6) -->
+  <PropertyGroup>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgManifestRoot>$(CamelRoot)</VcpkgManifestRoot>
+    <VcpkgTriplet>x64-windows-static-md</VcpkgTriplet>
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgUseMD>true</VcpkgUseMD>
+    <VcpkgInstalledDir>$(CamelRoot)vcpkg_installed\</VcpkgInstalledDir>
+    <VcpkgAdditionalInstallOptions>--clean-buildtrees-after-build</VcpkgAdditionalInstallOptions>
+    <CamelVcpkgMsbuild>$(VsInstallRoot)\VC\vcpkg\scripts\buildsystems\msbuild\</CamelVcpkgMsbuild>
+  </PropertyGroup>
+  <Import Project="$(CamelVcpkgMsbuild)vcpkg.props" Condition="'$(VcpkgPropsImported)' != 'true' and Exists('$(CamelVcpkgMsbuild)vcpkg.props')" />
+</Project>

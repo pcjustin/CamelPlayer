@@ -1,0 +1,20 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/App/App.vcxproj" />
+    <Project Path="src/Core/Core.vcxproj" />
+  </Folder>
+  <Folder Name="/src/Tools/">
+    <Project Path="src/Tools/camelcli/camelcli.vcxproj" />
+  </Folder>
+  <Folder Name="/rust/">
+    <Project Path="rust/symphonia_ffi/symphonia_ffi.vcxproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/tests.vcxproj" />
+  </Folder>
+</Solution>

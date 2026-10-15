@@ -1,0 +1,3 @@
+<Project>
+  <Import Project="$(CamelVcpkgMsbuild)vcpkg.targets" Condition="'$(VcpkgPropsImported)' == 'true' and Exists('$(CamelVcpkgMsbuild)vcpkg.targets')" />
+</Project>
