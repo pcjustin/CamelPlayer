@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 
 #include "util/Text.h"
@@ -22,6 +23,12 @@ std::vector<GenSpec> standardMatrix(double seconds) {
 }
 
 std::vector<int32_t> makeSignal(const GenSpec& spec) {
+    if (!spec.sampleRate || !spec.channels || spec.channels > 8 || spec.bits < 4 || spec.bits > 32 ||
+        !std::isfinite(spec.seconds) || spec.seconds < 0 || !std::isfinite(spec.toneDb))
+        throw std::invalid_argument("invalid test signal parameters");
+    const double sampleCount = spec.seconds * spec.sampleRate * spec.channels;
+    if (!std::isfinite(sampleCount) || sampleCount >= double(std::numeric_limits<size_t>::max()) / sizeof(int32_t))
+        throw std::length_error("test signal is too large");
     const uint64_t frames = uint64_t(spec.seconds * spec.sampleRate);
     std::vector<int32_t> out(size_t(frames * spec.channels));
     const double full = std::ldexp(1.0, int(spec.bits) - 1) - 1.0;
@@ -49,10 +56,10 @@ std::vector<int32_t> makeSignal(const GenSpec& spec) {
 }
 
 void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
-    std::filesystem::create_directories(path.parent_path());
+    const auto samples = makeSignal(spec);
+    if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     FLAC__StreamEncoder* enc = FLAC__stream_encoder_new();
     if (!enc) throw std::runtime_error("FLAC__stream_encoder_new failed");
-    const auto samples = makeSignal(spec);
     FLAC__stream_encoder_set_channels(enc, spec.channels);
     FLAC__stream_encoder_set_bits_per_sample(enc, spec.bits);
     FLAC__stream_encoder_set_sample_rate(enc, spec.sampleRate);
@@ -90,15 +97,19 @@ void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
 
 static std::vector<char> readAll(const std::filesystem::path& p) {
     std::ifstream in(p, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot read test audio input");
     return std::vector<char>(std::istreambuf_iterator<char>(in), {});
 }
 
 static void writeAll(const std::filesystem::path& p, const char* data, size_t n) {
     std::ofstream out(p, std::ios::binary | std::ios::trunc);
     out.write(data, std::streamsize(n));
+    out.flush();
+    if (!out) throw std::runtime_error("cannot write test audio output");
 }
 
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {
+    if (!std::isfinite(fraction) || fraction < 0 || fraction > 1) throw std::invalid_argument("invalid corruption fraction");
     auto b = readAll(src);
     size_t at = std::max<size_t>(8192, size_t(static_cast<double>(b.size()) * fraction));
     if (at < b.size()) b[at] = char(b[at] ^ 0x5A);
@@ -106,6 +117,7 @@ void writeCorrupted(const std::filesystem::path& src, const std::filesystem::pat
 }
 
 void writeTruncated(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {
+    if (!std::isfinite(fraction) || fraction < 0 || fraction > 1) throw std::invalid_argument("invalid truncation fraction");
     auto b = readAll(src);
     writeAll(dst, b.data(), size_t(static_cast<double>(b.size()) * fraction));
 }

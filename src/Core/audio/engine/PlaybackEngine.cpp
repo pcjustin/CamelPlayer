@@ -236,8 +236,15 @@ private:
             if (fn) {
                 try {
                     fn();
+                } catch (const Error& e) {
+                    teardown();
+                    output_.reset();
+                    fail(e, e.code() == ErrorCode::DeviceLost || e.code() == ErrorCode::DeviceInUse ? PlayState::Paused
+                                                                                                    : PlayState::Stopped);
                 } catch (const std::exception& e) {
-                    log::error("engine: command failed: %s", e.what());
+                    teardown();
+                    output_.reset();
+                    fail(Error(ErrorCode::Other, e.what()), PlayState::Stopped);
                 }
             }
             if (active_ && ended_.load()) onEnded();
@@ -255,6 +262,13 @@ private:
     void startSession(uint64_t startFrame, bool playNow) {
         teardown();
         const uint64_t session = ++session_;
+        {
+            std::lock_guard lock(snapMutex_);
+            snap_.file = file_;
+            snap_.source.reset();
+            snap_.total = 0;
+            snap_.outputStatus = {};
+        }
         std::unique_ptr<IDecoder> dec;
         try {
             dec = openDecoder(settings_.decoder, file_);
@@ -359,9 +373,9 @@ private:
     void decodeMain() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
         const SourceInfo& in = decoder_->info();
-        std::vector<int32_t> pcm(kDecodeChunk * in.channels);
-        std::vector<uint8_t> packed(kDecodeChunk * bpf_);
         try {
+            std::vector<int32_t> pcm(kDecodeChunk * in.channels);
+            std::vector<uint8_t> packed(kDecodeChunk * bpf_);
             while (!stopDecode_) {
                 if (ring_.writable() < packed.size()) {
                     Sleep(5);
@@ -376,6 +390,10 @@ private:
             log::error("engine: decode error: %s", e.what());
             std::lock_guard lock(decodeErrMutex_);
             decodeError_ = e;
+        } catch (const std::exception& e) {
+            log::error("engine: decoder worker failed: %s", e.what());
+            std::lock_guard lock(decodeErrMutex_);
+            decodeError_ = Error(ErrorCode::DecodeFailed, e.what());
         }
         decodeDone_.store(true, std::memory_order_release);
     }
@@ -451,7 +469,13 @@ private:
             l = listener_;
         }
         snapCv_.notify_all();
-        if (l) l();
+        if (l) {
+            try {
+                l();
+            } catch (...) {
+                log::error("engine: state listener failed");
+            }
+        }
     }
 
     // control-thread state
@@ -492,23 +516,11 @@ PlaybackEngine::~PlaybackEngine() = default;
 
 void PlaybackEngine::openAndPlay(const std::filesystem::path& file) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy] {
-        try {
-            impl_->openAndPlay(*fileCopy);
-        } catch (const std::exception& e) {
-            log::error("engine: open command failed: %s", e.what());
-        }
-    });
+    impl_->post([this, fileCopy] { impl_->openAndPlay(*fileCopy); });
 }
 void PlaybackEngine::load(const std::filesystem::path& file) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy] {
-        try {
-            impl_->load(*fileCopy);
-        } catch (const std::exception& e) {
-            log::error("engine: load command failed: %s", e.what());
-        }
-    });
+    impl_->post([this, fileCopy] { impl_->load(*fileCopy); });
 }
 void PlaybackEngine::play() {
     impl_->post([this] { impl_->play(); });
@@ -532,13 +544,7 @@ void PlaybackEngine::seek(uint64_t frame) {
 }
 void PlaybackEngine::applySettings(const Settings& s) {
     auto settingsCopy = std::make_shared<Settings>(s);
-    impl_->post([this, settingsCopy] {
-        try {
-            impl_->applySettings(*settingsCopy);
-        } catch (const std::exception& e) {
-            log::error("engine: settings command failed: %s", e.what());
-        }
-    });
+    impl_->post([this, settingsCopy] { impl_->applySettings(*settingsCopy); });
 }
 bool PlaybackEngine::showControlPanel() {
     return impl_->call<bool>([this] { return impl_->showControlPanel(); });

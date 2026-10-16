@@ -72,15 +72,11 @@ public:
         if (auto it = caps_.find(key); it != caps_.end()) return it->second;
         ComScope com;
         bool ok = false;
-        try {
-            auto dev = findDevice(cfg_.deviceId);
-            wil::com_ptr<IAudioClient> client;
-            if (SUCCEEDED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()))) {
-                WAVEFORMATEXTENSIBLE wf = makeWaveFormat(f);
-                ok = client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &wf.Format, nullptr) == S_OK;
-            }
-        } catch (const Error&) {
-            return false; // device missing: open() will report it
+        auto dev = findDevice(cfg_.deviceId);
+        wil::com_ptr<IAudioClient> client;
+        if (SUCCEEDED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()))) {
+            WAVEFORMATEXTENSIBLE wf = makeWaveFormat(f);
+            ok = client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &wf.Format, nullptr) == S_OK;
         }
         caps_[key] = ok;
         return ok;

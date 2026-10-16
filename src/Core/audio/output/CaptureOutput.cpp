@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <share.h>
 #include <thread>
 #include <vector>
 
@@ -25,8 +26,8 @@ public:
 
     void open(const DeviceFormat& f, IRenderSource* source) override {
         close();
-        if (_wfopen_s(&file_, opts_.file.c_str(), L"wb") != 0 || !file_)
-            throw Error(ErrorCode::DeviceNotFound, "cannot create capture file");
+        file_ = _wfsopen(opts_.file.c_str(), L"wb", _SH_DENYWR);
+        if (!file_) throw Error(ErrorCode::DeviceNotFound, "cannot create capture file");
         fmt_ = f;
         source_ = source;
         quit_ = false;
@@ -69,6 +70,7 @@ private:
                 if (fwrite(buf.data(), fmt_.bytesPerFrame(), got, file_) != got) {
                     log::error("capture: writing output file failed");
                     quit_ = true;
+                    raiseError(Error(ErrorCode::Other, "cannot write capture output file"));
                     continue;
                 }
                 frames += got;

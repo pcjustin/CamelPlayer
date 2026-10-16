@@ -40,7 +40,7 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-Validation recorded **92 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug, plus **20 passed hardware cases** covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS.
+Validation recorded **191 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug. The 29 engine-state tests also passed 20 repetitions (580 executions), plus **20 passed hardware cases** covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 
@@ -48,7 +48,7 @@ Hardware tests are disabled during ordinary runs because they play audio and req
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*HardwarePlayback*"
 ```
 
-The MVP is limited to stereo FLAC and unmodified integer output. Playback-time frame-count enforcement and FLAC MD5 verification are not yet implemented; some decoders can silently return damaged or shortened streams. The production decoder selection is still pending.
+The MVP is limited to stereo FLAC and unmodified integer output. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5. The production decoder selection is still pending.
 
 ## Dependencies and repository contents
 

@@ -32,6 +32,7 @@ public:
     const SourceInfo& info() const override { return info_; }
 
     size_t read(int32_t* dst, size_t frames) override {
+        if (!frames) return 0;
         drflac_uint64 got = drflac_read_pcm_frames_s32(flac_, frames, dst);
         // dr_flac stops early instead of reporting corrupt frames; treat a short read before the end as an error.
         if (got == 0 && info_.totalFrames && flac_->currentPCMFrame < info_.totalFrames)

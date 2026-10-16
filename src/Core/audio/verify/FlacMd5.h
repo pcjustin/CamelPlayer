@@ -2,6 +2,7 @@
 // of ceil(bits / 8) bytes, interleaved (FLAC format specification).
 #pragma once
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "util/Md5.h"
@@ -10,7 +11,10 @@ namespace camel::audio {
 
 class FlacMd5 {
 public:
-    explicit FlacMd5(uint32_t bitsPerSample) : bytes_((bitsPerSample + 7) / 8) {}
+    explicit FlacMd5(uint32_t bitsPerSample) : bytes_(0) {
+        if (!bitsPerSample || bitsPerSample > 32) throw std::invalid_argument("invalid PCM bit depth for FLAC MD5");
+        bytes_ = (bitsPerSample + 7) / 8;
+    }
 
     // `samples` are right-aligned to the stream's bit depth.
     void update(const int32_t* samples, size_t count);

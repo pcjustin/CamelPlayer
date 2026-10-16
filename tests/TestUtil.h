@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <mutex>
 
+#include "audio/decode/IDecoder.h"
 #include "audio/testing/TestAudio.h"
 
 namespace testutil {

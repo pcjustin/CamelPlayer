@@ -6,6 +6,7 @@
 #include <setupapi.h>
 
 #include <atomic>
+#include <charconv>
 #include <future>
 #include <map>
 #include <mutex>
@@ -225,9 +226,10 @@ bool setState(HANDLE pin, KSSTATE s) {
 
 bool parseDeviceId(const std::string& id, std::wstring& path, ULONG& pin) {
     auto bar = id.rfind('|');
-    if (bar == std::string::npos) return false;
+    if (bar == std::string::npos || !bar || bar + 1 == id.size()) return false;
+    const auto [end, error] = std::from_chars(id.data() + bar + 1, id.data() + id.size(), pin);
+    if (error != std::errc{} || end != id.data() + id.size()) return false;
     path = toWide(id.substr(0, bar));
-    pin = ULONG(std::stoul(id.substr(bar + 1)));
     return true;
 }
 
@@ -237,21 +239,27 @@ class KsOutput final : public IOutput {
 public:
     explicit KsOutput(const KsSettings& s) : cfg_(s) {
         if (!parseDeviceId(cfg_.deviceId, path_, pinId_)) { // default: first PCM render pin
+            if (!cfg_.deviceId.empty()) throw Error(ErrorCode::DeviceNotFound, "invalid KS device id");
             auto pins = listKsPins();
             if (!pins.empty()) parseDeviceId(pins.front().id, path_, pinId_);
         }
         for (auto& f : renderFilters())
             if (_wcsicmp(f.path.c_str(), path_.c_str()) == 0) realtimeFilter_ = f.realtime;
+        wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!wake_) throw Error(ErrorCode::DriverError, "cannot create KS wake event");
     }
-    ~KsOutput() override { close(); }
+    ~KsOutput() override {
+        close();
+        CloseHandle(wake_);
+    }
 
     bool supports(const DeviceFormat& f) override {
         std::lock_guard lock(capsMutex_);
         auto key = std::make_tuple(f.sampleRate, f.channels, int(f.type));
         if (auto it = caps_.find(key); it != caps_.end()) return it->second;
-        if (path_.empty()) return false;
+        if (path_.empty()) throw Error(ErrorCode::DeviceNotFound, "no KS render pin available");
         HANDLE filter = openFilter(path_);
-        if (filter == INVALID_HANDLE_VALUE) return false;
+        if (filter == INVALID_HANDLE_VALUE) throw Error(ErrorCode::DeviceNotFound, "KS filter not found");
         PinInfo pi = pinInfo(filter, pinId_);
         bool ok = false;
         bool definite = true;
@@ -359,7 +367,7 @@ private:
     IRenderSource* source_ = nullptr;
     std::thread thread_;
     std::atomic<bool> quit_{false}, running_{false};
-    HANDLE wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    HANDLE wake_ = nullptr;
     std::mutex cmdMutex_;
     std::condition_variable cmdCv_;
     bool applied_ = false, threadDone_ = false;

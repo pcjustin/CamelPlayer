@@ -1,7 +1,9 @@
 // Basic audio types shared by decoders, the engine and outputs (docs/計劃書.md §5, §16).
 #pragma once
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -62,7 +64,10 @@ inline double framesToSeconds(uint64_t frames, uint32_t rate) {
     return rate ? double(frames) / rate : 0.0;
 }
 inline uint64_t secondsToFrames(double seconds, uint32_t rate) {
-    return seconds <= 0 ? 0 : uint64_t(seconds * rate + 0.5);
+    if (!std::isfinite(seconds) || seconds <= 0 || !rate) return 0;
+    const double frames = seconds * rate;
+    if (frames >= double(std::numeric_limits<uint64_t>::max())) return std::numeric_limits<uint64_t>::max();
+    return uint64_t(std::round(frames));
 }
 
 // Errors carry a category the UI can turn into a localized message, plus a technical detail string.

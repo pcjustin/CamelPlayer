@@ -4,6 +4,7 @@
 #include <shlobj.h>
 
 #include <fstream>
+#include <cmath>
 #include <nlohmann/json.hpp>
 #include <sstream>
 
@@ -123,12 +124,19 @@ std::string toJson(const Settings& s) {
 
 Settings fromJson(const std::string& text) {
     json j = json::parse(text);
+    if (!j.is_object()) throw std::invalid_argument("settings must be a JSON object");
     Settings s;
     auto str = [](const json& o, const char* k, const std::string& def) {
         return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def;
     };
-    auto num = [](const json& o, const char* k, double def) {
-        return o.contains(k) && o[k].is_number() ? o[k].get<double>() : def;
+    auto num = [](const json& o, const char* k, double def, double minimum, double maximum) {
+        if (!o.contains(k) || !o[k].is_number()) return def;
+        const double value = o[k].get<double>();
+        return std::isfinite(value) && value >= minimum && value <= maximum ? value : def;
+    };
+    auto integer = [&](const json& o, const char* k, int def, int minimum, int maximum) {
+        const double value = num(o, k, def, minimum, maximum);
+        return std::trunc(value) == value ? int(value) : def;
     };
     auto boolean = [](const json& o, const char* k, bool def) {
         return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
@@ -142,23 +150,23 @@ Settings fromJson(const std::string& text) {
         s.wasapi.deviceId = str(w, "device", "");
         s.wasapi.eventDriven = boolean(w, "eventDriven", true);
         s.wasapi.period = periodFromId(str(w, "period", "default"));
-        s.wasapi.customPeriodMs = num(w, "customPeriodMs", 10.0);
+        s.wasapi.customPeriodMs = num(w, "customPeriodMs", 10.0, 1.0, 500.0);
         s.wasapi.sampleType = sampleTypeFromId(str(w, "sampleType", ""));
     }
     if (j.contains("asio") && j["asio"].is_object()) {
         const json& a = j["asio"];
         s.asio.driverClsid = str(a, "driver", "");
-        s.asio.bufferSize = long(num(a, "bufferSize", 0));
-        s.asio.outLeft = int(num(a, "outLeft", 0));
-        s.asio.outRight = int(num(a, "outRight", 1));
+        s.asio.bufferSize = integer(a, "bufferSize", 0, 0, 65536);
+        s.asio.outLeft = integer(a, "outLeft", 0, 0, 63);
+        s.asio.outRight = integer(a, "outRight", 1, 0, 63);
     }
     if (j.contains("ks") && j["ks"].is_object()) {
         const json& k = j["ks"];
         s.ks.deviceId = str(k, "device", "");
         s.ks.mode = ksModeFromId(str(k, "mode", "auto"));
-        s.ks.bufferMs = num(k, "bufferMs", 20.0);
-        s.ks.packetCount = int(num(k, "packetCount", 4));
-        s.ks.packetMs = num(k, "packetMs", 10.0);
+        s.ks.bufferMs = num(k, "bufferMs", 20.0, 2.0, 1000.0);
+        s.ks.packetCount = integer(k, "packetCount", 4, 2, 16);
+        s.ks.packetMs = num(k, "packetMs", 10.0, 1.0, 200.0);
         s.ks.sampleType = sampleTypeFromId(str(k, "sampleType", ""));
     }
     return s;

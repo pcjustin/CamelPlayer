@@ -31,7 +31,7 @@ void Md5::update(const void* data, size_t len) {
     auto p = static_cast<const UCHAR*>(data);
     while (len) {
         ULONG n = len > 0x40000000 ? 0x40000000 : ULONG(len);
-        BCryptHashData(hash_, const_cast<PUCHAR>(p), n, 0);
+        if (BCryptHashData(hash_, const_cast<PUCHAR>(p), n, 0) != 0) throw std::runtime_error("BCryptHashData failed");
         p += n;
         len -= n;
     }
@@ -39,7 +39,7 @@ void Md5::update(const void* data, size_t len) {
 
 std::array<uint8_t, 16> Md5::finish() {
     std::array<uint8_t, 16> d{};
-    BCryptFinishHash(hash_, d.data(), 16, 0);
+    if (BCryptFinishHash(hash_, d.data(), 16, 0) != 0) throw std::runtime_error("BCryptFinishHash failed");
     return d;
 }
 

@@ -1,5 +1,6 @@
 #include "audio/decode/DecoderImpl.h"
 #include "audio/decode/FlacStreamInfo.h"
+#include "audio/verify/FlacMd5.h"
 
 namespace camel::audio {
 
@@ -49,14 +50,38 @@ public:
     WithStreamInfo(std::unique_ptr<IDecoder> inner, const SourceInfo& parsed) : inner_(std::move(inner)), info_(inner_->info()) {
         info_.md5 = parsed.md5;
         if (!info_.totalFrames) info_.totalFrames = parsed.totalFrames;
+        if (info_.md5) md5_ = std::make_unique<FlacMd5>(info_.bitsPerSample);
     }
     const SourceInfo& info() const override { return info_; }
-    size_t read(int32_t* dst, size_t frames) override { return inner_->read(dst, frames); }
-    void seek(uint64_t frame) override { inner_->seek(frame); }
+    size_t read(int32_t* dst, size_t frames) override {
+        if (!frames || ended_) return 0;
+        const size_t got = inner_->read(dst, frames);
+        position_ += got;
+        if (info_.totalFrames && (position_ > info_.totalFrames || (!got && position_ != info_.totalFrames)))
+            throw Error(ErrorCode::DecodeFailed, "FLAC frame count does not match STREAMINFO");
+        if (got) {
+            if (md5_) md5_->update(dst, got * info_.channels);
+        } else {
+            ended_ = true;
+            if (md5_ && info_.md5 && md5_->finish() != *info_.md5) throw Error(ErrorCode::DecodeFailed, "FLAC MD5 mismatch");
+        }
+        return got;
+    }
+    void seek(uint64_t frame) override {
+        if (info_.totalFrames && frame >= info_.totalFrames) throw Error(ErrorCode::SeekFailed, "seek target is past FLAC end");
+        inner_->seek(frame);
+        position_ = frame;
+        ended_ = false;
+        md5_.reset();
+        if (!frame && info_.md5) md5_ = std::make_unique<FlacMd5>(info_.bitsPerSample);
+    }
 
 private:
     std::unique_ptr<IDecoder> inner_;
     SourceInfo info_;
+    uint64_t position_ = 0;
+    bool ended_ = false;
+    std::unique_ptr<FlacMd5> md5_;
 };
 
 } // namespace
@@ -76,6 +101,8 @@ std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::p
     case DecoderKind::Sndfile:
         d = openSndfileFlac(path);
         break;
+    default:
+        throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
     }
     SourceInfo parsed;
     if (readFlacStreamInfo(path, parsed)) return std::make_unique<WithStreamInfo>(std::move(d), parsed);

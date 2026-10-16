@@ -13,7 +13,7 @@ std::vector<SampleType> bitPerfectCandidates(uint32_t bits) {
 
 std::optional<DeviceFormat> chooseOutputFormat(const SourceInfo& src, std::optional<SampleType> fixedType,
                                                const std::function<bool(const DeviceFormat&)>& deviceSupports) {
-    if (src.channels != 2) return std::nullopt; // MVP: stereo only (downmix arrives in M6)
+    if (!src.sampleRate || src.channels != 2) return std::nullopt; // MVP: stereo only (downmix arrives in M6)
     for (SampleType t : bitPerfectCandidates(src.bitsPerSample)) {
         if (fixedType && t != *fixedType) continue;
         DeviceFormat f{src.sampleRate, src.channels, t};
