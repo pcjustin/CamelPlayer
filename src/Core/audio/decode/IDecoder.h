@@ -7,6 +7,7 @@
 #include <span>
 
 #include "audio/AudioTypes.h"
+#include "audio/DecoderKind.h"
 
 namespace camel::audio {
 
@@ -24,13 +25,6 @@ public:
     // Positions the stream so the next read() starts exactly at `frame`. Throws Error (SeekFailed).
     virtual void seek(uint64_t frame) = 0;
 };
-
-enum class DecoderKind : uint8_t { FFmpeg, Symphonia, DrFlac, Sndfile };
-constexpr DecoderKind kAllDecoders[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrFlac, DecoderKind::Sndfile};
-
-const char* decoderName(DecoderKind k); // display name, e.g. "dr_flac"
-const char* decoderId(DecoderKind k);   // settings / CLI id, e.g. "drflac"
-bool decoderFromId(std::string_view id, DecoderKind& out);
 
 // Opens `path` with the chosen decoder. Throws Error (FileOpen / UnsupportedStream / DecodeFailed).
 std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path);

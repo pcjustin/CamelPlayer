@@ -9,7 +9,8 @@ using namespace Microsoft::UI::Xaml;
 
 namespace winrt::CamelPlayer::implementation {
 
-App::App() {
+App::App(std::shared_ptr<camel::server::IServer> server) : server_(std::move(server)) {
+    if (!server_) server_ = camel::server::createLocalServer();
     UnhandledException([](IInspectable const&, UnhandledExceptionEventArgs const& e) {
         camel::log::error("unhandled XAML exception: %s", winrt::to_string(e.Message()).c_str());
 #if defined _DEBUG
@@ -19,7 +20,7 @@ App::App() {
 }
 
 void App::OnLaunched(LaunchActivatedEventArgs const&) {
-    window_ = make<MainWindow>();
+    window_ = make<MainWindow>(std::move(server_));
     window_.Activate();
 }
 

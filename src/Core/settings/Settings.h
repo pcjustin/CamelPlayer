@@ -5,7 +5,7 @@
 #include <string>
 
 #include "audio/AudioTypes.h"
-#include "audio/decode/IDecoder.h"
+#include "audio/DecoderKind.h"
 
 namespace camel {
 

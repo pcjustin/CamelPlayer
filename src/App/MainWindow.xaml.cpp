@@ -9,7 +9,6 @@
 #include <filesystem>
 
 #include "UiText.h"
-#include "util/Log.h"
 #include "util/Text.h"
 
 using namespace winrt;
@@ -18,6 +17,7 @@ using namespace Microsoft::UI::Xaml::Controls;
 using namespace camel;
 using namespace camel::audio;
 using ui::tr;
+using namespace camel::server;
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -53,25 +53,31 @@ void MainWindow::InitializeComponent() {
     MainWindowT<MainWindow>::InitializeComponent();
     AppWindow().Resize({1180, 780});
 
-    settings_ = loadSettings();
-    engine_ = std::make_unique<PlaybackEngine>(settings_);
+    if (!server_) server_ = createLocalServer();
+    settings_ = server_->snapshot().settings;
     auto dq = DispatcherQueue();
-    engine_->setListener([dq, weak = get_weak()] {
-        dq.TryEnqueue([weak] {
-            if (auto self = weak.get()) self->refreshFromEngine();
+    server_->setListener([dq, weak = get_weak()](const Event& event) {
+        dq.TryEnqueue([weak, snapshot = event.snapshot] {
+            if (auto self = weak.get()) self->applySnapshot(snapshot);
         });
     });
     using namespace std::chrono_literals;
     uiTimer_ = dq.CreateTimer();
     uiTimer_.Interval(250ms);
-    uiTimer_.Tick([this](auto&&, auto&&) { refreshFromEngine(); });
+    uiTimer_.Tick([this](auto&&, auto&&) { refreshFromServer(); });
     uiTimer_.Start();
     seekTimer_ = dq.CreateTimer();
     seekTimer_.Interval(200ms);
     seekTimer_.IsRepeating(false);
     seekTimer_.Tick([this](auto&&, auto&&) {
-        auto s = engine_->snapshot();
-        if (s.source) engine_->seek(secondsToFrames(pendingSeek_, s.source->sampleRate));
+        if (!server_) return;
+        const auto s = server_->snapshot().playback;
+        if (s.source) {
+            Command command;
+            command.kind = CommandKind::Seek;
+            command.frame = secondsToFrames(pendingSeek_, s.source->sampleRate);
+            submitCommand(std::move(command));
+        }
     });
 
     for (auto [button, key] : {std::pair{OpenButton(), L"Tip_Open"}, std::pair{PlayPauseButton(), L"Tip_PlayPause"},
@@ -82,16 +88,18 @@ void MainWindow::InitializeComponent() {
 
     populateSettings();
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
-    std::error_code ec;
-    if (!settings_.lastFile.empty() && std::filesystem::exists(settings_.lastFile, ec))
-        engine_->load(settings_.lastFile); // no autoplay (§2)
+    Command refresh;
+    refresh.kind = CommandKind::RefreshDevices;
+    submitCommand(std::move(refresh));
 
     Closed([this](auto&&, auto&&) {
         uiTimer_.Stop();
         seekTimer_.Stop();
-        engine_.reset(); // closes the device before the window goes away
+        server_->setListener({});
+        submitCommand(Command{});
+        server_.reset();
     });
-    refreshFromEngine();
+    refreshFromServer();
 }
 
 void MainWindow::populateSettings() {
@@ -120,15 +128,18 @@ void MainWindow::populateSettings() {
 
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
-    refreshDeviceLists();
+    populateDeviceLists(server_->snapshot().devices);
     populating_ = false;
     updateBackendGroups();
 }
 
-void MainWindow::refreshDeviceLists() {
+void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
     const bool was = populating_;
     populating_ = true;
-    wasapiDevices_ = listWasapiDevices();
+    WasapiDeviceCombo().IsEnabled(devices.revision != 0);
+    AsioDriverCombo().IsEnabled(devices.revision != 0);
+    KsDeviceCombo().IsEnabled(devices.revision != 0);
+    wasapiDevices_ = devices.wasapi;
     std::vector<hstring> names{tr(L"Device_Default")};
     int sel = 0;
     for (size_t i = 0; i < wasapiDevices_.size(); i++) {
@@ -137,7 +148,7 @@ void MainWindow::refreshDeviceLists() {
     }
     fill(WasapiDeviceCombo(), names, sel);
 
-    auto fillList = [&](ComboBox const& combo, const std::vector<DeviceEntry>& list, const std::string& current) {
+    auto fillList = [&](ComboBox const& combo, const std::vector<DeviceInfo>& list, const std::string& current) {
         std::vector<hstring> n;
         int s = 0;
         for (size_t i = 0; i < list.size(); i++) {
@@ -147,9 +158,9 @@ void MainWindow::refreshDeviceLists() {
         if (n.empty()) n.push_back(tr(L"Device_None"));
         fill(combo, n, s);
     };
-    asioDrivers_ = listAsioDrivers();
+    asioDrivers_ = devices.asio;
     fillList(AsioDriverCombo(), asioDrivers_, settings_.asio.driverClsid);
-    ksPins_ = listKsPins();
+    ksPins_ = devices.ks;
     fillList(KsDeviceCombo(), ksPins_, settings_.ks.deviceId);
     populating_ = was;
 }
@@ -160,7 +171,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.decoder = kAllDecoders[std::min<size_t>(idx(DecoderCombo()), std::size(kAllDecoders) - 1)];
 
     const int dev = idx(WasapiDeviceCombo());
-    settings_.wasapi.deviceId = dev == 0 || dev > int(wasapiDevices_.size()) ? "" : wasapiDevices_[size_t(dev - 1)].id;
+    if (shownDevicesRevision_ != 0)
+        settings_.wasapi.deviceId = dev == 0 || dev > int(wasapiDevices_.size()) ? "" : wasapiDevices_[size_t(dev - 1)].id;
     settings_.wasapi.eventDriven = idx(WasapiModeCombo()) == 0;
     settings_.wasapi.period = WasapiPeriod(std::min(idx(WasapiPeriodCombo()), 2));
     settings_.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), settings_.wasapi.customPeriodMs);
@@ -182,14 +194,12 @@ void MainWindow::readSettingsFromUi() {
 }
 
 void MainWindow::settingsChanged() {
-    if (populating_ || !engine_) return;
+    if (populating_ || !server_) return;
     readSettingsFromUi();
-    try {
-        saveSettings(settings_);
-    } catch (const std::exception& e) {
-        log::error("saving settings failed: %s", e.what());
-    }
-    engine_->applySettings(settings_); // immediately, from the current position (docs/計劃書.md §2)
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = settings_;
+    submitCommand(std::move(command));
     updateBackendGroups();
 }
 
@@ -200,14 +210,26 @@ void MainWindow::updateBackendGroups() {
     WasapiPeriodBox().IsEnabled(settings_.wasapi.period == WasapiPeriod::Custom);
 }
 
-void MainWindow::refreshFromEngine() {
-    if (!engine_) return;
-    const EngineSnapshot s = engine_->snapshot();
+void MainWindow::refreshFromServer() {
+    if (server_) applySnapshot(server_->snapshot());
+}
+
+void MainWindow::submitCommand(Command command) {
+    if (server_) cursor_.expect(server_->submit(std::move(command)));
+}
+
+void MainWindow::applySnapshot(const Snapshot& snapshot) {
+    if (!server_ || !cursor_.accept(snapshot)) return;
+    if (snapshot.devices.revision != shownDevicesRevision_) {
+        shownDevicesRevision_ = snapshot.devices.revision;
+        populateDeviceLists(snapshot.devices);
+    }
+    const auto& s = snapshot.playback;
     const uint32_t rate = s.source ? s.source->sampleRate : 0;
     const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
     const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
 
-    PlayPauseIcon().Symbol(s.state == PlayState::Playing ? Symbol::Pause : Symbol::Play);
+    PlayPauseIcon().Symbol(s.state == PlaybackState::Playing ? Symbol::Pause : Symbol::Play);
     if (!seekTimer_.IsRunning()) { // do not fight the user while they drag
         sliderUpdating_ = true;
         PositionSlider().Maximum(std::max(1.0, total));
@@ -217,14 +239,14 @@ void MainWindow::refreshFromEngine() {
     TimeText().Text(ui::formatTime(pos) + L" / " + ui::formatTime(total));
 
     // Now playing
-    if (s.file.empty()) {
+    if (s.pathUtf8.empty()) {
         TitleText().Text(tr(L"NoFile"));
         PathText().Text(L"");
         SourceText().Text(L"");
     } else {
-        const std::filesystem::path p(s.file);
+        const std::filesystem::path p(toWide(s.pathUtf8));
         TitleText().Text(p.stem().wstring());
-        PathText().Text(s.file);
+        PathText().Text(ui::utf8(s.pathUtf8));
         if (s.source) {
             wchar_t buf[256];
             swprintf(buf, 256, L"FLAC · %u-bit · %.1f kHz · %u ch · %s · STREAMINFO MD5 %s", s.source->bitsPerSample,
@@ -239,11 +261,11 @@ void MainWindow::refreshFromEngine() {
     if (s.output && s.source) {
         Lamp().Fill(brush(0x10, 0xB9, 0x10));
         LampText().Text(L"Bit-perfect");
-        FormatText().Text(hstring(L"FLAC ") + to_hstring(s.source->bitsPerSample) + L"-bit → " + ui::utf8(s.outputStatus.mode) +
-                          L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
+        FormatText().Text(hstring(L"FLAC ") + to_hstring(s.source->bitsPerSample) + L"-bit → " + ui::utf8(s.outputMode) + L" · " +
+                          ui::utf8(describe(*s.output)) + L" · " + decoder);
         SignalPathText().Text(tr(L"SignalPath_File") + L" → " + decoder + L" → " + tr(L"SignalPath_Pad") + L" " +
                               to_hstring(s.source->bitsPerSample) + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " +
-                              ui::utf8(s.outputStatus.mode));
+                              ui::utf8(s.outputMode));
     } else {
         Lamp().Fill(brush(0x80, 0x80, 0x80));
         LampText().Text(tr(L"Lamp_Idle"));
@@ -263,12 +285,20 @@ void MainWindow::refreshFromEngine() {
         }
     }
 
+    if (snapshot.command.id != shownCommandId_) {
+        shownCommandId_ = snapshot.command.id;
+        if (snapshot.commandError) {
+            ErrorBar().Title(ui::errorTitle(snapshot.commandError->code));
+            ErrorBar().Message(ui::utf8(snapshot.commandError->detail));
+            ErrorBar().IsOpen(true);
+        }
+    }
+
     // Status area on the settings page
     if (s.output) {
         wchar_t buf[512];
-        swprintf(buf, 512, L"%s\n%s\n%s\nunderrun: %llu", ui::utf8(describe(*s.output)).c_str(),
-                 ui::utf8(s.outputStatus.mode).c_str(), ui::utf8(s.outputStatus.detail).c_str(),
-                 static_cast<unsigned long long>(s.underruns));
+        swprintf(buf, 512, L"%s\n%s\n%s\nunderrun: %llu", ui::utf8(describe(*s.output)).c_str(), ui::utf8(s.outputMode).c_str(),
+                 ui::utf8(s.outputDetail).c_str(), static_cast<unsigned long long>(s.underruns));
         StatusText().Text(buf);
     } else {
         StatusText().Text(tr(L"Status_Idle"));
@@ -288,31 +318,31 @@ winrt::fire_and_forget MainWindow::OnOpenClick(Windows::Foundation::IInspectable
     picker.FileTypeFilter().Append(L".flac");
     picker.SuggestedStartLocation(Microsoft::Windows::Storage::Pickers::PickerLocationId::MusicLibrary);
     auto result = co_await picker.PickSingleFileAsync();
-    if (!result) co_return;
-    const std::wstring path{result.Path()};
-    settings_.lastFile = path;
-    try {
-        saveSettings(settings_);
-    } catch (...) {
-    }
-    engine_->openAndPlay(path);
+    if (!result || !server_) co_return;
+    Command command;
+    command.kind = CommandKind::OpenAndPlay;
+    command.source.emplace(toUtf8(std::wstring_view(result.Path())));
+    submitCommand(std::move(command));
 }
 
 void MainWindow::OnPlayPauseClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const& args) {
-    if (engine_->snapshot().file.empty()) {
+    if (!server_) return;
+    if (server_->snapshot().playback.pathUtf8.empty()) {
         OnOpenClick(sender, args);
         return;
     }
-    engine_->togglePause();
+    Command command;
+    command.kind = CommandKind::TogglePause;
+    submitCommand(std::move(command));
 }
 
 void MainWindow::OnStopClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    engine_->stop();
+    submitCommand(Command{});
 }
 
 void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,
                                       Primitives::RangeBaseValueChangedEventArgs const& e) {
-    if (sliderUpdating_ || !engine_) return;
+    if (sliderUpdating_ || !server_) return;
     pendingSeek_ = e.NewValue();
     seekTimer_.Stop();
     seekTimer_.Start(); // seek once the user pauses dragging
@@ -342,22 +372,24 @@ void MainWindow::OnLanguageChanged(Windows::Foundation::IInspectable const&, Sel
     if (populating_) return;
     const int i = LanguageCombo().SelectedIndex();
     settings_.language = i == 1 ? "zh-TW" : i == 2 ? "en-US" : "";
-    try {
-        saveSettings(settings_);
-    } catch (...) {
-    }
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = settings_;
+    submitCommand(std::move(command));
     LanguageNote().Visibility(Visibility::Visible); // takes effect after restart (docs/計劃書.md §8.5)
 }
 
 winrt::fire_and_forget MainWindow::OnAsioPanelClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    auto strong = get_strong();
-    auto* engine = engine_.get();
-    co_await winrt::resume_background(); // some drivers show a modal dialog
-    engine->showControlPanel();
+    Command command;
+    command.kind = CommandKind::ShowControlPanel;
+    submitCommand(std::move(command));
+    co_return;
 }
 
 void MainWindow::OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    refreshDeviceLists();
+    Command command;
+    command.kind = CommandKind::RefreshDevices;
+    submitCommand(std::move(command));
 }
 
 } // namespace winrt::CamelPlayer::implementation

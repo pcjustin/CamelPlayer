@@ -1,13 +1,12 @@
 #pragma once
 
 #include "MainWindow.g.h"
-#include "audio/engine/PlaybackEngine.h"
-#include "settings/Settings.h"
+#include "server/ServerApi.h"
 
 namespace winrt::CamelPlayer::implementation {
 
 struct MainWindow : MainWindowT<MainWindow> {
-    MainWindow() = default;
+    explicit MainWindow(std::shared_ptr<camel::server::IServer> server = {}) : server_(std::move(server)) {}
     // C++/WinRT calls this after construction; named XAML elements exist from here on.
     void InitializeComponent();
 
@@ -30,23 +29,28 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
-    void populateSettings();   // fills every control from settings_
-    void refreshDeviceLists(); // device combos only
+    void populateSettings(); // fills every control from settings_
+    void populateDeviceLists(const camel::server::DeviceCatalog& devices);
     void readSettingsFromUi(); // controls -> settings_
-    void settingsChanged();    // save + apply to the engine
+    void settingsChanged();
     void updateBackendGroups();
-    void refreshFromEngine();
+    void refreshFromServer();
+    void applySnapshot(const camel::server::Snapshot& snapshot);
+    void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
 
-    camel::Settings settings_;
-    std::unique_ptr<camel::audio::PlaybackEngine> engine_;
-    std::vector<camel::audio::DeviceEntry> wasapiDevices_, asioDrivers_, ksPins_;
+    camel::server::SettingsDto settings_;
+    std::shared_ptr<camel::server::IServer> server_;
+    camel::server::SnapshotCursor cursor_;
+    std::vector<camel::server::DeviceInfo> wasapiDevices_, asioDrivers_, ksPins_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer uiTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;
+    uint64_t shownCommandId_ = 0;
+    uint64_t shownDevicesRevision_ = 0;
 };
 
 } // namespace winrt::CamelPlayer::implementation

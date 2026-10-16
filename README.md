@@ -40,19 +40,21 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-Validation recorded **191 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug. The 29 engine-state tests also passed 20 repetitions (580 executions), plus **20 passed hardware cases** covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS.
+Validation recorded **209 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug. **40 hardware cases passed** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 
 ```powershell
-.\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*HardwarePlayback*"
+.\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*"
 ```
 
 The MVP is limited to stereo FLAC and unmodified integer output. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5. The production decoder selection is still pending.
 
 ## Dependencies and repository contents
 
-CamelPlayer-owned engine and decoder adapters live in `src/Core`, the WinUI application in `src/App`, the CLI in `src/Tools/camelcli`, and the Rust C ABI bridge in `rust/symphonia_ffi`. Tests and all required build configuration are included.
+The WinUI control point submits versioned commands to a same-process C++ Server, which owns settings, device enumeration and reference-engine control. Snapshots and events carry command IDs and revisions to reject stale UI updates. The Rust engine migration and remote transport remain future work.
+
+CamelPlayer-owned Server, engine and decoder adapters live in `src/Core`, the WinUI application in `src/App`, the CLI in `src/Tools/camelcli`, and the existing Rust Symphonia decoder FFI adapter in `rust/symphonia_ffi`. Tests and all required build configuration are included.
 
 FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia is restored through Cargo with a committed lockfile. The required ASIO SDK headers and their licenses are vendored in `third_party/asiosdk`.
 
