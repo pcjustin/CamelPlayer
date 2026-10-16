@@ -1,6 +1,6 @@
 # CamelPlayer v2 third-party dependencies
 
-This directory holds upstream source distributed directly with CamelPlayer and supplementary license notices. CamelPlayer-owned adapters and bridges remain with the application source. Package-manager downloads, caches, and build outputs are not committed.
+This directory holds upstream source distributed directly with CamelPlayer and supplementary license notices. CamelPlayer-owned adapters and bridges remain with the application source. The CamelPlayer brand assets are kept separately in `assets/`. Package-manager downloads, caches, and build outputs are not committed.
 
 | Component | Source management | CamelPlayer integration |
 |---|---|---|

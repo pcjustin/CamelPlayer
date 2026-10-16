@@ -52,6 +52,15 @@ Media::SolidColorBrush brush(uint8_t r, uint8_t g, uint8_t b) {
 void MainWindow::InitializeComponent() {
     MainWindowT<MainWindow>::InitializeComponent();
     AppWindow().Resize({1180, 780});
+    std::wstring executablePath(32768, L'\0');
+    const DWORD executablePathLength =
+        ::GetModuleFileNameW(nullptr, executablePath.data(), static_cast<DWORD>(executablePath.size()));
+    if (executablePathLength > 0 && executablePathLength < executablePath.size()) {
+        executablePath.resize(executablePathLength);
+        const auto iconPath = std::filesystem::path(executablePath).parent_path() / L"assets" / L"CamelPlayer.ico";
+        std::error_code error;
+        if (std::filesystem::exists(iconPath, error)) AppWindow().SetIcon(iconPath.c_str());
+    }
 
     if (!server_) server_ = createLocalServer();
     settings_ = server_->snapshot().settings;

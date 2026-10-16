@@ -115,6 +115,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <Content Include="$(CamelRoot)assets\CamelPlayer.ico">
+      <Link>assets\CamelPlayer.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(CamelRoot)src\Core\Core.vcxproj">

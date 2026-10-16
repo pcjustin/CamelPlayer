@@ -1,5 +1,7 @@
 # CamelPlayer v2
 
+![CamelPlayer logo](assets/camelplayer-logo.jpg)
+
 CamelPlayer v2 is a new Windows-native music player built with C++20 and WinUI 3. It is the second-generation CamelPlayer project, distinct from the earlier CamelPlayer codebase.
 
 The current implementation is an **MVP**: a stereo FLAC player with a bit-perfect output path, WASAPI exclusive, ASIO, and Kernel Streaming backends. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Four FLAC decoders remain available for comparison: FFmpeg, Symphonia, dr_flac, and libsndfile.
