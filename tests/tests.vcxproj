@@ -33,6 +33,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="*.cpp" />
+    <ClCompile Include="*.c" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(CamelRoot)src\Core\Core.vcxproj">
