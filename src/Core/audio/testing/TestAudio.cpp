@@ -100,14 +100,14 @@ static void writeAll(const std::filesystem::path& p, const char* data, size_t n)
 
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {
     auto b = readAll(src);
-    size_t at = std::max<size_t>(8192, size_t(b.size() * fraction));
+    size_t at = std::max<size_t>(8192, size_t(static_cast<double>(b.size()) * fraction));
     if (at < b.size()) b[at] = char(b[at] ^ 0x5A);
     writeAll(dst, b.data(), b.size());
 }
 
 void writeTruncated(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {
     auto b = readAll(src);
-    writeAll(dst, b.data(), size_t(b.size() * fraction));
+    writeAll(dst, b.data(), size_t(static_cast<double>(b.size()) * fraction));
 }
 
 std::vector<std::filesystem::path> generateAll(const std::filesystem::path& dir, double seconds) {

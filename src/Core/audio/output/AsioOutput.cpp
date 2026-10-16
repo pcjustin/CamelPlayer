@@ -21,7 +21,9 @@
 namespace camel::audio {
 namespace {
 
-enum : long { kStInt16LSB = 16, kStInt24LSB = 17, kStInt32LSB = 18 };
+constexpr long kStInt16LSB = 16;
+constexpr long kStInt24LSB = 17;
+constexpr long kStInt32LSB = 18;
 
 std::optional<SampleType> mapSampleType(ASIOSampleType t) {
     switch (t) {
@@ -73,8 +75,16 @@ public:
     }
 
     ~AsioOutput() override {
-        close();
-        invoke([this] { unload(); });
+        try {
+            close();
+        } catch (...) {
+            OutputDebugStringW(L"ASIO: failed to close driver during destruction.\n");
+        }
+        try {
+            invoke([this] { unload(); });
+        } catch (...) {
+            OutputDebugStringW(L"ASIO: failed to unload driver during destruction.\n");
+        }
         {
             std::lock_guard lock(qMutex_);
             quit_ = true;
@@ -158,7 +168,7 @@ public:
         for (size_t i = 0; i < frames; i++) {
             memcpy(l + i * bps, in, bps);
             memcpy(r + i * bps, in + bps, bps);
-            in += 2 * bps;
+            in += size_t(2) * bps;
         }
         if (outputReady_) drv_->outputReady();
     }
@@ -176,7 +186,6 @@ public:
             return 1;
         case kAsioResyncRequest:
         case kAsioLatenciesChanged:
-            return 1;
         case kAsioSupportsTimeInfo:
             return 1;
         default:
@@ -246,7 +255,8 @@ private:
         HRESULT hr = CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER, clsid, reinterpret_cast<void**>(&d));
         if (FAILED(hr) || !d) {
             char msg[96];
-            snprintf(msg, sizeof msg, "cannot load ASIO driver (0x%08lX)", (unsigned long)hr);
+            const int length = snprintf(msg, sizeof msg, "cannot load ASIO driver (0x%08lX)", (unsigned long)hr);
+            if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "cannot load ASIO driver");
             throw Error(ErrorCode::DriverError, msg);
         }
         if (!d->init(hwnd_)) {
@@ -334,9 +344,10 @@ private:
         status_.mode = "ASIO · " + driverName_;
         status_.bufferFrames = uint32_t(size);
         char d[160];
-        snprintf(d, sizeof d, "%s, buffer %ld (min %ld / max %ld), output latency %ld%s", asioTypeName(*driverType_), size, minS,
-                 maxS, outLat, outLat == 0 ? " (driver reports 0)" : "");
-        status_.detail = d;
+        const int length =
+            snprintf(d, sizeof d, "%s, buffer %ld (min %ld / max %ld), output latency %ld%s", asioTypeName(*driverType_), size,
+                     minS, maxS, outLat, outLat == 0 ? " (driver reports 0)" : "");
+        status_.detail = length < 0 || size_t(length) >= sizeof d ? "ASIO buffer status unavailable" : d;
     }
 
     AsioSettings cfg_;

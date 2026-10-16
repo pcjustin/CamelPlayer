@@ -8,6 +8,8 @@
 #include <thread>
 #include <vector>
 
+#include "util/Log.h"
+
 namespace camel::audio {
 namespace {
 
@@ -40,7 +42,7 @@ public:
             quit_ = true;
             thread_.join();
         }
-        if (file_) fclose(file_);
+        if (file_ && fclose(file_) != 0) log::warn("capture: closing output file failed");
         file_ = nullptr;
     }
 
@@ -64,7 +66,11 @@ private:
             }
             size_t got = source_->render(buf.data(), kChunk);
             if (got) {
-                fwrite(buf.data(), fmt_.bytesPerFrame(), got, file_);
+                if (fwrite(buf.data(), fmt_.bytesPerFrame(), got, file_) != got) {
+                    log::error("capture: writing output file failed");
+                    quit_ = true;
+                    continue;
+                }
                 frames += got;
             } else {
                 Sleep(1);

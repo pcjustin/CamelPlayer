@@ -22,11 +22,11 @@ const char* sampleTypeName(SampleType t) {
 
 std::string describe(const DeviceFormat& f) {
     char buf[64];
-    if (f.sampleRate % 1000 == 0)
-        snprintf(buf, sizeof buf, "%u kHz / %s", f.sampleRate / 1000, sampleTypeName(f.type));
-    else
-        snprintf(buf, sizeof buf, "%.1f kHz / %s", f.sampleRate / 1000.0, sampleTypeName(f.type));
-    return buf;
+    const int length = f.sampleRate % 1000 == 0
+                           ? snprintf(buf, sizeof buf, "%u kHz / %s", f.sampleRate / 1000, sampleTypeName(f.type))
+                           : snprintf(buf, sizeof buf, "%.1f kHz / %s", f.sampleRate / 1000.0, sampleTypeName(f.type));
+    if (length < 0 || size_t(length) >= sizeof buf) throw std::runtime_error("failed to format device description");
+    return std::string(buf, size_t(length));
 }
 
 const char* errorCodeName(ErrorCode c) {

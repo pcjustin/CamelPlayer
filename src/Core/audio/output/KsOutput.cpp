@@ -144,7 +144,7 @@ struct PinInfo {
 
 PinInfo pinInfo(HANDLE f, ULONG pin) {
     PinInfo pi;
-    KSPIN_DATAFLOW flow{};
+    KSPIN_DATAFLOW flow = KSPIN_DATAFLOW_IN;
     KSPIN_COMMUNICATION comm{};
     if (!pinProp(f, pin, KSPROPERTY_PIN_DATAFLOW, flow) || !pinProp(f, pin, KSPROPERTY_PIN_COMMUNICATION, comm)) return pi;
     if (flow != KSPIN_DATAFLOW_IN || !(comm == KSPIN_COMMUNICATION_SINK || comm == KSPIN_COMMUNICATION_BOTH)) return pi;
@@ -231,7 +231,7 @@ bool parseDeviceId(const std::string& id, std::wstring& path, ULONG& pin) {
     return true;
 }
 
-enum class Mode { RtEvent, RtPoll, Standard };
+enum class Mode : uint8_t { RtEvent, RtPoll, Standard };
 
 class KsOutput final : public IOutput {
 public:
@@ -387,7 +387,8 @@ void KsOutput::threadMain(std::promise<void>& opened) {
     CloseHandle(filter);
     if (e != ERROR_SUCCESS || !pin) {
         char msg[96];
-        snprintf(msg, sizeof msg, "KsCreatePin failed: %lu", e);
+        const int length = snprintf(msg, sizeof msg, "KsCreatePin failed: %lu", e);
+        if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "KsCreatePin failed");
         // ERROR_NO_MATCH means the format or interface is wrong; anything else is almost always another client holding the pin.
         opened.set_exception(
             std::make_exception_ptr(Error(e == ERROR_NO_MATCH ? ErrorCode::FormatNotSupported : ErrorCode::DeviceInUse, msg)));
@@ -421,7 +422,8 @@ bool KsOutput::waitRunning() {
 void KsOutput::finish(DWORD err, const char* what) {
     if (!err || quit_) return;
     char msg[128];
-    snprintf(msg, sizeof msg, "%s: %lu", what, err);
+    const int length = snprintf(msg, sizeof msg, "%s: %lu", what, err);
+    if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "KS output failed");
     log::error("ks: %s", msg);
     raiseError(Error(ErrorCode::DeviceLost, msg));
 }
@@ -457,7 +459,8 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
     }
     if (!ok || !rb.BufferAddress) {
         char msg[96];
-        snprintf(msg, sizeof msg, "KSPROPERTY_RTAUDIO_BUFFER failed: %lu", GetLastError());
+        const int length = snprintf(msg, sizeof msg, "KSPROPERTY_RTAUDIO_BUFFER failed: %lu", GetLastError());
+        if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "KSPROPERTY_RTAUDIO_BUFFER failed");
         CloseHandle(ev);
         opened.set_exception(std::make_exception_ptr(Error(ErrorCode::DriverError, msg)));
         return;
@@ -471,9 +474,10 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
     if (ksIoctl(pin, IOCTL_KS_PROPERTY, &hp, sizeof hp, &hr, sizeof hr) && hr.Register)
         posReg = static_cast<volatile ULONG*>(hr.Register);
     char detail[128];
-    snprintf(detail, sizeof detail, "buffer %lu bytes (%.2f ms), position %s", rb.ActualBufferSize,
-             rb.ActualBufferSize * 1000.0 / (fmt_.sampleRate * blk), posReg ? "register" : "property");
-    setStatus(notify ? "KS · WaveRT event" : "KS · WaveRT polling", size / blk, detail);
+    const int detailLength = snprintf(detail, sizeof detail, "buffer %lu bytes (%.2f ms), position %s", rb.ActualBufferSize,
+                                      rb.ActualBufferSize * 1000.0 / (fmt_.sampleRate * blk), posReg ? "register" : "property");
+    setStatus(notify ? "KS · WaveRT event" : "KS · WaveRT polling", size / blk,
+              detailLength < 0 || size_t(detailLength) >= sizeof detail ? "buffer status unavailable" : detail);
     opened.set_value();
 
     auto readPos = [&](ULONG& out) -> bool {
@@ -570,8 +574,10 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
         o.hEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     }
     char detail[96];
-    snprintf(detail, sizeof detail, "%d packets × %lu frames (%.1f ms)", n, pktFrames, pktFrames * 1000.0 / fmt_.sampleRate);
-    setStatus("KS · standard streaming", pktFrames * n, detail);
+    const int detailLength =
+        snprintf(detail, sizeof detail, "%d packets × %lu frames (%.1f ms)", n, pktFrames, pktFrames * 1000.0 / fmt_.sampleRate);
+    setStatus("KS · standard streaming", pktFrames * n,
+              detailLength < 0 || size_t(detailLength) >= sizeof detail ? "streaming buffer status unavailable" : detail);
     opened.set_value();
 
     auto submit = [&](int i) -> bool {

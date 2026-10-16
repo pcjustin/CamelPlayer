@@ -9,6 +9,7 @@
 #include <wil/resource.h>
 
 #include <atomic>
+#include <cmath>
 #include <future>
 #include <map>
 #include <mutex>
@@ -36,7 +37,8 @@ wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
 
 Error hrError(const char* what, HRESULT hr) {
     char buf[96];
-    snprintf(buf, sizeof buf, "%s: 0x%08lX", what, (unsigned long)hr);
+    const int length = snprintf(buf, sizeof buf, "%s: 0x%08lX", what, (unsigned long)hr);
+    if (length < 0 || size_t(length) >= sizeof buf) strcpy_s(buf, "WASAPI operation failed");
     switch (hr) {
     case AUDCLNT_E_DEVICE_IN_USE:
     case AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED:
@@ -149,7 +151,7 @@ private:
             if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
                 UINT32 frames = 0;
                 client->GetBufferSize(&frames);
-                period = REFERENCE_TIME(10000.0 * 1000 * frames / fmt_.sampleRate + 0.5);
+                period = REFERENCE_TIME(std::llround(10000.0 * 1000 * frames / fmt_.sampleRate));
                 log::info("wasapi: buffer not aligned, retrying with %u frames", frames);
                 client.reset();
                 THROW_IF_FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
@@ -165,8 +167,8 @@ private:
                 status_.mode = cfg_.eventDriven ? "WASAPI exclusive · event" : "WASAPI exclusive · polling";
                 status_.bufferFrames = bufferFrames;
                 char d[64];
-                snprintf(d, sizeof d, "period %.2f ms", period / 10000.0);
-                status_.detail = d;
+                const int length = snprintf(d, sizeof d, "period %.2f ms", static_cast<double>(period) / 10000.0);
+                status_.detail = length < 0 || size_t(length) >= sizeof d ? "WASAPI period unavailable" : d;
             }
             opened.set_value();
         } catch (const Error&) {
@@ -223,12 +225,17 @@ private:
                     continue;
                 }
                 timeouts = 0;
-                if (FAILED(err = fill(bufferFrames))) break;
+                err = fill(bufferFrames);
+                if (FAILED(err)) break;
             } else {
                 WaitForSingleObject(wake_.get(), DWORD(std::max<REFERENCE_TIME>(1, period / 20000)));
                 UINT32 pad = 0;
-                if (FAILED(err = client->GetCurrentPadding(&pad))) break;
-                if (bufferFrames > pad && FAILED(err = fill(bufferFrames - pad))) break;
+                err = client->GetCurrentPadding(&pad);
+                if (FAILED(err)) break;
+                if (bufferFrames > pad) {
+                    err = fill(bufferFrames - pad);
+                    if (FAILED(err)) break;
+                }
             }
         }
         if (started) client->Stop();

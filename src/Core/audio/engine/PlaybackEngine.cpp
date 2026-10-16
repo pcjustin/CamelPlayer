@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -60,10 +61,14 @@ public:
     }
 
     ~Impl() override {
-        post([this] {
-            teardown();
-            output_.reset();
-        });
+        try {
+            post([this] {
+                teardown();
+                output_.reset();
+            });
+        } catch (...) {
+            OutputDebugStringW(L"PlaybackEngine: failed to post teardown during destruction.\n");
+        }
         {
             std::lock_guard lock(qMutex_);
             quit_ = true;
@@ -276,8 +281,9 @@ private:
         }
         if (!fmt) {
             char msg[128];
-            snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device", src.sampleRate,
-                     src.bitsPerSample, src.channels);
+            const int length = snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device",
+                                        src.sampleRate, src.bitsPerSample, src.channels);
+            if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "No bit-perfect format available on this device");
             position_ = 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), PlayState::Stopped);
         }
@@ -485,10 +491,24 @@ PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f) : impl_(std::
 PlaybackEngine::~PlaybackEngine() = default;
 
 void PlaybackEngine::openAndPlay(const std::filesystem::path& file) {
-    impl_->post([this, file] { impl_->openAndPlay(file); });
+    auto fileCopy = std::make_shared<std::filesystem::path>(file);
+    impl_->post([this, fileCopy] {
+        try {
+            impl_->openAndPlay(*fileCopy);
+        } catch (const std::exception& e) {
+            log::error("engine: open command failed: %s", e.what());
+        }
+    });
 }
 void PlaybackEngine::load(const std::filesystem::path& file) {
-    impl_->post([this, file] { impl_->load(file); });
+    auto fileCopy = std::make_shared<std::filesystem::path>(file);
+    impl_->post([this, fileCopy] {
+        try {
+            impl_->load(*fileCopy);
+        } catch (const std::exception& e) {
+            log::error("engine: load command failed: %s", e.what());
+        }
+    });
 }
 void PlaybackEngine::play() {
     impl_->post([this] { impl_->play(); });
@@ -511,7 +531,14 @@ void PlaybackEngine::seek(uint64_t frame) {
     impl_->post([this, frame] { impl_->seek(frame); });
 }
 void PlaybackEngine::applySettings(const Settings& s) {
-    impl_->post([this, s] { impl_->applySettings(s); });
+    auto settingsCopy = std::make_shared<Settings>(s);
+    impl_->post([this, settingsCopy] {
+        try {
+            impl_->applySettings(*settingsCopy);
+        } catch (const std::exception& e) {
+            log::error("engine: settings command failed: %s", e.what());
+        }
+    });
 }
 bool PlaybackEngine::showControlPanel() {
     return impl_->call<bool>([this] { return impl_->showControlPanel(); });

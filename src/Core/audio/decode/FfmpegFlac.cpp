@@ -25,7 +25,11 @@ void routeAvLog() {
         av_log_set_callback([](void*, int level, const char* fmt, va_list ap) {
             if (level > AV_LOG_WARNING) return;
             char buf[512];
-            vsnprintf(buf, sizeof buf, fmt, ap);
+            const int length = vsnprintf(buf, sizeof buf, fmt, ap);
+            if (length < 0) {
+                log::warn("ffmpeg: failed to format log message");
+                return;
+            }
             log::warn("ffmpeg: %s", buf);
         });
     });
@@ -44,15 +48,16 @@ public:
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
         int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, nullptr);
         if (e < 0) throw Error(ErrorCode::FileOpen, "avformat_open_input: " + avErr(e));
-        if ((e = avformat_find_stream_info(fmt_, nullptr)) < 0)
-            fail(ErrorCode::UnsupportedStream, "avformat_find_stream_info: " + avErr(e));
+        e = avformat_find_stream_info(fmt_, nullptr);
+        if (e < 0) fail(ErrorCode::UnsupportedStream, "avformat_find_stream_info: " + avErr(e));
         const AVCodec* codec = nullptr;
         stream_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
         if (stream_ < 0 || !codec) fail(ErrorCode::UnsupportedStream, "no audio stream");
         AVStream* st = fmt_->streams[stream_];
         ctx_ = avcodec_alloc_context3(codec);
         avcodec_parameters_to_context(ctx_, st->codecpar);
-        if ((e = avcodec_open2(ctx_, codec, nullptr)) < 0) fail(ErrorCode::UnsupportedStream, "avcodec_open2: " + avErr(e));
+        e = avcodec_open2(ctx_, codec, nullptr);
+        if (e < 0) fail(ErrorCode::UnsupportedStream, "avcodec_open2: " + avErr(e));
         pkt_ = av_packet_alloc();
         frame_ = av_frame_alloc();
         info_.sampleRate = uint32_t(ctx_->sample_rate);
@@ -92,7 +97,8 @@ public:
         for (double backoff : {0.0, 1.0, 5.0, -1.0}) {
             int64_t target = backoff < 0 ? 0 : std::max<int64_t>(0, int64_t(frame) - int64_t(backoff * info_.sampleRate));
             int64_t ts = av_rescale_q(target, AVRational{1, int(info_.sampleRate)}, st->time_base);
-            if ((e = av_seek_frame(fmt_, stream_, ts, AVSEEK_FLAG_BACKWARD)) >= 0) break;
+            e = av_seek_frame(fmt_, stream_, ts, AVSEEK_FLAG_BACKWARD);
+            if (e >= 0) break;
         }
         if (e < 0) throw Error(ErrorCode::SeekFailed, "av_seek_frame: " + avErr(e));
         avcodec_flush_buffers(ctx_);
