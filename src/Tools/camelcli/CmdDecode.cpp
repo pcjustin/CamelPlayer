@@ -44,7 +44,8 @@ int cmdDecode(const Args& args) {
     }
     std::wstring which = option(args, L"--decoder").value_or(L"all");
     std::vector<DecoderKind> kinds;
-    if (which == L"all") kinds.assign(std::begin(kAllDecoders), std::end(kAllDecoders));
+    if (which == L"all")
+        kinds.assign(std::begin(kAllDecoders), std::end(kAllDecoders));
     else {
         DecoderKind k;
         if (!decoderFromId(toUtf8(which), k)) throw std::runtime_error("unknown decoder " + toUtf8(which));
@@ -69,9 +70,9 @@ int cmdDecode(const Args& args) {
                 double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
                 const char* verdict = !in.md5 ? "no MD5" : (*in.md5 == digest ? "MD5 OK" : "MD5 MISMATCH");
                 if (in.md5 && *in.md5 != digest) failures++;
-                std::printf("  %-10s %u Hz %u ch %u bit, %llu frames, %.3f s (%.0fx) %s %s\n", decoderName(k), in.sampleRate, in.channels,
-                            in.bitsPerSample, (unsigned long long)frames, s, s > 0 ? framesToSeconds(frames, in.sampleRate) / s : 0.0,
-                            toHex(digest).c_str(), verdict);
+                std::printf("  %-10s %u Hz %u ch %u bit, %llu frames, %.3f s (%.0fx) %s %s\n", decoderName(k), in.sampleRate,
+                            in.channels, in.bitsPerSample, (unsigned long long)frames, s,
+                            s > 0 ? framesToSeconds(frames, in.sampleRate) / s : 0.0, toHex(digest).c_str(), verdict);
             } catch (const Error& e) {
                 failures++;
                 std::printf("  %-10s ERROR %s: %s\n", decoderName(k), errorCodeName(e.code()), e.what());
@@ -81,4 +82,4 @@ int cmdDecode(const Args& args) {
     return failures ? 1 : 0;
 }
 
-}  // namespace camelcli
+} // namespace camelcli

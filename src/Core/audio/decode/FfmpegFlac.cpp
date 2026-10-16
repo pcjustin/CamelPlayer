@@ -44,7 +44,8 @@ public:
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
         int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, nullptr);
         if (e < 0) throw Error(ErrorCode::FileOpen, "avformat_open_input: " + avErr(e));
-        if ((e = avformat_find_stream_info(fmt_, nullptr)) < 0) fail(ErrorCode::UnsupportedStream, "avformat_find_stream_info: " + avErr(e));
+        if ((e = avformat_find_stream_info(fmt_, nullptr)) < 0)
+            fail(ErrorCode::UnsupportedStream, "avformat_find_stream_info: " + avErr(e));
         const AVCodec* codec = nullptr;
         stream_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
         if (stream_ < 0 || !codec) fail(ErrorCode::UnsupportedStream, "no audio stream");
@@ -57,7 +58,8 @@ public:
         info_.sampleRate = uint32_t(ctx_->sample_rate);
         info_.channels = uint32_t(ctx_->ch_layout.nb_channels);
         info_.bitsPerSample = uint32_t(ctx_->bits_per_raw_sample ? ctx_->bits_per_raw_sample : st->codecpar->bits_per_raw_sample);
-        if (st->duration > 0) info_.totalFrames = uint64_t(av_rescale_q(st->duration, st->time_base, AVRational{1, ctx_->sample_rate}));
+        if (st->duration > 0)
+            info_.totalFrames = uint64_t(av_rescale_q(st->duration, st->time_base, AVRational{1, ctx_->sample_rate}));
         if (!info_.sampleRate || !info_.channels || !info_.bitsPerSample || info_.bitsPerSample > 32)
             fail(ErrorCode::UnsupportedStream, "unexpected stream parameters");
     }
@@ -155,10 +157,11 @@ private:
         int skip = 0;
         if (seekTarget_ >= 0) {
             int64_t pts = frame_->best_effort_timestamp != AV_NOPTS_VALUE ? frame_->best_effort_timestamp : frame_->pts;
-            int64_t start = pts == AV_NOPTS_VALUE ? seekTarget_
-                                                  : av_rescale_q(pts, fmt_->streams[stream_]->time_base, AVRational{1, int(info_.sampleRate)});
+            int64_t start = pts == AV_NOPTS_VALUE
+                                ? seekTarget_
+                                : av_rescale_q(pts, fmt_->streams[stream_]->time_base, AVRational{1, int(info_.sampleRate)});
             int64_t drop = seekTarget_ - start;
-            if (drop >= n) {  // whole frame before the target
+            if (drop >= n) { // whole frame before the target
                 pending_.clear();
                 pendingPos_ = 0;
                 return;
@@ -194,8 +197,10 @@ private:
     SourceInfo info_;
 };
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IDecoder> openFfmpegFlac(const std::filesystem::path& path) { return std::make_unique<FfmpegFlac>(path); }
+std::unique_ptr<IDecoder> openFfmpegFlac(const std::filesystem::path& path) {
+    return std::make_unique<FfmpegFlac>(path);
+}
 
-}  // namespace camel::audio
+} // namespace camel::audio

@@ -7,4 +7,4 @@ namespace camel::audio {
 
 std::unique_ptr<IOutput> createWasapiOutput(const WasapiSettings& s);
 
-}  // namespace camel::audio
+} // namespace camel::audio

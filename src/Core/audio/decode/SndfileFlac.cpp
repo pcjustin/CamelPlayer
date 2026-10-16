@@ -17,10 +17,18 @@ public:
         sf_ = sf_wchar_open(longPath(path).c_str(), SFM_READ, &si);
         if (!sf_) throw Error(ErrorCode::FileOpen, std::string("sf_wchar_open: ") + sf_strerror(nullptr));
         switch (si.format & SF_FORMAT_SUBMASK) {
-        case SF_FORMAT_PCM_S8: info_.bitsPerSample = 8; break;
-        case SF_FORMAT_PCM_16: info_.bitsPerSample = 16; break;
-        case SF_FORMAT_PCM_24: info_.bitsPerSample = 24; break;
-        case SF_FORMAT_PCM_32: info_.bitsPerSample = 32; break;
+        case SF_FORMAT_PCM_S8:
+            info_.bitsPerSample = 8;
+            break;
+        case SF_FORMAT_PCM_16:
+            info_.bitsPerSample = 16;
+            break;
+        case SF_FORMAT_PCM_24:
+            info_.bitsPerSample = 24;
+            break;
+        case SF_FORMAT_PCM_32:
+            info_.bitsPerSample = 32;
+            break;
         default:
             sf_close(sf_);
             throw Error(ErrorCode::UnsupportedStream, "libsndfile: unsupported sample format");
@@ -46,7 +54,8 @@ public:
     }
 
     void seek(uint64_t frame) override {
-        if (sf_seek(sf_, sf_count_t(frame), SEEK_SET) < 0) throw Error(ErrorCode::SeekFailed, std::string("sf_seek: ") + sf_strerror(sf_));
+        if (sf_seek(sf_, sf_count_t(frame), SEEK_SET) < 0)
+            throw Error(ErrorCode::SeekFailed, std::string("sf_seek: ") + sf_strerror(sf_));
     }
 
 private:
@@ -54,8 +63,10 @@ private:
     SourceInfo info_;
 };
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IDecoder> openSndfileFlac(const std::filesystem::path& path) { return std::make_unique<SndfileFlac>(path); }
+std::unique_ptr<IDecoder> openSndfileFlac(const std::filesystem::path& path) {
+    return std::make_unique<SndfileFlac>(path);
+}
 
-}  // namespace camel::audio
+} // namespace camel::audio

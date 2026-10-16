@@ -18,7 +18,7 @@ std::vector<int32_t> decodeAll(IDecoder& d) {
 
 class EveryDecoder : public ::testing::TestWithParam<DecoderKind> {};
 
-}  // namespace
+} // namespace
 
 TEST_P(EveryDecoder, MatchesReferenceBitForBit) {
     for (const char* name : {"16-44.1k", "24-96k", "20-48k", "no-md5"}) {
@@ -53,7 +53,8 @@ TEST_P(EveryDecoder, SeeksSampleExact) {
             got += n;
         }
         ASSERT_EQ(got, 1000u) << "at " << target;
-        EXPECT_TRUE(std::equal(buf.begin(), buf.end(), ref.samples.begin() + target * ch)) << "seek to " << target << " is not sample exact";
+        EXPECT_TRUE(std::equal(buf.begin(), buf.end(), ref.samples.begin() + target * ch))
+            << "seek to " << target << " is not sample exact";
     }
 }
 

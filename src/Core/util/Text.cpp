@@ -27,4 +27,4 @@ std::wstring longPath(const std::filesystem::path& p) {
     return L"\\\\?\\" + s;
 }
 
-}  // namespace camel
+} // namespace camel

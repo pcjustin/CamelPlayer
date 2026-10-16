@@ -22,10 +22,10 @@ bool readFlacStreamInfo(const std::filesystem::path& path, SourceInfo& out) {
     uint64_t pos = 0;
     bool ok = false;
     if (readAt(0, hdr, 10)) {
-        if (hdr[0] == 'I' && hdr[1] == 'D' && hdr[2] == '3')  // ID3v2: synchsafe size
+        if (hdr[0] == 'I' && hdr[1] == 'D' && hdr[2] == '3') // ID3v2: synchsafe size
             pos = 10 + ((uint64_t(hdr[6] & 0x7f) << 21) | (uint64_t(hdr[7] & 0x7f) << 14) | (uint64_t(hdr[8] & 0x7f) << 7) |
                         uint64_t(hdr[9] & 0x7f));
-        uint8_t b[4 + 4 + 34];  // "fLaC", block header, STREAMINFO body
+        uint8_t b[4 + 4 + 34]; // "fLaC", block header, STREAMINFO body
         if (readAt(pos, b, sizeof b) && b[0] == 'f' && b[1] == 'L' && b[2] == 'a' && b[3] == 'C' && (b[4] & 0x7f) == 0) {
             const uint8_t* s = b + 8;
             out.sampleRate = (uint32_t(s[10]) << 12) | (uint32_t(s[11]) << 4) | (s[12] >> 4);
@@ -35,8 +35,10 @@ bool readFlacStreamInfo(const std::filesystem::path& path, SourceInfo& out) {
                               (uint64_t(s[16]) << 8) | s[17];
             std::array<uint8_t, 16> md5;
             std::copy(s + 18, s + 34, md5.begin());
-            if (std::any_of(md5.begin(), md5.end(), [](uint8_t x) { return x != 0; })) out.md5 = md5;
-            else out.md5.reset();
+            if (std::any_of(md5.begin(), md5.end(), [](uint8_t x) { return x != 0; }))
+                out.md5 = md5;
+            else
+                out.md5.reset();
             ok = true;
         }
     }
@@ -44,4 +46,4 @@ bool readFlacStreamInfo(const std::filesystem::path& path, SourceInfo& out) {
     return ok;
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

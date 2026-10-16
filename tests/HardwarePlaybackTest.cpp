@@ -17,19 +17,27 @@ struct Route {
     const char* device;
 };
 
-const Route routes[] = {{Backend::Wasapi, "Chord"}, {Backend::Asio, "Chord"}, {Backend::Ks, "Chord"},
-                        {Backend::Wasapi, "Cirrus"}, {Backend::Ks, "Cirrus"}};
+const Route routes[] = {{Backend::Wasapi, "Chord"},
+                        {Backend::Asio, "Chord"},
+                        {Backend::Ks, "Chord"},
+                        {Backend::Wasapi, "Cirrus"},
+                        {Backend::Ks, "Cirrus"}};
 
 bool selectDevice(Settings& settings, Backend backend, const char* name) {
-    const auto devices = backend == Backend::Wasapi ? listWasapiDevices() : backend == Backend::Asio ? listAsioDrivers() : listKsPins();
+    const auto devices = backend == Backend::Wasapi ? listWasapiDevices()
+                         : backend == Backend::Asio ? listAsioDrivers()
+                                                    : listKsPins();
     const auto it = std::find_if(devices.begin(), devices.end(), [&](const DeviceEntry& device) {
         return device.name.find(name) != std::string::npos && device.name.find("unavailable") == std::string::npos;
     });
     if (it == devices.end()) return false;
     settings.backend = backend;
-    if (backend == Backend::Wasapi) settings.wasapi.deviceId = it->id;
-    else if (backend == Backend::Asio) settings.asio.driverClsid = it->id;
-    else settings.ks.deviceId = it->id;
+    if (backend == Backend::Wasapi)
+        settings.wasapi.deviceId = it->id;
+    else if (backend == Backend::Asio)
+        settings.asio.driverClsid = it->id;
+    else
+        settings.ks.deviceId = it->id;
     return true;
 }
 
@@ -51,7 +59,7 @@ void expectPlaying(PlaybackEngine& engine, Backend backend, DecoderKind decoder)
     EXPECT_GT(snap.position, position);
     EXPECT_EQ(snap.underruns, 0u);
 }
-}  // namespace
+} // namespace
 
 class HardwarePlayback : public ::testing::TestWithParam<std::tuple<int, DecoderKind>> {};
 
@@ -117,5 +125,5 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
 }
 
 INSTANTIATE_TEST_SUITE_P(M0_21, HardwarePlayback,
-                        ::testing::Combine(::testing::Values(0, 1, 2, 3, 4), ::testing::ValuesIn(kAllDecoders)),
-                        hardwareCaseName);
+                         ::testing::Combine(::testing::Values(0, 1, 2, 3, 4), ::testing::ValuesIn(kAllDecoders)),
+                         hardwareCaseName);

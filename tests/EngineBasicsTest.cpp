@@ -35,13 +35,13 @@ TEST(SamplePacker, RoundTripEveryLayoutAndDepth) {
 }
 
 TEST(SamplePacker, ZeroPaddingLayout) {
-    const int32_t v = 0x123456;  // 24-bit sample
+    const int32_t v = 0x123456; // 24-bit sample
     uint8_t b[4];
     packSamples(&v, 1, 24, SampleType::Int24In32, b);
-    EXPECT_EQ(b[0], 0x00);  // low 8 bits padded with zero, value MSB-aligned
+    EXPECT_EQ(b[0], 0x00); // low 8 bits padded with zero, value MSB-aligned
     EXPECT_EQ(b[1], 0x56);
     EXPECT_EQ(b[3], 0x12);
-    const int32_t s = -2;  // 16-bit into 24 packed
+    const int32_t s = -2; // 16-bit into 24 packed
     packSamples(&s, 1, 16, SampleType::Int24, b);
     EXPECT_EQ(b[0], 0x00);
     EXPECT_EQ(b[1], 0xFE);
@@ -65,10 +65,10 @@ TEST(FormatRule, PicksSmallestContainerTheDeviceTakes) {
     EXPECT_EQ(chooseOutputFormat(s24, std::nullopt, cirrus)->type, SampleType::Int24In32);
     EXPECT_EQ(chooseOutputFormat(s16, std::nullopt, cirrus)->type, SampleType::Int16);
     EXPECT_EQ(chooseOutputFormat(s32, std::nullopt, cirrus)->type, SampleType::Int32);
-    EXPECT_EQ(chooseOutputFormat(s16, SampleType::Int32, cirrus)->type, SampleType::Int32);   // fixed in settings
-    EXPECT_FALSE(chooseOutputFormat(s24, SampleType::Int16, cirrus).has_value());              // would truncate
-    EXPECT_FALSE(chooseOutputFormat(s24, std::nullopt, only({SampleType::Float32})).has_value());  // no conversion in the MVP
-    EXPECT_FALSE(chooseOutputFormat(SourceInfo{44100, 1, 16}, std::nullopt, cirrus).has_value());   // stereo only
+    EXPECT_EQ(chooseOutputFormat(s16, SampleType::Int32, cirrus)->type, SampleType::Int32);       // fixed in settings
+    EXPECT_FALSE(chooseOutputFormat(s24, SampleType::Int16, cirrus).has_value());                 // would truncate
+    EXPECT_FALSE(chooseOutputFormat(s24, std::nullopt, only({SampleType::Float32})).has_value()); // no conversion in the MVP
+    EXPECT_FALSE(chooseOutputFormat(SourceInfo{44100, 1, 16}, std::nullopt, cirrus).has_value()); // stereo only
 }
 
 TEST(SpscRing, WrapsAround) {
@@ -76,8 +76,8 @@ TEST(SpscRing, WrapsAround) {
     uint8_t in[7] = {1, 2, 3, 4, 5, 6, 7}, out[10] = {};
     EXPECT_EQ(r.write(in, 7), 7u);
     EXPECT_EQ(r.read(out, 5), 5u);
-    EXPECT_EQ(r.write(in, 7), 7u);  // crosses the end
-    EXPECT_EQ(r.write(in, 7), 1u);  // full
+    EXPECT_EQ(r.write(in, 7), 7u); // crosses the end
+    EXPECT_EQ(r.write(in, 7), 1u); // full
     EXPECT_EQ(r.read(out, 10), 10u);
     EXPECT_EQ(out[0], 6);
     EXPECT_EQ(out[2], 1);
@@ -93,7 +93,7 @@ TEST(SpscRing, ConcurrentProducerConsumer) {
             uint32_t chunk[64];
             uint32_t n = std::min<uint32_t>(64, total - next);
             for (uint32_t i = 0; i < n; i++) chunk[i] = next + i;
-            size_t done = 0;  // the ring may take part of a value; keep going until all bytes are in
+            size_t done = 0; // the ring may take part of a value; keep going until all bytes are in
             while (done < n * 4) done += r.write(reinterpret_cast<uint8_t*>(chunk) + done, n * 4 - done);
             next += n;
         }
@@ -143,7 +143,7 @@ TEST(Settings, CorruptFileFallsBackToDefaults) {
     }
     Settings s = loadSettings(p);
     EXPECT_EQ(s.backend, Backend::Wasapi);
-    EXPECT_FALSE(std::filesystem::exists(p));  // moved aside as .bad
+    EXPECT_FALSE(std::filesystem::exists(p)); // moved aside as .bad
     EXPECT_TRUE(std::filesystem::exists(std::filesystem::path(p).concat(L".bad")));
     std::filesystem::remove(std::filesystem::path(p).concat(L".bad"));
 }

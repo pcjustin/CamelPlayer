@@ -5,7 +5,7 @@
 namespace camel::audio {
 
 void FlacMd5::update(const int32_t* samples, size_t count) {
-    if (bytes_ == 4) {  // little-endian int32 already has the right layout
+    if (bytes_ == 4) { // little-endian int32 already has the right layout
         md5_.update(samples, count * 4);
         return;
     }
@@ -18,4 +18,4 @@ void FlacMd5::update(const int32_t* samples, size_t count) {
     md5_.update(buf_.data(), buf_.size());
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

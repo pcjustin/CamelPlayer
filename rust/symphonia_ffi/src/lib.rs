@@ -85,7 +85,9 @@ impl SymDecoder {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(p) => p,
-                Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
+                Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Ok(false)
+                }
                 Err(e) => {
                     self.last_error = e.to_string();
                     return Err(map_err(&e));
@@ -111,7 +113,11 @@ impl SymDecoder {
 
 /// Opens `path` (UTF-8). On success stores a decoder handle in `out` and fills `info`.
 #[no_mangle]
-pub unsafe extern "C" fn sym_open(path: *const c_char, out: *mut *mut SymDecoder, info: *mut SymInfo) -> i32 {
+pub unsafe extern "C" fn sym_open(
+    path: *const c_char,
+    out: *mut *mut SymDecoder,
+    info: *mut SymInfo,
+) -> i32 {
     if path.is_null() || out.is_null() || info.is_null() {
         return SYM_E_ARG;
     }
@@ -124,18 +130,32 @@ pub unsafe extern "C" fn sym_open(path: *const c_char, out: *mut *mut SymDecoder
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     hint.with_extension("flac");
-    let probed = match symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()) {
+    let probed = match symphonia::default::get_probe().format(
+        &hint,
+        mss,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) {
         Ok(p) => p,
-        Err(e) => return if matches!(e, Error::Unsupported(_)) { SYM_E_UNSUPPORTED } else { SYM_E_FORMAT },
+        Err(e) => {
+            return if matches!(e, Error::Unsupported(_)) {
+                SYM_E_UNSUPPORTED
+            } else {
+                SYM_E_FORMAT
+            }
+        }
     };
     let format = probed.format;
-    let Some(track) = format.default_track() else { return SYM_E_FORMAT };
+    let Some(track) = format.default_track() else {
+        return SYM_E_FORMAT;
+    };
     let params = track.codec_params.clone();
     let track_id = track.id;
-    let decoder = match symphonia::default::get_codecs().make(&params, &DecoderOptions { verify: false }) {
-        Ok(d) => d,
-        Err(_) => return SYM_E_UNSUPPORTED,
-    };
+    let decoder =
+        match symphonia::default::get_codecs().make(&params, &DecoderOptions { verify: false }) {
+            Ok(d) => d,
+            Err(_) => return SYM_E_UNSUPPORTED,
+        };
     let channels = params.channels.map(|c| c.count()).unwrap_or(0);
     let bits = params.bits_per_sample.unwrap_or(0);
     if channels == 0 || bits == 0 || bits > 32 {
@@ -171,7 +191,12 @@ pub unsafe extern "C" fn sym_open(path: *const c_char, out: *mut *mut SymDecoder
 /// Reads up to `frames` frames into `dst` (frames * channels i32). Returns SYM_OK with `*read` frames,
 /// SYM_END with `*read` = 0 at end of stream, or a negative error code.
 #[no_mangle]
-pub unsafe extern "C" fn sym_read(dec: *mut SymDecoder, dst: *mut i32, frames: usize, read: *mut usize) -> i32 {
+pub unsafe extern "C" fn sym_read(
+    dec: *mut SymDecoder,
+    dst: *mut i32,
+    frames: usize,
+    read: *mut usize,
+) -> i32 {
     if dec.is_null() || dst.is_null() || read.is_null() {
         return SYM_E_ARG;
     }
@@ -196,7 +221,11 @@ pub unsafe extern "C" fn sym_read(dec: *mut SymDecoder, dst: *mut i32, frames: u
         d.pending_pos += n;
     }
     *read = filled / d.channels;
-    if filled == 0 { SYM_END } else { SYM_OK }
+    if filled == 0 {
+        SYM_END
+    } else {
+        SYM_OK
+    }
 }
 
 /// Seeks so the next read starts exactly at `frame`.
@@ -206,7 +235,13 @@ pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
         return SYM_E_ARG;
     }
     let d = &mut *dec;
-    let seeked = match d.format.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: frame, track_id: d.track_id }) {
+    let seeked = match d.format.seek(
+        SeekMode::Accurate,
+        SeekTo::TimeStamp {
+            ts: frame,
+            track_id: d.track_id,
+        },
+    ) {
         Ok(s) => s,
         Err(e) => {
             d.last_error = e.to_string();

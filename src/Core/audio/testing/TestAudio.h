@@ -11,13 +11,13 @@
 namespace camel::audio::testaudio {
 
 struct GenSpec {
-    std::string name;  // file stem, e.g. "24-96k"
+    std::string name; // file stem, e.g. "24-96k"
     uint32_t sampleRate;
     uint32_t bits;
     uint32_t channels = 2;
     double seconds = 10.0;
     bool md5 = true;
-    double toneDb = 0;  // < 0: a plain 440 Hz sine at this level (safe for listening tests) instead of the full-scale test signal
+    double toneDb = 0; // < 0: a plain 440 Hz sine at this level (safe for listening tests) instead of the full-scale test signal
 };
 
 // The §16.6 matrix: 16/44.1, 16/48, 24/96, 24/192, 24/352.8, 32/384, 32/768.
@@ -39,13 +39,13 @@ std::vector<std::filesystem::path> generateAll(const std::filesystem::path& dir,
 
 struct ReferenceDecode {
     SourceInfo info;
-    std::vector<int32_t> samples;  // interleaved, right-aligned
-    bool md5Checked = false;       // libFLAC verified the STREAMINFO MD5
+    std::vector<int32_t> samples; // interleaved, right-aligned
+    bool md5Checked = false;      // libFLAC verified the STREAMINFO MD5
     bool md5Ok = false;
-    std::string error;             // empty when the whole file decoded cleanly
+    std::string error; // empty when the whole file decoded cleanly
 };
 
 // Decodes the whole file with libFLAC (MD5 checking on).
 ReferenceDecode referenceDecode(const std::filesystem::path& path);
 
-}  // namespace camel::audio::testaudio
+} // namespace camel::audio::testaudio

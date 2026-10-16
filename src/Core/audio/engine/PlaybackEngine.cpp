@@ -22,14 +22,17 @@
 namespace camel::audio {
 
 namespace {
-constexpr size_t kDecodeChunk = 4096;   // frames per decoder read
-constexpr double kStartFillSeconds = 0.5;  // buffered before the output starts
+constexpr size_t kDecodeChunk = 4096;     // frames per decoder read
+constexpr double kStartFillSeconds = 0.5; // buffered before the output starts
 
 std::optional<SampleType> fixedSampleType(const Settings& s) {
     switch (s.backend) {
-    case Backend::Wasapi: return s.wasapi.sampleType;
-    case Backend::Ks: return s.ks.sampleType;
-    case Backend::Asio: return std::nullopt;  // the driver dictates the type
+    case Backend::Wasapi:
+        return s.wasapi.sampleType;
+    case Backend::Ks:
+        return s.ks.sampleType;
+    case Backend::Asio:
+        return std::nullopt; // the driver dictates the type
     }
     return std::nullopt;
 }
@@ -37,13 +40,16 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
 bool sameBackendConfig(const Settings& a, const Settings& b) {
     if (a.backend != b.backend) return false;
     switch (a.backend) {
-    case Backend::Wasapi: return a.wasapi == b.wasapi;
-    case Backend::Asio: return a.asio == b.asio;
-    case Backend::Ks: return a.ks == b.ks;
+    case Backend::Wasapi:
+        return a.wasapi == b.wasapi;
+    case Backend::Asio:
+        return a.asio == b.asio;
+    case Backend::Ks:
+        return a.ks == b.ks;
     }
     return false;
 }
-}  // namespace
+} // namespace
 
 class PlaybackEngine::Impl final : public IRenderSource {
 public:
@@ -148,7 +154,8 @@ public:
     }
 
     void seek(uint64_t frame) {
-        if (active_) startSession(frame, state_ == PlayState::Playing);
+        if (active_)
+            startSession(frame, state_ == PlayState::Playing);
         else {
             position_ = frame;
             publish();
@@ -169,8 +176,10 @@ public:
             snap_.backend = s.backend;
             snap_.decoder = s.decoder;
         }
-        if ((outputChanged || decoderChanged) && wasActive) startSession(pos, wasPlaying);
-        else publish();
+        if ((outputChanged || decoderChanged) && wasActive)
+            startSession(pos, wasPlaying);
+        else
+            publish();
     }
 
     bool showControlPanel() {
@@ -259,15 +268,16 @@ private:
         std::optional<DeviceFormat> fmt;
         try {
             ensureOutput();
-            fmt = chooseOutputFormat(src, fixedSampleType(settings_), [&](const DeviceFormat& f) { return output_->supports(f); });
+            fmt =
+                chooseOutputFormat(src, fixedSampleType(settings_), [&](const DeviceFormat& f) { return output_->supports(f); });
         } catch (const Error& e) {
             position_ = startFrame;
             return fail(e, PlayState::Stopped);
         }
         if (!fmt) {
             char msg[128];
-            snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device", src.sampleRate, src.bitsPerSample,
-                     src.channels);
+            snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device", src.sampleRate,
+                     src.bitsPerSample, src.channels);
             position_ = 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), PlayState::Stopped);
         }
@@ -329,8 +339,8 @@ private:
             snap_.error.reset();
             snap_.errorDetail.clear();
         }
-        log::info("engine: %s via %s, %s, start %llu", toUtf8(file_).c_str(), decoderName(settings_.decoder), describe(fmt_).c_str(),
-                  (unsigned long long)startFrame);
+        log::info("engine: %s via %s, %s, start %llu", toUtf8(file_).c_str(), decoderName(settings_.decoder),
+                  describe(fmt_).c_str(), (unsigned long long)startFrame);
         if (playNow) {
             playing_ = true;
             output_->start();
@@ -396,7 +406,7 @@ private:
     void onOutputError(const Error& e) {
         log::warn("engine: output error %s: %s", errorCodeName(e.code()), e.what());
         teardown();
-        output_.reset();  // the device may have changed; reopen from scratch on the next play
+        output_.reset(); // the device may have changed; reopen from scratch on the next play
         fail(e, PlayState::Paused);
     }
 
@@ -474,23 +484,49 @@ private:
 PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f) : impl_(std::make_unique<Impl>(s, std::move(f))) {}
 PlaybackEngine::~PlaybackEngine() = default;
 
-void PlaybackEngine::openAndPlay(const std::filesystem::path& file) { impl_->post([this, file] { impl_->openAndPlay(file); }); }
-void PlaybackEngine::load(const std::filesystem::path& file) { impl_->post([this, file] { impl_->load(file); }); }
-void PlaybackEngine::play() { impl_->post([this] { impl_->play(); }); }
-void PlaybackEngine::pause() { impl_->post([this] { impl_->pause(); }); }
+void PlaybackEngine::openAndPlay(const std::filesystem::path& file) {
+    impl_->post([this, file] { impl_->openAndPlay(file); });
+}
+void PlaybackEngine::load(const std::filesystem::path& file) {
+    impl_->post([this, file] { impl_->load(file); });
+}
+void PlaybackEngine::play() {
+    impl_->post([this] { impl_->play(); });
+}
+void PlaybackEngine::pause() {
+    impl_->post([this] { impl_->pause(); });
+}
 void PlaybackEngine::togglePause() {
     impl_->post([this] {
-        if (impl_->snapshot().state == PlayState::Playing) impl_->pause();
-        else impl_->play();
+        if (impl_->snapshot().state == PlayState::Playing)
+            impl_->pause();
+        else
+            impl_->play();
     });
 }
-void PlaybackEngine::stop() { impl_->post([this] { impl_->stop(); }); }
-void PlaybackEngine::seek(uint64_t frame) { impl_->post([this, frame] { impl_->seek(frame); }); }
-void PlaybackEngine::applySettings(const Settings& s) { impl_->post([this, s] { impl_->applySettings(s); }); }
-bool PlaybackEngine::showControlPanel() { return impl_->call<bool>([this] { return impl_->showControlPanel(); }); }
-EngineSnapshot PlaybackEngine::snapshot() const { return impl_->snapshot(); }
-void PlaybackEngine::setListener(std::function<void()> l) { impl_->setListener(std::move(l)); }
-void PlaybackEngine::waitIdle() { impl_->call<void>([] {}); }
-bool PlaybackEngine::waitForState(PlayState s, std::chrono::milliseconds t) { return impl_->waitForState(s, t); }
+void PlaybackEngine::stop() {
+    impl_->post([this] { impl_->stop(); });
+}
+void PlaybackEngine::seek(uint64_t frame) {
+    impl_->post([this, frame] { impl_->seek(frame); });
+}
+void PlaybackEngine::applySettings(const Settings& s) {
+    impl_->post([this, s] { impl_->applySettings(s); });
+}
+bool PlaybackEngine::showControlPanel() {
+    return impl_->call<bool>([this] { return impl_->showControlPanel(); });
+}
+EngineSnapshot PlaybackEngine::snapshot() const {
+    return impl_->snapshot();
+}
+void PlaybackEngine::setListener(std::function<void()> l) {
+    impl_->setListener(std::move(l));
+}
+void PlaybackEngine::waitIdle() {
+    impl_->call<void>([] {});
+}
+bool PlaybackEngine::waitForState(PlayState s, std::chrono::milliseconds t) {
+    return impl_->waitForState(s, t);
+}
 
-}  // namespace camel::audio
+} // namespace camel::audio

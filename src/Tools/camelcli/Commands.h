@@ -20,4 +20,4 @@ int cmdGenTestAudio(const Args& args);
 int cmdBenchOne(const Args& args);
 int cmdBenchDecoders(const Args& args);
 
-}  // namespace camelcli
+} // namespace camelcli

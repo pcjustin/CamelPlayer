@@ -10,4 +10,4 @@ std::unique_ptr<IOutput> createAsioOutput(const AsioSettings& s);
 // Opens the driver's control panel; false if `out` is not an ASIO output or the driver refused.
 bool showAsioControlPanel(IOutput* out);
 
-}  // namespace camel::audio
+} // namespace camel::audio

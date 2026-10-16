@@ -4,7 +4,7 @@
 #include <objbase.h>
 
 #pragma warning(push, 0)
-#include <iasiodrv.h>  // Steinberg ASIO SDK 2.3.4 (third_party/asiosdk, GPLv3)
+#include <iasiodrv.h> // Steinberg ASIO SDK 2.3.4 (third_party/asiosdk, GPLv3)
 #pragma warning(pop)
 
 #include <atomic>
@@ -25,30 +25,44 @@ enum : long { kStInt16LSB = 16, kStInt24LSB = 17, kStInt32LSB = 18 };
 
 std::optional<SampleType> mapSampleType(ASIOSampleType t) {
     switch (t) {
-    case kStInt16LSB: return SampleType::Int16;
-    case kStInt24LSB: return SampleType::Int24;
-    case kStInt32LSB: return SampleType::Int32;
-    default: return std::nullopt;  // float and LSB-justified 32-bit types are not bit-perfect targets in the MVP
+    case kStInt16LSB:
+        return SampleType::Int16;
+    case kStInt24LSB:
+        return SampleType::Int24;
+    case kStInt32LSB:
+        return SampleType::Int32;
+    default:
+        return std::nullopt; // float and LSB-justified 32-bit types are not bit-perfect targets in the MVP
     }
 }
 
 const char* asioTypeName(ASIOSampleType t) {
     switch (t) {
-    case 16: return "Int16LSB";
-    case 17: return "Int24LSB";
-    case 18: return "Int32LSB";
-    case 19: return "Float32LSB";
-    case 20: return "Float64LSB";
-    case 24: return "Int32LSB16";
-    case 25: return "Int32LSB18";
-    case 26: return "Int32LSB20";
-    case 27: return "Int32LSB24";
-    default: return "other";
+    case 16:
+        return "Int16LSB";
+    case 17:
+        return "Int24LSB";
+    case 18:
+        return "Int32LSB";
+    case 19:
+        return "Float32LSB";
+    case 20:
+        return "Float64LSB";
+    case 24:
+        return "Int32LSB16";
+    case 25:
+        return "Int32LSB18";
+    case 26:
+        return "Int32LSB20";
+    case 27:
+        return "Int32LSB24";
+    default:
+        return "other";
     }
 }
 
 class AsioOutput;
-AsioOutput* g_active = nullptr;  // the SDK callbacks carry no user pointer (§5.6)
+AsioOutput* g_active = nullptr; // the SDK callbacks carry no user pointer (§5.6)
 
 class AsioOutput final : public IOutput {
 public:
@@ -78,7 +92,7 @@ public:
                     ok = drv_->canSampleRate(ASIOSampleRate(f.sampleRate)) == ASE_OK;
             });
         } catch (const Error&) {
-            return true;  // let open() report why the driver is unusable
+            return true; // let open() report why the driver is unusable
         }
         return ok;
     }
@@ -153,16 +167,20 @@ public:
         case kAsioSelectorSupported:
             return value == kAsioResetRequest || value == kAsioEngineVersion || value == kAsioResyncRequest ||
                    value == kAsioLatenciesChanged || value == kAsioSupportsTimeInfo || value == kAsioBufferSizeChange;
-        case kAsioEngineVersion: return 2;
+        case kAsioEngineVersion:
+            return 2;
         case kAsioResetRequest:
         case kAsioBufferSizeChange:
             log::info("asio: driver requested reset (%ld)", selector);
             raiseRestart();
             return 1;
         case kAsioResyncRequest:
-        case kAsioLatenciesChanged: return 1;
-        case kAsioSupportsTimeInfo: return 1;
-        default: return 0;
+        case kAsioLatenciesChanged:
+            return 1;
+        case kAsioSupportsTimeInfo:
+            return 1;
+        default:
+            return 0;
         }
     }
     void onRateChanged() noexcept { raiseRestart(); }
@@ -188,8 +206,9 @@ private:
         threadId_ = GetCurrentThreadId();
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         MSG msg;
-        PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);  // create the message queue
-        HWND hwnd = CreateWindowExW(0, L"STATIC", L"CamelPlayer ASIO", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE); // create the message queue
+        HWND hwnd = CreateWindowExW(0, L"STATIC", L"CamelPlayer ASIO", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+                                    GetModuleHandleW(nullptr), nullptr);
         {
             std::lock_guard lock(qMutex_);
             hwnd_ = hwnd;
@@ -262,8 +281,10 @@ private:
 
     void openOnSta(const DeviceFormat& f, IRenderSource* source) {
         load();
-        if (cfg_.outLeft >= numOutputs_ || cfg_.outRight >= numOutputs_) throw Error(ErrorCode::DeviceNotFound, "ASIO output channel out of range");
-        if (!driverType_ || mapSampleType(*driverType_) != f.type) throw Error(ErrorCode::FormatNotSupported, "ASIO sample type mismatch");
+        if (cfg_.outLeft >= numOutputs_ || cfg_.outRight >= numOutputs_)
+            throw Error(ErrorCode::DeviceNotFound, "ASIO output channel out of range");
+        if (!driverType_ || mapSampleType(*driverType_) != f.type)
+            throw Error(ErrorCode::FormatNotSupported, "ASIO sample type mismatch");
         ASIOSampleRate cur = 0;
         drv_->getSampleRate(&cur);
         if (cur != ASIOSampleRate(f.sampleRate) && drv_->setSampleRate(ASIOSampleRate(f.sampleRate)) != ASE_OK)
@@ -273,8 +294,9 @@ private:
         long size = pref;
         if (cfg_.bufferSize > 0 && minS != maxS) {
             size = std::clamp(cfg_.bufferSize, minS, maxS);
-            if (gran > 0) size = minS + (size - minS) / gran * gran;
-            else if (gran == -1) {  // powers of two
+            if (gran > 0)
+                size = minS + (size - minS) / gran * gran;
+            else if (gran == -1) { // powers of two
                 long p = minS;
                 while (p * 2 <= size) p *= 2;
                 size = p;
@@ -312,8 +334,8 @@ private:
         status_.mode = "ASIO · " + driverName_;
         status_.bufferFrames = uint32_t(size);
         char d[160];
-        snprintf(d, sizeof d, "%s, buffer %ld (min %ld / max %ld), output latency %ld%s", asioTypeName(*driverType_), size, minS, maxS,
-                 outLat, outLat == 0 ? " (driver reports 0)" : "");
+        snprintf(d, sizeof d, "%s, buffer %ld (min %ld / max %ld), output latency %ld%s", asioTypeName(*driverType_), size, minS,
+                 maxS, outLat, outLat == 0 ? " (driver reports 0)" : "");
         status_.detail = d;
     }
 
@@ -340,9 +362,11 @@ private:
     OutputStatus status_;
 };
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IOutput> createAsioOutput(const AsioSettings& s) { return std::make_unique<AsioOutput>(s); }
+std::unique_ptr<IOutput> createAsioOutput(const AsioSettings& s) {
+    return std::make_unique<AsioOutput>(s);
+}
 
 bool showAsioControlPanel(IOutput* out) {
     auto a = dynamic_cast<AsioOutput*>(out);
@@ -380,4 +404,4 @@ std::vector<DeviceEntry> listAsioDrivers() {
     return out;
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

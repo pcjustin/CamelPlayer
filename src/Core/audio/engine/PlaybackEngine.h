@@ -20,17 +20,17 @@ enum class PlayState : uint8_t { Stopped, Playing, Paused };
 struct EngineSnapshot {
     PlayState state = PlayState::Stopped;
     std::wstring file;
-    uint64_t position = 0;  // frames handed to the device
+    uint64_t position = 0; // frames handed to the device
     uint64_t total = 0;
     std::optional<SourceInfo> source;
-    std::optional<DeviceFormat> output;  // set while a stream is open; always bit-perfect under the MVP rule
+    std::optional<DeviceFormat> output; // set while a stream is open; always bit-perfect under the MVP rule
     Backend backend = Backend::Wasapi;
     DecoderKind decoder = DecoderKind::FFmpeg;
     OutputStatus outputStatus;
     uint64_t underruns = 0;
-    std::optional<ErrorCode> error;  // last problem, shown until the next successful start
+    std::optional<ErrorCode> error; // last problem, shown until the next successful start
     std::string errorDetail;
-    uint64_t revision = 0;  // increments on every change
+    uint64_t revision = 0; // increments on every change
 
     bool bitPerfect() const { return output.has_value(); }
 };
@@ -71,4 +71,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace camel::audio
+} // namespace camel::audio

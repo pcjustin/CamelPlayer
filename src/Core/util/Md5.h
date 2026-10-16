@@ -24,4 +24,4 @@ private:
 
 std::string toHex(const std::array<uint8_t, 16>& digest);
 
-}  // namespace camel
+} // namespace camel

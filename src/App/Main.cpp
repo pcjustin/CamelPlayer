@@ -15,8 +15,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     try {
         const camel::Settings s = camel::loadSettings();
-        if (!s.language.empty())  // "" = follow Windows (docs/計劃書.md §8.5)
-            winrt::Microsoft::Windows::Globalization::ApplicationLanguages::PrimaryLanguageOverride(winrt::to_hstring(s.language));
+        if (!s.language.empty()) // "" = follow Windows (docs/計劃書.md §8.5)
+            winrt::Microsoft::Windows::Globalization::ApplicationLanguages::PrimaryLanguageOverride(
+                winrt::to_hstring(s.language));
     } catch (const winrt::hresult_error& e) {
         camel::log::warn("language override failed: 0x%08X", static_cast<unsigned>(e.code()));
     }

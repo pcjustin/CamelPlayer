@@ -43,9 +43,11 @@ double numberOr(NumberBox const& box, double fallback) {
     return std::isnan(v) ? fallback : v;
 }
 
-Media::SolidColorBrush brush(uint8_t r, uint8_t g, uint8_t b) { return Media::SolidColorBrush(Windows::UI::Color{255, r, g, b}); }
+Media::SolidColorBrush brush(uint8_t r, uint8_t g, uint8_t b) {
+    return Media::SolidColorBrush(Windows::UI::Color{255, r, g, b});
+}
 
-}  // namespace
+} // namespace
 
 void MainWindow::InitializeComponent() {
     MainWindowT<MainWindow>::InitializeComponent();
@@ -72,24 +74,25 @@ void MainWindow::InitializeComponent() {
         if (s.source) engine_->seek(secondsToFrames(pendingSeek_, s.source->sampleRate));
     });
 
-    for (auto [button, key] : {std::pair{OpenButton(), L"Tip_Open"}, std::pair{PlayPauseButton(), L"Tip_PlayPause"}, std::pair{StopButton(), L"Tip_Stop"}}) {
+    for (auto [button, key] : {std::pair{OpenButton(), L"Tip_Open"}, std::pair{PlayPauseButton(), L"Tip_PlayPause"},
+                               std::pair{StopButton(), L"Tip_Stop"}}) {
         ToolTipService::SetToolTip(button, box_value(tr(key)));
-        Automation::AutomationProperties::SetName(button, tr(key));  // icon-only buttons need a name for screen readers
+        Automation::AutomationProperties::SetName(button, tr(key)); // icon-only buttons need a name for screen readers
     }
 
     populateSettings();
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     std::error_code ec;
-    if (!settings_.lastFile.empty() && std::filesystem::exists(settings_.lastFile, ec)) engine_->load(settings_.lastFile);  // no autoplay (§2)
+    if (!settings_.lastFile.empty() && std::filesystem::exists(settings_.lastFile, ec))
+        engine_->load(settings_.lastFile); // no autoplay (§2)
 
     Closed([this](auto&&, auto&&) {
         uiTimer_.Stop();
         seekTimer_.Stop();
-        engine_.reset();  // closes the device before the window goes away
+        engine_.reset(); // closes the device before the window goes away
     });
     refreshFromEngine();
 }
-
 
 void MainWindow::populateSettings() {
     populating_ = true;
@@ -108,7 +111,8 @@ void MainWindow::populateSettings() {
     AsioLeftBox().Value(settings_.asio.outLeft + 1);
     AsioRightBox().Value(settings_.asio.outRight + 1);
 
-    fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")}, int(settings_.ks.mode));
+    fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")},
+         int(settings_.ks.mode));
     KsBufferBox().Value(settings_.ks.bufferMs);
     KsPacketCountBox().Value(settings_.ks.packetCount);
     KsPacketMsBox().Value(settings_.ks.packetMs);
@@ -185,7 +189,7 @@ void MainWindow::settingsChanged() {
     } catch (const std::exception& e) {
         log::error("saving settings failed: %s", e.what());
     }
-    engine_->applySettings(settings_);  // immediately, from the current position (docs/計劃書.md §2)
+    engine_->applySettings(settings_); // immediately, from the current position (docs/計劃書.md §2)
     updateBackendGroups();
 }
 
@@ -204,7 +208,7 @@ void MainWindow::refreshFromEngine() {
     const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
 
     PlayPauseIcon().Symbol(s.state == PlayState::Playing ? Symbol::Pause : Symbol::Play);
-    if (!seekTimer_.IsRunning()) {  // do not fight the user while they drag
+    if (!seekTimer_.IsRunning()) { // do not fight the user while they drag
         sliderUpdating_ = true;
         PositionSlider().Maximum(std::max(1.0, total));
         PositionSlider().Value(std::min(pos, std::max(1.0, total)));
@@ -224,7 +228,8 @@ void MainWindow::refreshFromEngine() {
         if (s.source) {
             wchar_t buf[256];
             swprintf(buf, 256, L"FLAC · %u-bit · %.1f kHz · %u ch · %s · STREAMINFO MD5 %s", s.source->bitsPerSample,
-                     s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str(), s.source->md5 ? L"✓" : L"—");
+                     s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str(),
+                     s.source->md5 ? L"✓" : L"—");
             SourceText().Text(buf);
         }
     }
@@ -234,8 +239,8 @@ void MainWindow::refreshFromEngine() {
     if (s.output && s.source) {
         Lamp().Fill(brush(0x10, 0xB9, 0x10));
         LampText().Text(L"Bit-perfect");
-        FormatText().Text(hstring(L"FLAC ") + to_hstring(s.source->bitsPerSample) + L"-bit → " + ui::utf8(s.outputStatus.mode) + L" · " +
-                          ui::utf8(describe(*s.output)) + L" · " + decoder);
+        FormatText().Text(hstring(L"FLAC ") + to_hstring(s.source->bitsPerSample) + L"-bit → " + ui::utf8(s.outputStatus.mode) +
+                          L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
         SignalPathText().Text(tr(L"SignalPath_File") + L" → " + decoder + L" → " + tr(L"SignalPath_Pad") + L" " +
                               to_hstring(s.source->bitsPerSample) + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " +
                               ui::utf8(s.outputStatus.mode));
@@ -261,8 +266,9 @@ void MainWindow::refreshFromEngine() {
     // Status area on the settings page
     if (s.output) {
         wchar_t buf[512];
-        swprintf(buf, 512, L"%s\n%s\n%s\nunderrun: %llu", ui::utf8(describe(*s.output)).c_str(), ui::utf8(s.outputStatus.mode).c_str(),
-                 ui::utf8(s.outputStatus.detail).c_str(), static_cast<unsigned long long>(s.underruns));
+        swprintf(buf, 512, L"%s\n%s\n%s\nunderrun: %llu", ui::utf8(describe(*s.output)).c_str(),
+                 ui::utf8(s.outputStatus.mode).c_str(), ui::utf8(s.outputStatus.detail).c_str(),
+                 static_cast<unsigned long long>(s.underruns));
         StatusText().Text(buf);
     } else {
         StatusText().Text(tr(L"Status_Idle"));
@@ -300,13 +306,16 @@ void MainWindow::OnPlayPauseClick(Windows::Foundation::IInspectable const& sende
     engine_->togglePause();
 }
 
-void MainWindow::OnStopClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) { engine_->stop(); }
+void MainWindow::OnStopClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    engine_->stop();
+}
 
-void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&, Primitives::RangeBaseValueChangedEventArgs const& e) {
+void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,
+                                      Primitives::RangeBaseValueChangedEventArgs const& e) {
     if (sliderUpdating_ || !engine_) return;
     pendingSeek_ = e.NewValue();
     seekTimer_.Stop();
-    seekTimer_.Start();  // seek once the user pauses dragging
+    seekTimer_.Start(); // seek once the user pauses dragging
 }
 
 void MainWindow::OnNavSelectionChanged(NavigationView const&, NavigationViewSelectionChangedEventArgs const& e) {
@@ -321,9 +330,13 @@ void MainWindow::OnNavSelectionChanged(NavigationView const&, NavigationViewSele
     showPage(tag);
 }
 
-void MainWindow::OnSettingChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) { settingsChanged(); }
+void MainWindow::OnSettingChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
+    settingsChanged();
+}
 
-void MainWindow::OnNumberChanged(NumberBox const&, NumberBoxValueChangedEventArgs const&) { settingsChanged(); }
+void MainWindow::OnNumberChanged(NumberBox const&, NumberBoxValueChangedEventArgs const&) {
+    settingsChanged();
+}
 
 void MainWindow::OnLanguageChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
     if (populating_) return;
@@ -333,16 +346,18 @@ void MainWindow::OnLanguageChanged(Windows::Foundation::IInspectable const&, Sel
         saveSettings(settings_);
     } catch (...) {
     }
-    LanguageNote().Visibility(Visibility::Visible);  // takes effect after restart (docs/計劃書.md §8.5)
+    LanguageNote().Visibility(Visibility::Visible); // takes effect after restart (docs/計劃書.md §8.5)
 }
 
 winrt::fire_and_forget MainWindow::OnAsioPanelClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
     auto* engine = engine_.get();
-    co_await winrt::resume_background();  // some drivers show a modal dialog
+    co_await winrt::resume_background(); // some drivers show a modal dialog
     engine->showControlPanel();
 }
 
-void MainWindow::OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) { refreshDeviceLists(); }
+void MainWindow::OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    refreshDeviceLists();
+}
 
-}  // namespace winrt::CamelPlayer::implementation
+} // namespace winrt::CamelPlayer::implementation

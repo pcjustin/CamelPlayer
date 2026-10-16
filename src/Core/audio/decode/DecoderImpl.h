@@ -9,4 +9,4 @@ std::unique_ptr<IDecoder> openSymphoniaFlac(const std::filesystem::path& path);
 std::unique_ptr<IDecoder> openDrFlac(const std::filesystem::path& path);
 std::unique_ptr<IDecoder> openSndfileFlac(const std::filesystem::path& path);
 
-}  // namespace camel::audio
+} // namespace camel::audio

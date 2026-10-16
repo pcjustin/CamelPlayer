@@ -26,4 +26,4 @@ inline WAVEFORMATEXTENSIBLE makeWaveFormat(const DeviceFormat& f) {
     return w;
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

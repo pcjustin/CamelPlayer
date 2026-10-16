@@ -17,4 +17,4 @@ struct CaptureOptions {
 
 std::unique_ptr<IOutput> createCaptureOutput(CaptureOptions opts);
 
-}  // namespace camel::audio
+} // namespace camel::audio

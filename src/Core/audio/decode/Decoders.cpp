@@ -5,20 +5,28 @@ namespace camel::audio {
 
 const char* decoderName(DecoderKind k) {
     switch (k) {
-    case DecoderKind::FFmpeg: return "FFmpeg";
-    case DecoderKind::Symphonia: return "Symphonia";
-    case DecoderKind::DrFlac: return "dr_flac";
-    case DecoderKind::Sndfile: return "libsndfile";
+    case DecoderKind::FFmpeg:
+        return "FFmpeg";
+    case DecoderKind::Symphonia:
+        return "Symphonia";
+    case DecoderKind::DrFlac:
+        return "dr_flac";
+    case DecoderKind::Sndfile:
+        return "libsndfile";
     }
     return "?";
 }
 
 const char* decoderId(DecoderKind k) {
     switch (k) {
-    case DecoderKind::FFmpeg: return "ffmpeg";
-    case DecoderKind::Symphonia: return "symphonia";
-    case DecoderKind::DrFlac: return "drflac";
-    case DecoderKind::Sndfile: return "sndfile";
+    case DecoderKind::FFmpeg:
+        return "ffmpeg";
+    case DecoderKind::Symphonia:
+        return "symphonia";
+    case DecoderKind::DrFlac:
+        return "drflac";
+    case DecoderKind::Sndfile:
+        return "sndfile";
     }
     return "?";
 }
@@ -51,19 +59,27 @@ private:
     SourceInfo info_;
 };
 
-}  // namespace
+} // namespace
 
 std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path) {
     std::unique_ptr<IDecoder> d;
     switch (kind) {
-    case DecoderKind::FFmpeg: d = openFfmpegFlac(path); break;
-    case DecoderKind::Symphonia: d = openSymphoniaFlac(path); break;
-    case DecoderKind::DrFlac: d = openDrFlac(path); break;
-    case DecoderKind::Sndfile: d = openSndfileFlac(path); break;
+    case DecoderKind::FFmpeg:
+        d = openFfmpegFlac(path);
+        break;
+    case DecoderKind::Symphonia:
+        d = openSymphoniaFlac(path);
+        break;
+    case DecoderKind::DrFlac:
+        d = openDrFlac(path);
+        break;
+    case DecoderKind::Sndfile:
+        d = openSndfileFlac(path);
+        break;
     }
     SourceInfo parsed;
     if (readFlacStreamInfo(path, parsed)) return std::make_unique<WithStreamInfo>(std::move(d), parsed);
     return d;
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

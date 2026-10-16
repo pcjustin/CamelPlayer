@@ -29,14 +29,15 @@ void write(const char* level, const char* fmt, va_list ap) {
     }
 }
 
-}  // namespace
+} // namespace
 
 void init(const std::filesystem::path& logDir, const wchar_t* prefix) {
     std::error_code ec;
     std::filesystem::create_directories(logDir, ec);
     auto cutoff = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24 * 7);
     for (auto& e : std::filesystem::directory_iterator(logDir, ec))
-        if (e.is_regular_file(ec) && e.path().extension() == L".log" && e.last_write_time(ec) < cutoff) std::filesystem::remove(e.path(), ec);
+        if (e.is_regular_file(ec) && e.path().extension() == L".log" && e.last_write_time(ec) < cutoff)
+            std::filesystem::remove(e.path(), ec);
     SYSTEMTIME t;
     GetLocalTime(&t);
     wchar_t name[128];
@@ -67,4 +68,4 @@ void error(const char* fmt, ...) {
     va_end(ap);
 }
 
-}  // namespace camel::log
+} // namespace camel::log

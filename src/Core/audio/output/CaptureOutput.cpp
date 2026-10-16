@@ -23,7 +23,8 @@ public:
 
     void open(const DeviceFormat& f, IRenderSource* source) override {
         close();
-        if (_wfopen_s(&file_, opts_.file.c_str(), L"wb") != 0 || !file_) throw Error(ErrorCode::DeviceNotFound, "cannot create capture file");
+        if (_wfopen_s(&file_, opts_.file.c_str(), L"wb") != 0 || !file_)
+            throw Error(ErrorCode::DeviceNotFound, "cannot create capture file");
         fmt_ = f;
         source_ = source;
         quit_ = false;
@@ -79,8 +80,10 @@ private:
     std::atomic<bool> quit_{false}, running_{false};
 };
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IOutput> createCaptureOutput(CaptureOptions opts) { return std::make_unique<CaptureOutput>(std::move(opts)); }
+std::unique_ptr<IOutput> createCaptureOutput(CaptureOptions opts) {
+    return std::make_unique<CaptureOutput>(std::move(opts));
+}
 
-}  // namespace camel::audio
+} // namespace camel::audio

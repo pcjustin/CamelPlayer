@@ -22,4 +22,4 @@ private:
     std::vector<uint8_t> buf_;
 };
 
-}  // namespace camel::audio
+} // namespace camel::audio

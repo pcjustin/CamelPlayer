@@ -27,7 +27,7 @@ void usage() {
         "      measure the four decoders (docs/計劃書.md §16.5)\n");
 }
 
-}  // namespace
+} // namespace
 
 int wmain(int argc, wchar_t** argv) {
     SetConsoleOutputCP(CP_UTF8);

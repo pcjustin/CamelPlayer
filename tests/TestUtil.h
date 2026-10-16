@@ -23,8 +23,9 @@ inline std::filesystem::path testFile(const char* name) {
     std::call_once(once, [] {
         auto dir = tempDir();
         using camel::audio::testaudio::GenSpec;
-        for (GenSpec s : {GenSpec{"16-44.1k", 44100, 16, 2, 2.0}, GenSpec{"24-96k", 96000, 24, 2, 2.0}, GenSpec{"32-384k", 384000, 32, 2, 1.0},
-                          GenSpec{"20-48k", 48000, 20, 2, 1.0}, GenSpec{"no-md5", 48000, 16, 2, 1.0, false}})
+        for (GenSpec s : {GenSpec{"16-44.1k", 44100, 16, 2, 2.0}, GenSpec{"24-96k", 96000, 24, 2, 2.0},
+                          GenSpec{"32-384k", 384000, 32, 2, 1.0}, GenSpec{"20-48k", 48000, 20, 2, 1.0},
+                          GenSpec{"no-md5", 48000, 16, 2, 1.0, false}})
             camel::audio::testaudio::writeFlac(dir / (s.name + ".flac"), s);
         camel::audio::testaudio::writeCorrupted(dir / "24-96k.flac", dir / "damaged.flac");
         camel::audio::testaudio::writeTruncated(dir / "24-96k.flac", dir / "truncated.flac");
@@ -46,12 +47,15 @@ inline std::filesystem::path acceptanceFile(const char* name) {
 inline bool knownUnsupported(camel::audio::DecoderKind k, uint32_t bits) {
     using camel::audio::DecoderKind;
     switch (k) {
-    case DecoderKind::FFmpeg: return false;
+    case DecoderKind::FFmpeg:
+        return false;
     case DecoderKind::Symphonia:
-    case DecoderKind::DrFlac: return bits == 32;
-    case DecoderKind::Sndfile: return bits != 8 && bits != 16 && bits != 24;
+    case DecoderKind::DrFlac:
+        return bits == 32;
+    case DecoderKind::Sndfile:
+        return bits != 8 && bits != 16 && bits != 24;
     }
     return false;
 }
 
-}  // namespace testutil
+} // namespace testutil
