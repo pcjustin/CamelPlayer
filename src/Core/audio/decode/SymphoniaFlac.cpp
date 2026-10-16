@@ -52,8 +52,10 @@ private:
     SourceInfo info_;
 };
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IDecoder> openSymphoniaFlac(const std::filesystem::path& path) { return std::make_unique<SymphoniaFlac>(path); }
+std::unique_ptr<IDecoder> openSymphoniaFlac(const std::filesystem::path& path) {
+    return std::make_unique<SymphoniaFlac>(path);
+}
 
-}  // namespace camel::audio
+} // namespace camel::audio

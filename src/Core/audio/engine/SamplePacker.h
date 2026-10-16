@@ -16,4 +16,4 @@ void packSamples(const int32_t* src, size_t count, uint32_t bits, SampleType typ
 // Inverse of packSamples, used by tests and capture comparison.
 void unpackSamples(const uint8_t* src, size_t count, uint32_t bits, SampleType type, int32_t* dst);
 
-}  // namespace camel::audio
+} // namespace camel::audio

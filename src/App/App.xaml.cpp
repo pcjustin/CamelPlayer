@@ -23,4 +23,4 @@ void App::OnLaunched(LaunchActivatedEventArgs const&) {
     window_.Activate();
 }
 
-}  // namespace winrt::CamelPlayer::implementation
+} // namespace winrt::CamelPlayer::implementation

@@ -21,7 +21,7 @@
 namespace camel::audio {
 namespace {
 
-constexpr REFERENCE_TIME kPollBuffer = 2'000'000;  // 200 ms (docs/計劃書.md §6 default)
+constexpr REFERENCE_TIME kPollBuffer = 2'000'000; // 200 ms (docs/計劃書.md §6 default)
 
 wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     auto en = wil::CoCreateInstance<MMDeviceEnumerator, IMMDeviceEnumerator>(CLSCTX_ALL);
@@ -29,7 +29,8 @@ wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     HRESULT hr = id.empty() ? en->GetDefaultAudioEndpoint(eRender, eConsole, &dev) : en->GetDevice(toWide(id).c_str(), &dev);
     if (FAILED(hr) || !dev) throw Error(ErrorCode::DeviceNotFound, "WASAPI device not found");
     DWORD state = 0;
-    if (SUCCEEDED(dev->GetState(&state)) && state != DEVICE_STATE_ACTIVE) throw Error(ErrorCode::DeviceNotFound, "WASAPI device not active");
+    if (SUCCEEDED(dev->GetState(&state)) && state != DEVICE_STATE_ACTIVE)
+        throw Error(ErrorCode::DeviceNotFound, "WASAPI device not active");
     return dev;
 }
 
@@ -38,11 +39,15 @@ Error hrError(const char* what, HRESULT hr) {
     snprintf(buf, sizeof buf, "%s: 0x%08lX", what, (unsigned long)hr);
     switch (hr) {
     case AUDCLNT_E_DEVICE_IN_USE:
-    case AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED: return Error(ErrorCode::DeviceInUse, buf);
+    case AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED:
+        return Error(ErrorCode::DeviceInUse, buf);
     case AUDCLNT_E_DEVICE_INVALIDATED:
-    case AUDCLNT_E_SERVICE_NOT_RUNNING: return Error(ErrorCode::DeviceLost, buf);
-    case AUDCLNT_E_UNSUPPORTED_FORMAT: return Error(ErrorCode::FormatNotSupported, buf);
-    default: return Error(ErrorCode::DriverError, buf);
+    case AUDCLNT_E_SERVICE_NOT_RUNNING:
+        return Error(ErrorCode::DeviceLost, buf);
+    case AUDCLNT_E_UNSUPPORTED_FORMAT:
+        return Error(ErrorCode::FormatNotSupported, buf);
+    default:
+        return Error(ErrorCode::DriverError, buf);
     }
 }
 
@@ -73,7 +78,7 @@ public:
                 ok = client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &wf.Format, nullptr) == S_OK;
             }
         } catch (const Error&) {
-            return false;  // device missing: open() will report it
+            return false; // device missing: open() will report it
         }
         caps_[key] = ok;
         return ok;
@@ -117,7 +122,7 @@ private:
         if (!thread_.joinable()) return;
         running_ = run;
         wake_.SetEvent();
-        applied_.wait(run);  // returns once the render thread has applied the new state
+        applied_.wait(run); // returns once the render thread has applied the new state
     }
 
     void threadMain(std::promise<void>& opened) {
@@ -132,13 +137,15 @@ private:
             THROW_IF_FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
             REFERENCE_TIME defP = 0, minP = 0;
             client->GetDevicePeriod(&defP, &minP);
-            period = cfg_.period == WasapiPeriod::Minimum  ? minP
-                     : cfg_.period == WasapiPeriod::Custom ? std::max<REFERENCE_TIME>(minP, REFERENCE_TIME(cfg_.customPeriodMs * 10000))
-                                                           : defP;
+            period = cfg_.period == WasapiPeriod::Minimum ? minP
+                     : cfg_.period == WasapiPeriod::Custom
+                         ? std::max<REFERENCE_TIME>(minP, REFERENCE_TIME(cfg_.customPeriodMs * 10000))
+                         : defP;
             WAVEFORMATEXTENSIBLE wf = makeWaveFormat(fmt_);
             const DWORD flags = cfg_.eventDriven ? AUDCLNT_STREAMFLAGS_EVENTCALLBACK : 0;
             const REFERENCE_TIME dur = cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4);
-            HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, dur, cfg_.eventDriven ? period : 0, &wf.Format, nullptr);
+            HRESULT hr =
+                client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, dur, cfg_.eventDriven ? period : 0, &wf.Format, nullptr);
             if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
                 UINT32 frames = 0;
                 client->GetBufferSize(&frames);
@@ -188,7 +195,7 @@ private:
             bool want = running_;
             if (want != started) {
                 if (want) {
-                    if (!primed) {  // exclusive mode requires a full buffer before Start
+                    if (!primed) { // exclusive mode requires a full buffer before Start
                         err = fill(bufferFrames);
                         primed = true;
                     }
@@ -267,9 +274,11 @@ private:
     std::map<std::tuple<uint32_t, uint32_t, int>, bool> caps_;
 };
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IOutput> createWasapiOutput(const WasapiSettings& s) { return std::make_unique<WasapiOutput>(s); }
+std::unique_ptr<IOutput> createWasapiOutput(const WasapiSettings& s) {
+    return std::make_unique<WasapiOutput>(s);
+}
 
 std::vector<DeviceEntry> listWasapiDevices() {
     ComScope com;
@@ -299,4 +308,4 @@ std::vector<DeviceEntry> listWasapiDevices() {
     return out;
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

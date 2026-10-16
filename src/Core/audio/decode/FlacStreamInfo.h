@@ -10,4 +10,4 @@ namespace camel::audio {
 // The MD5 is left empty when the encoder stored all zeros (no MD5).
 bool readFlacStreamInfo(const std::filesystem::path& path, SourceInfo& out);
 
-}  // namespace camel::audio
+} // namespace camel::audio

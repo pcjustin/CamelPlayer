@@ -14,19 +14,25 @@ enum class SampleType : uint8_t { Int16, Int24, Int24In32, Int32, Float32 };
 
 constexpr uint32_t bytesPerSample(SampleType t) {
     switch (t) {
-    case SampleType::Int16: return 2;
-    case SampleType::Int24: return 3;
-    default: return 4;
+    case SampleType::Int16:
+        return 2;
+    case SampleType::Int24:
+        return 3;
+    default:
+        return 4;
     }
 }
 
 // Number of significant bits the layout carries (container width for Int32 / Float32).
 constexpr uint32_t validBits(SampleType t) {
     switch (t) {
-    case SampleType::Int16: return 16;
+    case SampleType::Int16:
+        return 16;
     case SampleType::Int24:
-    case SampleType::Int24In32: return 24;
-    default: return 32;
+    case SampleType::Int24In32:
+        return 24;
+    default:
+        return 32;
     }
 }
 
@@ -41,30 +47,34 @@ struct DeviceFormat {
     bool operator==(const DeviceFormat&) const = default;
 };
 
-std::string describe(const DeviceFormat& f);  // e.g. "96 kHz / 24-in-32"
+std::string describe(const DeviceFormat& f); // e.g. "96 kHz / 24-in-32"
 
 // What a decoder reports about the stream it opened.
 struct SourceInfo {
     uint32_t sampleRate = 0;
     uint32_t channels = 0;
-    uint32_t bitsPerSample = 0;  // original bit depth; decoded samples are right-aligned to it
-    uint64_t totalFrames = 0;    // 0 if unknown
-    std::optional<std::array<uint8_t, 16>> md5;  // FLAC STREAMINFO MD5 when present (all zero means absent)
+    uint32_t bitsPerSample = 0;                 // original bit depth; decoded samples are right-aligned to it
+    uint64_t totalFrames = 0;                   // 0 if unknown
+    std::optional<std::array<uint8_t, 16>> md5; // FLAC STREAMINFO MD5 when present (all zero means absent)
 };
 
-inline double framesToSeconds(uint64_t frames, uint32_t rate) { return rate ? double(frames) / rate : 0.0; }
-inline uint64_t secondsToFrames(double seconds, uint32_t rate) { return seconds <= 0 ? 0 : uint64_t(seconds * rate + 0.5); }
+inline double framesToSeconds(uint64_t frames, uint32_t rate) {
+    return rate ? double(frames) / rate : 0.0;
+}
+inline uint64_t secondsToFrames(double seconds, uint32_t rate) {
+    return seconds <= 0 ? 0 : uint64_t(seconds * rate + 0.5);
+}
 
 // Errors carry a category the UI can turn into a localized message, plus a technical detail string.
 enum class ErrorCode {
     FileOpen,
-    UnsupportedStream,   // decoder cannot handle this file (e.g. bit depth)
-    DecodeFailed,        // corrupt data
+    UnsupportedStream, // decoder cannot handle this file (e.g. bit depth)
+    DecodeFailed,      // corrupt data
     SeekFailed,
     DeviceNotFound,
     DeviceInUse,
     DeviceLost,
-    FormatNotSupported,  // device cannot take the file's rate / bit depth without conversion
+    FormatNotSupported, // device cannot take the file's rate / bit depth without conversion
     DriverError,
     Other,
 };
@@ -80,4 +90,4 @@ private:
     ErrorCode code_;
 };
 
-}  // namespace camel::audio
+} // namespace camel::audio

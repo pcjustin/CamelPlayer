@@ -17,4 +17,4 @@ std::vector<SampleType> bitPerfectCandidates(uint32_t bits);
 std::optional<DeviceFormat> chooseOutputFormat(const SourceInfo& src, std::optional<SampleType> fixedType,
                                                const std::function<bool(const DeviceFormat&)>& deviceSupports);
 
-}  // namespace camel::audio
+} // namespace camel::audio

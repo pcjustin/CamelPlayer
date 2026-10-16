@@ -12,7 +12,8 @@ namespace camel {
 Md5::Md5() {
     BCRYPT_ALG_HANDLE alg = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_MD5_ALGORITHM, nullptr, 0) != 0) throw std::runtime_error("BCrypt MD5 unavailable");
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_MD5_ALGORITHM, nullptr, 0) != 0)
+        throw std::runtime_error("BCrypt MD5 unavailable");
     if (BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) != 0) {
         BCryptCloseAlgorithmProvider(alg, 0);
         throw std::runtime_error("BCryptCreateHash failed");
@@ -52,4 +53,4 @@ std::string toHex(const std::array<uint8_t, 16>& digest) {
     return s;
 }
 
-}  // namespace camel
+} // namespace camel

@@ -12,4 +12,4 @@ private:
     Microsoft::UI::Xaml::Window window_{nullptr};
 };
 
-}  // namespace winrt::CamelPlayer::implementation
+} // namespace winrt::CamelPlayer::implementation

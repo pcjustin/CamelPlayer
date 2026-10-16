@@ -6,4 +6,4 @@ namespace camel {
 
 void installCrashDumps(const std::filesystem::path& dir);
 
-}  // namespace camel
+} // namespace camel

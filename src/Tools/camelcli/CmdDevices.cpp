@@ -23,7 +23,8 @@ namespace {
 void printList(const char* title, const std::vector<DeviceEntry>& list) {
     std::printf("%s\n", title);
     if (list.empty()) std::puts("  (none)");
-    for (size_t i = 0; i < list.size(); i++) std::printf("  [%zu] %s\n      id: %s\n", i, list[i].name.c_str(), list[i].id.c_str());
+    for (size_t i = 0; i < list.size(); i++)
+        std::printf("  [%zu] %s\n      id: %s\n", i, list[i].name.c_str(), list[i].id.c_str());
 }
 
 // Applies --backend/--decoder/--device/--ks-mode/--format/--buffer options on top of the saved settings.
@@ -41,14 +42,21 @@ Settings settingsFromArgs(const Args& args) {
                                         : s.backend == Backend::Asio ? listAsioDrivers()
                                                                      : listKsPins();
         std::string id = toUtf8(*v);
-        if (!id.empty() && std::all_of(id.begin(), id.end(), ::isdigit) && std::stoul(id) < list.size()) id = list[std::stoul(id)].id;
-        if (s.backend == Backend::Wasapi) s.wasapi.deviceId = id;
-        else if (s.backend == Backend::Asio) s.asio.driverClsid = id;
-        else s.ks.deviceId = id;
+        if (!id.empty() && std::all_of(id.begin(), id.end(), ::isdigit) && std::stoul(id) < list.size())
+            id = list[std::stoul(id)].id;
+        if (s.backend == Backend::Wasapi)
+            s.wasapi.deviceId = id;
+        else if (s.backend == Backend::Asio)
+            s.asio.driverClsid = id;
+        else
+            s.ks.deviceId = id;
     }
     if (auto v = option(args, L"--ks-mode")) {
         std::string m = toUtf8(*v);
-        s.ks.mode = m == "rtevent" ? KsMode::WaveRtEvent : m == "rtpoll" ? KsMode::WaveRtPoll : m == "standard" ? KsMode::Standard : KsMode::Auto;
+        s.ks.mode = m == "rtevent"    ? KsMode::WaveRtEvent
+                    : m == "rtpoll"   ? KsMode::WaveRtPoll
+                    : m == "standard" ? KsMode::Standard
+                                      : KsMode::Auto;
     }
     if (auto v = option(args, L"--wasapi-poll")) s.wasapi.eventDriven = *v != L"1";
     if (auto v = option(args, L"--format")) {
@@ -59,17 +67,21 @@ Settings settingsFromArgs(const Args& args) {
     return s;
 }
 
-const char* stateName(PlayState s) { return s == PlayState::Playing ? "playing" : s == PlayState::Paused ? "paused" : "stopped"; }
+const char* stateName(PlayState s) {
+    return s == PlayState::Playing ? "playing" : s == PlayState::Paused ? "paused" : "stopped";
+}
 
 void printSnapshot(const EngineSnapshot& s) {
     std::printf("\r%-8s %7.2f / %7.2f s", stateName(s.state), s.source ? framesToSeconds(s.position, s.source->sampleRate) : 0.0,
                 s.source ? framesToSeconds(s.total, s.source->sampleRate) : 0.0);
-    if (s.output) std::printf("  %s  %s  underruns %llu   ", describe(*s.output).c_str(), s.outputStatus.mode.c_str(), (unsigned long long)s.underruns);
+    if (s.output)
+        std::printf("  %s  %s  underruns %llu   ", describe(*s.output).c_str(), s.outputStatus.mode.c_str(),
+                    (unsigned long long)s.underruns);
     if (s.error) std::printf("  [%s] %s", errorCodeName(*s.error), s.errorDetail.c_str());
     std::fflush(stdout);
 }
 
-}  // namespace
+} // namespace
 
 int cmdListDevices(const Args&) {
     printList("WASAPI endpoints:", listWasapiDevices());
@@ -82,7 +94,8 @@ int cmdListDevices(const Args&) {
 int cmdPlay(const Args& args) {
     auto files = positional(args);
     if (files.empty()) {
-        std::puts("usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode auto|rtevent|rtpoll|standard]\n"
+        std::puts("usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode "
+                  "auto|rtevent|rtpoll|standard]\n"
                   "            [--format 16|24|24in32|32] [--seconds N] [--seek S]");
         return 2;
     }
@@ -175,13 +188,14 @@ int cmdCapture(const Args& args) {
     std::vector<int32_t> got(count);
     unpackSamples(bytes.data(), count, ref.info.bitsPerSample, type, got.data());
     bool same = got == ref.samples;
-    std::printf("%s: %s via %s as %s, %zu samples captured, reference %zu -> %s\n", toUtf8(pos[0]).c_str(), decoderName(s.decoder),
-                "capture", sampleTypeName(type), count, ref.samples.size(), same ? "BIT-IDENTICAL" : "DIFFERENT");
+    std::printf("%s: %s via %s as %s, %zu samples captured, reference %zu -> %s\n", toUtf8(pos[0]).c_str(),
+                decoderName(s.decoder), "capture", sampleTypeName(type), count, ref.samples.size(),
+                same ? "BIT-IDENTICAL" : "DIFFERENT");
     return same ? 0 : 1;
 }
 
 int cmdGenTestAudio(const Args& args) {
-    if (auto db = option(args, L"--tone")) {  // gen-test-audio <dir> --tone -40 --rate 96000 --bits 24
+    if (auto db = option(args, L"--tone")) { // gen-test-audio <dir> --tone -40 --rate 96000 --bits 24
         auto pos = positional(args);
         std::filesystem::path dir = pos.empty() ? std::filesystem::path(L"build\\testaudio") : std::filesystem::path(pos[0]);
         testaudio::GenSpec s{"", 96000, 24, 2, 10.0};
@@ -198,8 +212,9 @@ int cmdGenTestAudio(const Args& args) {
     auto pos = positional(args);
     std::filesystem::path dir = pos.empty() ? std::filesystem::path(L"build\\testaudio") : std::filesystem::path(pos[0]);
     double seconds = option(args, L"--seconds") ? std::stod(*option(args, L"--seconds")) : 10.0;
-    for (auto& p : testaudio::generateAll(dir, seconds)) std::printf("%s  %llu bytes\n", toUtf8(p.wstring()).c_str(), (unsigned long long)std::filesystem::file_size(p));
+    for (auto& p : testaudio::generateAll(dir, seconds))
+        std::printf("%s  %llu bytes\n", toUtf8(p.wstring()).c_str(), (unsigned long long)std::filesystem::file_size(p));
     return 0;
 }
 
-}  // namespace camelcli
+} // namespace camelcli

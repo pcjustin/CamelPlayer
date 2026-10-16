@@ -1,6 +1,6 @@
 #include "audio/output/KsOutput.h"
 
-#include "audio/output/WaveFormat.h"  // windows + ks headers first
+#include "audio/output/WaveFormat.h" // windows + ks headers first
 
 #include <avrt.h>
 #include <setupapi.h>
@@ -84,7 +84,8 @@ struct Filter {
 std::string regString(HKEY k, const wchar_t* value) {
     wchar_t buf[512];
     DWORD sz = sizeof buf, type = 0;
-    if (RegQueryValueExW(k, value, nullptr, &type, reinterpret_cast<BYTE*>(buf), &sz) != ERROR_SUCCESS || type != REG_SZ) return {};
+    if (RegQueryValueExW(k, value, nullptr, &type, reinterpret_cast<BYTE*>(buf), &sz) != ERROR_SUCCESS || type != REG_SZ)
+        return {};
     buf[511] = 0;
     return toUtf8(buf);
 }
@@ -114,8 +115,10 @@ std::vector<Filter> renderFilters() {
             RegCloseKey(k);
         }
         wchar_t devName[512] = L"";
-        if (!SetupDiGetDeviceRegistryPropertyW(di, &dev, SPDRP_FRIENDLYNAME, nullptr, reinterpret_cast<BYTE*>(devName), sizeof devName, nullptr))
-            SetupDiGetDeviceRegistryPropertyW(di, &dev, SPDRP_DEVICEDESC, nullptr, reinterpret_cast<BYTE*>(devName), sizeof devName, nullptr);
+        if (!SetupDiGetDeviceRegistryPropertyW(di, &dev, SPDRP_FRIENDLYNAME, nullptr, reinterpret_cast<BYTE*>(devName),
+                                               sizeof devName, nullptr))
+            SetupDiGetDeviceRegistryPropertyW(di, &dev, SPDRP_DEVICEDESC, nullptr, reinterpret_cast<BYTE*>(devName),
+                                              sizeof devName, nullptr);
         std::string name = toUtf8(devName);
         if (!ifName.empty()) name += " / " + ifName;
         out.push_back({det->DevicePath, name, realtime});
@@ -125,7 +128,8 @@ std::vector<Filter> renderFilters() {
 }
 
 HANDLE openFilter(const std::wstring& path) {
-    return CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+    return CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
 }
 
 struct PinInfo {
@@ -170,7 +174,7 @@ PinInfo pinInfo(HANDLE f, ULONG pin) {
         auto r = reinterpret_cast<KSDATARANGE*>(p);
         ULONG sz = r->FormatSize;
         if (!sz) break;
-        if (attrNext) {  // attribute list following a range with KSDATARANGE_ATTRIBUTES
+        if (attrNext) { // attribute list following a range with KSDATARANGE_ATTRIBUTES
             attrNext = false;
             p += (sz + 7) & ~7u;
             continue;
@@ -181,7 +185,8 @@ PinInfo pinInfo(HANDLE f, ULONG pin) {
         bool wfx = r->Specifier == KSDATAFORMAT_SPECIFIER_WAVEFORMATEX || r->Specifier == KSDATAFORMAT_SPECIFIER_WILDCARD;
         if (audio && pcm && wfx && sz >= sizeof(KSDATARANGE_AUDIO)) {
             auto a = reinterpret_cast<KSDATARANGE_AUDIO*>(r);
-            pi.ranges.push_back({isFloat, a->MinimumBitsPerSample, a->MaximumBitsPerSample, a->MinimumSampleFrequency, a->MaximumSampleFrequency});
+            pi.ranges.push_back({isFloat, a->MinimumBitsPerSample, a->MaximumBitsPerSample, a->MinimumSampleFrequency,
+                                 a->MaximumSampleFrequency});
             pi.pcmRender = true;
         }
         if (r->Flags & KSDATARANGE_ATTRIBUTES) attrNext = true;
@@ -231,7 +236,7 @@ enum class Mode { RtEvent, RtPoll, Standard };
 class KsOutput final : public IOutput {
 public:
     explicit KsOutput(const KsSettings& s) : cfg_(s) {
-        if (!parseDeviceId(cfg_.deviceId, path_, pinId_)) {  // default: first PCM render pin
+        if (!parseDeviceId(cfg_.deviceId, path_, pinId_)) { // default: first PCM render pin
             auto pins = listKsPins();
             if (!pins.empty()) parseDeviceId(pins.front().id, path_, pinId_);
         }
@@ -262,8 +267,8 @@ public:
                 definite = false;
                 const ULONG bits = bytesPerSample(f.type) * 8;
                 for (auto& r : pi.ranges)
-                    if (r.isFloat == (f.type == SampleType::Float32) && bits >= r.minBits && bits <= r.maxBits && f.sampleRate >= r.minRate &&
-                        f.sampleRate <= r.maxRate)
+                    if (r.isFloat == (f.type == SampleType::Float32) && bits >= r.minBits && bits <= r.maxBits &&
+                        f.sampleRate >= r.minRate && f.sampleRate <= r.maxRate)
                         ok = true;
             }
         }
@@ -309,9 +314,12 @@ private:
     bool useLooped(const PinInfo& pi) const {
         switch (cfg_.mode) {
         case KsMode::WaveRtEvent:
-        case KsMode::WaveRtPoll: return true;
-        case KsMode::Standard: return false;
-        case KsMode::Auto: return pi.looped && realtimeFilter_;
+        case KsMode::WaveRtPoll:
+            return true;
+        case KsMode::Standard:
+            return false;
+        case KsMode::Auto:
+            return pi.looped && realtimeFilter_;
         }
         return false;
     }
@@ -340,7 +348,7 @@ private:
     void threadMain(std::promise<void>& opened);
     void runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened);
     void runStandard(HANDLE pin, std::promise<void>& opened);
-    bool waitRunning();  // blocks while paused; false when quitting
+    bool waitRunning(); // blocks while paused; false when quitting
     void finish(DWORD err, const char* what);
 
     KsSettings cfg_;
@@ -381,7 +389,8 @@ void KsOutput::threadMain(std::promise<void>& opened) {
         char msg[96];
         snprintf(msg, sizeof msg, "KsCreatePin failed: %lu", e);
         // ERROR_NO_MATCH means the format or interface is wrong; anything else is almost always another client holding the pin.
-        opened.set_exception(std::make_exception_ptr(Error(e == ERROR_NO_MATCH ? ErrorCode::FormatNotSupported : ErrorCode::DeviceInUse, msg)));
+        opened.set_exception(
+            std::make_exception_ptr(Error(e == ERROR_NO_MATCH ? ErrorCode::FormatNotSupported : ErrorCode::DeviceInUse, msg)));
         return;
     }
     timeBeginPeriod(1);
@@ -435,7 +444,7 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
             np.NotificationEvent = ev;
             ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &np, sizeof np, nullptr, 0);
         }
-        if (!ok && cfg_.mode == KsMode::Auto) {  // driver without notification support: fall back to polling
+        if (!ok && cfg_.mode == KsMode::Auto) { // driver without notification support: fall back to polling
             log::info("ks: WaveRT notification unavailable (%lu), polling instead", GetLastError());
             notify = false;
         }
@@ -459,7 +468,8 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
     KSRTAUDIO_HWREGISTER_PROPERTY hp{};
     hp.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_POSITIONREGISTER, KSPROPERTY_TYPE_GET);
     KSRTAUDIO_HWREGISTER hr{};
-    if (ksIoctl(pin, IOCTL_KS_PROPERTY, &hp, sizeof hp, &hr, sizeof hr) && hr.Register) posReg = static_cast<volatile ULONG*>(hr.Register);
+    if (ksIoctl(pin, IOCTL_KS_PROPERTY, &hp, sizeof hp, &hr, sizeof hr) && hr.Register)
+        posReg = static_cast<volatile ULONG*>(hr.Register);
     char detail[128];
     snprintf(detail, sizeof detail, "buffer %lu bytes (%.2f ms), position %s", rb.ActualBufferSize,
              rb.ActualBufferSize * 1000.0 / (fmt_.sampleRate * blk), posReg ? "register" : "property");
@@ -477,7 +487,7 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
         out = ULONG(apos.PlayOffset % size);
         return true;
     };
-    auto fill = [&](ULONG from, ULONG to) {  // circular [from, to)
+    auto fill = [&](ULONG from, ULONG to) { // circular [from, to)
         ULONG n = (to + size - from) % size;
         for (ULONG done = 0; done < n;) {
             ULONG at = (from + done) % size, chunk = std::min(n - done, size - at);
@@ -533,7 +543,7 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
             break;
         }
         pos = pos / blk * blk;
-        ULONG target = (pos + size - blk) % size;  // keep the writer one frame behind the play cursor
+        ULONG target = (pos + size - blk) % size; // keep the writer one frame behind the play cursor
         fill(wr, target);
         wr = target;
     }
@@ -578,7 +588,7 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
         BOOL ok = DeviceIoControl(pin, IOCTL_KS_WRITE_STREAM, nullptr, 0, &hdr[i], sizeof hdr[i], nullptr, &ov[i]);
         return ok || GetLastError() == ERROR_IO_PENDING;
     };
-    auto drain = [&] {  // STOP cancels queued packets; wait for their completion
+    auto drain = [&] { // STOP cancels queued packets; wait for their completion
         setState(pin, KSSTATE_PAUSE);
         setState(pin, KSSTATE_ACQUIRE);
         setState(pin, KSSTATE_STOP);
@@ -634,9 +644,11 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
     finish(err, "standard stream");
 }
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<IOutput> createKsOutput(const KsSettings& s) { return std::make_unique<KsOutput>(s); }
+std::unique_ptr<IOutput> createKsOutput(const KsSettings& s) {
+    return std::make_unique<KsOutput>(s);
+}
 
 std::vector<DeviceEntry> listKsPins() {
     std::vector<DeviceEntry> out;
@@ -659,4 +671,4 @@ std::vector<DeviceEntry> listKsPins() {
     return out;
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

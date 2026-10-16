@@ -7,4 +7,4 @@ namespace camel::audio {
 
 std::unique_ptr<IOutput> createKsOutput(const KsSettings& s);
 
-}  // namespace camel::audio
+} // namespace camel::audio

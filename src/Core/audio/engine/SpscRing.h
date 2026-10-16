@@ -11,7 +11,7 @@
 namespace camel::audio {
 
 #pragma warning(push)
-#pragma warning(disable : 4324)  // padding from alignas: intended, keeps head and tail on separate cache lines
+#pragma warning(disable : 4324) // padding from alignas: intended, keeps head and tail on separate cache lines
 class SpscRing {
 public:
     explicit SpscRing(size_t capacity = 0) { reset(capacity); }
@@ -64,9 +64,9 @@ private:
     }
 
     std::vector<uint8_t> buf_;
-    alignas(64) std::atomic<size_t> head_{0};  // total bytes written
-    alignas(64) std::atomic<size_t> tail_{0};  // total bytes read
+    alignas(64) std::atomic<size_t> head_{0}; // total bytes written
+    alignas(64) std::atomic<size_t> tail_{0}; // total bytes read
 };
 #pragma warning(pop)
 
-}  // namespace camel::audio
+} // namespace camel::audio

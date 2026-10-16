@@ -4,7 +4,9 @@
 
 namespace camel::audio {
 
-bool canCarryBitPerfect(SampleType type, uint32_t bits) { return type != SampleType::Float32 && bits >= 1 && bits <= validBits(type); }
+bool canCarryBitPerfect(SampleType type, uint32_t bits) {
+    return type != SampleType::Float32 && bits >= 1 && bits <= validBits(type);
+}
 
 void packSamples(const int32_t* src, size_t count, uint32_t bits, SampleType type, uint8_t* dst) {
     switch (type) {
@@ -35,7 +37,8 @@ void packSamples(const int32_t* src, size_t count, uint32_t bits, SampleType typ
         }
         break;
     }
-    case SampleType::Float32: break;  // never chosen by the bit-perfect rule
+    case SampleType::Float32:
+        break; // never chosen by the bit-perfect rule
     }
 }
 
@@ -68,8 +71,9 @@ void unpackSamples(const uint8_t* src, size_t count, uint32_t bits, SampleType t
         }
         break;
     }
-    case SampleType::Float32: break;
+    case SampleType::Float32:
+        break;
     }
 }
 
-}  // namespace camel::audio
+} // namespace camel::audio

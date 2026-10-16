@@ -25,7 +25,7 @@ public:
 
 struct OutputStatus {
     std::string mode;          // e.g. "WASAPI exclusive · event", "KS · standard streaming"
-    uint32_t bufferFrames = 0;  // device buffer actually in use
+    uint32_t bufferFrames = 0; // device buffer actually in use
     std::string detail;        // backend specific (ASIO sample type, KS buffer size, ...)
 };
 
@@ -38,9 +38,9 @@ public:
 
     // Opens the stream; `source` must outlive the stream. Throws Error (DeviceNotFound / DeviceInUse / FormatNotSupported / ...).
     virtual void open(const DeviceFormat& f, IRenderSource* source) = 0;
-    virtual void start() = 0;  // begin or resume pulling from the source
-    virtual void pause() = 0;  // stop pulling, keep the device open
-    virtual void close() = 0;  // after close() returns the source is never called again
+    virtual void start() = 0; // begin or resume pulling from the source
+    virtual void pause() = 0; // stop pulling, keep the device open
+    virtual void close() = 0; // after close() returns the source is never called again
 
     virtual OutputStatus status() const = 0;
 
@@ -63,15 +63,15 @@ private:
 };
 
 struct DeviceEntry {
-    std::string id;    // value stored in settings
-    std::string name;  // display name (UTF-8)
+    std::string id;   // value stored in settings
+    std::string name; // display name (UTF-8)
 };
 
-std::vector<DeviceEntry> listWasapiDevices();  // active render endpoints
+std::vector<DeviceEntry> listWasapiDevices(); // active render endpoints
 std::vector<DeviceEntry> listAsioDrivers();
-std::vector<DeviceEntry> listKsPins();         // PCM render pins
+std::vector<DeviceEntry> listKsPins(); // PCM render pins
 
 // Creates the output for the backend selected in `s`.
 std::unique_ptr<IOutput> createOutput(const Settings& s);
 
-}  // namespace camel::audio
+} // namespace camel::audio

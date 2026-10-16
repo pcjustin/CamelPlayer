@@ -7,7 +7,16 @@
 extern "C" {
 #endif
 
-enum { SYM_OK = 0, SYM_END = 1, SYM_E_IO = -1, SYM_E_FORMAT = -2, SYM_E_UNSUPPORTED = -3, SYM_E_DECODE = -4, SYM_E_SEEK = -5, SYM_E_ARG = -6 };
+enum {
+    SYM_OK = 0,
+    SYM_END = 1,
+    SYM_E_IO = -1,
+    SYM_E_FORMAT = -2,
+    SYM_E_UNSUPPORTED = -3,
+    SYM_E_DECODE = -4,
+    SYM_E_SEEK = -5,
+    SYM_E_ARG = -6
+};
 
 typedef struct SymDecoder SymDecoder;
 typedef struct SymInfo {

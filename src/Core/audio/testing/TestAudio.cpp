@@ -15,8 +15,8 @@ namespace camel::audio::testaudio {
 
 std::vector<GenSpec> standardMatrix(double seconds) {
     return {
-        {"16-44.1k", 44100, 16, 2, seconds},  {"16-48k", 48000, 16, 2, seconds},   {"24-96k", 96000, 24, 2, seconds},
-        {"24-192k", 192000, 24, 2, seconds},  {"24-352.8k", 352800, 24, 2, seconds}, {"32-384k", 384000, 32, 2, seconds},
+        {"16-44.1k", 44100, 16, 2, seconds}, {"16-48k", 48000, 16, 2, seconds},     {"24-96k", 96000, 24, 2, seconds},
+        {"24-192k", 192000, 24, 2, seconds}, {"24-352.8k", 352800, 24, 2, seconds}, {"32-384k", 384000, 32, 2, seconds},
         {"32-768k", 768000, 32, 2, seconds},
     };
 }
@@ -34,11 +34,12 @@ std::vector<int32_t> makeSignal(const GenSpec& spec) {
             if (spec.toneDb < 0) {
                 const double ramp = std::min(1.0, double(i) / (0.05 * spec.sampleRate));
                 const double a = std::pow(10.0, spec.toneDb / 20.0) * ramp;
-                out[size_t(i * spec.channels + c)] = int32_t(std::llround(a * full * std::sin(2 * 3.14159265358979 * 440.0 * double(i) / spec.sampleRate)));
+                out[size_t(i * spec.channels + c)] =
+                    int32_t(std::llround(a * full * std::sin(2 * 3.14159265358979 * 440.0 * double(i) / spec.sampleRate)));
                 continue;
             }
             double v = 0.6 * std::sin(2 * 3.14159265358979 * (997.0 + 110.0 * c) * t) + 0.3 * noise;
-            if (i % 50000 == 7) v = (c ? -1.0 : 1.0);  // touch both extremes now and then
+            if (i % 50000 == 7) v = (c ? -1.0 : 1.0); // touch both extremes now and then
             int64_t s = std::llround(v * full);
             const int64_t lo = -(int64_t(1) << (spec.bits - 1)), hi = (int64_t(1) << (spec.bits - 1)) - 1;
             out[size_t(i * spec.channels + c)] = int32_t(std::clamp(s, lo, hi));
@@ -55,7 +56,7 @@ void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
     FLAC__stream_encoder_set_channels(enc, spec.channels);
     FLAC__stream_encoder_set_bits_per_sample(enc, spec.bits);
     FLAC__stream_encoder_set_sample_rate(enc, spec.sampleRate);
-    FLAC__stream_encoder_set_streamable_subset(enc, false);  // 352.8k+ and 32-bit are outside the subset
+    FLAC__stream_encoder_set_streamable_subset(enc, false); // 352.8k+ and 32-bit are outside the subset
     FLAC__stream_encoder_set_compression_level(enc, 5);
     FLAC__stream_encoder_set_total_samples_estimate(enc, samples.size() / spec.channels);
     FILE* f = nullptr;
@@ -79,7 +80,7 @@ void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
     ok = FLAC__stream_encoder_finish(enc) && ok;
     FLAC__stream_encoder_delete(enc);
     if (!ok) throw std::runtime_error("FLAC encoding failed: " + state);
-    if (!spec.md5) {  // libFLAC has no public switch for this; zero the STREAMINFO MD5 (bytes 26..41) like encoders that skip it
+    if (!spec.md5) { // libFLAC has no public switch for this; zero the STREAMINFO MD5 (bytes 26..41) like encoders that skip it
         std::fstream io(path, std::ios::in | std::ios::out | std::ios::binary);
         const char zeros[16] = {};
         io.seekp(26);
@@ -134,7 +135,8 @@ struct RefState {
     bool errorSeen = false;
 };
 
-FLAC__StreamDecoderWriteStatus onWrite(const FLAC__StreamDecoder*, const FLAC__Frame* frame, const FLAC__int32* const buffer[], void* user) {
+FLAC__StreamDecoderWriteStatus onWrite(const FLAC__StreamDecoder*, const FLAC__Frame* frame, const FLAC__int32* const buffer[],
+                                       void* user) {
     auto* st = static_cast<RefState*>(user);
     const unsigned ch = frame->header.channels, n = frame->header.blocksize;
     auto& v = st->out->samples;
@@ -164,7 +166,7 @@ void onError(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus s, void*
     st->errorSeen = true;
 }
 
-}  // namespace
+} // namespace
 
 ReferenceDecode referenceDecode(const std::filesystem::path& path) {
     ReferenceDecode out;
@@ -187,9 +189,9 @@ ReferenceDecode referenceDecode(const std::filesystem::path& path) {
     if (out.error.empty() && out.info.totalFrames && out.samples.size() / std::max(1u, out.info.channels) != out.info.totalFrames)
         out.error = "stream ended early";
     out.md5Checked = out.info.md5.has_value() && out.error.empty();
-    out.md5Ok = FLAC__stream_decoder_finish(dec) != 0 && out.md5Checked;  // finish() returns false on MD5 mismatch
+    out.md5Ok = FLAC__stream_decoder_finish(dec) != 0 && out.md5Checked; // finish() returns false on MD5 mismatch
     FLAC__stream_decoder_delete(dec);
     return out;
 }
 
-}  // namespace camel::audio::testaudio
+} // namespace camel::audio::testaudio

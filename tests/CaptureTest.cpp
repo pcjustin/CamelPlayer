@@ -18,7 +18,7 @@ namespace {
 struct Case {
     DecoderKind decoder;
     const char* file;
-    std::vector<SampleType> accept;  // simulated device capabilities
+    std::vector<SampleType> accept; // simulated device capabilities
     SampleType expected;
     bool fullMatrix = false;
 };
@@ -73,7 +73,7 @@ void runCase(const Case& c, uint64_t seekFrame = 0) {
     std::filesystem::remove(out);
 }
 
-}  // namespace
+} // namespace
 
 class CaptureEveryDecoder : public ::testing::TestWithParam<DecoderKind> {};
 
@@ -90,14 +90,18 @@ TEST_P(CaptureEveryDecoder, ZeroPaddedContainers) {
     runCase({GetParam(), "20-48k", {SampleType::Int24}, SampleType::Int24});
 }
 
-TEST_P(CaptureEveryDecoder, SeekKeepsBitPerfectTail) { runCase({GetParam(), "24-96k", {SampleType::Int32}, SampleType::Int32}, 100000); }
+TEST_P(CaptureEveryDecoder, SeekKeepsBitPerfectTail) {
+    runCase({GetParam(), "24-96k", {SampleType::Int32}, SampleType::Int32}, 100000);
+}
 
 class CaptureAcceptance : public ::testing::TestWithParam<std::tuple<DecoderKind, const char*>> {};
 
 TEST_P(CaptureAcceptance, FullFile) {
     const auto [decoder, file] = GetParam();
     auto info = testaudio::referenceDecode(testutil::acceptanceFile(file)).info;
-    const auto native = info.bitsPerSample == 16 ? SampleType::Int16 : info.bitsPerSample == 24 ? SampleType::Int24 : SampleType::Int32;
+    const auto native = info.bitsPerSample == 16   ? SampleType::Int16
+                        : info.bitsPerSample == 24 ? SampleType::Int24
+                                                   : SampleType::Int32;
     runCase({decoder, file, {native}, native, true});
 }
 
@@ -109,19 +113,22 @@ TEST_P(CaptureAcceptance, PaddedAndSeek) {
 }
 
 INSTANTIATE_TEST_SUITE_P(M0_18, CaptureAcceptance,
-                        ::testing::Combine(::testing::ValuesIn(kAllDecoders),
-                                           ::testing::Values("16-44.1k", "16-48k", "24-96k", "24-192k", "24-352.8k", "32-384k", "32-768k", "no-md5-24-96k")));
+                         ::testing::Combine(::testing::ValuesIn(kAllDecoders),
+                                            ::testing::Values("16-44.1k", "16-48k", "24-96k", "24-192k", "24-352.8k", "32-384k",
+                                                              "32-768k", "no-md5-24-96k")));
 
 INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder, ::testing::ValuesIn(kAllDecoders),
                          [](const ::testing::TestParamInfo<DecoderKind>& i) { return std::string(decoderId(i.param)); });
 
-TEST(Capture, ThirtyTwoBitThroughFfmpeg) { runCase({DecoderKind::FFmpeg, "32-384k", {SampleType::Int32}, SampleType::Int32}); }
+TEST(Capture, ThirtyTwoBitThroughFfmpeg) {
+    runCase({DecoderKind::FFmpeg, "32-384k", {SampleType::Int32}, SampleType::Int32});
+}
 
 TEST(Capture, UnsupportedFormatIsReportedNotPlayed) {
     Settings s;
     CaptureOptions co;
     co.file = testutil::tempDir() / "never.raw";
-    co.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int16; };  // 16-bit only device
+    co.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int16; }; // 16-bit only device
     PlaybackEngine engine(s, [&](const Settings&) { return createCaptureOutput(co); });
     engine.openAndPlay(testutil::testFile("24-96k"));
     engine.waitIdle();

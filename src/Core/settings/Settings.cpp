@@ -14,23 +14,29 @@
 
 namespace camel {
 
-using nlohmann::json;
 using audio::SampleType;
+using nlohmann::json;
 
 const char* backendId(Backend b) {
     switch (b) {
-    case Backend::Wasapi: return "wasapi";
-    case Backend::Asio: return "asio";
-    case Backend::Ks: return "ks";
+    case Backend::Wasapi:
+        return "wasapi";
+    case Backend::Asio:
+        return "asio";
+    case Backend::Ks:
+        return "ks";
     }
     return "wasapi";
 }
 
 const char* backendName(Backend b) {
     switch (b) {
-    case Backend::Wasapi: return "WASAPI";
-    case Backend::Asio: return "ASIO";
-    case Backend::Ks: return "Kernel Streaming";
+    case Backend::Wasapi:
+        return "WASAPI";
+    case Backend::Asio:
+        return "ASIO";
+    case Backend::Ks:
+        return "Kernel Streaming";
     }
     return "?";
 }
@@ -46,10 +52,14 @@ bool backendFromId(std::string_view id, Backend& out) {
 
 const char* ksModeId(KsMode m) {
     switch (m) {
-    case KsMode::Auto: return "auto";
-    case KsMode::WaveRtEvent: return "rtevent";
-    case KsMode::WaveRtPoll: return "rtpoll";
-    case KsMode::Standard: return "standard";
+    case KsMode::Auto:
+        return "auto";
+    case KsMode::WaveRtEvent:
+        return "rtevent";
+    case KsMode::WaveRtPoll:
+        return "rtpoll";
+    case KsMode::Standard:
+        return "standard";
     }
     return "auto";
 }
@@ -62,11 +72,16 @@ static KsMode ksModeFromId(std::string_view id) {
 
 const char* sampleTypeId(SampleType t) {
     switch (t) {
-    case SampleType::Int16: return "16";
-    case SampleType::Int24: return "24";
-    case SampleType::Int24In32: return "24in32";
-    case SampleType::Int32: return "32";
-    case SampleType::Float32: return "f32";
+    case SampleType::Int16:
+        return "16";
+    case SampleType::Int24:
+        return "24";
+    case SampleType::Int24In32:
+        return "24in32";
+    case SampleType::Int32:
+        return "32";
+    case SampleType::Float32:
+        return "f32";
     }
     return "";
 }
@@ -77,7 +92,9 @@ std::optional<SampleType> sampleTypeFromId(std::string_view id) {
     return std::nullopt;
 }
 
-static const char* periodId(WasapiPeriod p) { return p == WasapiPeriod::Minimum ? "minimum" : p == WasapiPeriod::Custom ? "custom" : "default"; }
+static const char* periodId(WasapiPeriod p) {
+    return p == WasapiPeriod::Minimum ? "minimum" : p == WasapiPeriod::Custom ? "custom" : "default";
+}
 static WasapiPeriod periodFromId(std::string_view id) {
     return id == "minimum" ? WasapiPeriod::Minimum : id == "custom" ? WasapiPeriod::Custom : WasapiPeriod::Default;
 }
@@ -94,22 +111,28 @@ std::string toJson(const Settings& s) {
                    {"period", periodId(s.wasapi.period)},
                    {"customPeriodMs", s.wasapi.customPeriodMs},
                    {"sampleType", s.wasapi.sampleType ? sampleTypeId(*s.wasapi.sampleType) : ""}};
-    j["asio"] = {{"driver", s.asio.driverClsid}, {"bufferSize", s.asio.bufferSize}, {"outLeft", s.asio.outLeft}, {"outRight", s.asio.outRight}};
-    j["ks"] = {{"device", s.ks.deviceId},
-               {"mode", ksModeId(s.ks.mode)},
-               {"bufferMs", s.ks.bufferMs},
-               {"packetCount", s.ks.packetCount},
-               {"packetMs", s.ks.packetMs},
-               {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""}};
+    j["asio"] = {{"driver", s.asio.driverClsid},
+                 {"bufferSize", s.asio.bufferSize},
+                 {"outLeft", s.asio.outLeft},
+                 {"outRight", s.asio.outRight}};
+    j["ks"] = {{"device", s.ks.deviceId},   {"mode", ksModeId(s.ks.mode)},
+               {"bufferMs", s.ks.bufferMs}, {"packetCount", s.ks.packetCount},
+               {"packetMs", s.ks.packetMs}, {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""}};
     return j.dump(2);
 }
 
 Settings fromJson(const std::string& text) {
     json j = json::parse(text);
     Settings s;
-    auto str = [](const json& o, const char* k, const std::string& def) { return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def; };
-    auto num = [](const json& o, const char* k, double def) { return o.contains(k) && o[k].is_number() ? o[k].get<double>() : def; };
-    auto boolean = [](const json& o, const char* k, bool def) { return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def; };
+    auto str = [](const json& o, const char* k, const std::string& def) {
+        return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def;
+    };
+    auto num = [](const json& o, const char* k, double def) {
+        return o.contains(k) && o[k].is_number() ? o[k].get<double>() : def;
+    };
+    auto boolean = [](const json& o, const char* k, bool def) {
+        return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
+    };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
     audio::decoderFromId(str(j, "decoder", "ffmpeg"), s.decoder);
     s.language = str(j, "language", "");
@@ -144,14 +167,17 @@ Settings fromJson(const std::string& text) {
 std::filesystem::path dataDirectory() {
     PWSTR base = nullptr;
     std::filesystem::path dir;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base))) dir = std::filesystem::path(base) / L"CamelPlayer";
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base)))
+        dir = std::filesystem::path(base) / L"CamelPlayer";
     CoTaskMemFree(base);
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     return dir;
 }
 
-std::filesystem::path settingsPath() { return dataDirectory() / L"settings.json"; }
+std::filesystem::path settingsPath() {
+    return dataDirectory() / L"settings.json";
+}
 
 Settings loadSettings(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
@@ -180,4 +206,4 @@ void saveSettings(const Settings& s, const std::filesystem::path& path) {
         throw std::runtime_error("cannot replace settings file");
 }
 
-}  // namespace camel
+} // namespace camel
