@@ -6,7 +6,7 @@ The project GPL text applies to CamelPlayer-covered code. Each dependency retain
 
 Keep the application, core, CLI and Rust bridge source, solution/project files, manifests, lockfile, build/package scripts, and tests referenced by the solution in the repository. Keep the three required unmodified ASIO headers (`asio.h`, `asiosys.h`, `iasiodrv.h`), their licenses, and the SDK provenance record.
 
-Also keep the collected copyright/license notices, runtime notices, Microsoft package terms, and [dependency inventory](third_party/dependencies.json). The inventory lists exact versions and source locations; native archive checksums and vcpkg port-tree locations identify the sources and patches used. Rust archive checksums are recorded in `rust/symphonia_ffi/Cargo.lock`.
+Also keep the collected copyright/license notices, runtime notices, Microsoft package terms, and [dependency inventory](third_party/dependencies.json). The inventory lists exact versions and source locations; native archive checksums and vcpkg port-tree locations identify the sources and patches used. Rust archive checksums are recorded in `rust/Cargo.lock`.
 
 Downloaded static libraries, NuGet installations, complete SDKs, private music, root-level development probes and build caches are not committed. Their absence does not remove obligations when distributing a program incorporating third-party code.
 

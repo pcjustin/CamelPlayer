@@ -34,14 +34,5 @@
     <ClCompile Include="*.cpp" />
     <ClInclude Include="*.h" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="$(CamelRoot)src\Core\Core.vcxproj">
-      <Project>{6B0F6E0A-5C1D-4E52-9A39-3D0C2C8E1A01}</Project>
-    </ProjectReference>
-    <ProjectReference Include="$(CamelRoot)rust\symphonia_ffi\symphonia_ffi.vcxproj">
-      <Project>{6B0F6E0A-5C1D-4E52-9A39-3D0C2C8E1A02}</Project>
-      <LinkLibraryDependencies>false</LinkLibraryDependencies>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

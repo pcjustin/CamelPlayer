@@ -3,9 +3,9 @@
 #include <vector>
 
 #include "Commands.h"
-#include "audio/decode/IDecoder.h"
-#include "audio/verify/FlacMd5.h"
-#include "util/Text.h"
+#include "Engine/decode/IDecoder.h"
+#include "Engine/verify/FlacMd5.h"
+#include "Common/util/Text.h"
 
 using namespace camel;
 using namespace camel::audio;

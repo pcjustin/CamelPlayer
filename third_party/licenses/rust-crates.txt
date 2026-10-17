@@ -1,4 +1,4 @@
-Rust dependency closure for CamelPlayer v2 through rust/symphonia_ffi (from Cargo.lock).
+Rust dependency closure for CamelPlayer v2 through rust/symphonia_ffi (from rust/Cargo.lock).
 Symphonia is MPL-2.0 (full text in MPL-2.0.txt; source: https://github.com/pdeljanov/Symphonia).
 The other crates use their MIT license option; encoding_rs additionally requires its WHATWG BSD-3-Clause notice. Full notices are preserved in the rust subdirectories. rustversion is a build-time procedural macro.
 

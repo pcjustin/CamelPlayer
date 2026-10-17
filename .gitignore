@@ -3,6 +3,7 @@
 /dist/
 /vcpkg_installed/
 /packages/
+/rust/target/
 /rust/*/target/
 *.user
 .vs/

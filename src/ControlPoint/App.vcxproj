@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WinUI 3 desktop app, unpackaged + self-contained (docs/Plan.md §4, §15.1). Hand-written: the VS
+     "C++ WinUI app development tools" component is not required. -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <MinimalCoreWin>false</MinimalCoreWin>
+    <ProjectGuid>{6B0F6E0A-5C1D-4E52-9A39-3D0C2C8E1A05}</ProjectGuid>
+    <ProjectName>App</ProjectName>
+    <RootNamespace>CamelPlayer</RootNamespace>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <AppContainerApplication>false</AppContainerApplication>
+    <AppxPackage>false</AppxPackage>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKVerifyTransitiveDependencies>false</WindowsAppSDKVerifyTransitiveDependencies>
+    <CamelPackages>$(MSBuildThisFileDirectory)..\..\packages\</CamelPackages>
+  </PropertyGroup>
+  <Import Project="$(CamelPackages)Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('$(CamelPackages)Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')" />
+  <Import Project="$(CamelPackages)Microsoft.Windows.SDK.BuildTools.10.0.26100.4654\build\Microsoft.Windows.SDK.BuildTools.props" Condition="Exists('$(CamelPackages)Microsoft.Windows.SDK.BuildTools.10.0.26100.4654\build\Microsoft.Windows.SDK.BuildTools.props')" />
+  <Import Project="$(CamelPackages)Microsoft.Windows.SDK.BuildTools.MSIX.1.7.20250829.1\build\Microsoft.Windows.SDK.BuildTools.MSIX.props" Condition="Exists('$(CamelPackages)Microsoft.Windows.SDK.BuildTools.MSIX.1.7.20250829.1\build\Microsoft.Windows.SDK.BuildTools.MSIX.props')" />
+  <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.Base.1.8.251216001\build\native\Microsoft.WindowsAppSDK.Base.props" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.Base.1.8.251216001\build\native\Microsoft.WindowsAppSDK.Base.props')" />
+  <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260708001\build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.props" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260708001\build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.props')" />
+  <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.Foundation.1.8.260803002\build\native\Microsoft.WindowsAppSDK.Foundation.props" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.Foundation.1.8.260803002\build\native\Microsoft.WindowsAppSDK.Foundation.props')" />
+  <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.WinUI.1.8.260803003\build\native\Microsoft.WindowsAppSDK.WinUI.props" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.WinUI.1.8.260803003\build\native\Microsoft.WindowsAppSDK.WinUI.props')" />
+  <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.DWrite.1.8.25122902\build\Microsoft.WindowsAppSDK.DWrite.props" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.DWrite.1.8.25122902\build\Microsoft.WindowsAppSDK.DWrite.props')" />
+  <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.Runtime.1.8.260921001\build\native\Microsoft.WindowsAppSDK.Runtime.props" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.Runtime.1.8.260921001\build\native\Microsoft.WindowsAppSDK.Runtime.props')" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <DesktopCompatible>true</DesktopCompatible>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(CamelRoot)msbuild\CamelPlayer.Cpp.props" />
+  <Import Project="$(CamelRoot)msbuild\CamelPlayer.CoreLink.props" />
+  <PropertyGroup>
+    <TargetName>CamelPlayer</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+      <!-- our own wWinMain (Main.cpp) sets the UI language before XAML starts -->
+      <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- XAML-generated code trips some /W4 warnings -->
+      <DisableSpecificWarnings>4100;4189;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>dbghelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- per-library size breakdown for docs/Decoder-comparison.md -->
+      <GenerateMapFile>true</GenerateMapFile>
+      <MapFileName>$(IntDir)$(TargetName).map</MapFileName>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <Manifest Include="app.manifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="App.xaml.h">
+      <DependentUpon>App.xaml</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="MainWindow.xaml.h">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="UiText.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml" />
+    <Page Include="MainWindow.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="App.xaml.cpp">
+      <DependentUpon>App.xaml</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="MainWindow.xaml.cpp">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="UiText.cpp" />
+    <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="MainWindow.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Midl>
+  </ItemGroup>
+  <ItemGroup>
+    <PRIResource Include="Strings\en-US\Resources.resw" />
+    <PRIResource Include="Strings\zh-TW\Resources.resw" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <Content Include="$(CamelRoot)assets\CamelPlayer.ico">
+      <Link>assets\CamelPlayer.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(CamelPackages)Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('$(CamelPackages)Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.Windows.SDK.BuildTools.10.0.26100.4654\build\Microsoft.Windows.SDK.BuildTools.targets" Condition="Exists('$(CamelPackages)Microsoft.Windows.SDK.BuildTools.10.0.26100.4654\build\Microsoft.Windows.SDK.BuildTools.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.Windows.SDK.BuildTools.MSIX.1.7.20250829.1\build\Microsoft.Windows.SDK.BuildTools.MSIX.targets" Condition="Exists('$(CamelPackages)Microsoft.Windows.SDK.BuildTools.MSIX.1.7.20250829.1\build\Microsoft.Windows.SDK.BuildTools.MSIX.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.Base.1.8.251216001\build\native\Microsoft.WindowsAppSDK.Base.targets" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.Base.1.8.251216001\build\native\Microsoft.WindowsAppSDK.Base.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260708001\build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.targets" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260708001\build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.Foundation.1.8.260803002\build\native\Microsoft.WindowsAppSDK.Foundation.targets" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.Foundation.1.8.260803002\build\native\Microsoft.WindowsAppSDK.Foundation.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.WinUI.1.8.260803003\build\native\Microsoft.WindowsAppSDK.WinUI.targets" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.WinUI.1.8.260803003\build\native\Microsoft.WindowsAppSDK.WinUI.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.DWrite.1.8.25122902\build\Microsoft.WindowsAppSDK.DWrite.targets" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.DWrite.1.8.25122902\build\Microsoft.WindowsAppSDK.DWrite.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.WindowsAppSDK.Runtime.1.8.260921001\build\native\Microsoft.WindowsAppSDK.Runtime.targets" Condition="Exists('$(CamelPackages)Microsoft.WindowsAppSDK.Runtime.1.8.260921001\build\native\Microsoft.WindowsAppSDK.Runtime.targets')" />
+    <Import Project="$(CamelPackages)Microsoft.Web.WebView2.1.0.3179.45\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('$(CamelPackages)Microsoft.Web.WebView2.1.0.3179.45\build\native\Microsoft.Web.WebView2.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(CamelPackages)Microsoft.WindowsAppSDK.WinUI.1.8.260803003\build\native\Microsoft.WindowsAppSDK.WinUI.props')" Text="NuGet packages are missing. Build with build.cmd (msbuild -restore -p:RestorePackagesConfig=true)." />
+  </Target>
+</Project>

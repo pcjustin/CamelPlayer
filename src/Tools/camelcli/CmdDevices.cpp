@@ -8,12 +8,12 @@
 #include <fstream>
 
 #include "Commands.h"
-#include "audio/engine/PlaybackEngine.h"
-#include "audio/engine/SamplePacker.h"
-#include "audio/output/CaptureOutput.h"
-#include "audio/testing/TestAudio.h"
-#include "server/LocalServer.h"
-#include "util/Text.h"
+#include "Engine/PlaybackEngine.h"
+#include "Engine/SamplePacker.h"
+#include "OutputBridge/CaptureOutput.h"
+#include "Engine/testing/TestAudio.h"
+#include "Server/Playback/LocalServer.h"
+#include "Common/util/Text.h"
 
 using namespace camel;
 using namespace camel::audio;

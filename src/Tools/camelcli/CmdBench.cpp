@@ -12,10 +12,10 @@
 #include <nlohmann/json.hpp>
 
 #include "Commands.h"
-#include "audio/decode/IDecoder.h"
-#include "audio/testing/TestAudio.h"
-#include "audio/verify/FlacMd5.h"
-#include "util/Text.h"
+#include "Engine/decode/IDecoder.h"
+#include "Engine/testing/TestAudio.h"
+#include "Engine/verify/FlacMd5.h"
+#include "Common/util/Text.h"
 
 #pragma comment(lib, "psapi.lib")
 

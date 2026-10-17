@@ -58,7 +58,7 @@ New-Item -ItemType Directory -Force $rustOut | Out-Null
 Copy-Item -LiteralPath $rustNotices -Destination $rustOut
 & $rustc --version | Set-Content -LiteralPath (Join-Path $rustOut 'toolchain.txt') -Encoding utf8
 
-[xml]$packages = Get-Content (Join-Path $root 'src\App\packages.config')
+[xml]$packages = Get-Content (Join-Path $root 'src\ControlPoint\packages.config')
 foreach ($package in $packages.packages.package) {
     $name = "$($package.id).$($package.version)"
     $packageRoot = Join-Path $root "packages\$name"

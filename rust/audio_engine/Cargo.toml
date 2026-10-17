@@ -7,9 +7,3 @@ publish = false
 
 [lib]
 crate-type = ["rlib"]
-
-[profile.dev]
-panic = "unwind"
-
-[profile.release]
-panic = "unwind"
