@@ -431,6 +431,10 @@ private:
         teardown();
         position_ = 0;
         if (err) return fail(*err, PlayState::Stopped);
+        {
+            std::lock_guard lock(snapMutex_);
+            snap_.trackEnds++;
+        }
         setState(PlayState::Stopped);
     }
 
@@ -455,6 +459,7 @@ private:
             std::lock_guard lock(snapMutex_);
             snap_.error = e.code();
             snap_.errorDetail = e.what();
+            if (s == PlayState::Stopped) snap_.trackEnds++;
         }
         setState(s);
     }

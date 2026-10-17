@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "server/QueuePolicy.h"
 #include "settings/Settings.h"
 
 namespace camel::server {
@@ -60,7 +61,14 @@ enum class CommandKind : uint8_t {
     Seek,
     ApplySettings,
     RefreshDevices,
-    ShowControlPanel
+    ShowControlPanel,
+    QueueReplace, // sources + index: replace the queue and play sources[index]
+    QueueReorder, // entryIds: a permutation of the current queue entries
+    QueueSelect,  // entryId: play that queue entry
+    Next,
+    Previous,
+    SetShuffle, // shuffle
+    SetRepeat   // repeat
 };
 
 struct Command {
@@ -69,6 +77,12 @@ struct Command {
     std::optional<TrackSource> source;
     std::optional<SettingsDto> settings;
     uint64_t frame = 0;
+    std::vector<TrackSource> sources;
+    uint64_t index = 0;
+    std::vector<uint64_t> entryIds;
+    uint64_t entryId = 0;
+    std::optional<bool> shuffle;
+    std::optional<RepeatMode> repeat;
 };
 
 enum class PlaybackState : uint8_t { Stopped, Playing, Paused };
@@ -108,12 +122,26 @@ struct DeviceCatalog {
     std::vector<DeviceInfo> wasapi, asio, ks;
 };
 
+struct QueueEntry {
+    uint64_t id = 0;
+    TrackSource source;
+};
+
+struct QueueSnapshot {
+    uint64_t revision = 0; // QueuePolicy revision; prepared work for an older revision is stale
+    std::vector<QueueEntry> entries;
+    std::optional<uint64_t> upcomingEntryId; // what a natural completion of the current entry plays next
+    bool shuffle = false;
+    RepeatMode repeat = RepeatMode::Off;
+};
+
 struct Snapshot {
     uint32_t apiVersion = kApiVersion;
     uint64_t revision = 0;
     CommandStamp command;
-    uint64_t queueEntryId = 0;
+    uint64_t queueEntryId = 0; // current queue entry; 0 when none
     std::optional<TrackSource> track;
+    QueueSnapshot queue;
     PlaybackSnapshot playback;
     SettingsDto settings;
     DeviceCatalog devices;

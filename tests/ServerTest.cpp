@@ -111,7 +111,7 @@ TEST(SnapshotCursorTest, RejectsStaleRevisionCommandGenerationQueueAndVersion) {
     s.revision = 11;
     s.command.id = 3;
     EXPECT_FALSE(cursor.accept(s));
-    EXPECT_EQ(cursor.current()->revision, 10u);
+    EXPECT_EQ(cursor.current().value_or(Snapshot{}).revision, 10u);
 }
 
 TEST_F(ServerTest, RejectsInvalidCommandsBeforeAllocatingIds) {
@@ -147,7 +147,7 @@ TEST_F(ServerTest, AssignsOrderedScopesAndDistinctQueueEntries) {
     EXPECT_EQ(s.command, (CommandStamp{1, 1, 1}));
     EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
     ASSERT_TRUE(s.playback.source);
-    EXPECT_EQ(s.playback.source->bitsPerSample, 16u);
+    EXPECT_EQ(s.playback.source.value_or(SourceInfo{}).bitsPerSample, 16u);
     EXPECT_EQ(probe.opens.load(), 0);
     const auto entry = s.queueEntryId;
     s = send(command(CommandKind::Play));
@@ -200,11 +200,11 @@ TEST_F(ServerTest, ConcurrentProducersReceiveUniqueOrderedIds) {
 }
 
 TEST_F(ServerTest, SuppressesBlockedOldGenerationAfterNewSelection) {
-    std::promise<void> opened, release;
-    auto gate = release.get_future().share();
+    std::promise<void> opened;
+    std::atomic<bool> released = false;
     probe.onOpen = [&] {
         opened.set_value();
-        gate.wait();
+        released.wait(false);
     };
     std::mutex mutex;
     std::vector<Snapshot> events;
@@ -217,11 +217,14 @@ TEST_F(ServerTest, SuppressesBlockedOldGenerationAfterNewSelection) {
         events.push_back(e.snapshot);
     });
     struct Release {
-        std::promise<void>& promise;
-        ~Release() { promise.set_value(); }
+        std::atomic<bool>& released;
+        ~Release() {
+            released = true;
+            released.notify_all();
+        }
     };
     {
-        Release unblock{release};
+        Release unblock{released};
         server->submit(select());
         ASSERT_EQ(opened.get_future().wait_for(10s), std::future_status::ready);
         const auto latest = server->submit(select("16-44.1k", CommandKind::Load));
@@ -337,6 +340,7 @@ TEST(ServerPersistenceTest, SavesSettingsAndProtectsServerOwnedLastFile) {
     LocalServer server(Settings{}, path);
     auto stale = server.snapshot().settings;
     const auto load = select("16-44.1k", CommandKind::Load);
+    const auto loadPath = toUtf8(testutil::testFile("16-44.1k").wstring());
     server.submit(load);
     Command c = command(CommandKind::ApplySettings);
     c.settings = stale;
@@ -345,10 +349,10 @@ TEST(ServerPersistenceTest, SavesSettingsAndProtectsServerOwnedLastFile) {
     server.waitIdle();
     auto s = server.snapshot();
     EXPECT_FALSE(s.commandError);
-    EXPECT_EQ(s.settings.lastFileUtf8, load.source->pathUtf8());
+    EXPECT_EQ(s.settings.lastFileUtf8, loadPath);
     auto saved = loadSettings(path);
     EXPECT_EQ(saved.language, "en-US");
-    EXPECT_EQ(toUtf8(saved.lastFile), load.source->pathUtf8());
+    EXPECT_EQ(toUtf8(saved.lastFile), loadPath);
     std::filesystem::remove(path);
 }
 
@@ -378,6 +382,145 @@ TEST(ServerPersistenceTest, RestoresExistingSelectionWithoutAutoplayAndIgnoresMi
     server.waitIdle();
     EXPECT_TRUE(server.snapshot().playback.pathUtf8.empty());
     EXPECT_FALSE(server.snapshot().playback.error);
+}
+
+TrackSource source(const char* name) {
+    return TrackSource(toUtf8(testutil::testFile(name).wstring()));
+}
+
+TrackSource missingSource(const char* name) {
+    return TrackSource(toUtf8((testutil::tempDir() / name).wstring()));
+}
+
+Command queueReplace(std::vector<TrackSource> sources, uint64_t index = 0) {
+    Command c = command(CommandKind::QueueReplace);
+    c.sources = std::move(sources);
+    c.index = index;
+    return c;
+}
+
+std::vector<uint64_t> entryIds(const Snapshot& s) {
+    std::vector<uint64_t> ids;
+    ids.reserve(s.queue.entries.size());
+    for (const auto& e : s.queue.entries) ids.push_back(e.id);
+    return ids;
+}
+
+TEST_F(ServerTest, RejectsInvalidQueuePayloads) {
+    EXPECT_THROW(server->submit(queueReplace({})), std::invalid_argument);
+    EXPECT_THROW(server->submit(queueReplace({source("24-96k")}, 1)), std::invalid_argument);
+    EXPECT_THROW(server->submit(command(CommandKind::QueueReorder)), std::invalid_argument);
+    EXPECT_THROW(server->submit(command(CommandKind::QueueSelect)), std::invalid_argument);
+    EXPECT_THROW(server->submit(command(CommandKind::SetShuffle)), std::invalid_argument);
+    Command c = command(CommandKind::SetRepeat);
+    c.repeat = RepeatMode(7);
+    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    c = command(CommandKind::Next);
+    c.entryId = 1;
+    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    c = queueReplace({TrackSource("a.flac", FrameRange{1, 2})});
+    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_EQ(server->snapshot().command.id, 0u);
+}
+
+TEST_F(ServerTest, QueueNavigationReorderAndUpcomingEntry) {
+    auto s = send(queueReplace({source("16-44.1k"), source("24-96k"), source("no-md5")}));
+    const auto ids = entryIds(s);
+    ASSERT_EQ(ids.size(), 3u);
+    EXPECT_EQ(s.queueEntryId, ids[0]);
+    EXPECT_EQ(s.queue.upcomingEntryId, ids[1]);
+    EXPECT_EQ(s.playback.state, PlaybackState::Playing);
+    EXPECT_EQ(s.track, std::optional<TrackSource>(s.queue.entries[0].source));
+
+    EXPECT_EQ(send(command(CommandKind::Next)).queueEntryId, ids[1]);
+    EXPECT_EQ(send(command(CommandKind::Previous)).queueEntryId, ids[0]);
+    Command select = command(CommandKind::QueueSelect);
+    select.entryId = ids[2];
+    s = send(select);
+    EXPECT_EQ(s.queueEntryId, ids[2]);
+    EXPECT_FALSE(s.queue.upcomingEntryId);
+
+    const auto revision = s.queue.revision;
+    Command reorder = command(CommandKind::QueueReorder);
+    reorder.entryIds = {ids[2], ids[0], ids[1]};
+    s = send(reorder);
+    EXPECT_GT(s.queue.revision, revision);
+    EXPECT_EQ(entryIds(s), reorder.entryIds);
+    EXPECT_EQ(s.queueEntryId, ids[2]);
+    EXPECT_EQ(s.queue.upcomingEntryId, ids[0]);
+
+    select.entryId = ids[1];
+    send(select);
+    s = send(command(CommandKind::Next));
+    EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(s.queueEntryId, ids[1]);
+
+    select.entryId = 999;
+    s = send(select);
+    ASSERT_TRUE(s.commandError);
+    EXPECT_EQ(s.queueEntryId, ids[1]);
+}
+
+TEST_F(ServerTest, ShuffleAndRepeatAreReportedInQueueSnapshot) {
+    auto s = send(queueReplace({source("16-44.1k"), source("24-96k")}));
+    Command shuffle = command(CommandKind::SetShuffle);
+    shuffle.shuffle = true;
+    const auto revision = s.queue.revision;
+    s = send(shuffle);
+    EXPECT_TRUE(s.queue.shuffle);
+    EXPECT_GT(s.queue.revision, revision);
+    Command repeat = command(CommandKind::SetRepeat);
+    repeat.repeat = RepeatMode::One;
+    s = send(repeat);
+    EXPECT_EQ(s.queue.repeat, RepeatMode::One);
+    EXPECT_EQ(s.queue.upcomingEntryId, s.queueEntryId);
+}
+
+TEST_F(ServerTest, RepeatAllStopsWhenEveryEntryFails) {
+    Command repeat = command(CommandKind::SetRepeat);
+    repeat.repeat = RepeatMode::All;
+    send(repeat);
+    send(queueReplace({missingSource("queue-missing-1.flac"), missingSource("queue-missing-2.flac")}));
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    Snapshot s = server->snapshot();
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(100ms);
+        const auto next = server->snapshot();
+        if (next.playback.revision == s.playback.revision && next.queueEntryId == s.queueEntryId) break;
+        s = next;
+    }
+    std::this_thread::sleep_for(300ms);
+    const auto settled = server->snapshot();
+    EXPECT_EQ(settled.playback.revision, s.playback.revision);
+    EXPECT_EQ(settled.playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(settled.playback.error, ErrorCode::FileOpen);
+    EXPECT_FALSE(settled.queue.upcomingEntryId);
+}
+
+TEST(ServerQueueCaptureTest, NaturalEndAdvancesAndSkipsTrackLocalFailures) {
+    CaptureOptions options;
+    options.file = testutil::tempDir() / "server-queue.raw";
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    {
+        LocalServer server(Settings{}, {}, [&](const Settings&) { return createCaptureOutput(options); });
+        Command c = queueReplace({source("16-44.1k"), missingSource("queue-missing.flac"), source("24-96k")});
+        server.submit(c);
+        server.waitIdle();
+        const auto ids = entryIds(server.snapshot());
+        ASSERT_EQ(ids.size(), 3u);
+        const auto deadline = std::chrono::steady_clock::now() + 20s;
+        Snapshot s = server.snapshot();
+        while (!(s.queueEntryId == ids[2] && s.playback.state == PlaybackState::Stopped) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(10ms);
+            s = server.snapshot();
+        }
+        EXPECT_EQ(s.queueEntryId, ids[2]);
+        EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
+        EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+        EXPECT_FALSE(s.queue.upcomingEntryId);
+    }
+    std::filesystem::remove(options.file);
 }
 
 class ServerCaptureTest : public ::testing::TestWithParam<DecoderKind> {};

@@ -30,13 +30,43 @@ bool replaces(CommandKind kind) {
     return kind == CommandKind::Load || kind == CommandKind::OpenAndPlay;
 }
 
+bool startsEntry(CommandKind kind) {
+    return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueSelect || kind == CommandKind::Next ||
+           kind == CommandKind::Previous;
+}
+
+bool changesQueue(CommandKind kind) {
+    return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
+           kind == CommandKind::SetShuffle;
+}
+
+// Problems of one track rather than of the device: report them and move on to the next eligible entry.
+bool trackLocal(audio::ErrorCode code) {
+    switch (code) {
+    case audio::ErrorCode::FileOpen:
+    case audio::ErrorCode::UnsupportedStream:
+    case audio::ErrorCode::DecodeFailed:
+    case audio::ErrorCode::SeekFailed:
+    case audio::ErrorCode::FormatNotSupported:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::ShowControlPanel)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetRepeat)
         throw std::invalid_argument("unsupported Server command/version");
+    const bool queueReplace = c.kind == CommandKind::QueueReplace;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
-        (c.frame != 0 && c.kind != CommandKind::Seek))
+        (c.frame != 0 && c.kind != CommandKind::Seek) || c.sources.empty() == queueReplace ||
+        (queueReplace ? c.index >= c.sources.size() : c.index != 0) ||
+        c.entryIds.empty() == (c.kind == CommandKind::QueueReorder) || (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
+        c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
+        c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All))
         throw std::invalid_argument("invalid Server command payload");
-    if (c.source && c.source->range() != FrameRange{})
+    const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
+    if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
         throw std::invalid_argument("track ranges require the future segment playback adapter");
     if (c.settings && dto(fromJson(toJson(native(*c.settings)))) != *c.settings)
         throw std::invalid_argument("invalid Server settings");
@@ -142,10 +172,10 @@ public:
         if (closing_) throw std::runtime_error("Server is closing");
         CommandStamp next = issued_;
         ++next.id;
-        if (replaces(c.kind) || c.kind == CommandKind::Stop || c.kind == CommandKind::Seek ||
+        if (startsEntry(c.kind) || c.kind == CommandKind::Stop || c.kind == CommandKind::Seek ||
             c.kind == CommandKind::ApplySettings)
             ++next.generation;
-        if (replaces(c.kind)) ++next.queueRevision;
+        if (changesQueue(c.kind)) ++next.queueRevision;
         queue_.push_back({std::move(c), next, restore});
         issued_ = next;
         cv_.notify_one();
@@ -196,26 +226,47 @@ private:
         state_.commandError.reset();
         state_.controlPanelOpened.reset();
         if (c.source) {
-            const std::filesystem::path path(toWide(c.source.value().pathUtf8()));
             if (pending.restore) {
                 std::error_code ec;
-                if (!std::filesystem::exists(path, ec)) return;
+                if (!std::filesystem::exists(std::filesystem::path(toWide(c.source->pathUtf8())), ec)) return;
             }
-            state_.track = c.source;
-            state_.queueEntryId = pending.stamp.id;
-            settings_.lastFile = path.wstring();
-            const auto effective = effectiveSettings();
-            if (engine_->snapshot().decoder != effective.decoder) {
-                engine_->stop();
-                engine_->applySettings(effective);
-            }
-            if (c.kind == CommandKind::Load)
-                engine_->load(path);
-            else
-                engine_->openAndPlay(path);
-            persist();
+            const auto ids = replaceQueue({*c.source});
+            startEntry(policy_.select(ids.front()), c.kind == CommandKind::OpenAndPlay);
         } else {
             switch (c.kind) {
+            case CommandKind::QueueReplace: {
+                const auto ids = replaceQueue(c.sources);
+                startEntry(policy_.select(ids[size_t(c.index)]), true);
+                break;
+            }
+            case CommandKind::QueueReorder:
+                reorderQueue(c.entryIds);
+                break;
+            case CommandKind::QueueSelect:
+                startEntry(policy_.select(c.entryId), true);
+                break;
+            case CommandKind::Next:
+                if (const auto next = policy_.next(false))
+                    startEntry(*next, true);
+                else
+                    engine_->stop();
+                break;
+            case CommandKind::Previous: {
+                const auto playback = engine_->snapshot();
+                const auto previous = policy_.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
+                if (!previous) break;
+                if (previous->entryId == state_.queueEntryId)
+                    engine_->seek(0);
+                else
+                    startEntry(*previous, true);
+                break;
+            }
+            case CommandKind::SetShuffle:
+                if (c.shuffle) policy_.setShuffle(*c.shuffle);
+                break;
+            case CommandKind::SetRepeat:
+                if (c.repeat) policy_.setRepeat(*c.repeat);
+                break;
             case CommandKind::Play:
                 engine_->play();
                 break;
@@ -260,13 +311,85 @@ private:
         engine_->waitIdle();
     }
 
+    std::vector<uint64_t> replaceQueue(const std::vector<TrackSource>& sources) {
+        std::vector<uint64_t> ids;
+        std::vector<QueueEntry> entries;
+        for (const auto& source : sources) {
+            ids.push_back(++lastEntryId_);
+            entries.push_back({ids.back(), source});
+        }
+        policy_.replace(ids);
+        entries_ = std::move(entries);
+        return ids;
+    }
+
+    void reorderQueue(const std::vector<uint64_t>& ids) {
+        policy_.reorder(ids);
+        std::vector<QueueEntry> entries;
+        entries.reserve(ids.size());
+        for (const auto id : ids) entries.push_back(entry(id));
+        entries_ = std::move(entries);
+    }
+
+    const QueueEntry& entry(uint64_t id) const {
+        return *std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == id; });
+    }
+
+    // Ends of the previous entry that are still pending belong to playback this call supersedes.
+    void startEntry(const QueuePosition& position, bool play) {
+        engine_->waitIdle();
+        seenTrackEnds_ = engine_->snapshot().trackEnds;
+        const auto& source = entry(position.entryId).source;
+        const std::filesystem::path path(toWide(source.pathUtf8()));
+        state_.track = source;
+        state_.queueEntryId = position.entryId;
+        settings_.lastFile = path.wstring();
+        const auto effective = effectiveSettings();
+        if (engine_->snapshot().decoder != effective.decoder) {
+            engine_->stop();
+            engine_->applySettings(effective);
+        }
+        if (play)
+            engine_->openAndPlay(path);
+        else
+            engine_->load(path);
+        engine_->waitIdle(); // the next snapshot pairs this entry with its own playback state
+        persist();
+    }
+
+    // Natural completion plays the next eligible entry; a track-local failure marks the entry and skips it.
+    void advanceAfterTrackEnd() {
+        const auto playback = engine_->snapshot();
+        if (playback.trackEnds == seenTrackEnds_) return;
+        seenTrackEnds_ = playback.trackEnds;
+        if (!state_.queueEntryId) return;
+        if (playback.error) {
+            if (!trackLocal(*playback.error)) return;
+            policy_.markFailed(state_.queueEntryId);
+            queueChanged_ = true;
+        }
+        if (const auto next = policy_.next(true)) startEntry(*next, true);
+    }
+
+    QueueSnapshot queueSnapshot() const {
+        QueueSnapshot queue;
+        queue.revision = policy_.revision();
+        queue.entries = entries_;
+        if (const auto upcoming = policy_.upcoming()) queue.upcomingEntryId = upcoming->entryId;
+        queue.shuffle = policy_.shuffle();
+        queue.repeat = policy_.repeat();
+        return queue;
+    }
+
     void publish(bool completed) {
         const auto p = playback(engine_->snapshot());
-        if (!completed && p.revision == state_.playback.revision && p.position == state_.playback.position &&
+        if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
             p.underruns == state_.playback.underruns)
             return;
         state_.playback = p;
         state_.settings = dto(settings_);
+        state_.queue = queueSnapshot();
+        queueChanged_ = false;
         Event event;
         std::function<void(const Event&)> listener;
         {
@@ -310,6 +433,11 @@ private:
                     state_.commandError = Failure{audio::ErrorCode::Other, "unknown Server command failure"};
                 }
             }
+            try {
+                advanceAfterTrackEnd();
+            } catch (const std::exception& e) {
+                log::error("Server queue advance failed: %s", e.what());
+            }
             publish(pending.has_value());
             if (pending) {
                 {
@@ -333,6 +461,11 @@ private:
     uint64_t processed_ = 0;
     bool closing_ = false;
     Snapshot published_, state_;
+    QueuePolicy policy_;
+    std::vector<QueueEntry> entries_;
+    uint64_t lastEntryId_ = 0;
+    uint64_t seenTrackEnds_ = 0;
+    bool queueChanged_ = false; // queue state changed without a command or playback change
     std::function<void(const Event&)> listener_;
     std::thread worker_;
 };

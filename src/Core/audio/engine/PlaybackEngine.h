@@ -30,7 +30,8 @@ struct EngineSnapshot {
     uint64_t underruns = 0;
     std::optional<ErrorCode> error; // last problem, shown until the next successful start
     std::string errorDetail;
-    uint64_t revision = 0; // increments on every change
+    uint64_t trackEnds = 0; // increments when a playback attempt ends on its own: natural end or a stopping failure
+    uint64_t revision = 0;  // increments on every change
 
     bool bitPerfect() const { return output.has_value(); }
 };

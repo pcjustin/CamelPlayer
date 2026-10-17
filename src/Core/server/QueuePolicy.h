@@ -63,7 +63,7 @@ public:
         return position(*current_);
     }
 
-    std::optional<QueuePosition> select(uint64_t entryId) {
+    QueuePosition select(uint64_t entryId) {
         if (std::find(entries_.begin(), entries_.end(), entryId) == entries_.end())
             throw std::invalid_argument("unknown queue entry");
         if (current_ && *current_ != entryId) remember(*current_);
@@ -92,7 +92,15 @@ public:
         return position(*current_);
     }
 
+    // The entry next(true) would choose, without changing any state; this is the preload target.
+    std::optional<QueuePosition> upcoming() const {
+        QueuePolicy copy = *this;
+        return copy.next(true);
+    }
+
     void markFailed(uint64_t entryId) { failed_.insert(entryId); }
+    bool shuffle() const { return shuffle_; }
+    RepeatMode repeat() const { return repeat_; }
     uint64_t revision() const { return revision_; }
     bool isCurrent(const QueuePosition& prepared) const {
         return prepared.revision == revision_ && current_ == prepared.entryId && contains(prepared.entryId);
