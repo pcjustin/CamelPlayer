@@ -207,6 +207,41 @@ TEST(SettingsBoundary, WrongTypesAndUnknownEnumsUseDefaults) {
     EXPECT_EQ(toJson(settings), toJson(Settings{}));
 }
 
+TEST(SettingsMigration, V1DecoderChoiceSurvivesUpgradeAndNewSettingsUseSndfile) {
+    for (const auto decoder : audio::kAllDecoders) {
+        const auto json = std::string(R"({"schema":1,"backend":"ks","decoder":")") + audio::decoderId(decoder) + R"("})";
+        const auto migrated = fromJson(json);
+        EXPECT_EQ(migrated.backend, Backend::Ks);
+        EXPECT_EQ(migrated.decoder, decoder);
+        EXPECT_NE(toJson(migrated).find(R"("schema": 2)"), std::string::npos);
+    }
+
+    const auto fresh = Settings{};
+    EXPECT_EQ(fresh.decoder, DecoderKind::Sndfile);
+    EXPECT_EQ(fromJson(R"({"schema":2})").decoder, DecoderKind::Sndfile);
+}
+
+TEST(SettingsMigration, RejectsFutureSchemaVersions) {
+    EXPECT_THROW(fromJson(R"({"schema":99})"), std::invalid_argument);
+    EXPECT_THROW(fromJson(R"({"schema":"2"})"), std::invalid_argument);
+}
+
+TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
+    const auto file = caseFile(".json");
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << R"({"schema":1,"decoder":"drflac"})";
+    }
+    const auto settings = loadSettings(file);
+    EXPECT_EQ(settings.decoder, DecoderKind::DrFlac);
+    std::ifstream in(file, std::ios::binary);
+    std::stringstream contents;
+    contents << in.rdbuf();
+    in.close();
+    EXPECT_NE(contents.str().find(R"("schema": 2)"), std::string::npos);
+    std::filesystem::remove(file);
+}
+
 TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
     const auto file = caseFile(".json");
     for (auto mode : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard}) {

@@ -126,6 +126,9 @@ Settings fromJson(const std::string& text) {
     json j = json::parse(text);
     if (!j.is_object()) throw std::invalid_argument("settings must be a JSON object");
     Settings s;
+    if (j.contains("schema") && !j["schema"].is_number_integer()) throw std::invalid_argument("invalid settings schema");
+    const int schema = j.contains("schema") ? j["schema"].get<int>() : 0;
+    if (schema < 0 || schema > Settings::kSchemaVersion) throw std::invalid_argument("unsupported settings schema");
     auto str = [](const json& o, const char* k, const std::string& def) {
         return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def;
     };
@@ -142,7 +145,7 @@ Settings fromJson(const std::string& text) {
         return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
     };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
-    audio::decoderFromId(str(j, "decoder", "ffmpeg"), s.decoder);
+    audio::decoderFromId(str(j, "decoder", "sndfile"), s.decoder);
     s.language = str(j, "language", "");
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
@@ -194,7 +197,18 @@ Settings loadSettings(const std::filesystem::path& path) {
     ss << in.rdbuf();
     in.close();
     try {
-        return fromJson(ss.str());
+        const auto contents = ss.str();
+        const auto parsed = json::parse(contents);
+        Settings settings = fromJson(contents);
+        const int schema = parsed.value("schema", 0);
+        if (schema < Settings::kSchemaVersion) {
+            try {
+                saveSettings(settings, path);
+            } catch (const std::exception& e) {
+                log::warn("settings: loaded schema %d but could not persist migration (%s)", schema, e.what());
+            }
+        }
+        return settings;
     } catch (const std::exception& e) {
         log::warn("settings: corrupt file, using defaults (%s)", e.what());
         std::error_code ec;

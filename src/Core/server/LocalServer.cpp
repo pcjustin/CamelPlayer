@@ -62,6 +62,10 @@ PlaybackSnapshot playback(const audio::EngineSnapshot& s) {
     p.output = s.output;
     p.backend = s.backend;
     p.decoder = s.decoder;
+    if (s.output) {
+        p.activeBackend = s.backend;
+        p.activeDecoder = s.decoder;
+    }
     p.outputMode = s.outputStatus.mode;
     p.outputDetail = s.outputStatus.detail;
     p.bufferFrames = s.outputStatus.bufferFrames;

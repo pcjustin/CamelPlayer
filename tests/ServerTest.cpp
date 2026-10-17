@@ -22,6 +22,7 @@ namespace {
 struct Probe {
     std::atomic<int> opens = 0, closes = 0;
     std::function<void()> onOpen;
+    std::optional<Backend> failBackend;
 };
 
 class ManualOutput final : public IOutput {
@@ -60,8 +61,10 @@ protected:
     Probe probe;
     std::unique_ptr<LocalServer> server;
     void SetUp() override {
-        server = std::make_unique<LocalServer>(Settings{}, std::filesystem::path{},
-                                               [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
+        server = std::make_unique<LocalServer>(Settings{}, std::filesystem::path{}, [&](const Settings& settings) {
+            if (probe.failBackend == settings.backend) throw std::runtime_error("injected output activation failure");
+            return std::make_unique<ManualOutput>(probe);
+        });
     }
     Snapshot send(Command c) {
         server->submit(std::move(c));
@@ -262,7 +265,7 @@ TEST_F(ServerTest, FileErrorsRemainVisibleAndNextSelectionRecovers) {
 TEST_F(ServerTest, TrackDecoderOverrideSurvivesSettingsAndDoesNotChangeGlobalPreference) {
     auto s = send(select("24-96k", CommandKind::OpenAndPlay, DecoderKind::Sndfile));
     EXPECT_EQ(s.playback.decoder, DecoderKind::Sndfile);
-    EXPECT_EQ(s.settings.decoder, DecoderKind::FFmpeg);
+    EXPECT_EQ(s.settings.decoder, DecoderKind::Sndfile);
     send(command(CommandKind::Pause));
     Command c = command(CommandKind::ApplySettings);
     c.settings = s.settings;
@@ -274,6 +277,51 @@ TEST_F(ServerTest, TrackDecoderOverrideSurvivesSettingsAndDoesNotChangeGlobalPre
     s = send(select());
     EXPECT_EQ(s.playback.decoder, DecoderKind::DrFlac);
     EXPECT_FALSE(s.playback.error);
+}
+
+TEST_F(ServerTest, UnrelatedSettingsDoNotRestartPlaybackAndRequestedStateIsSeparate) {
+    auto s = send(select());
+    ASSERT_EQ(s.playback.state, PlaybackState::Playing);
+    EXPECT_EQ(s.settings.backend, Backend::Wasapi);
+    EXPECT_EQ(s.playback.activeBackend, Backend::Wasapi);
+    EXPECT_EQ(s.playback.activeDecoder, DecoderKind::Sndfile);
+    const int opens = probe.opens.load();
+
+    auto requested = s.settings;
+    requested.language = "en-US";
+    requested.asio.bufferSize = 512;
+    requested.ks.packetCount = 8;
+    Command c = command(CommandKind::ApplySettings);
+    c.settings = requested;
+    s = send(c);
+
+    EXPECT_EQ(probe.opens.load(), opens);
+    EXPECT_EQ(s.settings.language, "en-US");
+    EXPECT_EQ(s.settings.asio.bufferSize, 512);
+    EXPECT_EQ(s.settings.ks.packetCount, 8);
+    EXPECT_EQ(s.playback.state, PlaybackState::Playing);
+    EXPECT_EQ(s.playback.activeBackend, Backend::Wasapi);
+    EXPECT_EQ(s.playback.activeDecoder, DecoderKind::Sndfile);
+}
+
+TEST_F(ServerTest, RequestedBackendRemainsVisibleWhenActivationFails) {
+    auto s = send(select());
+    ASSERT_EQ(s.playback.activeBackend, Backend::Wasapi);
+    probe.failBackend = Backend::Ks;
+
+    auto requested = s.settings;
+    requested.backend = Backend::Ks;
+    Command c = command(CommandKind::ApplySettings);
+    c.settings = requested;
+    s = send(c);
+
+    EXPECT_EQ(s.settings.backend, Backend::Ks);
+    EXPECT_EQ(s.playback.backend, Backend::Ks);
+    EXPECT_FALSE(s.playback.activeBackend);
+    EXPECT_FALSE(s.playback.activeDecoder);
+    EXPECT_FALSE(s.playback.output);
+    EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
+    ASSERT_TRUE(s.playback.error);
 }
 
 TEST_F(ServerTest, DestructorClosesActiveOutputAndDrainsCommands) {

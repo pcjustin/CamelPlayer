@@ -25,7 +25,7 @@ struct EngineSnapshot {
     std::optional<SourceInfo> source;
     std::optional<DeviceFormat> output; // set while a stream is open; always bit-perfect under the MVP rule
     Backend backend = Backend::Wasapi;
-    DecoderKind decoder = DecoderKind::FFmpeg;
+    DecoderKind decoder = DecoderKind::Sndfile;
     OutputStatus outputStatus;
     uint64_t underruns = 0;
     std::optional<ErrorCode> error; // last problem, shown until the next successful start

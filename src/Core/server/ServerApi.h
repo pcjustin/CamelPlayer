@@ -34,7 +34,7 @@ private:
 
 struct SettingsDto {
     Backend backend = Backend::Wasapi;
-    audio::DecoderKind decoder = audio::DecoderKind::FFmpeg;
+    audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;
@@ -86,7 +86,9 @@ struct PlaybackSnapshot {
     std::optional<audio::SourceInfo> source;
     std::optional<audio::DeviceFormat> output;
     Backend backend = Backend::Wasapi;
-    audio::DecoderKind decoder = audio::DecoderKind::FFmpeg;
+    audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
+    std::optional<Backend> activeBackend;
+    std::optional<audio::DecoderKind> activeDecoder;
     std::string outputMode, outputDetail;
     uint32_t bufferFrames = 0;
     uint64_t underruns = 0;

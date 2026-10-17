@@ -46,10 +46,10 @@ struct KsSettings {
 };
 
 struct Settings {
-    static constexpr int kSchemaVersion = 1;
+    static constexpr int kSchemaVersion = 2;
 
     Backend backend = Backend::Wasapi;
-    audio::DecoderKind decoder = audio::DecoderKind::FFmpeg;
+    audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;
