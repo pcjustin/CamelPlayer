@@ -25,7 +25,7 @@ TEST_P(EveryDecoder, MatchesReferenceBitForBit) {
         auto file = testutil::testFile(name);
         auto ref = testaudio::referenceDecode(file);
         ASSERT_TRUE(ref.error.empty()) << name << ": " << ref.error;
-        if (testutil::knownUnsupported(GetParam(), ref.info.bitsPerSample)) {
+        if (testutil::knownUnsupported(GetParam(), ref.info.bitsPerSample, ref.info.sampleRate)) {
             EXPECT_THROW(decodeAll(*openDecoder(GetParam(), file)), Error) << name;
             continue;
         }

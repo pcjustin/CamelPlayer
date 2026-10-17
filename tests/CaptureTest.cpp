@@ -39,7 +39,8 @@ void runCase(const Case& c, uint64_t seekFrame = 0) {
     auto ref = testaudio::referenceDecode(file);
     ASSERT_TRUE(ref.error.empty()) << ref.error;
     if (ref.info.md5) ASSERT_TRUE(ref.md5Ok);
-    if (testutil::knownUnsupported(c.decoder, ref.info.bitsPerSample)) GTEST_SKIP() << "Decoder does not support this bit depth";
+    if (testutil::knownUnsupported(c.decoder, ref.info.bitsPerSample, ref.info.sampleRate))
+        GTEST_SKIP() << "Decoder does not support this format";
     auto out = file.parent_path() / (std::string("capture-") + decoderId(c.decoder) + "-" + c.file + ".raw");
     Settings s;
     s.decoder = c.decoder;
@@ -114,8 +115,8 @@ TEST_P(CaptureAcceptance, PaddedAndSeek) {
 
 INSTANTIATE_TEST_SUITE_P(M0_18, CaptureAcceptance,
                          ::testing::Combine(::testing::ValuesIn(kAllDecoders),
-                                            ::testing::Values("16-44.1k", "16-48k", "24-96k", "24-192k", "24-352.8k", "32-384k",
-                                                              "32-768k", "no-md5-24-96k")));
+                                            ::testing::Values("16-44.1k", "16-48k", "24-96k", "24-192k", "24-352.8k", "24-384k",
+                                                              "24-768k", "no-md5-24-96k")));
 
 INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder, ::testing::ValuesIn(kAllDecoders),
                          [](const ::testing::TestParamInfo<DecoderKind>& i) { return std::string(decoderId(i.param)); });

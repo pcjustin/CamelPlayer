@@ -38,7 +38,7 @@ camelcli gen-test-audio [directory]
 camelcli bench-decoders <directory> --runs 3
 ```
 
-`decode` checks decoder output against STREAMINFO MD5. `capture` compares the engine's output with an independent libFLAC reference decode. Test audio covers 16/24/32-bit FLAC at rates up to 768 kHz, plus damaged, truncated, and missing-MD5 inputs. Decoder support varies, especially for 32-bit FLAC.
+`decode` checks decoder output against STREAMINFO MD5. `capture` compares the engine's output with an independent libFLAC reference decode. Test audio covers 16/24-bit FLAC at rates up to 768 kHz, plus damaged, truncated, and missing-MD5 inputs. The test suite additionally generates 20/32-bit FLAC fixtures to check that unsupported depths are rejected cleanly.
 
 ## Validation and limitations
 

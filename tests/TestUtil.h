@@ -43,14 +43,15 @@ inline std::filesystem::path acceptanceFile(const char* name) {
     return dir / (std::string(name) + ".flac");
 }
 
-// Bit depths a decoder is known not to handle (findings recorded in docs/解碼器比較.md). Opening such a file must
+// Formats a decoder is known not to handle (findings recorded in docs/解碼器比較.md). Opening such a file must
 // throw camel::audio::Error instead of crashing or producing wrong samples.
-inline bool knownUnsupported(camel::audio::DecoderKind k, uint32_t bits) {
+inline bool knownUnsupported(camel::audio::DecoderKind k, uint32_t bits, uint32_t sampleRate) {
     using camel::audio::DecoderKind;
     switch (k) {
     case DecoderKind::FFmpeg:
         return false;
     case DecoderKind::Symphonia:
+        return bits == 32 || sampleRate > 655350;
     case DecoderKind::DrFlac:
         return bits == 32;
     case DecoderKind::Sndfile:

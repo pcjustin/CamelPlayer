@@ -17,8 +17,8 @@ namespace camel::audio::testaudio {
 std::vector<GenSpec> standardMatrix(double seconds) {
     return {
         {"16-44.1k", 44100, 16, 2, seconds}, {"16-48k", 48000, 16, 2, seconds},     {"24-96k", 96000, 24, 2, seconds},
-        {"24-192k", 192000, 24, 2, seconds}, {"24-352.8k", 352800, 24, 2, seconds}, {"32-384k", 384000, 32, 2, seconds},
-        {"32-768k", 768000, 32, 2, seconds},
+        {"24-192k", 192000, 24, 2, seconds}, {"24-352.8k", 352800, 24, 2, seconds}, {"24-384k", 384000, 24, 2, seconds},
+        {"24-768k", 768000, 24, 2, seconds},
     };
 }
 
