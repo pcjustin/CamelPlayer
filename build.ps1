@@ -13,8 +13,13 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
 # Storage Sense can wipe %TEMP% during long builds (docs/計劃書.md §15), so keep an eye on free space.
-$freeGB = [math]::Round((Get-PSDrive C).Free / 1GB, 1)
-if ($freeGB -lt 10) { Write-Warning "Only $freeGB GB free on C:" }
+$buildDrive = [System.IO.Path]::GetPathRoot($root)
+$driveInfo = [System.IO.DriveInfo]::new($buildDrive)
+$freeBytes = $driveInfo.AvailableFreeSpace
+if ($freeBytes -lt 10GB) {
+    $freeGB = ($freeBytes / 1GB).ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture)
+    Write-Warning "Only $freeGB GB free on $buildDrive"
+}
 
 # cargo is installed per user by rustup
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
