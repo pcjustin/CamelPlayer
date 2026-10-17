@@ -3,6 +3,7 @@
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{Decoder, DecoderOptions, VerificationCheck};
@@ -233,6 +234,11 @@ fn map_err(e: &Error) -> i32 {
     }
 }
 
+// Unwinding out of an extern "C" function aborts the process, so a Symphonia panic becomes an error code.
+fn guarded(body: impl FnOnce() -> i32) -> i32 {
+    catch_unwind(AssertUnwindSafe(body)).unwrap_or(SYM_E_DECODE)
+}
+
 fn interleave(buf: AudioBufferRef, ch: usize, shift: u32) -> Result<Vec<i32>, i32> {
     let frames = buf.frames();
     let mut out = Vec::with_capacity(frames * ch);
@@ -304,6 +310,10 @@ pub unsafe extern "C" fn sym_open(
         return SYM_E_ARG;
     }
     *out = std::ptr::null_mut();
+    guarded(|| open_decoder(path, out, info))
+}
+
+unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mut SymInfo) -> i32 {
     let path = CStr::from_ptr(path).to_string_lossy().into_owned();
     let file = match std::fs::File::open(&path) {
         Ok(f) => f,
@@ -385,8 +395,14 @@ pub unsafe extern "C" fn sym_read(
     if dec.is_null() || dst.is_null() || read.is_null() {
         return SYM_E_ARG;
     }
-    let d = &mut *dec;
-    let want = frames * d.channels;
+    *read = 0;
+    guarded(|| read_frames(&mut *dec, dst, frames, read))
+}
+
+unsafe fn read_frames(d: &mut SymDecoder, dst: *mut i32, frames: usize, read: *mut usize) -> i32 {
+    let Some(want) = frames.checked_mul(d.channels) else {
+        return SYM_E_ARG;
+    };
     let out = std::slice::from_raw_parts_mut(dst, want);
     let mut filled = 0;
     while filled < want {
@@ -422,7 +438,10 @@ pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
     if dec.is_null() {
         return SYM_E_ARG;
     }
-    let d = &mut *dec;
+    guarded(|| seek_frame(&mut *dec, frame))
+}
+
+fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
     let seeked = match d.format.seek(
         SeekMode::Accurate,
         SeekTo::TimeStamp {
@@ -463,6 +482,6 @@ pub unsafe extern "C" fn sym_last_error(dec: *const SymDecoder, buf: *mut c_char
 #[no_mangle]
 pub unsafe extern "C" fn sym_close(dec: *mut SymDecoder) {
     if !dec.is_null() {
-        drop(Box::from_raw(dec));
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(dec))));
     }
 }

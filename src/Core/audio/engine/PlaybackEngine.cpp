@@ -404,7 +404,14 @@ private:
     }
 
     void teardown() {
-        if (output_) output_->close();
+        if (output_) {
+            try {
+                output_->close();
+            } catch (const std::exception& e) {
+                log::warn("engine: closing output failed: %s", e.what());
+                output_.reset();
+            }
+        }
         stopDecoder();
         decoder_.reset();
         if (active_) position_ = base_ + consumed_.load();

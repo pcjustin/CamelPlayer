@@ -295,11 +295,14 @@ impl DecoderSource {
         Ok(frames_read)
     }
 
+    pub(crate) fn can_seek(&self, frame: u64) -> bool {
+        frame >= self.start_frame
+            && !self.end_frame.is_some_and(|end| frame >= end)
+            && (self.info.total_frames == 0 || frame < self.info.total_frames)
+    }
+
     pub(crate) fn seek(&mut self, frame: u64) -> Result<(), i32> {
-        if frame < self.start_frame
-            || self.end_frame.is_some_and(|end| frame >= end)
-            || (self.info.total_frames != 0 && frame >= self.info.total_frames)
-        {
+        if !self.can_seek(frame) {
             return Err(crate::ENGINE_E_SEEK);
         }
         let status =
@@ -311,7 +314,10 @@ impl DecoderSource {
         self.full_coverage_possible = frame == 0
             && (self.end_frame.is_none()
                 || self.info.total_frames != 0 && self.end_frame == Some(self.info.total_frames));
-        if self.integrity_status != FLAC_INTEGRITY_VERIFIED {
+        if !matches!(
+            self.integrity_status,
+            FLAC_INTEGRITY_VERIFIED | FLAC_INTEGRITY_FAILED
+        ) {
             self.integrity_status =
                 if self.info.has_md5 != 0 && self.info.md5.iter().any(|byte| *byte != 0) {
                     FLAC_INTEGRITY_INCOMPLETE

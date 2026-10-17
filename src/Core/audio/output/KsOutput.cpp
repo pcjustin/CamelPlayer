@@ -219,6 +219,27 @@ DWORD createPin(HANDLE filter, ULONG pinId, bool looped, const DeviceFormat& fmt
     return fn ? fn(filter, c, GENERIC_READ | GENERIC_WRITE, pin) : ERROR_PROC_NOT_FOUND;
 }
 
+// Pins held by another client fail with driver-specific codes (§15.5); report only those as suspected contention.
+ErrorCode pinErrorCode(DWORD e) {
+    switch (e) {
+    case ERROR_NO_MATCH:
+        return ErrorCode::FormatNotSupported;
+    case ERROR_INVALID_FUNCTION:
+    case ERROR_BAD_COMMAND:
+    case ERROR_BUSY:
+    case ERROR_SHARING_VIOLATION:
+        return ErrorCode::DeviceInUse;
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_DEV_NOT_EXIST:
+    case ERROR_DEVICE_NOT_CONNECTED:
+    case ERROR_NO_SUCH_DEVICE:
+    case ERROR_DEVICE_REMOVED:
+        return ErrorCode::DeviceLost;
+    default:
+        return ErrorCode::DriverError;
+    }
+}
+
 bool setState(HANDLE pin, KSSTATE s) {
     KSPROPERTY p = ksProp(KSPROPSETID_Connection, KSPROPERTY_CONNECTION_STATE, KSPROPERTY_TYPE_SET);
     return ksIoctl(pin, IOCTL_KS_PROPERTY, &p, sizeof p, &s, sizeof s);
@@ -397,9 +418,7 @@ void KsOutput::threadMain(std::promise<void>& opened) {
         char msg[96];
         const int length = snprintf(msg, sizeof msg, "KsCreatePin failed: %lu", e);
         if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "KsCreatePin failed");
-        // ERROR_NO_MATCH means the format or interface is wrong; anything else is almost always another client holding the pin.
-        opened.set_exception(
-            std::make_exception_ptr(Error(e == ERROR_NO_MATCH ? ErrorCode::FormatNotSupported : ErrorCode::DeviceInUse, msg)));
+        opened.set_exception(std::make_exception_ptr(Error(pinErrorCode(e), msg)));
         return;
     }
     timeBeginPeriod(1);

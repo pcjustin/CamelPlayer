@@ -560,7 +560,14 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
         let Some(source) = source.as_mut() else {
             return ENGINE_E_INVALID_STATE;
         };
+        if !source.can_seek(frame) {
+            return ENGINE_E_SEEK;
+        }
         if let Err(status) = source.seek(frame) {
+            // The decoder may have moved, so buffered frames and positions no longer describe it.
+            if operation_is_current(engine, epoch) {
+                engine.fail_render(status);
+            }
             return status;
         }
         if !operation_is_current(engine, epoch) {
@@ -2212,6 +2219,8 @@ mod tests {
         let mut output = [0; 8];
         assert_eq!(decoded.read(&mut output, 4), Ok(4));
         assert_eq!(decoded.read(&mut output, 1), Err(ENGINE_E_DECODE));
+        assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_FAILED);
+        assert_eq!(decoded.seek(0), Ok(()));
         assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_FAILED);
     }
 

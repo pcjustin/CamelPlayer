@@ -88,6 +88,7 @@ public:
         source_ = source;
         quit_ = false;
         running_ = false;
+        applied_.reset();
         wake_.ResetEvent();
         std::promise<void> opened;
         auto result = opened.get_future();
@@ -147,12 +148,13 @@ private:
             if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
                 UINT32 frames = 0;
                 client->GetBufferSize(&frames);
-                period = REFERENCE_TIME(std::llround(10000.0 * 1000 * frames / fmt_.sampleRate));
+                const auto aligned = REFERENCE_TIME(std::llround(10000.0 * 1000 * frames / fmt_.sampleRate));
+                if (cfg_.eventDriven) period = aligned;
                 log::info("wasapi: buffer not aligned, retrying with %u frames", frames);
                 client.reset();
                 THROW_IF_FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
-                hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, cfg_.eventDriven ? period : dur,
-                                        cfg_.eventDriven ? period : 0, &wf.Format, nullptr);
+                hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, aligned, cfg_.eventDriven ? aligned : 0, &wf.Format,
+                                        nullptr);
             }
             if (FAILED(hr)) throw hrError("IAudioClient::Initialize", hr);
             if (cfg_.eventDriven) THROW_IF_FAILED(client->SetEventHandle(bufferEvent.get()));
@@ -249,8 +251,11 @@ private:
         void notify(bool state) {
             std::lock_guard lock(m_);
             state_ = state;
-            ++gen_;
             cv_.notify_all();
+        }
+        void reset() {
+            std::lock_guard lock(m_);
+            state_ = false;
         }
         void wait(bool state) {
             std::unique_lock lock(m_);
@@ -261,7 +266,6 @@ private:
         std::mutex m_;
         std::condition_variable cv_;
         bool state_ = false;
-        uint64_t gen_ = 0;
     };
 
     WasapiSettings cfg_;

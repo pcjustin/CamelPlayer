@@ -222,6 +222,7 @@ void saveSettings(const Settings& s, const std::filesystem::path& path) {
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << toJson(s);
+        out.close();
         if (!out) throw std::runtime_error("cannot write settings");
     }
     if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))

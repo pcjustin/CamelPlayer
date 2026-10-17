@@ -64,7 +64,7 @@ const char* asioTypeName(ASIOSampleType t) {
 }
 
 class AsioOutput;
-AsioOutput* g_active = nullptr; // the SDK callbacks carry no user pointer (§5.6)
+std::atomic<AsioOutput*> g_active{nullptr}; // the SDK callbacks carry no user pointer (§5.6)
 
 class AsioOutput final : public IOutput {
 public:
@@ -98,6 +98,10 @@ public:
         try {
             invoke([&] {
                 load();
+                if (cfg_.outLeft >= numOutputs_ || cfg_.outRight >= numOutputs_) {
+                    ok = true; // open() reports the out-of-range channel
+                    return;
+                }
                 if (driverType_ && mapSampleType(*driverType_) == f.type && f.channels == 2)
                     ok = drv_->canSampleRate(ASIOSampleRate(f.sampleRate)) == ASE_OK;
             });
@@ -137,7 +141,8 @@ public:
             if (buffersCreated_) drv_->disposeBuffers();
             buffersCreated_ = false;
             source_.store(nullptr);
-            if (g_active == this) g_active = nullptr;
+            AsioOutput* self = this;
+            g_active.compare_exchange_strong(self, nullptr);
         });
     }
 
@@ -316,14 +321,17 @@ private:
         buffers_[1] = {ASIOFalse, cfg_.outRight, {nullptr, nullptr}};
         static ASIOCallbacks callbacks = {
             [](long index, ASIOBool) {
-                if (g_active) g_active->onBufferSwitch(index);
+                if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
             },
             [](ASIOSampleRate) {
-                if (g_active) g_active->onRateChanged();
+                if (auto* active = g_active.load(std::memory_order_acquire)) active->onRateChanged();
             },
-            [](long selector, long value, void*, double*) -> long { return g_active ? g_active->onMessage(selector, value) : 0; },
+            [](long selector, long value, void*, double*) -> long {
+                auto* active = g_active.load(std::memory_order_acquire);
+                return active ? active->onMessage(selector, value) : 0;
+            },
             [](ASIOTime* t, long index, ASIOBool) -> ASIOTime* {
-                if (g_active) g_active->onBufferSwitch(index);
+                if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
                 return t;
             },
         };
@@ -388,24 +396,22 @@ std::vector<DeviceEntry> listAsioDrivers() {
     std::vector<DeviceEntry> out;
     HKEY root;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ, &root) != ERROR_SUCCESS) return out;
+    // RegGetValueW guarantees a terminated REG_SZ result; anything else reads as empty.
+    auto readString = [](HKEY key, const wchar_t* subKey, const wchar_t* value, wchar_t* buf, DWORD bytes) {
+        if (RegGetValueW(key, subKey, value, RRF_RT_REG_SZ, nullptr, buf, &bytes) != ERROR_SUCCESS) buf[0] = 0;
+        return buf[0] != 0;
+    };
     wchar_t name[256];
     for (DWORD i = 0;; i++) {
         DWORD len = 256;
         if (RegEnumKeyExW(root, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-        HKEY k;
-        if (RegOpenKeyExW(root, name, 0, KEY_READ, &k) != ERROR_SUCCESS) continue;
-        wchar_t clsid[64] = {}, desc[256] = {};
-        DWORD sz = sizeof clsid;
-        RegQueryValueExW(k, L"CLSID", nullptr, nullptr, reinterpret_cast<BYTE*>(clsid), &sz);
-        sz = sizeof desc;
-        RegQueryValueExW(k, L"Description", nullptr, nullptr, reinterpret_cast<BYTE*>(desc), &sz);
-        RegCloseKey(k);
-        if (!clsid[0]) continue;
+        wchar_t clsid[64], desc[256];
+        if (!readString(root, name, L"CLSID", clsid, sizeof clsid)) continue;
+        readString(root, name, L"Description", desc, sizeof desc);
         // Skip drivers whose DLL is gone (e.g. a stale Cayin RU6 entry, §15.3)
         std::wstring inproc = std::wstring(L"CLSID\\") + clsid + L"\\InprocServer32";
-        wchar_t dll[MAX_PATH] = {};
-        LONG dllLen = sizeof dll;
-        bool present = RegQueryValueW(HKEY_CLASSES_ROOT, inproc.c_str(), dll, &dllLen) == ERROR_SUCCESS &&
+        wchar_t dll[MAX_PATH];
+        bool present = readString(HKEY_CLASSES_ROOT, inproc.c_str(), nullptr, dll, sizeof dll) &&
                        GetFileAttributesW(dll) != INVALID_FILE_ATTRIBUTES;
         std::string label = toUtf8(desc[0] ? desc : name);
         if (!present) label += " (unavailable)";

@@ -29,6 +29,7 @@ public:
         history_.clear();
         current_.reset();
         order_ = entries_;
+        if (shuffle_) shuffleOrder();
         ++revision_;
         return revision_;
     }
@@ -65,7 +66,7 @@ public:
     std::optional<QueuePosition> select(uint64_t entryId) {
         if (std::find(entries_.begin(), entries_.end(), entryId) == entries_.end())
             throw std::invalid_argument("unknown queue entry");
-        if (current_ && *current_ != entryId) history_.push_back(*current_);
+        if (current_ && *current_ != entryId) remember(*current_);
         current_ = entryId;
         failed_.erase(entryId);
         return position(entryId);
@@ -74,7 +75,7 @@ public:
     std::optional<QueuePosition> next(bool naturalCompletion) {
         if (naturalCompletion && repeat_ == RepeatMode::One && current_ && !failed_.contains(*current_))
             return position(*current_);
-        return advance(false);
+        return advance();
     }
 
     std::optional<QueuePosition> previous(uint64_t positionFrames, uint64_t sampleRate) {
@@ -123,26 +124,45 @@ private:
         }
     }
 
-    std::optional<QueuePosition> advance(bool newRound) {
+    // A new shuffle round visits every entry; only its first entry must differ from the one just played.
+    void shuffleNewRound() {
+        order_ = entries_;
+        std::shuffle(order_.begin(), order_.end(), random_);
+        if (current_ && order_.size() > 1 && order_.front() == *current_) std::swap(order_.front(), order_.back());
+    }
+
+    size_t eligibleCount() const {
+        return size_t(std::count_if(entries_.begin(), entries_.end(), [&](uint64_t id) { return !failed_.contains(id); }));
+    }
+
+    void remember(uint64_t id) {
+        history_.push_back(id);
+        if (history_.size() > kMaxHistory) history_.erase(history_.begin());
+    }
+
+    std::optional<QueuePosition> advance() {
         if (entries_.empty()) return std::nullopt;
-        if (newRound && shuffle_) shuffleOrder();
+        const bool avoidRepeat = eligibleCount() > 1;
         auto it = current_ ? std::find(order_.begin(), order_.end(), *current_) : order_.end();
         size_t index = it == order_.end() ? 0 : size_t(std::distance(order_.begin(), it)) + 1;
-        for (size_t visited = 0; visited < order_.size(); ++visited) {
+        bool wrapped = false;
+        for (;;) {
             if (index == order_.size()) {
-                if (repeat_ != RepeatMode::All) return std::nullopt;
-                if (shuffle_) shuffleOrder();
+                if (wrapped || repeat_ != RepeatMode::All) return std::nullopt;
+                wrapped = true;
+                if (shuffle_) shuffleNewRound();
                 index = 0;
             }
             const auto id = order_[index++];
-            if (id == current_.value_or(0) && entries_.size() > 1) continue;
+            if (avoidRepeat && id == current_.value_or(0)) continue;
             if (failed_.contains(id)) continue;
-            if (current_) history_.push_back(*current_);
+            if (current_) remember(*current_);
             current_ = id;
             return position(id);
         }
-        return std::nullopt;
     }
+
+    static constexpr size_t kMaxHistory = 1024;
 
     std::vector<uint64_t> entries_, order_, history_;
     std::unordered_set<uint64_t> failed_;
