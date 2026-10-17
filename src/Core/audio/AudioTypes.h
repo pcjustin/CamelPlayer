@@ -1,4 +1,4 @@
-// Basic audio types shared by decoders, the engine and outputs (docs/計劃書.md §5, §16).
+// Basic audio types shared by decoders, the engine and outputs (docs/Plan.md §5, §16).
 #pragma once
 #include <array>
 #include <cmath>

@@ -1,4 +1,4 @@
-// MVP output-format rule (docs/計劃書.md §16.2): integer zero padding only, never conversion.
+// MVP output-format rule (docs/Plan.md §16.2): integer zero padding only, never conversion.
 // The full FormatNegotiator (M1-07) replaces this later.
 #pragma once
 #include <functional>

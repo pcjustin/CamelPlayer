@@ -27,7 +27,7 @@
   <Import Project="$(CamelRoot)msbuild\CamelPlayer.Cpp.props" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <!-- Core must stay free of WinRT (docs/計劃書.md §4) -->
+      <!-- Core must stay free of WinRT (docs/Plan.md §4) -->
       <PreprocessorDefinitions>CAMEL_CORE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(CamelRoot)third_party\asiosdk\common;$(CamelRoot)rust\symphonia_ffi;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>

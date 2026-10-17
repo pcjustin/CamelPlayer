@@ -1,4 +1,4 @@
-// bench-decoders / bench-one: measurements for docs/解碼器比較.md (docs/計劃書.md §16.5).
+// bench-decoders / bench-one: measurements for docs/Decoder-comparison.md (docs/Plan.md §16.5).
 // Every decoder x file pair runs in its own child process so peak memory is not shared.
 #include <windows.h>
 #include <psapi.h>

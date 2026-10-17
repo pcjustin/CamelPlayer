@@ -265,7 +265,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         }
     }
 
-    // Bit-perfect indicator and signal path (docs/計劃書.md §5.2, §16.2)
+    // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
     const hstring decoder = ui::utf8(decoderName(s.decoder));
     if (s.output && s.source) {
         Lamp().Fill(brush(0x10, 0xB9, 0x10));
@@ -385,7 +385,7 @@ void MainWindow::OnLanguageChanged(Windows::Foundation::IInspectable const&, Sel
     command.kind = CommandKind::ApplySettings;
     command.settings = settings_;
     submitCommand(std::move(command));
-    LanguageNote().Visibility(Visibility::Visible); // takes effect after restart (docs/計劃書.md §8.5)
+    LanguageNote().Visibility(Visibility::Visible); // takes effect after restart (docs/Plan.md §8.5)
 }
 
 winrt::fire_and_forget MainWindow::OnAsioPanelClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

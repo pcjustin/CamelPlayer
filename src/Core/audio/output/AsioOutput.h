@@ -1,4 +1,4 @@
-// ASIO (PCM) with a dedicated STA control thread (docs/計劃書.md §5.6, §15.3). Native DSD arrives in M2.
+// ASIO (PCM) with a dedicated STA control thread (docs/Plan.md §5.6, §15.3). Native DSD arrives in M2.
 #pragma once
 #include "audio/output/IOutput.h"
 #include "settings/Settings.h"

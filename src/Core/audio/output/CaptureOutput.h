@@ -1,4 +1,4 @@
-// Writes exactly the bytes the engine hands to the device into a file (docs/計劃書.md §12.1, §16.7).
+// Writes exactly the bytes the engine hands to the device into a file (docs/Plan.md §12.1, §16.7).
 #pragma once
 #include <filesystem>
 #include <functional>

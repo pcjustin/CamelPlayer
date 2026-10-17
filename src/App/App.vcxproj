@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- WinUI 3 desktop app, unpackaged + self-contained (docs/計劃書.md §4, §15.1). Hand-written: the VS
+<!-- WinUI 3 desktop app, unpackaged + self-contained (docs/Plan.md §4, §15.1). Hand-written: the VS
      "C++ WinUI app development tools" component is not required. -->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="Globals">
@@ -67,7 +67,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>dbghelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <!-- per-library size breakdown for docs/解碼器比較.md -->
+      <!-- per-library size breakdown for docs/Decoder-comparison.md -->
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(IntDir)$(TargetName).map</MapFileName>
     </Link>

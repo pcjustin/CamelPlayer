@@ -1,4 +1,4 @@
-// Capture comparison (docs/計劃書.md §12.1, §16.7 item 2): the bytes the engine hands to the "device"
+// Capture comparison (docs/Plan.md §12.1, §16.7 item 2): the bytes the engine hands to the "device"
 // must unpack to exactly the libFLAC reference decode, for every decoder and container choice.
 #include <gtest/gtest.h>
 
@@ -85,7 +85,7 @@ TEST_P(CaptureEveryDecoder, NativeContainers) {
 }
 
 TEST_P(CaptureEveryDecoder, ZeroPaddedContainers) {
-    // DAVE on usbaudio2 only takes 32-bit containers; Cirrus takes 24-in-32 (docs/計劃書.md §15.2)
+    // DAVE on usbaudio2 only takes 32-bit containers; Cirrus takes 24-in-32 (docs/Plan.md §15.2)
     runCase({GetParam(), "16-44.1k", {SampleType::Int32}, SampleType::Int32});
     runCase({GetParam(), "24-96k", {SampleType::Int24In32, SampleType::Int32}, SampleType::Int24In32});
     runCase({GetParam(), "20-48k", {SampleType::Int24}, SampleType::Int24});

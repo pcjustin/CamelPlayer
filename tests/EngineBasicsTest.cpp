@@ -50,7 +50,7 @@ TEST(SamplePacker, ZeroPaddingLayout) {
     EXPECT_FALSE(canCarryBitPerfect(SampleType::Float32, 16));
 }
 
-// Device capability tables measured in docs/計劃書.md §15.2.
+// Device capability tables measured in docs/Plan.md §15.2.
 TEST(FormatRule, PicksSmallestContainerTheDeviceTakes) {
     auto only = [](std::initializer_list<SampleType> list) {
         std::vector<SampleType> types(list);

@@ -1,4 +1,4 @@
-// Decoder interface (docs/計劃書.md §16.3). The final player keeps this interface for every format.
+// Decoder interface (docs/Plan.md §16.3). The final player keeps this interface for every format.
 #pragma once
 #include <cstddef>
 #include <cstdint>

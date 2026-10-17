@@ -43,7 +43,7 @@ inline std::filesystem::path acceptanceFile(const char* name) {
     return dir / (std::string(name) + ".flac");
 }
 
-// Formats a decoder is known not to handle (findings recorded in docs/解碼器比較.md). Opening such a file must
+// Formats a decoder is known not to handle (findings recorded in docs/Decoder-comparison.md). Opening such a file must
 // throw camel::audio::Error instead of crashing or producing wrong samples.
 inline bool knownUnsupported(camel::audio::DecoderKind k, uint32_t bits, uint32_t sampleRate) {
     using camel::audio::DecoderKind;

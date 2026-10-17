@@ -1,4 +1,4 @@
-// Single-producer / single-consumer lock-free byte ring (docs/計劃書.md §5.1).
+// Single-producer / single-consumer lock-free byte ring (docs/Plan.md §5.1).
 // The decode thread writes packed device bytes; the output's real-time thread reads them.
 #pragma once
 #include <algorithm>

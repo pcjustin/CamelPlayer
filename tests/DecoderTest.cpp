@@ -1,4 +1,4 @@
-// Every decoder against the libFLAC reference (docs/計劃書.md §16.3, §16.7).
+// Every decoder against the libFLAC reference (docs/Plan.md §16.3, §16.7).
 #include <gtest/gtest.h>
 
 #include "audio/decode/IDecoder.h"

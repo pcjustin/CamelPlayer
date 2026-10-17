@@ -1,4 +1,4 @@
-//! C ABI over Symphonia's FLAC decoder for CamelPlayer (docs/計劃書.md §16.3).
+//! C ABI over Symphonia's FLAC decoder for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
 use std::ffi::CStr;

@@ -1,4 +1,4 @@
-// Minimal playback engine of the MVP (docs/計劃書.md §5.1, §16.2): decoder -> SPSC ring -> output.
+// Minimal playback engine of the MVP (docs/Plan.md §5.1, §16.2): decoder -> SPSC ring -> output.
 // All commands run in order on one control thread; the UI only posts commands and reads snapshots.
 #pragma once
 #include <chrono>
@@ -45,14 +45,14 @@ public:
     PlaybackEngine& operator=(const PlaybackEngine&) = delete;
 
     void openAndPlay(const std::filesystem::path& file);
-    // Selects a file without playing it (startup restore, docs/計劃書.md §2); play() starts it.
+    // Selects a file without playing it (startup restore, docs/Plan.md §2); play() starts it.
     void load(const std::filesystem::path& file);
     void play();
     void pause();
     void togglePause();
     void stop();
     void seek(uint64_t frame);
-    // Applies immediately: an open stream restarts from the current position (docs/計劃書.md §2).
+    // Applies immediately: an open stream restarts from the current position (docs/Plan.md §2).
     void applySettings(const Settings& settings);
     // ASIO only: opens the driver's control panel. Blocks until the driver returns.
     bool showControlPanel();

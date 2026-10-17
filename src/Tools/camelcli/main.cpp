@@ -1,4 +1,4 @@
-// camelcli: command-line companion of CamelPlayer (docs/計劃書.md §4, §16).
+// camelcli: command-line companion of CamelPlayer (docs/Plan.md §4, §16).
 #include <windows.h>
 
 #include <cstdio>
@@ -22,9 +22,9 @@ void usage() {
         "  capture <file.flac> <out.raw> [--decoder id] [--accept 16,24,24in32,32]\n"
         "      run the engine into a file and compare it bit for bit with the libFLAC reference\n"
         "  gen-test-audio [dir] [--seconds N]\n"
-        "      write the FLAC test matrix (docs/計劃書.md §16.6), default build\\testaudio\n"
+        "      write the FLAC test matrix (docs/Plan.md §16.6), default build\\testaudio\n"
         "  bench-decoders <dir|files...> [--runs N] [--out results.json]\n"
-        "      measure the four decoders (docs/計劃書.md §16.5)\n");
+        "      measure the four decoders (docs/Plan.md §16.5)\n");
 }
 
 } // namespace

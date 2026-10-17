@@ -16,7 +16,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     auto server = camel::server::createLocalServer();
     try {
         const auto s = server->snapshot().settings;
-        if (!s.language.empty()) // "" = follow Windows (docs/計劃書.md §8.5)
+        if (!s.language.empty()) // "" = follow Windows (docs/Plan.md §8.5)
             winrt::Microsoft::Windows::Globalization::ApplicationLanguages::PrimaryLanguageOverride(
                 winrt::to_hstring(s.language));
     } catch (const winrt::hresult_error& e) {

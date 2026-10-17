@@ -1,4 +1,4 @@
-// Packs right-aligned integer samples into a device layout without changing any bit (docs/計劃書.md §5.2, §16.2).
+// Packs right-aligned integer samples into a device layout without changing any bit (docs/Plan.md §5.2, §16.2).
 #pragma once
 #include <cstddef>
 #include <cstdint>

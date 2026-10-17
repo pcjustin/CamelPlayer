@@ -91,7 +91,7 @@ public:
 
     void seek(uint64_t frame) override {
         AVStream* st = fmt_->streams[stream_];
-        // The FLAC demuxer refuses targets inside the last frame or two (EPERM, see docs/解碼器比較.md).
+        // The FLAC demuxer refuses targets inside the last frame or two (EPERM, see docs/Decoder-comparison.md).
         // Then land earlier and let convert() decode and drop up to the exact frame.
         int e = -1;
         for (double backoff : {0.0, 1.0, 5.0, -1.0}) {

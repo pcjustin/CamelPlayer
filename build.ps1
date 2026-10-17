@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds CamelPlayer, optionally runs the tests and packages dist\CamelPlayer-win-x64.zip (docs/計劃書.md §4, M0-08).
+  Builds CamelPlayer, optionally runs the tests and packages dist\CamelPlayer-win-x64.zip (docs/Plan.md §4, M0-08).
 .EXAMPLE
   .\build.ps1 -Configuration Release -Test -Package
 #>
@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
-# Storage Sense can wipe %TEMP% during long builds (docs/計劃書.md §15), so keep an eye on free space.
+# Storage Sense can wipe %TEMP% during long builds (docs/Plan.md §15), so keep an eye on free space.
 $buildDrive = [System.IO.Path]::GetPathRoot($root)
 $driveInfo = [System.IO.DriveInfo]::new($buildDrive)
 $freeBytes = $driveInfo.AvailableFreeSpace

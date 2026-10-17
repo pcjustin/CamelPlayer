@@ -1,4 +1,4 @@
-// C ABI of rust/symphonia_ffi (docs/計劃書.md §16.3). Keep in sync with src/lib.rs.
+// C ABI of rust/symphonia_ffi (docs/Plan.md §16.3). Keep in sync with src/lib.rs.
 #pragma once
 #include <stddef.h>
 #include <stdint.h>

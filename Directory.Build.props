@@ -11,7 +11,7 @@
     <IntDir>$(CamelRoot)build\obj\$(Configuration)\$(MSBuildProjectName)\</IntDir>
   </PropertyGroup>
 
-  <!-- vcpkg manifest mode with the VS-bundled vcpkg (docs/計劃書.md §15.1, §15.4 item 6) -->
+  <!-- vcpkg manifest mode with the VS-bundled vcpkg (docs/Plan.md §15.1, §15.4 item 6) -->
   <PropertyGroup>
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
     <VcpkgManifestRoot>$(CamelRoot)</VcpkgManifestRoot>

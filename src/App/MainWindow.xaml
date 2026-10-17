@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- MVP main window (docs/計劃書.md §8.1, §16.2): navigation shell, now-playing view, settings, bottom player bar. -->
+<!-- MVP main window (docs/Plan.md §8.1, §16.2): navigation shell, now-playing view, settings, bottom player bar. -->
 <Window
     x:Class="CamelPlayer.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -47,7 +47,7 @@
                     <TextBlock x:Uid="Placeholder_Text" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
 
-                <!-- Settings (docs/計劃書.md §16.4) -->
+                <!-- Settings (docs/Plan.md §16.4) -->
                 <ScrollViewer x:Name="SettingsPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="12" MaxWidth="680" HorizontalAlignment="Left" Padding="0,0,16,24">
                         <TextBlock x:Uid="Settings_Title" Style="{StaticResource TitleTextBlockStyle}" />
@@ -111,7 +111,7 @@
             </Grid>
         </NavigationView>
 
-        <!-- Player bar with the signal-path / bit-perfect indicator (docs/計劃書.md §8.1) -->
+        <!-- Player bar with the signal-path / bit-perfect indicator (docs/Plan.md §8.1) -->
         <Grid Grid.Row="1" Padding="16,8,16,8" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
             <Grid.RowDefinitions>

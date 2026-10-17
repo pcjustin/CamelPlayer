@@ -346,7 +346,7 @@ private:
             stopDecoder();
             decoder_.reset();
             position_ = startFrame;
-            // Device busy or unplugged: pause and wait for the user (docs/計劃書.md §2)
+            // Device busy or unplugged: pause and wait for the user (docs/Plan.md §2)
             const bool waitForDevice = e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceLost;
             if (!waitForDevice) output_.reset();
             return fail(e, waitForDevice ? PlayState::Paused : PlayState::Stopped);

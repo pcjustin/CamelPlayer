@@ -1,4 +1,4 @@
-// Test material for the MVP (docs/計劃書.md §16.6): FLAC files generated with the libFLAC encoder,
+// Test material for the MVP (docs/Plan.md §16.6): FLAC files generated with the libFLAC encoder,
 // and an independent libFLAC reference decode used by capture comparison and the decoder report.
 #pragma once
 #include <cstdint>

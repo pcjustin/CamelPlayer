@@ -22,7 +22,7 @@
 namespace camel::audio {
 namespace {
 
-constexpr REFERENCE_TIME kPollBuffer = 2'000'000; // 200 ms (docs/計劃書.md §6 default)
+constexpr REFERENCE_TIME kPollBuffer = 2'000'000; // 200 ms (docs/Plan.md §6 default)
 
 wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     auto en = wil::CoCreateInstance<MMDeviceEnumerator, IMMDeviceEnumerator>(CLSCTX_ALL);

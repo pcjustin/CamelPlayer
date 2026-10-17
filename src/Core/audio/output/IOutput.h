@@ -1,4 +1,4 @@
-// Output backend interface (docs/計劃書.md §4, §16.2).
+// Output backend interface (docs/Plan.md §4, §16.2).
 #pragma once
 #include <cstddef>
 #include <cstdint>

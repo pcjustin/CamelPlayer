@@ -1,4 +1,4 @@
-// Kernel Streaming: WaveRT event / WaveRT polling / standard streaming (docs/計劃書.md §5.7, §15.5).
+// Kernel Streaming: WaveRT event / WaveRT polling / standard streaming (docs/Plan.md §5.7, §15.5).
 #pragma once
 #include "audio/output/IOutput.h"
 #include "settings/Settings.h"

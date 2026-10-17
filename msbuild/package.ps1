@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Stages build\<Configuration>\App into dist\CamelPlayer and zips it (docs/計劃書.md §4, M0-08).
+  Stages build\<Configuration>\App into dist\CamelPlayer and zips it (docs/Plan.md §4, M0-08).
   Called by build.ps1 -Package.
 #>
 param([ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release')
@@ -34,7 +34,7 @@ Get-ChildItem $app -Recurse -File | Where-Object {
 }
 Copy-Item $cli $stage
 
-# VC++ runtime, app-local (docs/計劃書.md §15.1)
+# VC++ runtime, app-local (docs/Plan.md §15.1)
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -prerelease -property installationPath
 $crt = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT') -Directory | Sort-Object FullName | Select-Object -Last 1

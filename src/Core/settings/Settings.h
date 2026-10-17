@@ -1,4 +1,4 @@
-// Persisted settings (docs/計劃書.md §6, §16.4). One set per backend; stored as JSON in %LOCALAPPDATA%\CamelPlayer.
+// Persisted settings (docs/Plan.md §6, §16.4). One set per backend; stored as JSON in %LOCALAPPDATA%\CamelPlayer.
 #pragma once
 #include <filesystem>
 #include <optional>
@@ -57,7 +57,7 @@ struct Settings {
     std::wstring lastFile;
 };
 
-// Fixed in the MVP (docs/計劃書.md §16.4).
+// Fixed in the MVP (docs/Plan.md §16.4).
 constexpr double kPrebufferSeconds = 10.0;
 constexpr const wchar_t* kMmcssTask = L"Pro Audio";
 

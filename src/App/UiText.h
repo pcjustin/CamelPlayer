@@ -1,4 +1,4 @@
-// Localized strings from Strings\<lang>\Resources.resw (docs/計劃書.md §8.5).
+// Localized strings from Strings\<lang>\Resources.resw (docs/Plan.md §8.5).
 #pragma once
 #include <string>
 

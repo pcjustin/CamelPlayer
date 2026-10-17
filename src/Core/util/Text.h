@@ -9,7 +9,7 @@ namespace camel {
 std::string toUtf8(std::wstring_view w);
 std::wstring toWide(std::string_view s);
 
-// Path with the \\?\ prefix so long and NAS paths open reliably (docs/計劃書.md §15.1).
+// Path with the \\?\ prefix so long and NAS paths open reliably (docs/Plan.md §15.1).
 std::wstring longPath(const std::filesystem::path& p);
 
 } // namespace camel
