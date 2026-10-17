@@ -743,6 +743,6 @@ TEST_P(ServerCaptureTest, MatchesReferencePcmFor16And24BitFiles) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(AllDecoders, ServerCaptureTest, ::testing::ValuesIn(kAllDecoders));
+INSTANTIATE_TEST_SUITE_P(AllDecoders, ServerCaptureTest, ::testing::ValuesIn(decodersFor(AudioFormat::Flac)));
 
 } // namespace

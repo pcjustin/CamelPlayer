@@ -43,6 +43,7 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_DECODER_SYMPHONIA 2u
 #define CAMEL_DECODER_DR_FLAC 3u
 #define CAMEL_DECODER_SNDFILE 4u
+#define CAMEL_DECODER_DR_WAV 5u
 
 #define CAMEL_DECODER_HOST_OK 0
 #define CAMEL_DECODER_HOST_E_IO (-1)

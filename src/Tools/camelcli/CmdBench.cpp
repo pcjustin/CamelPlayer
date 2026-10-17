@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "Commands.h"
+#include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/testing/TestAudio.h"
 #include "Engine/verify/FlacMd5.h"
@@ -178,7 +179,7 @@ int cmdBenchDecoders(const Args& args) {
     GetModuleFileNameW(nullptr, self, MAX_PATH);
     json all = json::array();
     for (auto& f : files) {
-        for (DecoderKind k : kAllDecoders) {
+        for (DecoderKind k : decodersFor(probeFormat(f))) {
             std::vector<json> results;
             for (int run = 0; run < runs; run++) {
                 std::wstring cmd = L"\"" + std::wstring(self) + L"\" bench-one " + toWide(decoderId(k)) + L" \"" +

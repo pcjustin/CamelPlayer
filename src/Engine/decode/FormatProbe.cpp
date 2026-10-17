@@ -205,4 +205,21 @@ AudioFormat probeFormat(const std::filesystem::path& path) {
     unsupported("unrecognized audio format");
 }
 
+std::optional<uint64_t> aiffSampleFrames(const std::filesystem::path& path) {
+    const File f(path);
+    uint8_t h[12];
+    if (!f.readAt(0, h, sizeof h) || !tagIs(h, "FORM") || !(tagIs(h + 8, "AIFF") || tagIs(h + 8, "AIFC"))) return std::nullopt;
+    for (uint64_t pos = 12; f.size() - pos >= 8;) {
+        uint8_t chunk[14];
+        if (!f.readAt(pos, chunk, 8)) return std::nullopt;
+        const uint64_t size = be32(chunk + 4);
+        if (tagIs(chunk, "COMM")) {
+            if (size < 6 || !f.readAt(pos + 8, chunk + 8, 6)) return std::nullopt;
+            return be32(chunk + 10);
+        }
+        pos += 8 + size + (size & 1); // chunks are padded to even sizes
+    }
+    return std::nullopt;
+}
+
 } // namespace camel::audio

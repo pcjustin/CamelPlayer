@@ -1,4 +1,4 @@
-//! C ABI over Symphonia's FLAC decoder for CamelPlayer (docs/Plan.md §16.3).
+//! C ABI over Symphonia's FLAC, ALAC, WAV and AIFF decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
 use std::ffi::CStr;
@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use symphonia::core::audio::{AudioBufferRef, Signal};
-use symphonia::core::codecs::{Decoder, DecoderOptions, VerificationCheck};
+use symphonia::core::codecs::{Decoder, DecoderOptions, VerificationCheck, CODEC_TYPE_ALAC};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
@@ -292,7 +292,22 @@ fn guarded(body: impl FnOnce() -> i32) -> i32 {
 fn interleave(buf: AudioBufferRef, ch: usize, shift: u32) -> Result<Vec<i32>, i32> {
     let frames = buf.frames();
     let mut out = Vec::with_capacity(frames * ch);
+    // 16- and 24-bit buffers hold right-aligned samples; 32-bit buffers hold left-aligned ones.
     match buf {
+        AudioBufferRef::S16(b) => {
+            for f in 0..frames {
+                for c in 0..ch {
+                    out.push(i32::from(b.chan(c)[f]));
+                }
+            }
+        }
+        AudioBufferRef::S24(b) => {
+            for f in 0..frames {
+                for c in 0..ch {
+                    out.push(b.chan(c)[f].inner());
+                }
+            }
+        }
         AudioBufferRef::S32(b) => {
             for f in 0..frames {
                 for c in 0..ch {
@@ -370,10 +385,8 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
         Err(_) => return SYM_E_IO,
     };
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    hint.with_extension("flac");
     let probed = match symphonia::default::get_probe().format(
-        &hint,
+        &Hint::new(),
         mss,
         &FormatOptions::default(),
         &MetadataOptions::default(),
@@ -398,8 +411,24 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
             Ok(d) => d,
             Err(_) => return SYM_E_UNSUPPORTED,
         };
-    let channels = params.channels.map(|c| c.count()).unwrap_or(0);
-    let bits = params.bits_per_sample.unwrap_or(0);
+    // ALAC parameters come from the magic cookie: the MP4 reader leaves channels and depth unset, and the sample
+    // entry's 16.16 rate field cannot hold rates above 65535 Hz.
+    let cookie = match params.extra_data.as_deref() {
+        Some(c) if params.codec == CODEC_TYPE_ALAC && c.len() >= 24 => Some(c),
+        _ => None,
+    };
+    let channels = cookie
+        .map(|c| usize::from(c[9]))
+        .or(params.channels.map(|c| c.count()))
+        .unwrap_or(0);
+    let bits = cookie
+        .map(|c| u32::from(c[5]))
+        .or(params.bits_per_sample)
+        .unwrap_or(0);
+    let sample_rate = cookie
+        .map(|c| u32::from_be_bytes([c[20], c[21], c[22], c[23]]))
+        .or(params.sample_rate)
+        .unwrap_or(0);
     if channels == 0 || bits == 0 || bits > 32 {
         return SYM_E_UNSUPPORTED;
     }
@@ -408,7 +437,7 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
         _ => (0, [0u8; 16]),
     };
     *info = SymInfo {
-        sample_rate: params.sample_rate.unwrap_or(0),
+        sample_rate,
         channels: channels as u32,
         bits_per_sample: bits,
         total_frames: params.n_frames.unwrap_or(0),

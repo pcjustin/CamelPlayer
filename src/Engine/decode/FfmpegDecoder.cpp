@@ -1,4 +1,4 @@
-// FLAC through FFmpeg (libavformat + libavcodec).
+// FLAC, ALAC, WAV and AIFF through FFmpeg (libavformat + libavcodec).
 #include "Engine/decode/DecoderImpl.h"
 
 extern "C" {
@@ -41,9 +41,9 @@ std::string avErr(int e) {
     return buf;
 }
 
-class FfmpegFlac final : public IDecoder {
+class FfmpegDecoder final : public IDecoder {
 public:
-    explicit FfmpegFlac(const std::filesystem::path& path) {
+    explicit FfmpegDecoder(const std::filesystem::path& path) {
         routeAvLog();
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
         int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, nullptr);
@@ -63,13 +63,14 @@ public:
         info_.sampleRate = uint32_t(ctx_->sample_rate);
         info_.channels = uint32_t(ctx_->ch_layout.nb_channels);
         info_.bitsPerSample = uint32_t(ctx_->bits_per_raw_sample ? ctx_->bits_per_raw_sample : st->codecpar->bits_per_raw_sample);
+        if (!info_.bitsPerSample) info_.bitsPerSample = uint32_t(av_get_bits_per_sample(ctx_->codec_id)); // 16-bit PCM
         if (st->duration > 0)
             info_.totalFrames = uint64_t(av_rescale_q(st->duration, st->time_base, AVRational{1, ctx_->sample_rate}));
         if (!info_.sampleRate || !info_.channels || !info_.bitsPerSample || info_.bitsPerSample > 32)
             fail(ErrorCode::UnsupportedStream, "unexpected stream parameters");
     }
 
-    ~FfmpegFlac() override { close(); }
+    ~FfmpegDecoder() override { close(); }
 
     const SourceInfo& info() const override { return info_; }
 
@@ -205,8 +206,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openFfmpegFlac(const std::filesystem::path& path) {
-    return std::make_unique<FfmpegFlac>(path);
+std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path) {
+    return std::make_unique<FfmpegDecoder>(path);
 }
 
 } // namespace camel::audio

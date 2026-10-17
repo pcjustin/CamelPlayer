@@ -17,11 +17,14 @@
   <data name="Nav_Folders.Content" xml:space="preserve"><value>Folders</value></data>
   <data name="Nav_Playlists.Content" xml:space="preserve"><value>Playlists</value></data>
   <data name="Nav_SmartPlaylists.Content" xml:space="preserve"><value>Smart Playlists</value></data>
-  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later milestone. The MVP plays one FLAC file at a time: use the open button below.</value></data>
+  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later milestone. The player opens one file at a time (FLAC, ALAC, WAV or AIFF): use the open button below.</value></data>
   <data name="Settings_Title.Text" xml:space="preserve"><value>Settings</value></data>
   <data name="Settings_Playback.Text" xml:space="preserve"><value>Playback</value></data>
   <data name="Settings_Backend.Header" xml:space="preserve"><value>Output backend</value></data>
   <data name="Settings_Decoder.Header" xml:space="preserve"><value>FLAC decoder</value></data>
+  <data name="Settings_AlacDecoder.Header" xml:space="preserve"><value>ALAC decoder</value></data>
+  <data name="Settings_WavDecoder.Header" xml:space="preserve"><value>WAV decoder</value></data>
+  <data name="Settings_AiffDecoder.Header" xml:space="preserve"><value>AIFF decoder</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>Output device</value></data>
   <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>Driving mode (exclusive)</value></data>
   <data name="Settings_Period.Header" xml:space="preserve"><value>Device period</value></data>
@@ -61,7 +64,7 @@
   <data name="Status_Idle" xml:space="preserve"><value>No stream open.</value></data>
   <data name="SignalPath_File" xml:space="preserve"><value>File</value></data>
   <data name="SignalPath_Pad" xml:space="preserve"><value>integer zero padding</value></data>
-  <data name="Tip_Open" xml:space="preserve"><value>Open a FLAC file</value></data>
+  <data name="Tip_Open" xml:space="preserve"><value>Open an audio file</value></data>
   <data name="Tip_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>Stop</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>Cannot open the file</value></data>

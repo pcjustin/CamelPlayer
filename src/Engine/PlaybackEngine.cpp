@@ -11,7 +11,6 @@
 #include <mutex>
 #include <thread>
 
-#include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
@@ -139,19 +138,20 @@ public:
         teardown();
         file_ = file.wstring();
         fileDecoder_ = decoder;
-        format_.reset(); // other formats are identified, and reported, when playback starts
+        format_.reset();
         position_ = 0;
-        SourceInfo si;
+        std::optional<SourceInfo> source;
+        try {
+            format_ = probeFormat(file);
+            source = openDecoder(chooseDecoder(*format_, decoder, settings_), file)->info();
+        } catch (const Error& e) {
+            log::info("engine: %s is reported when playback starts (%s)", toUtf8(file_).c_str(), e.what());
+        }
         {
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
-            snap_.source.reset();
-            snap_.total = 0;
-            if (readFlacStreamInfo(file, si)) {
-                format_ = AudioFormat::Flac;
-                snap_.source = si;
-                snap_.total = si.totalFrames;
-            }
+            snap_.source = source;
+            snap_.total = source ? source->totalFrames : 0;
             snap_.format = format_;
             snap_.decoder = displayedDecoder(settings_);
             snap_.error.reset();
@@ -219,14 +219,14 @@ public:
         if (!active_ || rust_->transitions().nextQueued) return false;
         AudioFormat format{};
         DecoderKind decoder{};
+        SourceInfo source;
         try {
             format = probeFormat(file);
             decoder = chooseDecoder(format, requested, settings_);
+            source = openDecoder(decoder, file)->info();
         } catch (const Error&) {
             return false; // reported when the file is opened normally
         }
-        SourceInfo source;
-        if (!readFlacStreamInfo(file, source)) return false;
         std::optional<DeviceFormat> outputFormat;
         try {
             outputFormat = chooseOutputFormat(source, fixedSampleType(settings_),

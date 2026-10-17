@@ -28,7 +28,9 @@
 #include <winrt/Microsoft.Windows.Globalization.h>
 #include <winrt/Microsoft.Windows.Storage.Pickers.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>

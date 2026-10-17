@@ -107,7 +107,8 @@ std::string hardwareCaseName(const ::testing::TestParamInfo<ServerHardware::Para
 }
 
 INSTANTIATE_TEST_SUITE_P(ServerRoutes, ServerHardware,
-                         ::testing::Combine(::testing::Values(0, 1, 2, 3, 4), ::testing::ValuesIn(audio::kAllDecoders)),
+                         ::testing::Combine(::testing::Values(0, 1, 2, 3, 4),
+                                            ::testing::ValuesIn(audio::decodersFor(audio::AudioFormat::Flac))),
                          hardwareCaseName);
 
 } // namespace

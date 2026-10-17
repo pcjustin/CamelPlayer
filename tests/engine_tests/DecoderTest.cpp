@@ -64,5 +64,5 @@ TEST_P(EveryDecoder, DamagedFilesDoNotCrash) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Flac, EveryDecoder, ::testing::ValuesIn(kAllDecoders),
+INSTANTIATE_TEST_SUITE_P(Flac, EveryDecoder, ::testing::ValuesIn(decodersFor(AudioFormat::Flac)),
                          [](const ::testing::TestParamInfo<DecoderKind>& i) { return std::string(decoderId(i.param)); });

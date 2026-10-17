@@ -1,4 +1,4 @@
-// FLAC through Symphonia (Rust, rust/symphonia_ffi).
+// FLAC, ALAC, WAV and AIFF through Symphonia (Rust, rust/symphonia_ffi).
 #include "Engine/decode/DecoderImpl.h"
 
 #include "symphonia_ffi.h"
@@ -7,9 +7,9 @@
 namespace camel::audio {
 namespace {
 
-class SymphoniaFlac final : public IDecoder {
+class SymphoniaDecoder final : public IDecoder {
 public:
-    explicit SymphoniaFlac(const std::filesystem::path& path) {
+    explicit SymphoniaDecoder(const std::filesystem::path& path) {
         SymInfo si{};
         int32_t r = sym_open(toUtf8(longPath(path)).c_str(), &dec_, &si);
         if (r == SYM_E_IO) throw Error(ErrorCode::FileOpen, "symphonia: cannot open file");
@@ -26,7 +26,7 @@ public:
         }
     }
 
-    ~SymphoniaFlac() override { sym_close(dec_); }
+    ~SymphoniaDecoder() override { sym_close(dec_); }
 
     const SourceInfo& info() const override { return info_; }
 
@@ -54,8 +54,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openSymphoniaFlac(const std::filesystem::path& path) {
-    return std::make_unique<SymphoniaFlac>(path);
+std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path) {
+    return std::make_unique<SymphoniaDecoder>(path);
 }
 
 } // namespace camel::audio

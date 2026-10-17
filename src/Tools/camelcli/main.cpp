@@ -12,8 +12,8 @@ namespace {
 void usage() {
     std::puts(
         "camelcli <command> [options]\n"
-        "  decode <file.flac> [--decoder ffmpeg|symphonia|drflac|sndfile|all]\n"
-        "      decode the whole file and compare the result with the STREAMINFO MD5\n"
+        "  decode <file> [--decoder ffmpeg|symphonia|drflac|sndfile|drwav|all]\n"
+        "      decode the whole file (FLAC, ALAC, WAV, AIFF); FLAC is compared with its STREAMINFO MD5\n"
         "  list-devices\n"
         "      list WASAPI endpoints, ASIO drivers and Kernel Streaming pins\n"
         "  play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode auto|rtevent|rtpoll|standard]\n"

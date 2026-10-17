@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "Commands.h"
+#include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/verify/FlacMd5.h"
 #include "Common/util/Text.h"
@@ -39,14 +40,12 @@ std::vector<std::wstring> positional(const Args& args) {
 int cmdDecode(const Args& args) {
     auto files = positional(args);
     if (files.empty()) {
-        std::puts("usage: decode <file.flac> [--decoder id|all]");
+        std::puts("usage: decode <file> [--decoder id|all]");
         return 2;
     }
     std::wstring which = option(args, L"--decoder").value_or(L"all");
-    std::vector<DecoderKind> kinds;
-    if (which == L"all")
-        kinds.assign(std::begin(kAllDecoders), std::end(kAllDecoders));
-    else {
+    std::vector<DecoderKind> kinds; // empty: every decoder registered for the file's format
+    if (which != L"all") {
         DecoderKind k;
         if (!decoderFromId(toUtf8(which), k)) throw std::runtime_error("unknown decoder " + toUtf8(which));
         kinds.push_back(k);
@@ -54,7 +53,12 @@ int cmdDecode(const Args& args) {
     int failures = 0;
     for (auto& file : files) {
         std::printf("%s\n", toUtf8(file).c_str());
-        for (DecoderKind k : kinds) {
+        std::vector<DecoderKind> fileKinds = kinds;
+        if (fileKinds.empty()) {
+            const auto registered = decodersFor(probeFormat(file));
+            fileKinds.assign(registered.begin(), registered.end());
+        }
+        for (DecoderKind k : fileKinds) {
             auto t0 = std::chrono::steady_clock::now();
             try {
                 auto dec = openDecoder(k, file);

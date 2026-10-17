@@ -114,12 +114,13 @@ void MainWindow::InitializeComponent() {
 void MainWindow::populateSettings() {
     populating_ = true;
     fill(BackendCombo(), {L"WASAPI", L"ASIO", L"Kernel Streaming"}, int(settings_.backend));
-    std::vector<hstring> decoders;
-    const auto flacDecoders = decodersFor(AudioFormat::Flac);
-    for (DecoderKind k : flacDecoders) decoders.push_back(ui::utf8(decoderName(k)));
-    fill(DecoderCombo(), decoders,
-         int(std::find(flacDecoders.begin(), flacDecoders.end(), decoderFor(settings_.decoderByFormat, AudioFormat::Flac)) -
-             flacDecoders.begin()));
+    for (const auto& [combo, format] : decoderCombos()) {
+        const auto registered = decodersFor(format);
+        std::vector<hstring> names;
+        for (DecoderKind k : registered) names.push_back(ui::utf8(decoderName(k)));
+        const auto chosen = std::find(registered.begin(), registered.end(), decoderFor(settings_.decoderByFormat, format));
+        fill(combo, names, int(chosen - registered.begin()));
+    }
 
     fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, settings_.wasapi.eventDriven ? 0 : 1);
     fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(settings_.wasapi.period));
@@ -177,12 +178,21 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
     populating_ = was;
 }
 
+std::array<std::pair<ComboBox, AudioFormat>, 4> MainWindow::decoderCombos() {
+    return {{{DecoderCombo(), AudioFormat::Flac},
+             {AlacDecoderCombo(), AudioFormat::Alac},
+             {WavDecoderCombo(), AudioFormat::Wav},
+             {AiffDecoderCombo(), AudioFormat::Aiff}}};
+}
+
 void MainWindow::readSettingsFromUi() {
     auto idx = [](ComboBox const& c) { return std::max(0, c.SelectedIndex()); };
     settings_.backend = Backend(std::min(idx(BackendCombo()), 2));
-    const auto flacDecoders = decodersFor(AudioFormat::Flac);
-    const DecoderKind flac = flacDecoders[std::min<size_t>(idx(DecoderCombo()), flacDecoders.size() - 1)];
-    if (flac != decoderFor(settings_.decoderByFormat, AudioFormat::Flac)) settings_.decoderByFormat[AudioFormat::Flac] = flac;
+    for (const auto& [combo, format] : decoderCombos()) {
+        const auto registered = decodersFor(format);
+        const DecoderKind chosen = registered[std::min<size_t>(idx(combo), registered.size() - 1)];
+        if (chosen != decoderFor(settings_.decoderByFormat, format)) settings_.decoderByFormat[format] = chosen;
+    }
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -263,10 +273,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         PathText().Text(ui::utf8(s.pathUtf8));
         if (s.source) {
             wchar_t buf[256];
-            swprintf(buf, 256, L"FLAC · %u-bit · %.1f kHz · %u ch · %s · STREAMINFO MD5 %s", s.source->bitsPerSample,
-                     s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str(),
-                     s.source->md5 ? L"✓" : L"—");
-            SourceText().Text(buf);
+            swprintf(buf, 256, L"%s · %u-bit · %.1f kHz · %u ch · %s", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
+                     s.source->bitsPerSample, s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str());
+            hstring text = buf;
+            if (s.format == AudioFormat::Flac) text = text + L" · STREAMINFO MD5 " + (s.source->md5 ? L"✓" : L"—");
+            SourceText().Text(text);
         }
     }
 
@@ -329,7 +340,9 @@ void MainWindow::showPage(hstring const& tag) {
 winrt::fire_and_forget MainWindow::OnOpenClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
     Microsoft::Windows::Storage::Pickers::FileOpenPicker picker(AppWindow().Id());
-    picker.FileTypeFilter().Append(L".flac");
+    // The decoder is chosen from the file's contents; the extension only filters the list.
+    for (const wchar_t* extension : {L".flac", L".m4a", L".alac", L".wav", L".aif", L".aiff", L".aifc"})
+        picker.FileTypeFilter().Append(extension);
     picker.SuggestedStartLocation(Microsoft::Windows::Storage::Pickers::PickerLocationId::MusicLibrary);
     auto result = co_await picker.PickSingleFileAsync();
     if (!result || !server_) co_return;

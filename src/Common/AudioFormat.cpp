@@ -54,11 +54,21 @@ bool formatFromId(std::string_view id, AudioFormat& out) {
 }
 
 std::span<const DecoderKind> decodersFor(AudioFormat format) {
-    // Default first.
-    static constexpr DecoderKind kFlac[] = {DecoderKind::Sndfile, DecoderKind::FFmpeg, DecoderKind::Symphonia,
-                                            DecoderKind::DrFlac};
-    if (format == AudioFormat::Flac) return kFlac;
-    return {};
+    static constexpr DecoderKind kFlac[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrFlac,
+                                            DecoderKind::Sndfile};
+    static constexpr DecoderKind kAlac[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia};
+    static constexpr DecoderKind kPcm[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::Sndfile, DecoderKind::DrWav};
+    switch (format) {
+    case AudioFormat::Flac:
+        return kFlac;
+    case AudioFormat::Alac:
+        return kAlac;
+    case AudioFormat::Wav:
+    case AudioFormat::Aiff:
+        return kPcm;
+    default:
+        return {};
+    }
 }
 
 bool supports(AudioFormat format, DecoderKind decoder) {
@@ -67,7 +77,7 @@ bool supports(AudioFormat format, DecoderKind decoder) {
 }
 
 DecoderKind defaultDecoder(AudioFormat format) {
-    return decodersFor(format).front();
+    return format == AudioFormat::Alac ? DecoderKind::Symphonia : DecoderKind::Sndfile;
 }
 
 } // namespace camel::audio

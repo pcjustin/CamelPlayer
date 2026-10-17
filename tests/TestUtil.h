@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <mutex>
 
+#include "Common/AudioFormat.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/testing/TestAudio.h"
 

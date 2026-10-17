@@ -53,6 +53,8 @@ uint32_t abiDecoder(DecoderKind kind) {
         return CAMEL_DECODER_DR_FLAC;
     case DecoderKind::Sndfile:
         return CAMEL_DECODER_SNDFILE;
+    case DecoderKind::DrWav:
+        return CAMEL_DECODER_DR_WAV;
     }
     return CAMEL_DECODER_SNDFILE;
 }

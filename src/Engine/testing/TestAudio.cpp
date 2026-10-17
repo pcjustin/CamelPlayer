@@ -4,8 +4,14 @@
 #include <FLAC/stream_decoder.h>
 #include <FLAC/stream_encoder.h>
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+}
+
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -110,6 +116,159 @@ static void writeAll(const std::filesystem::path& p, const char* data, size_t n)
     out.write(data, std::streamsize(n));
     out.flush();
     if (!out) throw std::runtime_error("cannot write test audio output");
+}
+
+namespace {
+
+void putLe(std::string& out, uint64_t value, int bytes) {
+    for (int i = 0; i < bytes; i++) out += char((value >> (8 * i)) & 0xFF);
+}
+
+void putBe(std::string& out, uint64_t value, int bytes) {
+    for (int i = bytes - 1; i >= 0; i--) out += char((value >> (8 * i)) & 0xFF);
+}
+
+void checkPcm(const std::vector<int32_t>& samples, uint32_t bits, uint32_t channels) {
+    if (!channels || bits < 8 || bits > 32 || bits % 8 || samples.size() % channels)
+        throw std::invalid_argument("invalid PCM test file parameters");
+}
+
+} // namespace
+
+void writeWav(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+              uint32_t channels, bool float32) {
+    checkPcm(samples, bits, channels);
+    const uint32_t bytes = float32 ? 4 : bits / 8;
+    std::string data;
+    data.reserve(samples.size() * bytes);
+    for (const int32_t s : samples) {
+        if (float32) {
+            const float f = float(std::ldexp(double(s), -int(bits - 1)));
+            uint32_t raw = 0;
+            std::memcpy(&raw, &f, sizeof raw);
+            putLe(data, raw, 4);
+        } else {
+            putLe(data, bits == 8 ? uint32_t(s + 128) : uint32_t(s), int(bytes)); // 8-bit WAV is unsigned
+        }
+    }
+    std::string file = "RIFF";
+    putLe(file, 4 + 24 + 8 + data.size(), 4);
+    file += "WAVEfmt ";
+    putLe(file, 16, 4);
+    putLe(file, float32 ? 3 : 1, 2);
+    putLe(file, channels, 2);
+    putLe(file, sampleRate, 4);
+    putLe(file, uint64_t(sampleRate) * channels * bytes, 4);
+    putLe(file, uint64_t(channels) * bytes, 2);
+    putLe(file, uint64_t(bytes) * 8, 2);
+    file += "data";
+    putLe(file, data.size(), 4);
+    writeAll(path, (file + data).data(), file.size() + data.size());
+}
+
+void writeAiff(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+               uint32_t channels) {
+    checkPcm(samples, bits, channels);
+    std::string data;
+    data.reserve(samples.size() * (bits / 8));
+    for (const int32_t s : samples) putBe(data, uint32_t(s), int(bits / 8));
+    std::string comm;
+    putBe(comm, channels, 2);
+    putBe(comm, samples.size() / channels, 4);
+    putBe(comm, bits, 2);
+    // 80-bit IEEE extended sample rate: sign/exponent, then a 64-bit mantissa with an explicit integer bit.
+    int exponent = 0;
+    while ((uint64_t(sampleRate) >> (exponent + 1)) != 0) exponent++;
+    putBe(comm, 16383 + exponent, 2);
+    putBe(comm, uint64_t(sampleRate) << (63 - exponent), 8);
+    std::string file = "FORM";
+    putBe(file, 4 + 8 + comm.size() + 8 + 8 + data.size(), 4);
+    file += "AIFFCOMM";
+    putBe(file, comm.size(), 4);
+    file += comm + "SSND";
+    putBe(file, 8 + data.size(), 4);
+    putBe(file, 0, 8); // offset, block size
+    writeAll(path, (file + data).data(), file.size() + data.size());
+}
+
+void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+               uint32_t channels) {
+    if ((bits != 16 && bits != 24) || !channels || samples.size() % channels)
+        throw std::invalid_argument("ALAC test files are 16 or 24-bit");
+    AVFormatContext* oc = nullptr;
+    AVCodecContext* ctx = nullptr;
+    AVFrame* frame = nullptr;
+    AVPacket* pkt = nullptr;
+    auto cleanup = [&] {
+        av_packet_free(&pkt);
+        av_frame_free(&frame);
+        avcodec_free_context(&ctx);
+        if (oc && oc->pb) avio_closep(&oc->pb);
+        avformat_free_context(oc);
+    };
+    auto check = [&](int result, const char* what) {
+        if (result < 0) {
+            cleanup();
+            throw std::runtime_error(std::string("ALAC test file: ") + what + " failed");
+        }
+    };
+    const std::string utf8 = toUtf8(path.wstring());
+    check(avformat_alloc_output_context2(&oc, nullptr, "ipod", utf8.c_str()), "output context");
+    const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_ALAC);
+    check(codec ? 0 : -1, "ALAC encoder");
+    AVStream* st = avformat_new_stream(oc, nullptr);
+    ctx = avcodec_alloc_context3(codec);
+    check(st && ctx ? 0 : -1, "stream");
+    ctx->sample_rate = int(sampleRate);
+    av_channel_layout_default(&ctx->ch_layout, int(channels));
+    ctx->sample_fmt = bits == 16 ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S32P;
+    ctx->bits_per_raw_sample = int(bits);
+    ctx->time_base = AVRational{1, int(sampleRate)};
+    if (oc->oformat->flags & AVFMT_GLOBALHEADER) ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    check(avcodec_open2(ctx, codec, nullptr), "encoder open");
+    check(avcodec_parameters_from_context(st->codecpar, ctx), "stream parameters");
+    st->time_base = ctx->time_base;
+    check(avio_open(&oc->pb, utf8.c_str(), AVIO_FLAG_WRITE), "file open");
+    check(avformat_write_header(oc, nullptr), "header");
+    frame = av_frame_alloc();
+    pkt = av_packet_alloc();
+    check(frame && pkt ? 0 : -1, "frame");
+    auto drain = [&] {
+        for (;;) {
+            const int r = avcodec_receive_packet(ctx, pkt);
+            if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) return;
+            check(r, "encode");
+            av_packet_rescale_ts(pkt, ctx->time_base, st->time_base);
+            pkt->stream_index = st->index;
+            check(av_interleaved_write_frame(oc, pkt), "write");
+        }
+    };
+    const size_t frames = samples.size() / channels;
+    const size_t frameSize = ctx->frame_size > 0 ? size_t(ctx->frame_size) : 4096;
+    for (size_t start = 0; start < frames; start += frameSize) {
+        const size_t n = std::min(frameSize, frames - start);
+        frame->nb_samples = int(n);
+        frame->format = ctx->sample_fmt;
+        frame->sample_rate = ctx->sample_rate;
+        check(av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout), "layout");
+        check(av_frame_get_buffer(frame, 0), "frame buffer");
+        for (uint32_t c = 0; c < channels; c++)
+            for (size_t i = 0; i < n; i++) {
+                const int32_t s = samples[(start + i) * channels + c];
+                if (bits == 16)
+                    reinterpret_cast<int16_t*>(frame->data[c])[i] = int16_t(s);
+                else
+                    reinterpret_cast<int32_t*>(frame->data[c])[i] = int32_t(uint32_t(s) << 8); // left-aligned 24-bit
+            }
+        frame->pts = int64_t(start);
+        check(avcodec_send_frame(ctx, frame), "send frame");
+        av_frame_unref(frame);
+        drain();
+    }
+    check(avcodec_send_frame(ctx, nullptr), "flush");
+    drain();
+    check(av_write_trailer(oc), "trailer");
+    cleanup();
 }
 
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {

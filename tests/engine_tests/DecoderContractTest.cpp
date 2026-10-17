@@ -139,7 +139,7 @@ TEST_P(DecoderContract, UnicodeFilePathsDecodeIdentically) {
     std::filesystem::remove(copy);
 }
 
-INSTANTIATE_TEST_SUITE_P(Flac, DecoderContract, ::testing::ValuesIn(kAllDecoders),
+INSTANTIATE_TEST_SUITE_P(Flac, DecoderContract, ::testing::ValuesIn(decodersFor(AudioFormat::Flac)),
                          [](const ::testing::TestParamInfo<DecoderKind>& info) { return std::string(decoderId(info.param)); });
 
 } // namespace

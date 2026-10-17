@@ -98,7 +98,7 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
     EXPECT_GE(engine.snapshot().position, target);
     EXPECT_LT(engine.snapshot().position, target + 2ull * engine.snapshot().source->sampleRate);
-    for (const auto nextDecoder : kAllDecoders) {
+    for (const auto nextDecoder : decodersFor(AudioFormat::Flac)) {
         settings.decoderByFormat[AudioFormat::Flac] = nextDecoder;
         const auto before = engine.snapshot().position;
         engine.applySettings(settings);
@@ -125,5 +125,6 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
 }
 
 INSTANTIATE_TEST_SUITE_P(M0_21, HardwarePlayback,
-                         ::testing::Combine(::testing::Values(0, 1, 2, 3, 4), ::testing::ValuesIn(kAllDecoders)),
+                         ::testing::Combine(::testing::Values(0, 1, 2, 3, 4),
+                                            ::testing::ValuesIn(decodersFor(AudioFormat::Flac))),
                          hardwareCaseName);

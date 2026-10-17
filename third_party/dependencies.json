@@ -255,6 +255,13 @@
                      "notice":  "licenses/rust/encoding_rs-0.8.42/"
                  },
                  {
+                     "name":  "extended",
+                     "version":  "0.1.0",
+                     "license":  "MIT",
+                     "source_archive":  "https://static.crates.io/crates/extended/extended-0.1.0.crate",
+                     "notice":  "licenses/rust/extended-0.1.0/"
+                 },
+                 {
                      "name":  "lazy_static",
                      "version":  "1.5.1",
                      "license":  "MIT OR Apache-2.0",
@@ -311,11 +318,39 @@
                      "notice":  "licenses/rust/symphonia-bundle-flac-0.5.5/"
                  },
                  {
+                     "name":  "symphonia-codec-alac",
+                     "version":  "0.5.5",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-alac/symphonia-codec-alac-0.5.5.crate",
+                     "notice":  "licenses/rust/symphonia-codec-alac-0.5.5/"
+                 },
+                 {
+                     "name":  "symphonia-codec-pcm",
+                     "version":  "0.5.5",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-pcm/symphonia-codec-pcm-0.5.5.crate",
+                     "notice":  "licenses/rust/symphonia-codec-pcm-0.5.5/"
+                 },
+                 {
                      "name":  "symphonia-core",
                      "version":  "0.5.5",
                      "license":  "MPL-2.0",
                      "source_archive":  "https://static.crates.io/crates/symphonia-core/symphonia-core-0.5.5.crate",
                      "notice":  "licenses/rust/symphonia-core-0.5.5/"
+                 },
+                 {
+                     "name":  "symphonia-format-isomp4",
+                     "version":  "0.5.5",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-format-isomp4/symphonia-format-isomp4-0.5.5.crate",
+                     "notice":  "licenses/rust/symphonia-format-isomp4-0.5.5/"
+                 },
+                 {
+                     "name":  "symphonia-format-riff",
+                     "version":  "0.5.5",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-format-riff/symphonia-format-riff-0.5.5.crate",
+                     "notice":  "licenses/rust/symphonia-format-riff-0.5.5/"
                  },
                  {
                      "name":  "symphonia-metadata",

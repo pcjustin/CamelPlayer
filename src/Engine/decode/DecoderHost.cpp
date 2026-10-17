@@ -42,8 +42,10 @@ DecoderKind decoderKind(uint32_t kind) {
         return DecoderKind::DrFlac;
     case CAMEL_DECODER_SNDFILE:
         return DecoderKind::Sndfile;
+    case CAMEL_DECODER_DR_WAV:
+        return DecoderKind::DrWav;
     default:
-        throw Error(ErrorCode::UnsupportedStream, "unknown FLAC decoder selection");
+        throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
     }
 }
 

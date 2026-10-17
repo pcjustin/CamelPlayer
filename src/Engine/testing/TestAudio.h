@@ -32,6 +32,16 @@ void writeFlac(const std::filesystem::path& path, const GenSpec& spec);
 void writeFlacSamples(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
                       uint32_t channels);
 
+// Writes interleaved, right-aligned `samples` as uncompressed PCM (any whole-byte depth, so rejection cases can be made too).
+// `float32` writes IEEE float WAV, scaling the samples by 2^-(bits-1).
+void writeWav(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+              uint32_t channels, bool float32 = false);
+void writeAiff(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+               uint32_t channels);
+// Encodes 16/24-bit `samples` as ALAC in an M4A container with FFmpeg's encoder. Throws std::runtime_error.
+void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+               uint32_t channels);
+
 // Copies `src` to `dst` with one byte flipped at `fraction` of the file (a damaged frame).
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction = 0.5);
 // Copies the first `fraction` of `src` to `dst` (a truncated download).

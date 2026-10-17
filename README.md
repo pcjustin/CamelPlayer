@@ -4,7 +4,7 @@
 
 CamelPlayer v2 is a new Windows-native music player built with C++20 and WinUI 3. It is the second-generation CamelPlayer project, distinct from the earlier CamelPlayer codebase.
 
-The current implementation is an **MVP**: a stereo FLAC player with a bit-perfect output path, WASAPI exclusive, ASIO, and Kernel Streaming backends. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Four FLAC decoders remain available for comparison: FFmpeg, Symphonia, dr_flac, and libsndfile.
+The current implementation is an **MVP**: a stereo FLAC, ALAC, WAV and AIFF player with a bit-perfect output path, WASAPI exclusive, ASIO, and Kernel Streaming backends. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Each format has its own decoder setting: FLAC can use FFmpeg, Symphonia, dr_flac or libsndfile; ALAC FFmpeg or Symphonia; WAV and AIFF FFmpeg, Symphonia, libsndfile or dr_wav. Files are identified by content, not extension.
 
 ## Build
 
@@ -42,7 +42,7 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-The current Release and Debug suites each ran **368 C++ tests: 363 passed, 5 known skips, and zero failures**. The Rust Engine suite passed all 28 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+The current Release and Debug suites each ran **329 C++ tests: all passed, with no skips**. The Rust Engine suite passed all 28 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 
@@ -50,7 +50,7 @@ Hardware tests are disabled during ordinary runs because they play audio and req
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*-*Cirrus*"
 ```
 
-The MVP is limited to stereo FLAC and unmodified integer output. The FLAC decoder defaults to libsndfile; existing settings preserve their saved decoder choice. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
+The MVP is limited to stereo 16/24-bit sources and unmodified integer output. FLAC, WAV and AIFF default to libsndfile and ALAC to Symphonia; an earlier saved FLAC choice is kept. A recognized format without an integrated decoder (AAC, MP3, DSD for now) is reported instead of played. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
 
 ## Dependencies and repository contents
 

@@ -1,4 +1,4 @@
-// FLAC through libsndfile (which decodes FLAC with libFLAC internally).
+// FLAC, WAV and AIFF through libsndfile (which decodes FLAC with libFLAC internally).
 #include "Engine/decode/DecoderImpl.h"
 
 #include <windows.h>
@@ -10,9 +10,9 @@
 namespace camel::audio {
 namespace {
 
-class SndfileFlac final : public IDecoder {
+class SndfileDecoder final : public IDecoder {
 public:
-    explicit SndfileFlac(const std::filesystem::path& path) {
+    explicit SndfileDecoder(const std::filesystem::path& path) {
         SF_INFO si{};
         sf_ = sf_wchar_open(longPath(path).c_str(), SFM_READ, &si);
         if (!sf_) {
@@ -36,7 +36,7 @@ public:
         info_.totalFrames = uint64_t(si.frames);
     }
 
-    ~SndfileFlac() override { sf_close(sf_); }
+    ~SndfileDecoder() override { sf_close(sf_); }
 
     const SourceInfo& info() const override { return info_; }
 
@@ -63,8 +63,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openSndfileFlac(const std::filesystem::path& path) {
-    return std::make_unique<SndfileFlac>(path);
+std::unique_ptr<IDecoder> openSndfile(const std::filesystem::path& path) {
+    return std::make_unique<SndfileDecoder>(path);
 }
 
 } // namespace camel::audio

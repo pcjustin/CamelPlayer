@@ -39,8 +39,10 @@ void runCase(const Case& c, uint64_t seekFrame = 0) {
     auto ref = testaudio::referenceDecode(file);
     ASSERT_TRUE(ref.error.empty()) << ref.error;
     if (ref.info.md5) ASSERT_TRUE(ref.md5Ok);
-    if (testutil::knownUnsupported(c.decoder, ref.info.sampleRate)) GTEST_SKIP() << "Decoder does not support this format";
+    // A decoder that cannot handle the file must stop with a clean error before anything reaches the device.
+    const bool rejected = testutil::knownUnsupported(c.decoder, ref.info.sampleRate);
     auto out = file.parent_path() / (std::string("capture-") + decoderId(c.decoder) + "-" + c.file + ".raw");
+    std::filesystem::remove(out);
     Settings s;
     s.decoderByFormat[AudioFormat::Flac] = c.decoder;
     CaptureOptions co;
@@ -54,6 +56,12 @@ void runCase(const Case& c, uint64_t seekFrame = 0) {
         engine.waitIdle();
         ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(60)));
         auto snap = engine.snapshot();
+        if (rejected) {
+            EXPECT_EQ(snap.error, ErrorCode::UnsupportedStream) << snap.errorDetail;
+            EXPECT_FALSE(snap.output);
+            EXPECT_FALSE(std::filesystem::exists(out));
+            return;
+        }
         ASSERT_FALSE(snap.error.has_value()) << snap.errorDetail;
     }
     auto bytes = readFile(out);
@@ -112,11 +120,11 @@ TEST_P(CaptureAcceptance, PaddedAndSeek) {
 }
 
 INSTANTIATE_TEST_SUITE_P(M0_18, CaptureAcceptance,
-                         ::testing::Combine(::testing::ValuesIn(kAllDecoders),
+                         ::testing::Combine(::testing::ValuesIn(decodersFor(AudioFormat::Flac)),
                                             ::testing::Values("16-44.1k", "16-48k", "24-96k", "24-192k", "24-352.8k", "24-384k",
                                                               "24-768k", "no-md5-24-96k")));
 
-INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder, ::testing::ValuesIn(kAllDecoders),
+INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder, ::testing::ValuesIn(decodersFor(AudioFormat::Flac)),
                          [](const ::testing::TestParamInfo<DecoderKind>& i) { return std::string(decoderId(i.param)); });
 
 TEST(Capture, UnsupportedFormatIsReportedNotPlayed) {

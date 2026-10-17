@@ -4,10 +4,11 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 
 | Component | Source management | CamelPlayer integration |
 |---|---|---|
-| FFmpeg | `vcpkg.json` with a pinned baseline | `src/Engine/decode/FfmpegFlac.cpp` |
+| FFmpeg | `vcpkg.json` with a pinned baseline | `src/Engine/decode/FfmpegDecoder.cpp` |
 | dr_flac | vcpkg `drlibs` | `src/Engine/decode/DrFlac.cpp` |
-| libsndfile | `vcpkg.json` with a pinned baseline | `src/Engine/decode/SndfileFlac.cpp` |
-| Symphonia | `rust/symphonia_ffi/Cargo.toml` and `rust/Cargo.lock` | Owned Rust C ABI bridge in `rust/symphonia_ffi`; C++ adapter in `src/Engine/decode/SymphoniaFlac.cpp` |
+| dr_wav | vcpkg `drlibs` | `src/Engine/decode/DrWav.cpp` |
+| libsndfile | `vcpkg.json` with a pinned baseline | `src/Engine/decode/SndfileDecoder.cpp` |
+| Symphonia | `rust/symphonia_ffi/Cargo.toml` and `rust/Cargo.lock` | Owned Rust C ABI bridge in `rust/symphonia_ffi`; C++ adapter in `src/Engine/decode/SymphoniaDecoder.cpp` |
 | libFLAC | vcpkg `libflac` | Test-audio encoding and independent reference decoding in `src/Engine/testing` |
 | Steinberg ASIO SDK | Selected unmodified headers and licenses in `third_party/asiosdk` | `src/OutputBridge/AsioOutput.cpp` |
 

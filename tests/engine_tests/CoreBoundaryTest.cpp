@@ -175,7 +175,7 @@ DecoderByFormat flacChoice(DecoderKind decoder) {
 
 TEST(SettingsMigration, GlobalDecoderChoiceBecomesTheFlacChoiceAndNewSettingsUseSndfile) {
     for (const int schema : {1, 2})
-        for (const auto decoder : audio::kAllDecoders) {
+        for (const auto decoder : audio::decodersFor(AudioFormat::Flac)) {
             const auto json =
                 R"({"schema":)" + std::to_string(schema) + R"(,"backend":"ks","decoder":")" + audio::decoderId(decoder) + R"("})";
             const auto migrated = fromJson(json);
@@ -192,10 +192,28 @@ TEST(SettingsMigration, GlobalDecoderChoiceBecomesTheFlacChoiceAndNewSettingsUse
     EXPECT_EQ(fromJson(R"({"schema":3,"decoder":"drflac"})").decoderByFormat, DecoderByFormat{});
 }
 
+TEST(SettingsBoundary, RegistryDefaultsFollowThePlan) {
+    const DecoderByFormat none;
+    EXPECT_EQ(decoderFor(none, AudioFormat::Flac), DecoderKind::Sndfile);
+    EXPECT_EQ(decoderFor(none, AudioFormat::Alac), DecoderKind::Symphonia);
+    EXPECT_EQ(decoderFor(none, AudioFormat::Wav), DecoderKind::Sndfile);
+    EXPECT_EQ(decoderFor(none, AudioFormat::Aiff), DecoderKind::Sndfile);
+    for (const auto format : kAllFormats) {
+        const auto decoders = decodersFor(format);
+        if (decoders.empty()) continue;
+        EXPECT_TRUE(supports(format, defaultDecoder(format))) << formatName(format);
+    }
+    EXPECT_TRUE(decodersFor(AudioFormat::Aac).empty());
+    EXPECT_TRUE(decodersFor(AudioFormat::Mp3).empty());
+    EXPECT_TRUE(decodersFor(AudioFormat::Dsd).empty());
+}
+
 TEST(SettingsBoundary, DecoderChoicesKeepOnlyIntegratedPairs) {
-    const auto settings = fromJson(R"({"schema":3,"decoderByFormat":{"flac":"symphonia","alac":"symphonia",
-        "ogg":"ffmpeg","mp3":"sndfile","wav":7}})");
-    EXPECT_EQ(settings.decoderByFormat, flacChoice(DecoderKind::Symphonia));
+    const auto settings = fromJson(R"({"schema":3,"decoderByFormat":{"flac":"symphonia","alac":"ffmpeg",
+        "ogg":"ffmpeg","mp3":"sndfile","wav":"drflac","aiff":7}})");
+    auto expected = flacChoice(DecoderKind::Symphonia);
+    expected[AudioFormat::Alac] = DecoderKind::FFmpeg;
+    EXPECT_EQ(settings.decoderByFormat, expected);
     EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":{"flac":"mpg123"}})").decoderByFormat, DecoderByFormat{});
     EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":["flac"]})").decoderByFormat, DecoderByFormat{});
 }

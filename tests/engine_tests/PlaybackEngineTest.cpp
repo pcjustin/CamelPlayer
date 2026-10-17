@@ -178,6 +178,36 @@ TEST_F(EngineStateTest, QueuedFileFollowsWithoutReopeningTheDevice) {
     EXPECT_EQ(probe.opens, 1);
 }
 
+TEST_F(EngineStateTest, QueuedFileOfAnotherContainerFollowsWithoutReopeningTheDevice) {
+    const testaudio::GenSpec spec{"gapless-next-24-96k-wav", 96000, 24, 2, 0.5};
+    const auto next = testutil::tempDir() / "gapless-next-24-96k.wav";
+    testaudio::writeWav(next, testaudio::makeSignal(spec), spec.sampleRate, spec.bits, spec.channels);
+    open();
+    ASSERT_TRUE(engine->queueNext(next));
+    for (int i = 0; i < 200 && !engine->snapshot().nextSlotFree; ++i) std::this_thread::sleep_for(5ms);
+    ASSERT_TRUE(engine->snapshot().nextSlotFree);
+    size_t frames = 0;
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    bool sawWav = false;
+    while (engine->snapshot().state != PlayState::Stopped && std::chrono::steady_clock::now() < deadline) {
+        frames += pull(4096);
+        engine->waitIdle();
+        const auto s = engine->snapshot();
+        if (s.transitions == 1 && s.file == next.wstring()) {
+            sawWav = true;
+            EXPECT_EQ(s.format, AudioFormat::Wav);
+            EXPECT_EQ(s.decoder, DecoderKind::Sndfile);
+            EXPECT_EQ(s.total, 48000u);
+        }
+    }
+    const auto s = engine->snapshot();
+    EXPECT_TRUE(sawWav);
+    EXPECT_EQ(s.transitions, 1u);
+    EXPECT_FALSE(s.error) << s.errorDetail;
+    EXPECT_EQ(frames, 192000u + 48000u);
+    EXPECT_EQ(probe.opens, 1);
+}
+
 TEST_F(EngineStateTest, QueuedFileWithAnotherOutputFormatIsRefused) {
     open();
     EXPECT_FALSE(engine->queueNext(testutil::testFile("16-44.1k")));
