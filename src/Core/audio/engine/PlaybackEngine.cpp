@@ -16,7 +16,7 @@
 #include "audio/engine/FormatRule.h"
 #include "audio/engine/SamplePacker.h"
 #include "audio/engine/SpscRing.h"
-#include "audio/output/AsioOutput.h"
+#include "audio/output/OutputBridge.h"
 #include "util/Log.h"
 #include "util/Text.h"
 
@@ -191,7 +191,7 @@ public:
         if (settings_.backend != Backend::Asio) return false;
         try {
             ensureOutput();
-            return showAsioControlPanel(output_.get());
+            return output_->showControlPanel();
         } catch (const Error& e) {
             fail(e, PlayState::Stopped);
             return false;
@@ -256,7 +256,7 @@ private:
 
     void ensureOutput() {
         if (output_) return;
-        output_ = factory_(settings_);
+        output_ = std::make_unique<OutputBridge>(factory_(settings_));
     }
 
     void startSession(uint64_t startFrame, bool playNow) {
@@ -481,7 +481,7 @@ private:
     // control-thread state
     Settings settings_;
     OutputFactory factory_;
-    std::unique_ptr<IOutput> output_;
+    std::unique_ptr<OutputBridge> output_;
     std::unique_ptr<IDecoder> decoder_;
     std::wstring file_;
     PlayState state_ = PlayState::Stopped;

@@ -6,7 +6,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+crate-type = ["rlib"]
 
 [profile.dev]
 panic = "unwind"

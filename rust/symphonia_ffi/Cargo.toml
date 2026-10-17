@@ -9,12 +9,13 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+camel_audio_engine = { path = "../audio_engine" }
 symphonia = { version = "=0.5.5", default-features = false, features = ["flac"] }
 
 [profile.release]
-panic = "abort"
+panic = "unwind"
 lto = true
 codegen-units = 1
 
 [profile.dev]
-panic = "abort"
+panic = "unwind"

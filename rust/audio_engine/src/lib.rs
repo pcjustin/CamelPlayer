@@ -282,14 +282,12 @@ fn validate_config(config: &CamelEngineConfigV1) -> Result<(AudioFormat, u64), E
     ))
 }
 
-#[no_mangle]
 pub extern "C" fn camel_engine_abi_version() -> u32 {
     ABI_VERSION
 }
 
 /// # Safety
 /// `config` must point to a readable V1 configuration and `out_engine` to writable storage.
-#[no_mangle]
 pub unsafe extern "C" fn camel_engine_create_v1(
     config: *const CamelEngineConfigV1,
     out_engine: *mut *mut CamelEngine,
@@ -318,7 +316,6 @@ pub unsafe extern "C" fn camel_engine_create_v1(
 
 /// # Safety
 /// The handle and structures must remain valid for the call. No new call may begin after quiesce starts.
-#[no_mangle]
 pub unsafe extern "C" fn camel_engine_render_v1(
     engine: *mut CamelEngine,
     request: *const CamelRenderRequestV1,
@@ -374,7 +371,6 @@ pub unsafe extern "C" fn camel_engine_render_v1(
 
 /// # Safety
 /// `engine` must point to a live handle. The caller must prevent new render calls before quiesce.
-#[no_mangle]
 pub unsafe extern "C" fn camel_engine_quiesce_v1(engine: *mut CamelEngine) -> i32 {
     if engine.is_null() {
         return ENGINE_E_INVALID_ARGUMENT;
@@ -387,7 +383,6 @@ pub unsafe extern "C" fn camel_engine_quiesce_v1(engine: *mut CamelEngine) -> i3
 
 /// # Safety
 /// `engine` must be live, quiesced, and inaccessible to all other calls.
-#[no_mangle]
 pub unsafe extern "C" fn camel_engine_destroy_v1(engine: *mut CamelEngine) -> i32 {
     if engine.is_null() {
         return ENGINE_E_INVALID_ARGUMENT;

@@ -21,6 +21,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 
 [[package]]
+name = "camel_audio_engine"
+version = "0.1.0"
+
+[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,5 +149,6 @@ dependencies = [
 name = "symphonia_ffi"
 version = "0.1.0"
 dependencies = [
+ "camel_audio_engine",
  "symphonia",
 ]

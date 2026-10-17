@@ -54,11 +54,11 @@ The MVP is limited to stereo FLAC and unmodified integer output. Complete decode
 
 ## Dependencies and repository contents
 
-The WinUI control point submits versioned commands to a same-process C++ Server, which owns settings, device enumeration and reference-engine control. Snapshots and events carry command IDs and revisions to reject stale UI updates. A versioned Engine/Bridge C ABI contract and Rust conformance scaffold are in place; audio decoding and C++ Bridge integration remain future work.
+The WinUI control point submits versioned commands to a same-process C++ Server, which owns settings, device enumeration and reference-engine control. Snapshots and events carry command IDs and revisions to reject stale UI updates. A versioned Engine/Bridge C ABI and Rust conformance crate are integrated; the C++ OutputBridge wraps the existing backends, while Rust audio decoding and playback remain future work.
 
 CamelPlayer-owned Server, engine and decoder adapters live in `src/Core`, the WinUI application in `src/App`, the CLI in `src/Tools/camelcli`, and the existing Rust Symphonia decoder FFI adapter in `rust/symphonia_ffi`. The new `rust/audio_engine` crate defines and tests the Engine/Bridge ABI boundary but does not yet decode or play audio. Tests and all required build configuration are included.
 
-FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia is restored through Cargo with a committed lockfile. The required ASIO SDK headers and their licenses are vendored in `third_party/asiosdk`.
+FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine are restored through Cargo with committed lockfiles and linked into one static library. The required ASIO SDK headers and their licenses are vendored in `third_party/asiosdk`.
 
 The repository also includes third-party license/notice snapshots and a versioned [dependency inventory](third_party/dependencies.json). See [third-party notices](THIRD-PARTY-NOTICES.md) for the source and license information that must accompany a release.
 

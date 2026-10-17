@@ -31,6 +31,8 @@ $log = Join-Path $root "build\logs\build-$Configuration.log"
 if ($LASTEXITCODE) { throw "build failed ($LASTEXITCODE), see $log" }
 
 if ($Test) {
+    cargo test --locked --manifest-path (Join-Path $root 'rust\audio_engine\Cargo.toml')
+    if ($LASTEXITCODE) { throw "Rust Engine tests failed ($LASTEXITCODE)" }
     & (Join-Path $root "build\$Configuration\tests\tests.exe") --gtest_brief=1
     if ($LASTEXITCODE) { throw "tests failed ($LASTEXITCODE)" }
 }

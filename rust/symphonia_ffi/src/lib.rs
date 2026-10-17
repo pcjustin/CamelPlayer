@@ -12,6 +12,50 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+#[no_mangle]
+pub extern "C" fn camel_engine_abi_version() -> u32 {
+    camel_audio_engine::camel_engine_abi_version()
+}
+
+/// # Safety
+/// `config` and `out_engine` must point to valid readable and writable V1 structures.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_create_v1(
+    config: *const camel_audio_engine::CamelEngineConfigV1,
+    out_engine: *mut *mut camel_audio_engine::CamelEngine,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_create_v1(config, out_engine) }
+}
+
+/// # Safety
+/// The engine and structures must be valid for the call, and the output buffer must cover its declared capacity.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_render_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    request: *const camel_audio_engine::CamelRenderRequestV1,
+    result: *mut camel_audio_engine::CamelRenderResultV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_render_v1(engine, request, result) }
+}
+
+/// # Safety
+/// `engine` must be a live handle, and the caller must prevent new calls from starting during quiescence.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_quiesce_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_quiesce_v1(engine) }
+}
+
+/// # Safety
+/// `engine` must be a live, quiesced handle with no concurrent calls.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_destroy_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_destroy_v1(engine) }
+}
+
 pub const SYM_OK: i32 = 0;
 pub const SYM_END: i32 = 1;
 pub const SYM_E_IO: i32 = -1;
@@ -112,6 +156,9 @@ impl SymDecoder {
 }
 
 /// Opens `path` (UTF-8). On success stores a decoder handle in `out` and fills `info`.
+///
+/// # Safety
+/// `path` must be NUL-terminated, and `out` and `info` must point to writable storage.
 #[no_mangle]
 pub unsafe extern "C" fn sym_open(
     path: *const c_char,
@@ -190,6 +237,9 @@ pub unsafe extern "C" fn sym_open(
 
 /// Reads up to `frames` frames into `dst` (frames * channels i32). Returns SYM_OK with `*read` frames,
 /// SYM_END with `*read` = 0 at end of stream, or a negative error code.
+///
+/// # Safety
+/// `dec` must be a live exclusive handle; `dst` must hold `frames * channels` samples and `read` must be writable.
 #[no_mangle]
 pub unsafe extern "C" fn sym_read(
     dec: *mut SymDecoder,
@@ -229,6 +279,9 @@ pub unsafe extern "C" fn sym_read(
 }
 
 /// Seeks so the next read starts exactly at `frame`.
+///
+/// # Safety
+/// `dec` must be a live exclusive handle with no concurrent calls.
 #[no_mangle]
 pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
     if dec.is_null() {
@@ -256,6 +309,9 @@ pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
 }
 
 /// Copies the last error message (UTF-8, NUL-terminated, truncated to `len`).
+///
+/// # Safety
+/// `dec` must be a live handle, and `buf` must be writable for `len` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn sym_last_error(dec: *const SymDecoder, buf: *mut c_char, len: usize) {
     if dec.is_null() || buf.is_null() || len == 0 {
@@ -267,6 +323,8 @@ pub unsafe extern "C" fn sym_last_error(dec: *const SymDecoder, buf: *mut c_char
     *buf.add(n) = 0;
 }
 
+/// # Safety
+/// `dec` must be a live handle with no concurrent calls; it is invalid after this call.
 #[no_mangle]
 pub unsafe extern "C" fn sym_close(dec: *mut SymDecoder) {
     if !dec.is_null() {
