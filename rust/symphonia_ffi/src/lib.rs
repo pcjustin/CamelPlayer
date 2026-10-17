@@ -39,6 +39,67 @@ pub unsafe extern "C" fn camel_engine_render_v1(
 }
 
 /// # Safety
+/// All pointers must reference valid V1 structures. Decoder callbacks must remain valid until source replacement or Engine destruction.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_load_flac_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+    source: *const camel_audio_engine::CamelTrackSourceV1,
+    decoder_kind: u32,
+    decoder_host: *const camel_audio_engine::CamelDecoderHostV1,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_engine_load_flac_v1(
+            engine,
+            command,
+            source,
+            decoder_kind,
+            decoder_host,
+        )
+    }
+}
+
+/// # Safety
+/// `engine`, `output`, and `frames_read` must reference valid storage for this call.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_read_decoded_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    output: *mut i32,
+    frame_capacity: u64,
+    frames_read: *mut u64,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_engine_read_decoded_v1(
+            engine,
+            output,
+            frame_capacity,
+            frames_read,
+        )
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid for the call.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_seek_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+    frame: u64,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_seek_v1(engine, command, frame) }
+}
+
+/// # Safety
+/// `engine` and `state` must reference a live handle and writable V1 state.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_get_state_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    state: *mut camel_audio_engine::CamelEngineStateV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_get_state_v1(engine, state) }
+}
+
+/// # Safety
 /// `engine` must be a live handle, and the caller must prevent new calls from starting during quiescence.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_quiesce_v1(

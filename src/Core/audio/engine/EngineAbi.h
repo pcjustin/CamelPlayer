@@ -35,6 +35,21 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_ENGINE_E_LIMIT_EXCEEDED (-7)
 #define CAMEL_ENGINE_E_NOT_READY (-8)
 #define CAMEL_ENGINE_E_PANIC (-9)
+#define CAMEL_ENGINE_E_SOURCE_IO (-10)
+#define CAMEL_ENGINE_E_DECODE (-11)
+#define CAMEL_ENGINE_E_SEEK (-12)
+
+#define CAMEL_DECODER_FFMPEG 1u
+#define CAMEL_DECODER_SYMPHONIA 2u
+#define CAMEL_DECODER_DR_FLAC 3u
+#define CAMEL_DECODER_SNDFILE 4u
+
+#define CAMEL_DECODER_HOST_OK 0
+#define CAMEL_DECODER_HOST_E_IO (-1)
+#define CAMEL_DECODER_HOST_E_FORMAT (-2)
+#define CAMEL_DECODER_HOST_E_UNSUPPORTED (-3)
+#define CAMEL_DECODER_HOST_E_DECODE (-4)
+#define CAMEL_DECODER_HOST_E_SEEK (-5)
 
 #define CAMEL_RENDER_STATE_NO_SOURCE 0u
 #define CAMEL_RENDER_STATE_ACTIVE 1u
@@ -86,6 +101,35 @@ typedef struct CamelTrackSourceV1 {
     uint32_t reserved;
 } CamelTrackSourceV1;
 
+typedef struct CamelSourceInfoV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t sample_rate;
+    uint32_t channel_count;
+    uint32_t valid_bits;
+    uint32_t reserved;
+    uint64_t total_frames;
+    uint32_t has_md5;
+    uint32_t reserved2;
+    uint8_t md5[16];
+} CamelSourceInfoV1;
+
+typedef int32_t (*CamelDecoderOpenV1)(void* context, uint32_t decoder_kind, const uint8_t* path_utf8, uint64_t path_length_bytes,
+                                      void** out_decoder, CamelSourceInfoV1* info);
+typedef int32_t (*CamelDecoderReadV1)(void* context, void* decoder, int32_t* output, uint64_t frames, uint64_t* frames_read);
+typedef int32_t (*CamelDecoderSeekV1)(void* context, void* decoder, uint64_t frame);
+typedef void (*CamelDecoderCloseV1)(void* context, void* decoder);
+
+typedef struct CamelDecoderHostV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    void* context;
+    CamelDecoderOpenV1 open;
+    CamelDecoderReadV1 read;
+    CamelDecoderSeekV1 seek;
+    CamelDecoderCloseV1 close;
+} CamelDecoderHostV1;
+
 typedef struct CamelRenderRequestV1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -122,10 +166,15 @@ typedef struct CamelEngine CamelEngine;
 uint32_t camel_engine_abi_version(void);
 CamelEngineStatus camel_engine_create_v1(const CamelEngineConfigV1* config, CamelEngine** out_engine);
 CamelEngineStatus camel_engine_load_v1(CamelEngine* engine, const CamelCommandStampV1* command, const CamelTrackSourceV1* source);
+CamelEngineStatus camel_engine_load_flac_v1(CamelEngine* engine, const CamelCommandStampV1* command,
+                                            const CamelTrackSourceV1* source, uint32_t decoder_kind,
+                                            const CamelDecoderHostV1* decoder_host);
 CamelEngineStatus camel_engine_play_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_pause_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_stop_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_seek_v1(CamelEngine* engine, const CamelCommandStampV1* command, uint64_t frame);
+CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
+                                               uint64_t* frames_read);
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,
                                                     const CamelAudioFormatV1* format);
 CamelEngineStatus camel_engine_get_state_v1(CamelEngine* engine, CamelEngineStateV1* state);

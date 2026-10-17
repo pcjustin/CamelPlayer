@@ -42,7 +42,7 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-Validation recorded **209 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+The current Release and Debug suites each ran **231 C++ tests: 218 passed, 13 known-format skips, and zero failures**. The Rust Engine suite passed all 7 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 
@@ -54,9 +54,9 @@ The MVP is limited to stereo FLAC and unmodified integer output. Complete decode
 
 ## Dependencies and repository contents
 
-The WinUI control point submits versioned commands to a same-process C++ Server, which owns settings, device enumeration and reference-engine control. Snapshots and events carry command IDs and revisions to reject stale UI updates. A versioned Engine/Bridge C ABI and Rust conformance crate are integrated; the C++ OutputBridge wraps the existing backends, while Rust audio decoding and playback remain future work.
+The WinUI control point submits versioned commands to a same-process C++ Server, which owns settings, device enumeration and reference-engine control. Snapshots and events carry command IDs and revisions to reject stale UI updates. A versioned Engine/Bridge C ABI and Rust Engine are integrated; the C++ OutputBridge wraps the existing output backends.
 
-CamelPlayer-owned Server, engine and decoder adapters live in `src/Core`, the WinUI application in `src/App`, the CLI in `src/Tools/camelcli`, and the existing Rust Symphonia decoder FFI adapter in `rust/symphonia_ffi`. The new `rust/audio_engine` crate defines and tests the Engine/Bridge ABI boundary but does not yet decode or play audio. Tests and all required build configuration are included.
+CamelPlayer-owned Server, engine and decoder adapters live in `src/Core`, the WinUI application in `src/App`, the CLI in `src/Tools/camelcli`, and the existing Rust Symphonia decoder FFI adapter in `rust/symphonia_ffi`. The Rust Engine now owns the selected FLAC source session, enforces 16/24-bit input, track ranges and seek, and requests decoded frames through a versioned host callback ABI that reuses the four existing adapters. Render output and the playback state machine are still under development. Tests and all required build configuration are included.
 
 FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine are restored through Cargo with committed lockfiles and linked into one static library. The required ASIO SDK headers and their licenses are vendored in `third_party/asiosdk`.
 

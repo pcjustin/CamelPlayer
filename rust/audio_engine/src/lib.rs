@@ -1,7 +1,13 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::thread;
+
+mod decoder_host;
+
+pub use decoder_host::{CamelDecoderHostV1, CamelSourceInfoV1};
+use decoder_host::{DecoderHost, DecoderSource};
 
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_RENDER_UNITS: u64 = 65_536;
@@ -30,6 +36,9 @@ pub const ENGINE_E_UNSUPPORTED_FORMAT: i32 = -6;
 pub const ENGINE_E_LIMIT_EXCEEDED: i32 = -7;
 pub const ENGINE_E_NOT_READY: i32 = -8;
 pub const ENGINE_E_PANIC: i32 = -9;
+pub const ENGINE_E_SOURCE_IO: i32 = -10;
+pub const ENGINE_E_DECODE: i32 = -11;
+pub const ENGINE_E_SEEK: i32 = -12;
 
 pub const RENDER_STATE_NO_SOURCE: u32 = 0;
 
@@ -130,6 +139,9 @@ pub enum EngineStatus {
     LimitExceeded = ENGINE_E_LIMIT_EXCEEDED,
     NotReady = ENGINE_E_NOT_READY,
     Panic = ENGINE_E_PANIC,
+    SourceIo = ENGINE_E_SOURCE_IO,
+    Decode = ENGINE_E_DECODE,
+    Seek = ENGINE_E_SEEK,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -262,8 +274,11 @@ impl Drop for RenderLease<'_> {
 
 pub struct CamelEngine {
     format: AudioFormat,
+    output_format: CamelAudioFormatV1,
     max_render_units: u64,
     render_gate: RenderGate,
+    command: Mutex<CamelCommandStampV1>,
+    source: Mutex<Option<DecoderSource>>,
 }
 
 fn validate_config(config: &CamelEngineConfigV1) -> Result<(AudioFormat, u64), EngineStatus> {
@@ -301,8 +316,17 @@ pub unsafe extern "C" fn camel_engine_create_v1(
             Ok((format, max_render_units)) => {
                 *out_engine = Box::into_raw(Box::new(CamelEngine {
                     format,
+                    output_format: (*config).format,
                     max_render_units,
                     render_gate: RenderGate::default(),
+                    command: Mutex::new(CamelCommandStampV1 {
+                        struct_size: std::mem::size_of::<CamelCommandStampV1>() as u32,
+                        abi_version: ABI_VERSION,
+                        command_id: 0,
+                        generation: 0,
+                        queue_revision: 0,
+                    }),
+                    source: Mutex::new(None),
                 }));
                 ENGINE_OK
             }
@@ -311,6 +335,219 @@ pub unsafe extern "C" fn camel_engine_create_v1(
     })) {
         Ok(status) => status,
         Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+fn validate_command(command: &CamelCommandStampV1) -> Result<(), EngineStatus> {
+    if command.abi_version != ABI_VERSION {
+        return Err(EngineStatus::AbiMismatch);
+    }
+    if command.struct_size < std::mem::size_of::<CamelCommandStampV1>() as u32 {
+        return Err(EngineStatus::StructSize);
+    }
+    Ok(())
+}
+
+/// # Safety
+/// All pointers must reference valid V1 structures. Decoder callbacks and their context must remain valid until the source is replaced or the Engine is destroyed.
+pub unsafe extern "C" fn camel_engine_load_flac_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+    source: *const CamelTrackSourceV1,
+    decoder_kind: u32,
+    decoder_host: *const CamelDecoderHostV1,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || command.is_null() || source.is_null() || decoder_host.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let engine = &*engine;
+        let command = &*command;
+        let source = &*source;
+        let decoder_host = &*decoder_host;
+        if let Err(status) = validate_command(command) {
+            return status as i32;
+        }
+        if source.abi_version != ABI_VERSION {
+            return ENGINE_E_ABI_MISMATCH;
+        }
+        if source.struct_size < std::mem::size_of::<CamelTrackSourceV1>() as u32
+            || decoder_host.abi_version != ABI_VERSION
+            || decoder_host.struct_size < std::mem::size_of::<CamelDecoderHostV1>() as u32
+        {
+            return ENGINE_E_STRUCT_SIZE;
+        }
+        let Some(host) = DecoderHost::from_abi(decoder_host) else {
+            return ENGINE_E_INVALID_ARGUMENT;
+        };
+        let new_source = match DecoderSource::open(source, decoder_kind, host) {
+            Ok(source) => source,
+            Err(status) => return status,
+        };
+        let mut current_command = engine.command.lock().unwrap();
+        let mut current_source = engine.source.lock().unwrap();
+        *current_source = Some(new_source);
+        *current_command = *command;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid for the call.
+pub unsafe extern "C" fn camel_engine_seek_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+    frame: u64,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || command.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let engine = &*engine;
+        let command = &*command;
+        if let Err(status) = validate_command(command) {
+            return status as i32;
+        }
+        let mut current_command = engine.command.lock().unwrap();
+        let mut source = engine.source.lock().unwrap();
+        let Some(source) = source.as_mut() else {
+            return ENGINE_E_INVALID_STATE;
+        };
+        if let Err(status) = source.seek(frame) {
+            return status;
+        }
+        *current_command = *command;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine`, `output`, and `frames_read` must reference valid storage for this call.
+pub unsafe extern "C" fn camel_engine_read_decoded_v1(
+    engine: *mut CamelEngine,
+    output: *mut i32,
+    frame_capacity: u64,
+    frames_read: *mut u64,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || frames_read.is_null() || (frame_capacity > 0 && output.is_null()) {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let engine = &*engine;
+        *frames_read = 0;
+        if frame_capacity == 0 {
+            return ENGINE_OK;
+        }
+        if frame_capacity > engine.max_render_units {
+            return ENGINE_E_LIMIT_EXCEEDED;
+        }
+        let mut source = engine.source.lock().unwrap();
+        let Some(source) = source.as_mut() else {
+            return ENGINE_E_INVALID_STATE;
+        };
+        let sample_capacity = match frame_capacity
+            .checked_mul(u64::from(source.info.channel_count))
+            .and_then(|samples| usize::try_from(samples).ok())
+        {
+            Some(samples) => samples,
+            None => return ENGINE_E_LIMIT_EXCEEDED,
+        };
+        let output = if sample_capacity == 0 {
+            &mut []
+        } else {
+            std::slice::from_raw_parts_mut(output, sample_capacity)
+        };
+        match source.read(output, frame_capacity) {
+            Ok(read) => {
+                *frames_read = read;
+                if read == 0 {
+                    ENGINE_END
+                } else {
+                    ENGINE_OK
+                }
+            }
+            Err(status) => status,
+        }
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `state` must reference a live handle and writable V1 state.
+pub unsafe extern "C" fn camel_engine_get_state_v1(
+    engine: *mut CamelEngine,
+    state: *mut CamelEngineStateV1,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || state.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let engine = &*engine;
+        let state = &mut *state;
+        if state.abi_version != ABI_VERSION {
+            return ENGINE_E_ABI_MISMATCH;
+        }
+        if state.struct_size < std::mem::size_of::<CamelEngineStateV1>() as u32 {
+            return ENGINE_E_STRUCT_SIZE;
+        }
+        let command = *engine.command.lock().unwrap();
+        let source = engine.source.lock().unwrap();
+        state.playback_state = if source.is_some() { 1 } else { 0 };
+        state.last_error_code = 0;
+        state.command = command;
+        state.position_frames = source.as_ref().map_or(0, DecoderSource::position);
+        state.total_frames = source.as_ref().map_or(0, |s| s.info.total_frames);
+        state.has_source = u32::from(source.is_some());
+        state.reserved = 0;
+        state.source_format = source
+            .as_ref()
+            .map_or(empty_format(), |s| source_audio_format(&s.info));
+        state.output_format = engine.output_format;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+fn empty_format() -> CamelAudioFormatV1 {
+    CamelAudioFormatV1 {
+        struct_size: std::mem::size_of::<CamelAudioFormatV1>() as u32,
+        abi_version: ABI_VERSION,
+        stream_kind: AUDIO_PCM,
+        sample_format: 0,
+        rate_hz: 0,
+        channel_count: 0,
+        valid_bits: 0,
+        container_bits: 0,
+        channel_mask: 0,
+    }
+}
+
+fn source_audio_format(info: &CamelSourceInfoV1) -> CamelAudioFormatV1 {
+    let sample_format = if info.valid_bits == 16 {
+        SAMPLE_S16_LE
+    } else {
+        SAMPLE_S24_LE
+    };
+    CamelAudioFormatV1 {
+        struct_size: std::mem::size_of::<CamelAudioFormatV1>() as u32,
+        abi_version: ABI_VERSION,
+        stream_kind: AUDIO_PCM,
+        sample_format,
+        rate_hz: info.sample_rate,
+        channel_count: info.channel_count,
+        valid_bits: info.valid_bits,
+        container_bits: info.valid_bits,
+        channel_mask: 0,
     }
 }
 
@@ -399,8 +636,87 @@ pub unsafe extern "C" fn camel_engine_destroy_v1(engine: *mut CamelEngine) -> i3
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::c_void;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    struct MockDecoder {
+        samples: Vec<i32>,
+        position: usize,
+    }
+
+    unsafe extern "C" fn mock_open(
+        _: *mut c_void,
+        _: u32,
+        _: *const u8,
+        _: u64,
+        out_decoder: *mut *mut c_void,
+        info: *mut CamelSourceInfoV1,
+    ) -> i32 {
+        let decoder = Box::new(MockDecoder {
+            samples: vec![1, -1, 2, -2, 3, -3, 4, -4],
+            position: 0,
+        });
+        *out_decoder = Box::into_raw(decoder).cast();
+        *info = CamelSourceInfoV1 {
+            struct_size: std::mem::size_of::<CamelSourceInfoV1>() as u32,
+            abi_version: ABI_VERSION,
+            sample_rate: 48_000,
+            channel_count: 2,
+            valid_bits: 16,
+            reserved: 0,
+            total_frames: 4,
+            has_md5: 0,
+            reserved2: 0,
+            md5: [0; 16],
+        };
+        0
+    }
+
+    unsafe extern "C" fn mock_read(
+        _: *mut c_void,
+        opaque: *mut c_void,
+        output: *mut i32,
+        frames: u64,
+        frames_read: *mut u64,
+    ) -> i32 {
+        let decoder = &mut *opaque.cast::<MockDecoder>();
+        let available = decoder.samples.len() / 2 - decoder.position;
+        let read = available.min(frames as usize);
+        std::ptr::copy_nonoverlapping(
+            decoder.samples.as_ptr().add(decoder.position * 2),
+            output,
+            read * 2,
+        );
+        decoder.position += read;
+        *frames_read = read as u64;
+        0
+    }
+
+    unsafe extern "C" fn mock_seek(_: *mut c_void, opaque: *mut c_void, frame: u64) -> i32 {
+        let decoder = &mut *opaque.cast::<MockDecoder>();
+        if frame > 4 {
+            return -5;
+        }
+        decoder.position = frame as usize;
+        0
+    }
+
+    unsafe extern "C" fn mock_close(_: *mut c_void, opaque: *mut c_void) {
+        drop(Box::from_raw(opaque.cast::<MockDecoder>()));
+    }
+
+    fn mock_host() -> CamelDecoderHostV1 {
+        CamelDecoderHostV1 {
+            struct_size: std::mem::size_of::<CamelDecoderHostV1>() as u32,
+            abi_version: ABI_VERSION,
+            context: std::ptr::null_mut(),
+            open: Some(mock_open),
+            read: Some(mock_read),
+            seek: Some(mock_seek),
+            close: Some(mock_close),
+        }
+    }
 
     fn format(
         stream_kind: u32,
@@ -437,6 +753,8 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 56);
         assert_eq!(std::mem::size_of::<CamelCommandStampV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 48);
+        assert_eq!(std::mem::size_of::<CamelSourceInfoV1>(), 56);
+        assert_eq!(std::mem::size_of::<CamelDecoderHostV1>(), 48);
         assert_eq!(std::mem::size_of::<CamelRenderRequestV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelRenderResultV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelEngineStateV1>(), 152);
@@ -563,5 +881,57 @@ mod tests {
         );
         closer.join().unwrap();
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn source_host_reads_seeks_and_honors_track_ranges() {
+        let path = b"mock.flac";
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 1,
+            end_frame_exclusive: 3,
+            has_end_frame: 1,
+            reserved: 0,
+        };
+        let host_abi = mock_host();
+        let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
+        let mut decoded =
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_FFMPEG, host) }.unwrap();
+        let mut output = [0; 8];
+        assert_eq!(decoded.read(&mut output, 4), Ok(2));
+        assert_eq!(output, [2, -2, 3, -3, 0, 0, 0, 0]);
+        assert_eq!(decoded.read(&mut output, 4), Ok(0));
+        assert_eq!(decoded.seek(2), Ok(()));
+        assert_eq!(decoded.read(&mut output, 1), Ok(1));
+        assert_eq!(&output[..2], &[3, -3]);
+        assert_eq!(decoded.seek(3), Err(ENGINE_E_SEEK));
+    }
+
+    #[test]
+    fn source_host_rejects_empty_paths() {
+        let path = b"mock.flac";
+        let mut source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let host_abi = mock_host();
+        let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
+        assert!(
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_SYMPHONIA, host) }.is_ok()
+        );
+        source.path_length_bytes = 0;
+        assert_eq!(
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_SYMPHONIA, host) }.err(),
+            Some(ENGINE_E_INVALID_ARGUMENT)
+        );
     }
 }

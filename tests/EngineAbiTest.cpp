@@ -8,6 +8,8 @@ static_assert(sizeof(CamelAudioFormatV1) == 40);
 static_assert(sizeof(CamelEngineConfigV1) == 56);
 static_assert(sizeof(CamelCommandStampV1) == 32);
 static_assert(sizeof(CamelTrackSourceV1) == 48);
+static_assert(sizeof(CamelSourceInfoV1) == 56);
+static_assert(sizeof(CamelDecoderHostV1) == 48);
 static_assert(sizeof(CamelRenderRequestV1) == 32);
 static_assert(sizeof(CamelRenderResultV1) == 32);
 static_assert(sizeof(CamelEngineStateV1) == 152);
@@ -23,4 +25,6 @@ TEST(EngineAbi, StableV1Constants) {
     EXPECT_EQ(CAMEL_ENGINE_MAX_RENDER_UNITS, 65536u);
     EXPECT_EQ(CAMEL_ENGINE_E_ABI_MISMATCH, -2);
     EXPECT_EQ(CAMEL_ENGINE_E_BUFFER_TOO_SMALL, -4);
+    EXPECT_EQ(CAMEL_ENGINE_E_SOURCE_IO, -10);
+    EXPECT_EQ(CAMEL_DECODER_SNDFILE, 4u);
 }
