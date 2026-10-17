@@ -50,7 +50,7 @@ Hardware tests are disabled during ordinary runs because they play audio and req
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*-*Cirrus*"
 ```
 
-The MVP is limited to stereo FLAC and unmodified integer output. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5. The production decoder selection is still pending.
+The MVP is limited to stereo FLAC and unmodified integer output. The FLAC decoder defaults to libsndfile; existing settings preserve their saved decoder choice. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
 
 ## Dependencies and repository contents
 
