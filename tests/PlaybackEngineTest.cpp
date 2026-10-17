@@ -189,6 +189,19 @@ TEST_P(EngineStateTest, QueuedFileWithAnotherOutputFormatIsRefused) {
     EXPECT_EQ(engine->snapshot().queuedFiles, 0u);
 }
 
+// The player supports 16/24-bit sources only; other depths are reported and never reach the device.
+TEST_P(EngineStateTest, OtherBitDepthsAreRefusedWithoutOpeningTheDevice) {
+    for (const auto& spec :
+         {testaudio::GenSpec{"refused-20-48k", 48000, 20, 2, 0.2}, testaudio::GenSpec{"refused-32-48k", 48000, 32, 2, 0.2}}) {
+        engine->openAndPlay(testutil::generatedFile(spec));
+        engine->waitIdle();
+        const auto s = engine->snapshot();
+        EXPECT_EQ(s.state, PlayState::Stopped) << spec.name;
+        EXPECT_EQ(s.error, ErrorCode::UnsupportedStream) << spec.name;
+    }
+    EXPECT_EQ(probe.opens, 0);
+}
+
 TEST_P(EngineStateTest, StopClearsOutputAndNextPlayStartsAtZero) {
     open();
     ASSERT_EQ(pull(100), 100u);

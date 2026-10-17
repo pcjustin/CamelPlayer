@@ -15,19 +15,17 @@ public:
     explicit SndfileFlac(const std::filesystem::path& path) {
         SF_INFO si{};
         sf_ = sf_wchar_open(longPath(path).c_str(), SFM_READ, &si);
-        if (!sf_) throw Error(ErrorCode::FileOpen, std::string("sf_wchar_open: ") + sf_strerror(nullptr));
+        if (!sf_) {
+            // A readable file that libsndfile cannot decode (e.g. 20/32-bit FLAC) is an unsupported stream, not an I/O error.
+            const auto code = sf_error(nullptr) == SF_ERR_SYSTEM ? ErrorCode::FileOpen : ErrorCode::UnsupportedStream;
+            throw Error(code, std::string("sf_wchar_open: ") + sf_strerror(nullptr));
+        }
         switch (si.format & SF_FORMAT_SUBMASK) {
-        case SF_FORMAT_PCM_S8:
-            info_.bitsPerSample = 8;
-            break;
         case SF_FORMAT_PCM_16:
             info_.bitsPerSample = 16;
             break;
         case SF_FORMAT_PCM_24:
             info_.bitsPerSample = 24;
-            break;
-        case SF_FORMAT_PCM_32:
-            info_.bitsPerSample = 32;
             break;
         default:
             sf_close(sf_);

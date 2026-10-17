@@ -20,7 +20,7 @@ struct GenSpec {
     double toneDb = 0; // < 0: a plain 440 Hz sine at this level (safe for listening tests) instead of the full-scale test signal
 };
 
-// The §16.6 matrix: 16/44.1, 16/48, 24/96, 24/192, 24/352.8, 32/384, 32/768.
+// The §16.6 matrix: 16/44.1, 16/48, 24/96, 24/192, 24/352.8, 24/384, 24/768.
 std::vector<GenSpec> standardMatrix(double seconds = 10.0);
 
 // Deterministic test signal (sine + noise reaching every bit), right-aligned to `bits`, interleaved.

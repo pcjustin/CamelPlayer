@@ -7,7 +7,7 @@
 
 namespace camel::audio {
 
-// True when `type` can carry `bits`-bit integer samples losslessly by zero padding.
+// True when `type` can carry 16/24-bit integer samples losslessly by zero padding.
 bool canCarryBitPerfect(SampleType type, uint32_t bits);
 
 // Packs `count` samples (right-aligned to `bits`) into `dst` as `type`. Requires canCarryBitPerfect(type, bits).

@@ -104,6 +104,9 @@ std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::p
     default:
         throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
     }
+    // The player supports 16/24-bit integer PCM sources only (docs/Plan.md §3.1).
+    if (const auto bits = d->info().bitsPerSample; bits != 16 && bits != 24)
+        throw Error(ErrorCode::UnsupportedStream, std::to_string(bits) + "-bit sources are not supported (16/24-bit only)");
     SourceInfo parsed;
     if (readFlacStreamInfo(path, parsed)) return std::make_unique<WithStreamInfo>(std::move(d), parsed);
     return d;

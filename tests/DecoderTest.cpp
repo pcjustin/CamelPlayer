@@ -21,14 +21,10 @@ class EveryDecoder : public ::testing::TestWithParam<DecoderKind> {};
 } // namespace
 
 TEST_P(EveryDecoder, MatchesReferenceBitForBit) {
-    for (const char* name : {"16-44.1k", "24-96k", "20-48k", "no-md5"}) {
+    for (const char* name : {"16-44.1k", "24-96k", "no-md5"}) {
         auto file = testutil::testFile(name);
         auto ref = testaudio::referenceDecode(file);
         ASSERT_TRUE(ref.error.empty()) << name << ": " << ref.error;
-        if (testutil::knownUnsupported(GetParam(), ref.info.bitsPerSample, ref.info.sampleRate)) {
-            EXPECT_THROW(decodeAll(*openDecoder(GetParam(), file)), Error) << name;
-            continue;
-        }
         auto dec = openDecoder(GetParam(), file);
         EXPECT_EQ(dec->info().sampleRate, ref.info.sampleRate) << name;
         EXPECT_EQ(dec->info().bitsPerSample, ref.info.bitsPerSample) << name;
@@ -58,19 +54,6 @@ TEST_P(EveryDecoder, SeeksSampleExact) {
     }
 }
 
-TEST_P(EveryDecoder, ThirtyTwoBitEitherDecodesOrFailsCleanly) {
-    auto file = testutil::testFile("32-384k");
-    auto ref = testaudio::referenceDecode(file);
-    try {
-        auto dec = openDecoder(GetParam(), file);
-        auto got = decodeAll(*dec);
-        // A decoder that claims success must be exact.
-        EXPECT_TRUE(got == ref.samples);
-    } catch (const Error& e) {
-        SUCCEED() << decoderName(GetParam()) << " does not support 32-bit FLAC: " << e.what();
-    }
-}
-
 TEST_P(EveryDecoder, DamagedFilesDoNotCrash) {
     for (const char* name : {"damaged", "truncated"}) {
         try {
@@ -83,11 +66,3 @@ TEST_P(EveryDecoder, DamagedFilesDoNotCrash) {
 
 INSTANTIATE_TEST_SUITE_P(Flac, EveryDecoder, ::testing::ValuesIn(kAllDecoders),
                          [](const ::testing::TestParamInfo<DecoderKind>& i) { return std::string(decoderId(i.param)); });
-
-TEST(Decoders, FfmpegHandles32Bit) {
-    auto file = testutil::testFile("32-384k");
-    auto ref = testaudio::referenceDecode(file);
-    ASSERT_TRUE(ref.md5Ok);
-    auto dec = openDecoder(DecoderKind::FFmpeg, file);
-    EXPECT_TRUE(decodeAll(*dec) == ref.samples);
-}

@@ -340,7 +340,7 @@ TEST(RustEngineHost, CorruptAndTruncatedFlacFailIntegrityForEveryDecoder) {
     }
 }
 
-TEST(RustEngineHost, SourceRangeAndUnsupportedBitDepthAreEnforced) {
+TEST(RustEngineHost, SourceRangeIsEnforced) {
     auto* engine = createEngine();
     ASSERT_NE(engine, nullptr);
     ASSERT_EQ(loadSource(engine, testutil::testFile("24-96k"), CAMEL_DECODER_SNDFILE, 100, 180, true), CAMEL_ENGINE_OK);
@@ -357,13 +357,6 @@ TEST(RustEngineHost, SourceRangeAndUnsupportedBitDepthAreEnforced) {
     CamelCommandStampV1 command{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 2, 1, 1};
     EXPECT_EQ(camel_engine_seek_v1(engine, &command, 99), CAMEL_ENGINE_E_SEEK);
     destroyEngine(engine);
-
-    for (const auto* name : {"20-48k", "32-384k"}) {
-        engine = createEngine();
-        ASSERT_NE(engine, nullptr);
-        EXPECT_EQ(loadSource(engine, testutil::testFile(name), CAMEL_DECODER_FFMPEG), CAMEL_ENGINE_E_UNSUPPORTED_FORMAT) << name;
-        destroyEngine(engine);
-    }
 }
 
 TEST(RustEngineHost, LoadsUnicodeSourcePathThroughHostAbi) {

@@ -69,8 +69,7 @@ TEST(AudioTypes, InvalidTimeValuesDoNotOverflowFrameCount) {
 
 TEST(SamplePackerBoundary, RejectsInvalidDepthsAndFloatingPointCandidates) {
     for (auto type : {SampleType::Int16, SampleType::Int24, SampleType::Int24In32, SampleType::Int32, SampleType::Float32}) {
-        EXPECT_FALSE(canCarryBitPerfect(type, 0));
-        EXPECT_FALSE(canCarryBitPerfect(type, 33));
+        for (auto bits : {0u, 8u, 20u, 32u, 33u}) EXPECT_FALSE(canCarryBitPerfect(type, bits)) << bits;
         EXPECT_FALSE(canCarryBitPerfect(type, validBits(type) + 1));
     }
     EXPECT_TRUE(bitPerfectCandidates(0).empty());
@@ -369,7 +368,7 @@ TEST(Md5, FinishedHashRejectsFurtherUpdatesAndFinalization) {
 }
 
 TEST(FlacMd5, InvalidDepthIsRejected) {
-    for (auto bits : {0u, 33u, std::numeric_limits<uint32_t>::max()})
+    for (auto bits : {0u, 8u, 20u, 32u, 33u, std::numeric_limits<uint32_t>::max()})
         EXPECT_THROW({ FlacMd5 invalid(bits); }, std::invalid_argument);
 }
 

@@ -63,7 +63,7 @@ void writeFlacSamples(const std::filesystem::path& path, const std::vector<int32
     FLAC__stream_encoder_set_channels(enc, channels);
     FLAC__stream_encoder_set_bits_per_sample(enc, bits);
     FLAC__stream_encoder_set_sample_rate(enc, sampleRate);
-    FLAC__stream_encoder_set_streamable_subset(enc, false); // 352.8k+ and 32-bit are outside the subset
+    FLAC__stream_encoder_set_streamable_subset(enc, false); // rates above 48 kHz with large blocks are outside the subset
     FLAC__stream_encoder_set_compression_level(enc, 5);
     FLAC__stream_encoder_set_total_samples_estimate(enc, samples.size() / channels);
     FILE* f = nullptr;

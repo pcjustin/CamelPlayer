@@ -1,5 +1,5 @@
 // Computes the FLAC STREAMINFO MD5 of decoded samples: every sample as a little-endian signed integer
-// of ceil(bits / 8) bytes, interleaved (FLAC format specification).
+// of bits / 8 bytes, interleaved (FLAC format specification). Only 16/24-bit sources are supported.
 #pragma once
 #include <cstdint>
 #include <stdexcept>
@@ -12,8 +12,8 @@ namespace camel::audio {
 class FlacMd5 {
 public:
     explicit FlacMd5(uint32_t bitsPerSample) : bytes_(0) {
-        if (!bitsPerSample || bitsPerSample > 32) throw std::invalid_argument("invalid PCM bit depth for FLAC MD5");
-        bytes_ = (bitsPerSample + 7) / 8;
+        if (bitsPerSample != 16 && bitsPerSample != 24) throw std::invalid_argument("FLAC MD5 supports 16/24-bit PCM only");
+        bytes_ = bitsPerSample / 8;
     }
 
     // `samples` are right-aligned to the stream's bit depth.

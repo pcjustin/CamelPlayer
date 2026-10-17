@@ -42,7 +42,7 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-The current Release and Debug suites each ran **234 C++ tests: 221 passed, 13 known-format skips, and zero failures**. The Rust Engine suite passed all 9 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+The current Release and Debug suites each ran **368 C++ tests: 363 passed, 5 known skips, and zero failures**. The Rust Engine suite passed all 28 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 

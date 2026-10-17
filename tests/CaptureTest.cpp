@@ -39,10 +39,7 @@ void runCase(EngineKind engineKind, const Case& c, uint64_t seekFrame = 0) {
     auto ref = testaudio::referenceDecode(file);
     ASSERT_TRUE(ref.error.empty()) << ref.error;
     if (ref.info.md5) ASSERT_TRUE(ref.md5Ok);
-    if (testutil::knownUnsupported(c.decoder, ref.info.bitsPerSample, ref.info.sampleRate))
-        GTEST_SKIP() << "Decoder does not support this format";
-    if (engineKind == EngineKind::Rust && ref.info.bitsPerSample != 16 && ref.info.bitsPerSample != 24)
-        GTEST_SKIP() << "The Rust Engine accepts only 16/24-bit sources";
+    if (testutil::knownUnsupported(c.decoder, ref.info.sampleRate)) GTEST_SKIP() << "Decoder does not support this format";
     auto out = file.parent_path() / (std::string("capture-") + decoderId(c.decoder) + "-" + c.file + ".raw");
     Settings s;
     s.decoder = c.decoder;
@@ -92,7 +89,6 @@ TEST_P(CaptureEveryDecoder, ZeroPaddedContainers) {
     runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "16-44.1k", {SampleType::Int32}, SampleType::Int32});
     runCase(std::get<1>(GetParam()),
             {std::get<0>(GetParam()), "24-96k", {SampleType::Int24In32, SampleType::Int32}, SampleType::Int24In32});
-    runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "20-48k", {SampleType::Int24}, SampleType::Int24});
 }
 
 TEST_P(CaptureEveryDecoder, SeekKeepsBitPerfectTail) {
@@ -129,10 +125,6 @@ INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder,
                          [](const ::testing::TestParamInfo<std::tuple<DecoderKind, EngineKind>>& i) {
                              return std::string(decoderId(std::get<0>(i.param))) + "_" + engineId(std::get<1>(i.param));
                          });
-
-TEST(Capture, ThirtyTwoBitThroughFfmpeg) {
-    runCase(EngineKind::Cpp, {DecoderKind::FFmpeg, "32-384k", {SampleType::Int32}, SampleType::Int32});
-}
 
 TEST(Capture, UnsupportedFormatIsReportedNotPlayed) {
     Settings s;
