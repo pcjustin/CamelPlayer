@@ -14,6 +14,7 @@
 
 #include "audio/decode/FlacStreamInfo.h"
 #include "audio/engine/FormatRule.h"
+#include "audio/engine/RustSession.h"
 #include "audio/engine/SamplePacker.h"
 #include "audio/engine/SpscRing.h"
 #include "audio/output/OutputBridge.h"
@@ -96,10 +97,19 @@ public:
     // ---- IRenderSource (real-time thread) ----
     size_t render(uint8_t* dst, size_t frames) noexcept override {
         const size_t bpf = bpf_;
-        size_t n = ring_.read(dst, frames * bpf) / bpf;
+        size_t n = 0;
+        bool drained = false;
+        if (rust_) {
+            const auto rendered = rust_->render(dst, frames, bpf);
+            n = rendered.frames;
+            drained = rendered.ended || rendered.fault;
+        } else {
+            n = ring_.read(dst, frames * bpf) / bpf;
+            drained = decodeDone_.load(std::memory_order_acquire);
+        }
         consumed_.fetch_add(n, std::memory_order_relaxed);
         if (n < frames) {
-            if (decodeDone_.load(std::memory_order_acquire)) {
+            if (drained) {
                 if (!ended_.exchange(true)) qCv_.notify_all();
             } else if (playing_.load(std::memory_order_relaxed)) {
                 underruns_.fetch_add(1, std::memory_order_relaxed);
@@ -137,6 +147,7 @@ public:
     void play() {
         if (active_) {
             if (state_ == PlayState::Paused) {
+                if (rust_) rust_->play();
                 output_->start();
                 setState(PlayState::Playing);
             }
@@ -148,6 +159,7 @@ public:
     void pause() {
         if (active_ && state_ == PlayState::Playing) {
             output_->pause();
+            if (rust_) rust_->pause();
             setState(PlayState::Paused);
         }
     }
@@ -169,7 +181,7 @@ public:
 
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
-        const bool decoderChanged = settings_.decoder != s.decoder;
+        const bool decoderChanged = settings_.decoder != s.decoder || settings_.engine != s.engine;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -248,8 +260,20 @@ private:
                 }
             }
             if (active_ && ended_.load()) onEnded();
+            if (active_ && rust_) reportAudible();
         }
         CoUninitialize();
+    }
+
+    // Frames handed to the device minus what its buffer still holds; refined once drivers report latency.
+    void reportAudible() {
+        uint64_t buffered = 0;
+        {
+            std::lock_guard lock(snapMutex_);
+            buffered = snap_.outputStatus.bufferFrames;
+        }
+        const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
+        rust_->reportAudible(base_ + consumed - std::min(buffered, consumed));
     }
 
     uint64_t currentPosition() const { return active_ ? base_ + consumed_.load(std::memory_order_relaxed) : position_; }
@@ -302,20 +326,25 @@ private:
             return fail(Error(ErrorCode::FormatNotSupported, msg), PlayState::Stopped);
         }
         if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
+        fmt_ = *fmt;
+        bpf_ = fmt_.bytesPerFrame();
         try {
-            if (startFrame) dec->seek(startFrame);
+            if (settings_.engine == EngineKind::Rust) {
+                dec.reset(); // the Rust Engine opens its own decoder through the host ABI
+                rust_ = std::make_unique<RustSession>(file_, settings_.decoder, fmt_, startFrame);
+            } else {
+                if (startFrame) dec->seek(startFrame);
+                decoder_ = std::move(dec);
+                ring_.reset((size_t(fmt_.sampleRate * kPrebufferSeconds) + kDecodeChunk) * bpf_);
+            }
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);
         }
 
-        decoder_ = std::move(dec);
-        fmt_ = *fmt;
-        bpf_ = fmt_.bytesPerFrame();
-        const size_t ringFrames = size_t(fmt_.sampleRate * kPrebufferSeconds) + kDecodeChunk;
-        ring_.reset(ringFrames * bpf_);
         base_ = startFrame;
         consumed_ = 0;
+        prefilled_ = 0;
         underruns_ = 0;
         decodeDone_ = false;
         ended_ = false;
@@ -324,11 +353,11 @@ private:
             std::lock_guard lock(decodeErrMutex_);
             decodeError_.reset();
         }
-        decodeThread_ = std::thread([this] { decodeMain(); });
+        decodeThread_ = std::thread([this] { rust_ ? decodeMainRust() : decodeMain(); });
 
         // Let the decoder get ahead before the device starts pulling.
-        const size_t startBytes = size_t(fmt_.sampleRate * kStartFillSeconds) * bpf_;
-        for (int i = 0; i < 600 && ring_.readable() < startBytes && !decodeDone_; i++) Sleep(5);
+        const auto startFrames = uint64_t(fmt_.sampleRate * kStartFillSeconds);
+        for (int i = 0; i < 600 && bufferedFrames() < startFrames && !decodeDone_; i++) Sleep(5);
 
         output_->setErrorHandler([this, session](const Error& e) {
             post([this, session, e] {
@@ -345,6 +374,7 @@ private:
         } catch (const Error& e) {
             stopDecoder();
             decoder_.reset();
+            rust_.reset();
             position_ = startFrame;
             // Device busy or unplugged: pause and wait for the user (docs/Plan.md §2)
             const bool waitForDevice = e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceLost;
@@ -363,6 +393,7 @@ private:
                   describe(fmt_).c_str(), (unsigned long long)startFrame);
         if (playNow) {
             playing_ = true;
+            if (rust_) rust_->play();
             output_->start();
             setState(PlayState::Playing);
         } else {
@@ -398,6 +429,32 @@ private:
         decodeDone_.store(true, std::memory_order_release);
     }
 
+    void decodeMainRust() {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+        try {
+            while (!stopDecode_) {
+                uint64_t frames = 0;
+                const auto result = rust_->prefill(frames);
+                if (result == RustSession::Prefill::End) break;
+                if (result == RustSession::Prefill::Full) {
+                    Sleep(5);
+                    continue;
+                }
+                prefilled_.fetch_add(frames, std::memory_order_relaxed);
+            }
+        } catch (const Error& e) {
+            log::error("engine: decode error: %s", e.what());
+            std::lock_guard lock(decodeErrMutex_);
+            decodeError_ = e;
+        }
+        decodeDone_.store(true, std::memory_order_release);
+    }
+
+    uint64_t bufferedFrames() const {
+        if (rust_) return prefilled_.load(std::memory_order_relaxed);
+        return ring_.readable() / bpf_;
+    }
+
     void stopDecoder() {
         stopDecode_ = true;
         if (decodeThread_.joinable()) decodeThread_.join();
@@ -414,6 +471,7 @@ private:
         }
         stopDecoder();
         decoder_.reset();
+        rust_.reset();
         if (active_) position_ = base_ + consumed_.load();
         active_ = false;
         playing_ = false;
@@ -423,6 +481,7 @@ private:
     }
 
     void onEnded() {
+        stopDecoder(); // the worker may still be recording the failure that ended the stream
         std::optional<Error> err;
         {
             std::lock_guard lock(decodeErrMutex_);
@@ -494,7 +553,8 @@ private:
     Settings settings_;
     OutputFactory factory_;
     std::unique_ptr<OutputBridge> output_;
-    std::unique_ptr<IDecoder> decoder_;
+    std::unique_ptr<IDecoder> decoder_; // C++ reference data path
+    std::unique_ptr<RustSession> rust_; // Rust Engine data path
     std::wstring file_;
     PlayState state_ = PlayState::Stopped;
     uint64_t position_ = 0;
@@ -505,7 +565,7 @@ private:
     // shared with the decode / output threads
     SpscRing ring_;
     size_t bpf_ = 8;
-    std::atomic<uint64_t> base_{0}, consumed_{0}, underruns_{0};
+    std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false};
     std::thread decodeThread_;
     std::mutex decodeErrMutex_;

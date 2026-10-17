@@ -45,6 +45,10 @@ struct KsSettings {
     bool operator==(const KsSettings&) const = default;
 };
 
+// Which data path decodes and renders: the Rust Engine, or the C++ reference engine kept for rollback.
+enum class EngineKind : uint8_t { Rust, Cpp };
+const char* engineId(EngineKind e); // "rust" / "cpp"
+
 struct Settings {
     static constexpr int kSchemaVersion = 2;
 
@@ -55,6 +59,7 @@ struct Settings {
     KsSettings ks;
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
     std::wstring lastFile;
+    EngineKind engine = EngineKind::Rust;
 };
 
 // Fixed in the MVP (docs/Plan.md §16.4).

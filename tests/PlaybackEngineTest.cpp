@@ -56,7 +56,7 @@ private:
     OutputProbe& probe_;
 };
 
-class EngineStateTest : public ::testing::Test {
+class EngineStateTest : public ::testing::TestWithParam<EngineKind> {
 protected:
     OutputProbe probe;
     ManualOutput* output = nullptr;
@@ -64,6 +64,7 @@ protected:
     std::unique_ptr<PlaybackEngine> engine;
 
     void SetUp() override {
+        settings.engine = GetParam();
         engine = std::make_unique<PlaybackEngine>(settings, [&](const Settings&) {
             auto result = std::make_unique<ManualOutput>(probe);
             output = result.get();
@@ -81,7 +82,7 @@ protected:
     }
 };
 
-TEST_F(EngineStateTest, IdleCommandsDoNotCreateOutput) {
+TEST_P(EngineStateTest, IdleCommandsDoNotCreateOutput) {
     engine->play();
     engine->pause();
     engine->togglePause();
@@ -93,7 +94,7 @@ TEST_F(EngineStateTest, IdleCommandsDoNotCreateOutput) {
     EXPECT_FALSE(engine->waitForState(PlayState::Playing, 1ms));
 }
 
-TEST_F(EngineStateTest, LoadPublishesMetadataWithoutPlaying) {
+TEST_P(EngineStateTest, LoadPublishesMetadataWithoutPlaying) {
     const auto file = testutil::testFile("24-96k");
     engine->load(file);
     engine->waitIdle();
@@ -111,7 +112,7 @@ TEST_F(EngineStateTest, LoadPublishesMetadataWithoutPlaying) {
     EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
 }
 
-TEST_F(EngineStateTest, PauseResumeAndTogglePreservePosition) {
+TEST_P(EngineStateTest, PauseResumeAndTogglePreservePosition) {
     open();
     ASSERT_EQ(engine->snapshot().state, PlayState::Playing);
     ASSERT_EQ(pull(123), 123u);
@@ -134,7 +135,21 @@ TEST_F(EngineStateTest, PauseResumeAndTogglePreservePosition) {
     EXPECT_EQ(engine->snapshot().position, 123u);
 }
 
-TEST_F(EngineStateTest, StopClearsOutputAndNextPlayStartsAtZero) {
+TEST_P(EngineStateTest, RustEngineRendersNothingWhilePaused) {
+    if (GetParam() != EngineKind::Rust) GTEST_SKIP() << "the C++ reference ring does not track playback state";
+    open();
+    ASSERT_EQ(pull(10), 10u);
+    engine->pause();
+    engine->waitIdle();
+    EXPECT_EQ(pull(100), 0u);
+    EXPECT_EQ(engine->snapshot().position, 10u);
+    engine->play();
+    engine->waitIdle();
+    EXPECT_EQ(pull(5), 5u);
+    EXPECT_EQ(engine->snapshot().position, 15u);
+}
+
+TEST_P(EngineStateTest, StopClearsOutputAndNextPlayStartsAtZero) {
     open();
     ASSERT_EQ(pull(100), 100u);
     engine->stop();
@@ -148,7 +163,7 @@ TEST_F(EngineStateTest, StopClearsOutputAndNextPlayStartsAtZero) {
     EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
 }
 
-TEST_F(EngineStateTest, SeekWhilePausedKeepsPausedState) {
+TEST_P(EngineStateTest, SeekWhilePausedKeepsPausedState) {
     open();
     engine->pause();
     engine->seek(12345);
@@ -162,7 +177,7 @@ TEST_F(EngineStateTest, SeekWhilePausedKeepsPausedState) {
     EXPECT_EQ(engine->snapshot().position, 12352u);
 }
 
-TEST_F(EngineStateTest, SeekWhileStoppedIsUsedByNextPlay) {
+TEST_P(EngineStateTest, SeekWhileStoppedIsUsedByNextPlay) {
     engine->load(testutil::testFile("24-96k"));
     engine->seek(54321);
     engine->waitIdle();
@@ -173,7 +188,7 @@ TEST_F(EngineStateTest, SeekWhileStoppedIsUsedByNextPlay) {
     EXPECT_EQ(engine->snapshot().position, 54321u);
 }
 
-TEST_F(EngineStateTest, SeekPastEndRestartsAtBeginning) {
+TEST_P(EngineStateTest, SeekPastEndRestartsAtBeginning) {
     open();
     engine->seek(192000);
     engine->waitIdle();
@@ -181,7 +196,7 @@ TEST_F(EngineStateTest, SeekPastEndRestartsAtBeginning) {
     EXPECT_FALSE(engine->snapshot().error);
 }
 
-TEST_F(EngineStateTest, NaturalEndResetsPositionAndClosesOutput) {
+TEST_P(EngineStateTest, NaturalEndResetsPositionAndClosesOutput) {
     open();
     size_t frames = 0;
     const auto deadline = std::chrono::steady_clock::now() + 2s;
@@ -197,7 +212,7 @@ TEST_F(EngineStateTest, NaturalEndResetsPositionAndClosesOutput) {
     EXPECT_EQ(probe.source, nullptr);
 }
 
-TEST_F(EngineStateTest, InactiveBackendSettingsDoNotRestartPlayback) {
+TEST_P(EngineStateTest, InactiveBackendSettingsDoNotRestartPlayback) {
     open();
     settings.asio.bufferSize = 512;
     settings.ks.packetCount = 8;
@@ -208,7 +223,7 @@ TEST_F(EngineStateTest, InactiveBackendSettingsDoNotRestartPlayback) {
     EXPECT_EQ(probe.creations, 1);
 }
 
-TEST_F(EngineStateTest, DecoderSwitchPreservesPausedPosition) {
+TEST_P(EngineStateTest, DecoderSwitchPreservesPausedPosition) {
     open();
     ASSERT_EQ(pull(17), 17u);
     engine->pause();
@@ -222,7 +237,7 @@ TEST_F(EngineStateTest, DecoderSwitchPreservesPausedPosition) {
     EXPECT_EQ(probe.creations, 1);
 }
 
-TEST_F(EngineStateTest, BackendSwitchRecreatesOutputAtCurrentPosition) {
+TEST_P(EngineStateTest, BackendSwitchRecreatesOutputAtCurrentPosition) {
     open();
     ASSERT_EQ(pull(23), 23u);
     settings.backend = Backend::Ks;
@@ -234,7 +249,7 @@ TEST_F(EngineStateTest, BackendSwitchRecreatesOutputAtCurrentPosition) {
     EXPECT_EQ(probe.creations, 2);
 }
 
-TEST_F(EngineStateTest, BackendSwitchPreservesPausedPosition) {
+TEST_P(EngineStateTest, BackendSwitchPreservesPausedPosition) {
     open();
     ASSERT_EQ(pull(23), 23u);
     engine->pause();
@@ -248,7 +263,7 @@ TEST_F(EngineStateTest, BackendSwitchPreservesPausedPosition) {
     EXPECT_EQ(probe.creations, 2);
 }
 
-TEST_F(EngineStateTest, AsynchronousDeviceLossPausesAndPlayRecovers) {
+TEST_P(EngineStateTest, AsynchronousDeviceLossPausesAndPlayRecovers) {
     open();
     ASSERT_EQ(pull(41), 41u);
     output->fail(ErrorCode::DeviceLost);
@@ -265,7 +280,7 @@ TEST_F(EngineStateTest, AsynchronousDeviceLossPausesAndPlayRecovers) {
     EXPECT_EQ(probe.creations, 2);
 }
 
-TEST_F(EngineStateTest, DriverRestartPreservesPositionAndState) {
+TEST_P(EngineStateTest, DriverRestartPreservesPositionAndState) {
     open();
     ASSERT_EQ(pull(29), 29u);
     engine->pause();
@@ -277,7 +292,7 @@ TEST_F(EngineStateTest, DriverRestartPreservesPositionAndState) {
     EXPECT_EQ(probe.creations, 2);
 }
 
-TEST_F(EngineStateTest, QueuedOldSessionErrorDoesNotAffectNewSession) {
+TEST_P(EngineStateTest, QueuedOldSessionErrorDoesNotAffectNewSession) {
     open();
     engine->stop();
     output->fail(ErrorCode::DeviceLost);
@@ -289,7 +304,7 @@ TEST_F(EngineStateTest, QueuedOldSessionErrorDoesNotAffectNewSession) {
     EXPECT_EQ(engine->snapshot().source->bitsPerSample, 16u);
 }
 
-TEST_F(EngineStateTest, DeviceBusyOnOpenPausesAndAllowsRetry) {
+TEST_P(EngineStateTest, DeviceBusyOnOpenPausesAndAllowsRetry) {
     probe.openError = ErrorCode::DeviceInUse;
     open();
     EXPECT_EQ(engine->snapshot().state, PlayState::Paused);
@@ -301,7 +316,7 @@ TEST_F(EngineStateTest, DeviceBusyOnOpenPausesAndAllowsRetry) {
     EXPECT_FALSE(engine->snapshot().error);
 }
 
-TEST_F(EngineStateTest, UnsupportedFormatNeverOpensDevice) {
+TEST_P(EngineStateTest, UnsupportedFormatNeverOpensDevice) {
     probe.accepts = false;
     open();
     EXPECT_EQ(probe.opens, 0);
@@ -309,7 +324,7 @@ TEST_F(EngineStateTest, UnsupportedFormatNeverOpensDevice) {
     EXPECT_EQ(engine->snapshot().state, PlayState::Stopped);
 }
 
-TEST_F(EngineStateTest, MissingNewFileDoesNotPublishPreviousTrackMetadata) {
+TEST_P(EngineStateTest, MissingNewFileDoesNotPublishPreviousTrackMetadata) {
     open();
     const auto missing = testutil::tempDir() / "missing-engine-input.flac";
     engine->openAndPlay(missing);
@@ -323,7 +338,7 @@ TEST_F(EngineStateTest, MissingNewFileDoesNotPublishPreviousTrackMetadata) {
     EXPECT_FALSE(snapshot.output);
 }
 
-TEST_F(EngineStateTest, StartFailureIsPublishedAndSessionIsClosed) {
+TEST_P(EngineStateTest, StartFailureIsPublishedAndSessionIsClosed) {
     probe.startError = ErrorCode::DeviceLost;
     open();
     EXPECT_EQ(engine->snapshot().error, ErrorCode::DeviceLost);
@@ -336,7 +351,7 @@ TEST_F(EngineStateTest, StartFailureIsPublishedAndSessionIsClosed) {
     EXPECT_FALSE(engine->snapshot().error);
 }
 
-TEST_F(EngineStateTest, UnexpectedCommandExceptionIsPublished) {
+TEST_P(EngineStateTest, UnexpectedCommandExceptionIsPublished) {
     probe.unexpectedStartError = true;
     open();
     EXPECT_EQ(engine->snapshot().error, ErrorCode::Other);
@@ -344,7 +359,7 @@ TEST_F(EngineStateTest, UnexpectedCommandExceptionIsPublished) {
     EXPECT_EQ(probe.source, nullptr);
 }
 
-TEST_F(EngineStateTest, ResumeFailureIsPublished) {
+TEST_P(EngineStateTest, ResumeFailureIsPublished) {
     open();
     engine->pause();
     engine->waitIdle();
@@ -355,7 +370,7 @@ TEST_F(EngineStateTest, ResumeFailureIsPublished) {
     EXPECT_FALSE(engine->snapshot().output);
 }
 
-TEST_F(EngineStateTest, PauseFailureIsPublished) {
+TEST_P(EngineStateTest, PauseFailureIsPublished) {
     open();
     probe.pauseError = ErrorCode::DeviceLost;
     engine->pause();
@@ -364,7 +379,7 @@ TEST_F(EngineStateTest, PauseFailureIsPublished) {
     EXPECT_EQ(probe.source, nullptr);
 }
 
-TEST_F(EngineStateTest, ListenerMayReadSnapshotAndCanBeRemoved) {
+TEST_P(EngineStateTest, ListenerMayReadSnapshotAndCanBeRemoved) {
     std::atomic<int> notifications = 0;
     engine->setListener([&] {
         EXPECT_GT(engine->snapshot().revision, 0u);
@@ -380,14 +395,14 @@ TEST_F(EngineStateTest, ListenerMayReadSnapshotAndCanBeRemoved) {
     EXPECT_EQ(notifications.load(), 2);
 }
 
-TEST_F(EngineStateTest, DestructionClosesActiveSession) {
+TEST_P(EngineStateTest, DestructionClosesActiveSession) {
     open();
     engine.reset();
     EXPECT_EQ(probe.source, nullptr);
     EXPECT_GT(probe.closes, 0);
 }
 
-TEST_F(EngineStateTest, TruncatedAudioPublishesDecodeFailureAndNextFileRecovers) {
+TEST_P(EngineStateTest, TruncatedAudioPublishesDecodeFailureAndNextFileRecovers) {
     engine->openAndPlay(testutil::testFile("truncated"));
     engine->waitIdle();
     const auto deadline = std::chrono::steady_clock::now() + 2s;
@@ -403,7 +418,7 @@ TEST_F(EngineStateTest, TruncatedAudioPublishesDecodeFailureAndNextFileRecovers)
     EXPECT_FALSE(engine->snapshot().error);
 }
 
-TEST_F(EngineStateTest, LoadingAnotherTrackClosesOutputAndResetsPosition) {
+TEST_P(EngineStateTest, LoadingAnotherTrackClosesOutputAndResetsPosition) {
     open();
     ASSERT_EQ(pull(31), 31u);
     engine->load(testutil::testFile("16-44.1k"));
@@ -417,7 +432,7 @@ TEST_F(EngineStateTest, LoadingAnotherTrackClosesOutputAndResetsPosition) {
     EXPECT_EQ(probe.source, nullptr);
 }
 
-TEST_F(EngineStateTest, SettingsWhileStoppedPublishWithoutCreatingOutput) {
+TEST_P(EngineStateTest, SettingsWhileStoppedPublishWithoutCreatingOutput) {
     settings.backend = Backend::Ks;
     settings.decoder = DecoderKind::DrFlac;
     engine->applySettings(settings);
@@ -427,7 +442,7 @@ TEST_F(EngineStateTest, SettingsWhileStoppedPublishWithoutCreatingOutput) {
     EXPECT_EQ(probe.creations, 0);
 }
 
-TEST_F(EngineStateTest, ActiveBackendConfigurationChangeRecreatesOutput) {
+TEST_P(EngineStateTest, ActiveBackendConfigurationChangeRecreatesOutput) {
     open();
     ASSERT_EQ(pull(43), 43u);
     settings.wasapi.eventDriven = false;
@@ -441,7 +456,7 @@ TEST_F(EngineStateTest, ActiveBackendConfigurationChangeRecreatesOutput) {
     EXPECT_EQ(probe.creations, 2);
 }
 
-TEST_F(EngineStateTest, FixedContainerCannotTruncateSource) {
+TEST_P(EngineStateTest, FixedContainerCannotTruncateSource) {
     settings.wasapi.sampleType = SampleType::Int16;
     engine->applySettings(settings);
     open();
@@ -449,7 +464,7 @@ TEST_F(EngineStateTest, FixedContainerCannotTruncateSource) {
     EXPECT_EQ(engine->snapshot().error, ErrorCode::FormatNotSupported);
 }
 
-TEST_F(EngineStateTest, ThrowingListenerDoesNotStopPlaybackOrControlThread) {
+TEST_P(EngineStateTest, ThrowingListenerDoesNotStopPlaybackOrControlThread) {
     engine->setListener([] { throw std::runtime_error("injected listener failure"); });
     open();
     EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
@@ -461,3 +476,6 @@ TEST_F(EngineStateTest, ThrowingListenerDoesNotStopPlaybackOrControlThread) {
 }
 
 } // namespace
+
+INSTANTIATE_TEST_SUITE_P(BothEngines, EngineStateTest, ::testing::Values(EngineKind::Rust, EngineKind::Cpp),
+                         [](const ::testing::TestParamInfo<EngineKind>& i) { return std::string(engineId(i.param)); });

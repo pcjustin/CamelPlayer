@@ -118,6 +118,8 @@ TEST(RustEngineHost, PrefillAndRenderPackPcmAndReportStarvation) {
         auto* engine = createEngine();
         ASSERT_NE(engine, nullptr);
         ASSERT_EQ(loadSource(engine, path, CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
+        const CamelCommandStampV1 play{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 2, 2, 1};
+        ASSERT_EQ(camel_engine_play_v1(engine, &play), CAMEL_ENGINE_OK);
 
         constexpr uint64_t frames = 256;
         uint64_t framesPrefilled = 0;

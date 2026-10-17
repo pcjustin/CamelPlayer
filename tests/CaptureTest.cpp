@@ -34,16 +34,19 @@ std::vector<uint8_t> readFile(const std::filesystem::path& p) {
     return bytes;
 }
 
-void runCase(const Case& c, uint64_t seekFrame = 0) {
+void runCase(EngineKind engineKind, const Case& c, uint64_t seekFrame = 0) {
     auto file = c.fullMatrix ? testutil::acceptanceFile(c.file) : testutil::testFile(c.file);
     auto ref = testaudio::referenceDecode(file);
     ASSERT_TRUE(ref.error.empty()) << ref.error;
     if (ref.info.md5) ASSERT_TRUE(ref.md5Ok);
     if (testutil::knownUnsupported(c.decoder, ref.info.bitsPerSample, ref.info.sampleRate))
         GTEST_SKIP() << "Decoder does not support this format";
+    if (engineKind == EngineKind::Rust && ref.info.bitsPerSample != 16 && ref.info.bitsPerSample != 24)
+        GTEST_SKIP() << "The Rust Engine accepts only 16/24-bit sources";
     auto out = file.parent_path() / (std::string("capture-") + decoderId(c.decoder) + "-" + c.file + ".raw");
     Settings s;
     s.decoder = c.decoder;
+    s.engine = engineKind;
     CaptureOptions co;
     co.file = out;
     auto accept = c.accept;
@@ -76,53 +79,59 @@ void runCase(const Case& c, uint64_t seekFrame = 0) {
 
 } // namespace
 
-class CaptureEveryDecoder : public ::testing::TestWithParam<DecoderKind> {};
+class CaptureEveryDecoder : public ::testing::TestWithParam<std::tuple<DecoderKind, EngineKind>> {};
 
 TEST_P(CaptureEveryDecoder, NativeContainers) {
     const std::vector<SampleType> all = {SampleType::Int16, SampleType::Int24, SampleType::Int24In32, SampleType::Int32};
-    runCase({GetParam(), "16-44.1k", all, SampleType::Int16});
-    runCase({GetParam(), "24-96k", all, SampleType::Int24});
+    runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "16-44.1k", all, SampleType::Int16});
+    runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "24-96k", all, SampleType::Int24});
 }
 
 TEST_P(CaptureEveryDecoder, ZeroPaddedContainers) {
     // DAVE on usbaudio2 only takes 32-bit containers; Cirrus takes 24-in-32 (docs/Plan.md §15.2)
-    runCase({GetParam(), "16-44.1k", {SampleType::Int32}, SampleType::Int32});
-    runCase({GetParam(), "24-96k", {SampleType::Int24In32, SampleType::Int32}, SampleType::Int24In32});
-    runCase({GetParam(), "20-48k", {SampleType::Int24}, SampleType::Int24});
+    runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "16-44.1k", {SampleType::Int32}, SampleType::Int32});
+    runCase(std::get<1>(GetParam()),
+            {std::get<0>(GetParam()), "24-96k", {SampleType::Int24In32, SampleType::Int32}, SampleType::Int24In32});
+    runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "20-48k", {SampleType::Int24}, SampleType::Int24});
 }
 
 TEST_P(CaptureEveryDecoder, SeekKeepsBitPerfectTail) {
-    runCase({GetParam(), "24-96k", {SampleType::Int32}, SampleType::Int32}, 100000);
+    runCase(std::get<1>(GetParam()), {std::get<0>(GetParam()), "24-96k", {SampleType::Int32}, SampleType::Int32}, 100000);
 }
 
-class CaptureAcceptance : public ::testing::TestWithParam<std::tuple<DecoderKind, const char*>> {};
+class CaptureAcceptance : public ::testing::TestWithParam<std::tuple<DecoderKind, const char*, EngineKind>> {};
 
 TEST_P(CaptureAcceptance, FullFile) {
-    const auto [decoder, file] = GetParam();
+    const auto [decoder, file, engine] = GetParam();
     auto info = testaudio::referenceDecode(testutil::acceptanceFile(file)).info;
     const auto native = info.bitsPerSample == 16   ? SampleType::Int16
                         : info.bitsPerSample == 24 ? SampleType::Int24
                                                    : SampleType::Int32;
-    runCase({decoder, file, {native}, native, true});
+    runCase(engine, {decoder, file, {native}, native, true});
 }
 
 TEST_P(CaptureAcceptance, PaddedAndSeek) {
-    const auto [decoder, file] = GetParam();
+    const auto [decoder, file, engine] = GetParam();
     auto info = testaudio::referenceDecode(testutil::acceptanceFile(file)).info;
-    runCase({decoder, file, {SampleType::Int32}, SampleType::Int32, true});
-    runCase({decoder, file, {SampleType::Int32}, SampleType::Int32, true}, info.sampleRate * 3ull + 17);
+    runCase(engine, {decoder, file, {SampleType::Int32}, SampleType::Int32, true});
+    runCase(engine, {decoder, file, {SampleType::Int32}, SampleType::Int32, true}, info.sampleRate * 3ull + 17);
 }
 
 INSTANTIATE_TEST_SUITE_P(M0_18, CaptureAcceptance,
                          ::testing::Combine(::testing::ValuesIn(kAllDecoders),
                                             ::testing::Values("16-44.1k", "16-48k", "24-96k", "24-192k", "24-352.8k", "24-384k",
-                                                              "24-768k", "no-md5-24-96k")));
+                                                              "24-768k", "no-md5-24-96k"),
+                                            ::testing::Values(EngineKind::Rust, EngineKind::Cpp)));
 
-INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder, ::testing::ValuesIn(kAllDecoders),
-                         [](const ::testing::TestParamInfo<DecoderKind>& i) { return std::string(decoderId(i.param)); });
+INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder,
+                         ::testing::Combine(::testing::ValuesIn(kAllDecoders),
+                                            ::testing::Values(EngineKind::Rust, EngineKind::Cpp)),
+                         [](const ::testing::TestParamInfo<std::tuple<DecoderKind, EngineKind>>& i) {
+                             return std::string(decoderId(std::get<0>(i.param))) + "_" + engineId(std::get<1>(i.param));
+                         });
 
 TEST(Capture, ThirtyTwoBitThroughFfmpeg) {
-    runCase({DecoderKind::FFmpeg, "32-384k", {SampleType::Int32}, SampleType::Int32});
+    runCase(EngineKind::Cpp, {DecoderKind::FFmpeg, "32-384k", {SampleType::Int32}, SampleType::Int32});
 }
 
 TEST(Capture, UnsupportedFormatIsReportedNotPlayed) {
