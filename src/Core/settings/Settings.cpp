@@ -65,14 +65,6 @@ const char* ksModeId(KsMode m) {
     return "auto";
 }
 
-const char* engineId(EngineKind e) {
-    return e == EngineKind::Cpp ? "cpp" : "rust";
-}
-
-static EngineKind engineFromId(std::string_view id) {
-    return id == "cpp" ? EngineKind::Cpp : EngineKind::Rust;
-}
-
 static KsMode ksModeFromId(std::string_view id) {
     for (KsMode m : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard})
         if (id == ksModeId(m)) return m;
@@ -113,7 +105,6 @@ std::string toJson(const Settings& s) {
     j["schema"] = Settings::kSchemaVersion;
     j["backend"] = backendId(s.backend);
     j["decoder"] = audio::decoderId(s.decoder);
-    j["engine"] = engineId(s.engine);
     j["language"] = s.language;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
@@ -155,7 +146,6 @@ Settings fromJson(const std::string& text) {
     };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
     audio::decoderFromId(str(j, "decoder", "sndfile"), s.decoder);
-    s.engine = engineFromId(str(j, "engine", "rust"));
     s.language = str(j, "language", "");
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {

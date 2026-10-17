@@ -41,7 +41,6 @@ struct SettingsDto {
     KsSettings ks;
     std::string language;
     std::string lastFileUtf8;
-    EngineKind engine = EngineKind::Rust;
     bool operator==(const SettingsDto&) const = default;
 };
 

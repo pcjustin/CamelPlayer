@@ -7,7 +7,6 @@
 #include "audio/decode/FlacStreamInfo.h"
 #include "audio/engine/FormatRule.h"
 #include "audio/engine/SamplePacker.h"
-#include "audio/engine/SpscRing.h"
 #include "settings/Settings.h"
 #include "TestUtil.h"
 
@@ -68,50 +67,6 @@ TEST(FormatRule, PicksSmallestContainerTheDeviceTakes) {
     EXPECT_FALSE(chooseOutputFormat(s24, SampleType::Int16, cirrus).has_value());                 // would truncate
     EXPECT_FALSE(chooseOutputFormat(s24, std::nullopt, only({SampleType::Float32})).has_value()); // no conversion in the MVP
     EXPECT_FALSE(chooseOutputFormat(SourceInfo{44100, 1, 16}, std::nullopt, cirrus).has_value()); // stereo only
-}
-
-TEST(SpscRing, WrapsAround) {
-    SpscRing r(10);
-    uint8_t in[7] = {1, 2, 3, 4, 5, 6, 7}, out[10] = {};
-    EXPECT_EQ(r.write(in, 7), 7u);
-    EXPECT_EQ(r.read(out, 5), 5u);
-    EXPECT_EQ(r.write(in, 7), 7u); // crosses the end
-    EXPECT_EQ(r.write(in, 7), 1u); // full
-    EXPECT_EQ(r.read(out, 10), 10u);
-    EXPECT_EQ(out[0], 6);
-    EXPECT_EQ(out[2], 1);
-    EXPECT_EQ(out[9], 1);
-}
-
-TEST(SpscRing, ConcurrentProducerConsumer) {
-    SpscRing r(4093);
-    const uint32_t total = 2'000'000;
-    std::thread prod([&] {
-        uint32_t next = 0;
-        while (next < total) {
-            uint32_t chunk[64];
-            uint32_t n = std::min<uint32_t>(64, total - next);
-            for (uint32_t i = 0; i < n; i++) chunk[i] = next + i;
-            size_t done = 0; // the ring may take part of a value; keep going until all bytes are in
-            while (done < n * 4) done += r.write(reinterpret_cast<uint8_t*>(chunk) + done, n * 4 - done);
-            next += n;
-        }
-    });
-    uint32_t expect = 0;
-    uint8_t buf[256];
-    size_t carry = 0;
-    while (expect < total) {
-        size_t got = r.read(buf + carry, sizeof buf - carry) + carry;
-        size_t whole = got / 4 * 4;
-        for (size_t i = 0; i < whole; i += 4) {
-            uint32_t v;
-            memcpy(&v, buf + i, 4);
-            ASSERT_EQ(v, expect++);
-        }
-        carry = got - whole;
-        memmove(buf, buf + whole, carry);
-    }
-    prod.join();
 }
 
 TEST(Settings, JsonRoundTrip) {

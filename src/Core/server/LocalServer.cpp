@@ -15,11 +15,11 @@ namespace camel::server {
 namespace {
 
 SettingsDto dto(const Settings& s) {
-    return {s.backend, s.decoder, s.wasapi, s.asio, s.ks, s.language, toUtf8(s.lastFile), s.engine};
+    return {s.backend, s.decoder, s.wasapi, s.asio, s.ks, s.language, toUtf8(s.lastFile)};
 }
 
 Settings native(const SettingsDto& s) {
-    return {s.backend, s.decoder, s.wasapi, s.asio, s.ks, s.language, toWide(s.lastFileUtf8), s.engine};
+    return {s.backend, s.decoder, s.wasapi, s.asio, s.ks, s.language, toWide(s.lastFileUtf8)};
 }
 
 bool covers(CommandStamp value, CommandStamp floor) {

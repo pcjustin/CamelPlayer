@@ -10,13 +10,10 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <vector>
 
 #include "audio/decode/FlacStreamInfo.h"
 #include "audio/engine/FormatRule.h"
 #include "audio/engine/RustSession.h"
-#include "audio/engine/SamplePacker.h"
-#include "audio/engine/SpscRing.h"
 #include "audio/output/OutputBridge.h"
 #include "util/Log.h"
 #include "util/Text.h"
@@ -24,7 +21,6 @@
 namespace camel::audio {
 
 namespace {
-constexpr size_t kDecodeChunk = 4096;     // frames per decoder read
 constexpr double kStartFillSeconds = 0.5; // buffered before the output starts
 
 std::optional<SampleType> fixedSampleType(const Settings& s) {
@@ -96,27 +92,19 @@ public:
 
     // ---- IRenderSource (real-time thread) ----
     size_t render(uint8_t* dst, size_t frames) noexcept override {
-        const size_t bpf = bpf_;
-        size_t n = 0;
-        bool drained = false;
-        if (rust_) {
-            const auto rendered = rust_->render(dst, frames, bpf);
-            n = rendered.frames;
-            drained = rendered.ended || rendered.fault;
-            const auto transitions = rust_->transitions();
-            if (transitions.count != renderTransitions_.load(std::memory_order_relaxed)) {
-                // A queued file became audible inside this request; positions now count from its start.
-                renderTransitions_.store(transitions.count, std::memory_order_release);
-                base_.store(0, std::memory_order_relaxed);
-                consumed_.store(transitions.trackPosition, std::memory_order_relaxed);
-                transitionPending_.store(true, std::memory_order_release);
-                qCv_.notify_all();
-            } else {
-                consumed_.fetch_add(n, std::memory_order_relaxed);
-            }
+        if (!rust_) return 0;
+        const auto rendered = rust_->render(dst, frames, bpf_);
+        const size_t n = rendered.frames;
+        const bool drained = rendered.ended || rendered.fault;
+        const auto transitions = rust_->transitions();
+        if (transitions.count != renderTransitions_.load(std::memory_order_relaxed)) {
+            // A queued file became audible inside this request; positions now count from its start.
+            renderTransitions_.store(transitions.count, std::memory_order_release);
+            base_.store(0, std::memory_order_relaxed);
+            consumed_.store(transitions.trackPosition, std::memory_order_relaxed);
+            transitionPending_.store(true, std::memory_order_release);
+            qCv_.notify_all();
         } else {
-            n = ring_.read(dst, frames * bpf) / bpf;
-            drained = decodeDone_.load(std::memory_order_acquire);
             consumed_.fetch_add(n, std::memory_order_relaxed);
         }
         if (n < frames) {
@@ -158,7 +146,7 @@ public:
     void play() {
         if (active_) {
             if (state_ == PlayState::Paused) {
-                if (rust_) rust_->play();
+                rust_->play();
                 output_->start();
                 setState(PlayState::Playing);
             }
@@ -170,7 +158,7 @@ public:
     void pause() {
         if (active_ && state_ == PlayState::Playing) {
             output_->pause();
-            if (rust_) rust_->pause();
+            rust_->pause();
             setState(PlayState::Paused);
         }
     }
@@ -192,7 +180,7 @@ public:
 
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
-        const bool decoderChanged = settings_.decoder != s.decoder || settings_.engine != s.engine;
+        const bool decoderChanged = settings_.decoder != s.decoder;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -211,7 +199,7 @@ public:
     }
 
     bool queueNext(const std::filesystem::path& file) {
-        if (!active_ || !rust_ || rust_->transitions().nextQueued) return false;
+        if (!active_ || rust_->transitions().nextQueued) return false;
         SourceInfo source;
         if (!readFlacStreamInfo(file, source)) return false;
         std::optional<DeviceFormat> format;
@@ -307,7 +295,7 @@ private:
             }
             if (active_ && transitionPending_.exchange(false)) onTransition();
             if (active_ && ended_.load()) onEnded();
-            if (active_ && rust_) {
+            if (active_) {
                 reportAudible();
                 refreshNextSlot();
             }
@@ -386,15 +374,9 @@ private:
         if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
         fmt_ = *fmt;
         bpf_ = fmt_.bytesPerFrame();
+        dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         try {
-            if (settings_.engine == EngineKind::Rust) {
-                dec.reset(); // the Rust Engine opens its own decoder through the host ABI
-                rust_ = std::make_unique<RustSession>(file_, settings_.decoder, fmt_, startFrame);
-            } else {
-                if (startFrame) dec->seek(startFrame);
-                decoder_ = std::move(dec);
-                ring_.reset((size_t(fmt_.sampleRate * kPrebufferSeconds) + kDecodeChunk) * bpf_);
-            }
+            rust_ = std::make_unique<RustSession>(file_, settings_.decoder, fmt_, startFrame);
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);
@@ -414,7 +396,7 @@ private:
             std::lock_guard lock(decodeErrMutex_);
             decodeError_.reset();
         }
-        decodeThread_ = std::thread([this] { rust_ ? decodeMainRust() : decodeMain(); });
+        decodeThread_ = std::thread([this] { decodeMain(); });
 
         // Let the decoder get ahead before the device starts pulling.
         const auto startFrames = uint64_t(fmt_.sampleRate * kStartFillSeconds);
@@ -434,7 +416,6 @@ private:
             output_->open(fmt_, this);
         } catch (const Error& e) {
             stopDecoder();
-            decoder_.reset();
             rust_.reset();
             position_ = startFrame;
             // Device busy or unplugged: pause and wait for the user (docs/Plan.md §2)
@@ -454,7 +435,7 @@ private:
                   describe(fmt_).c_str(), (unsigned long long)startFrame);
         if (playNow) {
             playing_ = true;
-            if (rust_) rust_->play();
+            rust_->play();
             output_->start();
             setState(PlayState::Playing);
         } else {
@@ -463,34 +444,6 @@ private:
     }
 
     void decodeMain() {
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
-        const SourceInfo& in = decoder_->info();
-        try {
-            std::vector<int32_t> pcm(kDecodeChunk * in.channels);
-            std::vector<uint8_t> packed(kDecodeChunk * bpf_);
-            while (!stopDecode_) {
-                if (ring_.writable() < packed.size()) {
-                    Sleep(5);
-                    continue;
-                }
-                size_t n = decoder_->read(pcm.data(), kDecodeChunk);
-                if (!n) break;
-                packSamples(pcm.data(), n * in.channels, in.bitsPerSample, fmt_.type, packed.data());
-                ring_.write(packed.data(), n * bpf_);
-            }
-        } catch (const Error& e) {
-            log::error("engine: decode error: %s", e.what());
-            std::lock_guard lock(decodeErrMutex_);
-            decodeError_ = e;
-        } catch (const std::exception& e) {
-            log::error("engine: decoder worker failed: %s", e.what());
-            std::lock_guard lock(decodeErrMutex_);
-            decodeError_ = Error(ErrorCode::DecodeFailed, e.what());
-        }
-        decodeDone_.store(true, std::memory_order_release);
-    }
-
-    void decodeMainRust() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
         try {
             while (!stopDecode_) {
@@ -516,10 +469,7 @@ private:
         decodeDone_.store(true, std::memory_order_release);
     }
 
-    uint64_t bufferedFrames() const {
-        if (rust_) return prefilled_.load(std::memory_order_relaxed);
-        return ring_.readable() / bpf_;
-    }
+    uint64_t bufferedFrames() const { return prefilled_.load(std::memory_order_relaxed); }
 
     void stopDecoder() {
         stopDecode_ = true;
@@ -536,7 +486,6 @@ private:
             }
         }
         stopDecoder();
-        decoder_.reset();
         rust_.reset();
         if (active_) position_ = base_ + consumed_.load();
         active_ = false;
@@ -642,8 +591,7 @@ private:
     Settings settings_;
     OutputFactory factory_;
     std::unique_ptr<OutputBridge> output_;
-    std::unique_ptr<IDecoder> decoder_; // C++ reference data path
-    std::unique_ptr<RustSession> rust_; // Rust Engine data path
+    std::unique_ptr<RustSession> rust_;
     std::wstring file_;
     PlayState state_ = PlayState::Stopped;
     uint64_t position_ = 0;
@@ -652,7 +600,6 @@ private:
     DeviceFormat fmt_;
 
     // shared with the decode / output threads
-    SpscRing ring_;
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};

@@ -8,7 +8,6 @@
 #include "audio/decode/FlacStreamInfo.h"
 #include "audio/engine/FormatRule.h"
 #include "audio/engine/SamplePacker.h"
-#include "audio/engine/SpscRing.h"
 #include "audio/output/WaveFormat.h"
 #include "audio/verify/FlacMd5.h"
 #include "settings/Settings.h"
@@ -126,44 +125,6 @@ TEST(FormatRuleBoundary, PreservesRateAndStopsAtFirstSupportedContainer) {
     EXPECT_EQ(format->type, SampleType::Int24);
     EXPECT_EQ(probes, (std::vector{SampleType::Int16, SampleType::Int24}));
     EXPECT_FALSE(chooseOutputFormat({48000, 2, 16}, SampleType::Float32, [](const auto&) { return true; }));
-}
-
-TEST(SpscRingBoundary, EmptyAndZeroCapacityAreSafe) {
-    SpscRing ring;
-    EXPECT_EQ(ring.capacity(), 0u);
-    EXPECT_EQ(ring.readable(), 0u);
-    EXPECT_EQ(ring.writable(), 0u);
-    EXPECT_EQ(ring.write(nullptr, 5), 0u);
-    EXPECT_EQ(ring.read(nullptr, 5), 0u);
-    ring.clear();
-    ring.reset(1);
-    const uint8_t byte = 42;
-    uint8_t got = 0;
-    EXPECT_EQ(ring.write(&byte, 1), 1u);
-    EXPECT_EQ(ring.write(&byte, 1), 0u);
-    EXPECT_EQ(ring.read(&got, 1), 1u);
-    EXPECT_EQ(got, byte);
-}
-
-TEST(SpscRingBoundary, PartialWritesReadsClearAndResetPreserveFifo) {
-    SpscRing ring(7);
-    std::array<uint8_t, 10> bytes{};
-    std::iota(bytes.begin(), bytes.end(), uint8_t(1));
-    std::array<uint8_t, 10> got{};
-    EXPECT_EQ(ring.write(bytes.data(), bytes.size()), 7u);
-    EXPECT_EQ(ring.writable(), 0u);
-    EXPECT_EQ(ring.read(got.data(), 3), 3u);
-    EXPECT_EQ(ring.write(bytes.data() + 7, 3), 3u);
-    EXPECT_EQ(ring.read(got.data() + 3, 7), 7u);
-    EXPECT_EQ(got, bytes);
-    ring.write(bytes.data(), 5);
-    ring.clear();
-    EXPECT_EQ(ring.readable(), 0u);
-    EXPECT_EQ(ring.writable(), 7u);
-    ring.reset(2);
-    EXPECT_EQ(ring.capacity(), 2u);
-    EXPECT_EQ(ring.readable(), 0u);
-    EXPECT_EQ(ring.write(bytes.data(), 3), 2u);
 }
 
 TEST(WaveFormat, IntegerAndFloatingPointLayouts) {

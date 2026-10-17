@@ -168,7 +168,7 @@ int cmdPlayQueue(const Args& args) {
         return 2;
     }
     const Settings s = settingsFromArgs(args);
-    std::printf("backend %s, decoder %s, engine %s\n", backendName(s.backend), decoderName(s.decoder), engineId(s.engine));
+    std::printf("backend %s, decoder %s\n", backendName(s.backend), decoderName(s.decoder));
     std::atomic<int> opens = 0;
     server::LocalServer server(
         s, {}, [&](const Settings& settings) { return std::make_unique<CountingOutput>(createOutput(settings), opens); });
