@@ -167,18 +167,37 @@ TEST(SettingsBoundary, WrongTypesAndUnknownEnumsUseDefaults) {
     EXPECT_EQ(toJson(settings), toJson(Settings{}));
 }
 
-TEST(SettingsMigration, V1DecoderChoiceSurvivesUpgradeAndNewSettingsUseSndfile) {
-    for (const auto decoder : audio::kAllDecoders) {
-        const auto json = std::string(R"({"schema":1,"backend":"ks","decoder":")") + audio::decoderId(decoder) + R"("})";
-        const auto migrated = fromJson(json);
-        EXPECT_EQ(migrated.backend, Backend::Ks);
-        EXPECT_EQ(migrated.decoder, decoder);
-        EXPECT_NE(toJson(migrated).find(R"("schema": 2)"), std::string::npos);
-    }
+DecoderByFormat flacChoice(DecoderKind decoder) {
+    DecoderByFormat choices;
+    choices[AudioFormat::Flac] = decoder;
+    return choices;
+}
 
-    const auto fresh = Settings{};
-    EXPECT_EQ(fresh.decoder, DecoderKind::Sndfile);
-    EXPECT_EQ(fromJson(R"({"schema":2})").decoder, DecoderKind::Sndfile);
+TEST(SettingsMigration, GlobalDecoderChoiceBecomesTheFlacChoiceAndNewSettingsUseSndfile) {
+    for (const int schema : {1, 2})
+        for (const auto decoder : audio::kAllDecoders) {
+            const auto json =
+                R"({"schema":)" + std::to_string(schema) + R"(,"backend":"ks","decoder":")" + audio::decoderId(decoder) + R"("})";
+            const auto migrated = fromJson(json);
+            EXPECT_EQ(migrated.backend, Backend::Ks);
+            EXPECT_EQ(migrated.decoderByFormat, flacChoice(decoder));
+            const auto saved = toJson(migrated);
+            EXPECT_NE(saved.find(R"("schema": 3)"), std::string::npos);
+            EXPECT_EQ(saved.find(R"("decoder")"), std::string::npos);
+        }
+
+    EXPECT_EQ(Settings{}.decoderByFormat, DecoderByFormat{});
+    EXPECT_EQ(decoderFor(Settings{}.decoderByFormat, AudioFormat::Flac), DecoderKind::Sndfile);
+    EXPECT_EQ(fromJson(R"({"schema":2})").decoderByFormat, DecoderByFormat{});
+    EXPECT_EQ(fromJson(R"({"schema":3,"decoder":"drflac"})").decoderByFormat, DecoderByFormat{});
+}
+
+TEST(SettingsBoundary, DecoderChoicesKeepOnlyIntegratedPairs) {
+    const auto settings = fromJson(R"({"schema":3,"decoderByFormat":{"flac":"symphonia","alac":"symphonia",
+        "ogg":"ffmpeg","mp3":"sndfile","wav":7}})");
+    EXPECT_EQ(settings.decoderByFormat, flacChoice(DecoderKind::Symphonia));
+    EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":{"flac":"mpg123"}})").decoderByFormat, DecoderByFormat{});
+    EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":["flac"]})").decoderByFormat, DecoderByFormat{});
 }
 
 TEST(SettingsMigration, RejectsFutureSchemaVersions) {
@@ -193,12 +212,13 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
         out << R"({"schema":1,"decoder":"drflac"})";
     }
     const auto settings = loadSettings(file);
-    EXPECT_EQ(settings.decoder, DecoderKind::DrFlac);
+    EXPECT_EQ(decoderFor(settings.decoderByFormat, AudioFormat::Flac), DecoderKind::DrFlac);
     std::ifstream in(file, std::ios::binary);
     std::stringstream contents;
     contents << in.rdbuf();
     in.close();
-    EXPECT_NE(contents.str().find(R"("schema": 2)"), std::string::npos);
+    EXPECT_NE(contents.str().find(R"("schema": 3)"), std::string::npos);
+    EXPECT_NE(contents.str().find(R"("flac": "drflac")"), std::string::npos);
     std::filesystem::remove(file);
 }
 
@@ -207,7 +227,7 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
     for (auto mode : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard}) {
         Settings settings;
         settings.backend = Backend::Asio;
-        settings.decoder = DecoderKind::Sndfile;
+        settings.decoderByFormat[AudioFormat::Flac] = DecoderKind::Sndfile;
         settings.language = "zh-TW";
         settings.lastFile = L"C:\\music\\album.flac";
         settings.wasapi = {"endpoint", false, WasapiPeriod::Custom, 12.5, SampleType::Int24In32};

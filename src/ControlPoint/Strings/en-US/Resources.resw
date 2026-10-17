@@ -65,7 +65,7 @@
   <data name="Tip_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>Stop</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>Cannot open the file</value></data>
-  <data name="Error_UnsupportedStream" xml:space="preserve"><value>This decoder cannot play the file</value></data>
+  <data name="Error_UnsupportedStream" xml:space="preserve"><value>This file's format or encoding is not supported</value></data>
   <data name="Error_DecodeFailed" xml:space="preserve"><value>The file is damaged</value></data>
   <data name="Error_SeekFailed" xml:space="preserve"><value>Seeking failed</value></data>
   <data name="Error_DeviceNotFound" xml:space="preserve"><value>Output device not found</value></data>

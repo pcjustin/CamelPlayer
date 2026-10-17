@@ -115,8 +115,11 @@ void MainWindow::populateSettings() {
     populating_ = true;
     fill(BackendCombo(), {L"WASAPI", L"ASIO", L"Kernel Streaming"}, int(settings_.backend));
     std::vector<hstring> decoders;
-    for (DecoderKind k : kAllDecoders) decoders.push_back(ui::utf8(decoderName(k)));
-    fill(DecoderCombo(), decoders, int(settings_.decoder));
+    const auto flacDecoders = decodersFor(AudioFormat::Flac);
+    for (DecoderKind k : flacDecoders) decoders.push_back(ui::utf8(decoderName(k)));
+    fill(DecoderCombo(), decoders,
+         int(std::find(flacDecoders.begin(), flacDecoders.end(), decoderFor(settings_.decoderByFormat, AudioFormat::Flac)) -
+             flacDecoders.begin()));
 
     fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, settings_.wasapi.eventDriven ? 0 : 1);
     fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(settings_.wasapi.period));
@@ -177,7 +180,9 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
 void MainWindow::readSettingsFromUi() {
     auto idx = [](ComboBox const& c) { return std::max(0, c.SelectedIndex()); };
     settings_.backend = Backend(std::min(idx(BackendCombo()), 2));
-    settings_.decoder = kAllDecoders[std::min<size_t>(idx(DecoderCombo()), std::size(kAllDecoders) - 1)];
+    const auto flacDecoders = decodersFor(AudioFormat::Flac);
+    const DecoderKind flac = flacDecoders[std::min<size_t>(idx(DecoderCombo()), flacDecoders.size() - 1)];
+    if (flac != decoderFor(settings_.decoderByFormat, AudioFormat::Flac)) settings_.decoderByFormat[AudioFormat::Flac] = flac;
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -270,8 +275,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (s.output && s.source) {
         Lamp().Fill(brush(0x10, 0xB9, 0x10));
         LampText().Text(L"Bit-perfect");
-        FormatText().Text(hstring(L"FLAC ") + to_hstring(s.source->bitsPerSample) + L"-bit → " + ui::utf8(s.outputMode) + L" · " +
-                          ui::utf8(describe(*s.output)) + L" · " + decoder);
+        FormatText().Text(ui::utf8(s.format ? formatName(*s.format) : "") + L" " + to_hstring(s.source->bitsPerSample) +
+                          L"-bit → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
         SignalPathText().Text(tr(L"SignalPath_File") + L" → " + decoder + L" → " + tr(L"SignalPath_Pad") + L" " +
                               to_hstring(s.source->bitsPerSample) + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " +
                               ui::utf8(s.outputMode));

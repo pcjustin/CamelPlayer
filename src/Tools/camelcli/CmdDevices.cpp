@@ -36,7 +36,10 @@ Settings settingsFromArgs(const Args& args) {
         if (!backendFromId(toUtf8(*v), s.backend)) throw std::runtime_error("unknown backend");
     }
     if (auto v = option(args, L"--decoder")) {
-        if (!decoderFromId(toUtf8(*v), s.decoder)) throw std::runtime_error("unknown decoder");
+        DecoderKind decoder{};
+        if (!decoderFromId(toUtf8(*v), decoder) || !supports(AudioFormat::Flac, decoder))
+            throw std::runtime_error("unknown FLAC decoder");
+        s.decoderByFormat[AudioFormat::Flac] = decoder;
     }
     if (auto v = option(args, L"--device")) {
         // index into the backend's device list, or a raw id
@@ -102,7 +105,8 @@ int cmdPlay(const Args& args) {
         return 2;
     }
     Settings s = settingsFromArgs(args);
-    std::printf("backend %s, decoder %s\n", backendName(s.backend), decoderName(s.decoder));
+    std::printf("backend %s, decoder %s\n", backendName(s.backend),
+                decoderName(decoderFor(s.decoderByFormat, AudioFormat::Flac)));
     PlaybackEngine engine(s);
     engine.openAndPlay(files[0]);
     engine.waitIdle();
@@ -168,7 +172,8 @@ int cmdPlayQueue(const Args& args) {
         return 2;
     }
     const Settings s = settingsFromArgs(args);
-    std::printf("backend %s, decoder %s\n", backendName(s.backend), decoderName(s.decoder));
+    std::printf("backend %s, decoder %s\n", backendName(s.backend),
+                decoderName(decoderFor(s.decoderByFormat, AudioFormat::Flac)));
     std::atomic<int> opens = 0;
     server::LocalServer server(
         s, {}, [&](const Settings& settings) { return std::make_unique<CountingOutput>(createOutput(settings), opens); });
@@ -258,8 +263,8 @@ int cmdCapture(const Args& args) {
     unpackSamples(bytes.data(), count, ref.info.bitsPerSample, type, got.data());
     bool same = got == ref.samples;
     std::printf("%s: %s via %s as %s, %zu samples captured, reference %zu -> %s\n", toUtf8(pos[0]).c_str(),
-                decoderName(s.decoder), "capture", sampleTypeName(type), count, ref.samples.size(),
-                same ? "BIT-IDENTICAL" : "DIFFERENT");
+                decoderName(decoderFor(s.decoderByFormat, AudioFormat::Flac)), "capture", sampleTypeName(type), count,
+                ref.samples.size(), same ? "BIT-IDENTICAL" : "DIFFERENT");
     return same ? 0 : 1;
 }
 

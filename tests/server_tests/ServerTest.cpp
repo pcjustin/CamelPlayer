@@ -268,15 +268,15 @@ TEST_F(ServerTest, FileErrorsRemainVisibleAndNextSelectionRecovers) {
 TEST_F(ServerTest, TrackDecoderOverrideSurvivesSettingsAndDoesNotChangeGlobalPreference) {
     auto s = send(select("24-96k", CommandKind::OpenAndPlay, DecoderKind::Sndfile));
     EXPECT_EQ(s.playback.decoder, DecoderKind::Sndfile);
-    EXPECT_EQ(s.settings.decoder, DecoderKind::Sndfile);
+    EXPECT_EQ(decoderFor(s.settings.decoderByFormat, AudioFormat::Flac), DecoderKind::Sndfile);
     send(command(CommandKind::Pause));
     Command c = command(CommandKind::ApplySettings);
     c.settings = s.settings;
-    c.settings->decoder = DecoderKind::DrFlac;
+    c.settings->decoderByFormat[AudioFormat::Flac] = DecoderKind::DrFlac;
     s = send(c);
     EXPECT_EQ(s.playback.state, PlaybackState::Paused);
     EXPECT_EQ(s.playback.decoder, DecoderKind::Sndfile);
-    EXPECT_EQ(s.settings.decoder, DecoderKind::DrFlac);
+    EXPECT_EQ(decoderFor(s.settings.decoderByFormat, AudioFormat::Flac), DecoderKind::DrFlac);
     s = send(select());
     EXPECT_EQ(s.playback.decoder, DecoderKind::DrFlac);
     EXPECT_FALSE(s.playback.error);
@@ -718,7 +718,7 @@ TEST_P(ServerCaptureTest, MatchesReferencePcmFor16And24BitFiles) {
         options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
         {
             Settings settings;
-            settings.decoder = GetParam();
+            settings.decoderByFormat[AudioFormat::Flac] = GetParam();
             LocalServer server(settings, {}, [&](const Settings&) { return createCaptureOutput(options); });
             server.submit(select(name));
             server.waitIdle();

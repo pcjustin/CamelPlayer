@@ -15,11 +15,11 @@ namespace camel::server {
 namespace {
 
 SettingsDto dto(const Settings& s) {
-    return {s.backend, s.decoder, s.wasapi, s.asio, s.ks, s.language, toUtf8(s.lastFile)};
+    return {s.backend, s.decoderByFormat, s.wasapi, s.asio, s.ks, s.language, toUtf8(s.lastFile)};
 }
 
 Settings native(const SettingsDto& s) {
-    return {s.backend, s.decoder, s.wasapi, s.asio, s.ks, s.language, toWide(s.lastFileUtf8)};
+    return {s.backend, s.decoderByFormat, s.wasapi, s.asio, s.ks, s.language, toWide(s.lastFileUtf8)};
 }
 
 bool covers(CommandStamp value, CommandStamp floor) {
@@ -89,6 +89,7 @@ PlaybackSnapshot playback(const audio::EngineSnapshot& s) {
     p.position = s.position;
     p.total = s.total;
     p.source = s.source;
+    p.format = s.format;
     p.output = s.output;
     p.backend = s.backend;
     p.decoder = s.decoder;
@@ -214,12 +215,6 @@ private:
         }
     }
 
-    Settings effectiveSettings() const {
-        Settings result = settings_;
-        if (state_.track) result.decoder = state_.track->decoder().value_or(result.decoder);
-        return result;
-    }
-
     void execute(const Pending& pending) {
         const auto& c = pending.command;
         state_.command = pending.stamp;
@@ -288,7 +283,7 @@ private:
                     const auto lastFile = settings_.lastFile;
                     settings_ = native(*c.settings);
                     settings_.lastFile = lastFile;
-                    engine_->applySettings(effectiveSettings());
+                    engine_->applySettings(settings_);
                     persist();
                 }
                 break;
@@ -348,15 +343,10 @@ private:
         state_.track = source;
         state_.queueEntryId = position.entryId;
         settings_.lastFile = path.wstring();
-        const auto effective = effectiveSettings();
-        if (engine_->snapshot().decoder != effective.decoder) {
-            engine_->stop();
-            engine_->applySettings(effective);
-        }
         if (play)
-            engine_->openAndPlay(path);
+            engine_->openAndPlay(path, source.decoder());
         else
-            engine_->load(path);
+            engine_->load(path, source.decoder());
         engine_->waitIdle(); // the next snapshot pairs this entry with its own playback state
         persist();
     }
@@ -407,7 +397,8 @@ private:
         attempted_ = attempt;
         const auto& source = entry(upcoming->entryId).source;
         if (source.decoder() != state_.track->decoder()) return;
-        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())))) chain_.push_back(upcoming->entryId);
+        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder()))
+            chain_.push_back(upcoming->entryId);
     }
 
     // Natural completion plays the next eligible entry; a track-local failure marks the entry and skips it.

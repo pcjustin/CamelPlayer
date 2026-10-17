@@ -65,7 +65,7 @@
   <data name="Tip_PlayPause" xml:space="preserve"><value>播放 / 暫停</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>停止</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>無法開啟檔案</value></data>
-  <data name="Error_UnsupportedStream" xml:space="preserve"><value>這個解碼器無法播放這個檔案</value></data>
+  <data name="Error_UnsupportedStream" xml:space="preserve"><value>不支援這個檔案的格式或編碼</value></data>
   <data name="Error_DecodeFailed" xml:space="preserve"><value>檔案已損壞</value></data>
   <data name="Error_SeekFailed" xml:space="preserve"><value>跳轉失敗</value></data>
   <data name="Error_DeviceNotFound" xml:space="preserve"><value>找不到輸出裝置</value></data>

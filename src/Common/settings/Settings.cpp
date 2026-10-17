@@ -100,11 +100,18 @@ static WasapiPeriod periodFromId(std::string_view id) {
     return id == "minimum" ? WasapiPeriod::Minimum : id == "custom" ? WasapiPeriod::Custom : WasapiPeriod::Default;
 }
 
+audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format) {
+    return choices[format].value_or(audio::defaultDecoder(format));
+}
+
 std::string toJson(const Settings& s) {
     json j;
     j["schema"] = Settings::kSchemaVersion;
     j["backend"] = backendId(s.backend);
-    j["decoder"] = audio::decoderId(s.decoder);
+    json decoders = json::object();
+    for (const auto format : audio::kAllFormats)
+        if (const auto decoder = s.decoderByFormat[format]) decoders[audio::formatId(format)] = audio::decoderId(*decoder);
+    j["decoderByFormat"] = decoders;
     j["language"] = s.language;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
@@ -145,7 +152,19 @@ Settings fromJson(const std::string& text) {
         return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
     };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
-    audio::decoderFromId(str(j, "decoder", "sndfile"), s.decoder);
+    // A choice survives only when that decoder is integrated for that format.
+    auto choose = [&](std::string_view formatId, std::string_view decoderId) {
+        audio::AudioFormat format{};
+        audio::DecoderKind decoder{};
+        if (audio::formatFromId(formatId, format) && audio::decoderFromId(decoderId, decoder) && audio::supports(format, decoder))
+            s.decoderByFormat[format] = decoder;
+    };
+    if (schema < 3) {
+        if (j.contains("decoder") && j["decoder"].is_string()) choose("flac", j["decoder"].get<std::string>());
+    } else if (j.contains("decoderByFormat") && j["decoderByFormat"].is_object()) {
+        for (const auto& [formatId, decoderId] : j["decoderByFormat"].items())
+            if (decoderId.is_string()) choose(formatId, decoderId.get<std::string>());
+    }
     s.language = str(j, "language", "");
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {

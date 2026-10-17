@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "Engine/decode/FlacStreamInfo.h"
+#include "Engine/decode/FormatProbe.h"
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
 #include "OutputBridge/OutputBridge.h"
@@ -47,13 +48,23 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
     }
     return false;
 }
+
+// The file's own decoder, else the per-format setting; an unsupported pairing fails instead of substituting.
+DecoderKind chooseDecoder(AudioFormat format, std::optional<DecoderKind> requested, const Settings& s) {
+    if (decodersFor(format).empty())
+        throw Error(ErrorCode::UnsupportedStream, std::string(formatName(format)) + " is not supported yet");
+    const DecoderKind decoder = requested.value_or(decoderFor(s.decoderByFormat, format));
+    if (!supports(format, decoder))
+        throw Error(ErrorCode::UnsupportedStream, std::string(decoderName(decoder)) + " cannot decode " + formatName(format));
+    return decoder;
+}
 } // namespace
 
 class PlaybackEngine::Impl final : public IRenderSource {
 public:
     Impl(const Settings& s, OutputFactory f) : settings_(s), factory_(std::move(f)) {
         snap_.backend = s.backend;
-        snap_.decoder = s.decoder;
+        snap_.decoder = displayedDecoder(s);
         thread_ = std::thread([this] { controlMain(); });
     }
 
@@ -118,14 +129,17 @@ public:
     }
 
     // ---- commands (control thread) ----
-    void openAndPlay(const std::filesystem::path& file) {
+    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
         file_ = file.wstring();
+        fileDecoder_ = decoder;
         startSession(0, true);
     }
 
-    void load(const std::filesystem::path& file) {
+    void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
         teardown();
         file_ = file.wstring();
+        fileDecoder_ = decoder;
+        format_.reset(); // other formats are identified, and reported, when playback starts
         position_ = 0;
         SourceInfo si;
         {
@@ -134,9 +148,12 @@ public:
             snap_.source.reset();
             snap_.total = 0;
             if (readFlacStreamInfo(file, si)) {
+                format_ = AudioFormat::Flac;
                 snap_.source = si;
                 snap_.total = si.totalFrames;
             }
+            snap_.format = format_;
+            snap_.decoder = displayedDecoder(settings_);
             snap_.error.reset();
             snap_.errorDetail.clear();
         }
@@ -180,7 +197,7 @@ public:
 
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
-        const bool decoderChanged = settings_.decoder != s.decoder;
+        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s);
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -190,7 +207,7 @@ public:
         {
             std::lock_guard lock(snapMutex_);
             snap_.backend = s.backend;
-            snap_.decoder = s.decoder;
+            snap_.decoder = displayedDecoder(s);
         }
         if ((outputChanged || decoderChanged) && wasActive)
             startSession(pos, wasPlaying);
@@ -198,19 +215,27 @@ public:
             publish();
     }
 
-    bool queueNext(const std::filesystem::path& file) {
+    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested) {
         if (!active_ || rust_->transitions().nextQueued) return false;
+        AudioFormat format{};
+        DecoderKind decoder{};
+        try {
+            format = probeFormat(file);
+            decoder = chooseDecoder(format, requested, settings_);
+        } catch (const Error&) {
+            return false; // reported when the file is opened normally
+        }
         SourceInfo source;
         if (!readFlacStreamInfo(file, source)) return false;
-        std::optional<DeviceFormat> format;
+        std::optional<DeviceFormat> outputFormat;
         try {
-            format = chooseOutputFormat(source, fixedSampleType(settings_),
-                                        [&](const DeviceFormat& f) { return output_->supports(f); });
+            outputFormat = chooseOutputFormat(source, fixedSampleType(settings_),
+                                              [&](const DeviceFormat& f) { return output_->supports(f); });
         } catch (const Error&) {
             return false; // the device question fails again when the file is opened normally
         }
-        if (format != fmt_ || !rust_->queueNext(file, settings_.decoder)) return false;
-        queued_.push_back({file.wstring(), source});
+        if (outputFormat != fmt_ || !rust_->queueNext(file, decoder)) return false;
+        queued_.push_back({file.wstring(), source, format, requested, decoder});
         publishQueue();
         return true;
     }
@@ -340,9 +365,17 @@ private:
             snap_.outputStatus = {};
         }
         std::unique_ptr<IDecoder> dec;
+        DecoderKind decoder{};
         try {
-            dec = openDecoder(settings_.decoder, file_);
+            format_.reset();
+            format_ = probeFormat(file_);
+            decoder = chooseDecoder(*format_, fileDecoder_, settings_);
+            dec = openDecoder(decoder, file_);
         } catch (const Error& e) {
+            {
+                std::lock_guard lock(snapMutex_);
+                snap_.format = format_;
+            }
             position_ = 0;
             return fail(e, PlayState::Stopped);
         }
@@ -350,6 +383,8 @@ private:
         {
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
+            snap_.format = format_;
+            snap_.decoder = decoder;
             snap_.source = src;
             snap_.total = src.totalFrames;
             snap_.output.reset();
@@ -376,7 +411,7 @@ private:
         bpf_ = fmt_.bytesPerFrame();
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         try {
-            rust_ = std::make_unique<RustSession>(file_, settings_.decoder, fmt_, startFrame);
+            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame);
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);
@@ -431,8 +466,8 @@ private:
             snap_.error.reset();
             snap_.errorDetail.clear();
         }
-        log::info("engine: %s via %s, %s, start %llu", toUtf8(file_).c_str(), decoderName(settings_.decoder),
-                  describe(fmt_).c_str(), (unsigned long long)startFrame);
+        log::info("engine: %s via %s, %s, start %llu", toUtf8(file_).c_str(), decoderName(decoder), describe(fmt_).c_str(),
+                  (unsigned long long)startFrame);
         if (playNow) {
             playing_ = true;
             rust_->play();
@@ -505,11 +540,16 @@ private:
         if (audible == handledTransitions_) return;
         while (handledTransitions_ < audible && !queued_.empty()) {
             ++handledTransitions_;
-            file_ = queued_.front().file;
-            const auto source = queued_.front().source;
+            const Queued next = queued_.front();
             queued_.pop_front();
+            file_ = next.file;
+            fileDecoder_ = next.requested;
+            format_ = next.format;
+            const auto& source = next.source;
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
+            snap_.format = next.format;
+            snap_.decoder = next.decoder;
             snap_.source = source;
             snap_.total = source.totalFrames;
             snap_.transitions++;
@@ -587,12 +627,21 @@ private:
         }
     }
 
+    // The decoder the current file uses, or would use, under settings `s`.
+    DecoderKind displayedDecoder(const Settings& s) const {
+        if (fileDecoder_) return *fileDecoder_;
+        const auto format = format_ && !decodersFor(*format_).empty() ? *format_ : AudioFormat::Flac;
+        return decoderFor(s.decoderByFormat, format);
+    }
+
     // control-thread state
     Settings settings_;
     OutputFactory factory_;
     std::unique_ptr<OutputBridge> output_;
     std::unique_ptr<RustSession> rust_;
     std::wstring file_;
+    std::optional<DecoderKind> fileDecoder_; // per-file override of the per-format setting
+    std::optional<AudioFormat> format_;
     PlayState state_ = PlayState::Stopped;
     uint64_t position_ = 0;
     uint64_t session_ = 0;
@@ -608,6 +657,9 @@ private:
     struct Queued {
         std::wstring file;
         SourceInfo source;
+        AudioFormat format;
+        std::optional<DecoderKind> requested;
+        DecoderKind decoder;
     };
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     std::thread decodeThread_;
@@ -629,13 +681,13 @@ private:
 PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f) : impl_(std::make_unique<Impl>(s, std::move(f))) {}
 PlaybackEngine::~PlaybackEngine() = default;
 
-void PlaybackEngine::openAndPlay(const std::filesystem::path& file) {
+void PlaybackEngine::openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy] { impl_->openAndPlay(*fileCopy); });
+    impl_->post([this, fileCopy, decoder] { impl_->openAndPlay(*fileCopy, decoder); });
 }
-void PlaybackEngine::load(const std::filesystem::path& file) {
+void PlaybackEngine::load(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy] { impl_->load(*fileCopy); });
+    impl_->post([this, fileCopy, decoder] { impl_->load(*fileCopy, decoder); });
 }
 void PlaybackEngine::play() {
     impl_->post([this] { impl_->play(); });
@@ -664,8 +716,8 @@ void PlaybackEngine::applySettings(const Settings& s) {
 bool PlaybackEngine::showControlPanel() {
     return impl_->call<bool>([this] { return impl_->showControlPanel(); });
 }
-bool PlaybackEngine::queueNext(const std::filesystem::path& file) {
-    return impl_->call<bool>([this, &file] { return impl_->queueNext(file); });
+bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+    return impl_->call<bool>([this, &file, decoder] { return impl_->queueNext(file, decoder); });
 }
 bool PlaybackEngine::clearNext() {
     return impl_->call<bool>([this] { return impl_->clearNext(); });

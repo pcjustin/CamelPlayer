@@ -1,9 +1,11 @@
 // Persisted settings (docs/Plan.md §6, §16.4). One set per backend; stored as JSON in %LOCALAPPDATA%\CamelPlayer.
 #pragma once
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
 
+#include "Common/AudioFormat.h"
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
 
@@ -45,11 +47,22 @@ struct KsSettings {
     bool operator==(const KsSettings&) const = default;
 };
 
+// Explicit per-format choices; a format without one uses its registry default (docs/Plan.md §3.1).
+struct DecoderByFormat {
+    std::array<std::optional<audio::DecoderKind>, std::size(audio::kAllFormats)> choices{};
+    std::optional<audio::DecoderKind>& operator[](audio::AudioFormat f) { return choices[size_t(f)]; }
+    const std::optional<audio::DecoderKind>& operator[](audio::AudioFormat f) const { return choices[size_t(f)]; }
+    bool operator==(const DecoderByFormat&) const = default;
+};
+
+// Precondition: audio::decodersFor(format) is not empty.
+audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format);
+
 struct Settings {
-    static constexpr int kSchemaVersion = 2;
+    static constexpr int kSchemaVersion = 3;
 
     Backend backend = Backend::Wasapi;
-    audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
+    DecoderByFormat decoderByFormat;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;

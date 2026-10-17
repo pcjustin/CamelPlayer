@@ -51,7 +51,7 @@ TEST_P(ServerHardware, DISABLED_PlayPauseSeekStop) {
     c.kind = CommandKind::ApplySettings;
     c.settings = s.settings;
     c.settings->backend = route.backend;
-    c.settings->decoder = decoder;
+    c.settings->decoderByFormat[audio::AudioFormat::Flac] = decoder;
     if (route.backend == Backend::Wasapi)
         c.settings->wasapi.deviceId = device->id;
     else if (route.backend == Backend::Asio)

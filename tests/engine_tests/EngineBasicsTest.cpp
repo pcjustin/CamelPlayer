@@ -72,7 +72,7 @@ TEST(FormatRule, PicksSmallestContainerTheDeviceTakes) {
 TEST(Settings, JsonRoundTrip) {
     Settings s;
     s.backend = Backend::Ks;
-    s.decoder = DecoderKind::Symphonia;
+    s.decoderByFormat[AudioFormat::Flac] = DecoderKind::Symphonia;
     s.wasapi.eventDriven = false;
     s.wasapi.sampleType = SampleType::Int24In32;
     s.asio.driverClsid = "{ABC}";
@@ -82,7 +82,7 @@ TEST(Settings, JsonRoundTrip) {
     s.lastFile = L"D:\\音樂\\測試.flac";
     Settings t = fromJson(toJson(s));
     EXPECT_EQ(t.backend, Backend::Ks);
-    EXPECT_EQ(t.decoder, DecoderKind::Symphonia);
+    EXPECT_EQ(decoderFor(t.decoderByFormat, AudioFormat::Flac), DecoderKind::Symphonia);
     EXPECT_EQ(t.wasapi, s.wasapi);
     EXPECT_EQ(t.asio, s.asio);
     EXPECT_EQ(t.ks, s.ks);

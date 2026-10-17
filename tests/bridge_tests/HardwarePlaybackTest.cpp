@@ -73,7 +73,7 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     const auto [routeIndex, decoder] = GetParam();
     const auto route = routes[routeIndex];
     Settings settings;
-    settings.decoder = decoder;
+    settings.decoderByFormat[AudioFormat::Flac] = decoder;
     ASSERT_TRUE(selectDevice(settings, route.backend, route.device));
     const auto file = testutil::tempDir().parent_path().parent_path() / "testdata" / "Sample_BeeMoved_96kHz24bit.flac";
     ASSERT_TRUE(std::filesystem::exists(file));
@@ -82,7 +82,7 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     RecordProperty("decoder", decoderName(decoder));
     PlaybackEngine engine(settings);
     engine.openAndPlay(file);
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, settings.decoder));
+    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
     engine.pause();
     engine.waitIdle();
     ASSERT_EQ(engine.snapshot().state, PlayState::Paused);
@@ -91,18 +91,18 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     std::this_thread::sleep_for(150ms);
     EXPECT_EQ(engine.snapshot().position, pausedPosition);
     engine.play();
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, settings.decoder));
+    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
     const uint64_t target = 10ull * engine.snapshot().source->sampleRate;
     engine.seek(target);
     engine.waitIdle();
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, settings.decoder));
+    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
     EXPECT_GE(engine.snapshot().position, target);
     EXPECT_LT(engine.snapshot().position, target + 2ull * engine.snapshot().source->sampleRate);
     for (const auto nextDecoder : kAllDecoders) {
-        settings.decoder = nextDecoder;
+        settings.decoderByFormat[AudioFormat::Flac] = nextDecoder;
         const auto before = engine.snapshot().position;
         engine.applySettings(settings);
-        ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, settings.decoder));
+        ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
         EXPECT_GE(engine.snapshot().position, before);
     }
     for (const auto nextRoute : routes) {
@@ -110,7 +110,7 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
         ASSERT_TRUE(selectDevice(settings, nextRoute.backend, route.device));
         const auto before = engine.snapshot().position;
         engine.applySettings(settings);
-        ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, settings.decoder));
+        ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
         EXPECT_GE(engine.snapshot().position, before);
     }
     engine.stop();
@@ -119,7 +119,7 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     EXPECT_EQ(engine.snapshot().position, 0u);
     EXPECT_FALSE(engine.snapshot().output);
     engine.play();
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, settings.decoder));
+    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
     engine.stop();
     engine.waitIdle();
 }

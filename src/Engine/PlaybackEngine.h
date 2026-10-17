@@ -23,9 +23,10 @@ struct EngineSnapshot {
     uint64_t position = 0; // frames handed to the device
     uint64_t total = 0;
     std::optional<SourceInfo> source;
+    std::optional<AudioFormat> format;  // probed from the current file
     std::optional<DeviceFormat> output; // set while a stream is open; always bit-perfect under the MVP rule
     Backend backend = Backend::Wasapi;
-    DecoderKind decoder = DecoderKind::Sndfile;
+    DecoderKind decoder = DecoderKind::Sndfile; // for the current file; FLAC's choice before a file is known
     OutputStatus outputStatus;
     uint64_t underruns = 0;
     std::optional<ErrorCode> error; // last problem, shown until the next successful start
@@ -48,9 +49,10 @@ public:
     PlaybackEngine(const PlaybackEngine&) = delete;
     PlaybackEngine& operator=(const PlaybackEngine&) = delete;
 
-    void openAndPlay(const std::filesystem::path& file);
+    // `decoder` overrides the per-format setting for this file; it must support the file's format.
+    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
     // Selects a file without playing it (startup restore, docs/Plan.md §2); play() starts it.
-    void load(const std::filesystem::path& file);
+    void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
     void play();
     void pause();
     void togglePause();
@@ -62,7 +64,7 @@ public:
     bool showControlPanel();
     // Gapless: queues the file that follows the current one. True when it will play without reopening the device,
     // which needs the Rust Engine and the same negotiated output format.
-    bool queueNext(const std::filesystem::path& file);
+    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
     // Withdraws the queued file; false when it is already committed and becomes current at its boundary.
     bool clearNext();
 

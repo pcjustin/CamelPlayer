@@ -42,7 +42,7 @@ void runCase(const Case& c, uint64_t seekFrame = 0) {
     if (testutil::knownUnsupported(c.decoder, ref.info.sampleRate)) GTEST_SKIP() << "Decoder does not support this format";
     auto out = file.parent_path() / (std::string("capture-") + decoderId(c.decoder) + "-" + c.file + ".raw");
     Settings s;
-    s.decoder = c.decoder;
+    s.decoderByFormat[AudioFormat::Flac] = c.decoder;
     CaptureOptions co;
     co.file = out;
     auto accept = c.accept;

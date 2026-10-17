@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <fstream>
 #include <optional>
 #include <thread>
 #include <mutex>
@@ -274,7 +275,7 @@ TEST_F(EngineStateTest, DecoderSwitchPreservesPausedPosition) {
     open();
     ASSERT_EQ(pull(17), 17u);
     engine->pause();
-    settings.decoder = DecoderKind::Symphonia;
+    settings.decoderByFormat[AudioFormat::Flac] = DecoderKind::Symphonia;
     engine->applySettings(settings);
     engine->waitIdle();
     EXPECT_EQ(engine->snapshot().decoder, DecoderKind::Symphonia);
@@ -369,6 +370,22 @@ TEST_F(EngineStateTest, UnsupportedFormatNeverOpensDevice) {
     EXPECT_EQ(probe.opens, 0);
     EXPECT_EQ(engine->snapshot().error, ErrorCode::FormatNotSupported);
     EXPECT_EQ(engine->snapshot().state, PlayState::Stopped);
+}
+
+TEST_F(EngineStateTest, UnsupportedFormatFailsWithoutSubstitutingADecoder) {
+    open();
+    EXPECT_EQ(engine->snapshot().format, AudioFormat::Flac);
+    const auto wav = testutil::tempDir() / "engine-input.flac"; // the extension is ignored
+    std::ofstream(wav, std::ios::binary | std::ios::trunc) << std::string("RIFF\x04\0\0\0WAVEfmt ", 16);
+    EXPECT_FALSE(engine->queueNext(wav));
+    engine->openAndPlay(wav);
+    engine->waitIdle();
+    const auto snapshot = engine->snapshot();
+    EXPECT_EQ(snapshot.state, PlayState::Stopped);
+    EXPECT_EQ(snapshot.error, ErrorCode::UnsupportedStream);
+    EXPECT_EQ(snapshot.format, AudioFormat::Wav);
+    EXPECT_FALSE(snapshot.source);
+    EXPECT_FALSE(snapshot.output);
 }
 
 TEST_F(EngineStateTest, MissingNewFileDoesNotPublishPreviousTrackMetadata) {
@@ -481,7 +498,7 @@ TEST_F(EngineStateTest, LoadingAnotherTrackClosesOutputAndResetsPosition) {
 
 TEST_F(EngineStateTest, SettingsWhileStoppedPublishWithoutCreatingOutput) {
     settings.backend = Backend::Ks;
-    settings.decoder = DecoderKind::DrFlac;
+    settings.decoderByFormat[AudioFormat::Flac] = DecoderKind::DrFlac;
     engine->applySettings(settings);
     engine->waitIdle();
     EXPECT_EQ(engine->snapshot().backend, Backend::Ks);
