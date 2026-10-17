@@ -167,6 +167,20 @@ typedef struct CamelEngineStateV1 {
     CamelAudioFormatV1 output_format;
 } CamelEngineStateV1;
 
+typedef struct CamelEngineTimelineV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t playback_state;
+    uint32_t reserved;
+    CamelCommandStampV1 command;
+    uint64_t decoded_position_frames;
+    uint64_t submitted_position_frames;
+    uint64_t audible_position_frames;
+    uint64_t total_frames;
+    uint32_t has_source;
+    uint32_t reserved2;
+} CamelEngineTimelineV1;
+
 typedef struct CamelFlacIntegrityV1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -188,6 +202,9 @@ CamelEngineStatus camel_engine_play_v1(CamelEngine* engine, const CamelCommandSt
 CamelEngineStatus camel_engine_pause_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_stop_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_seek_v1(CamelEngine* engine, const CamelCommandStampV1* command, uint64_t frame);
+CamelEngineStatus camel_engine_get_timeline_v1(CamelEngine* engine, CamelEngineTimelineV1* timeline);
+CamelEngineStatus camel_engine_report_audible_position_v1(CamelEngine* engine, const CamelCommandStampV1* command,
+                                                          uint64_t audible_frame);
 CamelEngineStatus camel_engine_prefill_v1(CamelEngine* engine, uint64_t frame_limit, uint64_t* frames_prefilled);
 CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
                                                uint64_t* frames_read);

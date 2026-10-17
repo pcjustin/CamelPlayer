@@ -13,6 +13,7 @@ static_assert(sizeof(CamelDecoderHostV1) == 48);
 static_assert(sizeof(CamelRenderRequestV1) == 32);
 static_assert(sizeof(CamelRenderResultV1) == 32);
 static_assert(sizeof(CamelEngineStateV1) == 152);
+static_assert(sizeof(CamelEngineTimelineV1) == 88);
 static_assert(sizeof(CamelFlacIntegrityV1) == 32);
 static_assert(offsetof(CamelAudioFormatV1, channel_mask) == 32);
 static_assert(offsetof(CamelEngineConfigV1, format) == 16);
@@ -32,4 +33,6 @@ TEST(EngineAbi, StableV1Constants) {
     EXPECT_EQ(CAMEL_FLAC_INTEGRITY_UNAVAILABLE, 0u);
     EXPECT_EQ(CAMEL_FLAC_INTEGRITY_FAILED, 3u);
     EXPECT_EQ(CAMEL_RENDER_STATE_UNDERRUN, 4u);
+    EXPECT_EQ(CAMEL_PLAYBACK_READY, 1u);
+    EXPECT_EQ(CAMEL_PLAYBACK_PAUSED, 3u);
 }

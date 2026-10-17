@@ -151,6 +151,47 @@ TEST(RustEngineHost, PrefillAndRenderPackPcmAndReportStarvation) {
     verifyFormat("24-96k", 24);
 }
 
+TEST(RustEngineHost, PlaybackCommandsExposeSeparateTimelinePositions) {
+    auto* engine = createEngine();
+    ASSERT_NE(engine, nullptr);
+    ASSERT_EQ(loadSource(engine, testutil::testFile("16-44.1k"), CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
+
+    CamelCommandStampV1 play{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 2, 2, 1};
+    ASSERT_EQ(camel_engine_play_v1(engine, &play), CAMEL_ENGINE_OK);
+    uint64_t prefilled = 0;
+    ASSERT_EQ(camel_engine_prefill_v1(engine, 4, &prefilled), CAMEL_ENGINE_OK);
+    ASSERT_EQ(prefilled, 4u);
+
+    std::array<uint8_t, 12> output{};
+    CamelRenderRequestV1 request{sizeof(CamelRenderRequestV1), CAMEL_ENGINE_ABI_VERSION, 2, output.data(), output.size()};
+    CamelRenderResultV1 result{sizeof(CamelRenderResultV1), CAMEL_ENGINE_ABI_VERSION, 0, 0, 0, 0};
+    ASSERT_EQ(camel_engine_render_v1(engine, &request, &result), CAMEL_ENGINE_OK);
+    ASSERT_EQ(camel_engine_report_audible_position_v1(engine, &play, 1), CAMEL_ENGINE_OK);
+
+    CamelEngineTimelineV1 timeline{sizeof(CamelEngineTimelineV1), CAMEL_ENGINE_ABI_VERSION};
+    ASSERT_EQ(camel_engine_get_timeline_v1(engine, &timeline), CAMEL_ENGINE_OK);
+    EXPECT_EQ(timeline.playback_state, CAMEL_PLAYBACK_PLAYING);
+    EXPECT_EQ(timeline.decoded_position_frames, 4u);
+    EXPECT_EQ(timeline.submitted_position_frames, 2u);
+    EXPECT_EQ(timeline.audible_position_frames, 1u);
+
+    CamelCommandStampV1 pause{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 3, 3, 1};
+    ASSERT_EQ(camel_engine_pause_v1(engine, &pause), CAMEL_ENGINE_OK);
+    EXPECT_EQ(camel_engine_report_audible_position_v1(engine, &play, 2), CAMEL_ENGINE_E_NOT_READY);
+    ASSERT_EQ(camel_engine_get_timeline_v1(engine, &timeline), CAMEL_ENGINE_OK);
+    EXPECT_EQ(timeline.playback_state, CAMEL_PLAYBACK_PAUSED);
+    EXPECT_EQ(timeline.audible_position_frames, 1u);
+
+    CamelCommandStampV1 stop{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 4, 4, 1};
+    ASSERT_EQ(camel_engine_stop_v1(engine, &stop), CAMEL_ENGINE_OK);
+    ASSERT_EQ(camel_engine_get_timeline_v1(engine, &timeline), CAMEL_ENGINE_OK);
+    EXPECT_EQ(timeline.playback_state, CAMEL_PLAYBACK_STOPPED);
+    EXPECT_EQ(timeline.decoded_position_frames, 0u);
+    EXPECT_EQ(timeline.submitted_position_frames, 0u);
+    EXPECT_EQ(timeline.audible_position_frames, 0u);
+    destroyEngine(engine);
+}
+
 TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
     constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
                                                   CAMEL_DECODER_SNDFILE};

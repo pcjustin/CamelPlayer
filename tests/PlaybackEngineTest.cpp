@@ -234,6 +234,20 @@ TEST_F(EngineStateTest, BackendSwitchRecreatesOutputAtCurrentPosition) {
     EXPECT_EQ(probe.creations, 2);
 }
 
+TEST_F(EngineStateTest, BackendSwitchPreservesPausedPosition) {
+    open();
+    ASSERT_EQ(pull(23), 23u);
+    engine->pause();
+    engine->waitIdle();
+    settings.backend = Backend::Ks;
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_EQ(engine->snapshot().backend, Backend::Ks);
+    EXPECT_EQ(engine->snapshot().position, 23u);
+    EXPECT_EQ(engine->snapshot().state, PlayState::Paused);
+    EXPECT_EQ(probe.creations, 2);
+}
+
 TEST_F(EngineStateTest, AsynchronousDeviceLossPausesAndPlayRecovers) {
     open();
     ASSERT_EQ(pull(41), 41u);

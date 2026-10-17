@@ -50,6 +50,13 @@ pub const RENDER_STATE_ACTIVE: u32 = 1;
 pub const RENDER_STATE_END_OF_STREAM: u32 = 2;
 pub const RENDER_STATE_FAULT: u32 = 3;
 pub const RENDER_STATE_UNDERRUN: u32 = 4;
+
+pub const PLAYBACK_EMPTY: u32 = 0;
+pub const PLAYBACK_READY: u32 = 1;
+pub const PLAYBACK_PLAYING: u32 = 2;
+pub const PLAYBACK_PAUSED: u32 = 3;
+pub const PLAYBACK_STOPPED: u32 = 4;
+pub const PLAYBACK_FAILED: u32 = 5;
 pub use decoder_host::{
     FLAC_INTEGRITY_FAILED, FLAC_INTEGRITY_INCOMPLETE, FLAC_INTEGRITY_UNAVAILABLE,
     FLAC_INTEGRITY_VERIFIED,
@@ -146,6 +153,22 @@ pub struct CamelFlacIntegrityV1 {
     pub has_reference_md5: u32,
     pub total_frames: u64,
     pub position_frames: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelEngineTimelineV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub playback_state: u32,
+    pub reserved: u32,
+    pub command: CamelCommandStampV1,
+    pub decoded_position_frames: u64,
+    pub submitted_position_frames: u64,
+    pub audible_position_frames: u64,
+    pub total_frames: u64,
+    pub has_source: u32,
+    pub reserved2: u32,
 }
 
 #[repr(i32)]
@@ -319,7 +342,11 @@ pub struct CamelEngine {
     consumer_gate: TryGate,
     render_source_state: AtomicUsize,
     render_error: AtomicI32,
-    render_position: AtomicU64,
+    playback_state: AtomicUsize,
+    operation_epoch: AtomicU64,
+    issued_command_id: AtomicU64,
+    submitted_position: AtomicU64,
+    audible_position: AtomicU64,
     command: Mutex<CamelCommandStampV1>,
     source: Mutex<Option<DecoderSource>>,
 }
@@ -327,6 +354,8 @@ pub struct CamelEngine {
 impl CamelEngine {
     fn fail_render(&self, status: i32) {
         self.render_error.store(status, Ordering::Release);
+        self.playback_state
+            .store(PLAYBACK_FAILED as usize, Ordering::Release);
         self.render_source_state
             .store(RENDER_STATE_FAULT as usize, Ordering::Release);
     }
@@ -392,7 +421,11 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     consumer_gate: TryGate::default(),
                     render_source_state: AtomicUsize::new(RENDER_STATE_NO_SOURCE as usize),
                     render_error: AtomicI32::new(ENGINE_OK),
-                    render_position: AtomicU64::new(0),
+                    playback_state: AtomicUsize::new(PLAYBACK_EMPTY as usize),
+                    operation_epoch: AtomicU64::new(0),
+                    issued_command_id: AtomicU64::new(0),
+                    submitted_position: AtomicU64::new(0),
+                    audible_position: AtomicU64::new(0),
                     command: Mutex::new(CamelCommandStampV1 {
                         struct_size: std::mem::size_of::<CamelCommandStampV1>() as u32,
                         abi_version: ABI_VERSION,
@@ -422,8 +455,25 @@ fn validate_command(command: &CamelCommandStampV1) -> Result<(), EngineStatus> {
     Ok(())
 }
 
+fn begin_command(engine: &CamelEngine, command: &CamelCommandStampV1) -> Result<u64, EngineStatus> {
+    validate_command(command)?;
+    let mut current = engine.command.lock().unwrap();
+    if command.command_id <= engine.issued_command_id.load(Ordering::Acquire) {
+        return Err(EngineStatus::NotReady);
+    }
+    *current = *command;
+    engine
+        .issued_command_id
+        .store(command.command_id, Ordering::Release);
+    Ok(engine.operation_epoch.fetch_add(1, Ordering::AcqRel) + 1)
+}
+
+fn operation_is_current(engine: &CamelEngine, epoch: u64) -> bool {
+    engine.operation_epoch.load(Ordering::Acquire) == epoch
+}
+
 /// # Safety
-/// All pointers must reference valid V1 structures. Stop and drain render before replacing the source. Decoder callbacks and their context must remain valid until replacement or destruction.
+/// All pointers must reference valid V1 structures. Stop and drain render before replacing the source. Decoder callbacks and their context must remain valid until replacement or destruction. Commands must have strictly increasing IDs.
 pub unsafe extern "C" fn camel_engine_load_flac_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -439,9 +489,6 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
         let command = &*command;
         let source = &*source;
         let decoder_host = &*decoder_host;
-        if let Err(status) = validate_command(command) {
-            return status as i32;
-        }
         if source.abi_version != ABI_VERSION {
             return ENGINE_E_ABI_MISMATCH;
         }
@@ -454,21 +501,34 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
         let Some(host) = DecoderHost::from_abi(decoder_host) else {
             return ENGINE_E_INVALID_ARGUMENT;
         };
+        let epoch = match begin_command(engine, command) {
+            Ok(epoch) => epoch,
+            Err(status) => return status as i32,
+        };
         let new_source = match DecoderSource::open(source, decoder_kind, host) {
             Ok(source) => source,
             Err(status) => return status,
         };
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
         let position = new_source.position();
-        let mut current_command = engine.command.lock().unwrap();
         let mut current_source = engine.source.lock().unwrap();
+        let _current_command = engine.command.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
         engine.ring.clear();
-        engine.render_position.store(position, Ordering::Release);
+        engine.submitted_position.store(position, Ordering::Release);
+        engine.audible_position.store(position, Ordering::Release);
         engine.render_error.store(ENGINE_OK, Ordering::Release);
         engine
             .render_source_state
             .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
         *current_source = Some(new_source);
-        *current_command = *command;
+        engine
+            .playback_state
+            .store(PLAYBACK_READY as usize, Ordering::Release);
         ENGINE_OK
     })) {
         Ok(status) => status,
@@ -477,7 +537,7 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
 }
 
 /// # Safety
-/// `engine` and `command` must remain valid for the call. Stop and drain render before seeking.
+/// `engine` and `command` must remain valid for the call. Stop and drain render before seeking. Commands must have strictly increasing IDs.
 pub unsafe extern "C" fn camel_engine_seek_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -489,24 +549,165 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
         }
         let engine = &*engine;
         let command = &*command;
-        if let Err(status) = validate_command(command) {
-            return status as i32;
-        }
-        let mut current_command = engine.command.lock().unwrap();
+        let epoch = match begin_command(engine, command) {
+            Ok(epoch) => epoch,
+            Err(status) => return status as i32,
+        };
         let mut source = engine.source.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
         let Some(source) = source.as_mut() else {
             return ENGINE_E_INVALID_STATE;
         };
         if let Err(status) = source.seek(frame) {
             return status;
         }
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
+        let _current_command = engine.command.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
         engine.ring.clear();
-        engine.render_position.store(frame, Ordering::Release);
+        engine.submitted_position.store(frame, Ordering::Release);
+        engine.audible_position.store(frame, Ordering::Release);
         engine.render_error.store(ENGINE_OK, Ordering::Release);
         engine
             .render_source_state
             .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
-        *current_command = *command;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid for the call. Commands must have strictly increasing IDs.
+pub unsafe extern "C" fn camel_engine_play_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+) -> i32 {
+    if engine.is_null() || command.is_null() {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let engine = &*engine;
+        let command = &*command;
+        if let Err(status) = validate_command(command) {
+            return status as i32;
+        }
+        if engine.source.lock().unwrap().is_none() {
+            return ENGINE_E_INVALID_STATE;
+        }
+        let epoch = match begin_command(engine, command) {
+            Ok(epoch) => epoch,
+            Err(status) => return status as i32,
+        };
+        let _current_command = engine.command.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
+        engine
+            .playback_state
+            .store(PLAYBACK_PLAYING as usize, Ordering::Release);
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid for the call. Commands must have strictly increasing IDs.
+pub unsafe extern "C" fn camel_engine_pause_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+) -> i32 {
+    if engine.is_null() || command.is_null() {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let engine = &*engine;
+        let command = &*command;
+        if let Err(status) = validate_command(command) {
+            return status as i32;
+        }
+        if engine.source.lock().unwrap().is_none() {
+            return ENGINE_E_INVALID_STATE;
+        }
+        let epoch = match begin_command(engine, command) {
+            Ok(epoch) => epoch,
+            Err(status) => return status as i32,
+        };
+        let _current_command = engine.command.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
+        engine
+            .playback_state
+            .store(PLAYBACK_PAUSED as usize, Ordering::Release);
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid for the call. Stop and drain render before calling. Commands must have strictly increasing IDs.
+pub unsafe extern "C" fn camel_engine_stop_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+) -> i32 {
+    if engine.is_null() || command.is_null() {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let engine = &*engine;
+        let command = &*command;
+        let epoch = match begin_command(engine, command) {
+            Ok(epoch) => epoch,
+            Err(status) => return status as i32,
+        };
+        let mut source = engine.source.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
+        let start_frame = if let Some(source) = source.as_mut() {
+            let start_frame = source.start_frame();
+            if let Err(status) = source.seek(start_frame) {
+                engine
+                    .playback_state
+                    .store(PLAYBACK_FAILED as usize, Ordering::Release);
+                return status;
+            }
+            Some(start_frame)
+        } else {
+            None
+        };
+        let _current_command = engine.command.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
+        let position = start_frame.unwrap_or(0);
+        engine.submitted_position.store(position, Ordering::Release);
+        engine.audible_position.store(position, Ordering::Release);
+        engine.render_source_state.store(
+            if start_frame.is_some() {
+                RENDER_STATE_ACTIVE
+            } else {
+                RENDER_STATE_NO_SOURCE
+            } as usize,
+            Ordering::Release,
+        );
+        engine.ring.clear();
+        engine.render_error.store(ENGINE_OK, Ordering::Release);
+        engine
+            .playback_state
+            .store(PLAYBACK_STOPPED as usize, Ordering::Release);
         ENGINE_OK
     })) {
         Ok(status) => status,
@@ -536,6 +737,7 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
         let Some(_producer) = engine.prefill_gate.enter() else {
             return ENGINE_E_INVALID_STATE;
         };
+        let epoch = engine.operation_epoch.load(Ordering::Acquire);
         let Some(bytes_per_frame) = bytes_per_frame(&engine.format) else {
             return ENGINE_E_UNSUPPORTED_FORMAT;
         };
@@ -544,6 +746,9 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
         let Some(source) = source.as_mut() else {
             return ENGINE_E_INVALID_STATE;
         };
+        if !operation_is_current(engine, epoch) {
+            return ENGINE_E_NOT_READY;
+        }
         if source.info.channel_count != engine.format.channel_count
             || pack_pcm(&[], source.info.valid_bits, &engine.format, &mut []).is_err()
         {
@@ -571,14 +776,27 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             return ENGINE_E_LIMIT_EXCEEDED;
         }
         samples.resize(sample_count, 0);
+        let start_position = source.position();
         let frames_read = match source.read(&mut samples, frame_limit) {
             Ok(frames_read) => frames_read,
             Err(status) => {
+                if !operation_is_current(engine, epoch) {
+                    let _ = source.seek(start_position);
+                    return ENGINE_E_NOT_READY;
+                }
                 engine.fail_render(status);
                 return status;
             }
         };
+        if !operation_is_current(engine, epoch) {
+            let _ = source.seek(start_position);
+            return ENGINE_E_NOT_READY;
+        }
         if frames_read == 0 {
+            let _current_command = engine.command.lock().unwrap();
+            if !operation_is_current(engine, epoch) {
+                return ENGINE_E_NOT_READY;
+            }
             engine
                 .render_source_state
                 .store(RENDER_STATE_END_OF_STREAM as usize, Ordering::Release);
@@ -613,10 +831,19 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
         ) {
             Ok(written) => written,
             Err(status) => {
+                if !operation_is_current(engine, epoch) {
+                    let _ = source.seek(start_position);
+                    return ENGINE_E_NOT_READY;
+                }
                 engine.fail_render(status);
                 return status;
             }
         };
+        let _current_command = engine.command.lock().unwrap();
+        if !operation_is_current(engine, epoch) {
+            let _ = source.seek(start_position);
+            return ENGINE_E_NOT_READY;
+        }
         if engine.ring.write(&packed[..written]) != written {
             engine.fail_render(ENGINE_E_INVALID_STATE);
             return ENGINE_E_INVALID_STATE;
@@ -654,6 +881,7 @@ pub unsafe extern "C" fn camel_engine_read_decoded_v1(
         if frame_capacity > engine.max_render_units {
             return ENGINE_E_LIMIT_EXCEEDED;
         }
+        let epoch = engine.operation_epoch.load(Ordering::Acquire);
         let mut source = engine.source.lock().unwrap();
         let Some(source) = source.as_mut() else {
             return ENGINE_E_INVALID_STATE;
@@ -670,11 +898,21 @@ pub unsafe extern "C" fn camel_engine_read_decoded_v1(
         } else {
             std::slice::from_raw_parts_mut(output, sample_capacity)
         };
+        let start_position = source.position();
         match source.read(output, frame_capacity) {
             Ok(read) => {
+                let _current_command = engine.command.lock().unwrap();
+                if !operation_is_current(engine, epoch) {
+                    let _ = source.seek(start_position);
+                    output.fill(0);
+                    return ENGINE_E_NOT_READY;
+                }
                 *frames_read = read;
                 engine
-                    .render_position
+                    .submitted_position
+                    .store(source.position(), Ordering::Release);
+                engine
+                    .audible_position
                     .store(source.position(), Ordering::Release);
                 if read == 0 {
                     ENGINE_END
@@ -682,7 +920,13 @@ pub unsafe extern "C" fn camel_engine_read_decoded_v1(
                     ENGINE_OK
                 }
             }
-            Err(status) => status,
+            Err(status) => {
+                if !operation_is_current(engine, epoch) {
+                    ENGINE_E_NOT_READY
+                } else {
+                    status
+                }
+            }
         }
     })) {
         Ok(status) => status,
@@ -710,10 +954,10 @@ pub unsafe extern "C" fn camel_engine_get_state_v1(
         }
         let command = *engine.command.lock().unwrap();
         let source = engine.source.lock().unwrap();
-        state.playback_state = if source.is_some() { 1 } else { 0 };
-        state.last_error_code = 0;
+        state.playback_state = engine.playback_state.load(Ordering::Acquire) as u32;
+        state.last_error_code = engine.render_error.load(Ordering::Acquire);
         state.command = command;
-        state.position_frames = source.as_ref().map_or(0, DecoderSource::position);
+        state.position_frames = engine.submitted_position.load(Ordering::Acquire);
         state.total_frames = source.as_ref().map_or(0, |s| s.info.total_frames);
         state.has_source = u32::from(source.is_some());
         state.reserved = 0;
@@ -721,6 +965,76 @@ pub unsafe extern "C" fn camel_engine_get_state_v1(
             .as_ref()
             .map_or(empty_format(), |s| source_audio_format(&s.info));
         state.output_format = engine.output_format;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `timeline` must reference a live engine and writable V1 timeline.
+pub unsafe extern "C" fn camel_engine_get_timeline_v1(
+    engine: *mut CamelEngine,
+    timeline: *mut CamelEngineTimelineV1,
+) -> i32 {
+    if engine.is_null() || timeline.is_null() {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let engine = &*engine;
+        let timeline = &mut *timeline;
+        if timeline.abi_version != ABI_VERSION {
+            return ENGINE_E_ABI_MISMATCH;
+        }
+        if timeline.struct_size < std::mem::size_of::<CamelEngineTimelineV1>() as u32 {
+            return ENGINE_E_STRUCT_SIZE;
+        }
+        let command = *engine.command.lock().unwrap();
+        let source = engine.source.lock().unwrap();
+        timeline.playback_state = engine.playback_state.load(Ordering::Acquire) as u32;
+        timeline.reserved = 0;
+        timeline.command = command;
+        timeline.decoded_position_frames = source.as_ref().map_or(0, DecoderSource::position);
+        timeline.submitted_position_frames = engine.submitted_position.load(Ordering::Acquire);
+        timeline.audible_position_frames = engine.audible_position.load(Ordering::Acquire);
+        timeline.total_frames = source.as_ref().map_or(0, |s| s.info.total_frames);
+        timeline.has_source = u32::from(source.is_some());
+        timeline.reserved2 = 0;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid. `audible_frame` is the output bridge's estimated audible track position.
+pub unsafe extern "C" fn camel_engine_report_audible_position_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+    audible_frame: u64,
+) -> i32 {
+    if engine.is_null() || command.is_null() {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let engine = &*engine;
+        let command = &*command;
+        if let Err(status) = validate_command(command) {
+            return status as i32;
+        }
+        let current = engine.command.lock().unwrap();
+        if current.command_id != command.command_id
+            || current.generation != command.generation
+            || current.queue_revision != command.queue_revision
+        {
+            return ENGINE_E_NOT_READY;
+        }
+        let submitted = engine.submitted_position.load(Ordering::Acquire);
+        engine
+            .audible_position
+            .store(audible_frame.min(submitted), Ordering::Release);
         ENGINE_OK
     })) {
         Ok(status) => status,
@@ -886,12 +1200,15 @@ pub unsafe extern "C" fn camel_engine_render_v1(
         let rendered_frames = rendered_bytes / bytes_per_frame;
         result.units_rendered = rendered_frames as u64;
         engine
-            .render_position
+            .submitted_position
             .fetch_add(rendered_frames as u64, Ordering::AcqRel);
 
         let source_state = engine.render_source_state.load(Ordering::Acquire) as u32;
         if source_state == RENDER_STATE_END_OF_STREAM && engine.ring.readable() == 0 {
             result.state = RENDER_STATE_END_OF_STREAM;
+            engine
+                .playback_state
+                .store(PLAYBACK_STOPPED as usize, Ordering::Release);
             if rendered_frames < request.units as usize {
                 return ENGINE_END;
             }
@@ -950,6 +1267,16 @@ mod tests {
     struct MockDecoder {
         samples: Vec<i32>,
         position: usize,
+    }
+
+    struct BlockingReadContext {
+        read_started: AtomicBool,
+        release_read: AtomicBool,
+    }
+
+    struct BlockingOpenContext {
+        open_started: AtomicBool,
+        release_open: AtomicBool,
     }
 
     #[derive(Clone)]
@@ -1029,6 +1356,74 @@ mod tests {
         drop(Box::from_raw(opaque.cast::<MockDecoder>()));
     }
 
+    unsafe extern "C" fn blocking_read(
+        context: *mut c_void,
+        opaque: *mut c_void,
+        output: *mut i32,
+        frames: u64,
+        frames_read: *mut u64,
+    ) -> i32 {
+        let context = &*context.cast::<BlockingReadContext>();
+        context.read_started.store(true, Ordering::Release);
+        while !context.release_read.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+        mock_read(ptr::null_mut(), opaque, output, frames, frames_read)
+    }
+
+    unsafe extern "C" fn blocking_read_open(
+        _: *mut c_void,
+        decoder_kind: u32,
+        path: *const u8,
+        path_length: u64,
+        out_decoder: *mut *mut c_void,
+        info: *mut CamelSourceInfoV1,
+    ) -> i32 {
+        mock_open(
+            ptr::null_mut(),
+            decoder_kind,
+            path,
+            path_length,
+            out_decoder,
+            info,
+        )
+    }
+
+    unsafe extern "C" fn blocking_load_open(
+        context: *mut c_void,
+        decoder_kind: u32,
+        path: *const u8,
+        path_length: u64,
+        out_decoder: *mut *mut c_void,
+        info: *mut CamelSourceInfoV1,
+    ) -> i32 {
+        let context = &*context.cast::<BlockingOpenContext>();
+        context.open_started.store(true, Ordering::Release);
+        while !context.release_open.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+        mock_open(
+            ptr::null_mut(),
+            decoder_kind,
+            path,
+            path_length,
+            out_decoder,
+            info,
+        )
+    }
+
+    unsafe extern "C" fn blocking_seek(
+        context: *mut c_void,
+        opaque: *mut c_void,
+        frame: u64,
+    ) -> i32 {
+        mock_seek(context, opaque, frame)
+    }
+
+    unsafe extern "C" fn blocking_close(context: *mut c_void, opaque: *mut c_void) {
+        mock_close(context, opaque)
+    }
+
     fn mock_host() -> CamelDecoderHostV1 {
         CamelDecoderHostV1 {
             struct_size: std::mem::size_of::<CamelDecoderHostV1>() as u32,
@@ -1047,6 +1442,30 @@ mod tests {
             abi_version: ABI_VERSION,
             context: (metadata as *mut MockMetadata).cast(),
             open: Some(mock_open),
+            read: Some(mock_read),
+            seek: Some(mock_seek),
+            close: Some(mock_close),
+        }
+    }
+
+    fn blocking_host(context: &mut BlockingReadContext) -> CamelDecoderHostV1 {
+        CamelDecoderHostV1 {
+            struct_size: std::mem::size_of::<CamelDecoderHostV1>() as u32,
+            abi_version: ABI_VERSION,
+            context: (context as *mut BlockingReadContext).cast(),
+            open: Some(blocking_read_open),
+            read: Some(blocking_read),
+            seek: Some(blocking_seek),
+            close: Some(blocking_close),
+        }
+    }
+
+    fn blocking_open_host(context: &mut BlockingOpenContext) -> CamelDecoderHostV1 {
+        CamelDecoderHostV1 {
+            struct_size: std::mem::size_of::<CamelDecoderHostV1>() as u32,
+            abi_version: ABI_VERSION,
+            context: (context as *mut BlockingOpenContext).cast(),
+            open: Some(blocking_load_open),
             read: Some(mock_read),
             seek: Some(mock_seek),
             close: Some(mock_close),
@@ -1121,6 +1540,16 @@ mod tests {
         }
     }
 
+    fn command_stamp(command_id: u64) -> CamelCommandStampV1 {
+        CamelCommandStampV1 {
+            struct_size: std::mem::size_of::<CamelCommandStampV1>() as u32,
+            abi_version: ABI_VERSION,
+            command_id,
+            generation: command_id,
+            queue_revision: 1,
+        }
+    }
+
     fn render_request(units: u64, output: &mut [u8]) -> CamelRenderRequestV1 {
         CamelRenderRequestV1 {
             struct_size: std::mem::size_of::<CamelRenderRequestV1>() as u32,
@@ -1155,6 +1584,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelRenderResultV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelEngineStateV1>(), 152);
         assert_eq!(std::mem::size_of::<CamelFlacIntegrityV1>(), 32);
+        assert_eq!(std::mem::size_of::<CamelEngineTimelineV1>(), 88);
         assert_eq!(std::mem::offset_of!(CamelAudioFormatV1, channel_mask), 32);
         assert_eq!(std::mem::offset_of!(CamelEngineConfigV1, format), 16);
         assert_eq!(std::mem::offset_of!(CamelCommandStampV1, command_id), 8);
@@ -1294,6 +1724,333 @@ mod tests {
             ENGINE_OK
         );
         assert_eq!(state.position_frames, 4);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn playback_state_and_timeline_separate_decoded_submitted_and_audible_positions() {
+        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source(engine), ENGINE_OK);
+
+        let play = command_stamp(2);
+        assert_eq!(unsafe { camel_engine_play_v1(engine, &play) }, ENGINE_OK);
+        let mut frames_prefilled = 0;
+        assert_eq!(
+            unsafe { camel_engine_prefill_v1(engine, 3, &mut frames_prefilled) },
+            ENGINE_OK
+        );
+        assert_eq!(frames_prefilled, 3);
+
+        let mut output = [0; 8];
+        let request = render_request(2, &mut output);
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_OK
+        );
+        assert_eq!(result.units_rendered, 2);
+        assert_eq!(
+            unsafe { camel_engine_report_audible_position_v1(engine, &play, 1) },
+            ENGINE_OK
+        );
+
+        let mut timeline = CamelEngineTimelineV1 {
+            struct_size: std::mem::size_of::<CamelEngineTimelineV1>() as u32,
+            abi_version: ABI_VERSION,
+            playback_state: PLAYBACK_EMPTY,
+            reserved: 0,
+            command: command_stamp(0),
+            decoded_position_frames: 0,
+            submitted_position_frames: 0,
+            audible_position_frames: 0,
+            total_frames: 0,
+            has_source: 0,
+            reserved2: 0,
+        };
+        assert_eq!(
+            unsafe { camel_engine_get_timeline_v1(engine, &mut timeline) },
+            ENGINE_OK
+        );
+        assert_eq!(timeline.playback_state, PLAYBACK_PLAYING);
+        assert_eq!(timeline.decoded_position_frames, 3);
+        assert_eq!(timeline.submitted_position_frames, 2);
+        assert_eq!(timeline.audible_position_frames, 1);
+        assert_eq!(timeline.total_frames, 4);
+
+        let pause = command_stamp(3);
+        assert_eq!(unsafe { camel_engine_pause_v1(engine, &pause) }, ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_report_audible_position_v1(engine, &play, 2) },
+            ENGINE_E_NOT_READY
+        );
+        assert_eq!(
+            unsafe { camel_engine_get_timeline_v1(engine, &mut timeline) },
+            ENGINE_OK
+        );
+        assert_eq!(timeline.playback_state, PLAYBACK_PAUSED);
+        assert_eq!(timeline.audible_position_frames, 1);
+
+        let stop = command_stamp(4);
+        assert_eq!(unsafe { camel_engine_stop_v1(engine, &stop) }, ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_get_timeline_v1(engine, &mut timeline) },
+            ENGINE_OK
+        );
+        assert_eq!(timeline.playback_state, PLAYBACK_STOPPED);
+        assert_eq!(timeline.decoded_position_frames, 0);
+        assert_eq!(timeline.submitted_position_frames, 0);
+        assert_eq!(timeline.audible_position_frames, 0);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn stop_cancels_a_prefill_in_progress_and_discards_its_decoded_frames() {
+        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+
+        let path = b"blocking.flac";
+        let load = command_stamp(1);
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let mut context = BlockingReadContext {
+            read_started: AtomicBool::new(false),
+            release_read: AtomicBool::new(false),
+        };
+        let host = blocking_host(&mut context);
+        assert_eq!(
+            unsafe {
+                camel_engine_load_flac_v1(
+                    engine,
+                    &load,
+                    &source,
+                    decoder_host::DECODER_FFMPEG,
+                    &host,
+                )
+            },
+            ENGINE_OK
+        );
+
+        let engine_address = engine as usize;
+        let prefill = thread::spawn(move || {
+            let mut frames_prefilled = 0;
+            let status = unsafe {
+                camel_engine_prefill_v1(
+                    engine_address as *mut CamelEngine,
+                    4,
+                    &mut frames_prefilled,
+                )
+            };
+            (status, frames_prefilled)
+        });
+        while !context.read_started.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+
+        let engine_address = engine as usize;
+        let stop = command_stamp(2);
+        let stop_thread = thread::spawn(move || unsafe {
+            camel_engine_stop_v1(engine_address as *mut CamelEngine, &stop)
+        });
+        while unsafe { &*(engine as *const CamelEngine) }
+            .operation_epoch
+            .load(Ordering::Acquire)
+            < 2
+        {
+            thread::yield_now();
+        }
+        context.release_read.store(true, Ordering::Release);
+
+        assert_eq!(prefill.join().unwrap(), (ENGINE_E_NOT_READY, 0));
+        assert_eq!(stop_thread.join().unwrap(), ENGINE_OK);
+        assert_eq!(unsafe { &*engine }.ring.readable(), 0);
+        assert_eq!(
+            unsafe { &*engine }
+                .source
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .position(),
+            0
+        );
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn newer_stop_discards_a_source_that_finishes_loading_late() {
+        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let mut context = BlockingOpenContext {
+            open_started: AtomicBool::new(false),
+            release_open: AtomicBool::new(false),
+        };
+        let context_address = (&mut context as *mut BlockingOpenContext) as usize;
+        let engine_address = engine as usize;
+        let load = thread::spawn(move || {
+            let path = b"slow.flac";
+            let command = command_stamp(1);
+            let source = CamelTrackSourceV1 {
+                struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+                abi_version: ABI_VERSION,
+                path_utf8: path.as_ptr(),
+                path_length_bytes: path.len() as u64,
+                start_frame: 0,
+                end_frame_exclusive: 0,
+                has_end_frame: 0,
+                reserved: 0,
+            };
+            let host =
+                unsafe { blocking_open_host(&mut *(context_address as *mut BlockingOpenContext)) };
+            unsafe {
+                camel_engine_load_flac_v1(
+                    engine_address as *mut CamelEngine,
+                    &command,
+                    &source,
+                    decoder_host::DECODER_FFMPEG,
+                    &host,
+                )
+            }
+        });
+        while !context.open_started.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+
+        let stop = command_stamp(2);
+        assert_eq!(unsafe { camel_engine_stop_v1(engine, &stop) }, ENGINE_OK);
+        context.release_open.store(true, Ordering::Release);
+        assert_eq!(load.join().unwrap(), ENGINE_E_NOT_READY);
+
+        let mut timeline = CamelEngineTimelineV1 {
+            struct_size: std::mem::size_of::<CamelEngineTimelineV1>() as u32,
+            abi_version: ABI_VERSION,
+            playback_state: PLAYBACK_EMPTY,
+            reserved: 0,
+            command: command_stamp(0),
+            decoded_position_frames: 0,
+            submitted_position_frames: 0,
+            audible_position_frames: 0,
+            total_frames: 0,
+            has_source: 0,
+            reserved2: 0,
+        };
+        assert_eq!(
+            unsafe { camel_engine_get_timeline_v1(engine, &mut timeline) },
+            ENGINE_OK
+        );
+        assert_eq!(timeline.command.command_id, 2);
+        assert_eq!(timeline.playback_state, PLAYBACK_STOPPED);
+        assert_eq!(timeline.has_source, 0);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn seek_cancels_prefill_and_discards_frames_from_the_old_position() {
+        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let path = b"blocking.flac";
+        let load = command_stamp(1);
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let mut context = BlockingReadContext {
+            read_started: AtomicBool::new(false),
+            release_read: AtomicBool::new(false),
+        };
+        let host = blocking_host(&mut context);
+        assert_eq!(
+            unsafe {
+                camel_engine_load_flac_v1(
+                    engine,
+                    &load,
+                    &source,
+                    decoder_host::DECODER_FFMPEG,
+                    &host,
+                )
+            },
+            ENGINE_OK
+        );
+
+        let engine_address = engine as usize;
+        let prefill = thread::spawn(move || {
+            let mut frames_prefilled = 0;
+            let status = unsafe {
+                camel_engine_prefill_v1(
+                    engine_address as *mut CamelEngine,
+                    4,
+                    &mut frames_prefilled,
+                )
+            };
+            (status, frames_prefilled)
+        });
+        while !context.read_started.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+
+        let engine_address = engine as usize;
+        let seek = command_stamp(2);
+        let seek_thread = thread::spawn(move || unsafe {
+            camel_engine_seek_v1(engine_address as *mut CamelEngine, &seek, 2)
+        });
+        while unsafe { &*(engine as *const CamelEngine) }
+            .operation_epoch
+            .load(Ordering::Acquire)
+            < 2
+        {
+            thread::yield_now();
+        }
+        context.release_read.store(true, Ordering::Release);
+
+        assert_eq!(prefill.join().unwrap(), (ENGINE_E_NOT_READY, 0));
+        assert_eq!(seek_thread.join().unwrap(), ENGINE_OK);
+        assert_eq!(unsafe { &*engine }.ring.readable(), 0);
+        assert_eq!(
+            unsafe { &*engine }
+                .source
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .position(),
+            2
+        );
+        assert_eq!(
+            unsafe { &*engine }
+                .submitted_position
+                .load(Ordering::Acquire),
+            2
+        );
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 

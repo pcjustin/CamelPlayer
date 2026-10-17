@@ -101,6 +101,59 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
 }
 
 /// # Safety
+/// `engine` and `command` must reference a live engine and readable V1 command.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_play_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_play_v1(engine, command) }
+}
+
+/// # Safety
+/// `engine` and `command` must reference a live engine and readable V1 command.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_pause_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_pause_v1(engine, command) }
+}
+
+/// # Safety
+/// `engine` and `command` must reference a live engine and readable V1 command.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_stop_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_stop_v1(engine, command) }
+}
+
+/// # Safety
+/// `engine` and `timeline` must reference a live engine and writable V1 timeline.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_get_timeline_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    timeline: *mut camel_audio_engine::CamelEngineTimelineV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_get_timeline_v1(engine, timeline) }
+}
+
+/// # Safety
+/// `engine` and `command` must reference a live engine and readable V1 command.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_report_audible_position_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+    audible_frame: u64,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_engine_report_audible_position_v1(engine, command, audible_frame)
+    }
+}
+
+/// # Safety
 /// `engine` and `state` must reference a live handle and writable V1 state.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_state_v1(

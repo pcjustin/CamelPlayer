@@ -326,6 +326,10 @@ impl DecoderSource {
         self.position
     }
 
+    pub(crate) fn start_frame(&self) -> u64 {
+        self.start_frame
+    }
+
     pub(crate) fn integrity_status(&self) -> u32 {
         self.integrity_status
     }
