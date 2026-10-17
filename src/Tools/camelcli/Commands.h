@@ -15,8 +15,10 @@ std::vector<std::wstring> positional(const Args& args);
 int cmdDecode(const Args& args);
 int cmdListDevices(const Args& args);
 int cmdPlay(const Args& args);
+int cmdPlayQueue(const Args& args);
 int cmdCapture(const Args& args);
 int cmdGenTestAudio(const Args& args);
+int cmdSplitFlac(const Args& args);
 int cmdBenchOne(const Args& args);
 int cmdBenchDecoders(const Args& args);
 

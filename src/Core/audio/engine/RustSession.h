@@ -38,6 +38,20 @@ public:
     // The output bridge's estimate of what the listener hears now.
     void reportAudible(uint64_t frame);
 
+    // Gapless: the next track plays without reopening the device. False when it does not decode to this session's
+    // output format or cannot be opened; playback then ends normally after the current track.
+    bool queueNext(const std::filesystem::path& path, DecoderKind decoder);
+    // False once decoding has moved on to the queued track; it then becomes current at its boundary.
+    bool clearNext();
+
+    struct Transitions {
+        uint64_t count = 0;         // queued tracks that have become audible
+        uint64_t trackPosition = 0; // frames of the current track handed to the device
+        bool nextQueued = false;    // a queued track still waits in the slot; another may be queued only when false
+    };
+    // Safe on the output callback thread.
+    Transitions transitions() const noexcept;
+
 private:
     CamelCommandStampV1 nextCommand();
 

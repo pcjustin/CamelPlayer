@@ -223,6 +223,7 @@ private:
     void execute(const Pending& pending) {
         const auto& c = pending.command;
         state_.command = pending.stamp;
+        attempted_ = {}; // a command may restart the stream, so the upcoming entry may be queued again
         state_.commandError.reset();
         state_.controlPanelOpened.reset();
         if (c.source) {
@@ -338,7 +339,10 @@ private:
     // Ends of the previous entry that are still pending belong to playback this call supersedes.
     void startEntry(const QueuePosition& position, bool play) {
         engine_->waitIdle();
-        seenTrackEnds_ = engine_->snapshot().trackEnds;
+        const auto before = engine_->snapshot();
+        seenTrackEnds_ = before.trackEnds;
+        seenTransitions_ = before.transitions;
+        chain_.clear();
         const auto& source = entry(position.entryId).source;
         const std::filesystem::path path(toWide(source.pathUtf8()));
         state_.track = source;
@@ -355,6 +359,55 @@ private:
             engine_->load(path);
         engine_->waitIdle(); // the next snapshot pairs this entry with its own playback state
         persist();
+    }
+
+    // A gapless transition already plays the queued entry; it becomes current without reopening anything.
+    void commitTransition() {
+        const auto playback = engine_->snapshot();
+        if (playback.transitions == seenTransitions_) return;
+        auto heard = playback.transitions - seenTransitions_;
+        seenTransitions_ = playback.transitions;
+        for (; heard && !chain_.empty(); --heard) {
+            const auto id = chain_.front();
+            chain_.pop_front();
+            auto position = policy_.next(true);
+            if (!position || position->entryId != id) position = policy_.select(id);
+            const auto& source = entry(position->entryId).source;
+            state_.track = source;
+            state_.queueEntryId = position->entryId;
+            settings_.lastFile = toWide(source.pathUtf8());
+            queueChanged_ = true;
+        }
+        persist();
+    }
+
+    // Keeps the entries that follow queued in the engine while a stream is open, so they play gaplessly. The engine
+    // takes one more as soon as its decoder moves on to the previous one, seconds before that one is heard.
+    void ensureNextQueued() {
+        const auto playback = engine_->snapshot();
+        if (playback.transitions != seenTransitions_) return; // committed on the next pass
+        if (playback.queuedFiles == 0) chain_.clear();        // a restarted stream forgets queued files
+        if (!playback.output || !state_.queueEntryId || !state_.track) return;
+        auto copy = policy_;
+        for (size_t i = 0; i < chain_.size(); ++i) {
+            const auto predicted = copy.next(true);
+            if (predicted && predicted->entryId == chain_[i]) continue;
+            // The order changed: withdraw a file still waiting in the slot; one already decoding plays regardless.
+            if (i + 1 == chain_.size() && !playback.nextSlotFree && engine_->clearNext()) {
+                chain_.pop_back();
+                return;
+            }
+            copy.select(chain_[i]);
+        }
+        if (!playback.nextSlotFree || chain_.size() >= 2) return;
+        const auto upcoming = copy.upcoming();
+        if (!upcoming) return;
+        const QueueAttempt attempt{state_.queueEntryId, upcoming->entryId, policy_.revision(), chain_.size()};
+        if (attempt == attempted_) return;
+        attempted_ = attempt;
+        const auto& source = entry(upcoming->entryId).source;
+        if (source.decoder() != state_.track->decoder()) return;
+        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())))) chain_.push_back(upcoming->entryId);
     }
 
     // Natural completion plays the next eligible entry; a track-local failure marks the entry and skips it.
@@ -434,7 +487,9 @@ private:
                 }
             }
             try {
+                commitTransition();
                 advanceAfterTrackEnd();
+                ensureNextQueued();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -466,6 +521,15 @@ private:
     uint64_t lastEntryId_ = 0;
     uint64_t seenTrackEnds_ = 0;
     bool queueChanged_ = false; // queue state changed without a command or playback change
+    // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
+    struct QueueAttempt {
+        uint64_t current = 0, upcoming = 0, revision = 0;
+        size_t depth = 0;
+        bool operator==(const QueueAttempt&) const = default;
+    };
+    uint64_t seenTransitions_ = 0;
+    std::deque<uint64_t> chain_; // entries queued in the engine, in playback order
+    QueueAttempt attempted_;
     std::function<void(const Event&)> listener_;
     std::thread worker_;
 };

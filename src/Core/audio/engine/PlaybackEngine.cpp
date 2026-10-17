@@ -103,11 +103,22 @@ public:
             const auto rendered = rust_->render(dst, frames, bpf);
             n = rendered.frames;
             drained = rendered.ended || rendered.fault;
+            const auto transitions = rust_->transitions();
+            if (transitions.count != renderTransitions_.load(std::memory_order_relaxed)) {
+                // A queued file became audible inside this request; positions now count from its start.
+                renderTransitions_.store(transitions.count, std::memory_order_release);
+                base_.store(0, std::memory_order_relaxed);
+                consumed_.store(transitions.trackPosition, std::memory_order_relaxed);
+                transitionPending_.store(true, std::memory_order_release);
+                qCv_.notify_all();
+            } else {
+                consumed_.fetch_add(n, std::memory_order_relaxed);
+            }
         } else {
             n = ring_.read(dst, frames * bpf) / bpf;
             drained = decodeDone_.load(std::memory_order_acquire);
+            consumed_.fetch_add(n, std::memory_order_relaxed);
         }
-        consumed_.fetch_add(n, std::memory_order_relaxed);
         if (n < frames) {
             if (drained) {
                 if (!ended_.exchange(true)) qCv_.notify_all();
@@ -199,6 +210,40 @@ public:
             publish();
     }
 
+    bool queueNext(const std::filesystem::path& file) {
+        if (!active_ || !rust_ || rust_->transitions().nextQueued) return false;
+        SourceInfo source;
+        if (!readFlacStreamInfo(file, source)) return false;
+        std::optional<DeviceFormat> format;
+        try {
+            format = chooseOutputFormat(source, fixedSampleType(settings_),
+                                        [&](const DeviceFormat& f) { return output_->supports(f); });
+        } catch (const Error&) {
+            return false; // the device question fails again when the file is opened normally
+        }
+        if (format != fmt_ || !rust_->queueNext(file, settings_.decoder)) return false;
+        queued_.push_back({file.wstring(), source});
+        publishQueue();
+        return true;
+    }
+
+    bool clearNext() {
+        if (!rust_ || !rust_->transitions().nextQueued) return true;
+        if (!rust_->clearNext()) return false;
+        queued_.pop_back();
+        publishQueue();
+        return true;
+    }
+
+    void publishQueue() {
+        {
+            std::lock_guard lock(snapMutex_);
+            snap_.queuedFiles = queued_.size();
+            snap_.nextSlotFree = rust_ && !rust_->transitions().nextQueued;
+        }
+        publish();
+    }
+
     bool showControlPanel() {
         if (settings_.backend != Backend::Asio) return false;
         try {
@@ -237,7 +282,8 @@ private:
             std::function<void()> fn;
             {
                 std::unique_lock lock(qMutex_);
-                qCv_.wait_for(lock, std::chrono::milliseconds(50), [&] { return quit_ || !queue_.empty() || ended_.load(); });
+                qCv_.wait_for(lock, std::chrono::milliseconds(50),
+                              [&] { return quit_ || !queue_.empty() || ended_.load() || transitionPending_.load(); });
                 if (!queue_.empty()) {
                     fn = std::move(queue_.front());
                     queue_.pop_front();
@@ -259,10 +305,22 @@ private:
                     fail(Error(ErrorCode::Other, e.what()), PlayState::Stopped);
                 }
             }
+            if (active_ && transitionPending_.exchange(false)) onTransition();
             if (active_ && ended_.load()) onEnded();
-            if (active_ && rust_) reportAudible();
+            if (active_ && rust_) {
+                reportAudible();
+                refreshNextSlot();
+            }
         }
         CoUninitialize();
+    }
+
+    // The decoder empties the slot when it moves on to a queued file, seconds before that file is heard; the Server
+    // polls this and queues the one after it.
+    void refreshNextSlot() {
+        const bool free = !rust_->transitions().nextQueued;
+        std::lock_guard lock(snapMutex_);
+        snap_.nextSlotFree = free;
     }
 
     // Frames handed to the device minus what its buffer still holds; refined once drivers report latency.
@@ -349,6 +407,9 @@ private:
         decodeDone_ = false;
         ended_ = false;
         stopDecode_ = false;
+        renderTransitions_ = 0;
+        handledTransitions_ = 0;
+        transitionPending_ = false;
         {
             std::lock_guard lock(decodeErrMutex_);
             decodeError_.reset();
@@ -435,7 +496,12 @@ private:
             while (!stopDecode_) {
                 uint64_t frames = 0;
                 const auto result = rust_->prefill(frames);
-                if (result == RustSession::Prefill::End) break;
+                if (result == RustSession::Prefill::End) {
+                    // Keep polling: a file queued while the tail still plays continues the stream gaplessly.
+                    decodeDone_.store(true, std::memory_order_release);
+                    Sleep(5);
+                    continue;
+                }
                 if (result == RustSession::Prefill::Full) {
                     Sleep(5);
                     continue;
@@ -476,8 +542,31 @@ private:
         active_ = false;
         playing_ = false;
         ended_ = false;
+        transitionPending_ = false;
+        queued_.clear();
         std::lock_guard lock(snapMutex_);
         snap_.output.reset();
+        snap_.queuedFiles = 0;
+        snap_.nextSlotFree = false;
+    }
+
+    // Queued files are now audible: the last of them becomes the current file without reopening the device.
+    void onTransition() {
+        const uint64_t audible = renderTransitions_.load(std::memory_order_acquire);
+        if (audible == handledTransitions_) return;
+        while (handledTransitions_ < audible && !queued_.empty()) {
+            ++handledTransitions_;
+            file_ = queued_.front().file;
+            const auto source = queued_.front().source;
+            queued_.pop_front();
+            std::lock_guard lock(snapMutex_);
+            snap_.file = file_;
+            snap_.source = source;
+            snap_.total = source.totalFrames;
+            snap_.transitions++;
+        }
+        handledTransitions_ = audible;
+        publishQueue();
     }
 
     void onEnded() {
@@ -566,7 +655,14 @@ private:
     SpscRing ring_;
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
-    std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false};
+    std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
+    std::atomic<uint64_t> renderTransitions_{0}; // written by the output callback
+    uint64_t handledTransitions_ = 0;
+    struct Queued {
+        std::wstring file;
+        SourceInfo source;
+    };
+    std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     std::thread decodeThread_;
     std::mutex decodeErrMutex_;
     std::optional<Error> decodeError_;
@@ -620,6 +716,12 @@ void PlaybackEngine::applySettings(const Settings& s) {
 }
 bool PlaybackEngine::showControlPanel() {
     return impl_->call<bool>([this] { return impl_->showControlPanel(); });
+}
+bool PlaybackEngine::queueNext(const std::filesystem::path& file) {
+    return impl_->call<bool>([this, &file] { return impl_->queueNext(file); });
+}
+bool PlaybackEngine::clearNext() {
+    return impl_->call<bool>([this] { return impl_->clearNext(); });
 }
 EngineSnapshot PlaybackEngine::snapshot() const {
     return impl_->snapshot();

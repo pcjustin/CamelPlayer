@@ -61,6 +61,56 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
 }
 
 /// # Safety
+/// All pointers must reference valid V1 structures. Decoder callbacks must remain valid until the queued source is replaced, discarded or the Engine is destroyed.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+    source: *const camel_audio_engine::CamelTrackSourceV1,
+    decoder_kind: u32,
+    decoder_host: *const camel_audio_engine::CamelDecoderHostV1,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_engine_queue_next_flac_v1(
+            engine,
+            command,
+            source,
+            decoder_kind,
+            decoder_host,
+        )
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must reference a live engine and readable V1 command.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_clear_next_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_clear_next_v1(engine, command) }
+}
+
+/// # Safety
+/// `engine` must be live and both output pointers writable.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_get_transitions_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    transitions: *mut u64,
+    track_position: *mut u64,
+    next_queued: *mut u32,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_engine_get_transitions_v1(
+            engine,
+            transitions,
+            track_position,
+            next_queued,
+        )
+    }
+}
+
+/// # Safety
 /// `engine`, `output`, and `frames_read` must reference valid storage for this call.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_read_decoded_v1(

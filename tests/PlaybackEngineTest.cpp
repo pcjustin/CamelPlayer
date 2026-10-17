@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <optional>
+#include <thread>
 #include <mutex>
 #include <vector>
 
@@ -147,6 +148,45 @@ TEST_P(EngineStateTest, RustEngineRendersNothingWhilePaused) {
     engine->waitIdle();
     EXPECT_EQ(pull(5), 5u);
     EXPECT_EQ(engine->snapshot().position, 15u);
+}
+
+TEST_P(EngineStateTest, QueuedFileFollowsWithoutReopeningTheDevice) {
+    const auto next = testutil::generatedFile({"gapless-next-24-96k", 96000, 24, 2, 0.5});
+    open();
+    if (GetParam() != EngineKind::Rust) {
+        EXPECT_FALSE(engine->queueNext(next));
+        return;
+    }
+    ASSERT_TRUE(engine->queueNext(next));
+    EXPECT_EQ(engine->snapshot().queuedFiles, 1u);
+    // A device takes seconds to play the current file; this test pulls it at once, so first let the decoder reach
+    // the queued file.
+    for (int i = 0; i < 200 && !engine->snapshot().nextSlotFree; ++i) std::this_thread::sleep_for(5ms);
+    ASSERT_TRUE(engine->snapshot().nextSlotFree);
+    size_t frames = 0;
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (engine->snapshot().state != PlayState::Stopped && std::chrono::steady_clock::now() < deadline) {
+        frames += pull(4096);
+        engine->waitIdle();
+        const auto s = engine->snapshot();
+        if (s.transitions == 1 && s.file == next.wstring()) {
+            EXPECT_EQ(s.queuedFiles, 0u);
+            EXPECT_EQ(s.total, 48000u);
+            EXPECT_LE(s.position, 48000u);
+        }
+    }
+    const auto s = engine->snapshot();
+    EXPECT_EQ(s.state, PlayState::Stopped);
+    EXPECT_EQ(s.transitions, 1u);
+    EXPECT_FALSE(s.error) << s.errorDetail;
+    EXPECT_EQ(frames, 192000u + 48000u);
+    EXPECT_EQ(probe.opens, 1);
+}
+
+TEST_P(EngineStateTest, QueuedFileWithAnotherOutputFormatIsRefused) {
+    open();
+    EXPECT_FALSE(engine->queueNext(testutil::testFile("16-44.1k")));
+    EXPECT_EQ(engine->snapshot().queuedFiles, 0u);
 }
 
 TEST_P(EngineStateTest, StopClearsOutputAndNextPlayStartsAtZero) {

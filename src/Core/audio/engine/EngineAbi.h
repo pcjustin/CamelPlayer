@@ -199,6 +199,16 @@ CamelEngineStatus camel_engine_load_v1(CamelEngine* engine, const CamelCommandSt
 CamelEngineStatus camel_engine_load_flac_v1(CamelEngine* engine, const CamelCommandStampV1* command,
                                             const CamelTrackSourceV1* source, uint32_t decoder_kind,
                                             const CamelDecoderHostV1* decoder_host);
+// Gapless: queue the track that follows the current one; it must decode to the current output format.
+CamelEngineStatus camel_engine_queue_next_flac_v1(CamelEngine* engine, const CamelCommandStampV1* command,
+                                                  const CamelTrackSourceV1* source, uint32_t decoder_kind,
+                                                  const CamelDecoderHostV1* decoder_host);
+// Discards the queued track; CAMEL_ENGINE_E_INVALID_STATE once decoding has already moved on to it.
+CamelEngineStatus camel_engine_clear_next_v1(CamelEngine* engine, const CamelCommandStampV1* command);
+// Queued tracks that became audible, the current track position, and whether a queued track still waits in the
+// slot (one more may be queued only when it does not). Safe on the output callback thread.
+CamelEngineStatus camel_engine_get_transitions_v1(CamelEngine* engine, uint64_t* transitions, uint64_t* track_position,
+                                                  uint32_t* next_queued);
 CamelEngineStatus camel_engine_play_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_pause_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_stop_v1(CamelEngine* engine, const CamelCommandStampV1* command);

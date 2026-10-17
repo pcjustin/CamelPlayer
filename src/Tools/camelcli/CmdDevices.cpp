@@ -1,7 +1,8 @@
-// list-devices, play, capture, gen-test-audio
+// list-devices, play, play-queue, capture, gen-test-audio
 #include <windows.h>
 #include <conio.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include "audio/engine/SamplePacker.h"
 #include "audio/output/CaptureOutput.h"
 #include "audio/testing/TestAudio.h"
+#include "server/LocalServer.h"
 #include "util/Text.h"
 
 using namespace camel;
@@ -132,6 +134,73 @@ int cmdPlay(const Args& args) {
     return snap.error ? 1 : 0;
 }
 
+namespace {
+
+// Counts device opens: a gapless queue opens the device once.
+class CountingOutput final : public IOutput {
+public:
+    CountingOutput(std::unique_ptr<IOutput> inner, std::atomic<int>& opens) : inner_(std::move(inner)), opens_(opens) {
+        inner_->setErrorHandler([this](const Error& e) { raiseError(e); });
+        inner_->setRestartHandler([this] { raiseRestart(); });
+    }
+    bool supports(const DeviceFormat& f) override { return inner_->supports(f); }
+    void open(const DeviceFormat& f, IRenderSource* source) override {
+        ++opens_;
+        inner_->open(f, source);
+    }
+    void start() override { inner_->start(); }
+    void pause() override { inner_->pause(); }
+    void close() override { inner_->close(); }
+    OutputStatus status() const override { return inner_->status(); }
+
+private:
+    std::unique_ptr<IOutput> inner_;
+    std::atomic<int>& opens_;
+};
+
+} // namespace
+
+// play-queue <file>... [options]: plays the files as one Server queue and reports how often the device opened.
+int cmdPlayQueue(const Args& args) {
+    const auto files = positional(args);
+    if (files.empty()) {
+        std::puts("usage: play-queue <file.flac>... [--backend wasapi|asio|ks] [--decoder id] [--device n|id]");
+        return 2;
+    }
+    const Settings s = settingsFromArgs(args);
+    std::printf("backend %s, decoder %s, engine %s\n", backendName(s.backend), decoderName(s.decoder), engineId(s.engine));
+    std::atomic<int> opens = 0;
+    server::LocalServer server(
+        s, {}, [&](const Settings& settings) { return std::make_unique<CountingOutput>(createOutput(settings), opens); });
+    server::Command queue;
+    queue.kind = server::CommandKind::QueueReplace;
+    for (const auto& file : files) queue.sources.emplace_back(toUtf8(std::filesystem::absolute(file).wstring()));
+    server.submit(std::move(queue));
+    server.waitIdle();
+    const auto entries = server.snapshot().queue.entries;
+    server::Snapshot snap;
+    for (;;) {
+        snap = server.snapshot();
+        size_t index = 0;
+        while (index < entries.size() && entries[index].id != snap.queueEntryId) ++index;
+        const auto& p = snap.playback;
+        std::printf("\rtrack %zu/%zu  %7.2f s  %-8s  device opens %d   ", index + 1, entries.size(),
+                    p.source ? framesToSeconds(p.position, p.source->sampleRate) : 0.0,
+                    p.state == server::PlaybackState::Playing  ? "playing"
+                    : p.state == server::PlaybackState::Paused ? "paused"
+                                                               : "stopped",
+                    opens.load());
+        std::fflush(stdout);
+        if (p.state == server::PlaybackState::Stopped && (p.error || index + 1 == entries.size())) break;
+        if (p.state == server::PlaybackState::Paused && p.error) break;
+        Sleep(200);
+    }
+    std::puts("");
+    if (snap.playback.error) std::printf("error: %s\n", snap.playback.errorDetail.c_str());
+    std::printf("device opens: %d for %zu tracks\n", opens.load(), entries.size());
+    return snap.playback.error ? 1 : 0;
+}
+
 // capture <file> <out.raw> [--decoder id] [--accept 16,24,24in32,32]: runs the engine into CaptureOutput and
 // compares the captured bytes with the libFLAC reference decode.
 int cmdCapture(const Args& args) {
@@ -214,6 +283,32 @@ int cmdGenTestAudio(const Args& args) {
     double seconds = option(args, L"--seconds") ? std::stod(*option(args, L"--seconds")) : 10.0;
     for (auto& p : testaudio::generateAll(dir, seconds))
         std::printf("%s  %llu bytes\n", toUtf8(p.wstring()).c_str(), (unsigned long long)std::filesystem::file_size(p));
+    return 0;
+}
+
+// split-flac <file.flac> <parts> <dir>: cuts one track into consecutive FLAC files, for listening to gapless seams.
+int cmdSplitFlac(const Args& args) {
+    const auto pos = positional(args);
+    if (pos.size() < 3) {
+        std::puts("usage: split-flac <file.flac> <parts> <dir>");
+        return 2;
+    }
+    const auto reference = testaudio::referenceDecode(pos[0]);
+    if (!reference.error.empty()) throw std::runtime_error("cannot decode: " + reference.error);
+    const size_t parts = std::stoul(pos[1]);
+    const size_t channels = reference.info.channels;
+    const size_t frames = reference.samples.size() / channels;
+    if (!parts || parts > frames) throw std::runtime_error("invalid part count");
+    const std::filesystem::path dir(pos[2]);
+    const auto stem = std::filesystem::path(pos[0]).stem().wstring();
+    for (size_t i = 0; i < parts; ++i) {
+        const size_t first = frames * i / parts, last = frames * (i + 1) / parts;
+        const std::vector<int32_t> part(reference.samples.begin() + std::ptrdiff_t(first * channels),
+                                        reference.samples.begin() + std::ptrdiff_t(last * channels));
+        const auto path = dir / (stem + L"-part" + std::to_wstring(i + 1) + L".flac");
+        testaudio::writeFlacSamples(path, part, reference.info.sampleRate, reference.info.bitsPerSample, uint32_t(channels));
+        std::printf("%s  %.2f s\n", toUtf8(path.wstring()).c_str(), double(last - first) / reference.info.sampleRate);
+    }
     return 0;
 }
 

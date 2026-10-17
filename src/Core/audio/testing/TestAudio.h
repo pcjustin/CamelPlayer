@@ -28,6 +28,9 @@ std::vector<int32_t> makeSignal(const GenSpec& spec);
 
 // Encodes `spec` to `path` with libFLAC. Throws std::runtime_error.
 void writeFlac(const std::filesystem::path& path, const GenSpec& spec);
+// Encodes interleaved, right-aligned `samples` as FLAC.
+void writeFlacSamples(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+                      uint32_t channels);
 
 // Copies `src` to `dst` with one byte flipped at `fraction` of the file (a damaged frame).
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction = 0.5);

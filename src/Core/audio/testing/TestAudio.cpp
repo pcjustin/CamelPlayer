@@ -55,17 +55,17 @@ std::vector<int32_t> makeSignal(const GenSpec& spec) {
     return out;
 }
 
-void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
-    const auto samples = makeSignal(spec);
+void writeFlacSamples(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+                      uint32_t channels) {
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     FLAC__StreamEncoder* enc = FLAC__stream_encoder_new();
     if (!enc) throw std::runtime_error("FLAC__stream_encoder_new failed");
-    FLAC__stream_encoder_set_channels(enc, spec.channels);
-    FLAC__stream_encoder_set_bits_per_sample(enc, spec.bits);
-    FLAC__stream_encoder_set_sample_rate(enc, spec.sampleRate);
+    FLAC__stream_encoder_set_channels(enc, channels);
+    FLAC__stream_encoder_set_bits_per_sample(enc, bits);
+    FLAC__stream_encoder_set_sample_rate(enc, sampleRate);
     FLAC__stream_encoder_set_streamable_subset(enc, false); // 352.8k+ and 32-bit are outside the subset
     FLAC__stream_encoder_set_compression_level(enc, 5);
-    FLAC__stream_encoder_set_total_samples_estimate(enc, samples.size() / spec.channels);
+    FLAC__stream_encoder_set_total_samples_estimate(enc, samples.size() / channels);
     FILE* f = nullptr;
     if (_wfopen_s(&f, path.c_str(), L"w+b") != 0 || !f) {
         FLAC__stream_encoder_delete(enc);
@@ -77,16 +77,20 @@ void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
         throw std::runtime_error("FLAC encoder init failed");
     }
     const size_t chunk = 4096;
-    const size_t frames = samples.size() / spec.channels;
+    const size_t frames = samples.size() / channels;
     bool ok = true;
     for (size_t at = 0; at < frames && ok; at += chunk) {
         size_t n = std::min(chunk, frames - at);
-        ok = FLAC__stream_encoder_process_interleaved(enc, samples.data() + at * spec.channels, unsigned(n));
+        ok = FLAC__stream_encoder_process_interleaved(enc, samples.data() + at * channels, unsigned(n));
     }
     std::string state = FLAC__stream_encoder_get_resolved_state_string(enc);
     ok = FLAC__stream_encoder_finish(enc) && ok;
     FLAC__stream_encoder_delete(enc);
     if (!ok) throw std::runtime_error("FLAC encoding failed: " + state);
+}
+
+void writeFlac(const std::filesystem::path& path, const GenSpec& spec) {
+    writeFlacSamples(path, makeSignal(spec), spec.sampleRate, spec.bits, spec.channels);
     if (!spec.md5) { // libFLAC has no public switch for this; zero the STREAMINFO MD5 (bytes 26..41) like encoders that skip it
         std::fstream io(path, std::ios::in | std::ios::out | std::ios::binary);
         const char zeros[16] = {};

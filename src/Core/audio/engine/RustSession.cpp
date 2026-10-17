@@ -73,6 +73,16 @@ Error engineError(const char* what, CamelEngineStatus status) {
     }
 }
 
+// Borrows `utf8`, which must outlive the call that receives the source.
+CamelTrackSourceV1 trackSource(const std::string& utf8) {
+    CamelTrackSourceV1 source{};
+    source.struct_size = sizeof(source);
+    source.abi_version = CAMEL_ENGINE_ABI_VERSION;
+    source.path_utf8 = reinterpret_cast<const uint8_t*>(utf8.data());
+    source.path_length_bytes = utf8.size();
+    return source;
+}
+
 void destroy(CamelEngine* engine) noexcept {
     camel_engine_quiesce_v1(engine);
     camel_engine_destroy_v1(engine);
@@ -90,11 +100,7 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
     if (const auto status = camel_engine_create_v1(&config, &engine_); status != CAMEL_ENGINE_OK)
         throw engineError("create", status);
     const auto utf8 = toUtf8(path.wstring());
-    CamelTrackSourceV1 source{};
-    source.struct_size = sizeof(source);
-    source.abi_version = CAMEL_ENGINE_ABI_VERSION;
-    source.path_utf8 = reinterpret_cast<const uint8_t*>(utf8.data());
-    source.path_length_bytes = utf8.size();
+    const auto source = trackSource(utf8);
     auto command = nextCommand();
     auto status = camel_engine_load_flac_v1(engine_, &command, &source, abiDecoder(decoder), &host_);
     if (status == CAMEL_ENGINE_OK && startFrame) {
@@ -170,6 +176,26 @@ RustSession::Rendered RustSession::render(uint8_t* destination, size_t frames, s
 
 void RustSession::reportAudible(uint64_t frame) {
     camel_engine_report_audible_position_v1(engine_, &command_, frame);
+}
+
+bool RustSession::queueNext(const std::filesystem::path& path, DecoderKind decoder) {
+    const auto utf8 = toUtf8(path.wstring());
+    const auto source = trackSource(utf8);
+    const auto command = nextCommand();
+    return camel_engine_queue_next_flac_v1(engine_, &command, &source, abiDecoder(decoder), &host_) == CAMEL_ENGINE_OK;
+}
+
+bool RustSession::clearNext() {
+    const auto command = nextCommand();
+    return camel_engine_clear_next_v1(engine_, &command) == CAMEL_ENGINE_OK;
+}
+
+RustSession::Transitions RustSession::transitions() const noexcept {
+    Transitions result;
+    uint32_t queued = 0;
+    camel_engine_get_transitions_v1(engine_, &result.count, &result.trackPosition, &queued);
+    result.nextQueued = queued != 0;
+    return result;
 }
 
 } // namespace camel::audio

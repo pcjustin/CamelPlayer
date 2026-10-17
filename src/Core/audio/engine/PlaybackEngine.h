@@ -30,8 +30,11 @@ struct EngineSnapshot {
     uint64_t underruns = 0;
     std::optional<ErrorCode> error; // last problem, shown until the next successful start
     std::string errorDetail;
-    uint64_t trackEnds = 0; // increments when a playback attempt ends on its own: natural end or a stopping failure
-    uint64_t revision = 0;  // increments on every change
+    uint64_t trackEnds = 0;    // increments when a playback attempt ends on its own: natural end or a stopping failure
+    uint64_t transitions = 0;  // increments when a queued file becomes the current one without reopening the device
+    size_t queuedFiles = 0;    // queued files not yet audible (at most two)
+    bool nextSlotFree = false; // another file may be queued now
+    uint64_t revision = 0;     // increments on every change
 
     bool bitPerfect() const { return output.has_value(); }
 };
@@ -57,6 +60,11 @@ public:
     void applySettings(const Settings& settings);
     // ASIO only: opens the driver's control panel. Blocks until the driver returns.
     bool showControlPanel();
+    // Gapless: queues the file that follows the current one. True when it will play without reopening the device,
+    // which needs the Rust Engine and the same negotiated output format.
+    bool queueNext(const std::filesystem::path& file);
+    // Withdraws the queued file; false when it is already committed and becomes current at its boundary.
+    bool clearNext();
 
     EngineSnapshot snapshot() const;
     // Called on the engine thread after every change; keep it short (e.g. post to the UI thread).

@@ -523,6 +523,188 @@ TEST(ServerQueueCaptureTest, NaturalEndAdvancesAndSkipsTrackLocalFailures) {
     std::filesystem::remove(options.file);
 }
 
+// Counts device opens of a wrapped output, which a gapless sequence must not repeat.
+class CountingOutput final : public IOutput {
+public:
+    CountingOutput(std::unique_ptr<IOutput> inner, std::atomic<int>& opens) : inner_(std::move(inner)), opens_(opens) {}
+    bool supports(const DeviceFormat& f) override { return inner_->supports(f); }
+    void open(const DeviceFormat& f, IRenderSource* source) override {
+        ++opens_;
+        inner_->open(f, source);
+    }
+    void start() override { inner_->start(); }
+    void pause() override { inner_->pause(); }
+    void close() override { inner_->close(); }
+    OutputStatus status() const override { return inner_->status(); }
+
+private:
+    std::unique_ptr<IOutput> inner_;
+    std::atomic<int>& opens_;
+};
+
+// Plays `sources` as one queue through a 32-bit capture device until the last entry stops.
+Snapshot playQueueToEnd(std::vector<TrackSource> sources, const std::filesystem::path& capture, std::atomic<int>& opens) {
+    CaptureOptions options;
+    options.file = capture;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true; // queuing the following file takes polls; real playback leaves seconds for that
+    LocalServer server(Settings{}, {},
+                       [&](const Settings&) { return std::make_unique<CountingOutput>(createCaptureOutput(options), opens); });
+    server.submit(queueReplace(std::move(sources)));
+    server.waitIdle();
+    const auto ids = entryIds(server.snapshot());
+    const auto deadline = std::chrono::steady_clock::now() + 30s;
+    Snapshot s = server.snapshot();
+    while (!(s.queueEntryId == ids.back() && s.playback.state == PlaybackState::Stopped) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(10ms);
+        s = server.snapshot();
+    }
+    return s;
+}
+
+TEST(ServerGaplessTest, MatchingTracksConcatenateBitExactlyThroughOneDeviceOpen) {
+    const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
+                                                      testutil::generatedFile({"gapless-short-24-96k", 96000, 24, 2, 0.3}),
+                                                      testutil::generatedFile({"gapless-tail-24-96k", 96000, 24, 2, 0.7})};
+    std::vector<int32_t> expected;
+    std::vector<TrackSource> sources;
+    for (const auto& file : files) {
+        const auto reference = testaudio::referenceDecode(file);
+        ASSERT_TRUE(reference.error.empty()) << reference.error;
+        expected.insert(expected.end(), reference.samples.begin(), reference.samples.end());
+        sources.emplace_back(toUtf8(file.wstring()));
+    }
+    const auto capture = testutil::tempDir() / "server-gapless.raw";
+    std::atomic<int> opens = 0;
+    const auto s = playQueueToEnd(sources, capture, opens);
+    EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
+    EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+    EXPECT_EQ(s.queueEntryId, s.queue.entries.back().id);
+    EXPECT_EQ(opens.load(), 1);
+
+    std::ifstream in(capture, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(in);
+    ASSERT_EQ(in.tellg(), std::streamoff(expected.size() * 4));
+    in.seekg(0);
+    std::vector<uint8_t> bytes(expected.size() * 4);
+    ASSERT_TRUE(in.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(bytes.size())));
+    in.close();
+    std::vector<int32_t> samples(expected.size());
+    unpackSamples(bytes.data(), samples.size(), 24, SampleType::Int32, samples.data());
+    EXPECT_TRUE(samples == expected);
+    std::filesystem::remove(capture);
+}
+
+std::vector<int32_t> concatenatedReferences(const std::vector<std::filesystem::path>& files) {
+    std::vector<int32_t> samples;
+    for (const auto& file : files) {
+        const auto reference = testaudio::referenceDecode(file);
+        EXPECT_TRUE(reference.error.empty()) << reference.error;
+        samples.insert(samples.end(), reference.samples.begin(), reference.samples.end());
+    }
+    return samples;
+}
+
+std::vector<int32_t> capturedSamples(const std::filesystem::path& capture) {
+    std::ifstream in(capture, std::ios::binary | std::ios::ate);
+    if (!in) return {};
+    std::vector<uint8_t> bytes(size_t(in.tellg()));
+    in.seekg(0);
+    in.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(bytes.size()));
+    std::vector<int32_t> samples(bytes.size() / 4);
+    unpackSamples(bytes.data(), samples.size(), 24, SampleType::Int32, samples.data());
+    return samples;
+}
+
+TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
+    const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
+                                                      testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3}),
+                                                      testutil::generatedFile({"gapless-c-24-96k", 96000, 24, 2, 0.4}),
+                                                      testutil::generatedFile({"gapless-d-24-96k", 96000, 24, 2, 0.5})};
+    const auto capture = testutil::tempDir() / "server-gapless-reorder.raw";
+    CaptureOptions options;
+    options.file = capture;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true;
+    std::atomic<int> opens = 0;
+    {
+        LocalServer server(Settings{}, {}, [&](const Settings&) {
+            return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
+        });
+        std::vector<TrackSource> sources;
+        for (const auto& file : files) sources.emplace_back(toUtf8(file.wstring()));
+        server.submit(queueReplace(sources));
+        server.waitIdle();
+        const auto ids = entryIds(server.snapshot());
+        std::this_thread::sleep_for(500ms); // b is already decoding behind a; c waits in the slot
+        Command reorder = command(CommandKind::QueueReorder);
+        reorder.entryIds = {ids[0], ids[1], ids[3], ids[2]};
+        server.submit(reorder);
+        const auto deadline = std::chrono::steady_clock::now() + 30s;
+        Snapshot s = server.snapshot();
+        while (!(s.queueEntryId == ids[2] && s.playback.state == PlaybackState::Stopped) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(10ms);
+            s = server.snapshot();
+        }
+        EXPECT_EQ(s.queueEntryId, ids[2]);
+        EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+    }
+    EXPECT_EQ(opens.load(), 1);
+    EXPECT_TRUE(capturedSamples(capture) == concatenatedReferences({files[0], files[1], files[3], files[2]}));
+    std::filesystem::remove(capture);
+}
+
+TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
+    const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
+                                                      testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3})};
+    const auto capture = testutil::tempDir() / "server-gapless-seek.raw";
+    CaptureOptions options;
+    options.file = capture;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true;
+    std::atomic<int> opens = 0;
+    {
+        LocalServer server(Settings{}, {}, [&](const Settings&) {
+            return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
+        });
+        server.submit(queueReplace({TrackSource(toUtf8(files[0].wstring())), TrackSource(toUtf8(files[1].wstring()))}));
+        server.waitIdle();
+        const auto ids = entryIds(server.snapshot());
+        Command seek = command(CommandKind::Seek);
+        seek.frame = 96000 * 3 / 2;
+        server.submit(seek);
+        const auto deadline = std::chrono::steady_clock::now() + 30s;
+        Snapshot s = server.snapshot();
+        while (!(s.queueEntryId == ids[1] && s.playback.state == PlaybackState::Stopped) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(10ms);
+            s = server.snapshot();
+        }
+        EXPECT_EQ(s.queueEntryId, ids[1]);
+        EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+    }
+    EXPECT_EQ(opens.load(), 2); // the seek reopens; the next file then follows without another open
+    const auto first = testaudio::referenceDecode(files[0]);
+    auto expected = std::vector<int32_t>(first.samples.begin() + 96000 * 3, first.samples.end());
+    const auto second = concatenatedReferences({files[1]});
+    expected.insert(expected.end(), second.begin(), second.end());
+    EXPECT_TRUE(capturedSamples(capture) == expected);
+    std::filesystem::remove(capture);
+}
+
+TEST(ServerGaplessTest, FormatChangeBetweenTracksReopensTheDevice) {
+    const auto capture = testutil::tempDir() / "server-format-change.raw";
+    std::atomic<int> opens = 0;
+    const auto s = playQueueToEnd({source("24-96k"), source("16-44.1k")}, capture, opens);
+    EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
+    EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+    EXPECT_EQ(s.queueEntryId, s.queue.entries.back().id);
+    EXPECT_EQ(opens.load(), 2);
+    std::filesystem::remove(capture);
+}
+
 class ServerCaptureTest : public ::testing::TestWithParam<DecoderKind> {};
 
 TEST_P(ServerCaptureTest, MatchesReferencePcmFor16And24BitFiles) {

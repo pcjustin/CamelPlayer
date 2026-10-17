@@ -354,7 +354,18 @@ pub struct CamelEngine {
     command: Mutex<CamelCommandStampV1>,
     source: Mutex<Option<DecoderSource>>,
     source_view: Mutex<Option<SourceView>>,
+    // Gapless: prefill swaps `next_source` in at the current source's end without clearing the ring. Frames are
+    // counted since the last ring reset; `boundary_at` is the frame where the next track starts, or NO_BOUNDARY.
+    next_source: Mutex<Option<DecoderSource>>,
+    written_frames: AtomicU64,
+    read_frames: AtomicU64,
+    boundary_at: AtomicU64,
+    boundary_start_frame: AtomicU64,
+    transitions: AtomicU64,
+    next_occupied: AtomicBool,
 }
+
+const NO_BOUNDARY: u64 = u64::MAX;
 
 // What queries report about the source. Decoder I/O holds `source` for its whole duration, so queries read this
 // copy, which every source change refreshes while still holding `source`.
@@ -386,6 +397,18 @@ impl CamelEngine {
 
     fn view(&self) -> Option<SourceView> {
         *self.source_view.lock().unwrap()
+    }
+
+    // Caller holds `source`; render must be drained.
+    fn reset_stream(&self) {
+        self.ring.clear();
+        self.written_frames.store(0, Ordering::Release);
+        self.read_frames.store(0, Ordering::Release);
+        self.boundary_at.store(NO_BOUNDARY, Ordering::Release);
+    }
+
+    fn boundary_pending(&self) -> bool {
+        self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY
     }
 }
 
@@ -475,6 +498,13 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     }),
                     source: Mutex::new(None),
                     source_view: Mutex::new(None),
+                    next_source: Mutex::new(None),
+                    written_frames: AtomicU64::new(0),
+                    read_frames: AtomicU64::new(0),
+                    boundary_at: AtomicU64::new(NO_BOUNDARY),
+                    boundary_start_frame: AtomicU64::new(0),
+                    transitions: AtomicU64::new(0),
+                    next_occupied: AtomicBool::new(false),
                 }));
                 ENGINE_OK
             }
@@ -496,7 +526,8 @@ fn validate_command(command: &CamelCommandStampV1) -> Result<(), EngineStatus> {
     Ok(())
 }
 
-fn begin_command(engine: &CamelEngine, command: &CamelCommandStampV1) -> Result<u64, EngineStatus> {
+// Accepts a newer command without cancelling in-flight decoder work.
+fn record_command(engine: &CamelEngine, command: &CamelCommandStampV1) -> Result<(), EngineStatus> {
     validate_command(command)?;
     let mut current = engine.command.lock().unwrap();
     if command.command_id <= engine.issued_command_id.load(Ordering::Acquire) {
@@ -506,7 +537,28 @@ fn begin_command(engine: &CamelEngine, command: &CamelCommandStampV1) -> Result<
     engine
         .issued_command_id
         .store(command.command_id, Ordering::Release);
+    Ok(())
+}
+
+fn begin_command(engine: &CamelEngine, command: &CamelCommandStampV1) -> Result<u64, EngineStatus> {
+    record_command(engine, command)?;
     Ok(engine.operation_epoch.fetch_add(1, Ordering::AcqRel) + 1)
+}
+
+unsafe fn track_host(
+    source: &CamelTrackSourceV1,
+    decoder_host: &CamelDecoderHostV1,
+) -> Result<DecoderHost, i32> {
+    if source.abi_version != ABI_VERSION {
+        return Err(ENGINE_E_ABI_MISMATCH);
+    }
+    if source.struct_size < std::mem::size_of::<CamelTrackSourceV1>() as u32
+        || decoder_host.abi_version != ABI_VERSION
+        || decoder_host.struct_size < std::mem::size_of::<CamelDecoderHostV1>() as u32
+    {
+        return Err(ENGINE_E_STRUCT_SIZE);
+    }
+    DecoderHost::from_abi(decoder_host).ok_or(ENGINE_E_INVALID_ARGUMENT)
 }
 
 fn operation_is_current(engine: &CamelEngine, epoch: u64) -> bool {
@@ -529,18 +581,9 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
         let engine = &*engine;
         let command = &*command;
         let source = &*source;
-        let decoder_host = &*decoder_host;
-        if source.abi_version != ABI_VERSION {
-            return ENGINE_E_ABI_MISMATCH;
-        }
-        if source.struct_size < std::mem::size_of::<CamelTrackSourceV1>() as u32
-            || decoder_host.abi_version != ABI_VERSION
-            || decoder_host.struct_size < std::mem::size_of::<CamelDecoderHostV1>() as u32
-        {
-            return ENGINE_E_STRUCT_SIZE;
-        }
-        let Some(host) = DecoderHost::from_abi(decoder_host) else {
-            return ENGINE_E_INVALID_ARGUMENT;
+        let host = match track_host(source, &*decoder_host) {
+            Ok(host) => host,
+            Err(status) => return status,
         };
         let epoch = match begin_command(engine, command) {
             Ok(epoch) => epoch,
@@ -559,7 +602,9 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
         if !operation_is_current(engine, epoch) {
             return ENGINE_E_NOT_READY;
         }
-        engine.ring.clear();
+        engine.reset_stream();
+        *engine.next_source.lock().unwrap() = None;
+        engine.next_occupied.store(false, Ordering::Release);
         engine.submitted_position.store(position, Ordering::Release);
         engine.audible_position.store(position, Ordering::Release);
         engine.render_error.store(ENGINE_OK, Ordering::Release);
@@ -602,6 +647,10 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
         let Some(source) = source.as_mut() else {
             return ENGINE_E_INVALID_STATE;
         };
+        // After a gapless swap the decoder already reads the next track while render still plays this one.
+        if engine.boundary_pending() {
+            return ENGINE_E_INVALID_STATE;
+        }
         if !source.can_seek(frame) {
             return ENGINE_E_SEEK;
         }
@@ -621,7 +670,7 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
         if !operation_is_current(engine, epoch) {
             return ENGINE_E_NOT_READY;
         }
-        engine.ring.clear();
+        engine.reset_stream();
         engine.submitted_position.store(frame, Ordering::Release);
         engine.audible_position.store(frame, Ordering::Release);
         engine.render_error.store(ENGINE_OK, Ordering::Release);
@@ -756,7 +805,9 @@ pub unsafe extern "C" fn camel_engine_stop_v1(
             } as usize,
             Ordering::Release,
         );
-        engine.ring.clear();
+        engine.reset_stream();
+        *engine.next_source.lock().unwrap() = None;
+        engine.next_occupied.store(false, Ordering::Release);
         engine.render_error.store(ENGINE_OK, Ordering::Release);
         engine
             .playback_state
@@ -851,6 +902,28 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                 if !operation_is_current(engine, epoch) {
                     return ENGINE_E_NOT_READY;
                 }
+                let mut next = engine.next_source.lock().unwrap();
+                if next.is_some() {
+                    // One boundary at a time: a second queued track waits until render reaches the first.
+                    if !engine.boundary_pending() {
+                        if let Some(next) = next.take() {
+                            engine
+                                .boundary_start_frame
+                                .store(next.start_frame(), Ordering::Release);
+                            *source = next;
+                        }
+                        engine.next_occupied.store(false, Ordering::Release);
+                        // A track queued after the previous end was reached keeps the stream going.
+                        engine
+                            .render_source_state
+                            .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
+                        engine.boundary_at.store(
+                            engine.written_frames.load(Ordering::Acquire),
+                            Ordering::Release,
+                        );
+                    }
+                    return ENGINE_OK;
+                }
                 engine
                     .render_source_state
                     .store(RENDER_STATE_END_OF_STREAM as usize, Ordering::Release);
@@ -902,6 +975,9 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                 engine.fail_render(ENGINE_E_INVALID_STATE);
                 return ENGINE_E_INVALID_STATE;
             }
+            engine
+                .written_frames
+                .fetch_add(frames_read, Ordering::AcqRel);
             *frames_prefilled = frames_read;
             ENGINE_OK
         })();
@@ -1136,6 +1212,115 @@ pub unsafe extern "C" fn camel_engine_get_flac_integrity_v1(
     }
 }
 
+/// # Safety
+/// All pointers must reference valid V1 structures for the call; decoder callbacks and their context must remain
+/// valid until the queued source is replaced, discarded or the Engine is destroyed. Commands must have strictly
+/// increasing IDs.
+///
+/// Queues the track that follows the current one gaplessly. It must decode to the current output format; otherwise
+/// the call fails and playback ends normally at the current track. Queuing again replaces a track not yet started.
+pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+    source: *const CamelTrackSourceV1,
+    decoder_kind: u32,
+    decoder_host: *const CamelDecoderHostV1,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || command.is_null() || source.is_null() || decoder_host.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let engine = &*engine;
+        let source = &*source;
+        let host = match track_host(source, &*decoder_host) {
+            Ok(host) => host,
+            Err(status) => return status,
+        };
+        if engine.format.stream_kind != AUDIO_PCM {
+            return ENGINE_E_UNSUPPORTED_FORMAT;
+        }
+        if engine.view().is_none() {
+            return ENGINE_E_INVALID_STATE;
+        }
+        if let Err(status) = record_command(engine, &*command) {
+            return status as i32;
+        }
+        let next = match DecoderSource::open(source, decoder_kind, host) {
+            Ok(next) => next,
+            Err(status) => return status,
+        };
+        if next.info.sample_rate != engine.output_format.rate_hz
+            || next.info.channel_count != engine.format.channel_count
+            || pack_pcm(&[], next.info.valid_bits, &engine.format, &mut []).is_err()
+        {
+            return ENGINE_E_UNSUPPORTED_FORMAT;
+        }
+        let mut slot = engine.next_source.lock().unwrap();
+        *slot = Some(next);
+        engine.next_occupied.store(true, Ordering::Release);
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` and `command` must remain valid for the call. Commands must have strictly increasing IDs.
+///
+/// Discards a queued next track. Fails with `CAMEL_ENGINE_E_INVALID_STATE` once decoding has already moved on to
+/// it; that track then becomes current at its boundary as queued.
+pub unsafe extern "C" fn camel_engine_clear_next_v1(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || command.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let engine = &*engine;
+        if let Err(status) = record_command(engine, &*command) {
+            return status as i32;
+        }
+        let mut next = engine.next_source.lock().unwrap();
+        if next.is_none() && engine.boundary_pending() {
+            return ENGINE_E_INVALID_STATE;
+        }
+        *next = None;
+        engine.next_occupied.store(false, Ordering::Release);
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` must be live; the output pointers must be writable. Safe on the output callback thread: it only reads
+/// atomics.
+///
+/// Reports how many queued tracks have become audible, the current track position (submitted frames) and whether
+/// a queued track still waits in the slot.
+pub unsafe extern "C" fn camel_engine_get_transitions_v1(
+    engine: *mut CamelEngine,
+    transitions: *mut u64,
+    track_position: *mut u64,
+    next_queued: *mut u32,
+) -> i32 {
+    if engine.is_null()
+        || transitions.is_null()
+        || track_position.is_null()
+        || next_queued.is_null()
+    {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    let engine = &*engine;
+    *transitions = engine.transitions.load(Ordering::Acquire);
+    *track_position = engine.submitted_position.load(Ordering::Acquire);
+    *next_queued = u32::from(engine.next_occupied.load(Ordering::Acquire));
+    ENGINE_OK
+}
+
 fn empty_format() -> CamelAudioFormatV1 {
     CamelAudioFormatV1 {
         struct_size: std::mem::size_of::<CamelAudioFormatV1>() as u32,
@@ -1271,9 +1456,25 @@ pub unsafe extern "C" fn camel_engine_render_v1(
         };
         let rendered_frames = rendered_bytes / bytes_per_frame;
         result.units_rendered = rendered_frames as u64;
-        engine
-            .submitted_position
+        let before = engine
+            .read_frames
             .fetch_add(rendered_frames as u64, Ordering::AcqRel);
+        let after = before + rendered_frames as u64;
+        let boundary = engine.boundary_at.load(Ordering::Acquire);
+        if boundary != NO_BOUNDARY && boundary <= after {
+            // The queued track is now audible: its position restarts at the boundary.
+            engine.boundary_at.store(NO_BOUNDARY, Ordering::Release);
+            let start = engine.boundary_start_frame.load(Ordering::Acquire);
+            engine
+                .submitted_position
+                .store(start + (after - boundary), Ordering::Release);
+            engine.audible_position.store(start, Ordering::Release);
+            engine.transitions.fetch_add(1, Ordering::AcqRel);
+        } else {
+            engine
+                .submitted_position
+                .fetch_add(rendered_frames as u64, Ordering::AcqRel);
+        }
 
         let source_state = engine.render_source_state.load(Ordering::Acquire) as u32;
         if source_state == RENDER_STATE_END_OF_STREAM && engine.ring.readable() == 0 {
@@ -1610,6 +1811,175 @@ mod tests {
                 &host,
             )
         }
+    }
+
+    fn queue_mock_next(engine: *mut CamelEngine, command_id: u64) -> i32 {
+        let path = b"next.flac";
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let host = mock_host();
+        unsafe {
+            camel_engine_queue_next_flac_v1(
+                engine,
+                &command_stamp(command_id),
+                &source,
+                decoder_host::DECODER_FFMPEG,
+                &host,
+            )
+        }
+    }
+
+    fn transitions(engine: *mut CamelEngine) -> (u64, u64, u32) {
+        let (mut count, mut position, mut queued) = (0, 0, 0);
+        assert_eq!(
+            unsafe {
+                camel_engine_get_transitions_v1(engine, &mut count, &mut position, &mut queued)
+            },
+            ENGINE_OK
+        );
+        (count, position, queued)
+    }
+
+    fn mock_engine_at_48k() -> *mut CamelEngine {
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        cfg.format.rate_hz = 48_000;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source(engine), ENGINE_OK);
+        engine
+    }
+
+    fn prefill_until_end(engine: *mut CamelEngine) -> u64 {
+        let mut total = 0;
+        loop {
+            let mut frames = 0;
+            match unsafe { camel_engine_prefill_v1(engine, 4, &mut frames) } {
+                ENGINE_OK => total += frames,
+                ENGINE_END => return total,
+                status => panic!("prefill failed: {status}"),
+            }
+        }
+    }
+
+    #[test]
+    fn queued_track_follows_without_a_gap_and_restarts_track_position() {
+        let engine = mock_engine_at_48k();
+        let play = command_stamp(2);
+        assert_eq!(unsafe { camel_engine_play_v1(engine, &play) }, ENGINE_OK);
+        assert_eq!(queue_mock_next(engine, 3), ENGINE_OK);
+        assert_eq!(prefill_until_end(engine), 8);
+
+        let mut output = [0u8; 24];
+        let request = render_request(6, &mut output);
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_OK
+        );
+        assert_eq!(result.units_rendered, 6);
+        let samples: Vec<i16> = output
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect();
+        assert_eq!(samples, [1, -1, 2, -2, 3, -3, 4, -4, 1, -1, 2, -2]);
+        assert_eq!(transitions(engine), (1, 2, 0));
+
+        let mut tail = [0u8; 16];
+        let request = render_request(4, &mut tail);
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_END
+        );
+        assert_eq!(result.units_rendered, 2);
+        assert_eq!(transitions(engine), (1, 4, 0));
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn track_queued_after_the_end_was_decoded_continues_the_stream() {
+        let engine = mock_engine_at_48k();
+        let play = command_stamp(2);
+        assert_eq!(unsafe { camel_engine_play_v1(engine, &play) }, ENGINE_OK);
+        assert_eq!(prefill_until_end(engine), 4);
+        assert_eq!(queue_mock_next(engine, 3), ENGINE_OK);
+        assert_eq!(prefill_until_end(engine), 4);
+
+        let mut output = [0u8; 32];
+        let request = render_request(8, &mut output);
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_OK
+        );
+        assert_eq!(result.units_rendered, 8);
+        assert_eq!(transitions(engine), (1, 4, 0));
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn queued_track_can_be_cleared_until_decoding_reaches_it() {
+        let engine = mock_engine_at_48k();
+        assert_eq!(queue_mock_next(engine, 2), ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_clear_next_v1(engine, &command_stamp(3)) },
+            ENGINE_OK
+        );
+        assert_eq!(prefill_until_end(engine), 4);
+        assert_eq!(transitions(engine).0, 0);
+
+        let engine2 = mock_engine_at_48k();
+        assert_eq!(queue_mock_next(engine2, 2), ENGINE_OK);
+        assert_eq!(transitions(engine2).2, 1);
+        let mut frames = 0;
+        assert_eq!(
+            unsafe { camel_engine_prefill_v1(engine2, 4, &mut frames) },
+            ENGINE_OK
+        );
+        assert_eq!(
+            unsafe { camel_engine_prefill_v1(engine2, 4, &mut frames) },
+            ENGINE_OK
+        );
+        assert_eq!(frames, 0); // swapped to the queued track
+        assert_eq!(transitions(engine2).2, 0);
+        assert_eq!(
+            unsafe { camel_engine_clear_next_v1(engine2, &command_stamp(3)) },
+            ENGINE_E_INVALID_STATE
+        );
+        assert_eq!(
+            unsafe { camel_engine_seek_v1(engine2, &command_stamp(4), 1) },
+            ENGINE_E_INVALID_STATE
+        );
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine2) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn queued_track_must_match_the_output_format() {
+        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(queue_mock_next(engine, 1), ENGINE_E_INVALID_STATE);
+        assert_eq!(load_mock_source(engine), ENGINE_OK);
+        // The 48 kHz mock does not match this 96 kHz output.
+        assert_eq!(queue_mock_next(engine, 2), ENGINE_E_UNSUPPORTED_FORMAT);
+        assert_eq!(prefill_until_end(engine), 4);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
     fn command_stamp(command_id: u64) -> CamelCommandStampV1 {

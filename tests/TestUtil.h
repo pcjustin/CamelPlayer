@@ -34,6 +34,14 @@ inline std::filesystem::path testFile(const char* name) {
     return tempDir() / (std::string(name) + ".flac");
 }
 
+// A FLAC file for `spec`, generated on first use next to the testFile set.
+inline std::filesystem::path generatedFile(const camel::audio::testaudio::GenSpec& spec) {
+    const auto path = tempDir() / (spec.name + ".flac");
+    std::error_code error;
+    if (!std::filesystem::exists(path, error)) camel::audio::testaudio::writeFlac(path, spec);
+    return path;
+}
+
 inline std::filesystem::path acceptanceFile(const char* name) {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
