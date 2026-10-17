@@ -48,6 +48,13 @@ int32_t loadSource(CamelEngine* engine, const std::filesystem::path& path, uint3
     return camel_engine_load_flac_v1(engine, &command, &source, decoderKind, &host);
 }
 
+CamelFlacIntegrityV1 flacIntegrity(CamelEngine* engine) {
+    CamelFlacIntegrityV1 integrity{
+        sizeof(CamelFlacIntegrityV1), CAMEL_ENGINE_ABI_VERSION, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX};
+    EXPECT_EQ(camel_engine_get_flac_integrity_v1(engine, &integrity), CAMEL_ENGINE_OK);
+    return integrity;
+}
+
 void destroyEngine(CamelEngine* engine) {
     ASSERT_NE(engine, nullptr);
     EXPECT_EQ(camel_engine_quiesce_v1(engine), CAMEL_ENGINE_OK);
@@ -122,6 +129,7 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
             EXPECT_EQ(state.source_format.channel_count, reference.info.channels);
             EXPECT_EQ(state.source_format.valid_bits, reference.info.bitsPerSample);
             EXPECT_EQ(state.total_frames, reference.info.totalFrames);
+            EXPECT_EQ(flacIntegrity(engine).status, CAMEL_FLAC_INTEGRITY_INCOMPLETE);
 
             std::vector<int32_t> samples;
             std::array<int32_t, 4096 * 2> chunk{};
@@ -133,6 +141,11 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
                 if (status == CAMEL_ENGINE_END) break;
             }
             EXPECT_EQ(samples, reference.samples) << "decoder=" << decoderKind << " file=" << name;
+            const auto verified = flacIntegrity(engine);
+            EXPECT_EQ(verified.status, CAMEL_FLAC_INTEGRITY_VERIFIED) << "decoder=" << decoderKind << " file=" << name;
+            EXPECT_EQ(verified.has_reference_md5, 1u);
+            EXPECT_EQ(verified.total_frames, reference.info.totalFrames);
+            EXPECT_EQ(verified.position_frames, reference.info.totalFrames);
 
             constexpr uint64_t seekFrame = 12345;
             CamelCommandStampV1 command{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 2, 1, 1};
@@ -144,6 +157,95 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
             const auto begin = reference.samples.begin() + seekFrame * reference.info.channels;
             EXPECT_TRUE(std::equal(seekSamples.begin(), seekSamples.end(), begin))
                 << "seek decoder=" << decoderKind << " file=" << name;
+            destroyEngine(engine);
+        }
+    }
+}
+
+TEST(RustEngineHost, ReportsIncompleteUnavailableAndFailedFlacIntegrity) {
+    constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
+                                                  CAMEL_DECODER_SNDFILE};
+    for (const auto decoderKind : decoders) {
+        auto* engine = createEngine();
+        ASSERT_NE(engine, nullptr);
+        ASSERT_EQ(loadSource(engine, testutil::testFile("no-md5"), decoderKind), CAMEL_ENGINE_OK);
+        auto integrity = flacIntegrity(engine);
+        EXPECT_EQ(integrity.status, CAMEL_FLAC_INTEGRITY_UNAVAILABLE) << decoderKind;
+        EXPECT_EQ(integrity.has_reference_md5, 0u) << decoderKind;
+        destroyEngine(engine);
+
+        engine = createEngine();
+        ASSERT_NE(engine, nullptr);
+        ASSERT_EQ(loadSource(engine, testutil::testFile("24-96k"), decoderKind, 100, 180, true), CAMEL_ENGINE_OK);
+        std::array<int32_t, 512> samples{};
+        uint64_t framesRead = 0;
+        EXPECT_EQ(camel_engine_read_decoded_v1(engine, samples.data(), 512, &framesRead), CAMEL_ENGINE_OK);
+        EXPECT_EQ(framesRead, 80u);
+        EXPECT_EQ(camel_engine_read_decoded_v1(engine, samples.data(), 512, &framesRead), CAMEL_ENGINE_END);
+        EXPECT_EQ(flacIntegrity(engine).status, CAMEL_FLAC_INTEGRITY_INCOMPLETE) << decoderKind;
+        destroyEngine(engine);
+
+        for (const auto* name : {"damaged", "truncated"}) {
+            engine = createEngine();
+            ASSERT_NE(engine, nullptr);
+            ASSERT_EQ(loadSource(engine, testutil::testFile(name), decoderKind), CAMEL_ENGINE_OK) << decoderKind << " " << name;
+            std::array<int32_t, 4096 * 2> chunk{};
+            int32_t status = CAMEL_ENGINE_OK;
+            while (status == CAMEL_ENGINE_OK) {
+                status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
+            }
+            EXPECT_EQ(status, CAMEL_ENGINE_E_DECODE) << decoderKind << " " << name;
+            integrity = flacIntegrity(engine);
+            EXPECT_EQ(integrity.status, CAMEL_FLAC_INTEGRITY_FAILED) << decoderKind << " " << name;
+            EXPECT_EQ(integrity.has_reference_md5, 1u) << decoderKind << " " << name;
+            destroyEngine(engine);
+        }
+    }
+}
+
+TEST(RustEngineHost, FullTrackRangeFinalizesIntegrityAndMissingMd5StaysUnavailable) {
+    auto* engine = createEngine();
+    ASSERT_NE(engine, nullptr);
+    const auto full = camel::audio::testaudio::referenceDecode(testutil::testFile("24-96k"));
+    ASSERT_TRUE(full.error.empty()) << full.error;
+    ASSERT_EQ(loadSource(engine, testutil::testFile("24-96k"), CAMEL_DECODER_SNDFILE, 0, full.info.totalFrames, true),
+              CAMEL_ENGINE_OK);
+    std::array<int32_t, 4096 * 2> chunk{};
+    uint64_t framesRead = 0;
+    int32_t status = CAMEL_ENGINE_OK;
+    while (status == CAMEL_ENGINE_OK) status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
+    ASSERT_EQ(status, CAMEL_ENGINE_END);
+    EXPECT_EQ(flacIntegrity(engine).status, CAMEL_FLAC_INTEGRITY_VERIFIED);
+    destroyEngine(engine);
+
+    engine = createEngine();
+    ASSERT_NE(engine, nullptr);
+    ASSERT_EQ(loadSource(engine, testutil::testFile("no-md5"), CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
+    status = CAMEL_ENGINE_OK;
+    while (status == CAMEL_ENGINE_OK) status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
+    ASSERT_EQ(status, CAMEL_ENGINE_END);
+    const auto unavailable = flacIntegrity(engine);
+    EXPECT_EQ(unavailable.status, CAMEL_FLAC_INTEGRITY_UNAVAILABLE);
+    EXPECT_EQ(unavailable.has_reference_md5, 0u);
+    destroyEngine(engine);
+}
+
+TEST(RustEngineHost, CorruptAndTruncatedFlacFailIntegrityForEveryDecoder) {
+    constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
+                                                  CAMEL_DECODER_SNDFILE};
+    for (const auto* name : {"damaged", "truncated"}) {
+        for (const auto decoderKind : decoders) {
+            auto* engine = createEngine();
+            ASSERT_NE(engine, nullptr);
+            ASSERT_EQ(loadSource(engine, testutil::testFile(name), decoderKind), CAMEL_ENGINE_OK) << name << " " << decoderKind;
+            std::array<int32_t, 4096 * 2> chunk{};
+            uint64_t framesRead = 0;
+            int32_t status = CAMEL_ENGINE_OK;
+            while (status == CAMEL_ENGINE_OK) status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
+            EXPECT_EQ(status, CAMEL_ENGINE_E_DECODE) << name << " " << decoderKind;
+            const auto integrity = flacIntegrity(engine);
+            EXPECT_EQ(integrity.status, CAMEL_FLAC_INTEGRITY_FAILED) << name << " " << decoderKind;
+            EXPECT_EQ(integrity.has_reference_md5, 1u) << name << " " << decoderKind;
             destroyEngine(engine);
         }
     }

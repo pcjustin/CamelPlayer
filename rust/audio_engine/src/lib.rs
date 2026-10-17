@@ -41,6 +41,10 @@ pub const ENGINE_E_DECODE: i32 = -11;
 pub const ENGINE_E_SEEK: i32 = -12;
 
 pub const RENDER_STATE_NO_SOURCE: u32 = 0;
+pub use decoder_host::{
+    FLAC_INTEGRITY_FAILED, FLAC_INTEGRITY_INCOMPLETE, FLAC_INTEGRITY_UNAVAILABLE,
+    FLAC_INTEGRITY_VERIFIED,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -122,6 +126,17 @@ pub struct CamelEngineStateV1 {
     pub reserved: u32,
     pub source_format: CamelAudioFormatV1,
     pub output_format: CamelAudioFormatV1,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelFlacIntegrityV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub status: u32,
+    pub has_reference_md5: u32,
+    pub total_frames: u64,
+    pub position_frames: u64,
 }
 
 #[repr(i32)]
@@ -518,6 +533,42 @@ pub unsafe extern "C" fn camel_engine_get_state_v1(
     }
 }
 
+/// # Safety
+/// `engine` and `integrity` must reference a live handle and writable V1 state.
+pub unsafe extern "C" fn camel_engine_get_flac_integrity_v1(
+    engine: *mut CamelEngine,
+    integrity: *mut CamelFlacIntegrityV1,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || integrity.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let integrity = &mut *integrity;
+        if integrity.abi_version != ABI_VERSION {
+            return ENGINE_E_ABI_MISMATCH;
+        }
+        if integrity.struct_size < std::mem::size_of::<CamelFlacIntegrityV1>() as u32 {
+            return ENGINE_E_STRUCT_SIZE;
+        }
+        let source = (&*engine).source.lock().unwrap();
+        let Some(source) = source.as_ref() else {
+            integrity.status = FLAC_INTEGRITY_UNAVAILABLE;
+            integrity.has_reference_md5 = 0;
+            integrity.total_frames = 0;
+            integrity.position_frames = 0;
+            return ENGINE_OK;
+        };
+        integrity.status = source.integrity_status();
+        integrity.has_reference_md5 = u32::from(source.has_reference_md5());
+        integrity.total_frames = source.info.total_frames;
+        integrity.position_frames = source.position();
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
 fn empty_format() -> CamelAudioFormatV1 {
     CamelAudioFormatV1 {
         struct_size: std::mem::size_of::<CamelAudioFormatV1>() as u32,
@@ -645,8 +696,15 @@ mod tests {
         position: usize,
     }
 
+    #[derive(Clone)]
+    struct MockMetadata {
+        total_frames: u64,
+        has_md5: u32,
+        md5: [u8; 16],
+    }
+
     unsafe extern "C" fn mock_open(
-        _: *mut c_void,
+        context: *mut c_void,
         _: u32,
         _: *const u8,
         _: u64,
@@ -658,6 +716,15 @@ mod tests {
             position: 0,
         });
         *out_decoder = Box::into_raw(decoder).cast();
+        let metadata = if context.is_null() {
+            MockMetadata {
+                total_frames: 4,
+                has_md5: 0,
+                md5: [0; 16],
+            }
+        } else {
+            (&*context.cast::<MockMetadata>()).to_owned()
+        };
         *info = CamelSourceInfoV1 {
             struct_size: std::mem::size_of::<CamelSourceInfoV1>() as u32,
             abi_version: ABI_VERSION,
@@ -665,10 +732,10 @@ mod tests {
             channel_count: 2,
             valid_bits: 16,
             reserved: 0,
-            total_frames: 4,
-            has_md5: 0,
+            total_frames: metadata.total_frames,
+            has_md5: metadata.has_md5,
             reserved2: 0,
-            md5: [0; 16],
+            md5: metadata.md5,
         };
         0
     }
@@ -718,6 +785,18 @@ mod tests {
         }
     }
 
+    fn mock_host_with_metadata(metadata: &mut MockMetadata) -> CamelDecoderHostV1 {
+        CamelDecoderHostV1 {
+            struct_size: std::mem::size_of::<CamelDecoderHostV1>() as u32,
+            abi_version: ABI_VERSION,
+            context: (metadata as *mut MockMetadata).cast(),
+            open: Some(mock_open),
+            read: Some(mock_read),
+            seek: Some(mock_seek),
+            close: Some(mock_close),
+        }
+    }
+
     fn format(
         stream_kind: u32,
         sample_format: u32,
@@ -758,6 +837,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelRenderRequestV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelRenderResultV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelEngineStateV1>(), 152);
+        assert_eq!(std::mem::size_of::<CamelFlacIntegrityV1>(), 32);
         assert_eq!(std::mem::offset_of!(CamelAudioFormatV1, channel_mask), 32);
         assert_eq!(std::mem::offset_of!(CamelEngineConfigV1, format), 16);
         assert_eq!(std::mem::offset_of!(CamelCommandStampV1, command_id), 8);
@@ -908,6 +988,64 @@ mod tests {
         assert_eq!(decoded.read(&mut output, 1), Ok(1));
         assert_eq!(&output[..2], &[3, -3]);
         assert_eq!(decoded.seek(3), Err(ENGINE_E_SEEK));
+    }
+
+    #[test]
+    fn unknown_total_is_verified_only_after_complete_eof() {
+        let path = b"mock.flac";
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let mut metadata = MockMetadata {
+            total_frames: 0,
+            has_md5: 1,
+            md5: [0xA5; 16],
+        };
+        let host_abi = mock_host_with_metadata(&mut metadata);
+        let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
+        let mut decoded =
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_FFMPEG, host) }.unwrap();
+        let mut output = [0; 8];
+        assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_INCOMPLETE);
+        assert_eq!(decoded.read(&mut output, 4), Ok(4));
+        assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_INCOMPLETE);
+        assert_eq!(decoded.read(&mut output, 1), Ok(0));
+        assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_VERIFIED);
+    }
+
+    #[test]
+    fn known_total_mismatch_marks_integrity_failed() {
+        let path = b"mock.flac";
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let mut metadata = MockMetadata {
+            total_frames: 5,
+            has_md5: 1,
+            md5: [0xA5; 16],
+        };
+        let host_abi = mock_host_with_metadata(&mut metadata);
+        let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
+        let mut decoded =
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_FFMPEG, host) }.unwrap();
+        let mut output = [0; 8];
+        assert_eq!(decoded.read(&mut output, 4), Ok(4));
+        assert_eq!(decoded.read(&mut output, 1), Err(ENGINE_E_DECODE));
+        assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_FAILED);
     }
 
     #[test]

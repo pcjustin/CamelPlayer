@@ -11,6 +11,7 @@ typedef char CamelDecoderHostV1Size[(sizeof(CamelDecoderHostV1) == 48) ? 1 : -1]
 typedef char CamelRenderRequestV1Size[(sizeof(CamelRenderRequestV1) == 32) ? 1 : -1];
 typedef char CamelRenderResultV1Size[(sizeof(CamelRenderResultV1) == 32) ? 1 : -1];
 typedef char CamelEngineStateV1Size[(sizeof(CamelEngineStateV1) == 152) ? 1 : -1];
+typedef char CamelFlacIntegrityV1Size[(sizeof(CamelFlacIntegrityV1) == 32) ? 1 : -1];
 
 uint32_t camel_engine_abi_header_c_compiles(void) {
     return CAMEL_ENGINE_ABI_VERSION;

@@ -63,6 +63,11 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_PLAYBACK_STOPPED 4u
 #define CAMEL_PLAYBACK_FAILED 5u
 
+#define CAMEL_FLAC_INTEGRITY_UNAVAILABLE 0u
+#define CAMEL_FLAC_INTEGRITY_INCOMPLETE 1u
+#define CAMEL_FLAC_INTEGRITY_VERIFIED 2u
+#define CAMEL_FLAC_INTEGRITY_FAILED 3u
+
 typedef struct CamelAudioFormatV1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -161,6 +166,15 @@ typedef struct CamelEngineStateV1 {
     CamelAudioFormatV1 output_format;
 } CamelEngineStateV1;
 
+typedef struct CamelFlacIntegrityV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t status;
+    uint32_t has_reference_md5;
+    uint64_t total_frames;
+    uint64_t position_frames;
+} CamelFlacIntegrityV1;
+
 typedef struct CamelEngine CamelEngine;
 
 uint32_t camel_engine_abi_version(void);
@@ -178,6 +192,7 @@ CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* out
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,
                                                     const CamelAudioFormatV1* format);
 CamelEngineStatus camel_engine_get_state_v1(CamelEngine* engine, CamelEngineStateV1* state);
+CamelEngineStatus camel_engine_get_flac_integrity_v1(CamelEngine* engine, CamelFlacIntegrityV1* integrity);
 CamelEngineStatus camel_engine_copy_last_error_v1(CamelEngine* engine, uint8_t* output, uint64_t output_capacity_bytes,
                                                   uint64_t* required_bytes);
 CamelEngineStatus camel_engine_render_v1(CamelEngine* engine, const CamelRenderRequestV1* request, CamelRenderResultV1* result);

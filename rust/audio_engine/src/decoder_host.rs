@@ -14,6 +14,11 @@ pub const HOST_E_UNSUPPORTED: i32 = -3;
 pub const HOST_E_DECODE: i32 = -4;
 pub const HOST_E_SEEK: i32 = -5;
 
+pub const FLAC_INTEGRITY_UNAVAILABLE: u32 = 0;
+pub const FLAC_INTEGRITY_INCOMPLETE: u32 = 1;
+pub const FLAC_INTEGRITY_VERIFIED: u32 = 2;
+pub const FLAC_INTEGRITY_FAILED: u32 = 3;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CamelSourceInfoV1 {
@@ -91,6 +96,8 @@ pub(crate) struct DecoderSource {
     position: u64,
     start_frame: u64,
     end_frame: Option<u64>,
+    integrity_status: u32,
+    full_coverage_possible: bool,
 }
 
 impl DecoderSource {
@@ -191,6 +198,11 @@ impl DecoderSource {
             }
         }
 
+        let has_reference_md5 = info.has_md5 != 0 && info.md5.iter().any(|byte| *byte != 0);
+        let full_coverage_possible = source.start_frame == 0
+            && (end_frame.is_none()
+                || info.total_frames != 0 && end_frame == Some(info.total_frames));
+
         Ok(Self {
             decoder: decoder as usize,
             host,
@@ -198,6 +210,12 @@ impl DecoderSource {
             position: source.start_frame,
             start_frame: source.start_frame,
             end_frame,
+            integrity_status: if has_reference_md5 {
+                FLAC_INTEGRITY_INCOMPLETE
+            } else {
+                FLAC_INTEGRITY_UNAVAILABLE
+            },
+            full_coverage_possible,
         })
     }
 
@@ -209,6 +227,32 @@ impl DecoderSource {
             .unwrap_or(u64::MAX);
         let frames = capacity.min(remaining);
         if frames == 0 {
+            if self.full_coverage_possible
+                && self.info.total_frames != 0
+                && self.position == self.info.total_frames
+            {
+                let mut frames_read = 0;
+                let status = unsafe {
+                    (self.host.read)(
+                        self.host.context(),
+                        self.decoder as *mut c_void,
+                        output.as_mut_ptr(),
+                        1,
+                        &mut frames_read,
+                    )
+                };
+                if status != HOST_OK || frames_read != 0 {
+                    self.integrity_status = FLAC_INTEGRITY_FAILED;
+                    return Err(if status == HOST_OK {
+                        crate::ENGINE_E_DECODE
+                    } else {
+                        map_host_status(status)
+                    });
+                }
+                if self.integrity_status == FLAC_INTEGRITY_INCOMPLETE {
+                    self.integrity_status = FLAC_INTEGRITY_VERIFIED;
+                }
+            }
             return Ok(0);
         }
         let mut frames_read = 0;
@@ -222,15 +266,32 @@ impl DecoderSource {
             )
         };
         if status != HOST_OK {
+            self.integrity_status = FLAC_INTEGRITY_FAILED;
             return Err(map_host_status(status));
         }
         if frames_read > frames {
+            self.integrity_status = FLAC_INTEGRITY_FAILED;
             return Err(crate::ENGINE_E_DECODE);
         }
-        self.position = self
-            .position
-            .checked_add(frames_read)
-            .ok_or(crate::ENGINE_E_DECODE)?;
+        if frames_read == 0 {
+            if self.info.total_frames != 0 && self.position != self.info.total_frames {
+                self.integrity_status = FLAC_INTEGRITY_FAILED;
+                return Err(crate::ENGINE_E_DECODE);
+            }
+            if self.full_coverage_possible && self.integrity_status == FLAC_INTEGRITY_INCOMPLETE {
+                self.integrity_status = FLAC_INTEGRITY_VERIFIED;
+            }
+            return Ok(0);
+        }
+        let Some(position) = self.position.checked_add(frames_read) else {
+            self.integrity_status = FLAC_INTEGRITY_FAILED;
+            return Err(crate::ENGINE_E_DECODE);
+        };
+        self.position = position;
+        if self.info.total_frames != 0 && self.position > self.info.total_frames {
+            self.integrity_status = FLAC_INTEGRITY_FAILED;
+            return Err(crate::ENGINE_E_DECODE);
+        }
         Ok(frames_read)
     }
 
@@ -247,11 +308,30 @@ impl DecoderSource {
             return Err(map_host_status(status));
         }
         self.position = frame;
+        self.full_coverage_possible = frame == 0
+            && (self.end_frame.is_none()
+                || self.info.total_frames != 0 && self.end_frame == Some(self.info.total_frames));
+        if self.integrity_status != FLAC_INTEGRITY_VERIFIED {
+            self.integrity_status =
+                if self.info.has_md5 != 0 && self.info.md5.iter().any(|byte| *byte != 0) {
+                    FLAC_INTEGRITY_INCOMPLETE
+                } else {
+                    FLAC_INTEGRITY_UNAVAILABLE
+                };
+        }
         Ok(())
     }
 
     pub(crate) fn position(&self) -> u64 {
         self.position
+    }
+
+    pub(crate) fn integrity_status(&self) -> u32 {
+        self.integrity_status
+    }
+
+    pub(crate) fn has_reference_md5(&self) -> bool {
+        self.info.has_md5 != 0 && self.info.md5.iter().any(|byte| *byte != 0)
     }
 }
 

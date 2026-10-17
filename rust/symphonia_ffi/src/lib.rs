@@ -99,6 +99,16 @@ pub unsafe extern "C" fn camel_engine_get_state_v1(
     unsafe { camel_audio_engine::camel_engine_get_state_v1(engine, state) }
 }
 
+#[no_mangle]
+/// # Safety
+/// Both pointers must reference valid engine and writable integrity state for this call.
+pub unsafe extern "C" fn camel_engine_get_flac_integrity_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    integrity: *mut camel_audio_engine::CamelFlacIntegrityV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_get_flac_integrity_v1(engine, integrity) }
+}
+
 /// # Safety
 /// `engine` must be a live handle, and the caller must prevent new calls from starting during quiescence.
 #[no_mangle]
