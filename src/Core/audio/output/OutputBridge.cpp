@@ -1,5 +1,7 @@
 #include "audio/output/OutputBridge.h"
 
+#include <windows.h>
+
 #include <thread>
 #include <utility>
 
@@ -15,6 +17,7 @@ OutputBridge::~OutputBridge() {
     try {
         close();
     } catch (...) {
+        OutputDebugStringW(L"OutputBridge: failed to close output during destruction.\n");
     }
 }
 
@@ -37,6 +40,7 @@ void OutputBridge::open(const DeviceFormat& format, IRenderSource* source) {
         try {
             output_->close();
         } catch (...) {
+            OutputDebugStringW(L"OutputBridge: failed to close output after open failure.\n");
         }
         waitForRenderQuiescence();
         source_.store(nullptr, std::memory_order_release);
