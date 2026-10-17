@@ -79,6 +79,17 @@ pub unsafe extern "C" fn camel_engine_read_decoded_v1(
 }
 
 /// # Safety
+/// `engine` and `frames_prefilled` must reference valid storage. Call from one decode worker only.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_prefill_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    frame_limit: u64,
+    frames_prefilled: *mut u64,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_prefill_v1(engine, frame_limit, frames_prefilled) }
+}
+
+/// # Safety
 /// `engine` and `command` must remain valid for the call.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_seek_v1(

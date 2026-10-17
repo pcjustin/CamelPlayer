@@ -55,6 +55,7 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_RENDER_STATE_ACTIVE 1u
 #define CAMEL_RENDER_STATE_END_OF_STREAM 2u
 #define CAMEL_RENDER_STATE_FAULT 3u
+#define CAMEL_RENDER_STATE_UNDERRUN 4u
 
 #define CAMEL_PLAYBACK_EMPTY 0u
 #define CAMEL_PLAYBACK_READY 1u
@@ -187,6 +188,7 @@ CamelEngineStatus camel_engine_play_v1(CamelEngine* engine, const CamelCommandSt
 CamelEngineStatus camel_engine_pause_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_stop_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_seek_v1(CamelEngine* engine, const CamelCommandStampV1* command, uint64_t frame);
+CamelEngineStatus camel_engine_prefill_v1(CamelEngine* engine, uint64_t frame_limit, uint64_t* frames_prefilled);
 CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
                                                uint64_t* frames_read);
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,

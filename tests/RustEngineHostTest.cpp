@@ -9,6 +9,7 @@
 #include "audio/decode/DecoderHost.h"
 #include "audio/testing/TestAudio.h"
 #include "audio/engine/EngineAbi.h"
+#include "audio/engine/SamplePacker.h"
 #include "util/Text.h"
 #include "TestUtil.h"
 
@@ -109,6 +110,47 @@ TEST(RustEngineHost, RenderRejectsInsufficientOutputBufferWithoutWriting) {
     EXPECT_EQ(camel_engine_destroy_v1(engine), CAMEL_ENGINE_OK);
 }
 
+TEST(RustEngineHost, PrefillAndRenderPackPcmAndReportStarvation) {
+    const auto verifyFormat = [](const char* name, uint32_t bits) {
+        const auto path = testutil::testFile(name);
+        const auto reference = camel::audio::testaudio::referenceDecode(path);
+        ASSERT_TRUE(reference.error.empty()) << reference.error;
+        auto* engine = createEngine();
+        ASSERT_NE(engine, nullptr);
+        ASSERT_EQ(loadSource(engine, path, CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
+
+        constexpr uint64_t frames = 256;
+        uint64_t framesPrefilled = 0;
+        ASSERT_EQ(camel_engine_prefill_v1(engine, frames, &framesPrefilled), CAMEL_ENGINE_OK);
+        ASSERT_EQ(framesPrefilled, frames);
+        std::array<uint8_t, frames * 2 * 3> output{};
+        CamelRenderRequestV1 request{sizeof(CamelRenderRequestV1), CAMEL_ENGINE_ABI_VERSION, frames, output.data(),
+                                     output.size()};
+        CamelRenderResultV1 result{sizeof(CamelRenderResultV1), CAMEL_ENGINE_ABI_VERSION, 0, 0, 0, 0};
+        EXPECT_EQ(camel_engine_render_v1(engine, &request, &result), CAMEL_ENGINE_OK);
+        EXPECT_EQ(result.units_rendered, frames);
+        EXPECT_EQ(result.state, CAMEL_RENDER_STATE_ACTIVE);
+
+        std::array<uint8_t, frames * 2 * 3> expected{};
+        camel::audio::packSamples(reference.samples.data(), frames * 2, bits, camel::audio::SampleType::Int24, expected.data());
+        EXPECT_EQ(output, expected);
+
+        std::array<uint8_t, 24> silence;
+        silence.fill(0xA5);
+        request.units = 4;
+        request.output = silence.data();
+        request.output_capacity_bytes = silence.size();
+        EXPECT_EQ(camel_engine_render_v1(engine, &request, &result), CAMEL_ENGINE_UNDERRUN);
+        EXPECT_EQ(result.units_rendered, 0u);
+        EXPECT_EQ(result.state, CAMEL_RENDER_STATE_UNDERRUN);
+        EXPECT_TRUE(std::all_of(silence.begin(), silence.end(), [](uint8_t value) { return value == 0; }));
+        destroyEngine(engine);
+    };
+
+    verifyFormat("16-44.1k", 16);
+    verifyFormat("24-96k", 24);
+}
+
 TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
     constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
                                                   CAMEL_DECODER_SNDFILE};
@@ -141,6 +183,8 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
                 if (status == CAMEL_ENGINE_END) break;
             }
             EXPECT_EQ(samples, reference.samples) << "decoder=" << decoderKind << " file=" << name;
+            ASSERT_EQ(camel_engine_get_state_v1(engine, &state), CAMEL_ENGINE_OK);
+            EXPECT_EQ(state.position_frames, reference.info.totalFrames);
             const auto verified = flacIntegrity(engine);
             EXPECT_EQ(verified.status, CAMEL_FLAC_INTEGRITY_VERIFIED) << "decoder=" << decoderKind << " file=" << name;
             EXPECT_EQ(verified.has_reference_md5, 1u);
@@ -157,6 +201,8 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
             const auto begin = reference.samples.begin() + seekFrame * reference.info.channels;
             EXPECT_TRUE(std::equal(seekSamples.begin(), seekSamples.end(), begin))
                 << "seek decoder=" << decoderKind << " file=" << name;
+            ASSERT_EQ(camel_engine_get_state_v1(engine, &state), CAMEL_ENGINE_OK);
+            EXPECT_EQ(state.position_frames, seekFrame + framesRead);
             destroyEngine(engine);
         }
     }
