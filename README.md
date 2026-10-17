@@ -42,12 +42,12 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-Validation recorded **209 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug. **40 hardware cases passed** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+Validation recorded **209 passed tests, 13 known-format skips, and zero failures** in each of Release and Debug. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 
 ```powershell
-.\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*"
+.\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*-*Cirrus*"
 ```
 
 The MVP is limited to stereo FLAC and unmodified integer output. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5. The production decoder selection is still pending.
