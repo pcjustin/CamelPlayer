@@ -8,6 +8,7 @@
 
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
+#include "Common/settings/Settings.h"
 
 namespace camel::audio {
 
@@ -26,7 +27,8 @@ public:
     virtual void seek(uint64_t frame) = 0;
 };
 
-// Opens `path` with the chosen decoder. Throws Error (FileOpen / UnsupportedStream / DecodeFailed).
-std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path);
+// Opens `path` with the chosen decoder. Lossy formats decode to the depth `pcmBits` sets for them (24 by default).
+// Throws Error (FileOpen / UnsupportedStream / DecodeFailed).
+std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, const PcmBitsByFormat& pcmBits = {});
 
 } // namespace camel::audio

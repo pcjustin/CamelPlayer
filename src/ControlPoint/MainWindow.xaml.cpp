@@ -121,6 +121,8 @@ void MainWindow::populateSettings() {
         const auto chosen = std::find(registered.begin(), registered.end(), decoderFor(settings_.decoderByFormat, format));
         fill(combo, names, int(chosen - registered.begin()));
     }
+    for (const auto& [combo, format] : pcmBitsCombos())
+        fill(combo, {L"24-bit", L"16-bit"}, pcmBitsFor(settings_.pcmBitsByFormat, format) == 16 ? 1 : 0);
 
     fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, settings_.wasapi.eventDriven ? 0 : 1);
     fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(settings_.wasapi.period));
@@ -178,11 +180,17 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
     populating_ = was;
 }
 
-std::array<std::pair<ComboBox, AudioFormat>, 4> MainWindow::decoderCombos() {
+std::array<std::pair<ComboBox, AudioFormat>, 6> MainWindow::decoderCombos() {
     return {{{DecoderCombo(), AudioFormat::Flac},
              {AlacDecoderCombo(), AudioFormat::Alac},
              {WavDecoderCombo(), AudioFormat::Wav},
-             {AiffDecoderCombo(), AudioFormat::Aiff}}};
+             {AiffDecoderCombo(), AudioFormat::Aiff},
+             {AacDecoderCombo(), AudioFormat::Aac},
+             {Mp3DecoderCombo(), AudioFormat::Mp3}}};
+}
+
+std::array<std::pair<ComboBox, AudioFormat>, 2> MainWindow::pcmBitsCombos() {
+    return {{{AacBitsCombo(), AudioFormat::Aac}, {Mp3BitsCombo(), AudioFormat::Mp3}}};
 }
 
 void MainWindow::readSettingsFromUi() {
@@ -192,6 +200,10 @@ void MainWindow::readSettingsFromUi() {
         const auto registered = decodersFor(format);
         const DecoderKind chosen = registered[std::min<size_t>(idx(combo), registered.size() - 1)];
         if (chosen != decoderFor(settings_.decoderByFormat, format)) settings_.decoderByFormat[format] = chosen;
+    }
+    for (const auto& [combo, format] : pcmBitsCombos()) {
+        const uint32_t bits = idx(combo) == 1 ? 16 : 24;
+        if (bits != pcmBitsFor(settings_.pcmBitsByFormat, format)) settings_.pcmBitsByFormat[format] = bits;
     }
 
     const int dev = idx(WasapiDeviceCombo());
@@ -273,9 +285,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         PathText().Text(ui::utf8(s.pathUtf8));
         if (s.source) {
             wchar_t buf[256];
-            swprintf(buf, 256, L"%s · %u-bit · %.1f kHz · %u ch · %s", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
-                     s.source->bitsPerSample, s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str());
+            swprintf(buf, 256, L"%s · %.1f kHz · %u ch · %s", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
+                     s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str());
             hstring text = buf;
+            if (!s.format || !isLossy(*s.format)) text = text + L" · " + to_hstring(s.source->bitsPerSample) + L"-bit";
             if (s.format == AudioFormat::Flac) text = text + L" · STREAMINFO MD5 " + (s.source->md5 ? L"✓" : L"—");
             SourceText().Text(text);
         }
@@ -284,10 +297,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
     const hstring decoder = ui::utf8(decoderName(s.decoder));
     if (s.output && s.source) {
-        Lamp().Fill(brush(0x10, 0xB9, 0x10));
-        LampText().Text(L"Bit-perfect");
-        FormatText().Text(ui::utf8(s.format ? formatName(*s.format) : "") + L" " + to_hstring(s.source->bitsPerSample) +
-                          L"-bit → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
+        // A lossy source has no PCM depth of its own; its decoded output is passed on unchanged (docs/Plan.md §5.2).
+        const bool lossy = s.format && isLossy(*s.format);
+        Lamp().Fill(lossy ? brush(0xD0, 0xD0, 0xD0) : brush(0x10, 0xB9, 0x10));
+        LampText().Text(lossy ? tr(L"Lamp_Lossy") : hstring(L"Bit-perfect"));
+        const hstring source =
+            ui::utf8(s.format ? formatName(*s.format) : "") + (lossy ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
+                                                                     : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
+        FormatText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
         SignalPathText().Text(tr(L"SignalPath_File") + L" → " + decoder + L" → " + tr(L"SignalPath_Pad") + L" " +
                               to_hstring(s.source->bitsPerSample) + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " +
                               ui::utf8(s.outputMode));
@@ -341,7 +358,7 @@ winrt::fire_and_forget MainWindow::OnOpenClick(Windows::Foundation::IInspectable
     auto strong = get_strong();
     Microsoft::Windows::Storage::Pickers::FileOpenPicker picker(AppWindow().Id());
     // The decoder is chosen from the file's contents; the extension only filters the list.
-    for (const wchar_t* extension : {L".flac", L".m4a", L".alac", L".wav", L".aif", L".aiff", L".aifc"})
+    for (const wchar_t* extension : {L".flac", L".m4a", L".alac", L".wav", L".aif", L".aiff", L".aifc", L".aac", L".mp3"})
         picker.FileTypeFilter().Append(extension);
     picker.SuggestedStartLocation(Microsoft::Windows::Storage::Pickers::PickerLocationId::MusicLibrary);
     auto result = co_await picker.PickSingleFileAsync();

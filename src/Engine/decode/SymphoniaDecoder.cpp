@@ -9,9 +9,9 @@ namespace {
 
 class SymphoniaDecoder final : public IDecoder {
 public:
-    explicit SymphoniaDecoder(const std::filesystem::path& path) {
+    SymphoniaDecoder(const std::filesystem::path& path, uint32_t lossyBits) {
         SymInfo si{};
-        int32_t r = sym_open(toUtf8(longPath(path)).c_str(), &dec_, &si);
+        int32_t r = sym_open(toUtf8(longPath(path)).c_str(), lossyBits, &dec_, &si);
         if (r == SYM_E_IO) throw Error(ErrorCode::FileOpen, "symphonia: cannot open file");
         if (r == SYM_E_UNSUPPORTED) throw Error(ErrorCode::UnsupportedStream, "symphonia: unsupported stream");
         if (r != SYM_OK) throw Error(ErrorCode::UnsupportedStream, "symphonia: open failed (" + std::to_string(r) + ")");
@@ -54,8 +54,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path) {
-    return std::make_unique<SymphoniaDecoder>(path);
+std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path, uint32_t lossyBits) {
+    return std::make_unique<SymphoniaDecoder>(path, lossyBits);
 }
 
 } // namespace camel::audio

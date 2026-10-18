@@ -25,6 +25,11 @@
   <data name="Settings_AlacDecoder.Header" xml:space="preserve"><value>ALAC 解碼器</value></data>
   <data name="Settings_WavDecoder.Header" xml:space="preserve"><value>WAV 解碼器</value></data>
   <data name="Settings_AiffDecoder.Header" xml:space="preserve"><value>AIFF 解碼器</value></data>
+  <data name="Settings_AacDecoder.Header" xml:space="preserve"><value>AAC 解碼器</value></data>
+  <data name="Settings_AacBits.Header" xml:space="preserve"><value>AAC 輸出位元深度</value></data>
+  <data name="Settings_Mp3Decoder.Header" xml:space="preserve"><value>MP3 解碼器</value></data>
+  <data name="Settings_Mp3Bits.Header" xml:space="preserve"><value>MP3 輸出位元深度</value></data>
+  <data name="Lamp_Lossy" xml:space="preserve"><value>有損來源</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>輸出裝置</value></data>
   <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>驅動方式（獨佔）</value></data>
   <data name="Settings_Period.Header" xml:space="preserve"><value>裝置週期</value></data>

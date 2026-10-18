@@ -17,7 +17,8 @@ Downloaded static libraries, NuGet installations, complete SDKs, private music, 
 | ASIO SDK 2.3.4 | GPL Version 3 option, alternatively a separate proprietary agreement | [SDK license](third_party/asiosdk/LICENSE.txt) and [provenance](third_party/asiosdk/SOURCE.txt) |
 | FFmpeg | Installed build: LGPL 2.1; upstream LGPL-2.1-or-later | [Notice](third_party/licenses/native/ffmpeg.txt) |
 | libsndfile | LGPL-2.1-or-later | [Notice](third_party/licenses/native/libsndfile.txt) |
-| dr_flac / drlibs | Unlicense OR MIT-0 | [Notice](third_party/licenses/native/drlibs.txt) |
+| mpg123 | LGPL-2.1-or-later | [Notice](third_party/licenses/native/mpg123.txt) |
+| dr_flac / dr_wav / dr_mp3 (drlibs) | Unlicense OR MIT-0 | [Notice](third_party/licenses/native/drlibs.txt) |
 | libFLAC | BSD-3-Clause library code | [Notice](third_party/licenses/native/libflac.txt) |
 | libogg | BSD-3-Clause | [Notice](third_party/licenses/native/libogg.txt) |
 | libvorbis | BSD-3-Clause | [Notice](third_party/licenses/native/libvorbis.txt) |
@@ -26,6 +27,7 @@ Downloaded static libraries, NuGet installations, complete SDKs, private music, 
 | nlohmann-json | MIT | [Notice](third_party/licenses/native/nlohmann-json.txt) |
 | WIL | MIT | [Notice](third_party/licenses/native/wil.txt) |
 | GoogleTest | BSD-3-Clause, tests only | [Notice](third_party/licenses/native/gtest.txt) |
+| LAME | LGPL-2.0-only, tests only (encodes MP3 fixtures; not linked into the player) | [Notice](third_party/licenses/native/mp3lame.txt) |
 
 ## Rust components
 

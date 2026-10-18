@@ -8,7 +8,9 @@ $nativeLicenses = [ordered]@{
     ffmpeg = 'LGPL-2.1-or-later'; libsndfile = 'LGPL-2.1-or-later'; drlibs = 'Unlicense OR MIT-0'
     libflac = 'BSD-3-Clause'; libogg = 'BSD-3-Clause'; libvorbis = 'BSD-3-Clause'; opus = 'BSD-3-Clause'
     zlib = 'Zlib'; wil = 'MIT'; 'nlohmann-json' = 'MIT'; gtest = 'BSD-3-Clause'
+    mpg123 = 'LGPL-2.1-or-later'; mp3lame = 'LGPL-2.0-only'
 }
+$testOnly = @('gtest', 'mp3lame') # linked into tests.exe only, never shipped
 foreach ($port in $nativeLicenses.Keys) {
     $share = Join-Path $root "vcpkg_installed\x64-windows-static-md\share\$port"
     $notice = Join-Path $share 'copyright'
@@ -22,7 +24,7 @@ foreach ($port in $nativeLicenses.Keys) {
     })
     $inventory.native += [ordered]@{
         name = $port; version = $spdx.packages[0].versionInfo; license = $nativeLicenses[$port]
-        role = $(if ($port -eq 'gtest') { 'test' } else { 'runtime or verification' })
+        role = $(if ($port -in $testOnly) { 'test' } else { 'runtime or verification' })
         port_source = $spdx.packages[0].downloadLocation; sources = $sources
         notice = "licenses/native/$port.txt"
     }

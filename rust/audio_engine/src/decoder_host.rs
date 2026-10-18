@@ -7,6 +7,8 @@ pub const DECODER_SYMPHONIA: u32 = 2;
 pub const DECODER_DR_FLAC: u32 = 3;
 pub const DECODER_SNDFILE: u32 = 4;
 pub const DECODER_DR_WAV: u32 = 5;
+pub const DECODER_MPG123: u32 = 6;
+pub const DECODER_DR_MP3: u32 = 7;
 
 pub const HOST_OK: i32 = 0;
 pub const HOST_E_IO: i32 = -1;
@@ -109,7 +111,13 @@ impl DecoderSource {
     ) -> Result<Self, i32> {
         if !matches!(
             decoder_kind,
-            DECODER_FFMPEG | DECODER_SYMPHONIA | DECODER_DR_FLAC | DECODER_SNDFILE | DECODER_DR_WAV
+            DECODER_FFMPEG
+                | DECODER_SYMPHONIA
+                | DECODER_DR_FLAC
+                | DECODER_SNDFILE
+                | DECODER_DR_WAV
+                | DECODER_MPG123
+                | DECODER_DR_MP3
         ) || source.path_utf8.is_null()
             || source.path_length_bytes == 0
             || source.path_length_bytes > 32_768

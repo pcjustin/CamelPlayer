@@ -25,6 +25,11 @@
   <data name="Settings_AlacDecoder.Header" xml:space="preserve"><value>ALAC decoder</value></data>
   <data name="Settings_WavDecoder.Header" xml:space="preserve"><value>WAV decoder</value></data>
   <data name="Settings_AiffDecoder.Header" xml:space="preserve"><value>AIFF decoder</value></data>
+  <data name="Settings_AacDecoder.Header" xml:space="preserve"><value>AAC decoder</value></data>
+  <data name="Settings_AacBits.Header" xml:space="preserve"><value>AAC output depth</value></data>
+  <data name="Settings_Mp3Decoder.Header" xml:space="preserve"><value>MP3 decoder</value></data>
+  <data name="Settings_Mp3Bits.Header" xml:space="preserve"><value>MP3 output depth</value></data>
+  <data name="Lamp_Lossy" xml:space="preserve"><value>Lossy source</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>Output device</value></data>
   <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>Driving mode (exclusive)</value></data>
   <data name="Settings_Period.Header" xml:space="preserve"><value>Device period</value></data>

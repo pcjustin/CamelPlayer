@@ -104,6 +104,10 @@ audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat
     return choices[format].value_or(audio::defaultDecoder(format));
 }
 
+uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format) {
+    return choices[format].value_or(24);
+}
+
 std::string toJson(const Settings& s) {
     json j;
     j["schema"] = Settings::kSchemaVersion;
@@ -112,6 +116,10 @@ std::string toJson(const Settings& s) {
     for (const auto format : audio::kAllFormats)
         if (const auto decoder = s.decoderByFormat[format]) decoders[audio::formatId(format)] = audio::decoderId(*decoder);
     j["decoderByFormat"] = decoders;
+    json pcmBits = json::object();
+    for (const auto format : audio::kAllFormats)
+        if (const auto bits = s.pcmBitsByFormat[format]) pcmBits[audio::formatId(format)] = *bits;
+    j["pcmBitsByFormat"] = pcmBits;
     j["language"] = s.language;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
@@ -165,6 +173,13 @@ Settings fromJson(const std::string& text) {
         for (const auto& [formatId, decoderId] : j["decoderByFormat"].items())
             if (decoderId.is_string()) choose(formatId, decoderId.get<std::string>());
     }
+    if (j.contains("pcmBitsByFormat") && j["pcmBitsByFormat"].is_object())
+        for (const auto& [formatId, bits] : j["pcmBitsByFormat"].items()) {
+            audio::AudioFormat format{};
+            if (audio::formatFromId(formatId, format) && audio::isLossy(format) && bits.is_number_integer() &&
+                (bits.get<int64_t>() == 16 || bits.get<int64_t>() == 24))
+                s.pcmBitsByFormat[format] = uint32_t(bits.get<int64_t>());
+        }
     s.language = str(j, "language", "");
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {

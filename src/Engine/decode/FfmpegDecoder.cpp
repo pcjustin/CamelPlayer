@@ -12,6 +12,7 @@ extern "C" {
 #include <mutex>
 #include <vector>
 
+#include "Engine/decode/Quantize.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 
@@ -43,7 +44,7 @@ std::string avErr(int e) {
 
 class FfmpegDecoder final : public IDecoder {
 public:
-    explicit FfmpegDecoder(const std::filesystem::path& path) {
+    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits) {
         routeAvLog();
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
         int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, nullptr);
@@ -54,6 +55,10 @@ public:
         stream_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
         if (stream_ < 0 || !codec) fail(ErrorCode::UnsupportedStream, "no audio stream");
         AVStream* st = fmt_->streams[stream_];
+        // The float decoders keep full precision until the single quantization below.
+        if (st->codecpar->codec_id == AV_CODEC_ID_MP3) codec = avcodec_find_decoder_by_name("mp3float");
+        if (st->codecpar->codec_id == AV_CODEC_ID_AAC) codec = avcodec_find_decoder_by_name("aac");
+        if (!codec) fail(ErrorCode::UnsupportedStream, "no float decoder for this stream");
         ctx_ = avcodec_alloc_context3(codec);
         avcodec_parameters_to_context(ctx_, st->codecpar);
         e = avcodec_open2(ctx_, codec, nullptr);
@@ -64,6 +69,10 @@ public:
         info_.channels = uint32_t(ctx_->ch_layout.nb_channels);
         info_.bitsPerSample = uint32_t(ctx_->bits_per_raw_sample ? ctx_->bits_per_raw_sample : st->codecpar->bits_per_raw_sample);
         if (!info_.bitsPerSample) info_.bitsPerSample = uint32_t(av_get_bits_per_sample(ctx_->codec_id)); // 16-bit PCM
+        const AVSampleFormat packed = av_get_packed_sample_fmt(ctx_->sample_fmt);
+        lossy_ = (packed == AV_SAMPLE_FMT_FLT || packed == AV_SAMPLE_FMT_DBL) &&
+                 (ctx_->codec_id == AV_CODEC_ID_MP3 || ctx_->codec_id == AV_CODEC_ID_AAC);
+        if (lossy_) info_.bitsPerSample = lossyBits;
         if (st->duration > 0)
             info_.totalFrames = uint64_t(av_rescale_q(st->duration, st->time_base, AVRational{1, ctx_->sample_rate}));
         if (!info_.sampleRate || !info_.channels || !info_.bitsPerSample || info_.bitsPerSample > 32)
@@ -158,9 +167,10 @@ private:
         const auto sf = AVSampleFormat(frame_->format);
         const bool planar = av_sample_fmt_is_planar(sf);
         const AVSampleFormat packed = av_get_packed_sample_fmt(sf);
-        if (packed != AV_SAMPLE_FMT_S16 && packed != AV_SAMPLE_FMT_S32)
+        const bool isFloat = packed == AV_SAMPLE_FMT_FLT || packed == AV_SAMPLE_FMT_DBL;
+        if (packed != AV_SAMPLE_FMT_S16 && packed != AV_SAMPLE_FMT_S32 && !(lossy_ && isFloat))
             throw Error(ErrorCode::UnsupportedStream, std::string("unexpected sample format ") + av_get_sample_fmt_name(sf));
-        const int shift = (packed == AV_SAMPLE_FMT_S32 ? 32 : 16) - int(info_.bitsPerSample);
+        const int shift = isFloat ? 0 : (packed == AV_SAMPLE_FMT_S32 ? 32 : 16) - int(info_.bitsPerSample);
         int skip = 0;
         if (seekTarget_ >= 0) {
             int64_t pts = frame_->best_effort_timestamp != AV_NOPTS_VALUE ? frame_->best_effort_timestamp : frame_->pts;
@@ -180,6 +190,16 @@ private:
         int32_t* out = pending_.data();
         for (int i = skip; i < n; i++)
             for (int c = 0; c < ch; c++) {
+                const int index = planar ? i : i * ch + c;
+                const uint8_t* plane = frame_->extended_data[planar ? c : 0];
+                if (packed == AV_SAMPLE_FMT_FLT) {
+                    *out++ = quantize(reinterpret_cast<const float*>(plane)[index], info_.bitsPerSample);
+                    continue;
+                }
+                if (packed == AV_SAMPLE_FMT_DBL) {
+                    *out++ = quantize(reinterpret_cast<const double*>(plane)[index], info_.bitsPerSample);
+                    continue;
+                }
                 int32_t v;
                 if (packed == AV_SAMPLE_FMT_S32)
                     v = planar ? reinterpret_cast<const int32_t*>(frame_->extended_data[c])[i]
@@ -199,6 +219,7 @@ private:
     int stream_ = -1;
     bool draining_ = false;
     int64_t seekTarget_ = -1;
+    bool lossy_ = false; // float decoder output, quantized to info_.bitsPerSample
     std::vector<int32_t> pending_;
     size_t pendingPos_ = 0;
     SourceInfo info_;
@@ -206,8 +227,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path) {
-    return std::make_unique<FfmpegDecoder>(path);
+std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits) {
+    return std::make_unique<FfmpegDecoder>(path, lossyBits);
 }
 
 } // namespace camel::audio

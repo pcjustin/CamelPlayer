@@ -191,10 +191,14 @@ void writeAiff(const std::filesystem::path& path, const std::vector<int32_t>& sa
     writeAll(path, (file + data).data(), file.size() + data.size());
 }
 
-void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
-               uint32_t channels) {
+namespace {
+
+// Encodes right-aligned `bits`-bit `samples` with an FFmpeg encoder into `muxer`'s container.
+void encodeWithFfmpeg(const std::filesystem::path& path, const char* muxer, AVCodecID codecId, AVSampleFormat sampleFormat,
+                      int64_t bitRate, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+                      uint32_t channels) {
     if ((bits != 16 && bits != 24) || !channels || samples.size() % channels)
-        throw std::invalid_argument("ALAC test files are 16 or 24-bit");
+        throw std::invalid_argument("encoded test files take 16 or 24-bit samples");
     AVFormatContext* oc = nullptr;
     AVCodecContext* ctx = nullptr;
     AVFrame* frame = nullptr;
@@ -209,20 +213,21 @@ void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& sa
     auto check = [&](int result, const char* what) {
         if (result < 0) {
             cleanup();
-            throw std::runtime_error(std::string("ALAC test file: ") + what + " failed");
+            throw std::runtime_error(std::string("encoded test file: ") + what + " failed");
         }
     };
     const std::string utf8 = toUtf8(path.wstring());
-    check(avformat_alloc_output_context2(&oc, nullptr, "ipod", utf8.c_str()), "output context");
-    const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_ALAC);
-    check(codec ? 0 : -1, "ALAC encoder");
+    check(avformat_alloc_output_context2(&oc, nullptr, muxer, utf8.c_str()), "output context");
+    const AVCodec* codec = avcodec_find_encoder(codecId);
+    check(codec ? 0 : -1, "encoder");
     AVStream* st = avformat_new_stream(oc, nullptr);
     ctx = avcodec_alloc_context3(codec);
     check(st && ctx ? 0 : -1, "stream");
     ctx->sample_rate = int(sampleRate);
     av_channel_layout_default(&ctx->ch_layout, int(channels));
-    ctx->sample_fmt = bits == 16 ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S32P;
+    ctx->sample_fmt = sampleFormat;
     ctx->bits_per_raw_sample = int(bits);
+    if (bitRate) ctx->bit_rate = bitRate;
     ctx->time_base = AVRational{1, int(sampleRate)};
     if (oc->oformat->flags & AVFMT_GLOBALHEADER) ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     check(avcodec_open2(ctx, codec, nullptr), "encoder open");
@@ -255,10 +260,12 @@ void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& sa
         for (uint32_t c = 0; c < channels; c++)
             for (size_t i = 0; i < n; i++) {
                 const int32_t s = samples[(start + i) * channels + c];
-                if (bits == 16)
+                if (sampleFormat == AV_SAMPLE_FMT_FLTP)
+                    reinterpret_cast<float*>(frame->data[c])[i] = float(std::ldexp(double(s), -int(bits - 1)));
+                else if (sampleFormat == AV_SAMPLE_FMT_S16P)
                     reinterpret_cast<int16_t*>(frame->data[c])[i] = int16_t(s);
                 else
-                    reinterpret_cast<int32_t*>(frame->data[c])[i] = int32_t(uint32_t(s) << 8); // left-aligned 24-bit
+                    reinterpret_cast<int32_t*>(frame->data[c])[i] = int32_t(uint32_t(s) << (32 - bits)); // left-aligned
             }
         frame->pts = int64_t(start);
         check(avcodec_send_frame(ctx, frame), "send frame");
@@ -269,6 +276,20 @@ void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& sa
     drain();
     check(av_write_trailer(oc), "trailer");
     cleanup();
+}
+
+} // namespace
+
+void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+               uint32_t channels) {
+    encodeWithFfmpeg(path, "ipod", AV_CODEC_ID_ALAC, bits == 16 ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S32P, 0, samples, sampleRate,
+                     bits, channels);
+}
+
+void writeAac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
+              uint32_t channels, bool adts, int64_t bitRate) {
+    encodeWithFfmpeg(path, adts ? "adts" : "ipod", AV_CODEC_ID_AAC, AV_SAMPLE_FMT_FLTP, bitRate, samples, sampleRate, bits,
+                     channels);
 }
 
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {

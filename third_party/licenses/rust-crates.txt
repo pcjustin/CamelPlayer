@@ -17,6 +17,8 @@ scopeguard 1.2.0  (MIT OR Apache-2.0)  https://github.com/bluss/scopeguard
 simdutf8 0.1.5  (MIT OR Apache-2.0)  https://github.com/rusticstuff/simdutf8
 symphonia 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
 symphonia-bundle-flac 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+symphonia-bundle-mp3 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
+symphonia-codec-aac 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
 symphonia-codec-alac 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
 symphonia-codec-pcm 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia
 symphonia-core 0.5.5  (MPL-2.0)  https://github.com/pdeljanov/Symphonia

@@ -36,6 +36,7 @@ private:
 struct SettingsDto {
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
+    PcmBitsByFormat pcmBitsByFormat;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;

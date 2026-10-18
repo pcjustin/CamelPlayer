@@ -143,7 +143,7 @@ public:
         std::optional<SourceInfo> source;
         try {
             format_ = probeFormat(file);
-            source = openDecoder(chooseDecoder(*format_, decoder, settings_), file)->info();
+            source = openDecoder(chooseDecoder(*format_, decoder, settings_), file, settings_.pcmBitsByFormat)->info();
         } catch (const Error& e) {
             log::info("engine: %s is reported when playback starts (%s)", toUtf8(file_).c_str(), e.what());
         }
@@ -197,7 +197,10 @@ public:
 
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
-        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s);
+        // A lossy file decodes to the configured depth, so changing it reopens the stream like a decoder change.
+        const bool lossyBitsChanged = format_ && isLossy(*format_) &&
+                                      pcmBitsFor(settings_.pcmBitsByFormat, *format_) != pcmBitsFor(s.pcmBitsByFormat, *format_);
+        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -223,7 +226,7 @@ public:
         try {
             format = probeFormat(file);
             decoder = chooseDecoder(format, requested, settings_);
-            source = openDecoder(decoder, file)->info();
+            source = openDecoder(decoder, file, settings_.pcmBitsByFormat)->info();
         } catch (const Error&) {
             return false; // reported when the file is opened normally
         }
@@ -370,7 +373,7 @@ private:
             format_.reset();
             format_ = probeFormat(file_);
             decoder = chooseDecoder(*format_, fileDecoder_, settings_);
-            dec = openDecoder(decoder, file_);
+            dec = openDecoder(decoder, file_, settings_.pcmBitsByFormat);
         } catch (const Error& e) {
             {
                 std::lock_guard lock(snapMutex_);
@@ -411,7 +414,7 @@ private:
         bpf_ = fmt_.bytesPerFrame();
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         try {
-            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame);
+            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat);
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);

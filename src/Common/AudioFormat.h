@@ -23,4 +23,7 @@ bool supports(AudioFormat format, DecoderKind decoder);
 // Precondition: decodersFor(format) is not empty.
 DecoderKind defaultDecoder(AudioFormat format);
 
+// Lossy bitstreams have no source PCM depth; their decoded output is offered as 16- or 24-bit PCM (docs/Plan.md §3.1).
+bool isLossy(AudioFormat format);
+
 } // namespace camel::audio

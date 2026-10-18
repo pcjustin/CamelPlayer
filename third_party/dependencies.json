@@ -209,6 +209,44 @@
                                        }
                                    ],
                        "notice":  "licenses/native/gtest.txt"
+                   },
+                   {
+                       "name":  "mpg123",
+                       "version":  "1.33.7#1",
+                       "license":  "LGPL-2.1-or-later",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@98177c10fc912f74da09290d3decea7d3219ee34",
+                       "sources":  [
+                                       {
+                                           "location":  "https://sourceforge.net/projects/mpg123/mpg123/files/1.33.7/mpg123-1.33.7.tar.bz2",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "694743802bb7be0f4a39bf62e681ae0bfed769cb87dc6c5b6fb5f9245966631efb5c5b9bd58588f7af55ced5d020f97c8a54993e71b5295bc45ebd152473f40e"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/mpg123.txt"
+                   },
+                   {
+                       "name":  "mp3lame",
+                       "version":  "3.100#17",
+                       "license":  "LGPL-2.0-only",
+                       "role":  "test",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@67a6a7a9a260c058627e8888ae8113e4f23f63ee",
+                       "sources":  [
+                                       {
+                                           "location":  "https://sourceforge.net/projects/lame/lame/files/3.100/lame-3.100.tar.gz",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "0844b9eadb4aacf8000444621451277de365041cc1d97b7f7a589da0b7a23899310afd4e4d81114b9912aa97832621d20588034715573d417b2923948c08634b"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/mp3lame.txt"
                    }
                ],
     "rust":  [
@@ -316,6 +354,20 @@
                      "license":  "MPL-2.0",
                      "source_archive":  "https://static.crates.io/crates/symphonia-bundle-flac/symphonia-bundle-flac-0.5.5.crate",
                      "notice":  "licenses/rust/symphonia-bundle-flac-0.5.5/"
+                 },
+                 {
+                     "name":  "symphonia-bundle-mp3",
+                     "version":  "0.5.5",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-bundle-mp3/symphonia-bundle-mp3-0.5.5.crate",
+                     "notice":  "licenses/rust/symphonia-bundle-mp3-0.5.5/"
+                 },
+                 {
+                     "name":  "symphonia-codec-aac",
+                     "version":  "0.5.5",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-aac/symphonia-codec-aac-0.5.5.crate",
+                     "notice":  "licenses/rust/symphonia-codec-aac-0.5.5/"
                  },
                  {
                      "name":  "symphonia-codec-alac",

@@ -7,14 +7,17 @@
 
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
+#include "Common/settings/Settings.h"
 #include "Engine/EngineAbi.h"
 
 namespace camel::audio {
 
 class RustSession {
 public:
-    // Loads `path` with `decoder` for output `format`, positioned at `startFrame`. Throws Error on failure.
-    RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame);
+    // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,
+    // decode to the depth `pcmBits` sets. Throws Error on failure.
+    RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
+                const PcmBitsByFormat& pcmBits);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;
@@ -56,6 +59,7 @@ private:
     CamelCommandStampV1 nextCommand();
 
     CamelEngine* engine_ = nullptr;
+    PcmBitsByFormat pcmBits_; // read by the decoder host; declared before host_, which points to it
     CamelDecoderHostV1 host_{};
     CamelCommandStampV1 command_{};
 };

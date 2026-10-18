@@ -8,6 +8,7 @@
 #include <fstream>
 
 #include "Commands.h"
+#include "Engine/decode/FormatProbe.h"
 #include "Engine/PlaybackEngine.h"
 #include "Engine/SamplePacker.h"
 #include "OutputBridge/CaptureOutput.h"
@@ -29,6 +30,12 @@ void printList(const char* title, const std::vector<DeviceEntry>& list) {
         std::printf("  [%zu] %s\n      id: %s\n", i, list[i].name.c_str(), list[i].id.c_str());
 }
 
+// The decoder `s` selects for `file`, by its contents.
+const char* decoderLabel(const Settings& s, const std::filesystem::path& file) {
+    const auto format = probeFormat(file);
+    return decodersFor(format).empty() ? "none" : decoderName(decoderFor(s.decoderByFormat, format));
+}
+
 // Applies --backend/--decoder/--device/--ks-mode/--format/--buffer options on top of the saved settings.
 Settings settingsFromArgs(const Args& args) {
     Settings s = loadSettings();
@@ -37,9 +44,9 @@ Settings settingsFromArgs(const Args& args) {
     }
     if (auto v = option(args, L"--decoder")) {
         DecoderKind decoder{};
-        if (!decoderFromId(toUtf8(*v), decoder) || !supports(AudioFormat::Flac, decoder))
-            throw std::runtime_error("unknown FLAC decoder");
-        s.decoderByFormat[AudioFormat::Flac] = decoder;
+        if (!decoderFromId(toUtf8(*v), decoder)) throw std::runtime_error("unknown decoder");
+        for (const auto format : kAllFormats) // every format this decoder reads
+            if (supports(format, decoder)) s.decoderByFormat[format] = decoder;
     }
     if (auto v = option(args, L"--device")) {
         // index into the backend's device list, or a raw id
@@ -105,8 +112,7 @@ int cmdPlay(const Args& args) {
         return 2;
     }
     Settings s = settingsFromArgs(args);
-    std::printf("backend %s, decoder %s\n", backendName(s.backend),
-                decoderName(decoderFor(s.decoderByFormat, AudioFormat::Flac)));
+    std::printf("backend %s, decoder %s\n", backendName(s.backend), decoderLabel(s, files[0]));
     PlaybackEngine engine(s);
     engine.openAndPlay(files[0]);
     engine.waitIdle();
@@ -172,8 +178,7 @@ int cmdPlayQueue(const Args& args) {
         return 2;
     }
     const Settings s = settingsFromArgs(args);
-    std::printf("backend %s, decoder %s\n", backendName(s.backend),
-                decoderName(decoderFor(s.decoderByFormat, AudioFormat::Flac)));
+    std::printf("backend %s, decoder %s\n", backendName(s.backend), decoderLabel(s, files[0]));
     std::atomic<int> opens = 0;
     server::LocalServer server(
         s, {}, [&](const Settings& settings) { return std::make_unique<CountingOutput>(createOutput(settings), opens); });
@@ -263,8 +268,8 @@ int cmdCapture(const Args& args) {
     unpackSamples(bytes.data(), count, ref.info.bitsPerSample, type, got.data());
     bool same = got == ref.samples;
     std::printf("%s: %s via %s as %s, %zu samples captured, reference %zu -> %s\n", toUtf8(pos[0]).c_str(),
-                decoderName(decoderFor(s.decoderByFormat, AudioFormat::Flac)), "capture", sampleTypeName(type), count,
-                ref.samples.size(), same ? "BIT-IDENTICAL" : "DIFFERENT");
+                decoderLabel(s, pos[0]), "capture", sampleTypeName(type), count, ref.samples.size(),
+                same ? "BIT-IDENTICAL" : "DIFFERENT");
     return same ? 0 : 1;
 }
 

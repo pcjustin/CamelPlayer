@@ -7,6 +7,9 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 | FFmpeg | `vcpkg.json` with a pinned baseline | `src/Engine/decode/FfmpegDecoder.cpp` |
 | dr_flac | vcpkg `drlibs` | `src/Engine/decode/DrFlac.cpp` |
 | dr_wav | vcpkg `drlibs` | `src/Engine/decode/DrWav.cpp` |
+| dr_mp3 | vcpkg `drlibs` | `src/Engine/decode/DrMp3.cpp` |
+| mpg123 | `vcpkg.json` with a pinned baseline | `src/Engine/decode/Mpg123Decoder.cpp` |
+| LAME | `vcpkg.json` (`mp3lame`) with a pinned baseline | MP3 test fixtures in `tests/LameFixture.cpp`; linked into tests.exe only |
 | libsndfile | `vcpkg.json` with a pinned baseline | `src/Engine/decode/SndfileDecoder.cpp` |
 | Symphonia | `rust/symphonia_ffi/Cargo.toml` and `rust/Cargo.lock` | Owned Rust C ABI bridge in `rust/symphonia_ffi`; C++ adapter in `src/Engine/decode/SymphoniaDecoder.cpp` |
 | libFLAC | vcpkg `libflac` | Test-audio encoding and independent reference decoding in `src/Engine/testing` |

@@ -6,7 +6,10 @@ use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use symphonia::core::audio::{AudioBufferRef, Signal};
-use symphonia::core::codecs::{Decoder, DecoderOptions, VerificationCheck, CODEC_TYPE_ALAC};
+use symphonia::core::codecs::{
+    CodecParameters, Decoder, DecoderOptions, VerificationCheck, CODEC_TYPE_AAC, CODEC_TYPE_ALAC,
+    CODEC_TYPE_MP3,
+};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
@@ -266,7 +269,8 @@ pub struct SymDecoder {
     decoder: Box<dyn Decoder>,
     track_id: u32,
     channels: usize,
-    shift: u32,
+    /// Output depth: the source depth, or the configured depth for lossy codecs.
+    bits: u32,
     /// Decoded, interleaved, right-aligned samples not yet handed out.
     pending: Vec<i32>,
     pending_pos: usize,
@@ -289,7 +293,18 @@ fn guarded(body: impl FnOnce() -> i32) -> i32 {
     catch_unwind(AssertUnwindSafe(body)).unwrap_or(SYM_E_DECODE)
 }
 
-fn interleave(buf: AudioBufferRef, ch: usize, shift: u32) -> Result<Vec<i32>, i32> {
+/// Rounds a float sample to `bits`-bit full scale and clips, once (the C++ adapters share this rule).
+fn quantize(sample: f64, bits: u32) -> i32 {
+    let full = f64::from(1u32 << (bits - 1));
+    let scaled = (sample * full).round_ties_even();
+    if scaled.is_nan() {
+        0
+    } else {
+        scaled.clamp(-full, full - 1.0) as i32
+    }
+}
+
+fn interleave(buf: AudioBufferRef, ch: usize, bits: u32) -> Result<Vec<i32>, i32> {
     let frames = buf.frames();
     let mut out = Vec::with_capacity(frames * ch);
     // 16- and 24-bit buffers hold right-aligned samples; 32-bit buffers hold left-aligned ones.
@@ -311,7 +326,21 @@ fn interleave(buf: AudioBufferRef, ch: usize, shift: u32) -> Result<Vec<i32>, i3
         AudioBufferRef::S32(b) => {
             for f in 0..frames {
                 for c in 0..ch {
-                    out.push(b.chan(c)[f] >> shift);
+                    out.push(b.chan(c)[f] >> (32 - bits));
+                }
+            }
+        }
+        AudioBufferRef::F32(b) => {
+            for f in 0..frames {
+                for c in 0..ch {
+                    out.push(quantize(f64::from(b.chan(c)[f]), bits));
+                }
+            }
+        }
+        AudioBufferRef::F64(b) => {
+            for f in 0..frames {
+                for c in 0..ch {
+                    out.push(quantize(b.chan(c)[f], bits));
                 }
             }
         }
@@ -348,7 +377,7 @@ impl SymDecoder {
             }
             match self.decoder.decode(&packet) {
                 Ok(buf) => {
-                    let out = interleave(buf, self.channels, self.shift)?;
+                    let out = interleave(buf, self.channels, self.bits)?;
                     self.set_pending(out);
                     return Ok(true);
                 }
@@ -361,24 +390,44 @@ impl SymDecoder {
     }
 }
 
-/// Opens `path` (UTF-8). On success stores a decoder handle in `out` and fills `info`.
+/// The sampling rate an AAC AudioSpecificConfig declares (ISO/IEC 14496-3 1.6.3.4); None for an explicit rate.
+fn aac_config_rate(params: &CodecParameters) -> Option<u32> {
+    const RATES: [u32; 13] = [
+        96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
+    ];
+    let config = params.extra_data.as_deref()?;
+    if params.codec != CODEC_TYPE_AAC || config.len() < 2 {
+        return None;
+    }
+    let index = usize::from(((config[0] & 0x07) << 1) | (config[1] >> 7));
+    RATES.get(index).copied()
+}
+
+/// Opens `path` (UTF-8). On success stores a decoder handle in `out` and fills `info`. Lossy streams (AAC, MP3) are
+/// quantized to `lossy_bits` (16 or 24); encoder delay and padding are trimmed when the file declares them.
 ///
 /// # Safety
 /// `path` must be NUL-terminated, and `out` and `info` must point to writable storage.
 #[no_mangle]
 pub unsafe extern "C" fn sym_open(
     path: *const c_char,
+    lossy_bits: u32,
     out: *mut *mut SymDecoder,
     info: *mut SymInfo,
 ) -> i32 {
-    if path.is_null() || out.is_null() || info.is_null() {
+    if path.is_null() || out.is_null() || info.is_null() || !matches!(lossy_bits, 16 | 24) {
         return SYM_E_ARG;
     }
     *out = std::ptr::null_mut();
-    guarded(|| open_decoder(path, out, info))
+    guarded(|| open_decoder(path, lossy_bits, out, info))
 }
 
-unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mut SymInfo) -> i32 {
+unsafe fn open_decoder(
+    path: *const c_char,
+    lossy_bits: u32,
+    out: *mut *mut SymDecoder,
+    info: *mut SymInfo,
+) -> i32 {
     let path = CStr::from_ptr(path).to_string_lossy().into_owned();
     let file = match std::fs::File::open(&path) {
         Ok(f) => f,
@@ -388,7 +437,10 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
     let probed = match symphonia::default::get_probe().format(
         &Hint::new(),
         mss,
-        &FormatOptions::default(),
+        &FormatOptions {
+            enable_gapless: true,
+            ..Default::default()
+        },
         &MetadataOptions::default(),
     ) {
         Ok(p) => p,
@@ -404,8 +456,13 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
     let Some(track) = format.default_track() else {
         return SYM_E_FORMAT;
     };
-    let params = track.codec_params.clone();
+    let mut params = track.codec_params.clone();
     let track_id = track.id;
+    // The AAC decoder prefers the container's rate over the AudioSpecificConfig, but the ASC rate selects its
+    // scale-factor band tables; an MP4 sample entry that disagrees would decode wrongly.
+    if let Some(rate) = aac_config_rate(&params) {
+        params.with_sample_rate(rate);
+    }
     let decoder =
         match symphonia::default::get_codecs().make(&params, &DecoderOptions { verify: false }) {
             Ok(d) => d,
@@ -417,14 +474,32 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
         Some(c) if params.codec == CODEC_TYPE_ALAC && c.len() >= 24 => Some(c),
         _ => None,
     };
+    // The MP4 reader also leaves AAC channels to the AudioSpecificConfig: 5-bit object type, 4-bit sampling
+    // frequency index (15 = explicit rate, not handled), then the 4-bit channel configuration.
+    let aac_channels = match params.extra_data.as_deref() {
+        Some(a)
+            if params.codec == CODEC_TYPE_AAC
+                && a.len() >= 2
+                && (((a[0] & 0x07) << 1) | (a[1] >> 7)) != 15 =>
+        {
+            Some(usize::from((a[1] >> 3) & 0x0F))
+        }
+        _ => None,
+    };
     let channels = cookie
         .map(|c| usize::from(c[9]))
         .or(params.channels.map(|c| c.count()))
+        .or(aac_channels)
         .unwrap_or(0);
-    let bits = cookie
-        .map(|c| u32::from(c[5]))
-        .or(params.bits_per_sample)
-        .unwrap_or(0);
+    let lossy = params.codec == CODEC_TYPE_AAC || params.codec == CODEC_TYPE_MP3;
+    let bits = if lossy {
+        lossy_bits
+    } else {
+        cookie
+            .map(|c| u32::from(c[5]))
+            .or(params.bits_per_sample)
+            .unwrap_or(0)
+    };
     let sample_rate = cookie
         .map(|c| u32::from_be_bytes([c[20], c[21], c[22], c[23]]))
         .or(params.sample_rate)
@@ -449,7 +524,7 @@ unsafe fn open_decoder(path: *const c_char, out: *mut *mut SymDecoder, info: *mu
         decoder,
         track_id,
         channels,
-        shift: 32 - bits,
+        bits,
         pending: Vec::new(),
         pending_pos: 0,
         skip_frames: 0,

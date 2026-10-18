@@ -28,7 +28,8 @@ typedef struct SymInfo {
     uint8_t md5[16];
 } SymInfo;
 
-int32_t sym_open(const char* utf8Path, SymDecoder** out, SymInfo* info);
+// Lossy streams (AAC, MP3) are quantized to `lossyBits` (16 or 24).
+int32_t sym_open(const char* utf8Path, uint32_t lossyBits, SymDecoder** out, SymInfo* info);
 int32_t sym_read(SymDecoder* dec, int32_t* dst, size_t frames, size_t* read);
 int32_t sym_seek(SymDecoder* dec, uint64_t frame);
 void sym_last_error(const SymDecoder* dec, char* buf, size_t len);

@@ -33,7 +33,9 @@ private:
     void populateDeviceLists(const camel::server::DeviceCatalog& devices);
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format that has integrated decoders.
-    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 4> decoderCombos();
+    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 6> decoderCombos();
+    // The output-depth selector of each lossy format.
+    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 2> pcmBitsCombos();
     void settingsChanged();
     void updateBackendGroups();
     void refreshFromServer();

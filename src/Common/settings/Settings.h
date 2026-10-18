@@ -47,22 +47,27 @@ struct KsSettings {
     bool operator==(const KsSettings&) const = default;
 };
 
-// Explicit per-format choices; a format without one uses its registry default (docs/Plan.md §3.1).
-struct DecoderByFormat {
-    std::array<std::optional<audio::DecoderKind>, std::size(audio::kAllFormats)> choices{};
-    std::optional<audio::DecoderKind>& operator[](audio::AudioFormat f) { return choices[size_t(f)]; }
-    const std::optional<audio::DecoderKind>& operator[](audio::AudioFormat f) const { return choices[size_t(f)]; }
-    bool operator==(const DecoderByFormat&) const = default;
+// Explicit per-format choices; a format without one uses its default (docs/Plan.md §3.1).
+template <class T> struct PerFormat {
+    std::array<std::optional<T>, std::size(audio::kAllFormats)> choices{};
+    std::optional<T>& operator[](audio::AudioFormat f) { return choices[size_t(f)]; }
+    const std::optional<T>& operator[](audio::AudioFormat f) const { return choices[size_t(f)]; }
+    bool operator==(const PerFormat&) const = default;
 };
+using DecoderByFormat = PerFormat<audio::DecoderKind>;
+using PcmBitsByFormat = PerFormat<uint32_t>; // lossy formats only: 16 or 24
 
 // Precondition: audio::decodersFor(format) is not empty.
 audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format);
+// The PCM depth a lossy format is decoded to; 24 unless set (docs/Plan.md §2).
+uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format);
 
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
+    PcmBitsByFormat pcmBitsByFormat;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;

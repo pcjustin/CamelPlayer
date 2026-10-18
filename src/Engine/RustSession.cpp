@@ -55,6 +55,10 @@ uint32_t abiDecoder(DecoderKind kind) {
         return CAMEL_DECODER_SNDFILE;
     case DecoderKind::DrWav:
         return CAMEL_DECODER_DR_WAV;
+    case DecoderKind::Mpg123:
+        return CAMEL_DECODER_MPG123;
+    case DecoderKind::DrMp3:
+        return CAMEL_DECODER_DR_MP3;
     }
     return CAMEL_DECODER_SNDFILE;
 }
@@ -92,8 +96,9 @@ void destroy(CamelEngine* engine) noexcept {
 
 } // namespace
 
-RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame)
-    : host_(makeDecoderHostV1()) {
+RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
+                         const PcmBitsByFormat& pcmBits)
+    : pcmBits_(pcmBits), host_(makeDecoderHostV1(&pcmBits_)) {
     command_.struct_size = sizeof(command_);
     command_.abi_version = CAMEL_ENGINE_ABI_VERSION;
     command_.generation = 1;

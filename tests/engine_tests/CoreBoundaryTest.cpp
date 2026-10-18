@@ -203,9 +203,23 @@ TEST(SettingsBoundary, RegistryDefaultsFollowThePlan) {
         if (decoders.empty()) continue;
         EXPECT_TRUE(supports(format, defaultDecoder(format))) << formatName(format);
     }
-    EXPECT_TRUE(decodersFor(AudioFormat::Aac).empty());
-    EXPECT_TRUE(decodersFor(AudioFormat::Mp3).empty());
+    EXPECT_EQ(decoderFor(none, AudioFormat::Aac), DecoderKind::Symphonia);
+    EXPECT_EQ(decoderFor(none, AudioFormat::Mp3), DecoderKind::Mpg123);
     EXPECT_TRUE(decodersFor(AudioFormat::Dsd).empty());
+}
+
+TEST(SettingsBoundary, LossyOutputDepthDefaultsTo24AndAccepts16) {
+    EXPECT_EQ(pcmBitsFor(PcmBitsByFormat{}, AudioFormat::Aac), 24u);
+    EXPECT_EQ(pcmBitsFor(PcmBitsByFormat{}, AudioFormat::Mp3), 24u);
+    const auto settings = fromJson(R"({"schema":3,"pcmBitsByFormat":{"aac":16,"mp3":24,"flac":16,"wav":24,"ogg":16}})");
+    PcmBitsByFormat expected;
+    expected[AudioFormat::Aac] = 16;
+    expected[AudioFormat::Mp3] = 24;
+    EXPECT_EQ(settings.pcmBitsByFormat, expected);
+    EXPECT_EQ(fromJson(toJson(settings)).pcmBitsByFormat, expected);
+    for (const char* json : {R"({"pcmBitsByFormat":{"aac":20}})", R"({"pcmBitsByFormat":{"mp3":"16"}})",
+                             R"({"pcmBitsByFormat":{"mp3":16.5}})", R"({"pcmBitsByFormat":[16]})"})
+        EXPECT_EQ(fromJson(json).pcmBitsByFormat, PcmBitsByFormat{}) << json;
 }
 
 TEST(SettingsBoundary, DecoderChoicesKeepOnlyIntegratedPairs) {

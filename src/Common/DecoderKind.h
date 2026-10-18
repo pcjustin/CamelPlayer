@@ -4,9 +4,9 @@
 
 namespace camel::audio {
 
-enum class DecoderKind : uint8_t { FFmpeg, Symphonia, DrFlac, Sndfile, DrWav };
+enum class DecoderKind : uint8_t { FFmpeg, Symphonia, DrFlac, Sndfile, DrWav, Mpg123, DrMp3 };
 constexpr DecoderKind kAllDecoders[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrFlac, DecoderKind::Sndfile,
-                                        DecoderKind::DrWav};
+                                        DecoderKind::DrWav,  DecoderKind::Mpg123,    DecoderKind::DrMp3};
 
 const char* decoderName(DecoderKind kind);
 const char* decoderId(DecoderKind kind);

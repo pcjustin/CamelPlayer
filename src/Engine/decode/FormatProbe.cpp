@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <optional>
+#include <sstream>
 #include <string>
 
 #include "Common/AudioTypes.h"
@@ -203,6 +204,114 @@ AudioFormat probeFormat(const std::filesystem::path& path) {
         unsupported("MPEG audio layer I/II is not supported");
     }
     unsupported("unrecognized audio format");
+}
+
+namespace {
+
+uint64_t be64(const uint8_t* p) {
+    return (uint64_t(be32(p)) << 32) | be32(p + 4);
+}
+
+// The timescale of an mvhd or mdhd full box.
+std::optional<uint64_t> timescale(const File& f, const Box& box) {
+    uint8_t h[24];
+    if (!f.readAt(box.start, h, sizeof h)) return std::nullopt;
+    const uint64_t scale = be32(h + (h[0] == 1 ? 20 : 12));
+    return scale ? std::optional(scale) : std::nullopt;
+}
+
+uint64_t rescale(uint64_t value, uint64_t to, uint64_t from) {
+    return (value * to + from / 2) / from;
+}
+
+// The single nonempty edit of an audio track: its media start (encoder delay) and duration in movie time.
+std::optional<EncoderTrim> editTrim(const File& f, const Box& moov, const Box& trak, const Box& mdia, uint32_t sampleRate) {
+    const auto mvhd = findBox(f, moov.start, moov.end, "mvhd");
+    const auto mdhd = findBox(f, mdia.start, mdia.end, "mdhd");
+    const auto edts = findBox(f, trak.start, trak.end, "edts");
+    const auto elst = edts ? findBox(f, edts->start, edts->end, "elst") : std::nullopt;
+    if (!mvhd || !mdhd || !elst) return std::nullopt;
+    const auto movieScale = timescale(f, *mvhd), mediaScale = timescale(f, *mdhd);
+    uint8_t h[8];
+    if (!movieScale || !mediaScale || !f.readAt(elst->start, h, sizeof h)) return std::nullopt;
+    const bool wide = h[0] == 1;
+    const size_t entrySize = wide ? 20 : 12;
+    std::optional<EncoderTrim> trim;
+    for (uint32_t i = 0, count = be32(h + 4); i < count; i++) {
+        uint8_t e[20];
+        if (!f.readAt(elst->start + 8 + uint64_t(i) * entrySize, e, entrySize)) return std::nullopt;
+        const uint64_t duration = wide ? be64(e) : be32(e);
+        const int64_t mediaTime = wide ? int64_t(be64(e + 8)) : int64_t(int32_t(be32(e + 4)));
+        if (mediaTime == -1) continue; // an empty edit inserts silence; there is nothing to trim in it
+        if (trim || mediaTime < 0) return std::nullopt;
+        trim = EncoderTrim{rescale(uint64_t(mediaTime), sampleRate, *mediaScale), rescale(duration, sampleRate, *movieScale)};
+    }
+    return trim;
+}
+
+// iTunes' gapless tag: hex fields " 0 priming padding length ...", in samples.
+std::optional<EncoderTrim> itunesTrim(const File& f, const Box& moov) {
+    const auto udta = findBox(f, moov.start, moov.end, "udta");
+    const auto meta = udta ? findBox(f, udta->start, udta->end, "meta") : std::nullopt;
+    const auto ilst = meta ? findBox(f, meta->start + 4, meta->end, "ilst") : std::nullopt; // meta is a full box
+    if (!ilst) return std::nullopt;
+    for (uint64_t pos = ilst->start;;) {
+        const auto item = findBox(f, pos, ilst->end, "----");
+        if (!item) return std::nullopt;
+        pos = item->end;
+        const auto name = findBox(f, item->start, item->end, "name");
+        const auto data = findBox(f, item->start, item->end, "data");
+        if (!name || !data || name->end - name->start != 4 + 8 || data->end - data->start > 512) continue;
+        char key[8];
+        if (!f.readAt(name->start + 4, key, sizeof key) || std::memcmp(key, "iTunSMPB", 8) != 0) continue;
+        std::string text(size_t(data->end - data->start), '\0');
+        if (text.size() <= 8 || !f.readAt(data->start, text.data(), text.size())) return std::nullopt;
+        std::istringstream fields(text.substr(8));
+        uint64_t zero = 0, priming = 0, padding = 0, length = 0;
+        if (!(fields >> std::hex >> zero >> priming >> padding >> length) || !length) return std::nullopt;
+        return EncoderTrim{priming, length};
+    }
+}
+
+} // namespace
+
+bool lossyLengthDeclared(const std::filesystem::path& path) {
+    const File f(path);
+    uint8_t h[10] = {};
+    if (!f.readAt(0, h, sizeof h)) return false;
+    if (tagIs(h + 4, "ftyp")) return true;
+    uint64_t pos = 0;
+    if (h[0] == 'I' && h[1] == 'D' && h[2] == '3')
+        pos = 10 +
+              ((uint64_t(h[6] & 0x7f) << 21) | (uint64_t(h[7] & 0x7f) << 14) | (uint64_t(h[8] & 0x7f) << 7) |
+               uint64_t(h[9] & 0x7f)) +
+              ((h[5] & 0x10) ? 10 : 0);
+    // The first MPEG frame carries the header after its side information (at most 32 bytes in).
+    uint8_t frame[4 + 32 + 4] = {};
+    if (!f.readAt(pos, frame, sizeof frame) || frame[0] != 0xFF || (frame[1] & 0xE0) != 0xE0) return false;
+    for (size_t i = 4; i + 4 <= sizeof frame; i++)
+        if (tagIs(frame + i, "Xing") || tagIs(frame + i, "Info") || tagIs(frame + i, "VBRI")) return true;
+    return false;
+}
+
+std::optional<EncoderTrim> mp4EncoderTrim(const std::filesystem::path& path, uint32_t sampleRate) {
+    const File f(path);
+    uint8_t h[8];
+    if (!sampleRate || !f.readAt(0, h, sizeof h) || !tagIs(h + 4, "ftyp")) return std::nullopt;
+    const auto moov = findBox(f, 0, f.size(), "moov");
+    if (!moov) return std::nullopt;
+    for (uint64_t pos = moov->start;;) {
+        const auto trak = findBox(f, pos, moov->end, "trak");
+        if (!trak) break;
+        pos = trak->end;
+        const auto mdia = findBox(f, trak->start, trak->end, "mdia");
+        const auto hdlr = mdia ? findBox(f, mdia->start, mdia->end, "hdlr") : std::nullopt;
+        uint8_t handler[12];
+        if (!hdlr || !f.readAt(hdlr->start, handler, sizeof handler) || !tagIs(handler + 8, "soun")) continue;
+        if (const auto trim = editTrim(f, *moov, *trak, *mdia, sampleRate)) return trim;
+        break;
+    }
+    return itunesTrim(f, *moov);
 }
 
 std::optional<uint64_t> aiffSampleFrames(const std::filesystem::path& path) {
