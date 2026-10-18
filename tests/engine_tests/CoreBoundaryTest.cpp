@@ -208,7 +208,8 @@ TEST(SettingsBoundary, RegistryDefaultsFollowThePlan) {
     }
     EXPECT_EQ(decoderFor(none, AudioFormat::Aac), DecoderKind::Symphonia);
     EXPECT_EQ(decoderFor(none, AudioFormat::Mp3), DecoderKind::Mpg123);
-    EXPECT_TRUE(decodersFor(AudioFormat::Dsd).empty());
+    EXPECT_EQ(decoderFor(none, AudioFormat::Dsd), DecoderKind::DsdNexus);
+    EXPECT_EQ(decodersFor(AudioFormat::Dsd).size(), 1u);
 }
 
 TEST(SettingsBoundary, ConversionIsOffByDefaultWithHighQualityResampling) {
@@ -282,8 +283,8 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         settings.language = "zh-TW";
         settings.lastFile = L"C:\\music\\album.flac";
         settings.wasapi = {"endpoint", false, WasapiPeriod::Custom, 12.5, SampleType::Int24In32};
-        settings.asio = {"driver", 1024, 2, 3};
-        settings.ks = {"filter|1", mode, 30, 8, 15, SampleType::Int32};
+        settings.asio = {"driver", 1024, 2, 3, DsdOutput::Dop};
+        settings.ks = {"filter|1", mode, 30, 8, 15, SampleType::Int32, DsdOutput::Native};
         saveSettings(settings, file);
         EXPECT_EQ(toJson(loadSettings(file)), toJson(settings));
         settings.language = "en-US";
@@ -292,6 +293,17 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(file).concat(L".tmp")));
     }
     std::filesystem::remove(file);
+}
+
+TEST(SettingsBoundary, DsdOutputDefaultsToNativeOnAsioAndDopOnKs) {
+    EXPECT_EQ(Settings{}.asio.dsdOutput, DsdOutput::Native);
+    EXPECT_EQ(Settings{}.ks.dsdOutput, DsdOutput::Dop);
+    const auto parsed = fromJson(R"({"asio":{"dsdOutput":"dop"},"ks":{"dsdOutput":"native"}})");
+    EXPECT_EQ(parsed.asio.dsdOutput, DsdOutput::Dop);
+    EXPECT_EQ(parsed.ks.dsdOutput, DsdOutput::Native);
+    const auto unknown = fromJson(R"({"asio":{"dsdOutput":"pcm"},"ks":{"dsdOutput":7}})");
+    EXPECT_EQ(unknown.asio.dsdOutput, DsdOutput::Native);
+    EXPECT_EQ(unknown.ks.dsdOutput, DsdOutput::Dop);
 }
 
 TEST(SettingsBoundary, InvalidRootIsRejected) {

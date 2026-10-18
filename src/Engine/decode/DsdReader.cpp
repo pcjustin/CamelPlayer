@@ -16,6 +16,7 @@ extern "C" {
 
 #include "Common/AudioTypes.h"
 #include "Common/util/Text.h"
+#include "Engine/decode/DecoderImpl.h"
 
 namespace camel::audio {
 namespace {
@@ -232,7 +233,38 @@ private:
     size_t pendingPos_ = 0;
 };
 
+class DsdDecoder final : public IDecoder {
+public:
+    explicit DsdDecoder(std::unique_ptr<DsdReader> reader) : reader_(std::move(reader)) {
+        const auto& dsd = reader_->info();
+        info_.sampleRate = dsd.sampleRate / 8;
+        info_.channels = dsd.channels;
+        info_.bitsPerSample = 1;
+        info_.totalFrames = dsd.frames;
+    }
+
+    const SourceInfo& info() const override { return info_; }
+
+    size_t read(int32_t* dst, size_t frames) override {
+        bytes_.resize(frames * info_.channels);
+        const size_t got = reader_->read(bytes_.data(), frames);
+        std::copy_n(bytes_.begin(), got * info_.channels, dst);
+        return got;
+    }
+
+    void seek(uint64_t frame) override { reader_->seek(frame); }
+
+private:
+    std::unique_ptr<DsdReader> reader_;
+    SourceInfo info_;
+    std::vector<uint8_t> bytes_;
+};
+
 } // namespace
+
+std::unique_ptr<IDecoder> openDsdNexus(const std::filesystem::path& path) {
+    return std::make_unique<DsdDecoder>(openDsdReader(path));
+}
 
 std::unique_ptr<DsdReader> openDsdReader(const std::filesystem::path& path, bool allowDst) {
     const std::wstring wide = longPath(path);

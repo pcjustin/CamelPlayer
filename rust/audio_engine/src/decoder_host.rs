@@ -9,6 +9,7 @@ pub const DECODER_SNDFILE: u32 = 4;
 pub const DECODER_DR_WAV: u32 = 5;
 pub const DECODER_MPG123: u32 = 6;
 pub const DECODER_DR_MP3: u32 = 7;
+pub const DECODER_DSD_NEXUS: u32 = 8;
 
 pub const HOST_OK: i32 = 0;
 pub const HOST_E_IO: i32 = -1;
@@ -24,6 +25,9 @@ pub const FLAC_INTEGRITY_FAILED: u32 = 3;
 
 pub const SAMPLE_ENCODING_INTEGER: u32 = 0;
 pub const SAMPLE_ENCODING_FLOAT32: u32 = 1;
+/// Raw DSD: one byte per channel per frame (eight samples, oldest in the MSB) in the low bits of each read value;
+/// `sample_rate` counts these byte frames and `valid_bits` is 1.
+pub const SAMPLE_ENCODING_DSD: u32 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -33,7 +37,8 @@ pub struct CamelSourceInfoV1 {
     pub sample_rate: u32,
     pub channel_count: u32,
     pub valid_bits: u32,
-    /// SAMPLE_ENCODING_INTEGER or SAMPLE_ENCODING_FLOAT32 (lossy decoders: float32 bit patterns in the read buffer).
+    /// SAMPLE_ENCODING_INTEGER, SAMPLE_ENCODING_FLOAT32 (lossy decoders: float32 bit patterns in the read buffer) or
+    /// SAMPLE_ENCODING_DSD.
     pub sample_encoding: u32,
     pub total_frames: u64,
     pub has_md5: u32,
@@ -124,6 +129,7 @@ impl DecoderSource {
                 | DECODER_DR_WAV
                 | DECODER_MPG123
                 | DECODER_DR_MP3
+                | DECODER_DSD_NEXUS
         ) || source.path_utf8.is_null()
             || source.path_length_bytes == 0
             || source.path_length_bytes > 32_768
@@ -173,7 +179,7 @@ impl DecoderSource {
             || info.sample_rate == 0
             || info.channel_count == 0
             || info.channel_count > 32
-            || info.sample_encoding > SAMPLE_ENCODING_FLOAT32
+            || info.sample_encoding > SAMPLE_ENCODING_DSD
             || info.reserved2 != 0
         {
             if !decoder.is_null() {
@@ -181,7 +187,12 @@ impl DecoderSource {
             }
             return Err(crate::ENGINE_E_UNSUPPORTED_FORMAT);
         }
-        if !matches!(info.valid_bits, 16 | 24) {
+        let valid_bits = if info.sample_encoding == SAMPLE_ENCODING_DSD {
+            info.valid_bits == 1
+        } else {
+            matches!(info.valid_bits, 16 | 24)
+        };
+        if !valid_bits {
             (host.close)(host.context(), decoder);
             return Err(crate::ENGINE_E_UNSUPPORTED_FORMAT);
         }

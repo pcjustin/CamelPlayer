@@ -11,8 +11,9 @@
 namespace camel::audio {
 
 // Sample layouts a device can accept. Integer layouts follow WAVEFORMATEXTENSIBLE conventions:
-// Int24In32 is a 24-bit value MSB-aligned in a 32-bit word (low 8 bits zero).
-enum class SampleType : uint8_t { Int16, Int24, Int24In32, Int32, Float32 };
+// Int24In32 is a 24-bit value MSB-aligned in a 32-bit word (low 8 bits zero). Dsd8 is native DSD: one byte per
+// channel per frame, eight samples with the oldest in the MSB, so a DeviceFormat's sampleRate is the DSD rate / 8.
+enum class SampleType : uint8_t { Int16, Int24, Int24In32, Int32, Float32, Dsd8 };
 
 constexpr uint32_t bytesPerSample(SampleType t) {
     switch (t) {
@@ -20,6 +21,8 @@ constexpr uint32_t bytesPerSample(SampleType t) {
         return 2;
     case SampleType::Int24:
         return 3;
+    case SampleType::Dsd8:
+        return 1;
     default:
         return 4;
     }
@@ -33,6 +36,8 @@ constexpr uint32_t validBits(SampleType t) {
     case SampleType::Int24:
     case SampleType::Int24In32:
         return 24;
+    case SampleType::Dsd8:
+        return 1;
     default:
         return 32;
     }

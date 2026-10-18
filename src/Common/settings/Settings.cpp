@@ -65,6 +65,14 @@ const char* ksModeId(KsMode m) {
     return "auto";
 }
 
+const char* dsdOutputId(DsdOutput d) {
+    return d == DsdOutput::Native ? "native" : "dop";
+}
+
+static DsdOutput dsdOutputFromId(std::string_view id, DsdOutput fallback) {
+    return id == "native" ? DsdOutput::Native : id == "dop" ? DsdOutput::Dop : fallback;
+}
+
 const char* resampleQualityId(ResampleQuality q) {
     return q == ResampleQuality::Quick ? "quick" : q == ResampleQuality::VeryHigh ? "veryhigh" : "high";
 }
@@ -91,6 +99,8 @@ const char* sampleTypeId(SampleType t) {
         return "32";
     case SampleType::Float32:
         return "f32";
+    case SampleType::Dsd8:
+        return ""; // never a fixed container
     }
     return "";
 }
@@ -140,10 +150,15 @@ std::string toJson(const Settings& s) {
     j["asio"] = {{"driver", s.asio.driverClsid},
                  {"bufferSize", s.asio.bufferSize},
                  {"outLeft", s.asio.outLeft},
-                 {"outRight", s.asio.outRight}};
-    j["ks"] = {{"device", s.ks.deviceId},   {"mode", ksModeId(s.ks.mode)},
-               {"bufferMs", s.ks.bufferMs}, {"packetCount", s.ks.packetCount},
-               {"packetMs", s.ks.packetMs}, {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""}};
+                 {"outRight", s.asio.outRight},
+                 {"dsdOutput", dsdOutputId(s.asio.dsdOutput)}};
+    j["ks"] = {{"device", s.ks.deviceId},
+               {"mode", ksModeId(s.ks.mode)},
+               {"bufferMs", s.ks.bufferMs},
+               {"packetCount", s.ks.packetCount},
+               {"packetMs", s.ks.packetMs},
+               {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""},
+               {"dsdOutput", dsdOutputId(s.ks.dsdOutput)}};
     return j.dump(2);
 }
 
@@ -208,6 +223,7 @@ Settings fromJson(const std::string& text) {
         s.asio.bufferSize = integer(a, "bufferSize", 0, 0, 65536);
         s.asio.outLeft = integer(a, "outLeft", 0, 0, 63);
         s.asio.outRight = integer(a, "outRight", 1, 0, 63);
+        s.asio.dsdOutput = dsdOutputFromId(str(a, "dsdOutput", ""), DsdOutput::Native);
     }
     if (j.contains("ks") && j["ks"].is_object()) {
         const json& k = j["ks"];
@@ -217,6 +233,7 @@ Settings fromJson(const std::string& text) {
         s.ks.packetCount = integer(k, "packetCount", 4, 2, 16);
         s.ks.packetMs = num(k, "packetMs", 10.0, 1.0, 200.0);
         s.ks.sampleType = sampleTypeFromId(str(k, "sampleType", ""));
+        s.ks.dsdOutput = dsdOutputFromId(str(k, "dsdOutput", ""), DsdOutput::Dop);
     }
     return s;
 }

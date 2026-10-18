@@ -72,6 +72,7 @@ Settings settingsFromArgs(const Args& args) {
     }
     if (auto v = option(args, L"--wasapi-poll")) s.wasapi.eventDriven = *v != L"1";
     if (auto v = option(args, L"--convert")) s.convertWhenUnsupported = *v == L"1";
+    if (auto v = option(args, L"--dsd")) s.asio.dsdOutput = s.ks.dsdOutput = *v == L"dop" ? DsdOutput::Dop : DsdOutput::Native;
     if (auto v = option(args, L"--format")) {
         auto t = sampleTypeFromId(toUtf8(*v));
         s.wasapi.sampleType = t;
@@ -109,7 +110,7 @@ int cmdPlay(const Args& args) {
     if (files.empty()) {
         std::puts("usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode "
                   "auto|rtevent|rtpoll|standard]\n"
-                  "            [--format 16|24|24in32|32] [--seconds N] [--seek S]");
+                  "            [--format 16|24|24in32|32] [--dsd native|dop] [--seconds N] [--seek S]");
         return 2;
     }
     Settings s = settingsFromArgs(args);

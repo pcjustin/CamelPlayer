@@ -9,7 +9,7 @@
 namespace camel::audio {
 namespace {
 
-CamelAudioFormatV1 abiFormat(const DeviceFormat& f) {
+CamelAudioFormatV1 abiFormat(const DeviceFormat& f, DsdPath dsd) {
     CamelAudioFormatV1 format{};
     format.struct_size = sizeof(format);
     format.abi_version = CAMEL_ENGINE_ABI_VERSION;
@@ -17,6 +17,21 @@ CamelAudioFormatV1 abiFormat(const DeviceFormat& f) {
     format.rate_hz = f.sampleRate;
     format.channel_count = f.channels;
     format.channel_mask = f.channels == 2 ? 3 : 0;
+    if (dsd == DsdPath::Native) {
+        format.stream_kind = CAMEL_AUDIO_DSD;
+        format.sample_format = CAMEL_SAMPLE_DSD_U8;
+        format.rate_hz = f.sampleRate * 8; // DSD samples per second
+        format.valid_bits = 1;
+        format.container_bits = 8;
+        return format;
+    }
+    if (dsd == DsdPath::Dop) {
+        format.stream_kind = CAMEL_AUDIO_DOP;
+        format.sample_format = f.type == SampleType::Int24 ? CAMEL_SAMPLE_DOP_S24_LE : CAMEL_SAMPLE_DOP_S24_IN_32_LE;
+        format.valid_bits = 24;
+        format.container_bits = f.type == SampleType::Int24 ? 24 : 32;
+        return format;
+    }
     switch (f.type) {
     case SampleType::Int16:
         format.sample_format = CAMEL_SAMPLE_S16_LE;
@@ -39,6 +54,8 @@ CamelAudioFormatV1 abiFormat(const DeviceFormat& f) {
         format.sample_format = CAMEL_SAMPLE_F32_LE;
         format.valid_bits = format.container_bits = 32;
         break;
+    case SampleType::Dsd8:
+        break; // native DSD returned above
     }
     return format;
 }
@@ -59,6 +76,8 @@ uint32_t abiDecoder(DecoderKind kind) {
         return CAMEL_DECODER_MPG123;
     case DecoderKind::DrMp3:
         return CAMEL_DECODER_DR_MP3;
+    case DecoderKind::DsdNexus:
+        return CAMEL_DECODER_DSD_NEXUS;
     }
     return CAMEL_DECODER_SNDFILE;
 }
@@ -97,8 +116,9 @@ void destroy(CamelEngine* engine) noexcept {
 } // namespace
 
 RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                         const PcmBitsByFormat& pcmBits, Conversion conversion)
-    : pcmBits_(pcmBits), host_(makeDecoderHostV1(&pcmBits_)) {
+                         const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd)
+    : pcmBits_(pcmBits), host_(makeDecoderHostV1(&pcmBits_)), raw_(dsd != DsdPath::None),
+      unitsPerFrame_(dsd == DsdPath::Native ? 8 : 1) {
     command_.struct_size = sizeof(command_);
     command_.abi_version = CAMEL_ENGINE_ABI_VERSION;
     command_.generation = 1;
@@ -106,7 +126,7 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
                              : conversion.quality == ResampleQuality::VeryHigh ? CAMEL_RESAMPLE_VERY_HIGH
                                                                                : CAMEL_RESAMPLE_HIGH;
     const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1), CAMEL_ENGINE_ABI_VERSION,   CAMEL_ENGINE_MAX_RENDER_UNITS,
-                                     abiFormat(format),           conversion.allow ? 1u : 0u, quality};
+                                     abiFormat(format, dsd),      conversion.allow ? 1u : 0u, quality};
     if (const auto status = camel_engine_create_v1(&config, &engine_); status != CAMEL_ENGINE_OK)
         throw engineError("create", status);
     const auto utf8 = toUtf8(path.wstring());
@@ -160,26 +180,26 @@ RustSession::Prefill RustSession::prefill(uint64_t& frames) {
 
 RustSession::Rendered RustSession::render(uint8_t* destination, size_t frames, size_t bytesPerFrame) noexcept {
     Rendered rendered;
+    const size_t maxChunk = size_t(CAMEL_ENGINE_MAX_RENDER_UNITS / unitsPerFrame_);
     for (size_t done = 0; done < frames;) {
-        const size_t chunk = std::min<size_t>(frames - done, CAMEL_ENGINE_MAX_RENDER_UNITS);
-        const CamelRenderRequestV1 request{sizeof(CamelRenderRequestV1), CAMEL_ENGINE_ABI_VERSION, chunk,
+        const size_t chunk = std::min(frames - done, maxChunk);
+        const CamelRenderRequestV1 request{sizeof(CamelRenderRequestV1), CAMEL_ENGINE_ABI_VERSION, chunk * unitsPerFrame_,
                                            destination + done * bytesPerFrame, chunk * bytesPerFrame};
         CamelRenderResultV1 result{sizeof(CamelRenderResultV1), CAMEL_ENGINE_ABI_VERSION, 0, 0, 0, 0};
         const auto status = camel_engine_render_v1(engine_, &request, &result);
-        rendered.frames += size_t(result.units_rendered);
-        if (status == CAMEL_ENGINE_END) {
-            rendered.ended = true;
-            break;
-        }
-        if (status == CAMEL_ENGINE_UNDERRUN) {
-            rendered.underrun = true;
-            break;
-        }
-        if (status < 0 || result.state != CAMEL_RENDER_STATE_ACTIVE || result.units_rendered < chunk) {
-            rendered.fault = result.state == CAMEL_RENDER_STATE_FAULT;
-            break;
-        }
+        const size_t got = size_t(result.units_rendered / unitsPerFrame_);
+        // Audio ends within this request; later chunks of a raw DSD stream still need the Engine's silence.
+        if (!rendered.ended && !rendered.underrun && !rendered.fault) rendered.frames += got;
         done += chunk;
+        if (status == CAMEL_ENGINE_END)
+            rendered.ended = true;
+        else if (status == CAMEL_ENGINE_UNDERRUN)
+            rendered.underrun = true;
+        else if (status < 0 || result.state != CAMEL_RENDER_STATE_ACTIVE || got < chunk)
+            rendered.fault = rendered.fault || result.state == CAMEL_RENDER_STATE_FAULT;
+        else
+            continue;
+        if (!raw_) break;
     }
     return rendered;
 }

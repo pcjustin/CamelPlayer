@@ -1,15 +1,26 @@
 use crate::{
-    AudioFormat, AUDIO_PCM, ENGINE_E_UNSUPPORTED_FORMAT, SAMPLE_S16_LE, SAMPLE_S24_IN_32_LE,
-    SAMPLE_S24_LE, SAMPLE_S32_LE,
+    AudioFormat, AUDIO_DOP, AUDIO_DSD, AUDIO_PCM, ENGINE_E_UNSUPPORTED_FORMAT, SAMPLE_S16_LE,
+    SAMPLE_S24_IN_32_LE, SAMPLE_S24_LE, SAMPLE_S32_LE,
 };
 
+/// Bytes of one engine frame: a PCM or DoP sample per channel, or one byte per channel for native DSD.
 pub(crate) fn bytes_per_frame(format: &AudioFormat) -> Option<usize> {
+    let bytes_per_sample = match format.stream_kind {
+        AUDIO_PCM | AUDIO_DOP => format.container_bits / 8,
+        AUDIO_DSD => 1,
+        _ => return None,
+    };
+    usize::try_from(format.channel_count)
+        .ok()?
+        .checked_mul(usize::try_from(bytes_per_sample).ok()?)
+}
+
+/// Packing integer PCM; DSD and DoP streams are packed by the converter.
+fn pcm_bytes_per_frame(format: &AudioFormat) -> Option<usize> {
     if format.stream_kind != AUDIO_PCM {
         return None;
     }
-    usize::try_from(format.channel_count)
-        .ok()?
-        .checked_mul(usize::try_from(format.container_bits / 8).ok()?)
+    bytes_per_frame(format)
 }
 
 pub(crate) fn pack_pcm(
@@ -18,7 +29,7 @@ pub(crate) fn pack_pcm(
     format: &AudioFormat,
     output: &mut [u8],
 ) -> Result<usize, i32> {
-    let Some(bytes_per_sample) = bytes_per_frame(format)
+    let Some(bytes_per_sample) = pcm_bytes_per_frame(format)
         .and_then(|frame_bytes| frame_bytes.checked_div(format.channel_count as usize))
     else {
         return Err(ENGINE_E_UNSUPPORTED_FORMAT);

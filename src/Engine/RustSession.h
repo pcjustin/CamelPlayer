@@ -9,6 +9,7 @@
 #include "Common/DecoderKind.h"
 #include "Common/settings/Settings.h"
 #include "Engine/EngineAbi.h"
+#include "Engine/FormatRule.h"
 
 namespace camel::audio {
 
@@ -21,9 +22,9 @@ public:
     };
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,
-    // decode to the depth `pcmBits` sets. Throws Error on failure.
+    // decode to the depth `pcmBits` sets. `dsd` makes the stream native DSD or DoP. Throws Error on failure.
     RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                const PcmBitsByFormat& pcmBits, Conversion conversion);
+                const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd = DsdPath::None);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;
@@ -41,7 +42,7 @@ public:
         bool underrun = false;
         bool fault = false; // the engine stopped after a decode failure
     };
-    // Output callback only; never blocks or allocates.
+    // Output callback only; never blocks or allocates. A raw DSD stream fills all `frames` (silence after the audio).
     Rendered render(uint8_t* destination, size_t frames, size_t bytesPerFrame) noexcept;
 
     // The output bridge's estimate of what the listener hears now.
@@ -68,6 +69,8 @@ private:
     PcmBitsByFormat pcmBits_; // read by the decoder host; declared before host_, which points to it
     CamelDecoderHostV1 host_{};
     CamelCommandStampV1 command_{};
+    bool raw_ = false;           // DoP or native DSD
+    uint64_t unitsPerFrame_ = 1; // render units per device frame: 8 DSD samples per native byte frame
 };
 
 } // namespace camel::audio

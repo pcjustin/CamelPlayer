@@ -35,6 +35,11 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
     return std::nullopt;
 }
 
+// ASIO plays native DSD when asked; KS native DSD is not enabled yet and WASAPI has none (docs/Plan.md §5.8).
+bool nativeDsd(const Settings& s) {
+    return s.backend == Backend::Asio && s.asio.dsdOutput == DsdOutput::Native;
+}
+
 bool sameBackendConfig(const Settings& a, const Settings& b) {
     if (a.backend != b.backend) return false;
     switch (a.backend) {
@@ -126,6 +131,8 @@ public:
         }
         return n;
     }
+
+    bool writesSilence() const noexcept override { return rawDsd_.load(std::memory_order_acquire); }
 
     // ---- commands (control thread) ----
     void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
@@ -348,8 +355,10 @@ private:
     // Frames handed to the device minus what its buffer still holds; refined once drivers report latency.
     void reportAudible() {
         uint64_t buffered = 0;
+        const OutputStatus status = output_->status(); // drivers add measurements once the stream runs
         {
             std::lock_guard lock(snapMutex_);
+            snap_.outputStatus = status;
             buffered = snap_.outputStatus.bufferFrames;
         }
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
@@ -370,8 +379,9 @@ private:
     }
 
     std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy) {
-        return negotiateOutput(src, lossy, fixedSampleType(settings_), settings_.convertWhenUnsupported,
-                               [&](const DeviceFormat& f) { return output_->supports(f); });
+        const auto supports = [&](const DeviceFormat& f) { return output_->supports(f); };
+        if (src.bitsPerSample == 1) return negotiateDsd(src, nativeDsd(settings_), fixedSampleType(settings_), supports);
+        return negotiateOutput(src, lossy, fixedSampleType(settings_), settings_.convertWhenUnsupported, supports);
     }
 
     RustSession::Conversion conversion() const { return {settings_.convertWhenUnsupported, settings_.resampleQuality}; }
@@ -427,10 +437,14 @@ private:
             return fail(e, PlayState::Stopped);
         }
         if (!plan) {
-            char msg[160];
+            char msg[200];
             const char* hint = settings_.convertWhenUnsupported ? "" : "; enable \"convert when unsupported\" to convert it";
-            const int length = snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
-                                        src.sampleRate, src.bitsPerSample, src.channels, hint);
+            const int length =
+                src.bitsPerSample == 1
+                    ? snprintf(msg, sizeof msg, "DSD%u / %u ch: this device takes neither native DSD nor DoP at %.1f kHz",
+                               src.sampleRate * 8 / 44100, src.channels, dopCarrierRate(src.sampleRate) / 1000.0)
+                    : snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
+                               src.sampleRate, src.bitsPerSample, src.channels, hint);
             if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "No bit-perfect format available on this device");
             position_ = 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), PlayState::Stopped);
@@ -443,7 +457,8 @@ private:
         outputRate_ = fmt_.sampleRate;
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         try {
-            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion());
+            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
+                                                  plan_.dsd);
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);
@@ -479,9 +494,11 @@ private:
                 if (session == session_ && active_) onRestart();
             });
         });
+        rawDsd_.store(plan_.dsd != DsdPath::None, std::memory_order_release);
         try {
             output_->open(fmt_, this);
         } catch (const Error& e) {
+            rawDsd_ = false;
             stopDecoder();
             rust_.reset();
             position_ = startFrame;
@@ -553,6 +570,7 @@ private:
                 output_.reset();
             }
         }
+        rawDsd_ = false; // the output no longer renders
         stopDecoder();
         rust_.reset();
         if (active_) position_ = sourcePosition();
@@ -668,7 +686,7 @@ private:
     bool conversionPathChanges(const Settings& s) {
         if (plan_.resample && settings_.resampleQuality != s.resampleQuality) return true;
         const auto source = snapshot().source;
-        if (!source) return false;
+        if (!source || source->bitsPerSample == 1) return false; // raw DSD is never converted here
         const auto plan = negotiateOutput(*source, format_ && isLossy(*format_), fixedSampleType(s), s.convertWhenUnsupported,
                                           [&](const DeviceFormat& f) { return output_->supports(f); });
         return plan != plan_;
@@ -701,6 +719,7 @@ private:
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
+    std::atomic<bool> rawDsd_{false};            // the open stream is DoP or native DSD
     std::atomic<uint64_t> renderTransitions_{0}; // written by the output callback
     uint64_t handledTransitions_ = 0;
     struct Queued {

@@ -141,6 +141,9 @@ struct PinInfo {
         ULONG minBits, maxBits, minRate, maxRate;
     };
     std::vector<Range> ranges;
+    // Audio data ranges that are neither PCM nor float. Windows defines no KS DSD subtype, so a vendor DSD format
+    // would appear here; native DSD stays disabled until one is verified (docs/Plan.md §5.7, §5.8).
+    std::vector<GUID> otherAudioFormats;
 };
 
 PinInfo pinInfo(HANDLE f, ULONG pin) {
@@ -189,6 +192,8 @@ PinInfo pinInfo(HANDLE f, ULONG pin) {
             pi.ranges.push_back({isFloat, a->MinimumBitsPerSample, a->MaximumBitsPerSample, a->MinimumSampleFrequency,
                                  a->MaximumSampleFrequency});
             pi.pcmRender = true;
+        } else if (r->MajorFormat == KSDATAFORMAT_TYPE_AUDIO && !pcm) {
+            pi.otherAudioFormats.push_back(r->SubFormat);
         }
         if (r->Flags & KSDATARANGE_ATTRIBUTES) attrNext = true;
         p += (sz + 7) & ~7u;
@@ -275,6 +280,7 @@ public:
     }
 
     bool supports(const DeviceFormat& f) override {
+        if (f.type == SampleType::Dsd8) return false; // native DSD on KS pins is not enabled yet
         std::lock_guard lock(capsMutex_);
         auto key = std::make_tuple(f.sampleRate, f.channels, int(f.type));
         if (auto it = caps_.find(key); it != caps_.end()) return it->second;
@@ -308,6 +314,7 @@ public:
 
     void open(const DeviceFormat& f, IRenderSource* source) override {
         close();
+        if (f.type == SampleType::Dsd8) throw Error(ErrorCode::FormatNotSupported, "native DSD on KS is not enabled");
         fmt_ = f;
         source_ = source;
         quit_ = false;
@@ -371,7 +378,7 @@ private:
         std::lock_guard lock(statusMutex_);
         status_.mode = mode;
         status_.bufferFrames = frames;
-        status_.detail = detail;
+        status_.detail = detail + ", " + nativeDsdNote_;
     }
 
     void threadMain(std::promise<void>& opened);
@@ -394,6 +401,7 @@ private:
     bool applied_ = false, threadDone_ = false;
     mutable std::mutex statusMutex_;
     OutputStatus status_;
+    std::string nativeDsdNote_; // KS thread, before setStatus
     std::mutex capsMutex_;
     std::map<std::tuple<uint32_t, uint32_t, int>, bool> caps_;
 };
@@ -410,6 +418,17 @@ void KsOutput::threadMain(std::promise<void>& opened) {
         return;
     }
     PinInfo pi = pinInfo(filter, pinId_);
+    nativeDsdNote_ = "native DSD: not enabled";
+    const char* separator = "; pin also offers ";
+    for (const GUID& g : pi.otherAudioFormats) {
+        char text[40];
+        const int length =
+            snprintf(text, sizeof text, "%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X", g.Data1, g.Data2, g.Data3,
+                     g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+        if (length <= 0 || size_t(length) >= sizeof text) continue;
+        nativeDsdNote_ += separator + std::string(text);
+        separator = ", ";
+    }
     const bool looped = useLooped(pi);
     HANDLE pin = nullptr;
     DWORD e = createPin(filter, pinId_, looped, fmt_, &pin);

@@ -67,6 +67,7 @@ public:
     ~WasapiOutput() override { close(); }
 
     bool supports(const DeviceFormat& f) override {
+        if (f.type == SampleType::Dsd8) return false; // WASAPI carries DSD as DoP only
         std::lock_guard lock(capsMutex_);
         auto key = std::make_tuple(f.sampleRate, f.channels, int(f.type));
         if (auto it = caps_.find(key); it != caps_.end()) return it->second;
@@ -84,6 +85,7 @@ public:
 
     void open(const DeviceFormat& f, IRenderSource* source) override {
         close();
+        if (f.type == SampleType::Dsd8) throw Error(ErrorCode::FormatNotSupported, "WASAPI has no native DSD");
         fmt_ = f;
         source_ = source;
         quit_ = false;

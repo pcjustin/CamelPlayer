@@ -60,6 +60,7 @@ std::span<const DecoderKind> decodersFor(AudioFormat format) {
     static constexpr DecoderKind kPcm[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::Sndfile, DecoderKind::DrWav};
     static constexpr DecoderKind kAac[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia};
     static constexpr DecoderKind kMp3[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::Mpg123, DecoderKind::DrMp3};
+    static constexpr DecoderKind kDsd[] = {DecoderKind::DsdNexus};
     switch (format) {
     case AudioFormat::Flac:
         return kFlac;
@@ -72,6 +73,8 @@ std::span<const DecoderKind> decodersFor(AudioFormat format) {
     case AudioFormat::Wav:
     case AudioFormat::Aiff:
         return kPcm;
+    case AudioFormat::Dsd:
+        return kDsd;
     default:
         return {};
     }
@@ -89,6 +92,8 @@ DecoderKind defaultDecoder(AudioFormat format) {
         return DecoderKind::Symphonia;
     case AudioFormat::Mp3:
         return DecoderKind::Mpg123;
+    case AudioFormat::Dsd:
+        return DecoderKind::DsdNexus;
     default:
         return DecoderKind::Sndfile;
     }

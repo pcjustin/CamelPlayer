@@ -12,5 +12,8 @@ std::unique_ptr<IDecoder> openSndfile(const std::filesystem::path& path);
 std::unique_ptr<IDecoder> openDrWav(const std::filesystem::path& path);
 std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t lossyBits);
 std::unique_ptr<IDecoder> openDrMp3(const std::filesystem::path& path, uint32_t lossyBits);
+// Raw DSD: SourceInfo counts byte frames (DSD rate / 8) and reports 1 bit per sample; read() returns one byte
+// per channel per frame, oldest sample in the MSB.
+std::unique_ptr<IDecoder> openDsdNexus(const std::filesystem::path& path);
 
 } // namespace camel::audio

@@ -20,6 +20,7 @@ extern "C" {
 #define CAMEL_SAMPLE_F32_LE 5u
 #define CAMEL_SAMPLE_DSD_U8 6u
 #define CAMEL_SAMPLE_DOP_S24_LE 7u
+#define CAMEL_SAMPLE_DOP_S24_IN_32_LE 8u
 
 typedef int32_t CamelEngineStatus;
 
@@ -46,6 +47,7 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_DECODER_DR_WAV 5u
 #define CAMEL_DECODER_MPG123 6u
 #define CAMEL_DECODER_DR_MP3 7u
+#define CAMEL_DECODER_DSD_NEXUS 8u
 
 #define CAMEL_DECODER_HOST_OK 0
 #define CAMEL_DECODER_HOST_E_IO (-1)
@@ -77,9 +79,12 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_RESAMPLE_HIGH 1u
 #define CAMEL_RESAMPLE_VERY_HIGH 2u
 
-// CamelSourceInfoV1.sample_encoding: lossy decoders hand float32 bit patterns through the int32 read buffer.
+// CamelSourceInfoV1.sample_encoding: lossy decoders hand float32 bit patterns through the int32 read buffer; a DSD
+// source hands one byte per channel per frame (eight samples, oldest in the MSB), counts these byte frames in
+// sample_rate and reports valid_bits 1.
 #define CAMEL_SAMPLE_ENCODING_INTEGER 0u
 #define CAMEL_SAMPLE_ENCODING_FLOAT32 1u
+#define CAMEL_SAMPLE_ENCODING_DSD 2u
 
 typedef struct CamelAudioFormatV1 {
     uint32_t struct_size;

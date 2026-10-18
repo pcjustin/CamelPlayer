@@ -29,6 +29,7 @@ public:
     void setRestartHandler(std::function<void()> handler);
     bool showControlPanel();
 
+    // A source that writes its own silence hands the output the whole request.
     size_t render(uint8_t* destination, size_t frames) noexcept override;
     uint64_t generation() const;
     std::optional<DeviceFormat> activeFormat() const;

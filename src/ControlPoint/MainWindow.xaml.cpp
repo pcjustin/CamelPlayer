@@ -290,10 +290,15 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         PathText().Text(ui::utf8(s.pathUtf8));
         if (s.source) {
             wchar_t buf[256];
-            swprintf(buf, 256, L"%s · %.1f kHz · %u ch · %s", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
-                     s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str());
+            if (s.format == AudioFormat::Dsd) // the decoder counts byte frames of eight DSD samples
+                swprintf(buf, 256, L"DSD%u · %.4f MHz · %u ch · %s", s.source->sampleRate * 8 / 44100,
+                         s.source->sampleRate * 8 / 1e6, s.source->channels, ui::formatTime(total).c_str());
+            else
+                swprintf(buf, 256, L"%s · %.1f kHz · %u ch · %s", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
+                         s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str());
             hstring text = buf;
-            if (!s.format || !isLossy(*s.format)) text = text + L" · " + to_hstring(s.source->bitsPerSample) + L"-bit";
+            if (s.format != AudioFormat::Dsd && (!s.format || !isLossy(*s.format)))
+                text = text + L" · " + to_hstring(s.source->bitsPerSample) + L"-bit";
             if (s.format == AudioFormat::Flac) text = text + L" · STREAMINFO MD5 " + (s.source->md5 ? L"✓" : L"—");
             SourceText().Text(text);
         }
@@ -324,9 +329,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             LampText().Text(tr(L"Lamp_Lossy"));
             break;
         }
-        const hstring source =
-            ui::utf8(s.format ? formatName(*s.format) : "") + (lossy ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
-                                                                     : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
+        const hstring source = ui::utf8(s.format ? formatName(*s.format) : "") +
+                               (plan.dsd != DsdPath::None ? L""
+                                : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
+                                                          : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
         FormatText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
         hstring path = tr(L"SignalPath_File") + L" → " + decoder;
         if (plan.duplicate) path = path + L" → " + tr(L"SignalPath_Duplicate");
@@ -336,7 +342,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_Resample") + rates;
         }
-        if (plan.widen)
+        if (plan.dsd == DsdPath::Dop)
+            path = path + L" → DoP";
+        else if (plan.dsd == DsdPath::Native)
+            path = path + L" → DSD";
+        else if (plan.widen)
             path = path + L" → float32";
         else if (plan.reduce || plan.resample || plan.downmix || lossy)
             path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(plan.reduce ? 16 : s.source->bitsPerSample) +

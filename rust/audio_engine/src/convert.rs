@@ -3,12 +3,16 @@
 //! Integer sources the device takes as they are only repack (zero padding) and never touch float. Mono is
 //! duplicated to both channels bit for bit. A float-only device gets integer samples widened exactly (at most 24
 //! bits). Everything else — resampling, ITU-R BS.775 downmix, bit reduction and the decoded output of lossy sources —
-//! is processed in 64-bit float and quantized once at the end with TPDF dither.
+//! is processed in 64-bit float and quantized once at the end with TPDF dither. Raw DSD reaches a native DSD or DoP
+//! stream bit for bit (mono duplicated); it never becomes PCM here.
 
-use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_FLOAT32};
+use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32};
+use crate::dsd::{put_dop_sample, DOP_MARKERS, DSD_SILENCE};
 use crate::packing::pack_pcm;
 use crate::resample::Resampler;
-use crate::{AudioFormat, ENGINE_E_UNSUPPORTED_FORMAT, SAMPLE_F32_LE};
+use crate::{
+    AudioFormat, AUDIO_DOP, AUDIO_DSD, AUDIO_PCM, ENGINE_E_UNSUPPORTED_FORMAT, SAMPLE_F32_LE,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -16,6 +20,10 @@ pub(crate) enum Mode {
     Duplicate,
     Widen,
     Process,
+    /// DSD byte frames to a native DSD stream.
+    Dsd,
+    /// Two DSD byte frames to one DoP frame.
+    Dop,
 }
 
 pub(crate) struct Converter {
@@ -34,6 +42,8 @@ pub(crate) struct Converter {
     pending_frames: u64,
     finished: bool,
     bytes_per_frame: usize,
+    /// DoP: a byte frame waiting for the one that completes its DoP frame.
+    carry: Vec<u8>,
 }
 
 /// Stereo downmix coefficients per source channel count, in WAVE/FLAC default order (ITU-R BS.775: centre and
@@ -89,6 +99,42 @@ impl Converter {
     ) -> Result<Self, i32> {
         let in_channels = info.channel_count as usize;
         let out_channels = out.channel_count as usize;
+        let in_dsd = info.sample_encoding == SAMPLE_ENCODING_DSD;
+        if in_dsd || out.stream_kind != AUDIO_PCM {
+            // DSD to PCM is a separate, explicitly enabled path (docs/Plan.md §5.8).
+            let rate_matches = match out.stream_kind {
+                AUDIO_DSD => u64::from(info.sample_rate) * 8 == u64::from(out_rate),
+                AUDIO_DOP => u64::from(info.sample_rate) == 2 * u64::from(out_rate),
+                _ => false,
+            };
+            let channels_kept =
+                in_channels == out_channels || (in_channels == 1 && out_channels == 2);
+            if !in_dsd || !rate_matches || !channels_kept {
+                return Err(ENGINE_E_UNSUPPORTED_FORMAT);
+            }
+            return Ok(Self {
+                mode: if out.stream_kind == AUDIO_DSD {
+                    Mode::Dsd
+                } else {
+                    Mode::Dop
+                },
+                in_channels,
+                in_bits: info.valid_bits,
+                in_float: false,
+                out: *out,
+                out_channels,
+                quantize_bits: 0,
+                matrix: None,
+                resampler: None,
+                dither: Tpdf(0),
+                pending: Vec::new(),
+                pending_frames: 0,
+                finished: false,
+                bytes_per_frame: crate::packing::bytes_per_frame(out)
+                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+                carry: Vec::new(),
+            });
+        }
         let in_float = info.sample_encoding == SAMPLE_ENCODING_FLOAT32;
         let same_rate = info.sample_rate == out_rate;
         let float_out = out.sample_format == SAMPLE_F32_LE;
@@ -149,6 +195,7 @@ impl Converter {
             pending_frames: 0,
             finished: false,
             bytes_per_frame,
+            carry: Vec::new(),
         })
     }
 
@@ -156,6 +203,7 @@ impl Converter {
     pub(crate) fn input_frames_for(&self, output_frames: u64) -> u64 {
         match &self.resampler {
             Some(r) => ((output_frames as f64 / r.ratio()).floor() as u64).max(1),
+            None if self.mode == Mode::Dop => output_frames * 2,
             None => output_frames,
         }
     }
@@ -199,6 +247,28 @@ impl Converter {
                 }
                 self.emit(&floats)
             }
+            Mode::Dsd => {
+                for frame in input.chunks_exact(self.in_channels) {
+                    for c in 0..self.out_channels {
+                        self.pending.push(frame[c.min(self.in_channels - 1)] as u8);
+                    }
+                }
+                self.pending_frames += frames as u64;
+                Ok(())
+            }
+            Mode::Dop => {
+                for frame in input.chunks_exact(self.in_channels) {
+                    let bytes =
+                        (0..self.out_channels).map(|c| frame[c.min(self.in_channels - 1)] as u8);
+                    if self.carry.is_empty() {
+                        self.carry.extend(bytes);
+                    } else {
+                        let second: Vec<u8> = bytes.collect();
+                        self.push_dop(&second);
+                    }
+                }
+                Ok(())
+            }
             Mode::Process => {
                 let mixed = self.mix(input, frames);
                 match self.resampler.as_mut() {
@@ -221,6 +291,10 @@ impl Converter {
             return Ok(());
         }
         self.finished = true;
+        if self.mode == Mode::Dop && !self.carry.is_empty() {
+            // An odd final byte frame is completed with idle pattern; the stream stays whole DoP frames.
+            self.push_dop(&vec![DSD_SILENCE; self.out_channels]);
+        }
         if let Some(resampler) = self.resampler.as_mut() {
             let mut tail = Vec::new();
             resampler
@@ -284,6 +358,21 @@ impl Converter {
             })
             .collect();
         self.pack(&integers, self.quantize_bits)
+    }
+
+    // One DoP frame from the carried byte frame and `second`. Render stamps the real markers.
+    fn push_dop(&mut self, second: &[u8]) {
+        let bytes_per_sample = self.bytes_per_frame / self.out_channels;
+        let start = self.pending.len();
+        self.pending.resize(start + self.bytes_per_frame, 0);
+        for (c, sample) in self.pending[start..]
+            .chunks_exact_mut(bytes_per_sample)
+            .enumerate()
+        {
+            put_dop_sample(sample, self.carry[c], second[c], DOP_MARKERS[0]);
+        }
+        self.carry.clear();
+        self.pending_frames += 1;
     }
 
     fn pack(&mut self, samples: &[i32], bits: u32) -> Result<(), i32> {

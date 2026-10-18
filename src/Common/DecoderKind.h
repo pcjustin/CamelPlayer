@@ -4,9 +4,10 @@
 
 namespace camel::audio {
 
-enum class DecoderKind : uint8_t { FFmpeg, Symphonia, DrFlac, Sndfile, DrWav, Mpg123, DrMp3 };
+// DsdNexus reads DSF/DSDIFF as raw DSD for DoP/native output; it is not a PCM decoder.
+enum class DecoderKind : uint8_t { FFmpeg, Symphonia, DrFlac, Sndfile, DrWav, Mpg123, DrMp3, DsdNexus };
 constexpr DecoderKind kAllDecoders[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrFlac, DecoderKind::Sndfile,
-                                        DecoderKind::DrWav,  DecoderKind::Mpg123,    DecoderKind::DrMp3};
+                                        DecoderKind::DrWav,  DecoderKind::Mpg123,    DecoderKind::DrMp3,  DecoderKind::DsdNexus};
 
 const char* decoderName(DecoderKind kind);
 const char* decoderId(DecoderKind kind);

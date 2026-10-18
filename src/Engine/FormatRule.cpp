@@ -73,4 +73,26 @@ std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std
     return std::nullopt;
 }
 
+std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::optional<SampleType> fixedType,
+                                       const std::function<bool(const DeviceFormat&)>& deviceSupports) {
+    constexpr uint32_t kDsd64ByteRate = 2822400 / 8;
+    if (src.bitsPerSample != 1 || !src.sampleRate || src.sampleRate % kDsd64ByteRate || !src.channels || src.channels > 2)
+        return std::nullopt;
+    OutputPlan plan;
+    plan.duplicate = src.channels == 1;
+    if (native && deviceSupports({src.sampleRate, 2, SampleType::Dsd8})) {
+        plan.format = {src.sampleRate, 2, SampleType::Dsd8};
+        plan.dsd = DsdPath::Native;
+        return plan;
+    }
+    for (SampleType t : {SampleType::Int24, SampleType::Int24In32, SampleType::Int32}) {
+        const DeviceFormat f{dopCarrierRate(src.sampleRate), 2, t};
+        if ((fixedType && t != *fixedType) || !deviceSupports(f)) continue;
+        plan.format = f;
+        plan.dsd = DsdPath::Dop;
+        return plan;
+    }
+    return std::nullopt;
+}
+
 } // namespace camel::audio

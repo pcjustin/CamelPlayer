@@ -6,15 +6,18 @@ use std::thread;
 
 mod convert;
 mod decoder_host;
+mod dsd;
 mod packing;
 mod resample;
 mod ring;
 
 use convert::Converter;
 pub use decoder_host::{
-    CamelDecoderHostV1, CamelSourceInfoV1, SAMPLE_ENCODING_FLOAT32, SAMPLE_ENCODING_INTEGER,
+    CamelDecoderHostV1, CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32,
+    SAMPLE_ENCODING_INTEGER,
 };
 use decoder_host::{DecoderHost, DecoderSource};
+use dsd::{fill_silence, stamp_markers, units_per_frame};
 use packing::bytes_per_frame;
 pub use resample::{QUALITY_HIGH, QUALITY_QUICK, QUALITY_VERY_HIGH};
 use ring::SpscByteRing;
@@ -37,6 +40,7 @@ pub const SAMPLE_S32_LE: u32 = 4;
 pub const SAMPLE_F32_LE: u32 = 5;
 pub const SAMPLE_DSD_U8: u32 = 6;
 pub const SAMPLE_DOP_S24_LE: u32 = 7;
+pub const SAMPLE_DOP_S24_IN_32_LE: u32 = 8;
 
 pub const ENGINE_OK: i32 = 0;
 pub const ENGINE_END: i32 = 1;
@@ -247,6 +251,9 @@ impl AudioFormat {
             }
             (AUDIO_DSD, SAMPLE_DSD_U8) => (self.valid_bits, self.container_bits) == (1, 8),
             (AUDIO_DOP, SAMPLE_DOP_S24_LE) => (self.valid_bits, self.container_bits) == (24, 24),
+            (AUDIO_DOP, SAMPLE_DOP_S24_IN_32_LE) => {
+                (self.valid_bits, self.container_bits) == (24, 32)
+            }
             _ => false,
         };
         if valid {
@@ -266,7 +273,7 @@ impl AudioFormat {
             }
             AUDIO_DOP => units
                 .checked_mul(u64::from(self.channel_count))
-                .and_then(|value| value.checked_mul(3)),
+                .and_then(|value| value.checked_mul(u64::from(self.container_bits / 8))),
             AUDIO_DSD => {
                 if !units.is_multiple_of(8) {
                     return Err(EngineStatus::InvalidArgument);
@@ -375,6 +382,8 @@ pub struct CamelEngine {
     boundary_start_frame: AtomicU64,
     transitions: AtomicU64,
     next_occupied: AtomicBool,
+    // DoP: the marker the next rendered frame carries. Only render touches it.
+    dop_phase: AtomicUsize,
 }
 
 const NO_BOUNDARY: u64 = u64::MAX;
@@ -436,8 +445,16 @@ impl CamelEngine {
 
     // Positions are counted in output frames; a source frame maps through the rate ratio.
     fn output_frames(&self, frames: u64, source_rate: u32) -> u64 {
-        (u128::from(frames) * u128::from(self.output_format.rate_hz)
-            / u128::from(source_rate.max(1))) as u64
+        let frame_rate = u64::from(self.output_format.rate_hz) / units_per_frame(&self.format);
+        (u128::from(frames) * u128::from(frame_rate) / u128::from(source_rate.max(1))) as u64
+    }
+
+    // Silence the request has not been given yet is already in place; DoP frames get their markers here.
+    fn seal(&self, output: &mut [u8]) {
+        if self.format.stream_kind == AUDIO_DOP {
+            let phase = stamp_markers(&self.format, output, self.dop_phase.load(Ordering::Relaxed));
+            self.dop_phase.store(phase, Ordering::Relaxed);
+        }
     }
 }
 
@@ -536,6 +553,7 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     boundary_start_frame: AtomicU64::new(0),
                     transitions: AtomicU64::new(0),
                     next_occupied: AtomicBool::new(false),
+                    dop_phase: AtomicUsize::new(0),
                 }));
                 ENGINE_OK
             }
@@ -883,9 +901,6 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
         *frames_prefilled = 0;
         if frame_limit > engine.max_render_units {
             return ENGINE_E_LIMIT_EXCEEDED;
-        }
-        if engine.format.stream_kind != AUDIO_PCM {
-            return ENGINE_E_UNSUPPORTED_FORMAT;
         }
         let Some(_producer) = engine.prefill_gate.enter() else {
             return ENGINE_E_INVALID_STATE;
@@ -1278,9 +1293,6 @@ pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
             Ok(host) => host,
             Err(status) => return status,
         };
-        if engine.format.stream_kind != AUDIO_PCM {
-            return ENGINE_E_UNSUPPORTED_FORMAT;
-        }
         if engine.view().is_none() {
             return ENGINE_E_INVALID_STATE;
         }
@@ -1447,23 +1459,6 @@ pub unsafe extern "C" fn camel_engine_render_v1(
             return ENGINE_E_BUFFER_TOO_SMALL;
         }
 
-        let source_state = engine.render_source_state.load(Ordering::Acquire) as u32;
-        if source_state == RENDER_STATE_NO_SOURCE {
-            return ENGINE_E_NOT_READY;
-        }
-        if source_state == RENDER_STATE_FAULT {
-            if engine.format.stream_kind == AUDIO_PCM && required_bytes > 0 {
-                let Ok(output_bytes) = usize::try_from(required_bytes) else {
-                    return ENGINE_E_LIMIT_EXCEEDED;
-                };
-                ptr::write_bytes(request.output, 0, output_bytes);
-            }
-            result.state = RENDER_STATE_FAULT;
-            return engine.render_error.load(Ordering::Acquire);
-        }
-        if engine.format.stream_kind != AUDIO_PCM {
-            return ENGINE_E_UNSUPPORTED_FORMAT;
-        }
         let Some(bytes_per_frame) = bytes_per_frame(&engine.format) else {
             return ENGINE_E_UNSUPPORTED_FORMAT;
         };
@@ -1471,11 +1466,37 @@ pub unsafe extern "C" fn camel_engine_render_v1(
             Ok(bytes) => bytes,
             Err(_) => return ENGINE_E_LIMIT_EXCEEDED,
         };
-        if output_bytes > 0 {
-            ptr::write_bytes(request.output, 0, output_bytes);
+        let output: &mut [u8] = if output_bytes > 0 {
+            std::slice::from_raw_parts_mut(request.output, output_bytes)
+        } else {
+            &mut []
+        };
+        let request_frames = request.units / units_per_frame(&engine.format);
+        // A raw DSD stream never hands out zero bytes: every request is filled with silence first, so the device
+        // always receives the idle pattern (with continuing DoP markers) where there is no audio.
+        let raw = engine.format.stream_kind != AUDIO_PCM;
+        if raw {
+            fill_silence(&engine.format, output);
+        }
+        let source_state = engine.render_source_state.load(Ordering::Acquire) as u32;
+        if source_state == RENDER_STATE_NO_SOURCE {
+            engine.seal(output);
+            return ENGINE_E_NOT_READY;
+        }
+        if source_state == RENDER_STATE_FAULT {
+            if !raw {
+                output.fill(0);
+            }
+            engine.seal(output);
+            result.state = RENDER_STATE_FAULT;
+            return engine.render_error.load(Ordering::Acquire);
+        }
+        if !raw {
+            output.fill(0);
         }
         if engine.playback_state.load(Ordering::Acquire) as u32 != PLAYBACK_PLAYING {
             // Only playback consumes audio; otherwise hand out silence and keep the buffered frames.
+            engine.seal(output);
             let drained = source_state == RENDER_STATE_END_OF_STREAM && engine.ring.readable() == 0;
             if drained {
                 result.state = RENDER_STATE_END_OF_STREAM;
@@ -1490,13 +1511,13 @@ pub unsafe extern "C" fn camel_engine_render_v1(
         }
         let available = engine.ring.readable().min(output_bytes);
         let rendered_bytes = if available > 0 {
-            let output = std::slice::from_raw_parts_mut(request.output, output_bytes);
             engine.ring.read(&mut output[..available])
         } else {
             0
         };
+        engine.seal(output);
         let rendered_frames = rendered_bytes / bytes_per_frame;
-        result.units_rendered = rendered_frames as u64;
+        result.units_rendered = rendered_frames as u64 * units_per_frame(&engine.format);
         let before = engine
             .read_frames
             .fetch_add(rendered_frames as u64, Ordering::AcqRel);
@@ -1523,10 +1544,10 @@ pub unsafe extern "C" fn camel_engine_render_v1(
             engine
                 .playback_state
                 .store(PLAYBACK_STOPPED as usize, Ordering::Release);
-            if rendered_frames < request.units as usize {
+            if (rendered_frames as u64) < request_frames {
                 return ENGINE_END;
             }
-        } else if rendered_frames < request.units as usize {
+        } else if (rendered_frames as u64) < request_frames {
             result.state = RENDER_STATE_UNDERRUN;
             return ENGINE_UNDERRUN;
         } else {
@@ -2840,6 +2861,274 @@ mod tests {
         assert_eq!(
             unsafe { DecoderSource::open(&source, decoder_host::DECODER_SYMPHONIA, host) }.err(),
             Some(ENGINE_E_INVALID_ARGUMENT)
+        );
+    }
+
+    // A raw DSD source: interleaved byte frames at `rate` byte frames per second.
+    struct DsdMock {
+        bytes: Vec<u8>,
+        channels: u32,
+        rate: u32,
+        position: usize,
+    }
+
+    unsafe extern "C" fn dsd_open(
+        context: *mut c_void,
+        _: u32,
+        _: *const u8,
+        _: u64,
+        out_decoder: *mut *mut c_void,
+        info: *mut CamelSourceInfoV1,
+    ) -> i32 {
+        let mock = &*context.cast::<DsdMock>();
+        *out_decoder = Box::into_raw(Box::new(DsdMock {
+            bytes: mock.bytes.clone(),
+            channels: mock.channels,
+            rate: mock.rate,
+            position: 0,
+        }))
+        .cast();
+        *info = CamelSourceInfoV1 {
+            struct_size: std::mem::size_of::<CamelSourceInfoV1>() as u32,
+            abi_version: ABI_VERSION,
+            sample_rate: mock.rate,
+            channel_count: mock.channels,
+            valid_bits: 1,
+            sample_encoding: SAMPLE_ENCODING_DSD,
+            total_frames: (mock.bytes.len() / mock.channels as usize) as u64,
+            has_md5: 0,
+            reserved2: 0,
+            md5: [0; 16],
+        };
+        0
+    }
+
+    unsafe extern "C" fn dsd_read(
+        _: *mut c_void,
+        opaque: *mut c_void,
+        output: *mut i32,
+        frames: u64,
+        frames_read: *mut u64,
+    ) -> i32 {
+        let mock = &mut *opaque.cast::<DsdMock>();
+        let channels = mock.channels as usize;
+        let read = (mock.bytes.len() / channels - mock.position).min(frames as usize);
+        for i in 0..read * channels {
+            *output.add(i) = i32::from(mock.bytes[mock.position * channels + i]);
+        }
+        mock.position += read;
+        *frames_read = read as u64;
+        0
+    }
+
+    unsafe extern "C" fn dsd_seek(_: *mut c_void, opaque: *mut c_void, frame: u64) -> i32 {
+        (*opaque.cast::<DsdMock>()).position = frame as usize;
+        0
+    }
+
+    unsafe extern "C" fn dsd_close(_: *mut c_void, opaque: *mut c_void) {
+        drop(Box::from_raw(opaque.cast::<DsdMock>()));
+    }
+
+    fn dsd_bytes(frames: usize, channels: usize) -> Vec<u8> {
+        (0..frames * channels)
+            .map(|i| (i * 37 + 11) as u8)
+            .collect()
+    }
+
+    fn dsd_mock(frames: usize, channels: u32, rate: u32) -> DsdMock {
+        DsdMock {
+            bytes: dsd_bytes(frames, channels as usize),
+            channels,
+            rate,
+            position: 0,
+        }
+    }
+
+    // An engine for `output` playing `mock` from the start, fully prefilled.
+    fn dsd_engine(output: CamelAudioFormatV1, mock: &mut DsdMock) -> Result<*mut CamelEngine, i32> {
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&config(output), &mut engine) },
+            ENGINE_OK
+        );
+        let host = CamelDecoderHostV1 {
+            struct_size: std::mem::size_of::<CamelDecoderHostV1>() as u32,
+            abi_version: ABI_VERSION,
+            context: (mock as *mut DsdMock).cast(),
+            open: Some(dsd_open),
+            read: Some(dsd_read),
+            seek: Some(dsd_seek),
+            close: Some(dsd_close),
+        };
+        let path = b"mock.dsf";
+        let source = CamelTrackSourceV1 {
+            struct_size: std::mem::size_of::<CamelTrackSourceV1>() as u32,
+            abi_version: ABI_VERSION,
+            path_utf8: path.as_ptr(),
+            path_length_bytes: path.len() as u64,
+            start_frame: 0,
+            end_frame_exclusive: 0,
+            has_end_frame: 0,
+            reserved: 0,
+        };
+        let status = unsafe {
+            camel_engine_load_flac_v1(
+                engine,
+                &command_stamp(1),
+                &source,
+                decoder_host::DECODER_DSD_NEXUS,
+                &host,
+            )
+        };
+        if status != ENGINE_OK {
+            unsafe { camel_engine_destroy_v1(engine) };
+            return Err(status);
+        }
+        prefill_until_end(engine);
+        Ok(engine)
+    }
+
+    fn dop_format(sample_format: u32, container_bits: u32, rate_hz: u32) -> CamelAudioFormatV1 {
+        let mut f = format(AUDIO_DOP, sample_format, 24, container_bits);
+        f.rate_hz = rate_hz;
+        f
+    }
+
+    #[test]
+    fn dop_carries_raw_dsd_with_markers_continuing_through_pause_and_end() {
+        for (sample_format, container_bits) in
+            [(SAMPLE_DOP_S24_LE, 24), (SAMPLE_DOP_S24_IN_32_LE, 32)]
+        {
+            // 201 byte frames: the last DoP frame is completed with idle pattern.
+            let mut mock = dsd_mock(201, 2, 352_800);
+            let raw = mock.bytes.clone();
+            let engine = dsd_engine(
+                dop_format(sample_format, container_bits, 176_400),
+                &mut mock,
+            )
+            .unwrap();
+            let bytes_per_sample = container_bits as usize / 8;
+            let mut out = Vec::new();
+            let mut render = |units: u64, expect: i32| {
+                let mut buf = vec![0xEE; units as usize * 2 * bytes_per_sample];
+                let mut request = render_request(units, &mut buf);
+                request.output_capacity_bytes = buf.len() as u64;
+                let mut result = render_result();
+                assert_eq!(
+                    unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+                    expect
+                );
+                out.extend_from_slice(&buf);
+                result.units_rendered
+            };
+            assert_eq!(render(7, ENGINE_OK), 0); // not playing yet: idle pattern
+            assert_eq!(
+                unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+                ENGINE_OK
+            );
+            assert_eq!(render(33, ENGINE_OK), 33);
+            assert_eq!(render(100, ENGINE_END), 68); // 101 DoP frames in all, then silence
+            assert_eq!(render(5, ENGINE_END), 0);
+
+            let samples: Vec<&[u8]> = out.chunks_exact(bytes_per_sample).collect();
+            let markers = [0x05, 0xFA];
+            for (i, frame) in samples.as_chunks::<2>().0.iter().enumerate() {
+                for sample in frame {
+                    assert_eq!(sample[bytes_per_sample - 1], markers[i % 2], "frame {i}");
+                    assert!(sample[..bytes_per_sample - 3].iter().all(|&b| b == 0));
+                }
+            }
+            let payload = |frame: usize, channel: usize| {
+                let s = samples[frame * 2 + channel];
+                [s[bytes_per_sample - 2], s[bytes_per_sample - 3]]
+            };
+            let silent = |frame: usize| (0..2).all(|c| payload(frame, c) == [0x69, 0x69]);
+            assert!((0..7).all(silent));
+            for d in 0..101 {
+                for c in 0..2 {
+                    let first = raw[2 * d * 2 + c];
+                    let second = raw.get((2 * d + 1) * 2 + c).copied().unwrap_or(0x69);
+                    assert_eq!(payload(7 + d, c), [first, second], "DoP frame {d}");
+                }
+            }
+            assert!((7 + 101..samples.len() / 2).all(silent));
+            unsafe { camel_engine_destroy_v1(engine) };
+        }
+    }
+
+    #[test]
+    fn native_dsd_counts_dsd_samples_and_pads_with_the_idle_pattern() {
+        let mut mock = dsd_mock(64, 1, 352_800); // mono is duplicated to both channels
+        let raw = mock.bytes.clone();
+        let mut output = format(AUDIO_DSD, SAMPLE_DSD_U8, 1, 8);
+        output.rate_hz = 2_822_400;
+        let engine = dsd_engine(output, &mut mock).unwrap();
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        let mut buf = vec![0; 80 * 2];
+        let mut request = render_request(80 * 8, &mut buf);
+        request.output_capacity_bytes = buf.len() as u64;
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_END
+        );
+        assert_eq!(result.units_rendered, 64 * 8);
+        let expected: Vec<u8> = raw.iter().flat_map(|&b| [b, b]).chain([0x69; 32]).collect();
+        assert_eq!(buf, expected);
+
+        let mut odd = vec![0; 2];
+        let mut request = render_request(3, &mut odd);
+        request.output_capacity_bytes = 2;
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut render_result()) },
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        unsafe { camel_engine_destroy_v1(engine) };
+    }
+
+    #[test]
+    fn raw_dsd_never_becomes_pcm_and_carrier_rates_must_match() {
+        let mut engine = ptr::null_mut();
+        let dop48 = dop_format(SAMPLE_DOP_S24_LE, 24, 48_000);
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&config(dop48), &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source(engine), ENGINE_E_UNSUPPORTED_FORMAT);
+        unsafe { camel_engine_destroy_v1(engine) };
+
+        let mut pcm = format(AUDIO_PCM, SAMPLE_S24_LE, 24, 24);
+        pcm.rate_hz = 352_800;
+        assert_eq!(
+            dsd_engine(pcm, &mut dsd_mock(16, 2, 352_800)).err(),
+            Some(ENGINE_E_UNSUPPORTED_FORMAT)
+        );
+        // DSD512 (2822400 byte frames per second) needs a 1411.2 kHz DoP carrier, not 705.6 kHz.
+        assert_eq!(
+            dsd_engine(
+                dop_format(SAMPLE_DOP_S24_LE, 24, 705_600),
+                &mut dsd_mock(16, 2, 2_822_400)
+            )
+            .err(),
+            Some(ENGINE_E_UNSUPPORTED_FORMAT)
+        );
+        let dsd512 = dsd_engine(
+            dop_format(SAMPLE_DOP_S24_LE, 24, 1_411_200),
+            &mut dsd_mock(16, 2, 2_822_400),
+        )
+        .unwrap();
+        unsafe { camel_engine_destroy_v1(dsd512) };
+        assert_eq!(
+            dsd_engine(
+                dop_format(SAMPLE_DOP_S24_LE, 24, 176_400),
+                &mut dsd_mock(16, 6, 352_800)
+            )
+            .err(),
+            Some(ENGINE_E_UNSUPPORTED_FORMAT)
         );
     }
 }

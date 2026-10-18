@@ -25,6 +25,8 @@ const char* decoderName(DecoderKind k) {
         return "mpg123";
     case DecoderKind::DrMp3:
         return "dr_mp3";
+    case DecoderKind::DsdNexus:
+        return "DSD Nexus";
     }
     return "?";
 }
@@ -45,6 +47,8 @@ const char* decoderId(DecoderKind k) {
         return "mpg123";
     case DecoderKind::DrMp3:
         return "drmp3";
+    case DecoderKind::DsdNexus:
+        return "dsdnexus";
     }
     return "?";
 }
@@ -228,6 +232,8 @@ std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::p
         return openMpg123(path, lossyBits);
     case DecoderKind::DrMp3:
         return openDrMp3(path, lossyBits);
+    case DecoderKind::DsdNexus:
+        return openDsdNexus(path);
     }
     throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
 }
@@ -238,6 +244,7 @@ std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::p
     const AudioFormat format = probeFormat(path);
     if (!supports(format, kind))
         throw Error(ErrorCode::UnsupportedStream, std::string(decoderName(kind)) + " cannot decode " + formatName(format));
+    if (format == AudioFormat::Dsd) return openAdapter(kind, path, 0); // raw DSD, not PCM
     const uint32_t lossyBits = pcmBitsFor(pcmBits, format);
     std::unique_ptr<IDecoder> d;
     // mpg123 seeks exactly by itself; Symphonia lands on the target after warm-up; FFmpeg and dr_mp3 can land beside it

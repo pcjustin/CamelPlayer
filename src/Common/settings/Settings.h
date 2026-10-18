@@ -18,6 +18,11 @@ bool backendFromId(std::string_view id, Backend& out);
 
 enum class WasapiPeriod : uint8_t { Default, Minimum, Custom };
 
+// Raw DSD output (docs/Plan.md §5.8, §6). Native falls back to DoP, never to PCM. WASAPI plays DoP only; KS stores
+// the choice but plays DoP until native DSD on KS pins is verified.
+enum class DsdOutput : uint8_t { Native, Dop };
+const char* dsdOutputId(DsdOutput d);
+
 struct WasapiSettings {
     std::string deviceId; // endpoint id (UTF-8); empty = Windows default device
     bool eventDriven = true;
@@ -31,6 +36,7 @@ struct AsioSettings {
     std::string driverClsid; // empty = first installed driver
     long bufferSize = 0;     // 0 = driver's preferred size
     int outLeft = 0, outRight = 1;
+    DsdOutput dsdOutput = DsdOutput::Native;
     bool operator==(const AsioSettings&) const = default;
 };
 
@@ -48,6 +54,7 @@ struct KsSettings {
     int packetCount = 4;    // standard streaming
     double packetMs = 10.0;
     std::optional<audio::SampleType> sampleType;
+    DsdOutput dsdOutput = DsdOutput::Dop;
     bool operator==(const KsSettings&) const = default;
 };
 

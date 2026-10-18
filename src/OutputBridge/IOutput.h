@@ -21,6 +21,9 @@ public:
     virtual ~IRenderSource() = default;
     // Writes up to `frames` frames into `dst`; returns how many it wrote. The output fills the rest with silence.
     virtual size_t render(uint8_t* dst, size_t frames) noexcept = 0;
+    // True while render() writes format-correct silence after its frames itself (raw DSD: idle pattern, continuing
+    // DoP markers), so nothing may overwrite the rest with zeros.
+    virtual bool writesSilence() const noexcept { return false; }
 };
 
 struct OutputStatus {

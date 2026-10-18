@@ -38,6 +38,7 @@ void packSamples(const int32_t* src, size_t count, uint32_t bits, SampleType typ
         break;
     }
     case SampleType::Float32:
+    case SampleType::Dsd8:
         break; // never chosen by the bit-perfect rule
     }
 }
@@ -72,6 +73,7 @@ void unpackSamples(const uint8_t* src, size_t count, uint32_t bits, SampleType t
         break;
     }
     case SampleType::Float32:
+    case SampleType::Dsd8:
         break;
     }
 }

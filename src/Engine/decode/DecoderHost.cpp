@@ -51,6 +51,8 @@ DecoderKind decoderKind(uint32_t kind) {
         return DecoderKind::Mpg123;
     case CAMEL_DECODER_DR_MP3:
         return DecoderKind::DrMp3;
+    case CAMEL_DECODER_DSD_NEXUS:
+        return DecoderKind::DsdNexus;
     default:
         throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
     }
@@ -75,7 +77,9 @@ int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint6
         result.sample_rate = source.sampleRate;
         result.channel_count = source.channels;
         result.valid_bits = source.bitsPerSample;
-        result.sample_encoding = handle->decoder->readsFloat() ? CAMEL_SAMPLE_ENCODING_FLOAT32 : CAMEL_SAMPLE_ENCODING_INTEGER;
+        result.sample_encoding = source.bitsPerSample == 1       ? CAMEL_SAMPLE_ENCODING_DSD
+                                 : handle->decoder->readsFloat() ? CAMEL_SAMPLE_ENCODING_FLOAT32
+                                                                 : CAMEL_SAMPLE_ENCODING_INTEGER;
         result.total_frames = source.totalFrames;
         result.has_md5 = source.md5.has_value() ? 1u : 0u;
         if (source.md5) std::copy(source.md5->begin(), source.md5->end(), result.md5);

@@ -106,7 +106,8 @@ bool OutputBridge::showControlPanel() {
 size_t OutputBridge::render(uint8_t* destination, size_t frames) noexcept {
     if (!enterRender()) return 0;
     IRenderSource* source = source_.load(std::memory_order_acquire);
-    const size_t rendered = source ? source->render(destination, frames) : 0;
+    size_t rendered = source ? source->render(destination, frames) : 0;
+    if (source && source->writesSilence()) rendered = frames;
     leaveRender();
     return rendered;
 }
