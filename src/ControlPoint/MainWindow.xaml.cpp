@@ -123,6 +123,9 @@ void MainWindow::populateSettings() {
     }
     for (const auto& [combo, format] : pcmBitsCombos())
         fill(combo, {L"24-bit", L"16-bit"}, pcmBitsFor(settings_.pcmBitsByFormat, format) == 16 ? 1 : 0);
+    fill(ConvertCombo(), {tr(L"Convert_Off"), tr(L"Convert_On")}, settings_.convertWhenUnsupported ? 1 : 0);
+    fill(ResampleQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
+         int(settings_.resampleQuality));
 
     fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, settings_.wasapi.eventDriven ? 0 : 1);
     fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(settings_.wasapi.period));
@@ -205,6 +208,8 @@ void MainWindow::readSettingsFromUi() {
         const uint32_t bits = idx(combo) == 1 ? 16 : 24;
         if (bits != pcmBitsFor(settings_.pcmBitsByFormat, format)) settings_.pcmBitsByFormat[format] = bits;
     }
+    settings_.convertWhenUnsupported = idx(ConvertCombo()) == 1;
+    settings_.resampleQuality = ResampleQuality(std::min(idx(ResampleQualityCombo()), 2));
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -298,16 +303,47 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     const hstring decoder = ui::utf8(decoderName(s.decoder));
     if (s.output && s.source) {
         // A lossy source has no PCM depth of its own; its decoded output is passed on unchanged (docs/Plan.md §5.2).
+        // Processing outranks the lossy-source badge, which must not hide it.
         const bool lossy = s.format && isLossy(*s.format);
-        Lamp().Fill(lossy ? brush(0xD0, 0xD0, 0xD0) : brush(0x10, 0xB9, 0x10));
-        LampText().Text(lossy ? tr(L"Lamp_Lossy") : hstring(L"Bit-perfect"));
+        const OutputPlan plan = s.plan.value_or(OutputPlan{*s.output});
+        switch (plan.state) {
+        case PipelineState::BitPerfect:
+            Lamp().Fill(brush(0x10, 0xB9, 0x10));
+            LampText().Text(L"Bit-perfect");
+            break;
+        case PipelineState::LosslessConversion:
+            Lamp().Fill(brush(0xE0, 0xB0, 0x00));
+            LampText().Text(tr(L"Lamp_Lossless"));
+            break;
+        case PipelineState::Processed:
+            Lamp().Fill(brush(0xD0, 0x30, 0x30));
+            LampText().Text(lossy ? tr(L"Lamp_Processed") + L" · " + tr(L"Lamp_Lossy") : tr(L"Lamp_Processed"));
+            break;
+        case PipelineState::LossySource:
+            Lamp().Fill(brush(0xD0, 0xD0, 0xD0));
+            LampText().Text(tr(L"Lamp_Lossy"));
+            break;
+        }
         const hstring source =
             ui::utf8(s.format ? formatName(*s.format) : "") + (lossy ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
                                                                      : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
         FormatText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
-        SignalPathText().Text(tr(L"SignalPath_File") + L" → " + decoder + L" → " + tr(L"SignalPath_Pad") + L" " +
-                              to_hstring(s.source->bitsPerSample) + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " +
-                              ui::utf8(s.outputMode));
+        hstring path = tr(L"SignalPath_File") + L" → " + decoder;
+        if (plan.duplicate) path = path + L" → " + tr(L"SignalPath_Duplicate");
+        if (plan.downmix) path = path + L" → " + tr(L"SignalPath_Downmix") + L" " + to_hstring(s.source->channels) + L"→2";
+        if (plan.resample) {
+            wchar_t rates[64];
+            swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
+            path = path + L" → " + tr(L"SignalPath_Resample") + rates;
+        }
+        if (plan.widen)
+            path = path + L" → float32";
+        else if (plan.reduce || plan.resample || plan.downmix || lossy)
+            path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(plan.reduce ? 16 : s.source->bitsPerSample) +
+                   L"-bit";
+        else
+            path = path + L" → " + tr(L"SignalPath_Pad") + L" " + to_hstring(s.source->bitsPerSample);
+        SignalPathText().Text(path + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " + ui::utf8(s.outputMode));
     } else {
         Lamp().Fill(brush(0x80, 0x80, 0x80));
         LampText().Text(tr(L"Lamp_Idle"));

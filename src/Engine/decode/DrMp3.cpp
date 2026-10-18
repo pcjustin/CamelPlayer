@@ -36,11 +36,15 @@ public:
     const SourceInfo& info() const override { return info_; }
 
     size_t read(int32_t* dst, size_t frames) override {
-        if (!frames) return 0;
         buffer_.resize(frames * info_.channels);
-        const drmp3_uint64 got = drmp3_read_pcm_frames_f32(&mp3_, frames, buffer_.data());
-        for (size_t i = 0, n = size_t(got) * info_.channels; i < n; i++) dst[i] = quantize(buffer_[i], info_.bitsPerSample);
-        return size_t(got);
+        const size_t got = readFloat(buffer_.data(), frames);
+        for (size_t i = 0, n = got * info_.channels; i < n; i++) dst[i] = quantize(buffer_[i], info_.bitsPerSample);
+        return got;
+    }
+
+    bool readsFloat() const override { return true; }
+    size_t readFloat(float* dst, size_t frames) override {
+        return frames ? size_t(drmp3_read_pcm_frames_f32(&mp3_, frames, dst)) : 0;
     }
 
     void seek(uint64_t frame) override {

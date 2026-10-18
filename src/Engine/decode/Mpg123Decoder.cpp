@@ -54,19 +54,24 @@ public:
     const SourceInfo& info() const override { return info_; }
 
     size_t read(int32_t* dst, size_t frames) override {
-        if (!frames || ended_) return 0;
         buffer_.resize(frames * info_.channels);
+        const size_t got = readFloat(buffer_.data(), frames);
+        for (size_t i = 0, n = got * info_.channels; i < n; i++) dst[i] = quantize(buffer_[i], info_.bitsPerSample);
+        return got;
+    }
+
+    bool readsFloat() const override { return true; }
+    size_t readFloat(float* dst, size_t frames) override {
+        if (!frames || ended_) return 0;
         size_t bytes = 0;
         while (!bytes && !ended_) {
-            const int result = mpg123_read(mh_, buffer_.data(), buffer_.size() * sizeof(float), &bytes);
+            const int result = mpg123_read(mh_, dst, frames * info_.channels * sizeof(float), &bytes);
             if (result == MPG123_DONE)
                 ended_ = true;
             else if (result != MPG123_OK)
                 throw Error(ErrorCode::DecodeFailed, std::string("mpg123_read: ") + mpg123_strerror(mh_));
         }
-        const size_t samples = bytes / sizeof(float);
-        for (size_t i = 0; i < samples; i++) dst[i] = quantize(buffer_[i], info_.bitsPerSample);
-        return samples / info_.channels;
+        return bytes / sizeof(float) / info_.channels;
     }
 
     void seek(uint64_t frame) override {

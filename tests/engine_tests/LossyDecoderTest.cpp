@@ -244,8 +244,8 @@ TEST(LossyDecoderPolicy, OversClipInsteadOfWrapping) {
         }
 }
 
-// The Rust Engine path hands each decoder's output to the device unchanged (docs/Plan.md §5.2: lossy source, no
-// processing), for files with and without trim metadata.
+// The Rust Engine path hands each decoder's float output to the device, quantized once (docs/Plan.md §5.2: lossy
+// source, no processing), for files with and without trim metadata.
 TEST(LossyDecoderPolicy, PlaysThroughTheEngineUnchanged) {
     reference();
     for (const auto& fixture : kFixtures)
@@ -271,7 +271,9 @@ TEST(LossyDecoderPolicy, PlaysThroughTheEngineUnchanged) {
             in.close();
             std::vector<int32_t> got(bytes.size() / 4);
             unpackSamples(reinterpret_cast<const uint8_t*>(bytes.data()), got.size(), 24, SampleType::Int32, got.data());
-            EXPECT_TRUE(got == expected) << fixture.name << " via " << decoderName(kind);
+            // The Engine quantizes the float decode once with TPDF dither; the adapter read rounds the same samples.
+            ASSERT_EQ(got.size(), expected.size()) << fixture.name << " via " << decoderName(kind);
+            EXPECT_LE(maxDifference(got, expected), 1) << fixture.name << " via " << decoderName(kind);
             std::filesystem::remove(out);
         }
 }
@@ -285,6 +287,7 @@ TEST(LossyDecoderPolicy, TrimmedMp3TracksAreGapless) {
     CaptureOptions options;
     options.file = out;
     options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true; // the second track is queued while the first plays
     {
         PlaybackEngine engine(Settings{}, [&](const Settings&) { return createCaptureOutput(options); });
         engine.openAndPlay(path(kFixtures[2]));
@@ -308,7 +311,8 @@ TEST(LossyDecoderPolicy, TrimmedMp3TracksAreGapless) {
     std::vector<int32_t> got(bytes.size() / 4);
     unpackSamples(reinterpret_cast<const uint8_t*>(bytes.data()), got.size(), 24, SampleType::Int32, got.data());
     EXPECT_EQ(got.size(), size_t(2 * kSeconds * kRate) * kChannels);
-    EXPECT_TRUE(got == expected);
+    ASSERT_EQ(got.size(), expected.size());
+    EXPECT_LE(maxDifference(got, expected), 1); // dithered once by the Engine
     std::filesystem::remove(out);
 }
 

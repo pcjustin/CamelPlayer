@@ -16,6 +16,7 @@
     "libflac",
     "mpg123",
     "mp3lame",
+    "soxr",
     {
       "name": "libsndfile",
       "default-features": false,

@@ -73,6 +73,14 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_FLAC_INTEGRITY_VERIFIED 2u
 #define CAMEL_FLAC_INTEGRITY_FAILED 3u
 
+#define CAMEL_RESAMPLE_QUICK 0u
+#define CAMEL_RESAMPLE_HIGH 1u
+#define CAMEL_RESAMPLE_VERY_HIGH 2u
+
+// CamelSourceInfoV1.sample_encoding: lossy decoders hand float32 bit patterns through the int32 read buffer.
+#define CAMEL_SAMPLE_ENCODING_INTEGER 0u
+#define CAMEL_SAMPLE_ENCODING_FLOAT32 1u
+
 typedef struct CamelAudioFormatV1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -90,6 +98,8 @@ typedef struct CamelEngineConfigV1 {
     uint32_t abi_version;
     uint64_t max_render_units;
     CamelAudioFormatV1 format;
+    uint32_t allow_conversion; // nonzero permits resampling, downmix and bit reduction
+    uint32_t resample_quality; // CAMEL_RESAMPLE_*
 } CamelEngineConfigV1;
 
 typedef struct CamelCommandStampV1 {
@@ -117,7 +127,7 @@ typedef struct CamelSourceInfoV1 {
     uint32_t sample_rate;
     uint32_t channel_count;
     uint32_t valid_bits;
-    uint32_t reserved;
+    uint32_t sample_encoding;
     uint64_t total_frames;
     uint32_t has_md5;
     uint32_t reserved2;

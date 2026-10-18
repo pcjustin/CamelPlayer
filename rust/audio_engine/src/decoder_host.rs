@@ -22,6 +22,9 @@ pub const FLAC_INTEGRITY_INCOMPLETE: u32 = 1;
 pub const FLAC_INTEGRITY_VERIFIED: u32 = 2;
 pub const FLAC_INTEGRITY_FAILED: u32 = 3;
 
+pub const SAMPLE_ENCODING_INTEGER: u32 = 0;
+pub const SAMPLE_ENCODING_FLOAT32: u32 = 1;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CamelSourceInfoV1 {
@@ -30,7 +33,8 @@ pub struct CamelSourceInfoV1 {
     pub sample_rate: u32,
     pub channel_count: u32,
     pub valid_bits: u32,
-    pub reserved: u32,
+    /// SAMPLE_ENCODING_INTEGER or SAMPLE_ENCODING_FLOAT32 (lossy decoders: float32 bit patterns in the read buffer).
+    pub sample_encoding: u32,
     pub total_frames: u64,
     pub has_md5: u32,
     pub reserved2: u32,
@@ -101,6 +105,8 @@ pub(crate) struct DecoderSource {
     end_frame: Option<u64>,
     integrity_status: u32,
     full_coverage_possible: bool,
+    /// Set by the engine once the output format is known; turns decoded frames into device bytes.
+    pub(crate) converter: Option<crate::convert::Converter>,
 }
 
 impl DecoderSource {
@@ -143,7 +149,7 @@ impl DecoderSource {
             sample_rate: 0,
             channel_count: 0,
             valid_bits: 0,
-            reserved: 0,
+            sample_encoding: SAMPLE_ENCODING_INTEGER,
             total_frames: 0,
             has_md5: 0,
             reserved2: 0,
@@ -167,7 +173,7 @@ impl DecoderSource {
             || info.sample_rate == 0
             || info.channel_count == 0
             || info.channel_count > 32
-            || info.reserved != 0
+            || info.sample_encoding > SAMPLE_ENCODING_FLOAT32
             || info.reserved2 != 0
         {
             if !decoder.is_null() {
@@ -225,6 +231,7 @@ impl DecoderSource {
                 FLAC_INTEGRITY_UNAVAILABLE
             },
             full_coverage_possible,
+            converter: None,
         })
     }
 

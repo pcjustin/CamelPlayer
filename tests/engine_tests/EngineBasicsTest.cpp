@@ -59,14 +59,80 @@ TEST(FormatRule, PicksSmallestContainerTheDeviceTakes) {
     auto daveUsbAudio2 = only({SampleType::Int32});
     auto daveChord = only({SampleType::Int16, SampleType::Int24, SampleType::Int32});
     auto cirrus = only({SampleType::Int16, SampleType::Int24In32, SampleType::Int32});
-    EXPECT_EQ(chooseOutputFormat(s16, std::nullopt, daveUsbAudio2)->type, SampleType::Int32);
-    EXPECT_EQ(chooseOutputFormat(s24, std::nullopt, daveChord)->type, SampleType::Int24);
-    EXPECT_EQ(chooseOutputFormat(s24, std::nullopt, cirrus)->type, SampleType::Int24In32);
-    EXPECT_EQ(chooseOutputFormat(s16, std::nullopt, cirrus)->type, SampleType::Int16);
-    EXPECT_EQ(chooseOutputFormat(s16, SampleType::Int32, cirrus)->type, SampleType::Int32);       // fixed in settings
-    EXPECT_FALSE(chooseOutputFormat(s24, SampleType::Int16, cirrus).has_value());                 // would truncate
-    EXPECT_FALSE(chooseOutputFormat(s24, std::nullopt, only({SampleType::Float32})).has_value()); // no conversion in the MVP
-    EXPECT_FALSE(chooseOutputFormat(SourceInfo{44100, 1, 16}, std::nullopt, cirrus).has_value()); // stereo only
+    auto type = [](const SourceInfo& s, std::optional<SampleType> fixed, const auto& device) {
+        const auto plan = negotiateOutput(s, false, fixed, false, device);
+        return plan ? std::optional(plan->format.type) : std::nullopt;
+    };
+    EXPECT_EQ(type(s16, std::nullopt, daveUsbAudio2), SampleType::Int32);
+    EXPECT_EQ(type(s24, std::nullopt, daveChord), SampleType::Int24);
+    EXPECT_EQ(type(s24, std::nullopt, cirrus), SampleType::Int24In32);
+    EXPECT_EQ(type(s16, std::nullopt, cirrus), SampleType::Int16);
+    EXPECT_EQ(type(s16, SampleType::Int32, cirrus), SampleType::Int32); // fixed in settings
+    EXPECT_FALSE(type(s24, SampleType::Int16, cirrus));                 // would truncate without conversion
+    const auto mono = negotiateOutput(SourceInfo{44100, 1, 16}, false, std::nullopt, false, cirrus);
+    ASSERT_TRUE(mono);
+    EXPECT_EQ(mono->format, (DeviceFormat{44100, 2, SampleType::Int16}));
+    EXPECT_TRUE(mono->duplicate);
+    EXPECT_EQ(mono->state, PipelineState::BitPerfect); // duplicated bit for bit
+    const auto floatOnly = negotiateOutput(s24, false, std::nullopt, false, only({SampleType::Float32}));
+    ASSERT_TRUE(floatOnly);
+    EXPECT_TRUE(floatOnly->widen);
+    EXPECT_EQ(floatOnly->state, PipelineState::LosslessConversion);
+}
+
+// docs/Plan.md §5.3: the source rate, then with conversion the lowest same-family rate at or above it, the lowest
+// other-family rate at or above it, then the highest rate the device takes.
+TEST(FormatRule, ConversionFollowsTheRateOrder) {
+    auto rates = [](std::initializer_list<uint32_t> list) {
+        std::vector<uint32_t> supported(list);
+        return [supported](const DeviceFormat& f) {
+            return f.type == SampleType::Int24 && std::find(supported.begin(), supported.end(), f.sampleRate) != supported.end();
+        };
+    };
+    auto rate = [](uint32_t source, const auto& device) {
+        const auto plan = negotiateOutput(SourceInfo{source, 2, 24}, false, std::nullopt, true, device);
+        return plan ? plan->format.sampleRate : 0u;
+    };
+    EXPECT_EQ(rate(44100, rates({44100, 48000})), 44100u);
+    EXPECT_EQ(rate(44100, rates({48000, 96000, 88200})), 88200u);
+    EXPECT_EQ(rate(44100, rates({96000, 48000})), 48000u);
+    EXPECT_EQ(rate(96000, rates({44100, 192000, 176400})), 192000u);
+    EXPECT_EQ(rate(192000, rates({44100, 48000, 96000})), 96000u);
+    EXPECT_EQ(rate(768000, rates({44100, 384000})), 384000u);
+    EXPECT_FALSE(negotiateOutput(SourceInfo{44100, 2, 24}, false, std::nullopt, false, rates({48000})));
+    const auto plan = negotiateOutput(SourceInfo{44100, 2, 24}, false, std::nullopt, true, rates({48000}));
+    ASSERT_TRUE(plan);
+    EXPECT_TRUE(plan->resample);
+    EXPECT_EQ(plan->state, PipelineState::Processed);
+}
+
+TEST(FormatRule, DownmixAndBitReductionNeedConversion) {
+    auto anyRate = [](std::initializer_list<SampleType> list) {
+        std::vector<SampleType> types(list);
+        return [types](const DeviceFormat& f) { return std::find(types.begin(), types.end(), f.type) != types.end(); };
+    };
+    const SourceInfo surround{48000, 6, 24}, hiRes{96000, 2, 24};
+    EXPECT_FALSE(negotiateOutput(surround, false, std::nullopt, false, anyRate({SampleType::Int24})));
+    const auto downmix = negotiateOutput(surround, false, std::nullopt, true, anyRate({SampleType::Int24}));
+    ASSERT_TRUE(downmix);
+    EXPECT_EQ(downmix->format, (DeviceFormat{48000, 2, SampleType::Int24}));
+    EXPECT_TRUE(downmix->downmix);
+    EXPECT_EQ(downmix->state, PipelineState::Processed);
+    EXPECT_FALSE(negotiateOutput(SourceInfo{48000, 9, 24}, false, std::nullopt, true, anyRate({SampleType::Int24})));
+
+    EXPECT_FALSE(negotiateOutput(hiRes, false, std::nullopt, false, anyRate({SampleType::Int16})));
+    const auto reduced = negotiateOutput(hiRes, false, std::nullopt, true, anyRate({SampleType::Int16}));
+    ASSERT_TRUE(reduced);
+    EXPECT_TRUE(reduced->reduce);
+    EXPECT_EQ(reduced->state, PipelineState::Processed);
+    // A wider container or float32 is still preferred over dropping bits.
+    const auto widened = negotiateOutput(hiRes, false, std::nullopt, true, anyRate({SampleType::Int16, SampleType::Float32}));
+    ASSERT_TRUE(widened);
+    EXPECT_EQ(widened->format.type, SampleType::Float32);
+
+    const auto lossy = negotiateOutput(hiRes, true, std::nullopt, false, anyRate({SampleType::Int24}));
+    ASSERT_TRUE(lossy);
+    EXPECT_EQ(lossy->state, PipelineState::LossySource);
 }
 
 TEST(Settings, JsonRoundTrip) {

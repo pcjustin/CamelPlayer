@@ -1,4 +1,4 @@
-//! C ABI over Symphonia's FLAC, ALAC, WAV and AIFF decoding for CamelPlayer (docs/Plan.md §16.3).
+//! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF, AAC and MP3 decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
 use std::ffi::CStr;
@@ -262,6 +262,8 @@ pub struct SymInfo {
     pub total_frames: u64,
     pub has_md5: u32,
     pub md5: [u8; 16],
+    /// Nonzero for lossy codecs: sym_read returns float32 bit patterns instead of integers.
+    pub is_float: u32,
 }
 
 pub struct SymDecoder {
@@ -293,21 +295,11 @@ fn guarded(body: impl FnOnce() -> i32) -> i32 {
     catch_unwind(AssertUnwindSafe(body)).unwrap_or(SYM_E_DECODE)
 }
 
-/// Rounds a float sample to `bits`-bit full scale and clips, once (the C++ adapters share this rule).
-fn quantize(sample: f64, bits: u32) -> i32 {
-    let full = f64::from(1u32 << (bits - 1));
-    let scaled = (sample * full).round_ties_even();
-    if scaled.is_nan() {
-        0
-    } else {
-        scaled.clamp(-full, full - 1.0) as i32
-    }
-}
-
 fn interleave(buf: AudioBufferRef, ch: usize, bits: u32) -> Result<Vec<i32>, i32> {
     let frames = buf.frames();
     let mut out = Vec::with_capacity(frames * ch);
-    // 16- and 24-bit buffers hold right-aligned samples; 32-bit buffers hold left-aligned ones.
+    // 16- and 24-bit buffers hold right-aligned samples; 32-bit buffers hold left-aligned ones; float buffers (lossy
+    // codecs) pass through as float32 bit patterns, quantized once further on.
     match buf {
         AudioBufferRef::S16(b) => {
             for f in 0..frames {
@@ -333,14 +325,14 @@ fn interleave(buf: AudioBufferRef, ch: usize, bits: u32) -> Result<Vec<i32>, i32
         AudioBufferRef::F32(b) => {
             for f in 0..frames {
                 for c in 0..ch {
-                    out.push(quantize(f64::from(b.chan(c)[f]), bits));
+                    out.push(b.chan(c)[f].to_bits() as i32);
                 }
             }
         }
         AudioBufferRef::F64(b) => {
             for f in 0..frames {
                 for c in 0..ch {
-                    out.push(quantize(b.chan(c)[f], bits));
+                    out.push((b.chan(c)[f] as f32).to_bits() as i32);
                 }
             }
         }
@@ -518,6 +510,7 @@ unsafe fn open_decoder(
         total_frames: params.n_frames.unwrap_or(0),
         has_md5,
         md5,
+        is_float: u32::from(lossy),
     };
     let dec = Box::new(SymDecoder {
         format,

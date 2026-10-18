@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Engine/decode/DecoderHost.h"
+#include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/testing/TestAudio.h"
 #include "Engine/EngineAbi.h"
 #include "Engine/SamplePacker.h"
@@ -25,8 +26,15 @@ uint64_t expectedBytes(const CamelAudioFormatV1& format, uint64_t units) {
     return units * format.channel_count * bytesPerSample;
 }
 
-CamelEngine* createEngine() {
-    const auto format = makeFormat(CAMEL_AUDIO_PCM, CAMEL_SAMPLE_S24_LE, 24, 24);
+// The Engine converts nothing without permission, so it runs at the rate of the file it plays.
+uint32_t rateOf(const std::filesystem::path& path) {
+    camel::audio::SourceInfo info;
+    return camel::audio::readFlacStreamInfo(path, info) ? info.sampleRate : 0;
+}
+
+CamelEngine* createEngine(uint32_t rate = 96000) {
+    auto format = makeFormat(CAMEL_AUDIO_PCM, CAMEL_SAMPLE_S24_LE, 24, 24);
+    format.rate_hz = rate;
     CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1), CAMEL_ENGINE_ABI_VERSION, CAMEL_ENGINE_MAX_RENDER_UNITS, format};
     CamelEngine* engine = nullptr;
     EXPECT_EQ(camel_engine_create_v1(&config, &engine), CAMEL_ENGINE_OK);
@@ -115,7 +123,7 @@ TEST(RustEngineHost, PrefillAndRenderPackPcmAndReportStarvation) {
         const auto path = testutil::testFile(name);
         const auto reference = camel::audio::testaudio::referenceDecode(path);
         ASSERT_TRUE(reference.error.empty()) << reference.error;
-        auto* engine = createEngine();
+        auto* engine = createEngine(rateOf(path));
         ASSERT_NE(engine, nullptr);
         ASSERT_EQ(loadSource(engine, path, CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
         const CamelCommandStampV1 play{sizeof(CamelCommandStampV1), CAMEL_ENGINE_ABI_VERSION, 2, 2, 1};
@@ -154,7 +162,7 @@ TEST(RustEngineHost, PrefillAndRenderPackPcmAndReportStarvation) {
 }
 
 TEST(RustEngineHost, PlaybackCommandsExposeSeparateTimelinePositions) {
-    auto* engine = createEngine();
+    auto* engine = createEngine(44100);
     ASSERT_NE(engine, nullptr);
     ASSERT_EQ(loadSource(engine, testutil::testFile("16-44.1k"), CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
 
@@ -202,7 +210,7 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
         const auto reference = camel::audio::testaudio::referenceDecode(path);
         ASSERT_TRUE(reference.error.empty()) << reference.error;
         for (const auto decoderKind : decoders) {
-            auto* engine = createEngine();
+            auto* engine = createEngine(rateOf(path));
             ASSERT_NE(engine, nullptr);
             ASSERT_EQ(loadSource(engine, path, decoderKind), CAMEL_ENGINE_OK) << decoderKind << " " << name;
 
@@ -255,7 +263,7 @@ TEST(RustEngineHost, ReportsIncompleteUnavailableAndFailedFlacIntegrity) {
     constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
                                                   CAMEL_DECODER_SNDFILE};
     for (const auto decoderKind : decoders) {
-        auto* engine = createEngine();
+        auto* engine = createEngine(rateOf(testutil::testFile("no-md5")));
         ASSERT_NE(engine, nullptr);
         ASSERT_EQ(loadSource(engine, testutil::testFile("no-md5"), decoderKind), CAMEL_ENGINE_OK);
         auto integrity = flacIntegrity(engine);
@@ -307,7 +315,7 @@ TEST(RustEngineHost, FullTrackRangeFinalizesIntegrityAndMissingMd5StaysUnavailab
     EXPECT_EQ(flacIntegrity(engine).status, CAMEL_FLAC_INTEGRITY_VERIFIED);
     destroyEngine(engine);
 
-    engine = createEngine();
+    engine = createEngine(rateOf(testutil::testFile("no-md5")));
     ASSERT_NE(engine, nullptr);
     ASSERT_EQ(loadSource(engine, testutil::testFile("no-md5"), CAMEL_DECODER_SNDFILE), CAMEL_ENGINE_OK);
     status = CAMEL_ENGINE_OK;
@@ -362,7 +370,7 @@ TEST(RustEngineHost, SourceRangeIsEnforced) {
 TEST(RustEngineHost, LoadsUnicodeSourcePathThroughHostAbi) {
     const auto path = testutil::tempDir() / L"\u97F3\u6A02-engine-source.flac";
     std::filesystem::copy_file(testutil::testFile("16-44.1k"), path, std::filesystem::copy_options::overwrite_existing);
-    auto* engine = createEngine();
+    auto* engine = createEngine(rateOf(path));
     ASSERT_NE(engine, nullptr);
     ASSERT_EQ(loadSource(engine, path, CAMEL_DECODER_SYMPHONIA), CAMEL_ENGINE_OK);
     std::array<int32_t, 2> samples{};

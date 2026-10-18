@@ -4,7 +4,7 @@
 
 CamelPlayer v2 is a new Windows-native music player built with C++20 and WinUI 3. It is the second-generation CamelPlayer project, distinct from the earlier CamelPlayer codebase.
 
-The current implementation is an **MVP**: a stereo FLAC, ALAC, WAV, AIFF, AAC-LC and MP3 player with a bit-perfect output path for lossless sources, WASAPI exclusive, ASIO, and Kernel Streaming backends. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Each format has its own decoder setting: FLAC can use FFmpeg, Symphonia, dr_flac or libsndfile; ALAC and AAC FFmpeg or Symphonia; WAV and AIFF FFmpeg, Symphonia, libsndfile or dr_wav; MP3 mpg123, FFmpeg, Symphonia or dr_mp3. AAC and MP3 decode to 24-bit PCM by default (16-bit per format), with declared encoder delay and padding trimmed. Files are identified by content, not extension.
+The current implementation is an **MVP**: a stereo FLAC, ALAC, WAV, AIFF, AAC-LC and MP3 player with a bit-perfect output path for lossless sources, WASAPI exclusive, ASIO, and Kernel Streaming backends. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Each format has its own decoder setting: FLAC can use FFmpeg, Symphonia, dr_flac or libsndfile; ALAC and AAC FFmpeg or Symphonia; WAV and AIFF FFmpeg, Symphonia, libsndfile or dr_wav; MP3 mpg123, FFmpeg, Symphonia or dr_mp3. AAC and MP3 decode to 24-bit PCM by default (16-bit per format), with declared encoder delay and padding trimmed. Mono files are duplicated to both channels bit for bit. With "convert when unsupported" (off by default) the player resamples with libsoxr, downmixes surround (ITU-R BS.775) or reduces depth with TPDF dither when a device does not take the file as it is; the indicator then shows the path as processed. Files are identified by content, not extension.
 
 ## Build
 
@@ -42,7 +42,7 @@ camelcli bench-decoders <directory> --runs 3
 
 ## Validation and limitations
 
-The current Release and Debug suites each ran **371 C++ tests: all passed, with no skips**. The Rust Engine suite passed all 28 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+The current Release and Debug suites each ran **381 C++ tests: all passed, with no skips**. The Rust Engine suite passed all 35 tests. A historical run passed **40 hardware cases** through the engine and Server APIs, covering Chord/DAVE WASAPI, ASIO and KS, and Cirrus WASAPI and KS. Future hardware validation is limited to Chord/DAVE; do not rerun Cirrus WASAPI or KS. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and a local `testdata/Sample_BeeMoved_96kHz24bit.flac` file, which is not distributed. Run them explicitly after building:
 
@@ -50,7 +50,7 @@ Hardware tests are disabled during ordinary runs because they play audio and req
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*-*Cirrus*"
 ```
 
-The MVP is limited to stereo sources (16/24-bit for lossless formats) and unmodified integer output. FLAC, WAV and AIFF default to libsndfile, ALAC and AAC to Symphonia and MP3 to mpg123; an earlier saved FLAC choice is kept. DSD is recognized but not played yet. MP3 test files are encoded with LAME inside the test program only. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
+The MVP plays 16/24-bit lossless sources and AAC/MP3 to stereo output; without conversion it only repacks integers. FLAC, WAV and AIFF default to libsndfile, ALAC and AAC to Symphonia and MP3 to mpg123; an earlier saved FLAC choice is kept. DSD is recognized but not played yet. MP3 test files are encoded with LAME inside the test program only. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
 
 ## Dependencies and repository contents
 

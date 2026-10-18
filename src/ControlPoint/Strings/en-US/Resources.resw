@@ -30,6 +30,19 @@
   <data name="Settings_Mp3Decoder.Header" xml:space="preserve"><value>MP3 decoder</value></data>
   <data name="Settings_Mp3Bits.Header" xml:space="preserve"><value>MP3 output depth</value></data>
   <data name="Lamp_Lossy" xml:space="preserve"><value>Lossy source</value></data>
+  <data name="Lamp_Lossless" xml:space="preserve"><value>Lossless conversion</value></data>
+  <data name="Lamp_Processed" xml:space="preserve"><value>Processed</value></data>
+  <data name="Settings_Convert.Header" xml:space="preserve"><value>When the device does not take a file as it is</value></data>
+  <data name="Convert_Off" xml:space="preserve"><value>Skip it and tell me</value></data>
+  <data name="Convert_On" xml:space="preserve"><value>Convert it (resample, downmix or reduce depth)</value></data>
+  <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>Resampling quality</value></data>
+  <data name="Quality_Quick" xml:space="preserve"><value>Quick</value></data>
+  <data name="Quality_High" xml:space="preserve"><value>High</value></data>
+  <data name="Quality_VeryHigh" xml:space="preserve"><value>Very high</value></data>
+  <data name="SignalPath_Duplicate" xml:space="preserve"><value>mono to both channels</value></data>
+  <data name="SignalPath_Downmix" xml:space="preserve"><value>downmix</value></data>
+  <data name="SignalPath_Resample" xml:space="preserve"><value>resample</value></data>
+  <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF dither to</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>Output device</value></data>
   <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>Driving mode (exclusive)</value></data>
   <data name="Settings_Period.Header" xml:space="preserve"><value>Device period</value></data>

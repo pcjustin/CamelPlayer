@@ -1,10 +1,12 @@
 #include "Engine/decode/DecoderHost.h"
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "Engine/decode/IDecoder.h"
 #include "Common/util/Text.h"
@@ -14,6 +16,7 @@ namespace {
 
 struct DecoderHandle {
     std::unique_ptr<IDecoder> decoder;
+    std::vector<float> floats; // a lossy decoder's output, handed on as float32 bit patterns
 };
 
 int32_t mapError(const Error& error) {
@@ -72,6 +75,7 @@ int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint6
         result.sample_rate = source.sampleRate;
         result.channel_count = source.channels;
         result.valid_bits = source.bitsPerSample;
+        result.sample_encoding = handle->decoder->readsFloat() ? CAMEL_SAMPLE_ENCODING_FLOAT32 : CAMEL_SAMPLE_ENCODING_INTEGER;
         result.total_frames = source.totalFrames;
         result.has_md5 = source.md5.has_value() ? 1u : 0u;
         if (source.md5) std::copy(source.md5->begin(), source.md5->end(), result.md5);
@@ -91,7 +95,14 @@ int32_t readDecoderHost(void*, void* opaque, int32_t* output, uint64_t frames, u
     *framesRead = 0;
     try {
         auto& handle = *static_cast<DecoderHandle*>(opaque);
-        const auto read = handle.decoder->read(output, static_cast<size_t>(frames));
+        size_t read = 0;
+        if (handle.decoder->readsFloat()) {
+            handle.floats.resize(static_cast<size_t>(frames) * handle.decoder->info().channels);
+            read = handle.decoder->readFloat(handle.floats.data(), static_cast<size_t>(frames));
+            std::memcpy(output, handle.floats.data(), read * handle.decoder->info().channels * sizeof(float));
+        } else {
+            read = handle.decoder->read(output, static_cast<size_t>(frames));
+        }
         *framesRead = read;
         return CAMEL_DECODER_HOST_OK;
     } catch (const Error& error) {

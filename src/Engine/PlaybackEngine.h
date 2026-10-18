@@ -10,6 +10,7 @@
 
 #include "Common/AudioTypes.h"
 #include "Engine/decode/IDecoder.h"
+#include "Engine/FormatRule.h"
 #include "OutputBridge/IOutput.h"
 #include "Common/settings/Settings.h"
 
@@ -24,7 +25,8 @@ struct EngineSnapshot {
     uint64_t total = 0;
     std::optional<SourceInfo> source;
     std::optional<AudioFormat> format;  // probed from the current file
-    std::optional<DeviceFormat> output; // set while a stream is open; always bit-perfect under the MVP rule
+    std::optional<DeviceFormat> output; // set while a stream is open
+    std::optional<OutputPlan> plan;     // how the source reaches `output`, and what that means for the indicator
     Backend backend = Backend::Wasapi;
     DecoderKind decoder = DecoderKind::Sndfile; // for the current file; FLAC's choice before a file is known
     OutputStatus outputStatus;
@@ -37,7 +39,7 @@ struct EngineSnapshot {
     bool nextSlotFree = false; // another file may be queued now
     uint64_t revision = 0;     // increments on every change
 
-    bool bitPerfect() const { return output.has_value(); }
+    bool bitPerfect() const { return plan && plan->state == PipelineState::BitPerfect; }
 };
 
 using OutputFactory = std::function<std::unique_ptr<IOutput>(const Settings&)>;

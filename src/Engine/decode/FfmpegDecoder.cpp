@@ -8,7 +8,9 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
+#include <bit>
 #include <cstdarg>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -84,6 +86,23 @@ public:
     const SourceInfo& info() const override { return info_; }
 
     size_t read(int32_t* dst, size_t frames) override {
+        const size_t got = readRaw(dst, frames);
+        if (lossy_)
+            for (size_t i = 0, n = got * info_.channels; i < n; i++)
+                dst[i] = quantize(std::bit_cast<float>(dst[i]), info_.bitsPerSample);
+        return got;
+    }
+
+    bool readsFloat() const override { return lossy_; }
+    size_t readFloat(float* dst, size_t frames) override {
+        raw_.resize(frames * info_.channels);
+        const size_t got = readRaw(raw_.data(), frames);
+        std::memcpy(dst, raw_.data(), got * info_.channels * sizeof(float));
+        return got;
+    }
+
+    // Integers, or float32 bit patterns for a lossy stream.
+    size_t readRaw(int32_t* dst, size_t frames) {
         const size_t ch = info_.channels;
         size_t done = 0;
         while (done < frames) {
@@ -193,11 +212,11 @@ private:
                 const int index = planar ? i : i * ch + c;
                 const uint8_t* plane = frame_->extended_data[planar ? c : 0];
                 if (packed == AV_SAMPLE_FMT_FLT) {
-                    *out++ = quantize(reinterpret_cast<const float*>(plane)[index], info_.bitsPerSample);
+                    *out++ = std::bit_cast<int32_t>(reinterpret_cast<const float*>(plane)[index]);
                     continue;
                 }
                 if (packed == AV_SAMPLE_FMT_DBL) {
-                    *out++ = quantize(reinterpret_cast<const double*>(plane)[index], info_.bitsPerSample);
+                    *out++ = std::bit_cast<int32_t>(float(reinterpret_cast<const double*>(plane)[index]));
                     continue;
                 }
                 int32_t v;
@@ -219,8 +238,9 @@ private:
     int stream_ = -1;
     bool draining_ = false;
     int64_t seekTarget_ = -1;
-    bool lossy_ = false; // float decoder output, quantized to info_.bitsPerSample
-    std::vector<int32_t> pending_;
+    bool lossy_ = false;           // float decoder output, quantized to info_.bitsPerSample
+    std::vector<int32_t> pending_; // float32 bit patterns for a lossy stream
+    std::vector<int32_t> raw_;
     size_t pendingPos_ = 0;
     SourceInfo info_;
 };

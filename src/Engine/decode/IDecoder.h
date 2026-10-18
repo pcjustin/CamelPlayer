@@ -25,6 +25,11 @@ public:
 
     // Positions the stream so the next read() starts exactly at `frame`. Throws Error (SeekFailed).
     virtual void seek(uint64_t frame) = 0;
+
+    // Lossy decoders also offer their float output (full scale +-1), which the Engine quantizes once with dither;
+    // read() returns the same samples rounded to info().bitsPerSample. Mixing the two reads is allowed.
+    virtual bool readsFloat() const { return false; }
+    virtual size_t readFloat(float* dst, size_t frames);
 };
 
 // Opens `path` with the chosen decoder. Lossy formats decode to the depth `pcmBits` sets for them (24 by default).

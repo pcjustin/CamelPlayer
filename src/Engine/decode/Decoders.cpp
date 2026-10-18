@@ -145,6 +145,8 @@ public:
     }
     const SourceInfo& info() const override { return info_; }
     size_t read(int32_t* dst, size_t frames) override { return inner_->read(dst, frames); }
+    bool readsFloat() const override { return inner_->readsFloat(); }
+    size_t readFloat(float* dst, size_t frames) override { return inner_->readFloat(dst, frames); }
     void seek(uint64_t frame) override {
         const uint64_t start = mode_ == Mode::Preroll && frame > kPreroll ? frame - kPreroll : 0;
         if (start)
@@ -183,6 +185,12 @@ public:
         position_ += got;
         return got;
     }
+    bool readsFloat() const override { return inner_->readsFloat(); }
+    size_t readFloat(float* dst, size_t frames) override {
+        const size_t got = inner_->readFloat(dst, size_t(std::min<uint64_t>(frames, info_.totalFrames - position_)));
+        position_ += got;
+        return got;
+    }
     void seek(uint64_t frame) override {
         if (frame >= info_.totalFrames) throw Error(ErrorCode::SeekFailed, "seek target is past the end");
         inner_->seek(priming_ + frame);
@@ -195,6 +203,14 @@ private:
     uint64_t priming_;
     uint64_t position_ = 0;
 };
+
+} // namespace
+
+size_t IDecoder::readFloat(float*, size_t) {
+    throw Error(ErrorCode::UnsupportedStream, "this decoder has no float output");
+}
+
+namespace {
 
 std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits) {
     switch (kind) {

@@ -4,13 +4,19 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering}
 use std::sync::Mutex;
 use std::thread;
 
+mod convert;
 mod decoder_host;
 mod packing;
+mod resample;
 mod ring;
 
-pub use decoder_host::{CamelDecoderHostV1, CamelSourceInfoV1};
+use convert::Converter;
+pub use decoder_host::{
+    CamelDecoderHostV1, CamelSourceInfoV1, SAMPLE_ENCODING_FLOAT32, SAMPLE_ENCODING_INTEGER,
+};
 use decoder_host::{DecoderHost, DecoderSource};
-use packing::{bytes_per_frame, pack_pcm};
+use packing::bytes_per_frame;
+pub use resample::{QUALITY_HIGH, QUALITY_QUICK, QUALITY_VERY_HIGH};
 use ring::SpscByteRing;
 
 pub const ABI_VERSION: u32 = 1;
@@ -112,6 +118,10 @@ pub struct CamelEngineConfigV1 {
     pub abi_version: u32,
     pub max_render_units: u64,
     pub format: CamelAudioFormatV1,
+    /// Nonzero permits resampling, downmix and bit reduction ("convert when unsupported").
+    pub allow_conversion: u32,
+    /// QUALITY_QUICK, QUALITY_HIGH or QUALITY_VERY_HIGH.
+    pub resample_quality: u32,
 }
 
 #[repr(C)]
@@ -339,6 +349,8 @@ impl Drop for RenderLease<'_> {
 pub struct CamelEngine {
     format: AudioFormat,
     output_format: CamelAudioFormatV1,
+    allow_conversion: bool,
+    resample_quality: u32,
     max_render_units: u64,
     ring: SpscByteRing,
     render_gate: RenderGate,
@@ -410,6 +422,23 @@ impl CamelEngine {
     fn boundary_pending(&self) -> bool {
         self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY
     }
+
+    // A converter for `info` to this engine's output format, or the reason none exists.
+    fn converter(&self, info: &CamelSourceInfoV1) -> Result<Converter, i32> {
+        Converter::new(
+            info,
+            &self.format,
+            self.output_format.rate_hz,
+            self.allow_conversion,
+            self.resample_quality,
+        )
+    }
+
+    // Positions are counted in output frames; a source frame maps through the rate ratio.
+    fn output_frames(&self, frames: u64, source_rate: u32) -> u64 {
+        (u128::from(frames) * u128::from(self.output_format.rate_hz)
+            / u128::from(source_rate.max(1))) as u64
+    }
 }
 
 fn validate_config(config: &CamelEngineConfigV1) -> Result<(AudioFormat, u64), EngineStatus> {
@@ -477,6 +506,8 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                 *out_engine = Box::into_raw(Box::new(CamelEngine {
                     format,
                     output_format: (*config).format,
+                    allow_conversion: (*config).allow_conversion != 0,
+                    resample_quality: (*config).resample_quality,
                     max_render_units,
                     ring,
                     render_gate: RenderGate::default(),
@@ -589,14 +620,18 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
             Ok(epoch) => epoch,
             Err(status) => return status as i32,
         };
-        let new_source = match DecoderSource::open(source, decoder_kind, host) {
+        let mut new_source = match DecoderSource::open(source, decoder_kind, host) {
             Ok(source) => source,
             Err(status) => return status,
         };
+        match engine.converter(&new_source.info) {
+            Ok(converter) => new_source.converter = Some(converter),
+            Err(status) => return status,
+        }
         if !operation_is_current(engine, epoch) {
             return ENGINE_E_NOT_READY;
         }
-        let position = new_source.position();
+        let position = engine.output_frames(new_source.position(), new_source.info.sample_rate);
         let mut current_source = engine.source.lock().unwrap();
         let _current_command = engine.command.lock().unwrap();
         if !operation_is_current(engine, epoch) {
@@ -654,7 +689,14 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
         if !source.can_seek(frame) {
             return ENGINE_E_SEEK;
         }
+        // Resampler state and pending output belong to the old position.
+        let converter = match engine.converter(&source.info) {
+            Ok(converter) => converter,
+            Err(status) => return status,
+        };
         let seeked = source.seek(frame);
+        source.converter = Some(converter);
+        let output_frame = engine.output_frames(frame, source.info.sample_rate);
         engine.publish_source(Some(source));
         if let Err(status) = seeked {
             // The decoder may have moved, so buffered frames and positions no longer describe it.
@@ -671,8 +713,12 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
             return ENGINE_E_NOT_READY;
         }
         engine.reset_stream();
-        engine.submitted_position.store(frame, Ordering::Release);
-        engine.audible_position.store(frame, Ordering::Release);
+        engine
+            .submitted_position
+            .store(output_frame, Ordering::Release);
+        engine
+            .audible_position
+            .store(output_frame, Ordering::Release);
         engine.render_error.store(ENGINE_OK, Ordering::Release);
         engine
             .render_source_state
@@ -779,6 +825,9 @@ pub unsafe extern "C" fn camel_engine_stop_v1(
         let start_frame = if let Some(source) = source.as_mut() {
             let start_frame = source.start_frame();
             let seeked = source.seek(start_frame);
+            if let Ok(converter) = engine.converter(&source.info) {
+                source.converter = Some(converter);
+            }
             engine.publish_source(Some(source));
             if let Err(status) = seeked {
                 engine
@@ -786,7 +835,7 @@ pub unsafe extern "C" fn camel_engine_stop_v1(
                     .store(PLAYBACK_FAILED as usize, Ordering::Release);
                 return status;
             }
-            Some(start_frame)
+            Some(engine.output_frames(start_frame, source.info.sample_rate))
         } else {
             None
         };
@@ -854,13 +903,6 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             if !operation_is_current(engine, epoch) {
                 return ENGINE_E_NOT_READY;
             }
-            if source.info.channel_count != engine.format.channel_count
-                || pack_pcm(&[], source.info.valid_bits, &engine.format, &mut []).is_err()
-            {
-                engine.fail_render(ENGINE_E_UNSUPPORTED_FORMAT);
-                return ENGINE_E_UNSUPPORTED_FORMAT;
-            }
-
             let writable_frames = engine.ring.writable() / bytes_per_frame;
             let frame_limit = frame_limit
                 .min(MAX_PREFILL_FRAMES)
@@ -868,7 +910,40 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             if frame_limit == 0 {
                 return ENGINE_OK;
             }
-            let sample_count = match frame_limit
+            // Output converted earlier but not yet in the ring goes first.
+            let write_pending = |source: &mut DecoderSource, frames_prefilled: &mut u64| -> i32 {
+                let converter = source
+                    .converter
+                    .as_mut()
+                    .expect("loaded sources have a converter");
+                let frames = converter.pending_frames().min(frame_limit);
+                let bytes = frames as usize * bytes_per_frame;
+                let _current_command = engine.command.lock().unwrap();
+                if !operation_is_current(engine, epoch) {
+                    return ENGINE_E_NOT_READY; // still a valid continuation; seek, stop and load replace it
+                }
+                if engine.ring.write(&converter.pending()[..bytes]) != bytes {
+                    engine.fail_render(ENGINE_E_INVALID_STATE);
+                    return ENGINE_E_INVALID_STATE;
+                }
+                converter.consume(frames);
+                engine.written_frames.fetch_add(frames, Ordering::AcqRel);
+                *frames_prefilled = frames;
+                ENGINE_OK
+            };
+            if source
+                .converter
+                .as_ref()
+                .is_some_and(|c| c.pending_frames() > 0)
+            {
+                return write_pending(source, &mut *frames_prefilled);
+            }
+            let Some(converter) = source.converter.as_ref() else {
+                engine.fail_render(ENGINE_E_UNSUPPORTED_FORMAT);
+                return ENGINE_E_UNSUPPORTED_FORMAT;
+            };
+            let source_frames = converter.input_frames_for(frame_limit);
+            let sample_count = match source_frames
                 .checked_mul(u64::from(source.info.channel_count))
                 .and_then(|count| usize::try_from(count).ok())
             {
@@ -882,7 +957,7 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             }
             samples.resize(sample_count, 0);
             let start_position = source.position();
-            let frames_read = match source.read(&mut samples, frame_limit) {
+            let frames_read = match source.read(&mut samples, source_frames) {
                 Ok(frames_read) => frames_read,
                 Err(status) => {
                     if !operation_is_current(engine, epoch) {
@@ -897,6 +972,17 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                 let _ = source.seek(start_position);
                 return ENGINE_E_NOT_READY;
             }
+            let converter = source.converter.as_mut().expect("checked above");
+            if frames_read == 0 && !converter.finished() {
+                // The resampler's tail belongs to this track and plays before any queued one.
+                if let Err(status) = converter.finish() {
+                    engine.fail_render(status);
+                    return status;
+                }
+                if converter.pending_frames() > 0 {
+                    return write_pending(source, &mut *frames_prefilled);
+                }
+            }
             if frames_read == 0 {
                 let _current_command = engine.command.lock().unwrap();
                 if !operation_is_current(engine, epoch) {
@@ -907,9 +993,10 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                     // One boundary at a time: a second queued track waits until render reaches the first.
                     if !engine.boundary_pending() {
                         if let Some(next) = next.take() {
-                            engine
-                                .boundary_start_frame
-                                .store(next.start_frame(), Ordering::Release);
+                            engine.boundary_start_frame.store(
+                                engine.output_frames(next.start_frame(), next.info.sample_rate),
+                                Ordering::Release,
+                            );
                             *source = next;
                         }
                         engine.next_occupied.store(false, Ordering::Release);
@@ -930,56 +1017,11 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                 return ENGINE_END;
             }
 
-            let sample_count = match frames_read
-                .checked_mul(u64::from(source.info.channel_count))
-                .and_then(|count| usize::try_from(count).ok())
-            {
-                Some(count) => count,
-                None => return ENGINE_E_LIMIT_EXCEEDED,
-            };
-            let output_bytes = match frames_read
-                .checked_mul(bytes_per_frame as u64)
-                .and_then(|bytes| usize::try_from(bytes).ok())
-            {
-                Some(bytes) => bytes,
-                None => return ENGINE_E_LIMIT_EXCEEDED,
-            };
-            let mut packed = Vec::new();
-            if packed.try_reserve_exact(output_bytes).is_err() {
-                engine.fail_render(ENGINE_E_LIMIT_EXCEEDED);
-                return ENGINE_E_LIMIT_EXCEEDED;
+            if let Err(status) = converter.convert(&samples, frames_read as usize) {
+                engine.fail_render(status);
+                return status;
             }
-            packed.resize(output_bytes, 0);
-            let written = match pack_pcm(
-                &samples[..sample_count],
-                source.info.valid_bits,
-                &engine.format,
-                &mut packed,
-            ) {
-                Ok(written) => written,
-                Err(status) => {
-                    if !operation_is_current(engine, epoch) {
-                        let _ = source.seek(start_position);
-                        return ENGINE_E_NOT_READY;
-                    }
-                    engine.fail_render(status);
-                    return status;
-                }
-            };
-            let _current_command = engine.command.lock().unwrap();
-            if !operation_is_current(engine, epoch) {
-                let _ = source.seek(start_position);
-                return ENGINE_E_NOT_READY;
-            }
-            if engine.ring.write(&packed[..written]) != written {
-                engine.fail_render(ENGINE_E_INVALID_STATE);
-                return ENGINE_E_INVALID_STATE;
-            }
-            engine
-                .written_frames
-                .fetch_add(frames_read, Ordering::AcqRel);
-            *frames_prefilled = frames_read;
-            ENGINE_OK
+            write_pending(source, &mut *frames_prefilled)
         })();
         engine.publish_source(guard.as_ref());
         status
@@ -1245,15 +1287,14 @@ pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
         if let Err(status) = record_command(engine, &*command) {
             return status as i32;
         }
-        let next = match DecoderSource::open(source, decoder_kind, host) {
+        let mut next = match DecoderSource::open(source, decoder_kind, host) {
             Ok(next) => next,
             Err(status) => return status,
         };
-        if next.info.sample_rate != engine.output_format.rate_hz
-            || next.info.channel_count != engine.format.channel_count
-            || pack_pcm(&[], next.info.valid_bits, &engine.format, &mut []).is_err()
-        {
-            return ENGINE_E_UNSUPPORTED_FORMAT;
+        // The queued track plays into the same device format; a converter takes it there or it is refused.
+        match engine.converter(&next.info) {
+            Ok(converter) => next.converter = Some(converter),
+            Err(status) => return status,
         }
         let mut slot = engine.next_source.lock().unwrap();
         *slot = Some(next);
@@ -1587,7 +1628,7 @@ mod tests {
             sample_rate: 48_000,
             channel_count: 2,
             valid_bits: 16,
-            reserved: 0,
+            sample_encoding: 0,
             total_frames: metadata.total_frames,
             has_md5: metadata.has_md5,
             reserved2: 0,
@@ -1756,7 +1797,7 @@ mod tests {
             abi_version: ABI_VERSION,
             stream_kind,
             sample_format,
-            rate_hz: 96_000,
+            rate_hz: 48_000,
             channel_count: 2,
             valid_bits,
             container_bits,
@@ -1770,6 +1811,8 @@ mod tests {
             abi_version: ABI_VERSION,
             max_render_units: MAX_RENDER_UNITS,
             format,
+            allow_conversion: 0,
+            resample_quality: QUALITY_HIGH,
         }
     }
 
@@ -1967,18 +2010,31 @@ mod tests {
     }
 
     #[test]
-    fn queued_track_must_match_the_output_format() {
-        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+    fn another_rate_needs_conversion_permission() {
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        cfg.format.rate_hz = 96_000;
         let mut engine = ptr::null_mut();
         assert_eq!(
             unsafe { camel_engine_create_v1(&cfg, &mut engine) },
             ENGINE_OK
         );
         assert_eq!(queue_mock_next(engine, 1), ENGINE_E_INVALID_STATE);
+        // The 48 kHz mock does not match this 96 kHz output, and nothing converts it silently.
+        assert_eq!(load_mock_source(engine), ENGINE_E_UNSUPPORTED_FORMAT);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+
+        cfg.allow_conversion = 1;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
         assert_eq!(load_mock_source(engine), ENGINE_OK);
-        // The 48 kHz mock does not match this 96 kHz output.
-        assert_eq!(queue_mock_next(engine, 2), ENGINE_E_UNSUPPORTED_FORMAT);
-        assert_eq!(prefill_until_end(engine), 4);
+        let first = prefill_until_end(engine);
+        // Queued after the first track's end was decoded: the stream continues with it.
+        assert_eq!(queue_mock_next(engine, 2), ENGINE_OK);
+        let second = prefill_until_end(engine);
+        assert_eq!((first, second), (8, 8)); // four 48 kHz frames each, at 96 kHz
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
@@ -2017,7 +2073,7 @@ mod tests {
     fn abi_layout_matches_the_c_header_contract() {
         assert_eq!(camel_engine_abi_version(), ABI_VERSION);
         assert_eq!(std::mem::size_of::<CamelAudioFormatV1>(), 40);
-        assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 56);
+        assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 64);
         assert_eq!(std::mem::size_of::<CamelCommandStampV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 48);
         assert_eq!(std::mem::size_of::<CamelSourceInfoV1>(), 56);

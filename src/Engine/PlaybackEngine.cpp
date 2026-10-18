@@ -200,7 +200,11 @@ public:
         // A lossy file decodes to the configured depth, so changing it reopens the stream like a decoder change.
         const bool lossyBitsChanged = format_ && isLossy(*format_) &&
                                       pcmBitsFor(settings_.pcmBitsByFormat, *format_) != pcmBitsFor(s.pcmBitsByFormat, *format_);
-        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged;
+        // A conversion setting reopens the stream only when the path it would choose differs.
+        const bool conversionChanged =
+            (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality) &&
+            active_ && !outputChanged && conversionPathChanges(s);
+        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged || conversionChanged;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -223,22 +227,24 @@ public:
         AudioFormat format{};
         DecoderKind decoder{};
         SourceInfo source;
+        bool lossy = false;
         try {
             format = probeFormat(file);
             decoder = chooseDecoder(format, requested, settings_);
-            source = openDecoder(decoder, file, settings_.pcmBitsByFormat)->info();
+            const auto opened = openDecoder(decoder, file, settings_.pcmBitsByFormat);
+            source = opened->info();
+            lossy = opened->readsFloat();
         } catch (const Error&) {
             return false; // reported when the file is opened normally
         }
-        std::optional<DeviceFormat> outputFormat;
+        std::optional<OutputPlan> plan;
         try {
-            outputFormat = chooseOutputFormat(source, fixedSampleType(settings_),
-                                              [&](const DeviceFormat& f) { return output_->supports(f); });
+            plan = negotiate(source, lossy);
         } catch (const Error&) {
             return false; // the device question fails again when the file is opened normally
         }
-        if (outputFormat != fmt_ || !rust_->queueNext(file, decoder)) return false;
-        queued_.push_back({file.wstring(), source, format, requested, decoder});
+        if (!plan || plan->format != fmt_ || !rust_->queueNext(file, decoder)) return false;
+        queued_.push_back({file.wstring(), source, format, requested, decoder, *plan});
         publishQueue();
         return true;
     }
@@ -275,7 +281,7 @@ public:
         std::lock_guard lock(snapMutex_);
         EngineSnapshot s = snap_;
         if (active_) {
-            s.position = base_ + consumed_.load(std::memory_order_relaxed);
+            s.position = sourcePosition();
             s.underruns = underruns_.load(std::memory_order_relaxed);
         }
         return s;
@@ -347,10 +353,28 @@ private:
             buffered = snap_.outputStatus.bufferFrames;
         }
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
-        rust_->reportAudible(base_ + consumed - std::min(buffered, consumed));
+        rust_->reportAudible(toOutput(base_) + consumed - std::min(buffered, consumed));
     }
 
-    uint64_t currentPosition() const { return active_ ? base_ + consumed_.load(std::memory_order_relaxed) : position_; }
+    uint64_t currentPosition() const { return active_ ? sourcePosition() : position_; }
+
+    // The device consumes output frames; positions count source frames, which differ when the stream is resampled.
+    uint64_t sourcePosition() const {
+        const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
+        const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
+        return base_ + (in == out || !out ? consumed : (consumed * in + out / 2) / out);
+    }
+    uint64_t toOutput(uint64_t sourceFrames) const {
+        const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
+        return in == out || !in ? sourceFrames : (sourceFrames * out + in / 2) / in;
+    }
+
+    std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy) {
+        return negotiateOutput(src, lossy, fixedSampleType(settings_), settings_.convertWhenUnsupported,
+                               [&](const DeviceFormat& f) { return output_->supports(f); });
+    }
+
+    RustSession::Conversion conversion() const { return {settings_.convertWhenUnsupported, settings_.resampleQuality}; }
 
     void ensureOutput() {
         if (output_) return;
@@ -391,30 +415,35 @@ private:
             snap_.source = src;
             snap_.total = src.totalFrames;
             snap_.output.reset();
+            snap_.plan.reset();
         }
-        std::optional<DeviceFormat> fmt;
+        const bool lossy = dec->readsFloat();
+        std::optional<OutputPlan> plan;
         try {
             ensureOutput();
-            fmt =
-                chooseOutputFormat(src, fixedSampleType(settings_), [&](const DeviceFormat& f) { return output_->supports(f); });
+            plan = negotiate(src, lossy);
         } catch (const Error& e) {
             position_ = startFrame;
             return fail(e, PlayState::Stopped);
         }
-        if (!fmt) {
-            char msg[128];
-            const int length = snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device",
-                                        src.sampleRate, src.bitsPerSample, src.channels);
+        if (!plan) {
+            char msg[160];
+            const char* hint = settings_.convertWhenUnsupported ? "" : "; enable \"convert when unsupported\" to convert it";
+            const int length = snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
+                                        src.sampleRate, src.bitsPerSample, src.channels, hint);
             if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "No bit-perfect format available on this device");
             position_ = 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), PlayState::Stopped);
         }
         if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
-        fmt_ = *fmt;
+        plan_ = *plan;
+        fmt_ = plan_.format;
         bpf_ = fmt_.bytesPerFrame();
+        sourceRate_ = src.sampleRate;
+        outputRate_ = fmt_.sampleRate;
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         try {
-            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat);
+            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion());
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);
@@ -465,6 +494,7 @@ private:
         {
             std::lock_guard lock(snapMutex_);
             snap_.output = fmt_;
+            snap_.plan = plan_;
             snap_.outputStatus = output_->status();
             snap_.error.reset();
             snap_.errorDetail.clear();
@@ -525,7 +555,7 @@ private:
         }
         stopDecoder();
         rust_.reset();
-        if (active_) position_ = base_ + consumed_.load();
+        if (active_) position_ = sourcePosition();
         active_ = false;
         playing_ = false;
         ended_ = false;
@@ -533,6 +563,7 @@ private:
         queued_.clear();
         std::lock_guard lock(snapMutex_);
         snap_.output.reset();
+        snap_.plan.reset();
         snap_.queuedFiles = 0;
         snap_.nextSlotFree = false;
     }
@@ -546,6 +577,8 @@ private:
             const Queued next = queued_.front();
             queued_.pop_front();
             file_ = next.file;
+            plan_ = next.plan;
+            sourceRate_ = next.source.sampleRate;
             fileDecoder_ = next.requested;
             format_ = next.format;
             const auto& source = next.source;
@@ -553,6 +586,7 @@ private:
             snap_.file = file_;
             snap_.format = next.format;
             snap_.decoder = next.decoder;
+            snap_.plan = next.plan;
             snap_.source = source;
             snap_.total = source.totalFrames;
             snap_.transitions++;
@@ -630,6 +664,16 @@ private:
         }
     }
 
+    // Whether settings `s` would convert the open stream differently: another path, or another resampling quality.
+    bool conversionPathChanges(const Settings& s) {
+        if (plan_.resample && settings_.resampleQuality != s.resampleQuality) return true;
+        const auto source = snapshot().source;
+        if (!source) return false;
+        const auto plan = negotiateOutput(*source, format_ && isLossy(*format_), fixedSampleType(s), s.convertWhenUnsupported,
+                                          [&](const DeviceFormat& f) { return output_->supports(f); });
+        return plan != plan_;
+    }
+
     // The decoder the current file uses, or would use, under settings `s`.
     DecoderKind displayedDecoder(const Settings& s) const {
         if (fileDecoder_) return *fileDecoder_;
@@ -650,6 +694,8 @@ private:
     uint64_t session_ = 0;
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;
+    OutputPlan plan_;
+    std::atomic<uint32_t> sourceRate_{0}, outputRate_{0}; // read by snapshot() while the stream plays
 
     // shared with the decode / output threads
     size_t bpf_ = 8;
@@ -663,6 +709,7 @@ private:
         AudioFormat format;
         std::optional<DecoderKind> requested;
         DecoderKind decoder;
+        OutputPlan plan;
     };
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     std::thread decodeThread_;

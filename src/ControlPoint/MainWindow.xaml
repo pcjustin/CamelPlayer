@@ -62,6 +62,8 @@
                         <ComboBox x:Name="AacBitsCombo" x:Uid="Settings_AacBits" Width="360" SelectionChanged="OnSettingChanged" />
                         <ComboBox x:Name="Mp3DecoderCombo" x:Uid="Settings_Mp3Decoder" Width="360" SelectionChanged="OnSettingChanged" />
                         <ComboBox x:Name="Mp3BitsCombo" x:Uid="Settings_Mp3Bits" Width="360" SelectionChanged="OnSettingChanged" />
+                        <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
+                        <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
 
                         <StackPanel x:Name="WasapiGroup" Spacing="12">
                             <TextBlock Text="WASAPI" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />

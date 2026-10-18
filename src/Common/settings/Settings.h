@@ -37,6 +37,10 @@ struct AsioSettings {
 enum class KsMode : uint8_t { Auto, WaveRtEvent, WaveRtPoll, Standard };
 const char* ksModeId(KsMode m);
 
+// soxr quick / high / very high (docs/Plan.md §6).
+enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
+const char* resampleQualityId(ResampleQuality q);
+
 struct KsSettings {
     std::string deviceId; // "<filter path>|<pin id>"; empty = first PCM render pin
     KsMode mode = KsMode::Auto;
@@ -68,6 +72,9 @@ struct Settings {
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
     PcmBitsByFormat pcmBitsByFormat;
+    // "Convert when unsupported" (docs/Plan.md §2, §5.3): resample, downmix or reduce depth instead of skipping.
+    bool convertWhenUnsupported = false;
+    ResampleQuality resampleQuality = ResampleQuality::High;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;

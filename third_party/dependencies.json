@@ -247,6 +247,25 @@
                                        }
                                    ],
                        "notice":  "licenses/native/mp3lame.txt"
+                   },
+                   {
+                       "name":  "soxr",
+                       "version":  "0.1.3#9",
+                       "license":  "LGPL-2.1-or-later",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@38edca408abad1f7d8e84363d2b8e31d982d6952",
+                       "sources":  [
+                                       {
+                                           "location":  "https://sourceforge.net/projects/soxr/files//soxr-0.1.3-Source.tar.xz",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "f4883ed298d5650399283238aac3dbe78d605b988246bea51fa343d4a8ce5ce97c6e143f6c3f50a3ff81795d9c19e7a07217c586d4020f6ced102aceac46aaa8"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/soxr.txt"
                    }
                ],
     "rust":  [

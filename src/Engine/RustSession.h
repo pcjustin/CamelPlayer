@@ -14,10 +14,16 @@ namespace camel::audio {
 
 class RustSession {
 public:
+    // Whether the Engine may resample, downmix or reduce depth, and with which soxr quality.
+    struct Conversion {
+        bool allow = false;
+        ResampleQuality quality = ResampleQuality::High;
+    };
+
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,
     // decode to the depth `pcmBits` sets. Throws Error on failure.
     RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                const PcmBitsByFormat& pcmBits);
+                const PcmBitsByFormat& pcmBits, Conversion conversion);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;

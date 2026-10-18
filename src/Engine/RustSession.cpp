@@ -73,7 +73,7 @@ Error engineError(const char* what, CamelEngineStatus status) {
     case CAMEL_ENGINE_E_SEEK:
         return Error(ErrorCode::SeekFailed, detail);
     case CAMEL_ENGINE_E_UNSUPPORTED_FORMAT:
-        return Error(ErrorCode::UnsupportedStream, detail + " (16/24-bit sources only)");
+        return Error(ErrorCode::UnsupportedStream, detail + " (the source cannot be played in this output format)");
     default:
         return Error(ErrorCode::Other, detail);
     }
@@ -97,13 +97,16 @@ void destroy(CamelEngine* engine) noexcept {
 } // namespace
 
 RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                         const PcmBitsByFormat& pcmBits)
+                         const PcmBitsByFormat& pcmBits, Conversion conversion)
     : pcmBits_(pcmBits), host_(makeDecoderHostV1(&pcmBits_)) {
     command_.struct_size = sizeof(command_);
     command_.abi_version = CAMEL_ENGINE_ABI_VERSION;
     command_.generation = 1;
-    const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1), CAMEL_ENGINE_ABI_VERSION, CAMEL_ENGINE_MAX_RENDER_UNITS,
-                                     abiFormat(format)};
+    const uint32_t quality = conversion.quality == ResampleQuality::Quick      ? CAMEL_RESAMPLE_QUICK
+                             : conversion.quality == ResampleQuality::VeryHigh ? CAMEL_RESAMPLE_VERY_HIGH
+                                                                               : CAMEL_RESAMPLE_HIGH;
+    const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1), CAMEL_ENGINE_ABI_VERSION,   CAMEL_ENGINE_MAX_RENDER_UNITS,
+                                     abiFormat(format),           conversion.allow ? 1u : 0u, quality};
     if (const auto status = camel_engine_create_v1(&config, &engine_); status != CAMEL_ENGINE_OK)
         throw engineError("create", status);
     const auto utf8 = toUtf8(path.wstring());

@@ -17,7 +17,7 @@ void usage() {
         "  list-devices\n"
         "      list WASAPI endpoints, ASIO drivers and Kernel Streaming pins\n"
         "  play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode auto|rtevent|rtpoll|standard]\n"
-        "       [--wasapi-poll 1] [--format 16|24|24in32|32] [--seconds N] [--seek S]\n"
+        "       [--wasapi-poll 1] [--format 16|24|24in32|32] [--convert 1] [--seconds N] [--seek S]\n"
         "      play through a real device (space = pause, s = +10 s, q = quit)\n"
         "  play-queue <file.flac>... [--backend wasapi|asio|ks] [--decoder id] [--device n|id]\n"
         "      play the files as one queue (gapless where formats match) and report device opens\n"

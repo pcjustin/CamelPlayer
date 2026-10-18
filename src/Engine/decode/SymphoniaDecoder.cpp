@@ -1,8 +1,13 @@
-// FLAC, ALAC, WAV and AIFF through Symphonia (Rust, rust/symphonia_ffi).
+// FLAC, ALAC, WAV, AIFF, AAC and MP3 through Symphonia (Rust, rust/symphonia_ffi).
 #include "Engine/decode/DecoderImpl.h"
+
+#include <bit>
+#include <cstring>
+#include <vector>
 
 #include "symphonia_ffi.h"
 #include "Common/util/Text.h"
+#include "Engine/decode/Quantize.h"
 
 namespace camel::audio {
 namespace {
@@ -19,6 +24,7 @@ public:
         info_.channels = si.channels;
         info_.bitsPerSample = si.bits_per_sample;
         info_.totalFrames = si.total_frames;
+        float_ = si.is_float != 0;
         if (si.has_md5) {
             std::array<uint8_t, 16> m;
             std::copy(si.md5, si.md5 + 16, m.begin());
@@ -31,9 +37,18 @@ public:
     const SourceInfo& info() const override { return info_; }
 
     size_t read(int32_t* dst, size_t frames) override {
-        size_t got = 0;
-        int32_t r = sym_read(dec_, dst, frames, &got);
-        if (r < 0) throw Error(ErrorCode::DecodeFailed, "symphonia: " + lastError());
+        const size_t got = readRaw(dst, frames);
+        if (float_)
+            for (size_t i = 0, n = got * info_.channels; i < n; i++)
+                dst[i] = quantize(std::bit_cast<float>(dst[i]), info_.bitsPerSample);
+        return got;
+    }
+
+    bool readsFloat() const override { return float_; }
+    size_t readFloat(float* dst, size_t frames) override {
+        raw_.resize(frames * info_.channels);
+        const size_t got = readRaw(raw_.data(), frames);
+        std::memcpy(dst, raw_.data(), got * info_.channels * sizeof(float));
         return got;
     }
 
@@ -42,6 +57,13 @@ public:
     }
 
 private:
+    // Integers, or float32 bit patterns for a lossy stream.
+    size_t readRaw(int32_t* dst, size_t frames) {
+        size_t got = 0;
+        if (sym_read(dec_, dst, frames, &got) < 0) throw Error(ErrorCode::DecodeFailed, "symphonia: " + lastError());
+        return got;
+    }
+
     std::string lastError() const {
         char buf[512] = {};
         sym_last_error(dec_, buf, sizeof buf);
@@ -50,6 +72,8 @@ private:
 
     SymDecoder* dec_ = nullptr;
     SourceInfo info_;
+    bool float_ = false;
+    std::vector<int32_t> raw_;
 };
 
 } // namespace

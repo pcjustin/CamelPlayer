@@ -107,24 +107,27 @@ TEST(FormatRuleBoundary, InvalidSourceNeverProbesDevice) {
         ++probes;
         return true;
     };
-    for (const auto& source : {SourceInfo{0, 2, 16}, SourceInfo{48000, 0, 16}, SourceInfo{48000, 1, 16}, SourceInfo{48000, 6, 24},
-                               SourceInfo{48000, 2, 0}, SourceInfo{48000, 2, 33}})
-        EXPECT_FALSE(chooseOutputFormat(source, std::nullopt, supports));
+    for (const auto& source : {SourceInfo{0, 2, 16}, SourceInfo{48000, 0, 16}, SourceInfo{48000, 6, 24}, SourceInfo{48000, 2, 0},
+                               SourceInfo{48000, 2, 33}})
+        EXPECT_FALSE(negotiateOutput(source, false, std::nullopt, false, supports));
+    EXPECT_FALSE(negotiateOutput(SourceInfo{48000, 9, 24}, false, std::nullopt, true, supports));
     EXPECT_EQ(probes, 0);
 }
 
 TEST(FormatRuleBoundary, PreservesRateAndStopsAtFirstSupportedContainer) {
     std::vector<SampleType> probes;
-    auto format = chooseOutputFormat({88200, 2, 16}, std::nullopt, [&](const DeviceFormat& candidate) {
+    auto plan = negotiateOutput({88200, 2, 16}, false, std::nullopt, false, [&](const DeviceFormat& candidate) {
         EXPECT_EQ(candidate.sampleRate, 88200u);
         EXPECT_EQ(candidate.channels, 2u);
         probes.push_back(candidate.type);
         return candidate.type == SampleType::Int24;
     });
-    ASSERT_TRUE(format);
-    EXPECT_EQ(format->type, SampleType::Int24);
+    ASSERT_TRUE(plan);
+    EXPECT_EQ(plan->format.type, SampleType::Int24);
     EXPECT_EQ(probes, (std::vector{SampleType::Int16, SampleType::Int24}));
-    EXPECT_FALSE(chooseOutputFormat({48000, 2, 16}, SampleType::Float32, [](const auto&) { return true; }));
+    const auto widened = negotiateOutput({48000, 2, 16}, false, SampleType::Float32, false, [](const auto&) { return true; });
+    ASSERT_TRUE(widened);
+    EXPECT_TRUE(widened->widen);
 }
 
 TEST(WaveFormat, IntegerAndFloatingPointLayouts) {
@@ -206,6 +209,22 @@ TEST(SettingsBoundary, RegistryDefaultsFollowThePlan) {
     EXPECT_EQ(decoderFor(none, AudioFormat::Aac), DecoderKind::Symphonia);
     EXPECT_EQ(decoderFor(none, AudioFormat::Mp3), DecoderKind::Mpg123);
     EXPECT_TRUE(decodersFor(AudioFormat::Dsd).empty());
+}
+
+TEST(SettingsBoundary, ConversionIsOffByDefaultWithHighQualityResampling) {
+    EXPECT_FALSE(Settings{}.convertWhenUnsupported);
+    EXPECT_EQ(Settings{}.resampleQuality, ResampleQuality::High);
+    Settings settings;
+    settings.convertWhenUnsupported = true;
+    for (const auto quality : {ResampleQuality::Quick, ResampleQuality::High, ResampleQuality::VeryHigh}) {
+        settings.resampleQuality = quality;
+        const auto back = fromJson(toJson(settings));
+        EXPECT_TRUE(back.convertWhenUnsupported);
+        EXPECT_EQ(back.resampleQuality, quality);
+    }
+    const auto invalid = fromJson(R"({"convertWhenUnsupported":"yes","resampleQuality":"best"})");
+    EXPECT_FALSE(invalid.convertWhenUnsupported);
+    EXPECT_EQ(invalid.resampleQuality, ResampleQuality::High);
 }
 
 TEST(SettingsBoundary, LossyOutputDepthDefaultsTo24AndAccepts16) {

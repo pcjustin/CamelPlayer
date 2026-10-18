@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "Engine/FormatRule.h"
 #include "Server/Playback/QueuePolicy.h"
 #include "Common/settings/Settings.h"
 
@@ -37,6 +38,8 @@ struct SettingsDto {
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
     PcmBitsByFormat pcmBitsByFormat;
+    bool convertWhenUnsupported = false;
+    ResampleQuality resampleQuality = ResampleQuality::High;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;
@@ -101,6 +104,7 @@ struct PlaybackSnapshot {
     std::optional<audio::SourceInfo> source;
     std::optional<audio::AudioFormat> format;
     std::optional<audio::DeviceFormat> output;
+    std::optional<audio::OutputPlan> plan;
     Backend backend = Backend::Wasapi;
     audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
     std::optional<Backend> activeBackend;
@@ -112,7 +116,7 @@ struct PlaybackSnapshot {
     std::string errorDetail;
     uint64_t revision = 0;
 
-    bool bitPerfect() const { return output.has_value(); }
+    bool bitPerfect() const { return plan && plan->state == audio::PipelineState::BitPerfect; }
 };
 
 struct DeviceInfo {

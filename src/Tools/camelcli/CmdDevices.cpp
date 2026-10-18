@@ -71,6 +71,7 @@ Settings settingsFromArgs(const Args& args) {
                                       : KsMode::Auto;
     }
     if (auto v = option(args, L"--wasapi-poll")) s.wasapi.eventDriven = *v != L"1";
+    if (auto v = option(args, L"--convert")) s.convertWhenUnsupported = *v == L"1";
     if (auto v = option(args, L"--format")) {
         auto t = sampleTypeFromId(toUtf8(*v));
         s.wasapi.sampleType = t;

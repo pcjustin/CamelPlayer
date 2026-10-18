@@ -65,6 +65,14 @@ const char* ksModeId(KsMode m) {
     return "auto";
 }
 
+const char* resampleQualityId(ResampleQuality q) {
+    return q == ResampleQuality::Quick ? "quick" : q == ResampleQuality::VeryHigh ? "veryhigh" : "high";
+}
+
+static ResampleQuality resampleQualityFromId(std::string_view id) {
+    return id == "quick" ? ResampleQuality::Quick : id == "veryhigh" ? ResampleQuality::VeryHigh : ResampleQuality::High;
+}
+
 static KsMode ksModeFromId(std::string_view id) {
     for (KsMode m : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard})
         if (id == ksModeId(m)) return m;
@@ -120,6 +128,8 @@ std::string toJson(const Settings& s) {
     for (const auto format : audio::kAllFormats)
         if (const auto bits = s.pcmBitsByFormat[format]) pcmBits[audio::formatId(format)] = *bits;
     j["pcmBitsByFormat"] = pcmBits;
+    j["convertWhenUnsupported"] = s.convertWhenUnsupported;
+    j["resampleQuality"] = resampleQualityId(s.resampleQuality);
     j["language"] = s.language;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
@@ -180,6 +190,8 @@ Settings fromJson(const std::string& text) {
                 (bits.get<int64_t>() == 16 || bits.get<int64_t>() == 24))
                 s.pcmBitsByFormat[format] = uint32_t(bits.get<int64_t>());
         }
+    s.convertWhenUnsupported = boolean(j, "convertWhenUnsupported", false);
+    s.resampleQuality = resampleQualityFromId(str(j, "resampleQuality", "high"));
     s.language = str(j, "language", "");
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
