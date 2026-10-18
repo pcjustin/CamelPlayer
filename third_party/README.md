@@ -12,6 +12,7 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 | libsoxr | `vcpkg.json` with a pinned baseline | Resampling in the Rust Engine through `rust/audio_engine/src/resample.rs`; linked by the C++ executables |
 | LAME | `vcpkg.json` (`mp3lame`) with a pinned baseline | MP3 test fixtures in `tests/LameFixture.cpp`; linked into tests.exe only |
 | libsndfile | `vcpkg.json` with a pinned baseline | `src/Engine/decode/SndfileDecoder.cpp` |
+| DSD Nexus (libdsf, libdsdiff, libdst) | Overlay port `vcpkg-ports/dsd-nexus` pinned to upstream tag 0.1.82 by commit and SHA512; builds only these libraries and libsautil as the shared `dsdnexus.dll` | `src/Engine/decode/DsdReader.cpp` (not yet used for playback) |
 | Symphonia | `rust/symphonia_ffi/Cargo.toml` and `rust/Cargo.lock` | Owned Rust C ABI bridge in `rust/symphonia_ffi`; C++ adapter in `src/Engine/decode/SymphoniaDecoder.cpp` |
 | libFLAC | vcpkg `libflac` | Test-audio encoding and independent reference decoding in `src/Engine/testing` |
 | Steinberg ASIO SDK | Selected unmodified headers and licenses in `third_party/asiosdk` | `src/OutputBridge/AsioOutput.cpp` |

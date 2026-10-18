@@ -1,0 +1,14 @@
+{
+  "name": "dsd-nexus",
+  "version-string": "0.1.82",
+  "description": "DSD Nexus libdsf, libdsdiff and libdst built as one shared library",
+  "homepage": "https://github.com/wichers/dsd-nexus",
+  "license": "LGPL-2.1-or-later",
+  "supports": "windows & x64",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ]
+}

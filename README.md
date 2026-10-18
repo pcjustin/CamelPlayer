@@ -50,7 +50,7 @@ Hardware tests are disabled during ordinary runs because they play audio and req
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*-*Cirrus*"
 ```
 
-The MVP plays 16/24-bit lossless sources and AAC/MP3 to stereo output; without conversion it only repacks integers. FLAC, WAV and AIFF default to libsndfile, ALAC and AAC to Symphonia and MP3 to mpg123; an earlier saved FLAC choice is kept. DSD is recognized but not played yet. MP3 test files are encoded with LAME inside the test program only. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
+The MVP plays 16/24-bit lossless sources and AAC/MP3 to stereo output; without conversion it only repacks integers. FLAC, WAV and AIFF default to libsndfile, ALAC and AAC to Symphonia and MP3 to mpg123; an earlier saved FLAC choice is kept. DSD is recognized but not played yet; DSF and DSDIFF files can already be read as raw DSD through DSD Nexus (tests only), and DST decompression stays disabled. MP3 test files are encoded with LAME inside the test program only. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
 
 ## Dependencies and repository contents
 

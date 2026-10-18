@@ -9,6 +9,7 @@ $nativeLicenses = [ordered]@{
     libflac = 'BSD-3-Clause'; libogg = 'BSD-3-Clause'; libvorbis = 'BSD-3-Clause'; opus = 'BSD-3-Clause'
     zlib = 'Zlib'; wil = 'MIT'; 'nlohmann-json' = 'MIT'; gtest = 'BSD-3-Clause'
     mpg123 = 'LGPL-2.1-or-later'; mp3lame = 'LGPL-2.0-only'; soxr = 'LGPL-2.1-or-later'
+    'dsd-nexus' = 'LGPL-2.1-or-later'
 }
 $testOnly = @('gtest', 'mp3lame') # linked into tests.exe only, never shipped
 foreach ($port in $nativeLicenses.Keys) {

@@ -266,6 +266,25 @@
                                        }
                                    ],
                        "notice":  "licenses/native/soxr.txt"
+                   },
+                   {
+                       "name":  "dsd-nexus",
+                       "version":  "0.1.82",
+                       "license":  "LGPL-2.1-or-later",
+                       "role":  "runtime or verification",
+                       "port_source":  "NOASSERTION",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/wichers/dsd-nexus@716c39e3c61837c1b5546721ea458521e5269b7b",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "995136faef385e204d6578f4dcc3f654881c169f6f848081331820e40d1809f3cbc4f3ea10ab33b940120fb3e625c24521468cdc1bb42c5acaf92c3c9870d21b"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/dsd-nexus.txt"
                    }
                ],
     "rust":  [

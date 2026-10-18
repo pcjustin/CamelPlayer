@@ -17,10 +17,14 @@
     "mpg123",
     "mp3lame",
     "soxr",
+    "dsd-nexus",
     {
       "name": "libsndfile",
       "default-features": false,
       "features": [ "external-libs" ]
     }
-  ]
+  ],
+  "vcpkg-configuration": {
+    "overlay-ports": [ "third_party/vcpkg-ports" ]
+  }
 }
