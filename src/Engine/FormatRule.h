@@ -25,6 +25,7 @@ struct OutputPlan {
     bool widen = false;  // integers to float32
     bool reduce = false; // fewer bits than the source, with dither
     DsdPath dsd = DsdPath::None;
+    bool shared = false; // through the WASAPI shared-mode mixer
     PipelineState state = PipelineState::BitPerfect;
     bool operator==(const OutputPlan&) const = default;
 };

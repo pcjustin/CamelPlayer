@@ -48,6 +48,20 @@ uint32_t dsdPcmRate(const Settings& s) {
 // chosen or allowed as a fallback.
 std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool lossy,
                                   const std::function<bool(const DeviceFormat&)>& supports) {
+    if (s.backend == Backend::Wasapi && s.wasapi.shared) {
+        // Choosing shared mode permits converting to the mixer's float32 format; nothing here is bit-perfect, and raw
+        // DSD cannot pass the mixer.
+        std::optional<OutputPlan> plan;
+        if (src.bitsPerSample != 1)
+            plan = negotiateOutput(src, lossy, SampleType::Float32, true, supports);
+        else if (dsdOutput(s) == DsdOutput::Pcm || s.convertDsdWhenUnsupported)
+            plan = negotiateDsdToPcm(src, dsdPcmRate(s), SampleType::Float32, true, supports);
+        if (plan) {
+            plan->shared = true;
+            plan->state = PipelineState::Processed;
+        }
+        return plan;
+    }
     if (src.bitsPerSample != 1) return negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports);
     const DsdOutput mode = dsdOutput(s);
     std::optional<OutputPlan> plan;
@@ -84,15 +98,18 @@ DecoderKind chooseDecoder(AudioFormat format, std::optional<DecoderKind> request
 
 class PlaybackEngine::Impl final : public IRenderSource {
 public:
-    Impl(const Settings& s, OutputFactory f) : settings_(s), factory_(std::move(f)) {
+    Impl(const Settings& s, OutputFactory f, DeviceWatcherFactory w)
+        : settings_(s), factory_(std::move(f)), watcherFactory_(std::move(w)) {
         snap_.backend = s.backend;
         snap_.decoder = displayedDecoder(s);
         thread_ = std::thread([this] { controlMain(); });
+        post([this] { updateWatcher(); });
     }
 
     ~Impl() override {
         try {
             post([this] {
+                watcher_.reset();
                 teardown();
                 output_.reset();
             });
@@ -154,12 +171,14 @@ public:
 
     // ---- commands (control thread) ----
     void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+        resumeOnDefault_ = false;
         file_ = file.wstring();
         fileDecoder_ = decoder;
         startSession(0, true);
     }
 
     void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+        resumeOnDefault_ = false;
         teardown();
         file_ = file.wstring();
         fileDecoder_ = decoder;
@@ -198,6 +217,7 @@ public:
     }
 
     void pause() {
+        resumeOnDefault_ = false;
         if (active_ && state_ == PlayState::Playing) {
             output_->pause();
             rust_->pause();
@@ -206,6 +226,7 @@ public:
     }
 
     void stop() {
+        resumeOnDefault_ = false;
         teardown();
         position_ = 0;
         setState(PlayState::Stopped);
@@ -237,6 +258,7 @@ public:
         if ((outputChanged || decoderChanged) && wasActive) teardown();
         if (outputChanged) output_.reset();
         settings_ = s;
+        updateWatcher();
         {
             std::lock_guard lock(snapMutex_);
             snap_.backend = s.backend;
@@ -402,6 +424,7 @@ private:
     }
 
     RustSession::Conversion conversion() const {
+        if (plan_.shared) return {true, settings_.wasapi.sharedResampleQuality, plan_.dsd == DsdPath::Pcm};
         return {settings_.convertWhenUnsupported, settings_.resampleQuality, plan_.dsd == DsdPath::Pcm};
     }
 
@@ -410,7 +433,10 @@ private:
         output_ = std::make_unique<OutputBridge>(factory_(settings_));
     }
 
-    void startSession(uint64_t startFrame, bool playNow) {
+    // `deviceChange`: reopening after the Windows default changed; a device that cannot play pauses instead of ending the
+    // track, so the user can resume (docs/Plan.md §2).
+    void startSession(uint64_t startFrame, bool playNow, bool deviceChange = false) {
+        const PlayState onDeviceFailure = deviceChange ? PlayState::Paused : PlayState::Stopped;
         teardown();
         const uint64_t session = ++session_;
         {
@@ -453,22 +479,31 @@ private:
             plan = negotiate(src, lossy);
         } catch (const Error& e) {
             position_ = startFrame;
-            return fail(e, PlayState::Stopped);
+            return fail(e, onDeviceFailure);
         }
         if (!plan) {
             char msg[200];
             const char* hint = settings_.convertWhenUnsupported ? "" : "; enable \"convert when unsupported\" to convert it";
+            const bool shared = settings_.backend == Backend::Wasapi && settings_.wasapi.shared;
             const int length =
-                src.bitsPerSample == 1
+                src.bitsPerSample == 1 && shared
+                    ? snprintf(msg, sizeof msg,
+                               "DSD%u: WASAPI shared mode plays DSD only converted to PCM; set DSD output to PCM or enable "
+                               "\"convert DSD when unsupported\"",
+                               src.sampleRate * 8 / 44100)
+                : src.bitsPerSample == 1
                     ? snprintf(msg, sizeof msg, "DSD%u / %u ch: this device takes neither native DSD nor DoP at %.1f kHz%s",
                                src.sampleRate * 8 / 44100, src.channels, dopCarrierRate(src.sampleRate) / 1000.0,
                                settings_.convertDsdWhenUnsupported ? ""
                                                                    : "; enable \"convert DSD when unsupported\" to convert it")
-                    : snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
-                               src.sampleRate, src.bitsPerSample, src.channels, hint);
+                : shared ? snprintf(msg, sizeof msg,
+                                    "%u Hz / %u-bit / %u ch: the WASAPI shared-mode mixer did not accept a converted stream",
+                                    src.sampleRate, src.bitsPerSample, src.channels)
+                         : snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
+                                    src.sampleRate, src.bitsPerSample, src.channels, hint);
             if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "No bit-perfect format available on this device");
-            position_ = 0;
-            return fail(Error(ErrorCode::FormatNotSupported, msg), PlayState::Stopped);
+            position_ = deviceChange ? startFrame : 0;
+            return fail(Error(ErrorCode::FormatNotSupported, msg), onDeviceFailure);
         }
         if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
         plan_ = *plan;
@@ -524,7 +559,7 @@ private:
             rust_.reset();
             position_ = startFrame;
             // Device busy or unplugged: pause and wait for the user (docs/Plan.md §2)
-            const bool waitForDevice = e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceLost;
+            const bool waitForDevice = deviceChange || e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceLost;
             if (!waitForDevice) output_.reset();
             return fail(e, waitForDevice ? PlayState::Paused : PlayState::Stopped);
         }
@@ -653,9 +688,47 @@ private:
 
     void onOutputError(const Error& e) {
         log::warn("engine: output error %s: %s", errorCodeName(e.code()), e.what());
+        // A followed default device that disappears mid-playback resumes on the next default (docs/Plan.md §2).
+        resumeOnDefault_ = followsDefault() && state_ == PlayState::Playing && e.code() == ErrorCode::DeviceLost;
         teardown();
         output_.reset(); // the device may have changed; reopen from scratch on the next play
         fail(e, PlayState::Paused);
+    }
+
+    bool followsDefault() const { return settings_.backend == Backend::Wasapi && settings_.wasapi.deviceId.empty(); }
+
+    void updateWatcher() {
+        if (!followsDefault()) {
+            watcher_.reset();
+            return;
+        }
+        if (watcher_) return;
+        try {
+            watcher_ = watcherFactory_([this] { post([this] { onDefaultDeviceChanged(); }); });
+        } catch (const Error& e) {
+            log::warn("engine: %s", e.what());
+        }
+    }
+
+    // The Windows default render device changed while WASAPI follows it: an open stream moves to the new default and
+    // keeps playing only if it was playing; playback lost with the old default resumes; otherwise the next play opens
+    // the new default.
+    void onDefaultDeviceChanged() {
+        if (!followsDefault()) return;
+        log::info("engine: Windows default output device changed");
+        if (active_) {
+            const bool wasPlaying = state_ == PlayState::Playing;
+            const uint64_t pos = currentPosition();
+            teardown();
+            output_.reset();
+            startSession(pos, wasPlaying, true);
+        } else if (resumeOnDefault_) {
+            resumeOnDefault_ = false;
+            output_.reset();
+            startSession(position_, true, true);
+        } else {
+            output_.reset();
+        }
     }
 
     void onRestart() {
@@ -723,6 +796,9 @@ private:
     // control-thread state
     Settings settings_;
     OutputFactory factory_;
+    DeviceWatcherFactory watcherFactory_;
+    std::unique_ptr<DeviceWatcher> watcher_; // while WASAPI follows the Windows default
+    bool resumeOnDefault_ = false;           // the followed default was lost while playing
     std::unique_ptr<OutputBridge> output_;
     std::unique_ptr<RustSession> rust_;
     std::wstring file_;
@@ -768,7 +844,8 @@ private:
     std::function<void()> listener_;
 };
 
-PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f) : impl_(std::make_unique<Impl>(s, std::move(f))) {}
+PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f, DeviceWatcherFactory w)
+    : impl_(std::make_unique<Impl>(s, std::move(f), std::move(w))) {}
 PlaybackEngine::~PlaybackEngine() = default;
 
 void PlaybackEngine::openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {

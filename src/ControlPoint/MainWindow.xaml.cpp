@@ -127,6 +127,9 @@ void MainWindow::populateSettings() {
     fill(ResampleQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
          int(settings_.resampleQuality));
 
+    fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
+    fill(WasapiSharedQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
+         int(settings_.wasapi.sharedResampleQuality));
     fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, settings_.wasapi.eventDriven ? 0 : 1);
     fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(settings_.wasapi.period));
     WasapiPeriodBox().Value(settings_.wasapi.customPeriodMs);
@@ -221,6 +224,8 @@ void MainWindow::readSettingsFromUi() {
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
         settings_.wasapi.deviceId = dev == 0 || dev > int(wasapiDevices_.size()) ? "" : wasapiDevices_[size_t(dev - 1)].id;
+    settings_.wasapi.shared = idx(WasapiShareCombo()) == 1;
+    settings_.wasapi.sharedResampleQuality = ResampleQuality(std::min(idx(WasapiSharedQualityCombo()), 2));
     settings_.wasapi.eventDriven = idx(WasapiModeCombo()) == 0;
     settings_.wasapi.period = WasapiPeriod(std::min(idx(WasapiPeriodCombo()), 2));
     settings_.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), settings_.wasapi.customPeriodMs);

@@ -67,6 +67,10 @@
   <data name="Settings_Language.Header" xml:space="preserve"><value>語言</value></data>
   <data name="Settings_LanguageNote.Text" xml:space="preserve"><value>重新啟動 CamelPlayer 後才會切換語言。</value></data>
   <data name="Mode_Event" xml:space="preserve"><value>事件驅動</value></data>
+  <data name="Settings_WasapiShare.Header" xml:space="preserve"><value>模式</value></data>
+  <data name="Share_Exclusive" xml:space="preserve"><value>獨佔（bit-perfect）</value></data>
+  <data name="Share_Shared" xml:space="preserve"><value>共用（Windows 混音器，會轉換）</value></data>
+  <data name="Settings_WasapiSharedQuality.Header" xml:space="preserve"><value>共用模式重新取樣品質</value></data>
   <data name="Mode_Polling" xml:space="preserve"><value>輪詢</value></data>
   <data name="Period_Default" xml:space="preserve"><value>預設</value></data>
   <data name="Period_Minimum" xml:space="preserve"><value>最小</value></data>

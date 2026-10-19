@@ -67,6 +67,10 @@
   <data name="Settings_Language.Header" xml:space="preserve"><value>Language</value></data>
   <data name="Settings_LanguageNote.Text" xml:space="preserve"><value>Restart CamelPlayer to switch the language.</value></data>
   <data name="Mode_Event" xml:space="preserve"><value>Event driven</value></data>
+  <data name="Settings_WasapiShare.Header" xml:space="preserve"><value>Mode</value></data>
+  <data name="Share_Exclusive" xml:space="preserve"><value>Exclusive (bit-perfect)</value></data>
+  <data name="Share_Shared" xml:space="preserve"><value>Shared (Windows mixer, converted)</value></data>
+  <data name="Settings_WasapiSharedQuality.Header" xml:space="preserve"><value>Shared-mode resampling quality</value></data>
   <data name="Mode_Polling" xml:space="preserve"><value>Polling</value></data>
   <data name="Period_Default" xml:space="preserve"><value>Default</value></data>
   <data name="Period_Minimum" xml:space="preserve"><value>Minimum</value></data>

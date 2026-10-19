@@ -53,7 +53,7 @@ Settings settingsFromArgs(const Args& args) {
         std::vector<DeviceEntry> list = s.backend == Backend::Wasapi ? listWasapiDevices()
                                         : s.backend == Backend::Asio ? listAsioDrivers()
                                                                      : listKsPins();
-        std::string id = toUtf8(*v);
+        std::string id = *v == L"default" ? "" : toUtf8(*v); // "default": follow the Windows default (WASAPI)
         if (!id.empty() && std::all_of(id.begin(), id.end(), ::isdigit) && std::stoul(id) < list.size())
             id = list[std::stoul(id)].id;
         if (s.backend == Backend::Wasapi)
@@ -71,6 +71,7 @@ Settings settingsFromArgs(const Args& args) {
                                       : KsMode::Auto;
     }
     if (auto v = option(args, L"--wasapi-poll")) s.wasapi.eventDriven = *v != L"1";
+    if (auto v = option(args, L"--shared")) s.wasapi.shared = *v == L"1";
     if (auto v = option(args, L"--convert")) s.convertWhenUnsupported = *v == L"1";
     if (auto v = option(args, L"--dsd")) {
         const DsdOutput d = *v == L"dop" ? DsdOutput::Dop : *v == L"pcm" ? DsdOutput::Pcm : DsdOutput::Native;
@@ -95,8 +96,8 @@ void printSnapshot(const EngineSnapshot& s) {
     std::printf("\r%-8s %7.2f / %7.2f s", stateName(s.state), s.source ? framesToSeconds(s.position, s.source->sampleRate) : 0.0,
                 s.source ? framesToSeconds(s.total, s.source->sampleRate) : 0.0);
     if (s.output)
-        std::printf("  %s  %s  underruns %llu   ", describe(*s.output).c_str(), s.outputStatus.mode.c_str(),
-                    (unsigned long long)s.underruns);
+        std::printf("  %s  %s  underruns %llu  %s   ", describe(*s.output).c_str(), s.outputStatus.mode.c_str(),
+                    (unsigned long long)s.underruns, s.outputStatus.detail.c_str());
     if (s.error) std::printf("  [%s] %s", errorCodeName(*s.error), s.errorDetail.c_str());
     std::fflush(stdout);
 }
@@ -114,10 +115,11 @@ int cmdListDevices(const Args&) {
 int cmdPlay(const Args& args) {
     auto files = positional(args);
     if (files.empty()) {
-        std::puts("usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode "
-                  "auto|rtevent|rtpoll|standard]\n"
-                  "            [--format 16|24|24in32|32] [--dsd native|dop|pcm] [--dsd-rate 88200|176400|352800]\n"
-                  "            [--convert-dsd 0|1] [--seconds N] [--seek S]");
+        std::puts(
+            "usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode "
+            "auto|rtevent|rtpoll|standard]\n"
+            "            [--format 16|24|24in32|32] [--shared 0|1] [--dsd native|dop|pcm] [--dsd-rate 88200|176400|352800]\n"
+            "            [--convert-dsd 0|1] [--seconds N] [--seek S]");
         return 2;
     }
     Settings s = settingsFromArgs(args);

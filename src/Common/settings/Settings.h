@@ -26,8 +26,16 @@ enum class DsdOutput : uint8_t { Native, Dop, Pcm };
 constexpr uint32_t kDsdPcmRates[] = {88200, 176400, 352800};
 const char* dsdOutputId(DsdOutput d);
 
+// soxr quick / high / very high (docs/Plan.md §6).
+enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
+const char* resampleQualityId(ResampleQuality q);
+
 struct WasapiSettings {
-    std::string deviceId; // endpoint id (UTF-8); empty = Windows default device
+    std::string deviceId; // endpoint id (UTF-8); empty = follow the Windows default device
+    // Shared mode plays through the Windows mixer: always converted to its mix format and shown as processed. Choosing
+    // it is the permission to convert (docs/Plan.md §5.4).
+    bool shared = false;
+    ResampleQuality sharedResampleQuality = ResampleQuality::High;
     bool eventDriven = true;
     WasapiPeriod period = WasapiPeriod::Default;
     double customPeriodMs = 10.0;
@@ -48,10 +56,6 @@ struct AsioSettings {
 
 enum class KsMode : uint8_t { Auto, WaveRtEvent, WaveRtPoll, Standard };
 const char* ksModeId(KsMode m);
-
-// soxr quick / high / very high (docs/Plan.md §6).
-enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
-const char* resampleQualityId(ResampleQuality q);
 
 struct KsSettings {
     std::string deviceId; // "<filter path>|<pin id>"; empty = first PCM render pin

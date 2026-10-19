@@ -68,6 +68,8 @@
                         <StackPanel x:Name="WasapiGroup" Spacing="12">
                             <TextBlock Text="WASAPI" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
                             <ComboBox x:Name="WasapiDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="WasapiShareCombo" x:Uid="Settings_WasapiShare" Width="360" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="WasapiSharedQualityCombo" x:Uid="Settings_WasapiSharedQuality" Width="360" SelectionChanged="OnSettingChanged" />
                             <ComboBox x:Name="WasapiModeCombo" x:Uid="Settings_WasapiMode" Width="360" SelectionChanged="OnSettingChanged" />
                             <ComboBox x:Name="WasapiPeriodCombo" x:Uid="Settings_Period" Width="360" SelectionChanged="OnSettingChanged" />
                             <NumberBox x:Name="WasapiPeriodBox" x:Uid="Settings_PeriodMs" Width="200" HorizontalAlignment="Left" Minimum="1" Maximum="500"

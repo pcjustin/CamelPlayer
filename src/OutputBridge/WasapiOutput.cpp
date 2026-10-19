@@ -38,6 +38,16 @@ wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     return dev;
 }
 
+std::string friendlyName(IMMDevice* device) {
+    wil::com_ptr<IPropertyStore> ps;
+    std::string name = "?";
+    if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &ps))) {
+        wil::unique_prop_variant v;
+        if (SUCCEEDED(ps->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR) name = toUtf8(v.pwszVal);
+    }
+    return name;
+}
+
 Error hrError(const char* what, HRESULT hr) {
     char buf[96];
     const int length = snprintf(buf, sizeof buf, "%s: 0x%08lX", what, (unsigned long)hr);
@@ -73,16 +83,27 @@ public:
         if (f.type == SampleType::Dsd8) return false; // WASAPI carries DSD as DoP only
         std::lock_guard lock(capsMutex_);
         auto key = std::make_tuple(f.sampleRate, f.channels, int(f.type));
-        if (auto it = caps_.find(key); it != caps_.end()) return it->second;
+        // The mix format can change in Windows at any time, and a busy device can fail one query; shared mode asks again.
+        if (auto it = caps_.find(key); !cfg_.shared && it != caps_.end()) return it->second;
         ComScope com;
         bool ok = false;
         auto dev = findDevice(cfg_.deviceId);
         wil::com_ptr<IAudioClient> client;
         if (SUCCEEDED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()))) {
-            WAVEFORMATEXTENSIBLE wf = makeWaveFormat(f);
-            ok = client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &wf.Format, nullptr) == S_OK;
+            if (cfg_.shared) {
+                // The mixer takes stereo float32 at its own rate and maps the channels; everything else is converted
+                // before it arrives.
+                wil::unique_cotaskmem_ptr<WAVEFORMATEX> mix;
+                // out_param writes `mix` back only when its own statement ends.
+                const HRESULT hr = client->GetMixFormat(wil::out_param(mix));
+                ok = SUCCEEDED(hr) && mix && f.type == SampleType::Float32 && f.channels == 2 &&
+                     f.sampleRate == mix->nSamplesPerSec;
+            } else {
+                WAVEFORMATEXTENSIBLE wf = makeWaveFormat(f);
+                ok = client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &wf.Format, nullptr) == S_OK;
+            }
         }
-        caps_[key] = ok;
+        if (!cfg_.shared) caps_[key] = ok;
         return ok;
     }
 
@@ -151,14 +172,21 @@ private:
             period = cfg_.period == WasapiPeriod::Minimum  ? minP
                      : cfg_.period == WasapiPeriod::Custom ? std::max<REFERENCE_TIME>(minP, custom)
                                                            : defP;
-            if (cfg_.period == WasapiPeriod::Custom && custom < minP)
+            if (!cfg_.shared && cfg_.period == WasapiPeriod::Custom && custom < minP)
                 adjustments.push_back(requestedVsActive("WASAPI period", ms(custom), ms(minP) + " (device minimum)"));
             WAVEFORMATEXTENSIBLE wf = makeWaveFormat(fmt_);
             const DWORD flags = cfg_.eventDriven ? AUDCLNT_STREAMFLAGS_EVENTCALLBACK : 0;
-            const REFERENCE_TIME dur = cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4);
-            HRESULT hr =
-                client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, dur, cfg_.eventDriven ? period : 0, &wf.Format, nullptr);
-            if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
+            HRESULT hr = S_OK;
+            if (cfg_.shared) {
+                period = defP; // the engine's period; shared streams cannot choose one
+                hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+                                        cfg_.eventDriven ? 0 : kPollBuffer, 0, &wf.Format, nullptr);
+            } else {
+                const REFERENCE_TIME dur = cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4);
+                hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, dur, cfg_.eventDriven ? period : 0, &wf.Format,
+                                        nullptr);
+            }
+            if (!cfg_.shared && hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
                 UINT32 frames = 0;
                 client->GetBufferSize(&frames);
                 const auto aligned = REFERENCE_TIME(std::llround(10000.0 * 1000 * frames / fmt_.sampleRate));
@@ -169,7 +197,7 @@ private:
                 hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, aligned, cfg_.eventDriven ? aligned : 0, &wf.Format,
                                         nullptr);
             }
-            if (hr == AUDCLNT_E_INVALID_DEVICE_PERIOD && cfg_.period == WasapiPeriod::Custom && period != defP) {
+            if (!cfg_.shared && hr == AUDCLNT_E_INVALID_DEVICE_PERIOD && cfg_.period == WasapiPeriod::Custom && period != defP) {
                 adjustments.push_back(requestedVsActive("WASAPI period", ms(period), ms(defP) + " (device default)"));
                 period = defP;
                 client.reset();
@@ -184,11 +212,13 @@ private:
             THROW_IF_FAILED(client->GetService(IID_PPV_ARGS(&render)));
             {
                 std::lock_guard lock(statusMutex_);
-                status_.mode = cfg_.eventDriven ? "WASAPI exclusive · event" : "WASAPI exclusive · polling";
+                status_.mode = std::string(cfg_.shared ? "WASAPI shared" : "WASAPI exclusive") +
+                               (cfg_.eventDriven ? " · event" : " · polling");
                 status_.bufferFrames = bufferFrames;
                 char d[64];
                 const int length = snprintf(d, sizeof d, "period %.2f ms", static_cast<double>(period) / 10000.0);
-                status_.detail = length < 0 || size_t(length) >= sizeof d ? "WASAPI period unavailable" : d;
+                status_.detail = (length < 0 || size_t(length) >= sizeof d ? std::string("WASAPI period unavailable") : d) +
+                                 ", " + (cfg_.deviceId.empty() ? "Windows default: " : "") + friendlyName(dev.get());
                 status_.adjustments = std::move(adjustments);
             }
             opened.set_value();
@@ -246,7 +276,9 @@ private:
                     continue;
                 }
                 timeouts = 0;
-                err = fill(bufferFrames);
+                UINT32 pad = 0; // a shared stream's buffer is not drained between events
+                if (cfg_.shared) err = client->GetCurrentPadding(&pad);
+                if (SUCCEEDED(err) && bufferFrames > pad) err = fill(bufferFrames - pad);
                 if (FAILED(err)) break;
             } else {
                 WaitForSingleObject(wake_.get(), DWORD(std::max<REFERENCE_TIME>(1, period / 20000)));
@@ -324,13 +356,7 @@ std::vector<DeviceEntry> listWasapiDevices() {
             if (FAILED(col->Item(i, &d))) continue;
             wil::unique_cotaskmem_string id;
             d->GetId(&id);
-            wil::com_ptr<IPropertyStore> ps;
-            std::string name = "?";
-            if (SUCCEEDED(d->OpenPropertyStore(STGM_READ, &ps))) {
-                wil::unique_prop_variant v;
-                if (SUCCEEDED(ps->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR) name = toUtf8(v.pwszVal);
-            }
-            out.push_back({toUtf8(id.get()), name});
+            out.push_back({toUtf8(id.get()), friendlyName(d.get())});
         }
     } catch (const wil::ResultException& e) {
         log::error("wasapi: enumerate failed 0x%08lX", (unsigned long)e.GetErrorCode());

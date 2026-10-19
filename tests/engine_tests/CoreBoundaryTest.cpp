@@ -282,7 +282,7 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         settings.decoderByFormat[AudioFormat::Flac] = DecoderKind::Sndfile;
         settings.language = "zh-TW";
         settings.lastFile = L"C:\\music\\album.flac";
-        settings.wasapi = {"endpoint", false, WasapiPeriod::Custom, 12.5, SampleType::Int24In32};
+        settings.wasapi = {"endpoint", true, ResampleQuality::Quick, false, WasapiPeriod::Custom, 12.5, SampleType::Int24In32};
         settings.asio = {"driver", 1024, 2, 3, DsdOutput::Dop};
         settings.ks = {"filter|1", mode, 30, 8, 15, SampleType::Int32, DsdOutput::Native};
         saveSettings(settings, file);

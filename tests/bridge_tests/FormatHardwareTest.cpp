@@ -22,7 +22,7 @@ struct Route {
     const char* device;
 };
 
-enum class Expect : uint8_t { BitPerfect, Lossy, Native, Dop, DsdToPcm };
+enum class Expect : uint8_t { BitPerfect, Lossy, Native, Dop, DsdToPcm, Shared };
 
 struct FormatCase {
     const char* name;
@@ -50,6 +50,8 @@ const FormatCase kFormats[] = {
     {"DsdNative", "Dayan Kai - 15 November 2012 - 01 - When You Know - 2.8MHz-DSF.dsf", DsdOutput::Native, Expect::Native},
     {"DsdDop", "Dayan Kai - 15 November 2012 - 01 - When You Know - 2.8MHz-DSF.dsf", DsdOutput::Dop, Expect::Dop},
     {"DsdToPcm", "Dayan Kai - 15 November 2012 - 01 - When You Know - 2.8MHz-DSF.dsf", DsdOutput::Pcm, Expect::DsdToPcm},
+    {"Shared", "Sample_BeeMoved_96kHz24bit.flac", DsdOutput::Dop, Expect::Shared},
+    {"SharedDsdToPcm", "Dayan Kai - 15 November 2012 - 01 - When You Know - 2.8MHz-DSF.dsf", DsdOutput::Pcm, Expect::Shared},
 };
 
 // Raw DSD only where the device decodes it: native DSD needs ASIO on DAVE, DoP needs DAVE.
@@ -60,6 +62,7 @@ std::vector<HardwareCase> cases() {
             const bool dave = std::string(route.device) == "Chord";
             if (format.expect == Expect::Native && !(dave && route.backend == Backend::Asio)) continue;
             if (format.expect == Expect::Dop && !dave) continue;
+            if (format.expect == Expect::Shared && route.backend != Backend::Wasapi) continue;
             out.push_back({route, format});
         }
     return out;
@@ -98,6 +101,7 @@ TEST_P(FormatHardware, DISABLED_PlaysTheNegotiatedPath) {
     ASSERT_TRUE(selectDevice(settings, route)) << route.device;
     settings.wasapi.dsdOutput = format.dsd == DsdOutput::Native ? DsdOutput::Dop : format.dsd;
     settings.asio.dsdOutput = settings.ks.dsdOutput = format.dsd;
+    settings.wasapi.shared = format.expect == Expect::Shared;
     const auto file = testutil::tempDir().parent_path().parent_path() / "testdata" / format.file;
     ASSERT_TRUE(std::filesystem::exists(file)) << file;
     RecordProperty("device", route.device);
@@ -122,6 +126,11 @@ TEST_P(FormatHardware, DISABLED_PlaysTheNegotiatedPath) {
         break;
     case Expect::Dop:
         EXPECT_EQ(snap.plan->dsd, DsdPath::Dop);
+        break;
+    case Expect::Shared:
+        EXPECT_TRUE(snap.plan->shared);
+        EXPECT_EQ(snap.plan->state, PipelineState::Processed);
+        EXPECT_EQ(snap.output->type, SampleType::Float32);
         break;
     case Expect::DsdToPcm:
         EXPECT_EQ(snap.plan->dsd, DsdPath::Pcm);

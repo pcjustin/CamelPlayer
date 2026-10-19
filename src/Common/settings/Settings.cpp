@@ -150,6 +150,8 @@ std::string toJson(const Settings& s) {
     j["language"] = s.language;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
+                   {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
+                   {"sharedResampleQuality", resampleQualityId(s.wasapi.sharedResampleQuality)},
                    {"eventDriven", s.wasapi.eventDriven},
                    {"period", periodId(s.wasapi.period)},
                    {"customPeriodMs", s.wasapi.customPeriodMs},
@@ -224,6 +226,8 @@ Settings fromJson(const std::string& text) {
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
         const json& w = j["wasapi"];
         s.wasapi.deviceId = str(w, "device", "");
+        s.wasapi.shared = str(w, "shareMode", "exclusive") == "shared";
+        s.wasapi.sharedResampleQuality = resampleQualityFromId(str(w, "sharedResampleQuality", "high"));
         s.wasapi.eventDriven = boolean(w, "eventDriven", true);
         s.wasapi.period = periodFromId(str(w, "period", "default"));
         s.wasapi.customPeriodMs = num(w, "customPeriodMs", 10.0, 1.0, 500.0);

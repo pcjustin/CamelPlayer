@@ -11,6 +11,7 @@
 #include "Common/AudioTypes.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/FormatRule.h"
+#include "OutputBridge/DeviceWatcher.h"
 #include "OutputBridge/IOutput.h"
 #include "Common/settings/Settings.h"
 
@@ -46,7 +47,9 @@ using OutputFactory = std::function<std::unique_ptr<IOutput>(const Settings&)>;
 
 class PlaybackEngine {
 public:
-    explicit PlaybackEngine(const Settings& settings, OutputFactory factory = createOutput);
+    // `watcher` reports Windows default-device changes while WASAPI follows the default.
+    explicit PlaybackEngine(const Settings& settings, OutputFactory factory = createOutput,
+                            DeviceWatcherFactory watcher = watchDefaultRenderDevice);
     ~PlaybackEngine();
     PlaybackEngine(const PlaybackEngine&) = delete;
     PlaybackEngine& operator=(const PlaybackEngine&) = delete;
