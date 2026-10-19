@@ -18,9 +18,12 @@ bool backendFromId(std::string_view id, Backend& out);
 
 enum class WasapiPeriod : uint8_t { Default, Minimum, Custom };
 
-// Raw DSD output (docs/Plan.md §5.8, §6). Native falls back to DoP, never to PCM. WASAPI plays DoP only; KS stores
-// the choice but plays DoP until native DSD on KS pins is verified.
-enum class DsdOutput : uint8_t { Native, Dop };
+// DSD output (docs/Plan.md §5.8, §6). Native falls back to DoP; PCM is used only when chosen here or when
+// Settings::convertDsdWhenUnsupported allows it after native/DoP failed. WASAPI has no native DSD; KS stores the
+// choice but plays DoP until native DSD on KS pins is verified.
+enum class DsdOutput : uint8_t { Native, Dop, Pcm };
+// DSD to PCM output rates (docs/Plan.md §6): 88.2, 176.4 (default) or 352.8 kHz.
+constexpr uint32_t kDsdPcmRates[] = {88200, 176400, 352800};
 const char* dsdOutputId(DsdOutput d);
 
 struct WasapiSettings {
@@ -29,6 +32,8 @@ struct WasapiSettings {
     WasapiPeriod period = WasapiPeriod::Default;
     double customPeriodMs = 10.0;
     std::optional<audio::SampleType> sampleType; // nullopt = automatic
+    DsdOutput dsdOutput = DsdOutput::Dop;
+    uint32_t dsdPcmRate = 176400;
     bool operator==(const WasapiSettings&) const = default;
 };
 
@@ -37,6 +42,7 @@ struct AsioSettings {
     long bufferSize = 0;     // 0 = driver's preferred size
     int outLeft = 0, outRight = 1;
     DsdOutput dsdOutput = DsdOutput::Native;
+    uint32_t dsdPcmRate = 176400;
     bool operator==(const AsioSettings&) const = default;
 };
 
@@ -55,6 +61,7 @@ struct KsSettings {
     double packetMs = 10.0;
     std::optional<audio::SampleType> sampleType;
     DsdOutput dsdOutput = DsdOutput::Dop;
+    uint32_t dsdPcmRate = 176400;
     bool operator==(const KsSettings&) const = default;
 };
 
@@ -82,6 +89,9 @@ struct Settings {
     // "Convert when unsupported" (docs/Plan.md §2, §5.3): resample, downmix or reduce depth instead of skipping.
     bool convertWhenUnsupported = false;
     ResampleQuality resampleQuality = ResampleQuality::High;
+    // "Convert DSD when unsupported" (docs/Plan.md §5.3 item 4): DSD to PCM after native/DoP failed. Independent of
+    // convertWhenUnsupported, which still governs rates, downmix and depth of the PCM it produces.
+    bool convertDsdWhenUnsupported = false;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;

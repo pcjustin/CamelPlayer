@@ -72,7 +72,13 @@ Settings settingsFromArgs(const Args& args) {
     }
     if (auto v = option(args, L"--wasapi-poll")) s.wasapi.eventDriven = *v != L"1";
     if (auto v = option(args, L"--convert")) s.convertWhenUnsupported = *v == L"1";
-    if (auto v = option(args, L"--dsd")) s.asio.dsdOutput = s.ks.dsdOutput = *v == L"dop" ? DsdOutput::Dop : DsdOutput::Native;
+    if (auto v = option(args, L"--dsd")) {
+        const DsdOutput d = *v == L"dop" ? DsdOutput::Dop : *v == L"pcm" ? DsdOutput::Pcm : DsdOutput::Native;
+        s.asio.dsdOutput = s.ks.dsdOutput = d;
+        s.wasapi.dsdOutput = d == DsdOutput::Pcm ? d : DsdOutput::Dop;
+    }
+    if (auto v = option(args, L"--dsd-rate")) s.wasapi.dsdPcmRate = s.asio.dsdPcmRate = s.ks.dsdPcmRate = std::stoul(*v);
+    if (auto v = option(args, L"--convert-dsd")) s.convertDsdWhenUnsupported = *v == L"1";
     if (auto v = option(args, L"--format")) {
         auto t = sampleTypeFromId(toUtf8(*v));
         s.wasapi.sampleType = t;
@@ -110,7 +116,8 @@ int cmdPlay(const Args& args) {
     if (files.empty()) {
         std::puts("usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode "
                   "auto|rtevent|rtpoll|standard]\n"
-                  "            [--format 16|24|24in32|32] [--dsd native|dop] [--seconds N] [--seek S]");
+                  "            [--format 16|24|24in32|32] [--dsd native|dop|pcm] [--dsd-rate 88200|176400|352800]\n"
+                  "            [--convert-dsd 0|1] [--seconds N] [--seek S]");
         return 2;
     }
     Settings s = settingsFromArgs(args);

@@ -1,5 +1,6 @@
 // Raw DSD test fixtures (docs/Plan.md §16.6): known MSB-first DSD bytes written as DSF by this independent writer.
 #pragma once
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -90,6 +91,26 @@ inline Bytes dsf(const Bytes& raw, const DsfSpec& s) {
     putLe<uint64_t>(out, dataChunk);
     out.insert(out.end(), data.begin(), data.end());
     if (s.id3) out.insert(out.end(), tag.begin(), tag.end());
+    return out;
+}
+
+// A second-order sigma-delta modulator (NTF (1 - z^-1)^2): `frames` byte frames of a sine at `amplitude` of full DSD
+// modulation and `frequency` Hz, the same on every channel, interleaved and MSB-first.
+inline Bytes dsdSine(uint32_t dsdRate, double frequency, double amplitude, size_t frames, uint32_t channels = 2) {
+    Bytes out;
+    out.reserve(frames * channels);
+    double u1 = 0, u2 = 0, y = 1;
+    for (size_t n = 0; n < frames; n++) {
+        uint8_t byte = 0;
+        for (int bit = 0; bit < 8; bit++) {
+            const double t = double(n * 8 + size_t(bit)) / dsdRate;
+            u1 += amplitude * std::sin(2 * 3.14159265358979323846 * frequency * t) - y;
+            u2 += u1 - 2 * y;
+            y = u2 >= 0 ? 1 : -1;
+            if (y > 0) byte = uint8_t(byte | (0x80 >> bit));
+        }
+        out.insert(out.end(), channels, byte);
+    }
     return out;
 }
 

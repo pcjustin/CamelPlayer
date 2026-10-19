@@ -296,14 +296,30 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
 }
 
 TEST(SettingsBoundary, DsdOutputDefaultsToNativeOnAsioAndDopOnKs) {
-    EXPECT_EQ(Settings{}.asio.dsdOutput, DsdOutput::Native);
-    EXPECT_EQ(Settings{}.ks.dsdOutput, DsdOutput::Dop);
-    const auto parsed = fromJson(R"({"asio":{"dsdOutput":"dop"},"ks":{"dsdOutput":"native"}})");
+    const Settings defaults;
+    EXPECT_EQ(defaults.asio.dsdOutput, DsdOutput::Native);
+    EXPECT_EQ(defaults.ks.dsdOutput, DsdOutput::Dop);
+    EXPECT_EQ(defaults.wasapi.dsdOutput, DsdOutput::Dop);
+    EXPECT_FALSE(defaults.convertDsdWhenUnsupported);
+    for (const uint32_t rate : {defaults.wasapi.dsdPcmRate, defaults.asio.dsdPcmRate, defaults.ks.dsdPcmRate})
+        EXPECT_EQ(rate, 176400u);
+    const auto parsed = fromJson(R"({"convertDsdWhenUnsupported":true,
+        "asio":{"dsdOutput":"dop","dsdPcmRate":88200},"ks":{"dsdOutput":"native","dsdPcmRate":352800},
+        "wasapi":{"dsdOutput":"pcm"}})");
+    EXPECT_TRUE(parsed.convertDsdWhenUnsupported);
     EXPECT_EQ(parsed.asio.dsdOutput, DsdOutput::Dop);
+    EXPECT_EQ(parsed.asio.dsdPcmRate, 88200u);
     EXPECT_EQ(parsed.ks.dsdOutput, DsdOutput::Native);
-    const auto unknown = fromJson(R"({"asio":{"dsdOutput":"pcm"},"ks":{"dsdOutput":7}})");
+    EXPECT_EQ(parsed.ks.dsdPcmRate, 352800u);
+    EXPECT_EQ(parsed.wasapi.dsdOutput, DsdOutput::Pcm);
+    EXPECT_EQ(fromJson(toJson(parsed)).asio, parsed.asio);
+    const auto unknown = fromJson(R"({"convertDsdWhenUnsupported":"yes","asio":{"dsdOutput":"both","dsdPcmRate":96000},
+        "ks":{"dsdOutput":7},"wasapi":{"dsdOutput":"native"}})");
+    EXPECT_FALSE(unknown.convertDsdWhenUnsupported);
     EXPECT_EQ(unknown.asio.dsdOutput, DsdOutput::Native);
+    EXPECT_EQ(unknown.asio.dsdPcmRate, 176400u);
     EXPECT_EQ(unknown.ks.dsdOutput, DsdOutput::Dop);
+    EXPECT_EQ(unknown.wasapi.dsdOutput, DsdOutput::Dop); // WASAPI has no native DSD
 }
 
 TEST(SettingsBoundary, InvalidRootIsRejected) {

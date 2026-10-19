@@ -337,16 +337,26 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         hstring path = tr(L"SignalPath_File") + L" → " + decoder;
         if (plan.duplicate) path = path + L" → " + tr(L"SignalPath_Duplicate");
         if (plan.downmix) path = path + L" → " + tr(L"SignalPath_Downmix") + L" " + to_hstring(s.source->channels) + L"→2";
-        if (plan.resample) {
+        if (plan.resample && plan.dsd != DsdPath::Pcm) {
             wchar_t rates[64];
             swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_Resample") + rates;
         }
         if (plan.dsd == DsdPath::Dop)
-            path = path + L" → DoP";
+            path = path + L" → DoP · " + tr(L"SignalPath_DspBypassed");
         else if (plan.dsd == DsdPath::Native)
-            path = path + L" → DSD";
-        else if (plan.widen)
+            path = path + L" → DSD · " + tr(L"SignalPath_DspBypassed");
+        else if (plan.dsd == DsdPath::Pcm) {
+            // The decimator always produces 352.8 kHz; soxr then takes it to the output rate.
+            wchar_t rates[64];
+            swprintf(rates, 64, L" 352.8→%.1f kHz", s.output->sampleRate / 1000.0);
+            path = path + L" → " + tr(L"SignalPath_DsdToPcm") + L" 352.8 kHz";
+            if (plan.resample) path = path + L" → " + tr(L"SignalPath_Resample") + rates;
+            if (plan.widen)
+                path = path + L" → float32";
+            else
+                path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(validBits(s.output->type)) + L"-bit";
+        } else if (plan.widen)
             path = path + L" → float32";
         else if (plan.reduce || plan.resample || plan.downmix || lossy)
             path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(plan.reduce ? 16 : s.source->bitsPerSample) +

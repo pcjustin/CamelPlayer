@@ -4,10 +4,12 @@
 //! duplicated to both channels bit for bit. A float-only device gets integer samples widened exactly (at most 24
 //! bits). Everything else — resampling, ITU-R BS.775 downmix, bit reduction and the decoded output of lossy sources —
 //! is processed in 64-bit float and quantized once at the end with TPDF dither. Raw DSD reaches a native DSD or DoP
-//! stream bit for bit (mono duplicated); it never becomes PCM here.
+//! stream bit for bit (mono duplicated). DSD becomes PCM only with explicit permission: it is decimated to
+//! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once.
 
 use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32};
 use crate::dsd::{put_dop_sample, DOP_MARKERS, DSD_SILENCE};
+use crate::dsd2pcm::{DsdDecimator, PCM_RATE};
 use crate::packing::pack_pcm;
 use crate::resample::Resampler;
 use crate::{
@@ -24,6 +26,8 @@ pub(crate) enum Mode {
     Dsd,
     /// Two DSD byte frames to one DoP frame.
     Dop,
+    /// DSD decimated to PCM, then processed like `Process`.
+    DsdPcm,
 }
 
 pub(crate) struct Converter {
@@ -44,6 +48,9 @@ pub(crate) struct Converter {
     bytes_per_frame: usize,
     /// DoP: a byte frame waiting for the one that completes its DoP frame.
     carry: Vec<u8>,
+    decimator: Option<DsdDecimator>,
+    in_rate: u32,
+    out_rate: u32,
 }
 
 /// Stereo downmix coefficients per source channel count, in WAVE/FLAC default order (ITU-R BS.775: centre and
@@ -89,17 +96,59 @@ impl Tpdf {
 
 impl Converter {
     /// `allow` is the "convert when unsupported" setting; a lossy source may still be quantized to its configured
-    /// depth without it.
+    /// depth without it. `allow_dsd` permits DSD to PCM; downmixing DSD also needs `allow`.
     pub(crate) fn new(
         info: &CamelSourceInfoV1,
         out: &AudioFormat,
         out_rate: u32,
         allow: bool,
+        allow_dsd: bool,
         quality: u32,
     ) -> Result<Self, i32> {
         let in_channels = info.channel_count as usize;
         let out_channels = out.channel_count as usize;
         let in_dsd = info.sample_encoding == SAMPLE_ENCODING_DSD;
+        if in_dsd && out.stream_kind == AUDIO_PCM {
+            if !allow_dsd || out_channels != 2 || (in_channels > 2 && !allow) {
+                return Err(ENGINE_E_UNSUPPORTED_FORMAT);
+            }
+            let decimator = DsdDecimator::new(info.sample_rate, in_channels)
+                .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?;
+            let resampler = if out_rate == PCM_RATE {
+                None
+            } else {
+                Some(
+                    Resampler::new(PCM_RATE, out_rate, out_channels, quality)
+                        .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+                )
+            };
+            return Ok(Self {
+                mode: Mode::DsdPcm,
+                in_channels,
+                in_bits: info.valid_bits,
+                in_float: false,
+                out: *out,
+                out_channels,
+                // Like any processed source: 24-bit at most, MSB-aligned in a 32-bit container.
+                quantize_bits: if out.sample_format == SAMPLE_F32_LE {
+                    0
+                } else {
+                    out.valid_bits.min(24)
+                },
+                matrix: Some(downmix_matrix(in_channels).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?),
+                resampler,
+                dither: Tpdf(0x9E37_79B9_7F4A_7C15),
+                pending: Vec::new(),
+                pending_frames: 0,
+                finished: false,
+                bytes_per_frame: crate::packing::bytes_per_frame(out)
+                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+                carry: Vec::new(),
+                decimator: Some(decimator),
+                in_rate: info.sample_rate,
+                out_rate,
+            });
+        }
         if in_dsd || out.stream_kind != AUDIO_PCM {
             // DSD to PCM is a separate, explicitly enabled path (docs/Plan.md §5.8).
             let rate_matches = match out.stream_kind {
@@ -133,6 +182,9 @@ impl Converter {
                 bytes_per_frame: crate::packing::bytes_per_frame(out)
                     .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
                 carry: Vec::new(),
+                decimator: None,
+                in_rate: info.sample_rate,
+                out_rate,
             });
         }
         let in_float = info.sample_encoding == SAMPLE_ENCODING_FLOAT32;
@@ -196,11 +248,19 @@ impl Converter {
             finished: false,
             bytes_per_frame,
             carry: Vec::new(),
+            decimator: None,
+            in_rate: info.sample_rate,
+            out_rate,
         })
     }
 
     /// Source frames to decode for about `output_frames` of output; any excess waits in the pending output.
     pub(crate) fn input_frames_for(&self, output_frames: u64) -> u64 {
+        if self.mode == Mode::DsdPcm {
+            let frames =
+                u128::from(output_frames) * u128::from(self.in_rate) / u128::from(self.out_rate);
+            return (frames as u64).max(1);
+        }
         match &self.resampler {
             Some(r) => ((output_frames as f64 / r.ratio()).floor() as u64).max(1),
             None if self.mode == Mode::Dop => output_frames * 2,
@@ -269,6 +329,24 @@ impl Converter {
                 }
                 Ok(())
             }
+            Mode::DsdPcm => {
+                let mut decimated = Vec::new();
+                self.decimator
+                    .as_mut()
+                    .expect("DSD to PCM has a decimator")
+                    .process(input, frames, &mut decimated);
+                let mixed = self.mix_floats(&decimated);
+                match self.resampler.as_mut() {
+                    Some(resampler) => {
+                        let mut resampled = Vec::new();
+                        resampler
+                            .process(&mixed, &mut resampled)
+                            .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
+                        self.emit(&resampled)
+                    }
+                    None => self.emit(&mixed),
+                }
+            }
             Mode::Process => {
                 let mixed = self.mix(input, frames);
                 match self.resampler.as_mut() {
@@ -319,14 +397,23 @@ impl Converter {
                 f64::from(s) * scale
             }
         };
+        let values: Vec<f64> = input[..frames * self.in_channels]
+            .iter()
+            .map(|&s| value(s))
+            .collect();
+        self.mix_floats(&values)
+    }
+
+    // Float frames of `in_channels`, mixed to stereo.
+    fn mix_floats(&self, input: &[f64]) -> Vec<f64> {
         let matrix = self
             .matrix
             .as_ref()
             .expect("processing has a channel matrix");
-        let mut out = Vec::with_capacity(frames * 2);
+        let mut out = Vec::with_capacity(input.len() / self.in_channels * 2);
         for frame in input.chunks_exact(self.in_channels) {
             for row in matrix {
-                out.push(frame.iter().zip(row).map(|(&s, &k)| value(s) * k).sum());
+                out.push(frame.iter().zip(row).map(|(&s, &k)| s * k).sum());
             }
         }
         out
@@ -342,7 +429,7 @@ impl Converter {
             self.pending_frames += (floats.len() / self.out_channels) as u64;
             return Ok(());
         }
-        if self.mode != Mode::Process {
+        if !matches!(self.mode, Mode::Process | Mode::DsdPcm) {
             return Err(ENGINE_E_UNSUPPORTED_FORMAT);
         }
         let full = f64::from(1u32 << (self.quantize_bits - 1));
@@ -452,7 +539,7 @@ mod tests {
     }
 
     fn converter(info: CamelSourceInfoV1, out: u32, rate: u32, allow: bool) -> Converter {
-        Converter::new(&info, &device(out), rate, allow, QUALITY_HIGH).unwrap()
+        Converter::new(&info, &device(out), rate, allow, false, QUALITY_HIGH).unwrap()
     }
 
     #[test]
@@ -489,7 +576,7 @@ mod tests {
     #[test]
     fn conversion_needs_permission_except_for_a_lossy_decode() {
         let refused = |info: CamelSourceInfoV1, out: u32, rate: u32| {
-            Converter::new(&info, &device(out), rate, false, QUALITY_HIGH).err()
+            Converter::new(&info, &device(out), rate, false, false, QUALITY_HIGH).err()
         };
         let unsupported = Some(ENGINE_E_UNSUPPORTED_FORMAT);
         assert_eq!(
@@ -521,6 +608,7 @@ mod tests {
             &device(SAMPLE_S24_LE),
             48_000,
             true,
+            false,
             QUALITY_HIGH
         )
         .is_err());
@@ -618,5 +706,187 @@ mod tests {
         }
         let snr = 10.0 * (signal / noise).log10();
         assert!(snr > 100.0, "no delay and a clean resample: {snr:.1} dB");
+    }
+
+    // A second-order sigma-delta modulator (NTF (1 - z^-1)^2, STF a pure delay): a sine at `amplitude` of full DSD
+    // modulation as `bytes` MSB-first byte frames, mono.
+    fn dsd_sine(dsd_rate: u32, frequency: f64, amplitude: f64, bytes: usize) -> Vec<i32> {
+        let (mut u1, mut u2, mut y) = (0.0f64, 0.0f64, 1.0f64);
+        (0..bytes)
+            .map(|n| {
+                let mut byte = 0u8;
+                for bit in 0..8 {
+                    let t = (n * 8 + bit) as f64 / f64::from(dsd_rate);
+                    let x = amplitude * (2.0 * std::f64::consts::PI * frequency * t).sin();
+                    u1 += x - y;
+                    u2 += u1 - 2.0 * y;
+                    y = if u2 >= 0.0 { 1.0 } else { -1.0 };
+                    if y > 0.0 {
+                        byte |= 0x80 >> bit;
+                    }
+                }
+                i32::from(byte)
+            })
+            .collect()
+    }
+
+    fn dsd_source(byte_rate: u32) -> CamelSourceInfoV1 {
+        let mut info = source(byte_rate, 1, 1, false);
+        info.sample_encoding = crate::SAMPLE_ENCODING_DSD;
+        info
+    }
+
+    // The left channel of `bytes` (mono DSD) converted to float PCM at `rate`.
+    fn dsd_to_pcm(bytes: &[i32], byte_rate: u32, rate: u32) -> Vec<f64> {
+        let mut c = Converter::new(
+            &dsd_source(byte_rate),
+            &device(SAMPLE_F32_LE),
+            rate,
+            false,
+            true,
+            QUALITY_HIGH,
+        )
+        .unwrap();
+        assert_eq!(c.mode, Mode::DsdPcm);
+        for chunk in bytes.chunks(4096) {
+            c.convert(chunk, chunk.len()).unwrap();
+        }
+        c.finish().unwrap();
+        floats(c.pending())
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|f| f64::from(f[0]))
+            .collect()
+    }
+
+    // |X[k]|^2 of a power-of-two length block.
+    fn power_spectrum(x: &[f64]) -> Vec<f64> {
+        let n = x.len();
+        let bits = n.trailing_zeros();
+        let mut re: Vec<f64> = (0..n)
+            .map(|i| x[i.reverse_bits() >> (usize::BITS - bits)])
+            .collect();
+        let mut im = vec![0.0; n];
+        let mut size = 2;
+        while size <= n {
+            let step = -2.0 * std::f64::consts::PI / size as f64;
+            for start in (0..n).step_by(size) {
+                for k in 0..size / 2 {
+                    let (s, c) = (step * k as f64).sin_cos();
+                    let (a, b) = (start + k, start + k + size / 2);
+                    let (tr, ti) = (re[b] * c - im[b] * s, re[b] * s + im[b] * c);
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+            size *= 2;
+        }
+        re.iter().zip(&im).map(|(r, i)| r * r + i * i).collect()
+    }
+
+    #[test]
+    fn dsd_to_pcm_needs_permission_and_maps_full_modulation_to_full_scale() {
+        let refused = Converter::new(
+            &dsd_source(352_800),
+            &device(SAMPLE_S24_LE),
+            176_400,
+            true,
+            false,
+            QUALITY_HIGH,
+        );
+        assert_eq!(refused.err(), Some(ENGINE_E_UNSUPPORTED_FORMAT));
+        let mut surround = dsd_source(352_800);
+        surround.channel_count = 6;
+        let no_downmix = Converter::new(
+            &surround,
+            &device(SAMPLE_S24_LE),
+            352_800,
+            false,
+            true,
+            QUALITY_HIGH,
+        );
+        assert_eq!(no_downmix.err(), Some(ENGINE_E_UNSUPPORTED_FORMAT));
+
+        let mut s32 = Converter::new(
+            &dsd_source(352_800),
+            &device(SAMPLE_S32_LE),
+            352_800,
+            false,
+            true,
+            QUALITY_HIGH,
+        )
+        .unwrap();
+        s32.convert(&vec![0xFF; 2000], 2000).unwrap();
+        let top = ints(s32.pending(), 4)[2 * 1500] >> 8;
+        assert!(
+            (8_388_600..=8_388_607).contains(&top),
+            "24 bits in the 32-bit container: {top}"
+        );
+
+        for byte_rate in [352_800, 1_411_200] {
+            let settle = |out: Vec<f64>| out[1000..].to_vec();
+            let ones = settle(dsd_to_pcm(&vec![0xFF; 20_000], byte_rate, 352_800));
+            assert!(
+                ones.iter().all(|v| (v - 1.0).abs() < 1e-6),
+                "100% modulation is 0 dBFS"
+            );
+            let zeros = settle(dsd_to_pcm(&vec![0x00; 20_000], byte_rate, 352_800));
+            assert!(zeros.iter().all(|v| (v + 1.0).abs() < 1e-6));
+            let idle = settle(dsd_to_pcm(&vec![0x69; 20_000], byte_rate, 352_800));
+            let peak = idle.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+            assert!(20.0 * peak.log10() < -120.0, "idle pattern: {peak:e}");
+        }
+    }
+
+    // A modulated sine keeps its level across the band, and the modulator's ultrasonic noise does not alias into it:
+    // the in-band SNR of the PCM equals that of the bitstream itself.
+    #[test]
+    fn dsd_sine_keeps_its_level_without_aliased_noise() {
+        const N: usize = 1 << 15;
+        for (dsd, rate) in [(1u32, 352_800u32), (2, 352_800), (1, 176_400)] {
+            let n = N * rate as usize / 352_800;
+            let bin = f64::from(rate) / n as f64;
+            let byte_rate = dsd * 352_800;
+            for k in [93usize, 1393] {
+                let frequency = k as f64 * bin;
+                let skip = 4096 * rate as usize / 352_800;
+                let bytes = (skip + n + 64) * (byte_rate / rate) as usize;
+                let dsd_bytes = dsd_sine(byte_rate * 8, frequency, 0.5, bytes);
+                let pcm = dsd_to_pcm(&dsd_bytes, byte_rate, rate);
+                let power = power_spectrum(&pcm[skip..skip + n]);
+                let level = 20.0 * (2.0 * power[k].sqrt() / n as f64 / 0.5).log10();
+                assert!(
+                    level.abs() < 0.02,
+                    "DSD{} to {rate} at {frequency:.0} Hz: {level:.4} dB",
+                    dsd * 64
+                );
+                let in_band_snr = |power: &[f64]| {
+                    let band = (20_000.0 / bin) as usize;
+                    let noise: f64 = (2..=band)
+                        .filter(|&b| b.abs_diff(k) > 1)
+                        .map(|b| power[b])
+                        .sum();
+                    10.0 * (power[k] / noise).log10()
+                };
+                // The same block of the bitstream itself, at the DSD rate: the modulator's own in-band noise.
+                let per_frame = (byte_rate / rate) as usize;
+                let bits: Vec<f64> = dsd_bytes[skip * per_frame..(skip + n) * per_frame]
+                    .iter()
+                    .flat_map(|&b| {
+                        (0..8).map(move |j| if b & (0x80 >> j) != 0 { 1.0 } else { -1.0 })
+                    })
+                    .collect();
+                let reference = in_band_snr(&power_spectrum(&bits));
+                let snr = in_band_snr(&power);
+                assert!(
+                    snr > reference - 0.5,
+                    "DSD{} to {rate} at {frequency:.0} Hz: SNR {snr:.2} dB, bitstream {reference:.2} dB",
+                    dsd * 64
+                );
+            }
+        }
     }
 }

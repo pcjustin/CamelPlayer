@@ -43,6 +43,8 @@
   <data name="SignalPath_Downmix" xml:space="preserve"><value>降混</value></data>
   <data name="SignalPath_Resample" xml:space="preserve"><value>重新取樣</value></data>
   <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF 抖動至</value></data>
+  <data name="SignalPath_DsdToPcm" xml:space="preserve"><value>DSD 轉 PCM</value></data>
+  <data name="SignalPath_DspBypassed" xml:space="preserve"><value>略過 DSP</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>輸出裝置</value></data>
   <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>驅動方式（獨佔）</value></data>
   <data name="Settings_Period.Header" xml:space="preserve"><value>裝置週期</value></data>

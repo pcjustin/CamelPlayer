@@ -5,7 +5,8 @@
 #include "Engine/EngineAbi.h"
 
 static_assert(sizeof(CamelAudioFormatV1) == 40);
-static_assert(sizeof(CamelEngineConfigV1) == 64);
+static_assert(sizeof(CamelEngineConfigV1) == 72);
+static_assert(offsetof(CamelEngineConfigV1, allow_dsd_to_pcm) == 64);
 static_assert(sizeof(CamelCommandStampV1) == 32);
 static_assert(sizeof(CamelTrackSourceV1) == 48);
 static_assert(sizeof(CamelSourceInfoV1) == 56);

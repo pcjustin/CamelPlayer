@@ -7,6 +7,7 @@ use std::thread;
 mod convert;
 mod decoder_host;
 mod dsd;
+mod dsd2pcm;
 mod packing;
 mod resample;
 mod ring;
@@ -126,6 +127,9 @@ pub struct CamelEngineConfigV1 {
     pub allow_conversion: u32,
     /// QUALITY_QUICK, QUALITY_HIGH or QUALITY_VERY_HIGH.
     pub resample_quality: u32,
+    /// Nonzero permits DSD to PCM; without it a DSD source plays only as native DSD or DoP.
+    pub allow_dsd_to_pcm: u32,
+    pub reserved: u32,
 }
 
 #[repr(C)]
@@ -357,6 +361,7 @@ pub struct CamelEngine {
     format: AudioFormat,
     output_format: CamelAudioFormatV1,
     allow_conversion: bool,
+    allow_dsd_to_pcm: bool,
     resample_quality: u32,
     max_render_units: u64,
     ring: SpscByteRing,
@@ -439,6 +444,7 @@ impl CamelEngine {
             &self.format,
             self.output_format.rate_hz,
             self.allow_conversion,
+            self.allow_dsd_to_pcm,
             self.resample_quality,
         )
     }
@@ -524,6 +530,7 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     format,
                     output_format: (*config).format,
                     allow_conversion: (*config).allow_conversion != 0,
+                    allow_dsd_to_pcm: (*config).allow_dsd_to_pcm != 0,
                     resample_quality: (*config).resample_quality,
                     max_render_units,
                     ring,
@@ -1834,6 +1841,8 @@ mod tests {
             format,
             allow_conversion: 0,
             resample_quality: QUALITY_HIGH,
+            allow_dsd_to_pcm: 0,
+            reserved: 0,
         }
     }
 
@@ -2094,7 +2103,7 @@ mod tests {
     fn abi_layout_matches_the_c_header_contract() {
         assert_eq!(camel_engine_abi_version(), ABI_VERSION);
         assert_eq!(std::mem::size_of::<CamelAudioFormatV1>(), 40);
-        assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 64);
+        assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 72);
         assert_eq!(std::mem::size_of::<CamelCommandStampV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 48);
         assert_eq!(std::mem::size_of::<CamelSourceInfoV1>(), 56);

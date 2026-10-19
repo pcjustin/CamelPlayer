@@ -2,14 +2,17 @@
 // bit for bit, with format-correct silence and continuous DoP markers; carrier rates are never assumed.
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <fstream>
 #include <functional>
+#include <numbers>
 #include <optional>
 #include <string>
 
 #include "DsdFixture.h"
 #include "Engine/FormatRule.h"
 #include "Engine/PlaybackEngine.h"
+#include "Engine/SamplePacker.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "TestUtil.h"
 
@@ -202,4 +205,81 @@ TEST(DsdPlayback, Dsd512DopIsRefusedOnA768kDevice) {
     EXPECT_EQ(played.snapshot.error, ErrorCode::FormatNotSupported);
     EXPECT_NE(played.snapshot.errorDetail.find("DSD512"), std::string::npos) << played.snapshot.errorDetail;
     EXPECT_NE(played.snapshot.errorDetail.find("1411.2 kHz"), std::string::npos) << played.snapshot.errorDetail;
+}
+
+namespace {
+
+// Amplitude of the `frequency` component of the left channel (24-bit samples) over the middle half, by least squares.
+double amplitudeAt(const std::vector<int32_t>& stereo, uint32_t rate, double frequency) {
+    const size_t frames = stereo.size() / 2;
+    double cc = 0, ss = 0, sc = 0, yc = 0, ys = 0;
+    for (size_t i = frames / 4; i < frames * 3 / 4; i++) {
+        const double w = 2 * std::numbers::pi * frequency * double(i) / rate;
+        const double c = std::cos(w), s = std::sin(w), y = stereo[2 * i] / 8388608.0;
+        cc += c * c, ss += s * s, sc += s * c, yc += y * c, ys += y * s;
+    }
+    const double det = cc * ss - sc * sc;
+    const double a = (yc * ss - ys * sc) / det, b = (ys * cc - yc * sc) / det;
+    return std::hypot(a, b);
+}
+
+std::vector<int32_t> unpack24(const Played& played) {
+    const SampleType type = played.plan->format.type;
+    std::vector<int32_t> samples(played.bytes.size() / bytesPerSample(type));
+    unpackSamples(reinterpret_cast<const uint8_t*>(played.bytes.data()), samples.size(), 24, type, samples.data());
+    return samples;
+}
+
+bool pcmDevice(const DeviceFormat& f, uint32_t maxRate = 192000) {
+    return f.type == SampleType::Int24In32 && f.sampleRate <= maxRate;
+}
+
+} // namespace
+
+// Native/DoP failure never converts on its own; "convert DSD when unsupported" or a "to PCM" output does.
+TEST(DsdToPcm, ConversionNeedsExplicitPermission) {
+    const auto dsd128 = dsfFile("pcm-dsd128", dsdSine(2 * kDsd64, 1000, 0.5, size_t(2 * kDsd64Frames * 3 / 10)), 2, 2 * kDsd64);
+    const auto refused = play(dsd128, Settings{}, [](const DeviceFormat& f) { return pcmDevice(f); });
+    EXPECT_EQ(refused.snapshot.error, ErrorCode::FormatNotSupported);
+    EXPECT_NE(refused.snapshot.errorDetail.find("convert DSD when unsupported"), std::string::npos)
+        << refused.snapshot.errorDetail;
+
+    Settings fallback;
+    fallback.convertDsdWhenUnsupported = true;
+    const auto converted = play(dsd128, fallback, [](const DeviceFormat& f) { return pcmDevice(f); });
+    ASSERT_FALSE(converted.snapshot.error) << converted.snapshot.errorDetail;
+    ASSERT_TRUE(converted.plan);
+    EXPECT_EQ(converted.plan->dsd, DsdPath::Pcm);
+    EXPECT_EQ(converted.plan->state, PipelineState::Processed);
+    EXPECT_EQ(converted.plan->format, (DeviceFormat{176400, 2, SampleType::Int24In32}));
+
+    // "To PCM" converts even where DoP would work.
+    Settings toPcm;
+    toPcm.wasapi.dsdOutput = DsdOutput::Pcm;
+    const auto dsd64 = dsfFile("pcm-dsd64", dsdSine(kDsd64, 1000, 0.5, size_t(kDsd64Frames * 3 / 10)));
+    const auto chosen = play(dsd64, toPcm, [](const DeviceFormat& f) { return pcmDevice(f); });
+    ASSERT_TRUE(chosen.plan);
+    EXPECT_EQ(chosen.plan->dsd, DsdPath::Pcm);
+    const auto dop = play(dsd64, Settings{}, [](const DeviceFormat& f) { return pcmDevice(f); });
+    ASSERT_TRUE(dop.plan);
+    EXPECT_EQ(dop.plan->dsd, DsdPath::Dop);
+}
+
+// 50% DSD modulation becomes a -6.02 dBFS sine at every configured rate; the rate setting picks the output rate.
+TEST(DsdToPcm, KeepsTheLevelAtEveryConfiguredRate) {
+    const auto file = dsfFile("pcm-level", dsdSine(kDsd64, 1000, 0.5, size_t(kDsd64Frames * 3 / 10)));
+    for (const uint32_t rate : kDsdPcmRates) {
+        Settings settings;
+        settings.wasapi.dsdOutput = DsdOutput::Pcm;
+        settings.wasapi.dsdPcmRate = rate;
+        const auto played = play(file, settings, [](const DeviceFormat& f) { return pcmDevice(f, 384000); });
+        ASSERT_FALSE(played.snapshot.error) << played.snapshot.errorDetail;
+        ASSERT_TRUE(played.plan);
+        EXPECT_EQ(played.plan->format.sampleRate, rate);
+        EXPECT_EQ(played.plan->resample, rate != 352800);
+        const auto samples = unpack24(played);
+        ASSERT_GT(samples.size(), size_t(rate / 5));
+        const double level = 20 * std::log10(amplitudeAt(samples, rate, 1000) / 0.5);
+        EXPECT_NEAR(level, 0.0, 0.02) << rate;
+    }
 }

@@ -19,6 +19,7 @@ public:
     struct Conversion {
         bool allow = false;
         ResampleQuality quality = ResampleQuality::High;
+        bool allowDsd = false; // DSD to PCM
     };
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,

@@ -13,8 +13,9 @@ namespace camel::audio {
 // AAC/MP3 decode passed on unchanged otherwise.
 enum class PipelineState : uint8_t { BitPerfect, LosslessConversion, Processed, LossySource };
 
-// How a raw DSD source reaches the device: native DSD bytes, or DoP in a 24-bit PCM carrier (docs/Plan.md §5.8).
-enum class DsdPath : uint8_t { None, Native, Dop };
+// How a DSD source reaches the device: native DSD bytes, DoP in a 24-bit PCM carrier, or converted to PCM
+// (docs/Plan.md §5.8).
+enum class DsdPath : uint8_t { None, Native, Dop, Pcm };
 
 struct OutputPlan {
     DeviceFormat format;
@@ -45,6 +46,11 @@ std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std
 // 768 kHz (DSD512 DoP needs 1411.2 kHz) is used only if the device reports it.
 std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::optional<SampleType> fixedType,
                                        const std::function<bool(const DeviceFormat&)>& deviceSupports);
+
+// DSD converted to PCM: decimated to 352.8 kHz, then delivered like a 24-bit source at `rate` (the setting), with
+// `convert` governing other rates, downmix and depth exactly as for PCM. Always Processed; nullopt when nothing fits.
+std::optional<OutputPlan> negotiateDsdToPcm(const SourceInfo& src, uint32_t rate, std::optional<SampleType> fixedType,
+                                            bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports);
 
 // The DoP carrier rate for a DSD source of `byteFrameRate` byte frames per second.
 constexpr uint32_t dopCarrierRate(uint32_t byteFrameRate) {

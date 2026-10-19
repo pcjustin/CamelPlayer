@@ -95,4 +95,15 @@ std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::
     return std::nullopt;
 }
 
+std::optional<OutputPlan> negotiateDsdToPcm(const SourceInfo& src, uint32_t rate, std::optional<SampleType> fixedType,
+                                            bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports) {
+    if (src.bitsPerSample != 1) return std::nullopt;
+    auto plan = negotiateOutput({rate, src.channels, 24}, false, fixedType, convert, deviceSupports);
+    if (!plan) return std::nullopt;
+    plan->dsd = DsdPath::Pcm;
+    plan->resample = plan->format.sampleRate != 352800; // from the decimator's 352.8 kHz
+    plan->state = PipelineState::Processed;
+    return plan;
+}
+
 } // namespace camel::audio

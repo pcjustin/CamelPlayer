@@ -66,11 +66,17 @@ const char* ksModeId(KsMode m) {
 }
 
 const char* dsdOutputId(DsdOutput d) {
-    return d == DsdOutput::Native ? "native" : "dop";
+    return d == DsdOutput::Native ? "native" : d == DsdOutput::Pcm ? "pcm" : "dop";
 }
 
 static DsdOutput dsdOutputFromId(std::string_view id, DsdOutput fallback) {
-    return id == "native" ? DsdOutput::Native : id == "dop" ? DsdOutput::Dop : fallback;
+    return id == "native" ? DsdOutput::Native : id == "dop" ? DsdOutput::Dop : id == "pcm" ? DsdOutput::Pcm : fallback;
+}
+
+static uint32_t dsdPcmRateFrom(double rate) {
+    for (uint32_t r : kDsdPcmRates)
+        if (rate == r) return r;
+    return 176400;
 }
 
 const char* resampleQualityId(ResampleQuality q) {
@@ -140,25 +146,30 @@ std::string toJson(const Settings& s) {
     j["pcmBitsByFormat"] = pcmBits;
     j["convertWhenUnsupported"] = s.convertWhenUnsupported;
     j["resampleQuality"] = resampleQualityId(s.resampleQuality);
+    j["convertDsdWhenUnsupported"] = s.convertDsdWhenUnsupported;
     j["language"] = s.language;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"eventDriven", s.wasapi.eventDriven},
                    {"period", periodId(s.wasapi.period)},
                    {"customPeriodMs", s.wasapi.customPeriodMs},
-                   {"sampleType", s.wasapi.sampleType ? sampleTypeId(*s.wasapi.sampleType) : ""}};
+                   {"sampleType", s.wasapi.sampleType ? sampleTypeId(*s.wasapi.sampleType) : ""},
+                   {"dsdOutput", dsdOutputId(s.wasapi.dsdOutput)},
+                   {"dsdPcmRate", s.wasapi.dsdPcmRate}};
     j["asio"] = {{"driver", s.asio.driverClsid},
                  {"bufferSize", s.asio.bufferSize},
                  {"outLeft", s.asio.outLeft},
                  {"outRight", s.asio.outRight},
-                 {"dsdOutput", dsdOutputId(s.asio.dsdOutput)}};
+                 {"dsdOutput", dsdOutputId(s.asio.dsdOutput)},
+                 {"dsdPcmRate", s.asio.dsdPcmRate}};
     j["ks"] = {{"device", s.ks.deviceId},
                {"mode", ksModeId(s.ks.mode)},
                {"bufferMs", s.ks.bufferMs},
                {"packetCount", s.ks.packetCount},
                {"packetMs", s.ks.packetMs},
                {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""},
-               {"dsdOutput", dsdOutputId(s.ks.dsdOutput)}};
+               {"dsdOutput", dsdOutputId(s.ks.dsdOutput)},
+               {"dsdPcmRate", s.ks.dsdPcmRate}};
     return j.dump(2);
 }
 
@@ -207,6 +218,7 @@ Settings fromJson(const std::string& text) {
         }
     s.convertWhenUnsupported = boolean(j, "convertWhenUnsupported", false);
     s.resampleQuality = resampleQualityFromId(str(j, "resampleQuality", "high"));
+    s.convertDsdWhenUnsupported = boolean(j, "convertDsdWhenUnsupported", false);
     s.language = str(j, "language", "");
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
@@ -216,6 +228,9 @@ Settings fromJson(const std::string& text) {
         s.wasapi.period = periodFromId(str(w, "period", "default"));
         s.wasapi.customPeriodMs = num(w, "customPeriodMs", 10.0, 1.0, 500.0);
         s.wasapi.sampleType = sampleTypeFromId(str(w, "sampleType", ""));
+        s.wasapi.dsdOutput = dsdOutputFromId(str(w, "dsdOutput", ""), DsdOutput::Dop);
+        if (s.wasapi.dsdOutput == DsdOutput::Native) s.wasapi.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
+        s.wasapi.dsdPcmRate = dsdPcmRateFrom(num(w, "dsdPcmRate", 176400, 0, 1e7));
     }
     if (j.contains("asio") && j["asio"].is_object()) {
         const json& a = j["asio"];
@@ -224,6 +239,7 @@ Settings fromJson(const std::string& text) {
         s.asio.outLeft = integer(a, "outLeft", 0, 0, 63);
         s.asio.outRight = integer(a, "outRight", 1, 0, 63);
         s.asio.dsdOutput = dsdOutputFromId(str(a, "dsdOutput", ""), DsdOutput::Native);
+        s.asio.dsdPcmRate = dsdPcmRateFrom(num(a, "dsdPcmRate", 176400, 0, 1e7));
     }
     if (j.contains("ks") && j["ks"].is_object()) {
         const json& k = j["ks"];
@@ -234,6 +250,7 @@ Settings fromJson(const std::string& text) {
         s.ks.packetMs = num(k, "packetMs", 10.0, 1.0, 200.0);
         s.ks.sampleType = sampleTypeFromId(str(k, "sampleType", ""));
         s.ks.dsdOutput = dsdOutputFromId(str(k, "dsdOutput", ""), DsdOutput::Dop);
+        s.ks.dsdPcmRate = dsdPcmRateFrom(num(k, "dsdPcmRate", 176400, 0, 1e7));
     }
     return s;
 }

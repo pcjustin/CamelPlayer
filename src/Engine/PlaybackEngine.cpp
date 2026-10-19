@@ -35,9 +35,27 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
     return std::nullopt;
 }
 
-// ASIO plays native DSD when asked; KS native DSD is not enabled yet and WASAPI has none (docs/Plan.md §5.8).
-bool nativeDsd(const Settings& s) {
-    return s.backend == Backend::Asio && s.asio.dsdOutput == DsdOutput::Native;
+DsdOutput dsdOutput(const Settings& s) {
+    return s.backend == Backend::Asio ? s.asio.dsdOutput : s.backend == Backend::Ks ? s.ks.dsdOutput : s.wasapi.dsdOutput;
+}
+
+uint32_t dsdPcmRate(const Settings& s) {
+    return s.backend == Backend::Asio ? s.asio.dsdPcmRate : s.backend == Backend::Ks ? s.ks.dsdPcmRate : s.wasapi.dsdPcmRate;
+}
+
+// How `src` reaches a device that takes what `supports` accepts under settings `s` (docs/Plan.md §5.3). DSD: the
+// configured raw path (ASIO native, else DoP; KS native DSD is not enabled yet and WASAPI has none), PCM only when
+// chosen or allowed as a fallback.
+std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool lossy,
+                                  const std::function<bool(const DeviceFormat&)>& supports) {
+    if (src.bitsPerSample != 1) return negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports);
+    const DsdOutput mode = dsdOutput(s);
+    std::optional<OutputPlan> plan;
+    if (mode != DsdOutput::Pcm)
+        plan = negotiateDsd(src, s.backend == Backend::Asio && mode == DsdOutput::Native, fixedSampleType(s), supports);
+    if (!plan && (mode == DsdOutput::Pcm || s.convertDsdWhenUnsupported))
+        plan = negotiateDsdToPcm(src, dsdPcmRate(s), fixedSampleType(s), s.convertWhenUnsupported, supports);
+    return plan;
 }
 
 bool sameBackendConfig(const Settings& a, const Settings& b) {
@@ -209,7 +227,8 @@ public:
                                       pcmBitsFor(settings_.pcmBitsByFormat, *format_) != pcmBitsFor(s.pcmBitsByFormat, *format_);
         // A conversion setting reopens the stream only when the path it would choose differs.
         const bool conversionChanged =
-            (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality) &&
+            (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality ||
+             settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported) &&
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged || conversionChanged;
         const bool wasActive = active_;
@@ -379,12 +398,12 @@ private:
     }
 
     std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy) {
-        const auto supports = [&](const DeviceFormat& f) { return output_->supports(f); };
-        if (src.bitsPerSample == 1) return negotiateDsd(src, nativeDsd(settings_), fixedSampleType(settings_), supports);
-        return negotiateOutput(src, lossy, fixedSampleType(settings_), settings_.convertWhenUnsupported, supports);
+        return planFor(settings_, src, lossy, [&](const DeviceFormat& f) { return output_->supports(f); });
     }
 
-    RustSession::Conversion conversion() const { return {settings_.convertWhenUnsupported, settings_.resampleQuality}; }
+    RustSession::Conversion conversion() const {
+        return {settings_.convertWhenUnsupported, settings_.resampleQuality, plan_.dsd == DsdPath::Pcm};
+    }
 
     void ensureOutput() {
         if (output_) return;
@@ -441,8 +460,10 @@ private:
             const char* hint = settings_.convertWhenUnsupported ? "" : "; enable \"convert when unsupported\" to convert it";
             const int length =
                 src.bitsPerSample == 1
-                    ? snprintf(msg, sizeof msg, "DSD%u / %u ch: this device takes neither native DSD nor DoP at %.1f kHz",
-                               src.sampleRate * 8 / 44100, src.channels, dopCarrierRate(src.sampleRate) / 1000.0)
+                    ? snprintf(msg, sizeof msg, "DSD%u / %u ch: this device takes neither native DSD nor DoP at %.1f kHz%s",
+                               src.sampleRate * 8 / 44100, src.channels, dopCarrierRate(src.sampleRate) / 1000.0,
+                               settings_.convertDsdWhenUnsupported ? ""
+                                                                   : "; enable \"convert DSD when unsupported\" to convert it")
                     : snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
                                src.sampleRate, src.bitsPerSample, src.channels, hint);
             if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "No bit-perfect format available on this device");
@@ -494,7 +515,7 @@ private:
                 if (session == session_ && active_) onRestart();
             });
         });
-        rawDsd_.store(plan_.dsd != DsdPath::None, std::memory_order_release);
+        rawDsd_.store(plan_.dsd == DsdPath::Native || plan_.dsd == DsdPath::Dop, std::memory_order_release);
         try {
             output_->open(fmt_, this);
         } catch (const Error& e) {
@@ -686,9 +707,9 @@ private:
     bool conversionPathChanges(const Settings& s) {
         if (plan_.resample && settings_.resampleQuality != s.resampleQuality) return true;
         const auto source = snapshot().source;
-        if (!source || source->bitsPerSample == 1) return false; // raw DSD is never converted here
-        const auto plan = negotiateOutput(*source, format_ && isLossy(*format_), fixedSampleType(s), s.convertWhenUnsupported,
-                                          [&](const DeviceFormat& f) { return output_->supports(f); });
+        if (!source) return false;
+        const auto plan =
+            planFor(s, *source, format_ && isLossy(*format_), [&](const DeviceFormat& f) { return output_->supports(f); });
         return plan != plan_;
     }
 

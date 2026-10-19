@@ -43,6 +43,8 @@
   <data name="SignalPath_Downmix" xml:space="preserve"><value>downmix</value></data>
   <data name="SignalPath_Resample" xml:space="preserve"><value>resample</value></data>
   <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF dither to</value></data>
+  <data name="SignalPath_DsdToPcm" xml:space="preserve"><value>DSD to PCM</value></data>
+  <data name="SignalPath_DspBypassed" xml:space="preserve"><value>DSP bypassed</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>Output device</value></data>
   <data name="Settings_WasapiMode.Header" xml:space="preserve"><value>Driving mode (exclusive)</value></data>
   <data name="Settings_Period.Header" xml:space="preserve"><value>Device period</value></data>

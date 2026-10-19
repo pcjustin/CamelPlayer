@@ -40,6 +40,7 @@ struct SettingsDto {
     PcmBitsByFormat pcmBitsByFormat;
     bool convertWhenUnsupported = false;
     ResampleQuality resampleQuality = ResampleQuality::High;
+    bool convertDsdWhenUnsupported = false;
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;

@@ -3,7 +3,7 @@
 #include "Engine/EngineAbi.h"
 
 typedef char CamelAudioFormatV1Size[(sizeof(CamelAudioFormatV1) == 40) ? 1 : -1];
-typedef char CamelEngineConfigV1Size[(sizeof(CamelEngineConfigV1) == 64) ? 1 : -1];
+typedef char CamelEngineConfigV1Size[(sizeof(CamelEngineConfigV1) == 72) ? 1 : -1];
 typedef char CamelCommandStampV1Size[(sizeof(CamelCommandStampV1) == 32) ? 1 : -1];
 typedef char CamelTrackSourceV1Size[(sizeof(CamelTrackSourceV1) == 48) ? 1 : -1];
 typedef char CamelSourceInfoV1Size[(sizeof(CamelSourceInfoV1) == 56) ? 1 : -1];
