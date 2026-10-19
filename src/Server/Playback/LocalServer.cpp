@@ -120,6 +120,7 @@ PlaybackSnapshot playback(const audio::EngineSnapshot& s) {
     }
     p.outputMode = s.outputStatus.mode;
     p.outputDetail = s.outputStatus.detail;
+    p.outputAdjustments = s.outputStatus.adjustments;
     p.bufferFrames = s.outputStatus.bufferFrames;
     p.underruns = s.underruns;
     p.error = s.error;

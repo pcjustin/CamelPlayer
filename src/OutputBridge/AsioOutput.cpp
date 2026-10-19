@@ -20,6 +20,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "OutputBridge/AsioLayout.h"
+#include "OutputBridge/OutputChoices.h"
 
 namespace camel::audio {
 namespace {
@@ -109,10 +110,6 @@ public:
         try {
             invoke([&] {
                 load();
-                if (cfg_.outLeft >= numOutputs_ || cfg_.outRight >= numOutputs_) {
-                    ok = true; // open() reports the out-of-range channel
-                    return;
-                }
                 if (f.type == SampleType::Dsd8)
                     ok = f.channels == 2 && supportsDsd(f.sampleRate);
                 else if (driverType_ && mapSampleType(*driverType_) == f.type && f.channels == 2)
@@ -275,10 +272,15 @@ private:
         if (drv_) return;
         CLSID clsid{};
         std::string id = cfg_.driverClsid;
+        const auto drivers = listAsioDrivers();
         if (id.empty()) {
-            auto drivers = listAsioDrivers();
             if (drivers.empty()) throw Error(ErrorCode::DeviceNotFound, "no ASIO driver installed");
             id = drivers.front().id;
+        } else if (std::none_of(drivers.begin(), drivers.end(), [&](const DeviceEntry& d) {
+                       return d.id == id && d.name.find("(unavailable)") == std::string::npos;
+                   })) {
+            // A saved driver is never replaced by another one.
+            throw Error(ErrorCode::DeviceNotFound, "ASIO driver not connected (not installed)");
         }
         if (FAILED(CLSIDFromString(toWide(id).c_str(), &clsid))) throw Error(ErrorCode::DeviceNotFound, "bad ASIO driver id");
         IASIO* d = nullptr;
@@ -293,7 +295,8 @@ private:
             char err[128] = {};
             d->getErrorMessage(err);
             d->Release();
-            throw Error(ErrorCode::DriverError, std::string("ASIO init failed: ") + err);
+            // Drivers fail init when their device is unplugged.
+            throw Error(ErrorCode::DeviceNotFound, std::string("ASIO device not connected: ") + err);
         }
         drv_ = d;
         char name[64] = {};
@@ -302,10 +305,8 @@ private:
         long ins = 0, outs = 0;
         drv_->getChannels(&ins, &outs);
         numOutputs_ = outs;
-        ASIOChannelInfo ci{};
-        ci.channel = cfg_.outLeft;
-        ci.isInput = ASIOFalse;
-        if (cfg_.outLeft < outs && drv_->getChannelInfo(&ci) == ASE_OK) driverType_ = ci.type;
+        channels_ = asioChannels(cfg_.outLeft, cfg_.outRight, outs);
+        driverType_ = outputType();
         log::info("asio: loaded %s (%ld outputs, %s)", name, outs, driverType_ ? asioTypeName(*driverType_) : "?");
     }
 
@@ -331,9 +332,9 @@ private:
 
     std::optional<ASIOSampleType> outputType() {
         ASIOChannelInfo ci{};
-        ci.channel = cfg_.outLeft;
+        ci.channel = channels_.left;
         ci.isInput = ASIOFalse;
-        if (cfg_.outLeft < numOutputs_ && drv_->getChannelInfo(&ci) == ASE_OK) return ci.type;
+        if (channels_.left < numOutputs_ && drv_->getChannelInfo(&ci) == ASE_OK) return ci.type;
         return std::nullopt;
     }
 
@@ -357,8 +358,7 @@ private:
 
     void openOnSta(const DeviceFormat& f, IRenderSource* source) {
         load();
-        if (cfg_.outLeft >= numOutputs_ || cfg_.outRight >= numOutputs_)
-            throw Error(ErrorCode::DeviceNotFound, "ASIO output channel out of range");
+        if (numOutputs_ < 2) throw Error(ErrorCode::DeviceNotFound, "ASIO driver has fewer than two outputs");
         const bool dsd = f.type == SampleType::Dsd8;
         if (dsd != dsdMode_ && !setIoFormat(dsd ? kASIODSDFormat : kASIOPCMFormat))
             throw Error(ErrorCode::FormatNotSupported, dsd ? "ASIO driver refused DSD mode" : "ASIO driver refused PCM mode");
@@ -374,19 +374,19 @@ private:
             throw Error(ErrorCode::FormatNotSupported, "ASIOSetSampleRate failed");
         long minS = 0, maxS = 0, pref = 0, gran = 0;
         drv_->getBufferSize(&minS, &maxS, &pref, &gran);
-        long size = pref;
-        if (cfg_.bufferSize > 0 && minS != maxS) {
-            size = std::clamp(cfg_.bufferSize, minS, maxS);
-            if (gran > 0)
-                size = minS + (size - minS) / gran * gran;
-            else if (gran == -1) { // powers of two
-                long p = minS;
-                while (p * 2 <= size) p *= 2;
-                size = p;
-            }
-        }
-        buffers_[0] = {ASIOFalse, cfg_.outLeft, {nullptr, nullptr}};
-        buffers_[1] = {ASIOFalse, cfg_.outRight, {nullptr, nullptr}};
+        const AsioBufferChoice buffer = asioBufferSize(cfg_.bufferSize, minS, maxS, pref, gran);
+        const long size = buffer.size;
+        std::vector<std::string> adjustments;
+        if (buffer.adjusted)
+            adjustments.push_back(requestedVsActive("ASIO buffer", std::to_string(cfg_.bufferSize),
+                                                    std::to_string(size) + " (driver min " + std::to_string(minS) + " / max " +
+                                                        std::to_string(maxS) + " / granularity " + std::to_string(gran) + ")"));
+        if (channels_.adjusted)
+            adjustments.push_back(requestedVsActive("ASIO output channels",
+                                                    std::to_string(cfg_.outLeft + 1) + "/" + std::to_string(cfg_.outRight + 1),
+                                                    "1/2 (driver has " + std::to_string(numOutputs_) + " outputs)"));
+        buffers_[0] = {ASIOFalse, channels_.left, {nullptr, nullptr}};
+        buffers_[1] = {ASIOFalse, channels_.right, {nullptr, nullptr}};
         static ASIOCallbacks callbacks = {
             [](long index, ASIOBool) {
                 if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
@@ -423,6 +423,7 @@ private:
         std::lock_guard lock(statusMutex_);
         status_.mode = "ASIO · " + driverName_ + (dsd ? " · native DSD" : "");
         status_.bufferFrames = uint32_t(bufferFrames_);
+        status_.adjustments = std::move(adjustments);
         char d[160];
         const int length =
             snprintf(d, sizeof d, "%s, buffer %ld (min %ld / max %ld), output latency %ld%s", asioTypeName(*driverType_), size,
@@ -442,6 +443,7 @@ private:
     IASIO* drv_ = nullptr;
     std::string driverName_;
     long numOutputs_ = 0;
+    ChannelChoice channels_;
     std::optional<ASIOSampleType> driverType_;
     bool buffersCreated_ = false, started_ = false, outputReady_ = false;
     ASIOBufferInfo buffers_[2] = {};

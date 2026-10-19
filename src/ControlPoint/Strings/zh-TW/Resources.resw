@@ -78,6 +78,8 @@
   <data name="KsMode_Standard" xml:space="preserve"><value>標準串流</value></data>
   <data name="Device_Default" xml:space="preserve"><value>跟隨 Windows 預設</value></data>
   <data name="Device_None" xml:space="preserve"><value>（找不到）</value></data>
+  <data name="Device_NotConnected" xml:space="preserve"><value>已儲存的裝置（未連接）</value></data>
+  <data name="Status_Adjusted" xml:space="preserve"><value>設定值 ≠ 實際值：</value></data>
   <data name="Lang_System" xml:space="preserve"><value>跟隨系統</value></data>
   <data name="NoFile" xml:space="preserve"><value>尚未開啟檔案</value></data>
   <data name="Lamp_Idle" xml:space="preserve"><value>未輸出</value></data>

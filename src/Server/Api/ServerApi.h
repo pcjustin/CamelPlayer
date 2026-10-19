@@ -111,6 +111,7 @@ struct PlaybackSnapshot {
     std::optional<Backend> activeBackend;
     std::optional<audio::DecoderKind> activeDecoder;
     std::string outputMode, outputDetail;
+    std::vector<std::string> outputAdjustments; // saved output parameters replaced by device defaults (requested ≠ active)
     uint32_t bufferFrames = 0;
     uint64_t underruns = 0;
     std::optional<audio::ErrorCode> error;

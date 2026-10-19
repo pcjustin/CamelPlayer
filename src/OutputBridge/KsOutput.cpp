@@ -14,6 +14,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/OutputChoices.h"
 
 #pragma comment(lib, "setupapi.lib")
 #pragma comment(lib, "winmm.lib")
@@ -132,6 +133,19 @@ HANDLE openFilter(const std::wstring& path) {
     return CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
 }
+
+// Why openFilter failed: an interface path that no longer exists is an unplugged device.
+Error filterError() {
+    const DWORD e = GetLastError();
+    if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND || e == ERROR_DEVICE_NOT_CONNECTED || e == ERROR_DEV_NOT_EXIST ||
+        e == ERROR_NO_SUCH_DEVICE)
+        return Error(ErrorCode::DeviceNotFound, "KS device not connected");
+    char msg[64];
+    const int length = snprintf(msg, sizeof msg, "KS filter cannot be opened: %lu", e);
+    return Error(ErrorCode::DeviceInUse, length > 0 && size_t(length) < sizeof msg ? msg : "KS filter cannot be opened");
+}
+
+constexpr double kDefaultBufferMs = 20.0; // KsSettings::bufferMs default
 
 struct PinInfo {
     bool pcmRender = false, standard = false, looped = false;
@@ -286,7 +300,7 @@ public:
         if (auto it = caps_.find(key); it != caps_.end()) return it->second;
         if (path_.empty()) throw Error(ErrorCode::DeviceNotFound, "no KS render pin available");
         HANDLE filter = openFilter(path_);
-        if (filter == INVALID_HANDLE_VALUE) throw Error(ErrorCode::DeviceNotFound, "KS filter not found");
+        if (filter == INVALID_HANDLE_VALUE) throw filterError();
         PinInfo pi = pinInfo(filter, pinId_);
         bool ok = false;
         bool definite = true;
@@ -374,8 +388,9 @@ private:
         cmdCv_.notify_all();
     }
 
-    void setStatus(const char* mode, uint32_t frames, const std::string& detail) {
+    void setStatus(const char* mode, uint32_t frames, const std::string& detail, std::vector<std::string> adjustments = {}) {
         std::lock_guard lock(statusMutex_);
+        status_.adjustments = std::move(adjustments);
         status_.mode = mode;
         status_.bufferFrames = frames;
         status_.detail = detail + ", " + nativeDsdNote_;
@@ -414,7 +429,8 @@ void KsOutput::threadMain(std::promise<void>& opened) {
     }
     HANDLE filter = path_.empty() ? INVALID_HANDLE_VALUE : openFilter(path_);
     if (filter == INVALID_HANDLE_VALUE) {
-        opened.set_exception(std::make_exception_ptr(Error(ErrorCode::DeviceNotFound, "KS filter not found")));
+        opened.set_exception(std::make_exception_ptr(
+            path_.empty() ? Error(ErrorCode::DeviceNotFound, "no KS render pin available") : filterError()));
         return;
     }
     PinInfo pi = pinInfo(filter, pinId_);
@@ -476,32 +492,44 @@ void KsOutput::finish(DWORD err, const char* what) {
 
 void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
     const UINT blk = fmt_.bytesPerFrame();
-    const DWORD want = DWORD(fmt_.sampleRate * cfg_.bufferMs / 1000.0) * blk;
     KSRTAUDIO_BUFFER rb{};
     HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    bool ok = false;
-    if (notify) {
-        KSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION bp{};
-        bp.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_BUFFER_WITH_NOTIFICATION, KSPROPERTY_TYPE_GET);
-        bp.RequestedBufferSize = want;
-        bp.NotificationCount = 2;
-        ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &bp, sizeof bp, &rb, sizeof rb);
-        if (ok) {
-            KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY np{};
-            np.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_REGISTER_NOTIFICATION_EVENT, KSPROPERTY_TYPE_GET);
-            np.NotificationEvent = ev;
-            ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &np, sizeof np, nullptr, 0);
+    const auto allocate = [&](double ms) {
+        const DWORD want = DWORD(fmt_.sampleRate * ms / 1000.0) * blk;
+        bool ok = false;
+        if (notify) {
+            KSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION bp{};
+            bp.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_BUFFER_WITH_NOTIFICATION, KSPROPERTY_TYPE_GET);
+            bp.RequestedBufferSize = want;
+            bp.NotificationCount = 2;
+            ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &bp, sizeof bp, &rb, sizeof rb);
+            if (ok) {
+                KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY np{};
+                np.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_REGISTER_NOTIFICATION_EVENT, KSPROPERTY_TYPE_GET);
+                np.NotificationEvent = ev;
+                ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &np, sizeof np, nullptr, 0);
+            }
+            if (!ok && cfg_.mode == KsMode::Auto) { // driver without notification support: fall back to polling
+                log::info("ks: WaveRT notification unavailable (%lu), polling instead", GetLastError());
+                notify = false;
+            }
         }
-        if (!ok && cfg_.mode == KsMode::Auto) { // driver without notification support: fall back to polling
-            log::info("ks: WaveRT notification unavailable (%lu), polling instead", GetLastError());
-            notify = false;
+        if (!notify) {
+            KSRTAUDIO_BUFFER_PROPERTY bp{};
+            bp.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_BUFFER, KSPROPERTY_TYPE_GET);
+            bp.RequestedBufferSize = want;
+            ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &bp, sizeof bp, &rb, sizeof rb);
         }
-    }
-    if (!notify) {
-        KSRTAUDIO_BUFFER_PROPERTY bp{};
-        bp.Property = ksProp(kRtAudioSet, KSPROPERTY_RTAUDIO_BUFFER, KSPROPERTY_TYPE_GET);
-        bp.RequestedBufferSize = want;
-        ok = ksIoctl(pin, IOCTL_KS_PROPERTY, &bp, sizeof bp, &rb, sizeof rb);
+        return ok && rb.BufferAddress;
+    };
+    bool ok = allocate(cfg_.bufferMs);
+    std::vector<std::string> adjustments;
+    if (!ok && cfg_.bufferMs != kDefaultBufferMs) {
+        ok = allocate(kDefaultBufferMs);
+        char requested[32];
+        const int length = snprintf(requested, sizeof requested, "%.1f ms", cfg_.bufferMs);
+        if (ok && length > 0 && size_t(length) < sizeof requested)
+            adjustments.push_back(requestedVsActive("KS WaveRT buffer", requested, "20.0 ms (driver refused the request)"));
     }
     if (!ok || !rb.BufferAddress) {
         char msg[96];
@@ -523,7 +551,8 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
     const int detailLength = snprintf(detail, sizeof detail, "buffer %lu bytes (%.2f ms), position %s", rb.ActualBufferSize,
                                       rb.ActualBufferSize * 1000.0 / (fmt_.sampleRate * blk), posReg ? "register" : "property");
     setStatus(notify ? "KS · WaveRT event" : "KS · WaveRT polling", size / blk,
-              detailLength < 0 || size_t(detailLength) >= sizeof detail ? "buffer status unavailable" : detail);
+              detailLength < 0 || size_t(detailLength) >= sizeof detail ? "buffer status unavailable" : detail,
+              std::move(adjustments));
     opened.set_value();
 
     auto readPos = [&](ULONG& out) -> bool {

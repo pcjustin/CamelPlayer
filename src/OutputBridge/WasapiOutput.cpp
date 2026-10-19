@@ -18,6 +18,7 @@
 #include "OutputBridge/WaveFormat.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/OutputChoices.h"
 
 namespace camel::audio {
 namespace {
@@ -28,10 +29,12 @@ wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     auto en = wil::CoCreateInstance<MMDeviceEnumerator, IMMDeviceEnumerator>(CLSCTX_ALL);
     wil::com_ptr<IMMDevice> dev;
     HRESULT hr = id.empty() ? en->GetDefaultAudioEndpoint(eRender, eConsole, &dev) : en->GetDevice(toWide(id).c_str(), &dev);
-    if (FAILED(hr) || !dev) throw Error(ErrorCode::DeviceNotFound, "WASAPI device not found");
+    // A saved endpoint is never replaced by another one, including the default.
+    if (FAILED(hr) || !dev)
+        throw Error(ErrorCode::DeviceNotFound, id.empty() ? "no Windows default output device" : "WASAPI device not connected");
     DWORD state = 0;
     if (SUCCEEDED(dev->GetState(&state)) && state != DEVICE_STATE_ACTIVE)
-        throw Error(ErrorCode::DeviceNotFound, "WASAPI device not active");
+        throw Error(ErrorCode::DeviceNotFound, "WASAPI device not connected");
     return dev;
 }
 
@@ -138,10 +141,18 @@ private:
             THROW_IF_FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
             REFERENCE_TIME defP = 0, minP = 0;
             client->GetDevicePeriod(&defP, &minP);
-            period = cfg_.period == WasapiPeriod::Minimum ? minP
-                     : cfg_.period == WasapiPeriod::Custom
-                         ? std::max<REFERENCE_TIME>(minP, REFERENCE_TIME(cfg_.customPeriodMs * 10000))
-                         : defP;
+            const auto ms = [](REFERENCE_TIME t) {
+                char text[32];
+                const int length = snprintf(text, sizeof text, "%.2f ms", double(t) / 10000.0);
+                return length > 0 && size_t(length) < sizeof text ? std::string(text) : std::string("?");
+            };
+            std::vector<std::string> adjustments;
+            const auto custom = REFERENCE_TIME(cfg_.customPeriodMs * 10000);
+            period = cfg_.period == WasapiPeriod::Minimum  ? minP
+                     : cfg_.period == WasapiPeriod::Custom ? std::max<REFERENCE_TIME>(minP, custom)
+                                                           : defP;
+            if (cfg_.period == WasapiPeriod::Custom && custom < minP)
+                adjustments.push_back(requestedVsActive("WASAPI period", ms(custom), ms(minP) + " (device minimum)"));
             WAVEFORMATEXTENSIBLE wf = makeWaveFormat(fmt_);
             const DWORD flags = cfg_.eventDriven ? AUDCLNT_STREAMFLAGS_EVENTCALLBACK : 0;
             const REFERENCE_TIME dur = cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4);
@@ -158,6 +169,15 @@ private:
                 hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, aligned, cfg_.eventDriven ? aligned : 0, &wf.Format,
                                         nullptr);
             }
+            if (hr == AUDCLNT_E_INVALID_DEVICE_PERIOD && cfg_.period == WasapiPeriod::Custom && period != defP) {
+                adjustments.push_back(requestedVsActive("WASAPI period", ms(period), ms(defP) + " (device default)"));
+                period = defP;
+                client.reset();
+                THROW_IF_FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
+                hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags,
+                                        cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4),
+                                        cfg_.eventDriven ? period : 0, &wf.Format, nullptr);
+            }
             if (FAILED(hr)) throw hrError("IAudioClient::Initialize", hr);
             if (cfg_.eventDriven) THROW_IF_FAILED(client->SetEventHandle(bufferEvent.get()));
             THROW_IF_FAILED(client->GetBufferSize(&bufferFrames));
@@ -169,6 +189,7 @@ private:
                 char d[64];
                 const int length = snprintf(d, sizeof d, "period %.2f ms", static_cast<double>(period) / 10000.0);
                 status_.detail = length < 0 || size_t(length) >= sizeof d ? "WASAPI period unavailable" : d;
+                status_.adjustments = std::move(adjustments);
             }
             opened.set_value();
         } catch (const Error&) {

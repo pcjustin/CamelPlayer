@@ -157,11 +157,18 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
     WasapiDeviceCombo().IsEnabled(devices.revision != 0);
     AsioDriverCombo().IsEnabled(devices.revision != 0);
     KsDeviceCombo().IsEnabled(devices.revision != 0);
-    wasapiDevices_ = devices.wasapi;
+    // A saved device that is missing stays selected as "not connected"; it is never replaced by another device.
+    const auto withSaved = [](std::vector<DeviceInfo> list, const std::string& saved) {
+        if (!saved.empty() && std::none_of(list.begin(), list.end(), [&](const DeviceInfo& d) { return d.id == saved; }))
+            list.push_back({saved, ""});
+        return list;
+    };
+    const auto label = [](const DeviceInfo& d) { return d.name.empty() ? tr(L"Device_NotConnected") : ui::utf8(d.name); };
+    wasapiDevices_ = withSaved(devices.wasapi, settings_.wasapi.deviceId);
     std::vector<hstring> names{tr(L"Device_Default")};
     int sel = 0;
     for (size_t i = 0; i < wasapiDevices_.size(); i++) {
-        names.push_back(ui::utf8(wasapiDevices_[i].name));
+        names.push_back(label(wasapiDevices_[i]));
         if (wasapiDevices_[i].id == settings_.wasapi.deviceId) sel = int(i + 1);
     }
     fill(WasapiDeviceCombo(), names, sel);
@@ -170,15 +177,15 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
         std::vector<hstring> n;
         int s = 0;
         for (size_t i = 0; i < list.size(); i++) {
-            n.push_back(ui::utf8(list[i].name));
+            n.push_back(label(list[i]));
             if (list[i].id == current) s = int(i);
         }
         if (n.empty()) n.push_back(tr(L"Device_None"));
         fill(combo, n, s);
     };
-    asioDrivers_ = devices.asio;
+    asioDrivers_ = withSaved(devices.asio, settings_.asio.driverClsid);
     fillList(AsioDriverCombo(), asioDrivers_, settings_.asio.driverClsid);
-    ksPins_ = devices.ks;
+    ksPins_ = withSaved(devices.ks, settings_.ks.deviceId);
     fillList(KsDeviceCombo(), ksPins_, settings_.ks.deviceId);
     populating_ = was;
 }
@@ -397,7 +404,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         wchar_t buf[512];
         swprintf(buf, 512, L"%s\n%s\n%s\nunderrun: %llu", ui::utf8(describe(*s.output)).c_str(), ui::utf8(s.outputMode).c_str(),
                  ui::utf8(s.outputDetail).c_str(), static_cast<unsigned long long>(s.underruns));
-        StatusText().Text(buf);
+        hstring status = buf;
+        for (const auto& adjustment : s.outputAdjustments)
+            status = status + L"\n" + tr(L"Status_Adjusted") + L" " + ui::utf8(adjustment);
+        StatusText().Text(status);
     } else {
         StatusText().Text(tr(L"Status_Idle"));
     }

@@ -30,6 +30,9 @@ struct OutputStatus {
     std::string mode;          // e.g. "WASAPI exclusive · event", "KS · standard streaming"
     uint32_t bufferFrames = 0; // device buffer actually in use
     std::string detail;        // backend specific (ASIO sample type, KS buffer size, ...)
+    // Saved parameters the device could not take and what is used instead (requested ≠ active); the settings keep
+    // the requested values.
+    std::vector<std::string> adjustments;
 };
 
 class IOutput {

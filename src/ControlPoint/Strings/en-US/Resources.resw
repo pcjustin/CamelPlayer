@@ -78,6 +78,8 @@
   <data name="KsMode_Standard" xml:space="preserve"><value>Standard streaming</value></data>
   <data name="Device_Default" xml:space="preserve"><value>Follow Windows default</value></data>
   <data name="Device_None" xml:space="preserve"><value>(none found)</value></data>
+  <data name="Device_NotConnected" xml:space="preserve"><value>Saved device (not connected)</value></data>
+  <data name="Status_Adjusted" xml:space="preserve"><value>Requested ≠ active:</value></data>
   <data name="Lang_System" xml:space="preserve"><value>Follow Windows</value></data>
   <data name="NoFile" xml:space="preserve"><value>No file open</value></data>
   <data name="Lamp_Idle" xml:space="preserve"><value>No output</value></data>
