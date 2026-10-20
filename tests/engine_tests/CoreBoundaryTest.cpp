@@ -284,7 +284,7 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         settings.lastFile = L"C:\\music\\album.flac";
         settings.wasapi = {"endpoint", true, ResampleQuality::Quick, false, WasapiPeriod::Custom, 12.5, SampleType::Int24In32};
         settings.asio = {"driver", 1024, 2, 3, DsdOutput::Dop};
-        settings.ks = {"filter|1", mode, 30, 8, 15, SampleType::Int32, DsdOutput::Native};
+        settings.ks = {"filter|1", mode, 30, 8, 15, SampleType::Int32, DsdOutput::Pcm};
         saveSettings(settings, file);
         EXPECT_EQ(toJson(loadSettings(file)), toJson(settings));
         settings.language = "en-US";
@@ -309,7 +309,7 @@ TEST(SettingsBoundary, DsdOutputDefaultsToNativeOnAsioAndDopOnKs) {
     EXPECT_TRUE(parsed.convertDsdWhenUnsupported);
     EXPECT_EQ(parsed.asio.dsdOutput, DsdOutput::Dop);
     EXPECT_EQ(parsed.asio.dsdPcmRate, 88200u);
-    EXPECT_EQ(parsed.ks.dsdOutput, DsdOutput::Native);
+    EXPECT_EQ(parsed.ks.dsdOutput, DsdOutput::Dop); // KS has no native DSD
     EXPECT_EQ(parsed.ks.dsdPcmRate, 352800u);
     EXPECT_EQ(parsed.wasapi.dsdOutput, DsdOutput::Pcm);
     EXPECT_EQ(fromJson(toJson(parsed)).asio, parsed.asio);

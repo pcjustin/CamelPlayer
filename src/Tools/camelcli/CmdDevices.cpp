@@ -75,8 +75,8 @@ Settings settingsFromArgs(const Args& args) {
     if (auto v = option(args, L"--convert")) s.convertWhenUnsupported = *v == L"1";
     if (auto v = option(args, L"--dsd")) {
         const DsdOutput d = *v == L"dop" ? DsdOutput::Dop : *v == L"pcm" ? DsdOutput::Pcm : DsdOutput::Native;
-        s.asio.dsdOutput = s.ks.dsdOutput = d;
-        s.wasapi.dsdOutput = d == DsdOutput::Pcm ? d : DsdOutput::Dop;
+        s.asio.dsdOutput = d;
+        s.ks.dsdOutput = s.wasapi.dsdOutput = d == DsdOutput::Pcm ? d : DsdOutput::Dop;
     }
     if (auto v = option(args, L"--dsd-rate")) s.wasapi.dsdPcmRate = s.asio.dsdPcmRate = s.ks.dsdPcmRate = std::stoul(*v);
     if (auto v = option(args, L"--convert-dsd")) s.convertDsdWhenUnsupported = *v == L"1";

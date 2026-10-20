@@ -254,6 +254,7 @@ Settings fromJson(const std::string& text) {
         s.ks.packetMs = num(k, "packetMs", 10.0, 1.0, 200.0);
         s.ks.sampleType = sampleTypeFromId(str(k, "sampleType", ""));
         s.ks.dsdOutput = dsdOutputFromId(str(k, "dsdOutput", ""), DsdOutput::Dop);
+        if (s.ks.dsdOutput == DsdOutput::Native) s.ks.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
         s.ks.dsdPcmRate = dsdPcmRateFrom(num(k, "dsdPcmRate", 176400, 0, 1e7));
     }
     return s;

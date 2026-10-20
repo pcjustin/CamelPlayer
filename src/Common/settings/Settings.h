@@ -19,8 +19,8 @@ bool backendFromId(std::string_view id, Backend& out);
 enum class WasapiPeriod : uint8_t { Default, Minimum, Custom };
 
 // DSD output (docs/Plan.md §5.8, §6). Native falls back to DoP; PCM is used only when chosen here or when
-// Settings::convertDsdWhenUnsupported allows it after native/DoP failed. WASAPI has no native DSD; KS stores the
-// choice but plays DoP until native DSD on KS pins is verified.
+// Settings::convertDsdWhenUnsupported allows it after native/DoP failed. Only ASIO has native DSD; WASAPI and KS
+// (Windows defines no DSD format for either) read a stored Native as DoP.
 enum class DsdOutput : uint8_t { Native, Dop, Pcm };
 // DSD to PCM output rates (docs/Plan.md §6): 88.2, 176.4 (default) or 352.8 kHz.
 constexpr uint32_t kDsdPcmRates[] = {88200, 176400, 352800};

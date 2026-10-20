@@ -156,7 +156,7 @@ struct PinInfo {
     };
     std::vector<Range> ranges;
     // Audio data ranges that are neither PCM nor float. Windows defines no KS DSD subtype, so a vendor DSD format
-    // would appear here; native DSD stays disabled until one is verified (docs/Plan.md §5.7, §5.8).
+    // would appear here. It is only reported; KS plays DSD as DoP or PCM (docs/Plan.md §5.7, §5.8).
     std::vector<GUID> otherAudioFormats;
 };
 
@@ -294,7 +294,7 @@ public:
     }
 
     bool supports(const DeviceFormat& f) override {
-        if (f.type == SampleType::Dsd8) return false; // native DSD on KS pins is not enabled yet
+        if (f.type == SampleType::Dsd8) return false;
         std::lock_guard lock(capsMutex_);
         auto key = std::make_tuple(f.sampleRate, f.channels, int(f.type));
         if (auto it = caps_.find(key); it != caps_.end()) return it->second;
@@ -328,7 +328,7 @@ public:
 
     void open(const DeviceFormat& f, IRenderSource* source) override {
         close();
-        if (f.type == SampleType::Dsd8) throw Error(ErrorCode::FormatNotSupported, "native DSD on KS is not enabled");
+        if (f.type == SampleType::Dsd8) throw Error(ErrorCode::FormatNotSupported, "native DSD is not available on KS");
         fmt_ = f;
         source_ = source;
         quit_ = false;
@@ -434,8 +434,8 @@ void KsOutput::threadMain(std::promise<void>& opened) {
         return;
     }
     PinInfo pi = pinInfo(filter, pinId_);
-    nativeDsdNote_ = "native DSD: not enabled";
-    const char* separator = "; pin also offers ";
+    nativeDsdNote_ = "native DSD: not available on KS";
+    const char* separator = "; pin also lists non-PCM formats ";
     for (const GUID& g : pi.otherAudioFormats) {
         char text[40];
         const int length =

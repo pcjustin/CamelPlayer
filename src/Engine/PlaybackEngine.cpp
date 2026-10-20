@@ -44,7 +44,7 @@ uint32_t dsdPcmRate(const Settings& s) {
 }
 
 // How `src` reaches a device that takes what `supports` accepts under settings `s` (docs/Plan.md §5.3). DSD: the
-// configured raw path (ASIO native, else DoP; KS native DSD is not enabled yet and WASAPI has none), PCM only when
+// configured raw path (ASIO native, else DoP; WASAPI and KS have no native DSD), PCM only when
 // chosen or allowed as a fallback.
 std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool lossy,
                                   const std::function<bool(const DeviceFormat&)>& supports) {
