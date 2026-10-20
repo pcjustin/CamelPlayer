@@ -41,7 +41,21 @@ bool selectDevice(Settings& settings, Backend backend, const char* name) {
     return true;
 }
 
-void expectPlaying(PlaybackEngine& engine, Backend backend, DecoderKind decoder) {
+// When playback does not advance, a 3 s timeline shows whether it starts late or stays stuck.
+std::string stallTrace(PlaybackEngine& engine) {
+    std::string trace;
+    for (int i = 0; i < 30; i++) {
+        std::this_thread::sleep_for(100ms);
+        const auto s = engine.snapshot();
+        trace += " " + std::to_string(s.position) + (s.error ? "!" : "") + "/u" + std::to_string(s.underruns);
+    }
+    const auto s = engine.snapshot();
+    return "positions every 100 ms:" + trace + "; " + s.outputStatus.mode + ", " + s.outputStatus.detail + ", buffer " +
+           std::to_string(s.outputStatus.bufferFrames) + (s.error ? ", error " + s.errorDetail : "");
+}
+
+void expectPlaying(PlaybackEngine& engine, Backend backend, DecoderKind decoder, const char* phase) {
+    SCOPED_TRACE(phase);
     engine.waitIdle();
     auto snap = engine.snapshot();
     ASSERT_FALSE(snap.error) << snap.errorDetail;
@@ -56,7 +70,7 @@ void expectPlaying(PlaybackEngine& engine, Backend backend, DecoderKind decoder)
     std::this_thread::sleep_for(350ms);
     snap = engine.snapshot();
     EXPECT_FALSE(snap.error) << snap.errorDetail;
-    EXPECT_GT(snap.position, position);
+    EXPECT_GT(snap.position, position) << stallTrace(engine);
     EXPECT_EQ(snap.underruns, 0u);
 }
 } // namespace
@@ -82,7 +96,8 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     RecordProperty("decoder", decoderName(decoder));
     PlaybackEngine engine(settings);
     engine.openAndPlay(file);
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
+    ASSERT_NO_FATAL_FAILURE(
+        expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "start"));
     engine.pause();
     engine.waitIdle();
     ASSERT_EQ(engine.snapshot().state, PlayState::Paused);
@@ -91,18 +106,21 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     std::this_thread::sleep_for(150ms);
     EXPECT_EQ(engine.snapshot().position, pausedPosition);
     engine.play();
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
+    ASSERT_NO_FATAL_FAILURE(
+        expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "resume"));
     const uint64_t target = 10ull * engine.snapshot().source->sampleRate;
     engine.seek(target);
     engine.waitIdle();
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
+    ASSERT_NO_FATAL_FAILURE(
+        expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "seek"));
     EXPECT_GE(engine.snapshot().position, target);
     EXPECT_LT(engine.snapshot().position, target + 2ull * engine.snapshot().source->sampleRate);
     for (const auto nextDecoder : decodersFor(AudioFormat::Flac)) {
         settings.decoderByFormat[AudioFormat::Flac] = nextDecoder;
         const auto before = engine.snapshot().position;
         engine.applySettings(settings);
-        ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
+        ASSERT_NO_FATAL_FAILURE(
+            expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "decoder switch"));
         EXPECT_GE(engine.snapshot().position, before);
     }
     for (const auto nextRoute : routes) {
@@ -110,7 +128,8 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
         ASSERT_TRUE(selectDevice(settings, nextRoute.backend, route.device));
         const auto before = engine.snapshot().position;
         engine.applySettings(settings);
-        ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
+        ASSERT_NO_FATAL_FAILURE(
+            expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "backend switch"));
         EXPECT_GE(engine.snapshot().position, before);
     }
     engine.stop();
@@ -119,7 +138,8 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
     EXPECT_EQ(engine.snapshot().position, 0u);
     EXPECT_FALSE(engine.snapshot().output);
     engine.play();
-    ASSERT_NO_FATAL_FAILURE(expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac)));
+    ASSERT_NO_FATAL_FAILURE(
+        expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "replay"));
     engine.stop();
     engine.waitIdle();
 }

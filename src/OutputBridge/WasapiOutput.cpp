@@ -254,7 +254,12 @@ private:
                     }
                     if (SUCCEEDED(err)) err = client->Start();
                 } else {
+                    // Restart from an emptied buffer, primed again like the first start: after a plain Stop/Start the
+                    // Chord DAVE in exclusive event mode never signalled the buffer event again (playback stalled on
+                    // resume). This drops at most the one period still queued.
                     err = client->Stop();
+                    if (SUCCEEDED(err)) err = client->Reset();
+                    primed = false;
                 }
                 started = want;
                 applied_.notify(want);

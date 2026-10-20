@@ -577,7 +577,13 @@ private:
         if (playNow) {
             playing_ = true;
             rust_->play();
-            output_->start();
+            try {
+                output_->start();
+            } catch (const Error& e) {
+                if (plan_.dsd != DsdPath::Dop) throw;
+                // DoP is the user's choice; the other DSD paths stay their call (docs/Plan.md §5.3 item 4).
+                throw Error(e.code(), std::string(e.what()) + "; play this file as native DSD or DSD converted to PCM instead");
+            }
             setState(PlayState::Playing);
         } else {
             setState(PlayState::Paused);

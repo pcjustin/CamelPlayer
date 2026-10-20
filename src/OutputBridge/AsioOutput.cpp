@@ -129,7 +129,10 @@ public:
     void start() override {
         invoke([&] {
             if (buffersCreated_ && !started_) {
-                if (drv_->start() != ASE_OK) throw Error(ErrorCode::DriverError, "ASIOStart failed");
+                // Some drivers accept a rate in canSampleRate/setSampleRate that they cannot run (Chord ASIO at 1411.2 kHz).
+                if (drv_->start() != ASE_OK)
+                    throw Error(ErrorCode::DriverError,
+                                "ASIO driver accepted " + describe(fmt_) + " but could not start it (ASIOStart failed)");
                 started_ = true;
             }
         });
