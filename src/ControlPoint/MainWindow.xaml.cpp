@@ -47,6 +47,38 @@ Media::SolidColorBrush brush(uint8_t r, uint8_t g, uint8_t b) {
     return Media::SolidColorBrush(Windows::UI::Color{255, r, g, b});
 }
 
+std::vector<hstring> rateItems() {
+    std::vector<hstring> items{tr(L"Rate_FollowFile")};
+    for (uint32_t rate : kFixedRates) {
+        wchar_t text[32];
+        swprintf(text, 32, L"%.1f kHz", rate / 1000.0);
+        items.push_back(text);
+    }
+    return items;
+}
+
+int rateIndex(uint32_t rate) {
+    for (size_t i = 0; i < std::size(kFixedRates); i++)
+        if (kFixedRates[i] == rate) return int(i + 1);
+    return 0;
+}
+
+uint32_t rateAt(int index) {
+    return index > 0 && size_t(index) <= std::size(kFixedRates) ? kFixedRates[size_t(index) - 1] : 0;
+}
+
+void showTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, const PlaybackTiming& t) {
+    predecode.Value(t.predecodeSeconds);
+    silence.Value(t.formatChangeSilenceMs);
+    release.Value(t.releaseAfterPauseSeconds);
+}
+
+void readTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, PlaybackTiming& t) {
+    t.predecodeSeconds = uint32_t(std::clamp(numberOr(predecode, t.predecodeSeconds), 1.0, 60.0));
+    t.formatChangeSilenceMs = uint32_t(std::clamp(numberOr(silence, t.formatChangeSilenceMs), 0.0, 2000.0));
+    t.releaseAfterPauseSeconds = uint32_t(std::clamp(numberOr(release, t.releaseAfterPauseSeconds), 0.0, 3600.0));
+}
+
 } // namespace
 
 void MainWindow::InitializeComponent() {
@@ -135,10 +167,20 @@ void MainWindow::populateSettings() {
     WasapiPeriodBox().Value(settings_.wasapi.customPeriodMs);
     const std::vector<hstring> formats = {tr(L"Format_Auto"), L"16", L"24", L"24-in-32", L"32"};
     fill(WasapiFormatCombo(), formats, formatIndex(settings_.wasapi.sampleType));
+    const auto rates = rateItems();
+    const std::vector<hstring> tasks = {L"Pro Audio", L"Playback", tr(L"Mmcss_Disabled")};
+    const std::vector<hstring> priorities = {tr(L"Priority_Normal"), tr(L"Priority_High"), tr(L"Priority_Critical")};
+    fill(WasapiRateCombo(), rates, rateIndex(settings_.wasapi.fixedRate));
+    WasapiPollBufferBox().Value(settings_.wasapi.pollBufferMs);
+    fill(WasapiMmcssTaskCombo(), tasks, int(settings_.wasapi.mmcssTask));
+    fill(WasapiMmcssPriorityCombo(), priorities, int(settings_.wasapi.mmcssPriority));
+    showTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), settings_.wasapi.timing);
 
     AsioBufferBox().Value(double(settings_.asio.bufferSize));
     AsioLeftBox().Value(settings_.asio.outLeft + 1);
     AsioRightBox().Value(settings_.asio.outRight + 1);
+    fill(AsioRateCombo(), rates, rateIndex(settings_.asio.fixedRate));
+    showTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")},
          int(settings_.ks.mode));
@@ -146,6 +188,10 @@ void MainWindow::populateSettings() {
     KsPacketCountBox().Value(settings_.ks.packetCount);
     KsPacketMsBox().Value(settings_.ks.packetMs);
     fill(KsFormatCombo(), formats, formatIndex(settings_.ks.sampleType));
+    fill(KsRateCombo(), rates, rateIndex(settings_.ks.fixedRate));
+    fill(KsMmcssTaskCombo(), tasks, int(settings_.ks.mmcssTask));
+    fill(KsMmcssPriorityCombo(), priorities, int(settings_.ks.mmcssPriority));
+    showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
 
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
@@ -230,12 +276,19 @@ void MainWindow::readSettingsFromUi() {
     settings_.wasapi.period = WasapiPeriod(std::min(idx(WasapiPeriodCombo()), 2));
     settings_.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), settings_.wasapi.customPeriodMs);
     settings_.wasapi.sampleType = kFormatChoices[std::min(idx(WasapiFormatCombo()), 4)];
+    settings_.wasapi.fixedRate = rateAt(idx(WasapiRateCombo()));
+    settings_.wasapi.pollBufferMs = std::clamp(numberOr(WasapiPollBufferBox(), settings_.wasapi.pollBufferMs), 20.0, 2000.0);
+    settings_.wasapi.mmcssTask = MmcssTask(std::min(idx(WasapiMmcssTaskCombo()), 2));
+    settings_.wasapi.mmcssPriority = MmcssPriority(std::min(idx(WasapiMmcssPriorityCombo()), 2));
+    readTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), settings_.wasapi.timing);
 
     const int drv = idx(AsioDriverCombo());
     if (drv < int(asioDrivers_.size())) settings_.asio.driverClsid = asioDrivers_[size_t(drv)].id;
     settings_.asio.bufferSize = long(numberOr(AsioBufferBox(), double(settings_.asio.bufferSize)));
     settings_.asio.outLeft = int(numberOr(AsioLeftBox(), settings_.asio.outLeft + 1)) - 1;
     settings_.asio.outRight = int(numberOr(AsioRightBox(), settings_.asio.outRight + 1)) - 1;
+    settings_.asio.fixedRate = rateAt(idx(AsioRateCombo()));
+    readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     const int pin = idx(KsDeviceCombo());
     if (pin < int(ksPins_.size())) settings_.ks.deviceId = ksPins_[size_t(pin)].id;
@@ -244,6 +297,10 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.packetCount = int(numberOr(KsPacketCountBox(), settings_.ks.packetCount));
     settings_.ks.packetMs = numberOr(KsPacketMsBox(), settings_.ks.packetMs);
     settings_.ks.sampleType = kFormatChoices[std::min(idx(KsFormatCombo()), 4)];
+    settings_.ks.fixedRate = rateAt(idx(KsRateCombo()));
+    settings_.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
+    settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
+    readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
 }
 
 void MainWindow::settingsChanged() {
@@ -261,6 +318,8 @@ void MainWindow::updateBackendGroups() {
     AsioGroup().Visibility(settings_.backend == Backend::Asio ? Visibility::Visible : Visibility::Collapsed);
     KsGroup().Visibility(settings_.backend == Backend::Ks ? Visibility::Visible : Visibility::Collapsed);
     WasapiPeriodBox().IsEnabled(settings_.wasapi.period == WasapiPeriod::Custom);
+    WasapiRateCombo().IsEnabled(!settings_.wasapi.shared); // the mixer sets the rate in shared mode
+    WasapiPollBufferBox().IsEnabled(!settings_.wasapi.eventDriven);
 }
 
 void MainWindow::refreshFromServer() {

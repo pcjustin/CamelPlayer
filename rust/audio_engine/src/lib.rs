@@ -26,8 +26,9 @@ use ring::SpscByteRing;
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_RENDER_UNITS: u64 = 65_536;
 const MAX_PREFILL_FRAMES: u64 = 4_096;
-// The ring holds this much predecoded audio (matching the C++ reference engine) within a fixed memory limit.
-const PREBUFFER_SECONDS: u64 = 10;
+// The ring holds this much predecoded audio unless the configuration sets another amount, within a fixed memory
+// limit.
+const DEFAULT_PREBUFFER_MS: u64 = 10_000;
 const MAX_RING_BYTES: u64 = 64 << 20;
 
 pub const AUDIO_PCM: u32 = 1;
@@ -129,7 +130,8 @@ pub struct CamelEngineConfigV1 {
     pub resample_quality: u32,
     /// Nonzero permits DSD to PCM; without it a DSD source plays only as native DSD or DoP.
     pub allow_dsd_to_pcm: u32,
-    pub reserved: u32,
+    /// Predecoded audio the ring holds, in milliseconds; 0 means 10 s. Capped at 64 MiB.
+    pub prebuffer_ms: u32,
 }
 
 #[repr(C)]
@@ -480,9 +482,14 @@ fn validate_config(config: &CamelEngineConfigV1) -> Result<(AudioFormat, u64), E
     ))
 }
 
-// At least one maximal render request; otherwise PREBUFFER_SECONDS of audio, aligned to whole frames and capped
-// at MAX_RING_BYTES.
-fn ring_capacity(format: &AudioFormat, max_render_units: u64, rate_hz: u32) -> Option<usize> {
+// At least one maximal render request; otherwise `prebuffer_ms` (0: DEFAULT_PREBUFFER_MS) of audio, aligned to
+// whole frames and capped at MAX_RING_BYTES.
+fn ring_capacity(
+    format: &AudioFormat,
+    max_render_units: u64,
+    rate_hz: u32,
+    prebuffer_ms: u32,
+) -> Option<usize> {
     let align = |units: u64| {
         if format.stream_kind == AUDIO_DSD {
             units - units % 8
@@ -491,8 +498,13 @@ fn ring_capacity(format: &AudioFormat, max_render_units: u64, rate_hz: u32) -> O
         }
     };
     let minimum = format.required_bytes(align(max_render_units)).ok()?;
+    let milliseconds = match u64::from(prebuffer_ms) {
+        0 => DEFAULT_PREBUFFER_MS,
+        ms => ms,
+    };
     let prebuffer = u64::from(rate_hz)
-        .checked_mul(PREBUFFER_SECONDS)
+        .checked_mul(milliseconds)
+        .map(|units| units / 1000)
         .and_then(|units| format.required_bytes(align(units)).ok())
         .unwrap_or(u64::MAX);
     let block = format.required_bytes(8).ok()?.max(1);
@@ -517,11 +529,15 @@ pub unsafe extern "C" fn camel_engine_create_v1(
         *out_engine = ptr::null_mut();
         match validate_config(&*config) {
             Ok((format, max_render_units)) => {
-                let ring_capacity =
-                    match ring_capacity(&format, max_render_units, (*config).format.rate_hz) {
-                        Some(capacity) => capacity,
-                        None => return ENGINE_E_LIMIT_EXCEEDED,
-                    };
+                let ring_capacity = match ring_capacity(
+                    &format,
+                    max_render_units,
+                    (*config).format.rate_hz,
+                    (*config).prebuffer_ms,
+                ) {
+                    Some(capacity) => capacity,
+                    None => return ENGINE_E_LIMIT_EXCEEDED,
+                };
                 let ring = match SpscByteRing::new(ring_capacity) {
                     Ok(ring) => ring,
                     Err(()) => return ENGINE_E_LIMIT_EXCEEDED,
@@ -1842,7 +1858,7 @@ mod tests {
             allow_conversion: 0,
             resample_quality: QUALITY_HIGH,
             allow_dsd_to_pcm: 0,
-            reserved: 0,
+            prebuffer_ms: 0,
         }
     }
 
@@ -2698,15 +2714,23 @@ mod tests {
     fn ring_holds_the_prebuffer_within_the_memory_limit() {
         let pcm = AudioFormat::from_abi(&format(AUDIO_PCM, SAMPLE_S24_LE, 24, 24)).unwrap();
         assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000),
+            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000, 0),
             Some(96_000 * 10 * 6)
         );
         assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 768_000 * 4),
+            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000, 30_000),
+            Some(96_000 * 30 * 6)
+        );
+        assert_eq!(
+            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000, 1_000),
+            Some(96_000 * 6)
+        );
+        assert_eq!(
+            ring_capacity(&pcm, MAX_RENDER_UNITS, 768_000 * 4, 0),
             Some((MAX_RING_BYTES - MAX_RING_BYTES % (8 * 6)) as usize)
         );
         assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 1),
+            ring_capacity(&pcm, MAX_RENDER_UNITS, 1, 0),
             Some(MAX_RENDER_UNITS as usize * 6)
         );
     }

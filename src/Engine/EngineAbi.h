@@ -106,7 +106,7 @@ typedef struct CamelEngineConfigV1 {
     uint32_t allow_conversion; // nonzero permits resampling, downmix and bit reduction
     uint32_t resample_quality; // CAMEL_RESAMPLE_*
     uint32_t allow_dsd_to_pcm; // nonzero permits DSD to PCM; otherwise DSD plays only as native DSD or DoP
-    uint32_t reserved;
+    uint32_t prebuffer_ms;     // predecoded audio the ring holds; 0 = 10 s; capped at 64 MiB
 } CamelEngineConfigV1;
 
 typedef struct CamelCommandStampV1 {

@@ -43,7 +43,7 @@ std::vector<SampleType> bitPerfectCandidates(uint32_t bits) {
 }
 
 std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std::optional<SampleType> fixedType, bool convert,
-                                          const std::function<bool(const DeviceFormat&)>& deviceSupports) {
+                                          const std::function<bool(const DeviceFormat&)>& deviceSupports, uint32_t fixedRate) {
     if (!src.sampleRate || !src.channels || src.channels > 8 || (src.channels > 2 && !convert) || !src.bitsPerSample ||
         src.bitsPerSample > 32)
         return std::nullopt;
@@ -53,7 +53,7 @@ std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std
         for (SampleType t : {SampleType::Int24In32, SampleType::Int24, SampleType::Int16})
             if (containerBits(t) < src.bitsPerSample && std::find(types.begin(), types.end(), t) == types.end())
                 types.push_back(t);
-    for (uint32_t rate : candidateRates(src.sampleRate, convert))
+    for (uint32_t rate : fixedRate ? std::vector<uint32_t>{fixedRate} : candidateRates(src.sampleRate, convert))
         for (SampleType t : types) {
             if (fixedType && t != *fixedType) continue;
             const DeviceFormat f{rate, 2, t};

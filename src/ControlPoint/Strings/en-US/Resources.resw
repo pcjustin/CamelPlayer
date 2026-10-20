@@ -60,7 +60,19 @@
   <data name="Settings_KsPacketCount.Header" xml:space="preserve"><value>Packets (standard streaming)</value></data>
   <data name="Settings_KsPacketMs.Header" xml:space="preserve"><value>Packet length (ms)</value></data>
   <data name="Settings_KsNote.Text" xml:space="preserve"><value>While Kernel Streaming holds the device, Windows and other apps cannot play through it (system sounds included).</value></data>
-  <data name="Settings_Fixed.Text" xml:space="preserve"><value>Fixed in the MVP: MMCSS task "Pro Audio", 10 s pre-decode. Changes apply immediately and playback continues from the current position.</value></data>
+  <data name="Settings_FixedRate.Header" xml:space="preserve"><value>Sample rate</value></data>
+  <data name="Rate_FollowFile" xml:space="preserve"><value>Follow the file</value></data>
+  <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>Polling buffer (ms)</value></data>
+  <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS task</value></data>
+  <data name="Mmcss_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Settings_MmcssPriority.Header" xml:space="preserve"><value>MMCSS priority</value></data>
+  <data name="Priority_Normal" xml:space="preserve"><value>Normal</value></data>
+  <data name="Priority_High" xml:space="preserve"><value>High</value></data>
+  <data name="Priority_Critical" xml:space="preserve"><value>Critical</value></data>
+  <data name="Settings_Predecode.Header" xml:space="preserve"><value>Pre-decode (s)</value></data>
+  <data name="Settings_FormatSilence.Header" xml:space="preserve"><value>Silence after a format change (ms)</value></data>
+  <data name="Settings_ReleaseAfterPause.Header" xml:space="preserve"><value>Release the device after pausing (s, 0 = never)</value></data>
+  <data name="Settings_ApplyNote.Text" xml:space="preserve"><value>Changes apply immediately; output changes reopen the device and continue from the current position. A fixed sample rate resamples PCM files to it (shown as processed); DSD keeps its own path. Pre-decode applies from the next stream.</value></data>
   <data name="Settings_Refresh.Content" xml:space="preserve"><value>Refresh device lists</value></data>
   <data name="Settings_Status.Text" xml:space="preserve"><value>Status</value></data>
   <data name="Settings_Interface.Text" xml:space="preserve"><value>Interface</value></data>

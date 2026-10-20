@@ -85,6 +85,25 @@ Settings settingsFromArgs(const Args& args) {
         s.wasapi.sampleType = t;
         s.ks.sampleType = t;
     }
+    if (auto v = option(args, L"--rate")) s.wasapi.fixedRate = s.asio.fixedRate = s.ks.fixedRate = std::stoul(*v);
+    if (auto v = option(args, L"--poll-buffer")) s.wasapi.pollBufferMs = std::stod(*v);
+    if (auto v = option(args, L"--mmcss")) {
+        const MmcssTask t = *v == L"playback"   ? MmcssTask::Playback
+                            : *v == L"disabled" ? MmcssTask::Disabled
+                                                : MmcssTask::ProAudio;
+        s.wasapi.mmcssTask = s.ks.mmcssTask = t;
+    }
+    if (auto v = option(args, L"--mmcss-priority")) {
+        const MmcssPriority p = *v == L"normal"     ? MmcssPriority::Normal
+                                : *v == L"critical" ? MmcssPriority::Critical
+                                                    : MmcssPriority::High;
+        s.wasapi.mmcssPriority = s.ks.mmcssPriority = p;
+    }
+    for (PlaybackTiming* t : {&s.wasapi.timing, &s.asio.timing, &s.ks.timing}) {
+        if (auto v = option(args, L"--predecode")) t->predecodeSeconds = std::stoul(*v);
+        if (auto v = option(args, L"--silence")) t->formatChangeSilenceMs = std::stoul(*v);
+        if (auto v = option(args, L"--release")) t->releaseAfterPauseSeconds = std::stoul(*v);
+    }
     return s;
 }
 
@@ -119,7 +138,9 @@ int cmdPlay(const Args& args) {
             "usage: play <file.flac> [--backend wasapi|asio|ks] [--decoder id] [--device n|id] [--ks-mode "
             "auto|rtevent|rtpoll|standard]\n"
             "            [--format 16|24|24in32|32] [--shared 0|1] [--dsd native|dop|pcm] [--dsd-rate 88200|176400|352800]\n"
-            "            [--convert-dsd 0|1] [--seconds N] [--seek S]");
+            "            [--convert-dsd 0|1] [--rate Hz] [--poll-buffer ms] [--mmcss proaudio|playback|disabled]\n"
+            "            [--mmcss-priority normal|high|critical] [--predecode s] [--silence ms] [--release s]\n"
+            "            [--seconds N] [--seek S]");
         return 2;
     }
     Settings s = settingsFromArgs(args);

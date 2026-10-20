@@ -14,6 +14,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/Mmcss.h"
 #include "OutputBridge/OutputChoices.h"
 
 #pragma comment(lib, "setupapi.lib")
@@ -391,6 +392,7 @@ private:
     void setStatus(const char* mode, uint32_t frames, const std::string& detail, std::vector<std::string> adjustments = {}) {
         std::lock_guard lock(statusMutex_);
         status_.adjustments = std::move(adjustments);
+        if (!mmcssAdjustment_.empty()) status_.adjustments.push_back(mmcssAdjustment_);
         status_.mode = mode;
         status_.bufferFrames = frames;
         status_.detail = detail + ", " + nativeDsdNote_;
@@ -416,7 +418,8 @@ private:
     bool applied_ = false, threadDone_ = false;
     mutable std::mutex statusMutex_;
     OutputStatus status_;
-    std::string nativeDsdNote_; // KS thread, before setStatus
+    std::string nativeDsdNote_;   // KS thread, before setStatus
+    std::string mmcssAdjustment_; // KS thread, before setStatus
     std::mutex capsMutex_;
     std::map<std::tuple<uint32_t, uint32_t, int>, bool> caps_;
 };
@@ -457,19 +460,20 @@ void KsOutput::threadMain(std::promise<void>& opened) {
         return;
     }
     timeBeginPeriod(1);
-    DWORD task = 0;
-    HANDLE av = AvSetMmThreadCharacteristicsW(kMmcssTask, &task);
-    if (looped) {
-        bool notify = cfg_.mode != KsMode::WaveRtPoll;
-        runWaveRt(pin, notify, opened);
-    } else {
-        runStandard(pin, opened);
+    {
+        const MmcssScope mmcss(cfg_.mmcssTask, cfg_.mmcssPriority);
+        mmcssAdjustment_ = mmcss.adjustment();
+        if (looped) {
+            bool notify = cfg_.mode != KsMode::WaveRtPoll;
+            runWaveRt(pin, notify, opened);
+        } else {
+            runStandard(pin, opened);
+        }
+        setState(pin, KSSTATE_PAUSE);
+        setState(pin, KSSTATE_ACQUIRE);
+        setState(pin, KSSTATE_STOP);
+        CloseHandle(pin);
     }
-    setState(pin, KSSTATE_PAUSE);
-    setState(pin, KSSTATE_ACQUIRE);
-    setState(pin, KSSTATE_STOP);
-    CloseHandle(pin);
-    if (av) AvRevertMmThreadCharacteristics(av);
     timeEndPeriod(1);
     std::lock_guard lock(cmdMutex_);
     threadDone_ = true;

@@ -14,16 +14,16 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #include "OutputBridge/WaveFormat.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/Mmcss.h"
 #include "OutputBridge/OutputChoices.h"
 
 namespace camel::audio {
 namespace {
-
-constexpr REFERENCE_TIME kPollBuffer = 2'000'000; // 200 ms (docs/Plan.md §6 default)
 
 wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     auto en = wil::CoCreateInstance<MMDeviceEnumerator, IMMDeviceEnumerator>(CLSCTX_ALL);
@@ -174,15 +174,25 @@ private:
                                                            : defP;
             if (!cfg_.shared && cfg_.period == WasapiPeriod::Custom && custom < minP)
                 adjustments.push_back(requestedVsActive("WASAPI period", ms(custom), ms(minP) + " (device minimum)"));
+            // The polling thread wakes every half period; the buffer holds at least four periods.
+            const auto requestedPoll = REFERENCE_TIME(cfg_.pollBufferMs * 10000);
+            bool pollNoted = false;
+            const auto pollBuffer = [&] {
+                const REFERENCE_TIME active = std::max(requestedPoll, period * 4);
+                if (!cfg_.shared && !cfg_.eventDriven && active != requestedPoll && !std::exchange(pollNoted, true))
+                    adjustments.push_back(
+                        requestedVsActive("WASAPI polling buffer", ms(requestedPoll), ms(active) + " (four device periods)"));
+                return active;
+            };
             WAVEFORMATEXTENSIBLE wf = makeWaveFormat(fmt_);
             const DWORD flags = cfg_.eventDriven ? AUDCLNT_STREAMFLAGS_EVENTCALLBACK : 0;
             HRESULT hr = S_OK;
             if (cfg_.shared) {
                 period = defP; // the engine's period; shared streams cannot choose one
                 hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-                                        cfg_.eventDriven ? 0 : kPollBuffer, 0, &wf.Format, nullptr);
+                                        cfg_.eventDriven ? 0 : requestedPoll, 0, &wf.Format, nullptr);
             } else {
-                const REFERENCE_TIME dur = cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4);
+                const REFERENCE_TIME dur = cfg_.eventDriven ? period : pollBuffer();
                 hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, dur, cfg_.eventDriven ? period : 0, &wf.Format,
                                         nullptr);
             }
@@ -202,8 +212,7 @@ private:
                 period = defP;
                 client.reset();
                 THROW_IF_FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
-                hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags,
-                                        cfg_.eventDriven ? period : std::max(kPollBuffer, period * 4),
+                hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, flags, cfg_.eventDriven ? period : pollBuffer(),
                                         cfg_.eventDriven ? period : 0, &wf.Format, nullptr);
             }
             if (FAILED(hr)) throw hrError("IAudioClient::Initialize", hr);
@@ -230,8 +239,11 @@ private:
             return;
         }
 
-        DWORD task = 0;
-        HANDLE av = AvSetMmThreadCharacteristicsW(kMmcssTask, &task);
+        const MmcssScope mmcss(cfg_.mmcssTask, cfg_.mmcssPriority);
+        if (!mmcss.adjustment().empty()) {
+            std::lock_guard lock(statusMutex_);
+            status_.adjustments.push_back(mmcss.adjustment());
+        }
         const UINT32 bpf = fmt_.bytesPerFrame();
         bool started = false, primed = false;
         int timeouts = 0;
@@ -297,7 +309,6 @@ private:
             }
         }
         if (started) client->Stop();
-        if (av) AvRevertMmThreadCharacteristics(av);
         if (FAILED(err)) {
             log::error("wasapi: stream failed 0x%08lX", (unsigned long)err);
             applied_.notify(running_);

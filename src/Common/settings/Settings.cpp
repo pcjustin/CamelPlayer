@@ -124,6 +124,51 @@ static WasapiPeriod periodFromId(std::string_view id) {
     return id == "minimum" ? WasapiPeriod::Minimum : id == "custom" ? WasapiPeriod::Custom : WasapiPeriod::Default;
 }
 
+const wchar_t* mmcssTaskName(MmcssTask t) {
+    return t == MmcssTask::ProAudio ? L"Pro Audio" : t == MmcssTask::Playback ? L"Playback" : nullptr;
+}
+
+static const char* mmcssTaskId(MmcssTask t) {
+    return t == MmcssTask::Playback ? "playback" : t == MmcssTask::Disabled ? "disabled" : "proaudio";
+}
+static MmcssTask mmcssTaskFromId(std::string_view id) {
+    return id == "playback" ? MmcssTask::Playback : id == "disabled" ? MmcssTask::Disabled : MmcssTask::ProAudio;
+}
+static const char* mmcssPriorityId(MmcssPriority p) {
+    return p == MmcssPriority::Normal ? "normal" : p == MmcssPriority::Critical ? "critical" : "high";
+}
+static MmcssPriority mmcssPriorityFromId(std::string_view id) {
+    return id == "normal" ? MmcssPriority::Normal : id == "critical" ? MmcssPriority::Critical : MmcssPriority::High;
+}
+
+static uint32_t fixedRateFrom(double rate) {
+    for (uint32_t r : kFixedRates)
+        if (rate == r) return r;
+    return 0;
+}
+
+static json timingJson(const PlaybackTiming& t) {
+    return {{"predecodeSeconds", t.predecodeSeconds},
+            {"formatChangeSilenceMs", t.formatChangeSilenceMs},
+            {"releaseAfterPauseSeconds", t.releaseAfterPauseSeconds}};
+}
+
+uint32_t fixedRate(const Settings& s) {
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return s.wasapi.shared ? 0 : s.wasapi.fixedRate;
+    case Backend::Asio:
+        return s.asio.fixedRate;
+    case Backend::Ks:
+        return s.ks.fixedRate;
+    }
+    return 0;
+}
+
+const PlaybackTiming& timing(const Settings& s) {
+    return s.backend == Backend::Asio ? s.asio.timing : s.backend == Backend::Ks ? s.ks.timing : s.wasapi.timing;
+}
+
 audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format) {
     return choices[format].value_or(audio::defaultDecoder(format));
 }
@@ -157,13 +202,20 @@ std::string toJson(const Settings& s) {
                    {"customPeriodMs", s.wasapi.customPeriodMs},
                    {"sampleType", s.wasapi.sampleType ? sampleTypeId(*s.wasapi.sampleType) : ""},
                    {"dsdOutput", dsdOutputId(s.wasapi.dsdOutput)},
-                   {"dsdPcmRate", s.wasapi.dsdPcmRate}};
+                   {"dsdPcmRate", s.wasapi.dsdPcmRate},
+                   {"fixedRate", s.wasapi.fixedRate},
+                   {"pollBufferMs", s.wasapi.pollBufferMs},
+                   {"mmcssTask", mmcssTaskId(s.wasapi.mmcssTask)},
+                   {"mmcssPriority", mmcssPriorityId(s.wasapi.mmcssPriority)}};
+    j["wasapi"].update(timingJson(s.wasapi.timing));
     j["asio"] = {{"driver", s.asio.driverClsid},
                  {"bufferSize", s.asio.bufferSize},
                  {"outLeft", s.asio.outLeft},
                  {"outRight", s.asio.outRight},
                  {"dsdOutput", dsdOutputId(s.asio.dsdOutput)},
-                 {"dsdPcmRate", s.asio.dsdPcmRate}};
+                 {"dsdPcmRate", s.asio.dsdPcmRate},
+                 {"fixedRate", s.asio.fixedRate}};
+    j["asio"].update(timingJson(s.asio.timing));
     j["ks"] = {{"device", s.ks.deviceId},
                {"mode", ksModeId(s.ks.mode)},
                {"bufferMs", s.ks.bufferMs},
@@ -171,7 +223,11 @@ std::string toJson(const Settings& s) {
                {"packetMs", s.ks.packetMs},
                {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""},
                {"dsdOutput", dsdOutputId(s.ks.dsdOutput)},
-               {"dsdPcmRate", s.ks.dsdPcmRate}};
+               {"dsdPcmRate", s.ks.dsdPcmRate},
+               {"fixedRate", s.ks.fixedRate},
+               {"mmcssTask", mmcssTaskId(s.ks.mmcssTask)},
+               {"mmcssPriority", mmcssPriorityId(s.ks.mmcssPriority)}};
+    j["ks"].update(timingJson(s.ks.timing));
     return j.dump(2);
 }
 
@@ -196,6 +252,11 @@ Settings fromJson(const std::string& text) {
     };
     auto boolean = [](const json& o, const char* k, bool def) {
         return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
+    };
+    auto readTiming = [&](const json& o, PlaybackTiming& t) {
+        t.predecodeSeconds = uint32_t(integer(o, "predecodeSeconds", 10, 1, 60));
+        t.formatChangeSilenceMs = uint32_t(integer(o, "formatChangeSilenceMs", 0, 0, 2000));
+        t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", 60, 0, 3600));
     };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
     // A choice survives only when that decoder is integrated for that format.
@@ -235,6 +296,11 @@ Settings fromJson(const std::string& text) {
         s.wasapi.dsdOutput = dsdOutputFromId(str(w, "dsdOutput", ""), DsdOutput::Dop);
         if (s.wasapi.dsdOutput == DsdOutput::Native) s.wasapi.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
         s.wasapi.dsdPcmRate = dsdPcmRateFrom(num(w, "dsdPcmRate", 176400, 0, 1e7));
+        s.wasapi.fixedRate = fixedRateFrom(num(w, "fixedRate", 0, 0, 1e7));
+        s.wasapi.pollBufferMs = num(w, "pollBufferMs", 200.0, 20.0, 2000.0);
+        s.wasapi.mmcssTask = mmcssTaskFromId(str(w, "mmcssTask", ""));
+        s.wasapi.mmcssPriority = mmcssPriorityFromId(str(w, "mmcssPriority", ""));
+        readTiming(w, s.wasapi.timing);
     }
     if (j.contains("asio") && j["asio"].is_object()) {
         const json& a = j["asio"];
@@ -244,6 +310,8 @@ Settings fromJson(const std::string& text) {
         s.asio.outRight = integer(a, "outRight", 1, 0, 63);
         s.asio.dsdOutput = dsdOutputFromId(str(a, "dsdOutput", ""), DsdOutput::Native);
         s.asio.dsdPcmRate = dsdPcmRateFrom(num(a, "dsdPcmRate", 176400, 0, 1e7));
+        s.asio.fixedRate = fixedRateFrom(num(a, "fixedRate", 0, 0, 1e7));
+        readTiming(a, s.asio.timing);
     }
     if (j.contains("ks") && j["ks"].is_object()) {
         const json& k = j["ks"];
@@ -256,6 +324,10 @@ Settings fromJson(const std::string& text) {
         s.ks.dsdOutput = dsdOutputFromId(str(k, "dsdOutput", ""), DsdOutput::Dop);
         if (s.ks.dsdOutput == DsdOutput::Native) s.ks.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
         s.ks.dsdPcmRate = dsdPcmRateFrom(num(k, "dsdPcmRate", 176400, 0, 1e7));
+        s.ks.fixedRate = fixedRateFrom(num(k, "fixedRate", 0, 0, 1e7));
+        s.ks.mmcssTask = mmcssTaskFromId(str(k, "mmcssTask", ""));
+        s.ks.mmcssPriority = mmcssPriorityFromId(str(k, "mmcssPriority", ""));
+        readTiming(k, s.ks.timing);
     }
     return s;
 }

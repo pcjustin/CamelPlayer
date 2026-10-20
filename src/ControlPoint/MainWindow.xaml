@@ -75,6 +75,17 @@
                             <NumberBox x:Name="WasapiPeriodBox" x:Uid="Settings_PeriodMs" Width="200" HorizontalAlignment="Left" Minimum="1" Maximum="500"
                                        SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                             <ComboBox x:Name="WasapiFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="WasapiRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                            <NumberBox x:Name="WasapiPollBufferBox" x:Uid="Settings_PollBuffer" Width="200" HorizontalAlignment="Left" Minimum="20" Maximum="2000"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <ComboBox x:Name="WasapiMmcssTaskCombo" x:Uid="Settings_MmcssTask" Width="360" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="WasapiMmcssPriorityCombo" x:Uid="Settings_MmcssPriority" Width="360" SelectionChanged="OnSettingChanged" />
+                            <NumberBox x:Name="WasapiPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <NumberBox x:Name="WasapiSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <NumberBox x:Name="WasapiReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                         </StackPanel>
 
                         <StackPanel x:Name="AsioGroup" Spacing="12">
@@ -89,6 +100,13 @@
                                 <NumberBox x:Name="AsioRightBox" x:Uid="Settings_AsioRight" Width="160" Minimum="1" Maximum="64"
                                            SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                             </StackPanel>
+                            <ComboBox x:Name="AsioRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                            <NumberBox x:Name="AsioPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <NumberBox x:Name="AsioSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <NumberBox x:Name="AsioReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                         </StackPanel>
 
                         <StackPanel x:Name="KsGroup" Spacing="12">
@@ -104,10 +122,19 @@
                                            SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                             </StackPanel>
                             <ComboBox x:Name="KsFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="KsRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="KsMmcssTaskCombo" x:Uid="Settings_MmcssTask" Width="360" SelectionChanged="OnSettingChanged" />
+                            <ComboBox x:Name="KsMmcssPriorityCombo" x:Uid="Settings_MmcssPriority" Width="360" SelectionChanged="OnSettingChanged" />
+                            <NumberBox x:Name="KsPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <NumberBox x:Name="KsSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                            <NumberBox x:Name="KsReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                             <TextBlock x:Uid="Settings_KsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
 
-                        <TextBlock x:Uid="Settings_Fixed" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
 
                         <TextBlock x:Uid="Settings_Status" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />

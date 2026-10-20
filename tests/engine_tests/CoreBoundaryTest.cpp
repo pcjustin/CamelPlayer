@@ -285,6 +285,16 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         settings.wasapi = {"endpoint", true, ResampleQuality::Quick, false, WasapiPeriod::Custom, 12.5, SampleType::Int24In32};
         settings.asio = {"driver", 1024, 2, 3, DsdOutput::Dop};
         settings.ks = {"filter|1", mode, 30, 8, 15, SampleType::Int32, DsdOutput::Pcm};
+        settings.wasapi.fixedRate = 96000;
+        settings.wasapi.pollBufferMs = 50;
+        settings.wasapi.mmcssTask = MmcssTask::Playback;
+        settings.wasapi.mmcssPriority = MmcssPriority::Critical;
+        settings.wasapi.timing = {20, 500, 0};
+        settings.asio.fixedRate = 352800;
+        settings.asio.timing = {1, 2000, 3600};
+        settings.ks.mmcssTask = MmcssTask::Disabled;
+        settings.ks.mmcssPriority = MmcssPriority::Normal;
+        settings.ks.timing = {60, 0, 30};
         saveSettings(settings, file);
         EXPECT_EQ(toJson(loadSettings(file)), toJson(settings));
         settings.language = "en-US";
@@ -293,6 +303,35 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(file).concat(L".tmp")));
     }
     std::filesystem::remove(file);
+}
+
+TEST(SettingsBoundary, OutputParametersDefaultAndRejectInvalidValues) {
+    const Settings defaults;
+    for (const PlaybackTiming* t : {&defaults.wasapi.timing, &defaults.asio.timing, &defaults.ks.timing})
+        EXPECT_EQ(*t, (PlaybackTiming{10, 0, 60}));
+    EXPECT_EQ(defaults.wasapi.fixedRate, 0u);
+    EXPECT_EQ(defaults.wasapi.pollBufferMs, 200.0);
+    EXPECT_EQ(defaults.wasapi.mmcssTask, MmcssTask::ProAudio);
+    EXPECT_EQ(defaults.wasapi.mmcssPriority, MmcssPriority::High);
+    EXPECT_EQ(defaults.ks.mmcssPriority, MmcssPriority::High);
+    const auto parsed = fromJson(R"({"backend":"ks",
+        "wasapi":{"fixedRate":12345,"pollBufferMs":5,"mmcssTask":"games","mmcssPriority":"low",
+                  "predecodeSeconds":0,"formatChangeSilenceMs":2001,"releaseAfterPauseSeconds":-1},
+        "asio":{"fixedRate":"48000","predecodeSeconds":2.5},
+        "ks":{"fixedRate":768000,"mmcssTask":"playback","mmcssPriority":"critical","releaseAfterPauseSeconds":0}})");
+    EXPECT_EQ(parsed.wasapi.fixedRate, 0u);
+    EXPECT_EQ(parsed.wasapi.pollBufferMs, 200.0);
+    EXPECT_EQ(parsed.wasapi.mmcssTask, MmcssTask::ProAudio);
+    EXPECT_EQ(parsed.wasapi.mmcssPriority, MmcssPriority::High);
+    EXPECT_EQ(parsed.wasapi.timing, (PlaybackTiming{10, 0, 60}));
+    EXPECT_EQ(parsed.asio.fixedRate, 0u);
+    EXPECT_EQ(parsed.asio.timing.predecodeSeconds, 10u);
+    EXPECT_EQ(parsed.ks.fixedRate, 768000u);
+    EXPECT_EQ(parsed.ks.mmcssTask, MmcssTask::Playback);
+    EXPECT_EQ(parsed.ks.mmcssPriority, MmcssPriority::Critical);
+    EXPECT_EQ(parsed.ks.timing.releaseAfterPauseSeconds, 0u);
+    EXPECT_EQ(fixedRate(parsed), 768000u);
+    EXPECT_EQ(&timing(parsed), &parsed.ks.timing);
 }
 
 TEST(SettingsBoundary, DsdOutputDefaultsToNativeOnAsioAndDopOnKs) {

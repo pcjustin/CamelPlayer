@@ -30,6 +30,22 @@ const char* dsdOutputId(DsdOutput d);
 enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
 const char* resampleQualityId(ResampleQuality q);
 
+// Fixed output rates (docs/Plan.md §6): 0 follows the file.
+constexpr uint32_t kFixedRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000};
+
+enum class MmcssTask : uint8_t { ProAudio, Playback, Disabled };
+enum class MmcssPriority : uint8_t { Normal, High, Critical };
+const wchar_t* mmcssTaskName(MmcssTask t); // nullptr for Disabled
+
+// Engine behavior each backend keeps its own copy of (docs/Plan.md §6). Changing it never reopens a playing stream;
+// it applies from the next stream (predecode) or the next pause / format change.
+struct PlaybackTiming {
+    uint32_t predecodeSeconds = 10;
+    uint32_t formatChangeSilenceMs = 0;
+    uint32_t releaseAfterPauseSeconds = 60; // 0 = never
+    bool operator==(const PlaybackTiming&) const = default;
+};
+
 struct WasapiSettings {
     std::string deviceId; // endpoint id (UTF-8); empty = follow the Windows default device
     // Shared mode plays through the Windows mixer: always converted to its mix format and shown as processed. Choosing
@@ -42,6 +58,12 @@ struct WasapiSettings {
     std::optional<audio::SampleType> sampleType; // nullopt = automatic
     DsdOutput dsdOutput = DsdOutput::Dop;
     uint32_t dsdPcmRate = 176400;
+    // Exclusive mode only; choosing a rate is the permission to resample PCM to it (raw DSD is never resampled).
+    uint32_t fixedRate = 0;
+    double pollBufferMs = 200.0;
+    MmcssTask mmcssTask = MmcssTask::ProAudio;
+    MmcssPriority mmcssPriority = MmcssPriority::High;
+    PlaybackTiming timing;
     bool operator==(const WasapiSettings&) const = default;
 };
 
@@ -51,6 +73,8 @@ struct AsioSettings {
     int outLeft = 0, outRight = 1;
     DsdOutput dsdOutput = DsdOutput::Native;
     uint32_t dsdPcmRate = 176400;
+    uint32_t fixedRate = 0;
+    PlaybackTiming timing;
     bool operator==(const AsioSettings&) const = default;
 };
 
@@ -66,6 +90,10 @@ struct KsSettings {
     std::optional<audio::SampleType> sampleType;
     DsdOutput dsdOutput = DsdOutput::Dop;
     uint32_t dsdPcmRate = 176400;
+    uint32_t fixedRate = 0;
+    MmcssTask mmcssTask = MmcssTask::ProAudio;
+    MmcssPriority mmcssPriority = MmcssPriority::High;
+    PlaybackTiming timing;
     bool operator==(const KsSettings&) const = default;
 };
 
@@ -103,8 +131,9 @@ struct Settings {
     std::wstring lastFile;
 };
 
-// Fixed in the MVP (docs/Plan.md §16.4).
-constexpr const wchar_t* kMmcssTask = L"Pro Audio";
+// The selected backend's fixed rate (0: follow the file) and timing.
+uint32_t fixedRate(const Settings& s);
+const PlaybackTiming& timing(const Settings& s);
 
 std::filesystem::path dataDirectory(); // %LOCALAPPDATA%\CamelPlayer (created on demand)
 std::filesystem::path settingsPath();

@@ -36,10 +36,11 @@ std::vector<SampleType> bitPerfectCandidates(uint32_t bits);
 // Rates are tried in order: the source rate, then with `convert` the lowest same-family rate at or above it, the
 // lowest other-family rate at or above it, and the highest rate. Each rate tries containers that carry the source
 // depth, then float32, then with `convert` a smaller depth. Output is always stereo: mono is duplicated, more channels
-// need `convert`. `fixedType` (from settings) restricts the container. `lossy` marks a float decode (AAC/MP3).
-// Returns nullopt when nothing fits; the caller then skips the track and tells the user.
+// need `convert`. `fixedType` (from settings) restricts the container. `lossy` marks a float decode (AAC/MP3). A
+// nonzero `fixedRate` is the only rate tried, resampled without `convert`. Returns nullopt when nothing fits; the
+// caller then skips the track and tells the user.
 std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std::optional<SampleType> fixedType, bool convert,
-                                          const std::function<bool(const DeviceFormat&)>& deviceSupports);
+                                          const std::function<bool(const DeviceFormat&)>& deviceSupports, uint32_t fixedRate = 0);
 
 // Raw DSD (`src` from the DSD Nexus decoder: byte frames, 1 bit per sample), docs/Plan.md §5.3 item 4: native DSD
 // when `native` is requested and the device takes it, else DoP at DSD rate / 16 in a 24-bit, 24-in-32 or 32-bit

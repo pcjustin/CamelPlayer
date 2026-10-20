@@ -23,9 +23,11 @@ public:
     };
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,
-    // decode to the depth `pcmBits` sets. `dsd` makes the stream native DSD or DoP. Throws Error on failure.
+    // decode to the depth `pcmBits` sets. `dsd` makes the stream native DSD or DoP. The Engine predecodes up to
+    // `predecodeSeconds` (within its memory limit). Throws Error on failure.
     RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd = DsdPath::None);
+                const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd = DsdPath::None,
+                uint32_t predecodeSeconds = 10);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;

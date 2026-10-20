@@ -116,7 +116,7 @@ void destroy(CamelEngine* engine) noexcept {
 } // namespace
 
 RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                         const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd)
+                         const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd, uint32_t predecodeSeconds)
     : pcmBits_(pcmBits), host_(makeDecoderHostV1(&pcmBits_)), raw_(dsd == DsdPath::Native || dsd == DsdPath::Dop),
       unitsPerFrame_(dsd == DsdPath::Native ? 8 : 1) {
     command_.struct_size = sizeof(command_);
@@ -125,10 +125,9 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
     const uint32_t quality = conversion.quality == ResampleQuality::Quick      ? CAMEL_RESAMPLE_QUICK
                              : conversion.quality == ResampleQuality::VeryHigh ? CAMEL_RESAMPLE_VERY_HIGH
                                                                                : CAMEL_RESAMPLE_HIGH;
-    const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1),   CAMEL_ENGINE_ABI_VERSION,
-                                     CAMEL_ENGINE_MAX_RENDER_UNITS, abiFormat(format, dsd),
-                                     conversion.allow ? 1u : 0u,    quality,
-                                     conversion.allowDsd ? 1u : 0u, 0};
+    const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1),   CAMEL_ENGINE_ABI_VERSION,   CAMEL_ENGINE_MAX_RENDER_UNITS,
+                                     abiFormat(format, dsd),        conversion.allow ? 1u : 0u, quality,
+                                     conversion.allowDsd ? 1u : 0u, predecodeSeconds * 1000};
     if (const auto status = camel_engine_create_v1(&config, &engine_); status != CAMEL_ENGINE_OK)
         throw engineError("create", status);
     const auto utf8 = toUtf8(path.wstring());

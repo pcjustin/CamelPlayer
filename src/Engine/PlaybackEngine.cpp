@@ -4,7 +4,9 @@
 #include <objbase.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <future>
 #include <memory>
@@ -15,6 +17,7 @@
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
 #include "OutputBridge/OutputBridge.h"
+#include "OutputBridge/OutputChoices.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 
@@ -45,9 +48,9 @@ uint32_t dsdPcmRate(const Settings& s) {
 
 // How `src` reaches a device that takes what `supports` accepts under settings `s` (docs/Plan.md §5.3). DSD: the
 // configured raw path (ASIO native, else DoP; WASAPI and KS have no native DSD), PCM only when
-// chosen or allowed as a fallback.
+// chosen or allowed as a fallback. A fixed rate the device refuses falls back to the file's rate, noted in `adjustment`.
 std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool lossy,
-                                  const std::function<bool(const DeviceFormat&)>& supports) {
+                                  const std::function<bool(const DeviceFormat&)>& supports, std::string* adjustment = nullptr) {
     if (s.backend == Backend::Wasapi && s.wasapi.shared) {
         // Choosing shared mode permits converting to the mixer's float32 format; nothing here is bit-perfect, and raw
         // DSD cannot pass the mixer.
@@ -62,7 +65,17 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
         }
         return plan;
     }
-    if (src.bitsPerSample != 1) return negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports);
+    if (src.bitsPerSample != 1) {
+        const uint32_t rate = fixedRate(s);
+        if (rate)
+            if (auto plan = negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports, rate))
+                return plan;
+        auto plan = negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports);
+        if (rate && plan && adjustment)
+            *adjustment = requestedVsActive("Fixed sample rate", std::to_string(rate) + " Hz",
+                                            std::to_string(plan->format.sampleRate) + " Hz (the device refused it)");
+        return plan;
+    }
     const DsdOutput mode = dsdOutput(s);
     std::optional<OutputPlan> plan;
     if (mode != DsdOutput::Pcm)
@@ -72,15 +85,21 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
     return plan;
 }
 
+// Timing applies without reopening the stream.
+template <class T> bool sameOutput(T a, const T& b) {
+    a.timing = b.timing;
+    return a == b;
+}
+
 bool sameBackendConfig(const Settings& a, const Settings& b) {
     if (a.backend != b.backend) return false;
     switch (a.backend) {
     case Backend::Wasapi:
-        return a.wasapi == b.wasapi;
+        return sameOutput(a.wasapi, b.wasapi);
     case Backend::Asio:
-        return a.asio == b.asio;
+        return sameOutput(a.asio, b.asio);
     case Backend::Ks:
-        return a.ks == b.ks;
+        return sameOutput(a.ks, b.ks);
     }
     return false;
 }
@@ -143,6 +162,19 @@ public:
     // ---- IRenderSource (real-time thread) ----
     size_t render(uint8_t* dst, size_t frames) noexcept override {
         if (!rust_) return 0;
+        if (uint64_t lead = leadSilence_.load(std::memory_order_acquire)) {
+            // The whole request is silence; the paused Engine writes the DSD idle pattern with continuing DoP markers.
+            if (rawDsd_.load(std::memory_order_acquire))
+                rust_->render(dst, frames, bpf_);
+            else
+                memset(dst, 0, frames * bpf_);
+            const uint64_t left = lead > frames ? lead - frames : 0;
+            if (leadSilence_.compare_exchange_strong(lead, left, std::memory_order_acq_rel) && !left) {
+                leadDone_.store(true, std::memory_order_release);
+                qCv_.notify_all();
+            }
+            return frames;
+        }
         const auto rendered = rust_->render(dst, frames, bpf_);
         const size_t n = rendered.frames;
         const bool drained = rendered.ended || rendered.fault;
@@ -160,7 +192,7 @@ public:
         if (n < frames) {
             if (drained) {
                 if (!ended_.exchange(true)) qCv_.notify_all();
-            } else if (playing_.load(std::memory_order_relaxed)) {
+            } else if (playing_.load(std::memory_order_relaxed) && !leadDone_.load(std::memory_order_acquire)) {
                 underruns_.fetch_add(1, std::memory_order_relaxed);
             }
         }
@@ -207,7 +239,7 @@ public:
     void play() {
         if (active_) {
             if (state_ == PlayState::Paused) {
-                rust_->play();
+                startRust();
                 output_->start();
                 setState(PlayState::Playing);
             }
@@ -220,6 +252,8 @@ public:
         resumeOnDefault_ = false;
         if (active_ && state_ == PlayState::Playing) {
             output_->pause();
+            leadSilence_ = 0;
+            leadDone_ = false;
             rust_->pause();
             setState(PlayState::Paused);
         }
@@ -352,8 +386,9 @@ private:
             std::function<void()> fn;
             {
                 std::unique_lock lock(qMutex_);
-                qCv_.wait_for(lock, std::chrono::milliseconds(50),
-                              [&] { return quit_ || !queue_.empty() || ended_.load() || transitionPending_.load(); });
+                qCv_.wait_for(lock, std::chrono::milliseconds(50), [&] {
+                    return quit_ || !queue_.empty() || ended_.load() || transitionPending_.load() || leadDone_.load();
+                });
                 if (!queue_.empty()) {
                     fn = std::move(queue_.front());
                     queue_.pop_front();
@@ -375,12 +410,17 @@ private:
                     fail(Error(ErrorCode::Other, e.what()), PlayState::Stopped);
                 }
             }
+            if (active_ && leadDone_.load()) {
+                if (state_ == PlayState::Playing) rust_->play();
+                leadDone_ = false;
+            }
             if (active_ && transitionPending_.exchange(false)) onTransition();
             if (active_ && ended_.load()) onEnded();
             if (active_) {
                 reportAudible();
                 refreshNextSlot();
             }
+            if (active_ && state_ == PlayState::Paused) releaseAfterPause();
         }
         CoUninitialize();
     }
@@ -396,7 +436,7 @@ private:
     // Frames handed to the device minus what its buffer still holds; refined once drivers report latency.
     void reportAudible() {
         uint64_t buffered = 0;
-        const OutputStatus status = output_->status(); // drivers add measurements once the stream runs
+        const OutputStatus status = outputStatus(); // drivers add measurements once the stream runs
         {
             std::lock_guard lock(snapMutex_);
             snap_.outputStatus = status;
@@ -419,18 +459,52 @@ private:
         return in == out || !in ? sourceFrames : (sourceFrames * out + in / 2) / in;
     }
 
-    std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy) {
-        return planFor(settings_, src, lossy, [&](const DeviceFormat& f) { return output_->supports(f); });
+    std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy, std::string* adjustment = nullptr) {
+        return planFor(settings_, src, lossy, [&](const DeviceFormat& f) { return output_->supports(f); }, adjustment);
     }
 
     RustSession::Conversion conversion() const {
         if (plan_.shared) return {true, settings_.wasapi.sharedResampleQuality, plan_.dsd == DsdPath::Pcm};
-        return {settings_.convertWhenUnsupported, settings_.resampleQuality, plan_.dsd == DsdPath::Pcm};
+        // A fixed rate is the permission to resample to it (docs/Plan.md §6).
+        const bool fixedResample = plan_.dsd == DsdPath::None && plan_.resample && fixedRate(settings_);
+        return {settings_.convertWhenUnsupported || fixedResample, settings_.resampleQuality, plan_.dsd == DsdPath::Pcm};
     }
 
     void ensureOutput() {
         if (output_) return;
         output_ = std::make_unique<OutputBridge>(factory_(settings_));
+        ++outputGeneration_;
+    }
+
+    OutputStatus outputStatus() const {
+        OutputStatus status = output_->status();
+        if (!planAdjustment_.empty()) status.adjustments.push_back(planAdjustment_);
+        return status;
+    }
+
+    // After a format change the device first plays the configured silence (docs/Plan.md §6): the Engine stays paused,
+    // rendering silence in the stream's format, until the output has taken that many frames.
+    void startRust() {
+        const uint32_t ms = timing(settings_).formatChangeSilenceMs;
+        if (pendingSilence_ && ms)
+            leadSilence_ = std::max<uint64_t>(1, uint64_t(fmt_.sampleRate) * ms / 1000);
+        else
+            rust_->play();
+        pendingSilence_ = false;
+    }
+
+    // Closes the device once playback has been paused for the configured time; play reopens it at the same position.
+    void releaseAfterPause() {
+        const uint32_t seconds = timing(settings_).releaseAfterPauseSeconds;
+        if (!seconds || std::chrono::steady_clock::now() - pausedAt_ < std::chrono::seconds(seconds)) return;
+        log::info("engine: releasing the output device after %u s paused", seconds);
+        teardown();
+        output_.reset();
+        {
+            std::lock_guard lock(snapMutex_);
+            snap_.outputStatus = {};
+        }
+        publish();
     }
 
     // `deviceChange`: reopening after the Windows default changed; a device that cannot play pauses instead of ending the
@@ -474,9 +548,10 @@ private:
         }
         const bool lossy = dec->readsFloat();
         std::optional<OutputPlan> plan;
+        planAdjustment_.clear();
         try {
             ensureOutput();
-            plan = negotiate(src, lossy);
+            plan = negotiate(src, lossy, &planAdjustment_);
         } catch (const Error& e) {
             position_ = startFrame;
             return fail(e, onDeviceFailure);
@@ -514,7 +589,7 @@ private:
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         try {
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
-                                                  plan_.dsd);
+                                                  plan_.dsd, timing(settings_).predecodeSeconds);
         } catch (const Error& e) {
             position_ = 0;
             return fail(e, PlayState::Stopped);
@@ -564,11 +639,15 @@ private:
             return fail(e, waitForDevice ? PlayState::Paused : PlayState::Stopped);
         }
         active_ = true;
+        const bool raw = rawDsd_.load(std::memory_order_relaxed);
+        pendingSilence_ = !lastOpened_ || lastOpened_->generation != outputGeneration_ || lastOpened_->format != fmt_ ||
+                          lastOpened_->raw != raw;
+        lastOpened_ = Opened{outputGeneration_, fmt_, raw};
         {
             std::lock_guard lock(snapMutex_);
             snap_.output = fmt_;
             snap_.plan = plan_;
-            snap_.outputStatus = output_->status();
+            snap_.outputStatus = outputStatus();
             snap_.error.reset();
             snap_.errorDetail.clear();
         }
@@ -576,7 +655,7 @@ private:
                   (unsigned long long)startFrame);
         if (playNow) {
             playing_ = true;
-            rust_->play();
+            startRust();
             try {
                 output_->start();
             } catch (const Error& e) {
@@ -633,6 +712,9 @@ private:
             }
         }
         rawDsd_ = false; // the output no longer renders
+        leadSilence_ = 0;
+        leadDone_ = false;
+        pendingSilence_ = false;
         stopDecoder();
         rust_.reset();
         if (active_) position_ = sourcePosition();
@@ -757,6 +839,7 @@ private:
     }
 
     void setState(PlayState s) {
+        if (s == PlayState::Paused) pausedAt_ = std::chrono::steady_clock::now();
         state_ = s;
         playing_ = s == PlayState::Playing;
         publish();
@@ -816,6 +899,16 @@ private:
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;
     OutputPlan plan_;
+    std::string planAdjustment_;    // a fixed rate the device refused
+    uint64_t outputGeneration_ = 0; // counts output devices opened; a new one starts in an unknown format
+    struct Opened {
+        uint64_t generation;
+        DeviceFormat format;
+        bool raw;
+    };
+    std::optional<Opened> lastOpened_;
+    bool pendingSilence_ = false; // the open stream changed format and has not started yet
+    std::chrono::steady_clock::time_point pausedAt_;
     std::atomic<uint32_t> sourceRate_{0}, outputRate_{0}; // read by snapshot() while the stream plays
 
     // shared with the decode / output threads
@@ -823,6 +916,8 @@ private:
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
     std::atomic<bool> rawDsd_{false};            // the open stream is DoP or native DSD
+    std::atomic<uint64_t> leadSilence_{0};       // frames of format-change silence still to play
+    std::atomic<bool> leadDone_{false};          // the silence is over; the control thread starts the Engine
     std::atomic<uint64_t> renderTransitions_{0}; // written by the output callback
     uint64_t handledTransitions_ = 0;
     struct Queued {
