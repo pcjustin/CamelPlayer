@@ -51,6 +51,16 @@ double workingMB() {
     return pmc.WorkingSetSize / 1048576.0;
 }
 
+// Every format the probe recognizes is benchmarked; other files are skipped.
+bool recognized(const std::filesystem::path& path) {
+    try {
+        probeFormat(path);
+        return true;
+    } catch (const Error&) {
+        return false;
+    }
+}
+
 } // namespace
 
 // bench-one <decoder> <file>: prints one JSON object.
@@ -80,31 +90,53 @@ int cmdBenchOne(const Args& args) {
     r["channels"] = in.channels;
     r["totalFrames"] = in.totalFrames;
 
-    // 1. Full sequential decode: speed, CPU, memory, MD5
-    FlacMd5 md5(in.bitsPerSample);
+    // 1. Pure sequential decode: speed, CPU, memory. The samples are kept as the seek reference for formats without a
+    //    libFLAC reference, when they fit.
+    constexpr size_t kMaxReferenceSamples = size_t(64) << 20;
+    const AudioFormat format = probeFormat(file);
+    const bool keep = format != AudioFormat::Flac && in.totalFrames * in.channels <= kMaxReferenceSamples;
+    std::vector<int32_t> linear;
     std::vector<int32_t> buf(4096 * size_t(in.channels));
     uint64_t frames = 0;
     double c0 = cpuMs();
     t0 = nowMs();
     try {
         while (size_t n = dec->read(buf.data(), 4096)) {
-            md5.update(buf.data(), n * in.channels);
+            if (keep) linear.insert(linear.end(), buf.begin(), buf.begin() + ptrdiff_t(n * in.channels));
             frames += n;
         }
     } catch (const Error& e) {
         r["decodeError"] = std::string(errorCodeName(e.code())) + ": " + e.what();
     }
+    r["format"] = formatName(format);
     r["decodeMs"] = nowMs() - t0;
     r["cpuMs"] = cpuMs() - c0;
     r["framesDecoded"] = frames;
     r["peakMB"] = peakMB() - baseMB;
-    auto digest = md5.finish();
-    r["md5"] = toHex(digest);
-    r["md5Status"] = !in.md5 ? "none" : (*in.md5 == digest ? "ok" : "mismatch");
 
-    // 2. Seek accuracy against the libFLAC reference (only for files that decode cleanly)
-    if (!r.contains("decodeError") && frames > 8192) {
-        auto ref = testaudio::referenceDecode(file);
+    // 2. A separate decode with STREAMINFO MD5 for FLAC, so the pure decode time above excludes hashing.
+    r["md5Status"] = "n/a";
+    if (format == AudioFormat::Flac && !r.contains("decodeError")) {
+        r["md5Status"] = "none";
+        if (in.md5) {
+            auto again = openDecoder(kind, file);
+            FlacMd5 md5(in.bitsPerSample);
+            t0 = nowMs();
+            while (size_t n = again->read(buf.data(), 4096)) md5.update(buf.data(), n * in.channels);
+            r["md5Ms"] = nowMs() - t0;
+            const auto digest = md5.finish();
+            r["md5"] = toHex(digest);
+            r["md5Status"] = *in.md5 == digest ? "ok" : "mismatch";
+        }
+    }
+
+    // 3. Seek accuracy against the libFLAC reference, or against this decoder's own linear decode.
+    if (!r.contains("decodeError") && frames > 8192 && (format == AudioFormat::Flac || keep)) {
+        testaudio::ReferenceDecode ref;
+        if (format == AudioFormat::Flac)
+            ref = testaudio::referenceDecode(file);
+        else
+            ref.samples = std::move(linear);
         if (ref.error.empty()) {
             const size_t ch = in.channels;
             uint64_t lcg = 12345;
@@ -164,7 +196,7 @@ int cmdBenchDecoders(const Args& args) {
     for (auto& p : positional(args)) {
         if (std::filesystem::is_directory(p)) {
             for (auto& e : std::filesystem::directory_iterator(p))
-                if (e.path().extension() == L".flac") files.push_back(e.path());
+                if (recognized(e.path())) files.push_back(e.path());
         } else {
             files.push_back(p);
         }
@@ -232,6 +264,7 @@ int cmdBenchDecoders(const Args& args) {
                 std::printf("%8.1f ms (%5.0fx) cpu %8.1f ms  mem %6.1f MB  md5 %-8s", best.value("decodeMs", 0.0),
                             secs / (best.value("decodeMs", 1.0) / 1000), best.value("cpuMs", 0.0), best.value("peakMB", 0.0),
                             best.value("md5Status", "").c_str());
+                if (best.contains("md5Ms")) std::printf(" (decode+md5 %.1f ms)", best.value("md5Ms", 0.0));
                 if (best.contains("decodeError"))
                     std::printf(" error after %llu frames: %s", best.value("framesDecoded", 0ull),
                                 best["decodeError"].get<std::string>().c_str());

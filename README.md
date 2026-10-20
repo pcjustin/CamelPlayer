@@ -35,14 +35,14 @@ camelcli play <file.flac> --backend ks --device 0 --decoder drflac
 camelcli decode <file.flac>
 camelcli capture <file.flac> out.raw
 camelcli gen-test-audio [directory]
-camelcli bench-decoders <directory> --runs 3
+camelcli bench-decoders <directory> --runs 3   # every recognized format; pure decode, separate FLAC MD5, seek checks
 ```
 
 `decode` checks decoder output against STREAMINFO MD5. `capture` compares the engine's output with an independent libFLAC reference decode. Test audio covers 16/24-bit FLAC at rates up to 768 kHz, plus damaged, truncated, and missing-MD5 inputs. The test suite additionally generates 20/32-bit FLAC fixtures to check that unsupported depths are rejected cleanly.
 
 ## Validation and limitations
 
-The current Release and Debug suites each ran **406 C++ tests: all passed, with no skips**. The Rust Engine suite passed all 44 tests. The latest hardware run passed all **69 hardware cases** through the engine and Server APIs: FLAC playback controls on Chord/DAVE WASAPI, ASIO and KS and Cirrus WASAPI and KS, plus WAV, ALAC, AAC, MP3 and DSD (native, DoP, DSD to PCM) wherever the device can play them. Hardware validation covers Chord/DAVE (WASAPI, ASIO, KS) and the built-in Cirrus codec (WASAPI, KS): Cirrus takes 24-in-32 up to 192 kHz, a container DAVE refuses. Cirrus has no DSD mode, so it only receives DSD converted to PCM, never DoP or native DSD. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+The current Release and Debug suites each ran **416 C++ tests: all passed, with no skips**. The Rust Engine suite passed all 44 tests. The latest hardware run covered **91 hardware cases** through the engine and Server APIs: FLAC playback controls on Chord/DAVE WASAPI, ASIO and KS and Cirrus WASAPI and KS; WAV, ALAC, AAC, MP3, WASAPI shared mode and DSD (native, DoP, DSD to PCM) wherever the device can play them; and DSD64 to DSD512 on DAVE, where DSD512 DoP (a 1411.2 kHz carrier) is refused or reported as a driver failure rather than assumed. KS native DSD is unavailable on the tested hardware. Hardware validation covers Chord/DAVE (WASAPI, ASIO, KS) and the built-in Cirrus codec (WASAPI, KS): Cirrus takes 24-in-32 up to 192 kHz, a container DAVE refuses. Cirrus has no DSD mode, so it only receives DSD converted to PCM, never DoP or native DSD. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
 
 Hardware tests are disabled during ordinary runs because they play audio and require the named devices and local `testdata/` files (FLAC, WAV, ALAC, AAC, MP3 and DSF samples), which are not distributed. Lower the volume, then run them explicitly after building:
 
