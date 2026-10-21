@@ -53,6 +53,9 @@ struct SettingsDto {
     bool operator==(const SettingsDto&) const = default;
 };
 
+SettingsDto settingsDto(const Settings& s);
+Settings nativeSettings(const SettingsDto& s);
+
 struct CommandStamp {
     uint64_t id = 0;
     uint64_t generation = 0;
@@ -92,6 +95,7 @@ struct Command {
     uint64_t entryId = 0;
     std::optional<bool> shuffle;
     std::optional<RepeatMode> repeat;
+    bool operator==(const Command&) const = default;
 };
 
 enum class PlaybackState : uint8_t { Stopped, Playing, Paused };
@@ -99,6 +103,7 @@ enum class PlaybackState : uint8_t { Stopped, Playing, Paused };
 struct Failure {
     audio::ErrorCode code = audio::ErrorCode::Other;
     std::string detail;
+    bool operator==(const Failure&) const = default;
 };
 
 struct PlaybackSnapshot {
@@ -123,20 +128,24 @@ struct PlaybackSnapshot {
     uint64_t revision = 0;
 
     bool bitPerfect() const { return plan && plan->state == audio::PipelineState::BitPerfect; }
+    bool operator==(const PlaybackSnapshot&) const = default;
 };
 
 struct DeviceInfo {
     std::string id, name;
+    bool operator==(const DeviceInfo&) const = default;
 };
 
 struct DeviceCatalog {
     uint64_t revision = 0;
     std::vector<DeviceInfo> wasapi, asio, ks;
+    bool operator==(const DeviceCatalog&) const = default;
 };
 
 struct QueueEntry {
     uint64_t id = 0;
     TrackSource source;
+    bool operator==(const QueueEntry&) const = default;
 };
 
 struct QueueSnapshot {
@@ -145,6 +154,7 @@ struct QueueSnapshot {
     std::optional<uint64_t> upcomingEntryId; // what a natural completion of the current entry plays next
     bool shuffle = false;
     RepeatMode repeat = RepeatMode::Off;
+    bool operator==(const QueueSnapshot&) const = default;
 };
 
 struct Snapshot {
@@ -159,12 +169,14 @@ struct Snapshot {
     DeviceCatalog devices;
     std::optional<Failure> commandError;
     std::optional<bool> controlPanelOpened;
+    bool operator==(const Snapshot&) const = default;
 };
 
 enum class EventKind : uint8_t { StateChanged, CommandCompleted };
 struct Event {
     EventKind kind = EventKind::StateChanged;
     Snapshot snapshot;
+    bool operator==(const Event&) const = default;
 };
 
 class SnapshotCursor {

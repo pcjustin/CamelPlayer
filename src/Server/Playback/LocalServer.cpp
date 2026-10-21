@@ -18,34 +18,6 @@
 namespace camel::server {
 namespace {
 
-SettingsDto dto(const Settings& s) {
-    return {s.backend,
-            s.decoderByFormat,
-            s.pcmBitsByFormat,
-            s.convertWhenUnsupported,
-            s.resampleQuality,
-            s.convertDsdWhenUnsupported,
-            s.wasapi,
-            s.asio,
-            s.ks,
-            s.language,
-            toUtf8(s.lastFile)};
-}
-
-Settings native(const SettingsDto& s) {
-    return {s.backend,
-            s.decoderByFormat,
-            s.pcmBitsByFormat,
-            s.convertWhenUnsupported,
-            s.resampleQuality,
-            s.convertDsdWhenUnsupported,
-            s.wasapi,
-            s.asio,
-            s.ks,
-            s.language,
-            toWide(s.lastFileUtf8)};
-}
-
 bool covers(CommandStamp value, CommandStamp floor) {
     return value.id >= floor.id && value.generation >= floor.generation && value.queueRevision >= floor.queueRevision;
 }
@@ -92,7 +64,7 @@ void validate(const Command& c) {
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
         throw std::invalid_argument("track ranges require the future segment playback adapter");
-    if (c.settings && dto(fromJson(toJson(native(*c.settings)))) != *c.settings)
+    if (c.settings && settingsDto(fromJson(toJson(nativeSettings(*c.settings)))) != *c.settings)
         throw std::invalid_argument("invalid Server settings");
 }
 
@@ -172,7 +144,7 @@ public:
     Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
         : settings_(settings), settingsFile_(std::move(settingsFile)),
           engine_(std::make_unique<audio::PlaybackEngine>(settings, std::move(factory))) {
-        published_.settings = dto(settings_);
+        published_.settings = settingsDto(settings_);
         published_.playback = playback(engine_->snapshot());
         if (!settings_.lastFile.empty()) {
             Command restore;
@@ -307,7 +279,7 @@ private:
             case CommandKind::ApplySettings: {
                 if (c.settings) {
                     const auto lastFile = settings_.lastFile;
-                    settings_ = native(*c.settings);
+                    settings_ = nativeSettings(*c.settings);
                     settings_.lastFile = lastFile;
                     engine_->applySettings(settings_);
                     persist();
@@ -457,7 +429,7 @@ private:
             p.underruns == state_.playback.underruns)
             return;
         state_.playback = p;
-        state_.settings = dto(settings_);
+        state_.settings = settingsDto(settings_);
         state_.queue = queueSnapshot();
         queueChanged_ = false;
         Event event;

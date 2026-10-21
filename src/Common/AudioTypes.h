@@ -67,6 +67,7 @@ struct SourceInfo {
     uint32_t bitsPerSample = 0;                 // original bit depth; decoded samples are right-aligned to it
     uint64_t totalFrames = 0;                   // 0 if unknown
     std::optional<std::array<uint8_t, 16>> md5; // FLAC STREAMINFO MD5 when present (all zero means absent)
+    bool operator==(const SourceInfo&) const = default;
 };
 
 inline double framesToSeconds(uint64_t frames, uint32_t rate) {
