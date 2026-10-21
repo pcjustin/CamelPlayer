@@ -3,10 +3,6 @@
 #include <windows.h>
 #include <objbase.h>
 
-#pragma warning(push, 0)
-#include <iasiodrv.h> // Steinberg ASIO SDK 2.3.4 (third_party/asiosdk, GPLv3)
-#pragma warning(pop)
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -19,56 +15,51 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/AsioAbi.h"
 #include "OutputBridge/AsioLayout.h"
 #include "OutputBridge/OutputChoices.h"
 
 namespace camel::audio {
 namespace {
 
-constexpr long kStInt16LSB = 16;
-constexpr long kStInt24LSB = 17;
-constexpr long kStInt32LSB = 18;
-constexpr long kStDsdInt8LSB1 = 32;
-constexpr long kStDsdInt8MSB1 = 33;
-
-std::optional<SampleType> mapSampleType(ASIOSampleType t) {
+std::optional<SampleType> mapSampleType(asio::SampleType t) {
     switch (t) {
-    case kStInt16LSB:
+    case asio::sample::kInt16Lsb:
         return SampleType::Int16;
-    case kStInt24LSB:
+    case asio::sample::kInt24Lsb:
         return SampleType::Int24;
-    case kStInt32LSB:
+    case asio::sample::kInt32Lsb:
         return SampleType::Int32;
     default:
         return std::nullopt; // float and LSB-justified 32-bit types are not bit-perfect targets in the MVP
     }
 }
 
-const char* asioTypeName(ASIOSampleType t) {
+const char* asioTypeName(asio::SampleType t) {
     switch (t) {
-    case 16:
+    case asio::sample::kInt16Lsb:
         return "Int16LSB";
-    case 17:
+    case asio::sample::kInt24Lsb:
         return "Int24LSB";
-    case 18:
+    case asio::sample::kInt32Lsb:
         return "Int32LSB";
-    case 19:
+    case asio::sample::kFloat32Lsb:
         return "Float32LSB";
-    case 20:
+    case asio::sample::kFloat64Lsb:
         return "Float64LSB";
-    case 24:
+    case asio::sample::kInt32Lsb16:
         return "Int32LSB16";
-    case 25:
+    case asio::sample::kInt32Lsb18:
         return "Int32LSB18";
-    case 26:
+    case asio::sample::kInt32Lsb20:
         return "Int32LSB20";
-    case 27:
+    case asio::sample::kInt32Lsb24:
         return "Int32LSB24";
-    case 32:
+    case asio::sample::kDsdInt8Lsb1:
         return "DSDInt8LSB1";
-    case 33:
+    case asio::sample::kDsdInt8Msb1:
         return "DSDInt8MSB1";
-    case 40:
+    case asio::sample::kDsdInt8Ner8:
         return "DSDInt8NER8";
     default:
         return "other";
@@ -76,7 +67,7 @@ const char* asioTypeName(ASIOSampleType t) {
 }
 
 class AsioOutput;
-std::atomic<AsioOutput*> g_active{nullptr}; // the SDK callbacks carry no user pointer (§5.6)
+std::atomic<AsioOutput*> g_active{nullptr}; // ASIO callbacks carry no user pointer (§5.6)
 
 class AsioOutput final : public IOutput {
 public:
@@ -113,7 +104,7 @@ public:
                 if (f.type == SampleType::Dsd8)
                     ok = f.channels == 2 && supportsDsd(f.sampleRate);
                 else if (driverType_ && mapSampleType(*driverType_) == f.type && f.channels == 2)
-                    ok = drv_->canSampleRate(ASIOSampleRate(f.sampleRate)) == ASE_OK;
+                    ok = drv_->canSampleRate(asio::SampleRate(f.sampleRate)) == asio::kOk;
             });
         } catch (const Error&) {
             return true; // let open() report why the driver is unusable
@@ -130,7 +121,7 @@ public:
         invoke([&] {
             if (buffersCreated_ && !started_) {
                 // Some drivers accept a rate in canSampleRate/setSampleRate that they cannot run (Chord ASIO at 1411.2 kHz).
-                if (drv_->start() != ASE_OK)
+                if (drv_->start() != asio::kOk)
                     throw Error(ErrorCode::DriverError,
                                 "ASIO driver accepted " + describe(fmt_) + " but could not start it (ASIOStart failed)");
                 started_ = true;
@@ -153,7 +144,7 @@ public:
             started_ = false;
             if (buffersCreated_) drv_->disposeBuffers();
             buffersCreated_ = false;
-            if (dsdMode_) setIoFormat(kASIOPCMFormat); // leave the driver in PCM mode for the next stream
+            if (dsdMode_) setIoFormat(asio::IoFormatType::Pcm); // leave the driver in PCM mode for the next stream
             source_.store(nullptr);
             AsioOutput* self = this;
             g_active.compare_exchange_strong(self, nullptr);
@@ -176,7 +167,7 @@ public:
         bool ok = false;
         invoke([&] {
             load();
-            ok = drv_->controlPanel() == ASE_OK;
+            ok = drv_->controlPanel() == asio::kOk;
         });
         return ok;
     }
@@ -188,7 +179,7 @@ public:
         const uint32_t bps = bytesPerSample(fmt_.type);
         size_t got = src ? src->render(interleaved_.data(), frames) : 0;
         if (got < frames) memset(interleaved_.data() + got * 2 * bps, dsdMode_ ? kDsdSilence : 0, (frames - got) * 2 * bps);
-        splitStereo(interleaved_.data(), frames, bps, dsdMode_ && *driverType_ == kStDsdInt8LSB1,
+        splitStereo(interleaved_.data(), frames, bps, dsdMode_ && *driverType_ == asio::sample::kDsdInt8Lsb1,
                     static_cast<uint8_t*>(buffers_[0].buffers[index]), static_cast<uint8_t*>(buffers_[1].buffers[index]));
         if (outputReady_) drv_->outputReady();
         if (dsdMode_ && callbacks_ < kTimedCallbacks) {
@@ -204,19 +195,20 @@ public:
     }
     long onMessage(long selector, long value) noexcept {
         switch (selector) {
-        case kAsioSelectorSupported:
-            return value == kAsioResetRequest || value == kAsioEngineVersion || value == kAsioResyncRequest ||
-                   value == kAsioLatenciesChanged || value == kAsioSupportsTimeInfo || value == kAsioBufferSizeChange;
-        case kAsioEngineVersion:
+        case asio::message::kSelectorSupported:
+            return value == asio::message::kResetRequest || value == asio::message::kEngineVersion ||
+                   value == asio::message::kResyncRequest || value == asio::message::kLatenciesChanged ||
+                   value == asio::message::kSupportsTimeInfo || value == asio::message::kBufferSizeChange;
+        case asio::message::kEngineVersion:
             return 2;
-        case kAsioResetRequest:
-        case kAsioBufferSizeChange:
+        case asio::message::kResetRequest:
+        case asio::message::kBufferSizeChange:
             log::info("asio: driver requested reset (%ld)", selector);
             raiseRestart();
             return 1;
-        case kAsioResyncRequest:
-        case kAsioLatenciesChanged:
-        case kAsioSupportsTimeInfo:
+        case asio::message::kResyncRequest:
+        case asio::message::kLatenciesChanged:
+        case asio::message::kSupportsTimeInfo:
             return 1;
         default:
             return 0;
@@ -286,7 +278,7 @@ private:
             throw Error(ErrorCode::DeviceNotFound, "ASIO driver not connected (not installed)");
         }
         if (FAILED(CLSIDFromString(toWide(id).c_str(), &clsid))) throw Error(ErrorCode::DeviceNotFound, "bad ASIO driver id");
-        IASIO* d = nullptr;
+        asio::Driver* d = nullptr;
         HRESULT hr = CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER, clsid, reinterpret_cast<void**>(&d));
         if (FAILED(hr) || !d) {
             char msg[96];
@@ -325,19 +317,19 @@ private:
         dsdCaps_.clear();
     }
 
-    bool setIoFormat(ASIOIoFormatType type) {
-        ASIOIoFormat format{};
-        format.FormatType = type;
-        const bool ok = drv_->future(kAsioSetIoFormat, &format) == ASE_SUCCESS;
-        if (ok) dsdMode_ = type == kASIODSDFormat;
+    bool setIoFormat(asio::IoFormatType type) {
+        asio::IoFormat format{};
+        format.type = type;
+        const bool ok = drv_->future(asio::future::kSetIoFormat, &format) == asio::kSuccess;
+        if (ok) dsdMode_ = type == asio::IoFormatType::Dsd;
         return ok;
     }
 
-    std::optional<ASIOSampleType> outputType() {
-        ASIOChannelInfo ci{};
+    std::optional<asio::SampleType> outputType() {
+        asio::ChannelInfo ci{};
         ci.channel = channels_.left;
-        ci.isInput = ASIOFalse;
-        if (channels_.left < numOutputs_ && drv_->getChannelInfo(&ci) == ASE_OK) return ci.type;
+        ci.isInput = asio::kFalse;
+        if (channels_.left < numOutputs_ && drv_->getChannelInfo(&ci) == asio::kOk) return ci.type;
         return std::nullopt;
     }
 
@@ -346,14 +338,14 @@ private:
     bool supportsDsd(uint32_t byteFrameRate) {
         if (const auto it = dsdCaps_.find(byteFrameRate); it != dsdCaps_.end()) return it->second;
         if (buffersCreated_) return fmt_ == DeviceFormat{byteFrameRate, 2, SampleType::Dsd8};
-        ASIOIoFormat query{};
-        query.FormatType = kASIODSDFormat;
-        bool ok = drv_->future(kAsioCanDoIoFormat, &query) == ASE_SUCCESS && setIoFormat(kASIODSDFormat);
+        asio::IoFormat query{};
+        query.type = asio::IoFormatType::Dsd;
+        bool ok = drv_->future(asio::future::kCanDoIoFormat, &query) == asio::kSuccess && setIoFormat(asio::IoFormatType::Dsd);
         if (ok) {
             const auto type = outputType();
-            ok = (type == kStDsdInt8MSB1 || type == kStDsdInt8LSB1) &&
-                 drv_->canSampleRate(ASIOSampleRate(double(byteFrameRate) * 8)) == ASE_OK;
-            setIoFormat(kASIOPCMFormat);
+            ok = (type == asio::sample::kDsdInt8Msb1 || type == asio::sample::kDsdInt8Lsb1) &&
+                 drv_->canSampleRate(asio::SampleRate(double(byteFrameRate) * 8)) == asio::kOk;
+            setIoFormat(asio::IoFormatType::Pcm);
         }
         dsdCaps_[byteFrameRate] = ok;
         return ok;
@@ -363,17 +355,17 @@ private:
         load();
         if (numOutputs_ < 2) throw Error(ErrorCode::DeviceNotFound, "ASIO driver has fewer than two outputs");
         const bool dsd = f.type == SampleType::Dsd8;
-        if (dsd != dsdMode_ && !setIoFormat(dsd ? kASIODSDFormat : kASIOPCMFormat))
+        if (dsd != dsdMode_ && !setIoFormat(dsd ? asio::IoFormatType::Dsd : asio::IoFormatType::Pcm))
             throw Error(ErrorCode::FormatNotSupported, dsd ? "ASIO driver refused DSD mode" : "ASIO driver refused PCM mode");
         driverType_ = outputType();
-        const bool typeOk = dsd ? driverType_ == kStDsdInt8MSB1 || driverType_ == kStDsdInt8LSB1
+        const bool typeOk = dsd ? driverType_ == asio::sample::kDsdInt8Msb1 || driverType_ == asio::sample::kDsdInt8Lsb1
                                 : driverType_ && mapSampleType(*driverType_) == f.type;
         if (!typeOk) throw Error(ErrorCode::FormatNotSupported, "ASIO sample type mismatch");
         // DSD rates are set in DSD samples per second (2.8224 MHz for DSD64); a device frame holds eight of them.
-        const ASIOSampleRate rate = dsd ? double(f.sampleRate) * 8 : double(f.sampleRate);
-        ASIOSampleRate cur = 0;
+        const asio::SampleRate rate = dsd ? double(f.sampleRate) * 8 : double(f.sampleRate);
+        asio::SampleRate cur = 0;
         drv_->getSampleRate(&cur);
-        if (cur != rate && drv_->setSampleRate(rate) != ASE_OK)
+        if (cur != rate && drv_->setSampleRate(rate) != asio::kOk)
             throw Error(ErrorCode::FormatNotSupported, "ASIOSetSampleRate failed");
         long minS = 0, maxS = 0, pref = 0, gran = 0;
         drv_->getBufferSize(&minS, &maxS, &pref, &gran);
@@ -388,20 +380,20 @@ private:
             adjustments.push_back(requestedVsActive("ASIO output channels",
                                                     std::to_string(cfg_.outLeft + 1) + "/" + std::to_string(cfg_.outRight + 1),
                                                     "1/2 (driver has " + std::to_string(numOutputs_) + " outputs)"));
-        buffers_[0] = {ASIOFalse, channels_.left, {nullptr, nullptr}};
-        buffers_[1] = {ASIOFalse, channels_.right, {nullptr, nullptr}};
-        static ASIOCallbacks callbacks = {
-            [](long index, ASIOBool) {
+        buffers_[0] = {asio::kFalse, channels_.left, {nullptr, nullptr}};
+        buffers_[1] = {asio::kFalse, channels_.right, {nullptr, nullptr}};
+        static asio::Callbacks callbacks = {
+            [](long index, asio::Bool) {
                 if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
             },
-            [](ASIOSampleRate) {
+            [](asio::SampleRate) {
                 if (auto* active = g_active.load(std::memory_order_acquire)) active->onRateChanged();
             },
             [](long selector, long value, void*, double*) -> long {
                 auto* active = g_active.load(std::memory_order_acquire);
                 return active ? active->onMessage(selector, value) : 0;
             },
-            [](ASIOTime* t, long index, ASIOBool) -> ASIOTime* {
+            [](asio::Time* t, long index, asio::Bool) -> asio::Time* {
                 if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
                 return t;
             },
@@ -414,12 +406,12 @@ private:
         callbackPeriodUs_ = 0;
         interleaved_.assign(bufferFrames_ * f.bytesPerFrame(), dsd ? kDsdSilence : 0);
         g_active = this;
-        if (drv_->createBuffers(buffers_, 2, size, &callbacks) != ASE_OK) {
+        if (drv_->createBuffers(buffers_, 2, size, &callbacks) != asio::kOk) {
             g_active = nullptr;
             throw Error(ErrorCode::DriverError, "ASIOCreateBuffers failed");
         }
         buffersCreated_ = true;
-        outputReady_ = drv_->outputReady() == ASE_OK;
+        outputReady_ = drv_->outputReady() == asio::kOk;
         source_.store(source, std::memory_order_release);
         long inLat = 0, outLat = 0;
         drv_->getLatencies(&inLat, &outLat);
@@ -443,16 +435,16 @@ private:
     std::condition_variable qCv_;
     std::deque<std::packaged_task<void()>> queue_;
 
-    IASIO* drv_ = nullptr;
+    asio::Driver* drv_ = nullptr;
     std::string driverName_;
     long numOutputs_ = 0;
     ChannelChoice channels_;
-    std::optional<ASIOSampleType> driverType_;
+    std::optional<asio::SampleType> driverType_;
     bool buffersCreated_ = false, started_ = false, outputReady_ = false;
-    ASIOBufferInfo buffers_[2] = {};
+    asio::BufferInfo buffers_[2] = {};
     long bufferSize_ = 0;
     size_t bufferFrames_ = 0; // device frames per callback: bytes per channel in DSD mode
-    bool dsdMode_ = false;    // driver switched to kASIODSDFormat
+    bool dsdMode_ = false;    // driver switched to DSD I/O format
     std::map<uint32_t, bool> dsdCaps_;
     static constexpr uint8_t kDsdSilence = 0x69;
     static constexpr uint32_t kTimedCallbacks = 64;

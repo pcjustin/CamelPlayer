@@ -45,8 +45,6 @@ foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') { Cop
 $lic = Join-Path $stage 'licenses'
 New-Item -ItemType Directory -Force $lic | Out-Null
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
-Copy-Item (Join-Path $root 'third_party\asiosdk\LICENSE.txt') (Join-Path $lic 'Steinberg-ASIO-SDK.txt')
-Copy-Item (Join-Path $root 'third_party\asiosdk\common\LICENSE.txt') (Join-Path $lic 'Steinberg-ASIO-common.txt')
 Copy-Item (Join-Path $root 'third_party\licenses\*') $lic -Recurse -Force
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $stage
 Copy-Item (Join-Path $root 'third_party\dependencies.json') (Join-Path $stage 'dependencies.json')

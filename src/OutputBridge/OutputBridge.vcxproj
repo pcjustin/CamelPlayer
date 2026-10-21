@@ -29,7 +29,6 @@
     <ClCompile>
       <!-- WASAPI / ASIO / KS outputs and the Bridge; free of WinRT (docs/Plan.md §4) -->
       <PreprocessorDefinitions>CAMEL_CORE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(CamelRoot)third_party\asiosdk\common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

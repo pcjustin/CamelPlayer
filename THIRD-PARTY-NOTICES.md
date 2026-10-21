@@ -4,7 +4,7 @@ The project GPL text applies to CamelPlayer-covered code. Each dependency retain
 
 ## Repository contents
 
-Keep the application, core, CLI and Rust bridge source, solution/project files, manifests, lockfile, build/package scripts, and tests referenced by the solution in the repository. Keep the three required unmodified ASIO headers (`asio.h`, `asiosys.h`, `iasiodrv.h`), their licenses, and the SDK provenance record.
+Keep the application, core, CLI and Rust bridge source, solution/project files, manifests, lockfile, build/package scripts, and tests referenced by the solution in the repository.
 
 Also keep the collected copyright/license notices, runtime notices, Microsoft package terms, and [dependency inventory](third_party/dependencies.json). The inventory lists exact versions and source locations; native archive checksums and vcpkg port-tree locations identify the sources and patches used. Rust archive checksums are recorded in `rust/Cargo.lock`.
 
@@ -14,7 +14,6 @@ Downloaded static libraries, NuGet installations, complete SDKs, private music, 
 
 | Component | Applicable license | Complete notice |
 |---|---|---|
-| ASIO SDK 2.3.4 | GPL Version 3 option, alternatively a separate proprietary agreement | [SDK license](third_party/asiosdk/LICENSE.txt) and [provenance](third_party/asiosdk/SOURCE.txt) |
 | FFmpeg | Installed build: LGPL 2.1; upstream LGPL-2.1-or-later | [Notice](third_party/licenses/native/ffmpeg.txt) |
 | libsndfile | LGPL-2.1-or-later | [Notice](third_party/licenses/native/libsndfile.txt) |
 | mpg123 | LGPL-2.1-or-later | [Notice](third_party/licenses/native/mpg123.txt) |
@@ -49,10 +48,12 @@ GitHub's automatic archive can supply the project source at a matching release t
 
 The inventory's native `port_source` fields identify exact vcpkg port trees, including patches. Native `sources` checksums identify upstream archives. Rust source archive locations are version-specific and their checksums can be verified against Cargo.lock. Package-manager installation directories do not need to be committed merely to retain these records.
 
-Release binaries need copies of the required notices. Include this guide, the root GPL text, ASIO terms and collected notice directories. Where LGPL static linking requires a rebuilding/relinking route, provide the necessary source/object materials and scripts under appropriate terms. MPL-covered source must also be available to recipients.
+Release binaries need copies of the required notices. Include this guide, the root GPL text and collected notice directories. Where LGPL static linking requires a rebuilding/relinking route, provide the necessary source/object materials and scripts under appropriate terms. MPL-covered source must also be available to recipients.
 
 ## Distribution status
 
-The ASIO GPLv3 option and Microsoft-licensed WinUI/Windows App SDK binaries still require a combined-work licensing determination. This collection does not grant exceptions over Steinberg or Microsoft code and does not authorize public binary distribution by itself.
+CamelPlayer contains no Steinberg ASIO SDK code. Its ASIO host (`src/OutputBridge/AsioAbi.h`, `AsioOutput.cpp`) is an independent implementation of the driver interface, written from the interface's layout and values for interoperability. ASIO is a trademark of Steinberg Media Technologies GmbH; CamelPlayer is not affiliated with or endorsed by Steinberg.
 
-An entirely binary-only public distribution without corresponding-source access is not the chosen GPLv3 compliance route. A proprietary ASIO agreement would need to be obtained and assessed separately.
+Microsoft-licensed WinUI/Windows App SDK binaries still require a combined-work licensing determination. This collection does not grant exceptions over Microsoft code and does not authorize public binary distribution by itself.
+
+An entirely binary-only public distribution without corresponding-source access is not the chosen GPLv3 compliance route.

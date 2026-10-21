@@ -15,9 +15,8 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 | DSD Nexus (libdsf, libdsdiff, libdst) | Overlay port `vcpkg-ports/dsd-nexus` pinned to upstream tag 0.1.82 by commit and SHA512; builds only these libraries and libsautil as the shared `dsdnexus.dll` | `src/Engine/decode/DsdReader.cpp` (not yet used for playback) |
 | Symphonia | `rust/symphonia_ffi/Cargo.toml` and `rust/Cargo.lock` | Owned Rust C ABI bridge in `rust/symphonia_ffi`; C++ adapter in `src/Engine/decode/SymphoniaDecoder.cpp` |
 | libFLAC | vcpkg `libflac` | Test-audio encoding and independent reference decoding in `src/Engine/testing` |
-| Steinberg ASIO SDK | Selected unmodified headers and licenses in `third_party/asiosdk` | `src/OutputBridge/AsioOutput.cpp` |
 
-The vcpkg installation is generated under `vcpkg_installed`; Cargo output is generated under `build/cargo`. Both are ignored by Git. The vendored ASIO SDK version, source URL, and archive checksum are recorded in [asiosdk/SOURCE.txt](asiosdk/SOURCE.txt).
+The vcpkg installation is generated under `vcpkg_installed`; Cargo output is generated under `build/cargo`. Both are ignored by Git.
 
 Keep upstream license files with vendored code. Collected notices for native, Rust and Microsoft dependencies are in `licenses`; exact versions and source locations are in `dependencies.json`. Refresh snapshots with `msbuild/collect-licenses.ps1` after restoring dependencies. See [the distribution guide](../THIRD-PARTY-NOTICES.md) for source-access obligations and the unresolved licensing issue.
 
