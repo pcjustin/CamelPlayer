@@ -1,0 +1,213 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// library.db (docs/Plan.md §7.6, M3-R01): schema v1, identity rules, the single writer, migrations with backup and
+// restore, recovery from a damaged file, and refusal of network locations.
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <fstream>
+#include <set>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "Server/Library/LibraryStore.h"
+#include "TestUtil.h"
+
+using namespace camel::server;
+using camel::server::sqlite::Database;
+
+namespace {
+
+std::filesystem::path freshDir(const char* name) {
+    const auto dir = testutil::tempDir() / "library" / name;
+    std::filesystem::remove_all(dir);
+    return dir;
+}
+
+std::set<std::string> tables(Database& db) {
+    std::set<std::string> out;
+    auto s = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table') AND name NOT LIKE 'sqlite_%'"
+                        " AND name NOT LIKE 'tracks_fts_%'");
+    while (s.step()) out.insert(s.text(0));
+    return out;
+}
+
+// One root, folder, audio file and whole-file track; returns the file identity.
+int64_t addTrack(Database& db, const std::string& path, const std::string& title) {
+    db.exec("INSERT OR IGNORE INTO roots (id, path, added) VALUES (1, 'C:/music', 0)");
+    db.exec("INSERT OR IGNORE INTO folders (id, root_id, path) VALUES (1, 1, 'C:/music/album')");
+    db.prepare("INSERT INTO files (folder_id, root_id, path, kind, size, mtime) VALUES (1, 1, ?, 'audio', 100, 1)")
+        .bind(1, path)
+        .run();
+    const int64_t file = db.lastInsertId();
+    db.prepare("INSERT INTO tracks (file_id, title) VALUES (?, ?)").bind(1, file).bind(2, title).run();
+    return file;
+}
+
+std::vector<Migration> withExtra(std::vector<Migration> extra) {
+    std::vector<Migration> all = libraryMigrations();
+    all.insert(all.end(), extra.begin(), extra.end());
+    return all;
+}
+
+Migration addTable(const std::string& name) {
+    return [name](Database& db) { db.exec("CREATE TABLE " + name + " (x INTEGER)"); };
+}
+
+size_t backupCount(const std::filesystem::path& dir) {
+    size_t n = 0;
+    for (const auto& e : std::filesystem::directory_iterator(dir))
+        if (e.path().extension() == ".bak") n++;
+    return n;
+}
+
+} // namespace
+
+TEST(LibraryStore, CreatesSchemaV1WithWalAndForeignKeys) {
+    const auto dir = freshDir("create");
+    LibraryStore store(dir);
+    EXPECT_TRUE(store.report().created);
+    EXPECT_EQ(store.report().migratedFrom, 0);
+    auto db = store.openReader();
+    EXPECT_EQ(db.userVersion(), 1);
+    EXPECT_EQ(tables(db),
+              (std::set<std::string>{"albums", "app_state", "change_log", "covers", "files", "folders", "playlist_items",
+                                     "playlists", "queue", "roots", "stats", "track_values", "tracks", "tracks_fts"}));
+    auto mode = db.prepare("PRAGMA journal_mode");
+    ASSERT_TRUE(mode.step());
+    EXPECT_EQ(mode.text(0), "wal");
+    store
+        .write([](Database& w) {
+            EXPECT_EQ(w.scalar("PRAGMA foreign_keys"), 1);
+            w.exec(
+                "INSERT INTO tracks_fts (rowid, title_norm, album_norm, artist_norm) VALUES (1, 'kind of blue', 'x', 'miles')");
+            EXPECT_EQ(w.scalar("SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH 'blu'"), 1); // trigram
+        })
+        .get();
+}
+
+TEST(LibraryStore, IdentityRulesHold) {
+    LibraryStore store(freshDir("identity"));
+    store
+        .write([](Database& db) {
+            const int64_t file = addTrack(db, "C:/music/album/01.flac", "One");
+            db.prepare("INSERT INTO stats (file_id, cue_index, play_count, rating) VALUES (?, 0, 3, 5)").bind(1, file).run();
+            // A rescan replaces the track row; statistics stay with the identity.
+            db.exec("DELETE FROM tracks");
+            EXPECT_EQ(db.scalar("SELECT play_count FROM stats WHERE cue_index = 0"), 3);
+            // One available file per path; an unavailable identity may keep the old path.
+            EXPECT_THROW(addTrack(db, "C:/music/album/01.flac", "Again"), sqlite::Error);
+            db.prepare("UPDATE files SET available = 0 WHERE id = ?").bind(1, file).run();
+            EXPECT_NO_THROW(addTrack(db, "C:/music/album/01.flac", "New identity"));
+            EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE path = 'C:/music/album/01.flac'"), 2);
+            // Rows cannot point at identities that do not exist, and referenced identities cannot vanish.
+            EXPECT_THROW(db.exec("INSERT INTO tracks (file_id) VALUES (999)"), sqlite::Error);
+            EXPECT_THROW(db.prepare("DELETE FROM files WHERE id = ?").bind(1, file).run(), sqlite::Error);
+            EXPECT_THROW(db.exec("INSERT INTO stats (file_id, rating) VALUES (1, 6)"), sqlite::Error);
+        })
+        .get();
+}
+
+TEST(LibraryStore, WriterRunsEachJobInOneTransaction) {
+    LibraryStore store(freshDir("writer"));
+    auto failed = store.write([](Database& db) {
+        db.exec("INSERT INTO app_state (key, value) VALUES ('kept', 'no')");
+        throw std::runtime_error("job failed");
+    });
+    EXPECT_THROW(failed.get(), std::runtime_error);
+    std::vector<std::thread> threads;
+    std::vector<std::future<void>> jobs(8);
+    for (int t = 0; t < 8; t++)
+        threads.emplace_back([&, t] {
+            jobs[size_t(t)] = store.write([t](Database& db) {
+                for (int i = 0; i < 50; i++)
+                    db.prepare("INSERT INTO app_state (key, value) VALUES (?, 'v')").bind(1, std::to_string(t * 100 + i)).run();
+            });
+        });
+    for (auto& t : threads) t.join();
+    for (auto& j : jobs) j.get();
+    auto reader = store.openReader();
+    EXPECT_EQ(reader.scalar("SELECT COUNT(*) FROM app_state"), 400);
+    EXPECT_EQ(reader.scalar("SELECT COUNT(*) FROM app_state WHERE key = 'kept'"), 0);
+    EXPECT_THROW(reader.exec("INSERT INTO app_state (key, value) VALUES ('ro', 'x')"), sqlite::Error);
+}
+
+TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
+    const auto dir = freshDir("migrate");
+    {
+        LibraryStore store(dir);
+        store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "Kept"); }).get();
+    }
+    {
+        LibraryStore store(dir, withExtra({addTable("v2_table")}));
+        EXPECT_EQ(store.report().migratedFrom, 1);
+        auto db = store.openReader();
+        EXPECT_EQ(db.userVersion(), 2);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
+    }
+    const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
+                                       db.exec("CREATE TABLE half (x INTEGER)");
+                                       throw std::runtime_error("broken migration");
+                                   }});
+    EXPECT_THROW((LibraryStore(dir, broken)), MigrationError);
+    {
+        LibraryStore store(dir, withExtra({addTable("v2_table")}));
+        auto db = store.openReader();
+        EXPECT_EQ(db.userVersion(), 2);
+        EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
+        EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
+    }
+    EXPECT_THROW((LibraryStore(dir)), MigrationError); // schema 2 is newer than a program that knows only 1
+}
+
+TEST(LibraryStore, KeepsTheNewestThreeBackups) {
+    const auto dir = freshDir("rotate");
+    {
+        LibraryStore store(dir);
+    }
+    std::vector<Migration> extra;
+    for (int v = 2; v <= 6; v++) {
+        extra.push_back(addTable("t" + std::to_string(v)));
+        LibraryStore store(dir, withExtra(extra));
+    }
+    EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
+    for (int v : {3, 4, 5}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+}
+
+TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
+    const auto dir = freshDir("damaged");
+    {
+        LibraryStore store(dir);
+        store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "From backup"); }).get();
+    }
+    {
+        LibraryStore store(dir, withExtra({addTable("v2_table")}));
+    } // writes library.db.v1.bak
+    std::filesystem::remove(dir / "library.db-wal");
+    std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'x');
+    {
+        LibraryStore store(dir, withExtra({addTable("v2_table")}));
+        EXPECT_TRUE(store.report().damaged);
+        EXPECT_TRUE(store.report().restoredBackup);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
+        auto db = store.openReader();
+        EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
+        EXPECT_EQ(db.userVersion(), 2); // the v1 backup was migrated again
+    }
+    for (const auto& e : std::filesystem::directory_iterator(dir))
+        if (e.path().extension() == ".bak") std::filesystem::remove(e.path());
+    std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'y');
+    LibraryStore store(dir);
+    EXPECT_TRUE(store.report().damaged);
+    EXPECT_FALSE(store.report().restoredBackup);
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks"), 0);
+}
+
+TEST(LibraryStore, RefusesNetworkLocations) {
+    EXPECT_TRUE(isNetworkPath(L"\\\\nas\\music\\camelplayer"));
+    EXPECT_FALSE(isNetworkPath(testutil::tempDir()));
+    EXPECT_THROW(LibraryStore(L"\\\\nas\\music\\camelplayer"), std::runtime_error);
+}

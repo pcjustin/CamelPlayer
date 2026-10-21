@@ -18,6 +18,7 @@ Downloaded static libraries, NuGet installations, complete SDKs, private music, 
 | libsndfile | LGPL-2.1-or-later | [Notice](third_party/licenses/native/libsndfile.txt) |
 | mpg123 | LGPL-2.1-or-later | [Notice](third_party/licenses/native/mpg123.txt) |
 | libsoxr | LGPL-2.1-or-later | [Notice](third_party/licenses/native/soxr.txt) |
+| SQLite 3.53.4 (with FTS5) | Public domain (SQLite blessing) | [Notice](third_party/licenses/native/sqlite3.txt) |
 | DSD Nexus (libdsf, libdsdiff, libdst) | LGPL-2.1-or-later; built as the shared library `dsdnexus.dll` | [Notice](third_party/licenses/native/dsd-nexus.txt) |
 | dr_flac / dr_wav / dr_mp3 (drlibs) | Unlicense OR MIT-0 | [Notice](third_party/licenses/native/drlibs.txt) |
 | libFLAC | BSD-3-Clause library code | [Notice](third_party/licenses/native/libflac.txt) |

@@ -285,6 +285,25 @@
                                        }
                                    ],
                        "notice":  "licenses/native/dsd-nexus.txt"
+                   },
+                   {
+                       "name":  "sqlite3",
+                       "version":  "3.53.4#2",
+                       "license":  "blessing",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@6e8aa4f2fb9f002a2b62e755d6eda078b7ac1111",
+                       "sources":  [
+                                       {
+                                           "location":  "https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "c24374e9393a943157f533f96e89e6c5743e5f5aad169d8393cff3088ca5ccbe5cc0561681ace49c349d0fe402298ee2624d319f422967247ce0792e3b3aa01e"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/sqlite3.txt"
                    }
                ],
     "rust":  [

@@ -17,6 +17,10 @@
     "mpg123",
     "mp3lame",
     "soxr",
+    {
+      "name": "sqlite3",
+      "features": [ "fts5" ]
+    },
     "dsd-nexus",
     {
       "name": "libsndfile",
