@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // docs/Plan.md §6 output parameters on Chord/DAVE: WASAPI polling buffer and MMCSS, MMCSS on KS, a fixed sample rate,
 // silence after a DoP-to-PCM switch and release of the device after a pause, each for a few seconds of real playback.
 #include <gtest/gtest.h>

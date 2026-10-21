@@ -1,6 +1,6 @@
 # CamelPlayer v2 third-party notices
 
-The project GPL text applies to CamelPlayer-covered code. Each dependency retains its own applicable license. This guide does not replace the complete upstream terms preserved under [third_party/licenses](third_party/licenses).
+The project license, MPL-2.0 ([LICENSE](LICENSE)), applies to CamelPlayer-covered code; versions published before the change remain under GPLv3. Each dependency retains its own applicable license. This guide does not replace the complete upstream terms preserved under [third_party/licenses](third_party/licenses).
 
 ## Repository contents
 
@@ -49,10 +49,10 @@ GitHub's automatic archive can supply the project source at a matching release t
 
 The inventory's native `port_source` fields identify exact vcpkg port trees, including patches. Native `sources` checksums identify upstream archives. Rust source archive locations are version-specific and their checksums can be verified against Cargo.lock. Package-manager installation directories do not need to be committed merely to retain these records.
 
-Release binaries need copies of the required notices. Include this guide, the root GPL text, ASIO terms and collected notice directories. Where LGPL static linking requires a rebuilding/relinking route, provide the necessary source/object materials and scripts under appropriate terms. MPL-covered source must also be available to recipients.
+Release binaries need copies of the required notices. Include this guide, the root MPL-2.0 text, ASIO terms and collected notice directories. Where LGPL static linking requires a rebuilding/relinking route, provide the necessary source/object materials and scripts under appropriate terms. MPL-covered source must also be available to recipients.
 
 ## Distribution status
 
 The ASIO GPLv3 option and Microsoft-licensed WinUI/Windows App SDK binaries still require a combined-work licensing determination. This collection does not grant exceptions over Steinberg or Microsoft code and does not authorize public binary distribution by itself.
 
-An entirely binary-only public distribution without corresponding-source access is not the chosen GPLv3 compliance route. A proprietary ASIO agreement would need to be obtained and assessed separately.
+Binary releases provide the CamelPlayer source as MPL-2.0 requires (Source Code Form of covered files) and keep the LGPL/MPL obligations of the dependencies. A proprietary ASIO agreement would need to be obtained and assessed separately.

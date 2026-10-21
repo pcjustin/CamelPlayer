@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Computes the FLAC STREAMINFO MD5 of decoded samples: every sample as a little-endian signed integer
 // of bits / 8 bytes, interleaved (FLAC format specification). Only 16/24-bit sources are supported.
 #pragma once

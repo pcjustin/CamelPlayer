@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Test material for the MVP (docs/Plan.md §16.6): FLAC files generated with the libFLAC encoder,
 // and an independent libFLAC reference decode used by capture comparison and the decoder report.
 #pragma once

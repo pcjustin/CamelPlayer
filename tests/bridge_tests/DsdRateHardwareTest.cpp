@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // DSD64 to DSD512 on Chord/DAVE (docs/Plan.md §5.8, M2-R09), gated on what the device reports: native DSD on ASIO and
 // DoP on WASAPI, ASIO and KS. A DoP carrier the device does not offer (DSD512 needs 1411.2 kHz) must be refused with
 // that reason, never assumed. KS native DSD has no case: no tested pin reports a DSD data format. Generated low-level

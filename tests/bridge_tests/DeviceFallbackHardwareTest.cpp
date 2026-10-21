@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Saved devices and parameters on real drivers (docs/Plan.md M2-R10). Opt in with
 // --gtest_also_run_disabled_tests --gtest_filter=DeviceFallbackHardware.*
 #include <gtest/gtest.h>

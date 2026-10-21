@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! DSD to PCM (docs/Plan.md §5.8): multistage FIR decimation to 352.8 kHz in the manner of dsd2pcm.
 //!
 //! The first stage filters the 1-bit stream and keeps one value per DSD byte (decimation by 8), summing precomputed

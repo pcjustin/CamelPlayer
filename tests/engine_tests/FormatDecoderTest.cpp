@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // ALAC, WAV and AIFF through every registered decoder (docs/Plan.md §3.1): lossless, so the generated PCM is the
 // independent reference for full decodes and exact seeks.
 #include <gtest/gtest.h>

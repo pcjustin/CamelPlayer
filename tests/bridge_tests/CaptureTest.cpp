@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Capture comparison (docs/Plan.md §12.1, §16.7 item 2): the bytes the engine hands to the "device"
 // must unpack to exactly the libFLAC reference decode, for every decoder and container choice.
 #include <gtest/gtest.h>

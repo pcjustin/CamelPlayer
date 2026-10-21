@@ -3,6 +3,11 @@
   Stages build\<Configuration>\App into dist\CamelPlayer and zips it (docs/Plan.md §4, M0-08).
   Called by build.ps1 -Package.
 #>
+
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 param([ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot

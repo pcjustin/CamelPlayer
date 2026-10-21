@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // One playback session on the Rust Engine through its versioned C ABI (docs/Engine-Bridge-ABI.md).
 // The engine is created for one negotiated output format; seek or a format change opens a new session.
 #pragma once

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Conversion through the Rust Engine into simulated devices (docs/Plan.md §5.2, §5.3): what reaches the device when it
 // does not take the source as it is, and that nothing is converted without "convert when unsupported".
 #include <gtest/gtest.h>
