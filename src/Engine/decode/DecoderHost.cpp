@@ -10,8 +10,10 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "Common/DecoderRegistry.h"
 #include "Engine/decode/IDecoder.h"
 #include "Common/util/Text.h"
 
@@ -39,27 +41,18 @@ int32_t mapError(const Error& error) {
     }
 }
 
-DecoderKind decoderKind(uint32_t kind) {
-    switch (kind) {
-    case CAMEL_DECODER_FFMPEG:
-        return DecoderKind::FFmpeg;
-    case CAMEL_DECODER_SYMPHONIA:
-        return DecoderKind::Symphonia;
-    case CAMEL_DECODER_DR_FLAC:
-        return DecoderKind::DrFlac;
-    case CAMEL_DECODER_SNDFILE:
-        return DecoderKind::Sndfile;
-    case CAMEL_DECODER_DR_WAV:
-        return DecoderKind::DrWav;
-    case CAMEL_DECODER_MPG123:
-        return DecoderKind::Mpg123;
-    case CAMEL_DECODER_DR_MP3:
-        return DecoderKind::DrMp3;
-    case CAMEL_DECODER_DSD_NEXUS:
-        return DecoderKind::DsdNexus;
-    default:
-        throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
-    }
+constexpr std::pair<uint32_t, DecoderKind> kBuiltinNumbers[] = {
+    {CAMEL_DECODER_FFMPEG, DecoderKind::FFmpeg},  {CAMEL_DECODER_SYMPHONIA, DecoderKind::Symphonia},
+    {CAMEL_DECODER_DR_FLAC, DecoderKind::DrFlac}, {CAMEL_DECODER_SNDFILE, DecoderKind::Sndfile},
+    {CAMEL_DECODER_DR_WAV, DecoderKind::DrWav},   {CAMEL_DECODER_MPG123, DecoderKind::Mpg123},
+    {CAMEL_DECODER_DR_MP3, DecoderKind::DrMp3},   {CAMEL_DECODER_DSD_NEXUS, DecoderKind::DsdNexus}};
+
+std::string decoderFor(uint32_t number) {
+    for (const auto& [n, kind] : kBuiltinNumbers)
+        if (n == number) return decoderId(kind);
+    if (number >= CAMEL_DECODER_REGISTERED_BASE)
+        if (const auto entry = decoderRegistry().at(number - CAMEL_DECODER_REGISTERED_BASE)) return entry->id;
+    throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
 }
 
 int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint64_t pathLength, void** outDecoder,
@@ -70,8 +63,7 @@ int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint6
     try {
         const std::string_view utf8(reinterpret_cast<const char*>(path), static_cast<size_t>(pathLength));
         const auto* pcmBits = static_cast<const PcmBitsByFormat*>(context);
-        auto decoder =
-            openDecoder(decoderKind(kind), std::filesystem::path(toWide(utf8)), pcmBits ? *pcmBits : PcmBitsByFormat{});
+        auto decoder = openDecoder(decoderFor(kind), std::filesystem::path(toWide(utf8)), pcmBits ? *pcmBits : PcmBitsByFormat{});
         const auto& source = decoder->info();
         auto handle = std::make_unique<DecoderHandle>();
         handle->decoder = std::move(decoder);
@@ -146,6 +138,13 @@ CamelDecoderHostV1 makeDecoderHostV1(const PcmBitsByFormat* pcmBits) {
             readDecoderHost,
             seekDecoderHost,
             closeDecoderHost};
+}
+
+uint32_t abiDecoder(std::string_view decoder) {
+    for (const auto& [number, kind] : kBuiltinNumbers)
+        if (decoder == decoderId(kind)) return number;
+    const auto index = decoderRegistry().indexOf(decoder);
+    return index ? CAMEL_DECODER_REGISTERED_BASE + uint32_t(*index) : 0;
 }
 
 } // namespace camel::audio

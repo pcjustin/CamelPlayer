@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <span>
+#include <string_view>
 
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
@@ -39,5 +40,8 @@ public:
 // Opens `path` with the chosen decoder. Lossy formats decode to the depth `pcmBits` sets for them (24 by default).
 // Throws Error (FileOpen / UnsupportedStream / DecodeFailed).
 std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, const PcmBitsByFormat& pcmBits = {});
+// The same for any decoder in decoderRegistry() by its ID (docs/Extension-points.md #1).
+std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path,
+                                      const PcmBitsByFormat& pcmBits = {});
 
 } // namespace camel::audio

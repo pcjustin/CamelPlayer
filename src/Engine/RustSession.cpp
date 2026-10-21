@@ -64,28 +64,6 @@ CamelAudioFormatV1 abiFormat(const DeviceFormat& f, DsdPath dsd) {
     return format;
 }
 
-uint32_t abiDecoder(DecoderKind kind) {
-    switch (kind) {
-    case DecoderKind::FFmpeg:
-        return CAMEL_DECODER_FFMPEG;
-    case DecoderKind::Symphonia:
-        return CAMEL_DECODER_SYMPHONIA;
-    case DecoderKind::DrFlac:
-        return CAMEL_DECODER_DR_FLAC;
-    case DecoderKind::Sndfile:
-        return CAMEL_DECODER_SNDFILE;
-    case DecoderKind::DrWav:
-        return CAMEL_DECODER_DR_WAV;
-    case DecoderKind::Mpg123:
-        return CAMEL_DECODER_MPG123;
-    case DecoderKind::DrMp3:
-        return CAMEL_DECODER_DR_MP3;
-    case DecoderKind::DsdNexus:
-        return CAMEL_DECODER_DSD_NEXUS;
-    }
-    return CAMEL_DECODER_SNDFILE;
-}
-
 Error engineError(const char* what, CamelEngineStatus status) {
     const std::string detail = std::string(what) + ": Rust engine status " + std::to_string(status);
     switch (status) {
@@ -137,7 +115,7 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
     const auto utf8 = toUtf8(path.wstring());
     const auto source = trackSource(utf8);
     auto command = nextCommand();
-    auto status = camel_engine_load_flac_v1(engine_, &command, &source, abiDecoder(decoder), &host_);
+    auto status = camel_engine_load_flac_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_);
     if (status == CAMEL_ENGINE_OK && startFrame) {
         command = nextCommand();
         status = camel_engine_seek_v1(engine_, &command, startFrame);
@@ -217,7 +195,7 @@ bool RustSession::queueNext(const std::filesystem::path& path, DecoderKind decod
     const auto utf8 = toUtf8(path.wstring());
     const auto source = trackSource(utf8);
     const auto command = nextCommand();
-    return camel_engine_queue_next_flac_v1(engine_, &command, &source, abiDecoder(decoder), &host_) == CAMEL_ENGINE_OK;
+    return camel_engine_queue_next_flac_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_) == CAMEL_ENGINE_OK;
 }
 
 bool RustSession::clearNext() {

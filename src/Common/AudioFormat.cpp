@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "Common/DecoderRegistry.h"
+
 namespace camel::audio {
 
 const char* formatId(AudioFormat format) {
@@ -57,31 +59,11 @@ bool formatFromId(std::string_view id, AudioFormat& out) {
     return false;
 }
 
-std::span<const DecoderKind> decodersFor(AudioFormat format) {
-    static constexpr DecoderKind kFlac[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrFlac,
-                                            DecoderKind::Sndfile};
-    static constexpr DecoderKind kAlac[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia};
-    static constexpr DecoderKind kPcm[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::Sndfile, DecoderKind::DrWav};
-    static constexpr DecoderKind kAac[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia};
-    static constexpr DecoderKind kMp3[] = {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::Mpg123, DecoderKind::DrMp3};
-    static constexpr DecoderKind kDsd[] = {DecoderKind::DsdNexus};
-    switch (format) {
-    case AudioFormat::Flac:
-        return kFlac;
-    case AudioFormat::Alac:
-        return kAlac;
-    case AudioFormat::Aac:
-        return kAac;
-    case AudioFormat::Mp3:
-        return kMp3;
-    case AudioFormat::Wav:
-    case AudioFormat::Aiff:
-        return kPcm;
-    case AudioFormat::Dsd:
-        return kDsd;
-    default:
-        return {};
-    }
+std::vector<DecoderKind> decodersFor(AudioFormat format) {
+    std::vector<DecoderKind> out;
+    for (const auto& d : decoderRegistry().forFormat(formatId(format)))
+        if (d.builtin) out.push_back(*d.builtin);
+    return out;
 }
 
 bool supports(AudioFormat format, DecoderKind decoder) {
@@ -90,17 +72,10 @@ bool supports(AudioFormat format, DecoderKind decoder) {
 }
 
 DecoderKind defaultDecoder(AudioFormat format) {
-    switch (format) {
-    case AudioFormat::Alac:
-    case AudioFormat::Aac:
-        return DecoderKind::Symphonia;
-    case AudioFormat::Mp3:
-        return DecoderKind::Mpg123;
-    case AudioFormat::Dsd:
-        return DecoderKind::DsdNexus;
-    default:
-        return DecoderKind::Sndfile;
-    }
+    const auto id = decoderRegistry().defaultFor(formatId(format));
+    DecoderKind kind{};
+    if (!id || !decoderFromId(*id, kind)) return DecoderKind::Sndfile;
+    return kind;
 }
 
 bool isLossy(AudioFormat format) {

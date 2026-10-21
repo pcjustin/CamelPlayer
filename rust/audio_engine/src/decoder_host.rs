@@ -14,6 +14,8 @@ pub const DECODER_DR_WAV: u32 = 5;
 pub const DECODER_MPG123: u32 = 6;
 pub const DECODER_DR_MP3: u32 = 7;
 pub const DECODER_DSD_NEXUS: u32 = 8;
+/// Numbers from here on select a decoder the host registered at runtime; the Engine passes them through.
+pub const DECODER_REGISTERED_BASE: u32 = 0x10000;
 
 pub const HOST_OK: i32 = 0;
 pub const HOST_E_IO: i32 = -1;
@@ -118,23 +120,28 @@ pub(crate) struct DecoderSource {
     pub(crate) converter: Option<crate::convert::Converter>,
 }
 
+pub(crate) fn is_decoder_kind(decoder_kind: u32) -> bool {
+    matches!(
+        decoder_kind,
+        DECODER_FFMPEG
+            | DECODER_SYMPHONIA
+            | DECODER_DR_FLAC
+            | DECODER_SNDFILE
+            | DECODER_DR_WAV
+            | DECODER_MPG123
+            | DECODER_DR_MP3
+            | DECODER_DSD_NEXUS
+    ) || decoder_kind >= DECODER_REGISTERED_BASE
+}
+
 impl DecoderSource {
     pub(crate) unsafe fn open(
         source: &CamelTrackSourceV1,
         decoder_kind: u32,
         host: DecoderHost,
     ) -> Result<Self, i32> {
-        if !matches!(
-            decoder_kind,
-            DECODER_FFMPEG
-                | DECODER_SYMPHONIA
-                | DECODER_DR_FLAC
-                | DECODER_SNDFILE
-                | DECODER_DR_WAV
-                | DECODER_MPG123
-                | DECODER_DR_MP3
-                | DECODER_DSD_NEXUS
-        ) || source.path_utf8.is_null()
+        if !is_decoder_kind(decoder_kind)
+            || source.path_utf8.is_null()
             || source.path_length_bytes == 0
             || source.path_length_bytes > 32_768
             || source.path_length_bytes > usize::MAX as u64
@@ -394,3 +401,25 @@ fn map_host_status(status: i32) -> i32 {
 
 const _: () = assert!(std::mem::size_of::<CamelSourceInfoV1>() == 56);
 const _: () = assert!(std::mem::size_of::<CamelDecoderHostV1>() == 48);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_built_in_and_registered_decoder_numbers_only() {
+        for kind in DECODER_FFMPEG..=DECODER_DSD_NEXUS {
+            assert!(is_decoder_kind(kind), "{kind}");
+        }
+        for kind in [
+            DECODER_REGISTERED_BASE,
+            DECODER_REGISTERED_BASE + 7,
+            u32::MAX,
+        ] {
+            assert!(is_decoder_kind(kind), "{kind}");
+        }
+        for kind in [0, DECODER_DSD_NEXUS + 1, DECODER_REGISTERED_BASE - 1] {
+            assert!(!is_decoder_kind(kind), "{kind}");
+        }
+    }
+}

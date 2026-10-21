@@ -5,8 +5,8 @@
 // Logical audio formats and the capability registry (docs/Plan.md §3.1).
 #pragma once
 #include <cstdint>
-#include <span>
 #include <string_view>
+#include <vector>
 
 #include "Common/DecoderKind.h"
 
@@ -21,8 +21,8 @@ const char* formatId(AudioFormat format);
 const char* formatName(AudioFormat format);
 bool formatFromId(std::string_view id, AudioFormat& out);
 
-// Integrated and tested decoders for `format`; empty while the format is not supported yet.
-std::span<const DecoderKind> decodersFor(AudioFormat format);
+// Built-in decoders for `format` from the decoder registry, in settings order; empty while the format is not supported.
+std::vector<DecoderKind> decodersFor(AudioFormat format);
 bool supports(AudioFormat format, DecoderKind decoder);
 // Precondition: decodersFor(format) is not empty.
 DecoderKind defaultDecoder(AudioFormat format);

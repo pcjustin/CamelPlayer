@@ -5,7 +5,10 @@
 #include "Engine/decode/DecoderImpl.h"
 
 #include <algorithm>
+#include <mutex>
 #include <vector>
+
+#include "Common/DecoderRegistry.h"
 
 #include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/decode/FormatProbe.h"
@@ -244,12 +247,12 @@ std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::p
 
 } // namespace
 
-std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, const PcmBitsByFormat& pcmBits) {
-    const AudioFormat format = probeFormat(path);
-    if (!supports(format, kind))
-        throw Error(ErrorCode::UnsupportedStream, std::string(decoderName(kind)) + " cannot decode " + formatName(format));
+namespace {
+
+// A built-in decoder with the corrections it needs for `format` (docs/Plan.md §3.1).
+std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::path& path, AudioFormat format,
+                                      uint32_t lossyBits) {
     if (format == AudioFormat::Dsd) return openAdapter(kind, path, 0); // raw DSD, not PCM
-    const uint32_t lossyBits = pcmBitsFor(pcmBits, format);
     std::unique_ptr<IDecoder> d;
     // mpg123 seeks exactly by itself; Symphonia lands on the target after warm-up; FFmpeg and dr_mp3 can land beside it
     // when they trim encoder delay, so they decode from the start.
@@ -261,15 +264,48 @@ std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::p
         d = openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Aac && kind == DecoderKind::Symphonia)
         if (const auto trim = mp4EncoderTrim(path, d->info().sampleRate)) d = std::make_unique<TrimDelay>(std::move(d), *trim);
+    if (format == AudioFormat::Aiff && kind == DecoderKind::Symphonia)
+        if (const auto frames = aiffSampleFrames(path)) d = std::make_unique<FrameLimit>(std::move(d), *frames);
+    return d;
+}
+
+void registerBuiltinOpeners() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        for (const DecoderKind kind : kAllDecoders)
+            decoderRegistry().setOpener(decoderId(kind),
+                                        [kind](const std::filesystem::path& path, std::string_view id, uint32_t lossyBits) {
+                                            AudioFormat format{};
+                                            formatFromId(id, format);
+                                            return openBuiltin(kind, path, format, lossyBits);
+                                        });
+    });
+}
+
+} // namespace
+
+std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path,
+                                      const PcmBitsByFormat& pcmBits) {
+    registerBuiltinOpeners();
+    const AudioFormat format = probeFormat(path);
+    const std::string_view id = formatId(format);
+    const auto entry = decoderRegistry().find(decoder);
+    if (!entry || !entry->open || std::find(entry->formats.begin(), entry->formats.end(), id) == entry->formats.end())
+        throw Error(ErrorCode::UnsupportedStream,
+                    (entry ? entry->name : std::string(decoder)) + " cannot decode " + formatName(format));
+    auto d = entry->open(path, id, format == AudioFormat::Dsd ? 0 : pcmBitsFor(pcmBits, format));
+    if (format == AudioFormat::Dsd) return d;
     // The player supports 16/24-bit integer PCM sources only (docs/Plan.md §3.1).
     if (const auto bits = d->info().bitsPerSample; bits != 16 && bits != 24)
         throw Error(ErrorCode::UnsupportedStream, std::to_string(bits) + "-bit sources are not supported (16/24-bit only)");
-    if (format == AudioFormat::Aiff && kind == DecoderKind::Symphonia)
-        if (const auto frames = aiffSampleFrames(path)) return std::make_unique<FrameLimit>(std::move(d), *frames);
     SourceInfo parsed;
     if (format == AudioFormat::Flac && readFlacStreamInfo(path, parsed))
         return std::make_unique<WithStreamInfo>(std::move(d), parsed);
     return d;
+}
+
+std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, const PcmBitsByFormat& pcmBits) {
+    return openDecoder(decoderId(kind), path, pcmBits);
 }
 
 } // namespace camel::audio

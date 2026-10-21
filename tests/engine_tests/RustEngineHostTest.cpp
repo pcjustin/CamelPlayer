@@ -8,9 +8,12 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <vector>
 
+#include "Common/DecoderRegistry.h"
 #include "Engine/decode/DecoderHost.h"
+#include "Engine/decode/IDecoder.h"
 #include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/testing/TestAudio.h"
 #include "Engine/EngineAbi.h"
@@ -218,6 +221,43 @@ TEST(RustEngineHost, PlaybackCommandsExposeSeparateTimelinePositions) {
     EXPECT_EQ(timeline.submitted_position_frames, 0u);
     EXPECT_EQ(timeline.audible_position_frames, 0u);
     destroyEngine(engine);
+}
+
+// An extension decoder reaches the Engine through CAMEL_DECODER_REGISTERED_BASE + its registry index
+// (docs/Extension-points.md #1); here a second name for libsndfile.
+TEST(RustEngineHost, RegisteredDecoderNumberDecodesThroughTheHost) {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        camel::audio::decoderRegistry().add({"test/host-alias",
+                                             "Host alias",
+                                             {"flac"},
+                                             std::nullopt,
+                                             [](const std::filesystem::path& path, std::string_view, uint32_t) {
+                                                 return camel::audio::openDecoder(camel::audio::DecoderKind::Sndfile, path);
+                                             }});
+    });
+    const uint32_t number = camel::audio::abiDecoder("test/host-alias");
+    ASSERT_GE(number, CAMEL_DECODER_REGISTERED_BASE);
+    const auto path = testutil::testFile("16-44.1k");
+    const auto reference = camel::audio::testaudio::referenceDecode(path);
+    ASSERT_TRUE(reference.error.empty()) << reference.error;
+    auto* engine = createEngine(rateOf(path));
+    ASSERT_NE(engine, nullptr);
+    ASSERT_EQ(loadSource(engine, path, number), CAMEL_ENGINE_OK);
+    std::vector<int32_t> samples;
+    std::array<int32_t, 4096 * 2> chunk{};
+    for (;;) {
+        uint64_t framesRead = 0;
+        const auto status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
+        ASSERT_TRUE(status == CAMEL_ENGINE_OK || status == CAMEL_ENGINE_END) << status;
+        samples.insert(samples.end(), chunk.begin(), chunk.begin() + framesRead * reference.info.channels);
+        if (status == CAMEL_ENGINE_END) break;
+    }
+    EXPECT_EQ(samples, reference.samples);
+    destroyEngine(engine);
+    auto* unknown = createEngine();
+    EXPECT_NE(loadSource(unknown, path, CAMEL_DECODER_REGISTERED_BASE + 100000), CAMEL_ENGINE_OK);
+    destroyEngine(unknown);
 }
 
 TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {

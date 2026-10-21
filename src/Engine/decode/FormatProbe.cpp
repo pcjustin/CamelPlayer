@@ -7,11 +7,13 @@
 #include <windows.h>
 
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
 
 #include "Common/AudioTypes.h"
+#include "Common/DecoderRegistry.h"
 #include "Common/util/Text.h"
 
 namespace camel::audio {
@@ -172,9 +174,8 @@ AudioFormat mp4Format(const File& f) {
     unsupported("MP4 file has no audio track");
 }
 
-} // namespace
-
-AudioFormat probeFormat(const std::filesystem::path& path) {
+// The built-in content rules; nullopt when no rule matches.
+std::optional<AudioFormat> builtinFormat(const std::filesystem::path& path) {
     const File f(path);
     uint8_t h[12] = {};
     if (!f.readAt(0, h, sizeof h)) unsupported("file is too short to identify");
@@ -207,6 +208,25 @@ AudioFormat probeFormat(const std::filesystem::path& path) {
         if (layer == 1 && ((h[1] >> 3) & 3) != 1) return AudioFormat::Mp3;
         unsupported("MPEG audio layer I/II is not supported");
     }
+    return std::nullopt;
+}
+
+} // namespace
+
+AudioFormat probeFormat(const std::filesystem::path& path) {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        decoderRegistry().addProbe({"builtin", [](const std::filesystem::path& p) -> std::optional<std::string> {
+                                        const auto format = builtinFormat(p);
+                                        return format ? std::optional<std::string>(formatId(*format)) : std::nullopt;
+                                    }});
+    });
+    for (const auto& probe : decoderRegistry().probes())
+        if (const auto id = probe.identify(path)) {
+            AudioFormat format{};
+            if (formatFromId(*id, format)) return format;
+            unsupported("format " + *id + " has no player support yet");
+        }
     unsupported("unrecognized audio format");
 }
 
