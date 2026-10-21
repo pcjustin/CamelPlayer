@@ -19,6 +19,7 @@
 #include "Engine/PlaybackEngine.h"
 #include "Engine/SamplePacker.h"
 #include "OutputBridge/CaptureOutput.h"
+#include "StartedSnapshot.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -46,10 +47,12 @@ Played play(const std::filesystem::path& file, const Settings& settings, std::fu
     options.accepts = std::move(accepts);
     Played played;
     PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
+    testutil::StartedSnapshot started(engine);
     for (int i = 0; i < times; i++) {
+        started.reset();
         engine.openAndPlay(file);
         engine.waitIdle();
-        played.started = engine.snapshot();
+        played.started = started.get().value_or(engine.snapshot());
         EXPECT_TRUE(engine.waitForState(PlayState::Stopped, 30s));
     }
     played.ended = engine.snapshot();

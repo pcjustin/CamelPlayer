@@ -15,6 +15,7 @@
 #include "DsdFixture.h"
 #include "Engine/PlaybackEngine.h"
 #include "OutputBridge/CaptureOutput.h"
+#include "StartedSnapshot.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -149,9 +150,10 @@ TEST(SharedMode, PlaysDsdOnlyConvertedToPcm) {
     settings.wasapi.dsdOutput = DsdOutput::Pcm;
     Rig converted(settings);
     converted.device.accepts = refused.device.accepts;
+    testutil::StartedSnapshot started(*converted.engine);
     converted.engine->openAndPlay(file);
     converted.engine->waitIdle();
-    const auto c = converted.engine->snapshot();
+    const auto c = started.get().value_or(converted.engine->snapshot());
     converted.engine->stop();
     ASSERT_FALSE(c.error) << c.errorDetail;
     ASSERT_TRUE(c.plan);
