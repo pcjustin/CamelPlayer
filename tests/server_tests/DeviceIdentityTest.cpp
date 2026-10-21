@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Saved devices and output parameters (docs/Plan.md §2, M2-R10): a missing device fails playback with a notice and is
 // never replaced, it plays again once it returns, and parameters the device could not take reach the status area
 // while the saved settings stay as requested.

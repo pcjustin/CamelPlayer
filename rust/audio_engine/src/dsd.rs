@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Raw DSD output (docs/Plan.md §5.8): native bytes or DoP, and format-correct silence.
 //!
 //! Engine frames of a native DSD stream are byte frames: one byte per channel, eight DSD samples, the oldest in the

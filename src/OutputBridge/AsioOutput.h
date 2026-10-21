@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // ASIO (PCM) with a dedicated STA control thread (docs/Plan.md §5.6, §15.3). Native DSD arrives in M2.
 #pragma once
 #include "OutputBridge/IOutput.h"

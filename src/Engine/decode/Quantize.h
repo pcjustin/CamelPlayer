@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Lossy decoders produce float samples; the adapter converts them to the configured PCM depth exactly once
 // (docs/Plan.md §2). Rounds to nearest and clips to full scale; dither arrives with the shared quantization stage.
 #pragma once

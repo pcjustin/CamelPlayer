@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // FLAC, WAV and AIFF through libsndfile (which decodes FLAC with libFLAC internally).
 #include "Engine/decode/DecoderImpl.h"
 

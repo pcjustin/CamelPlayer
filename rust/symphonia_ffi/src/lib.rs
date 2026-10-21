@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF, AAC and MP3 decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 

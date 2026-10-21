@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Saved output parameters the device cannot take fall back to the driver's choice and say so (docs/Plan.md M2-R10).
 #include <gtest/gtest.h>
 

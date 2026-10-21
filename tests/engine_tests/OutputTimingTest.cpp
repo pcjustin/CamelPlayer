@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Output parameters of docs/Plan.md §6 through a simulated device: a fixed sample rate resamples PCM without the
 // convert setting and falls back visibly when the device refuses it, silence after a format change is
 // format-correct (DoP markers continue), the device is released after a pause, and timing changes never reopen it.

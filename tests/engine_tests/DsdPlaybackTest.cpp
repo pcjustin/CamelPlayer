@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Raw DSD playback (docs/Plan.md §5.3, §5.8): DSF read by DSD Nexus reaches a simulated device as native DSD or DoP,
 // bit for bit, with format-correct silence and continuous DoP markers; carrier rates are never assumed.
 #include <gtest/gtest.h>

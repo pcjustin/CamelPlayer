@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // The binary interface of ASIO drivers as a host sees it (docs/Plan.md §5.6), written for interoperability from the
 // interface's layout and values; it contains no Steinberg SDK code. x64 only: COM methods and driver callbacks use the
 // single x64 calling convention. ASIO is a trademark of Steinberg Media Technologies GmbH.

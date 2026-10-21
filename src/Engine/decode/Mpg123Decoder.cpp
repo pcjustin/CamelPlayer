@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // MP3 through libmpg123 with gapless decoding: LAME/Xing encoder delay and padding are trimmed by the library.
 #include "Engine/decode/DecoderImpl.h"
 

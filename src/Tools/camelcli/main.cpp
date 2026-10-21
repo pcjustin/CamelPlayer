@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // camelcli: command-line companion of CamelPlayer (docs/Plan.md §4, §16).
 #include <windows.h>
 

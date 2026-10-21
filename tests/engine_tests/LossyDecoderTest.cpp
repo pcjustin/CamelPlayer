@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // AAC-LC and MP3 through every registered decoder (docs/Plan.md §3.1, §12): lossy, so the encoded source PCM is the
 // reference with declared tolerances. Files that declare encoder delay and padding must decode to exactly the source
 // frames at lag 0; files without trim metadata are only required to decode consistently.

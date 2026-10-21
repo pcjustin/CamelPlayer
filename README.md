@@ -72,8 +72,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File msbuild/collect-licenses.ps1
 
 ## License and release status
 
-The project currently carries the [GNU GPL version 3](LICENSE). Third-party components retain their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD, or other notices.
+CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components retain their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD, or other notices.
 
-**Public binary distribution is not yet cleared.** The combination of the GPLv3 ASIO SDK option with Microsoft-licensed Windows App SDK/WinUI binary packages still requires a licensing determination. A source archive or an exception applied only to CamelPlayer-owned code does not resolve third-party permissions.
+MPL-2.0 allows CamelPlayer code to be combined with Microsoft-licensed Windows App SDK/WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release. A review of the complete notice set is still a check before the first public release.
 
 For any future binary release, provide access to the exact corresponding source, dependency modifications and build information, and include all required notices. The local packaging command prepares files; it does not establish redistribution permission or publish a release.

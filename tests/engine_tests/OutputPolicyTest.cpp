@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // WASAPI shared mode and follow-default (docs/Plan.md §2, §5.4; M2-R08) through simulated devices: shared mode always
 // converts to the mixer's format and is processed; a followed default moves an open stream and resumes only active
 // playback; a fixed device pauses on loss and never follows the default.

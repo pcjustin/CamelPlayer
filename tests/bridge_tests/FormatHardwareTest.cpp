@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // M2 formats and DSD paths on the connected devices (docs/Plan.md §16.7): each case plays a local testdata file for a
 // second on Chord/DAVE or the built-in Cirrus codec and checks the negotiated path. Cirrus has no DSD mode, so it only
 // receives DSD converted to PCM, never DoP or native DSD.

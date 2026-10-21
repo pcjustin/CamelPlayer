@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // ASIO channel buffer layouts (docs/Plan.md §5.6, §5.8): PCM samples and native DSD bytes split per channel, with
 // the bit order DSDInt8LSB1 drivers expect.
 #include <gtest/gtest.h>

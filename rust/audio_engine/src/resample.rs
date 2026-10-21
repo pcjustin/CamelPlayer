@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Streaming sample-rate conversion through libsoxr (docs/Plan.md §5.2), on interleaved 64-bit float frames.
 
 use std::ffi::{c_char, c_uint, c_ulong, c_void};

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Converts one decoded source to the device format (docs/Plan.md §5.2, §5.3).
 //!
 //! Integer sources the device takes as they are only repack (zero padding) and never touch float. Mono is

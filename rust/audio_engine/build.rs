@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // libsoxr comes from the repository's vcpkg tree. It is not bundled into the static library: the C++ executables link
 // soxr.lib themselves, and only Rust test binaries need it from here.
 fn main() {
