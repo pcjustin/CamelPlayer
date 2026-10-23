@@ -304,6 +304,44 @@
                                        }
                                    ],
                        "notice":  "licenses/native/sqlite3.txt"
+                   },
+                   {
+                       "name":  "taglib",
+                       "version":  "2.3.1",
+                       "license":  "LGPL-2.1-only OR MPL-1.1",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@83224e7f88cca8b768fd66f3f99b040867f7dad4",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/taglib/taglib@v2.3.1",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "f3988a78692527af0cb006c2cf5767f2ca624a35eaf75a594ce29f26f8b8f233d9e79c7925305cb362fa600491a9b5f34a81b622b6456e62e32d94d769be3762"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/taglib.txt"
+                   },
+                   {
+                       "name":  "utfcpp",
+                       "version":  "4.2.1",
+                       "license":  "BSL-1.0",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@c1ef638c33ab0b9d609c564ac63417499f8a3e5d",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/nemtrif/utfcpp@v4.2.1",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "07d0e4bebb0c80a5fdabbd4ae0c005c17a99b88e01db70976ba01878ce1f9771ffaf33e510985d4c80f19b31df23e5ce4abbc1fc89460819c5b29b6e774a8b21"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/utfcpp.txt"
                    }
                ],
     "rust":  [

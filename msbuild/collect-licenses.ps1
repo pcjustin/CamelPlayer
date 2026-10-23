@@ -13,7 +13,7 @@ $nativeLicenses = [ordered]@{
     libflac = 'BSD-3-Clause'; libogg = 'BSD-3-Clause'; libvorbis = 'BSD-3-Clause'; opus = 'BSD-3-Clause'
     zlib = 'Zlib'; wil = 'MIT'; 'nlohmann-json' = 'MIT'; gtest = 'BSD-3-Clause'
     mpg123 = 'LGPL-2.1-or-later'; mp3lame = 'LGPL-2.0-only'; soxr = 'LGPL-2.1-or-later'
-    'dsd-nexus' = 'LGPL-2.1-or-later'; sqlite3 = 'blessing'
+    'dsd-nexus' = 'LGPL-2.1-or-later'; sqlite3 = 'blessing'; taglib = 'LGPL-2.1-only OR MPL-1.1'; utfcpp = 'BSL-1.0'
 }
 $testOnly = @('gtest', 'mp3lame') # linked into tests.exe only, never shipped
 foreach ($port in $nativeLicenses.Keys) {

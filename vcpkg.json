@@ -17,6 +17,7 @@
     "mpg123",
     "mp3lame",
     "soxr",
+    "taglib",
     {
       "name": "sqlite3",
       "features": [ "fts5" ]

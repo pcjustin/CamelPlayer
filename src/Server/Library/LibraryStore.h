@@ -55,6 +55,8 @@ public:
     static constexpr int kKeptBackups = 3;
 
 private:
+    friend class LibraryScanner;
+    std::mutex scanMutex_;
     void writerMain();
 
     std::filesystem::path path_;

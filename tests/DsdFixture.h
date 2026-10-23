@@ -118,4 +118,39 @@ inline Bytes dsdSine(uint32_t dsdRate, double frequency, double amplitude, size_
     return out;
 }
 
+inline void putChunk(Bytes& out, std::string_view id, const Bytes& body) {
+    put(out, id);
+    putBe<uint64_t>(out, body.size());
+    out.insert(out.end(), body.begin(), body.end());
+    if (body.size() % 2) out.push_back(0);
+}
+
+inline Bytes dffProp(uint32_t channels, uint32_t rate, bool dst) {
+    Bytes fs, chnl, cmpr, prop;
+    putBe<uint32_t>(fs, rate);
+    putBe<uint16_t>(chnl, uint16_t(channels));
+    for (uint32_t c = 0; c < channels; c++) put(chnl, channels == 1 ? "C   " : c == 0 ? "SLFT" : "SRGT");
+    const std::string_view name = dst ? "DST Encoded" : "not compressed";
+    put(cmpr, dst ? "DST " : "DSD ");
+    cmpr.push_back(uint8_t(name.size()));
+    put(cmpr, name);
+    put(prop, "SND ");
+    putChunk(prop, "FS  ", fs);
+    putChunk(prop, "CHNL", chnl);
+    putChunk(prop, "CMPR", cmpr);
+    return prop;
+}
+
+inline Bytes dff(const Bytes& sound, uint32_t channels, uint32_t rate, bool dst) {
+    Bytes form, fver;
+    put(form, "DSD ");
+    putBe<uint32_t>(fver, 0x01050000);
+    putChunk(form, "FVER", fver);
+    putChunk(form, "PROP", dffProp(channels, rate, dst));
+    putChunk(form, dst ? "DST " : "DSD ", sound);
+    Bytes out;
+    putChunk(out, "FRM8", form);
+    return out;
+}
+
 } // namespace dsdfixture

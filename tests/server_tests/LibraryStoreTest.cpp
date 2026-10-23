@@ -208,6 +208,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
 
 TEST(LibraryStore, RefusesNetworkLocations) {
     EXPECT_TRUE(isNetworkPath(L"\\\\nas\\music\\camelplayer"));
+    EXPECT_TRUE(isNetworkPath(L"\\\\?\\UNC\\nas\\music\\camelplayer"));
     EXPECT_FALSE(isNetworkPath(testutil::tempDir()));
     EXPECT_THROW(LibraryStore(L"\\\\nas\\music\\camelplayer"), std::runtime_error);
 }

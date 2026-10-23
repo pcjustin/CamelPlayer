@@ -69,6 +69,7 @@ void configure(sqlite::Database& db) {
 
 bool isNetworkPath(const std::filesystem::path& path) {
     const std::wstring text = std::filesystem::absolute(path).wstring();
+    if (_wcsnicmp(text.c_str(), L"\\\\?\\UNC\\", 8) == 0) return true;
     if (PathIsNetworkPathW(text.c_str())) return true;
     const std::wstring root = std::filesystem::absolute(path).root_path().wstring();
     return !root.empty() && GetDriveTypeW(root.c_str()) == DRIVE_REMOTE;
