@@ -31,6 +31,7 @@
 #include <taglib/wavfile.h>
 
 #include "Server/Library/LibraryIdentity.h"
+#include "Server/Library/CueSheet.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Engine/decode/FormatProbe.h"
@@ -244,6 +245,316 @@ struct Listing {
     std::string error;
 };
 
+struct CueProjection {
+    int64_t file = 0;
+    int64_t cueFile = 0;
+    int index = 0;
+    int64_t start = 0;
+    int64_t end = 0;
+    int64_t pregap75 = 0;
+    int64_t postgap75 = 0;
+    int64_t year = 0;
+    int64_t trackTotal = 0;
+    std::string title;
+    std::string album;
+    std::string albumArtist;
+    std::string artist;
+};
+
+struct CuePlan {
+    std::set<int64_t> validCueFiles;
+    std::set<int64_t> replaceEmbeddedFiles;
+    std::set<std::pair<int64_t, int>> tracks;
+    std::vector<CueProjection> projections;
+};
+
+std::optional<uint32_t> cueEncoding(sqlite::Database& db, int64_t fileId) {
+    auto row = db.prepare("SELECT value FROM app_state WHERE key=?");
+    row.bind(1, "cue_encoding:" + std::to_string(fileId));
+    if (!row.step()) return std::nullopt;
+    uint32_t value = 0;
+    const auto text = row.text(0);
+    if (std::from_chars(text.data(), text.data() + text.size(), value).ec != std::errc{} || !value) return std::nullopt;
+    return value;
+}
+
+uint64_t cueSamples(uint64_t frames75, uint64_t sampleRate) {
+    if (!sampleRate || frames75 > UINT64_MAX / sampleRate || (frames75 * sampleRate) % 75)
+        throw std::runtime_error("CUE offset cannot be represented at this sample rate");
+    return frames75 * sampleRate / 75;
+}
+
+CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, const std::vector<std::string>& changedAudio,
+                    std::vector<std::string>& diagnostics) {
+    struct Audio {
+        int64_t id;
+        std::string path;
+        uint64_t rate;
+        uint64_t frames;
+        std::string title, album, albumArtist, artist;
+        int year, trackTotal;
+    };
+    struct Source {
+        int64_t id;
+        std::string path;
+        library::CueSheet sheet;
+        bool valid = false;
+        std::vector<CueProjection> tracks;
+    };
+    CuePlan plan;
+    std::map<std::string, Audio> audioByPath;
+    std::map<int64_t, Audio> audioById;
+    auto audioRows =
+        db.prepare("SELECT f.id,f.path,t.sample_rate,t.total_frames,t.title,t.album,t.album_artist,t.artist,t.year,t.track_total "
+                   "FROM files f JOIN tracks t ON t.file_id=f.id AND t.cue_index=0 "
+                   "WHERE f.root_id=? AND f.available=1 AND f.kind='audio'");
+    audioRows.bind(1, root);
+    while (audioRows.step()) {
+        Audio a{audioRows.integer(0),
+                audioRows.text(1),
+                uint64_t(audioRows.integer(2)),
+                uint64_t(audioRows.integer(3)),
+                audioRows.text(4),
+                audioRows.text(5),
+                audioRows.text(6),
+                audioRows.text(7),
+                int(audioRows.integer(8)),
+                int(audioRows.integer(9))};
+        audioByPath.emplace(a.path, a);
+        audioById.emplace(a.id, std::move(a));
+    }
+    std::vector<Source> sources;
+    auto cueRows = db.prepare("SELECT id,path FROM files WHERE root_id=? AND available=1 AND kind='cue'");
+    cueRows.bind(1, root);
+    while (cueRows.step()) {
+        Source source{cueRows.integer(0), cueRows.text(1)};
+        try {
+            const Path cuePath(toWide(source.path));
+            const auto before = fileVersion(cuePath);
+            source.sheet = library::parseCue(cuePath, cueEncoding(db, source.id));
+            if (fileVersion(cuePath) != before) throw std::runtime_error("CUE changed during read");
+            std::set<std::string> usedPaths;
+            for (const auto& cueFile : source.sheet.files) {
+                const Path relative(toWide(cueFile.path));
+                if (relative.is_absolute() || relative.has_root_name() || relative.has_root_directory())
+                    throw std::runtime_error("CUE FILE path must be relative");
+                const Path resolved = (cuePath.parent_path() / relative).lexically_normal();
+                if (canonicalRoot(resolved) != Path(lower(resolved.wstring())) || !contains(rootPath, resolved))
+                    throw std::runtime_error("CUE FILE resolves outside the registered root or through an alias");
+                const std::string audioPath = key(resolved);
+                if (!usedPaths.insert(audioPath).second) throw std::runtime_error("CUE repeats a FILE path");
+                const auto found = audioByPath.find(audioPath);
+                if (found == audioByPath.end()) throw std::runtime_error("CUE FILE is not an available audio file in this root");
+                const auto& audio = found->second;
+                if (!audio.rate || !audio.frames) throw std::runtime_error("CUE source has no known sample range");
+                std::vector<uint64_t> starts;
+                for (const auto& track : cueFile.tracks)
+                    starts.push_back(source.sheet.offsetsAreSamples ? *track.index01 : cueSamples(*track.index01, audio.rate));
+                size_t totalTracks = 0;
+                for (const auto& file : source.sheet.files) totalTracks += file.tracks.size();
+                if (starts.front() > 0 && &cueFile == &source.sheet.files.front()) {
+                    source.tracks.push_back({audio.id, source.id, -1, 0, int64_t(starts.front()), 0, 0, source.sheet.year,
+                                             int64_t(source.sheet.files.front().tracks.size()), "", source.sheet.title,
+                                             source.sheet.performer.empty() ? audio.albumArtist : source.sheet.performer,
+                                             source.sheet.performer.empty() ? audio.artist : source.sheet.performer});
+                }
+                for (size_t i = 0; i < cueFile.tracks.size(); ++i) {
+                    const auto& track = cueFile.tracks[i];
+                    const uint64_t end = i + 1 < starts.size() ? starts[i + 1] : audio.frames;
+                    if (starts[i] >= end || end > audio.frames)
+                        throw std::runtime_error("CUE track range is empty, overlapping or beyond the source");
+                    if (i + 1 < cueFile.tracks.size() && cueFile.tracks[i + 1].index00) {
+                        const auto pregap = source.sheet.offsetsAreSamples
+                                                ? *cueFile.tracks[i + 1].index00
+                                                : cueSamples(*cueFile.tracks[i + 1].index00, audio.rate);
+                        if (pregap < starts[i]) throw std::runtime_error("CUE INDEX 00 overlaps the preceding track");
+                    }
+                    source.tracks.push_back(
+                        {audio.id, source.id, track.number, int64_t(starts[i]), int64_t(end), int64_t(track.pregap75),
+                         int64_t(track.postgap75), source.sheet.year ? source.sheet.year : audio.year, int64_t(totalTracks),
+                         track.title.empty() ? "Track " + std::to_string(track.number) : track.title,
+                         source.sheet.title.empty() ? audio.album : source.sheet.title,
+                         source.sheet.performer.empty() ? audio.albumArtist : source.sheet.performer,
+                         track.performer.empty() ? (source.sheet.performer.empty() ? audio.artist : source.sheet.performer)
+                                                 : track.performer});
+                }
+            }
+            source.valid = true;
+        } catch (const std::exception& e) {
+            diagnostics.push_back(source.path + ": " + e.what());
+        }
+        sources.push_back(std::move(source));
+    }
+
+    std::map<int64_t, std::set<int64_t>> sourcesByAudio;
+    for (const auto& source : sources)
+        if (source.valid)
+            for (const auto& track : source.tracks)
+                if (track.index > 0) sourcesByAudio[track.file].insert(source.id);
+    std::set<int64_t> ambiguous;
+    for (const auto& [audioId, sourceIds] : sourcesByAudio) {
+        if (sourceIds.size() > 1) {
+            ambiguous.insert(sourceIds.begin(), sourceIds.end());
+            diagnostics.push_back("ambiguous external CUE references for audio file " + std::to_string(audioId));
+        }
+    }
+    for (auto& source : sources) {
+        if (!source.valid || ambiguous.contains(source.id)) continue;
+        plan.validCueFiles.insert(source.id);
+        for (const auto& track : source.tracks) {
+            plan.replaceEmbeddedFiles.insert(track.file);
+            plan.tracks.emplace(track.file, track.index);
+            plan.projections.push_back(track);
+        }
+    }
+
+    std::set<std::string> changedPaths(changedAudio.begin(), changedAudio.end());
+    std::set<int64_t> embeddedCandidates;
+    for (const auto& [id, audio] : audioById)
+        if (changedPaths.contains(audio.path)) embeddedCandidates.insert(id);
+    auto oldCueTracks = db.prepare("SELECT DISTINCT t.file_id,f.path,cf.id,cf.available FROM tracks t "
+                                   "JOIN files f ON f.id=t.file_id LEFT JOIN files cf ON cf.id=t.cue_file_id "
+                                   "WHERE f.root_id=? AND f.available=1 AND f.kind='audio' AND t.cue_index<>0 "
+                                   "AND t.cue_file_id IS NOT NULL");
+    oldCueTracks.bind(1, root);
+    while (oldCueTracks.step()) {
+        const int64_t file = oldCueTracks.integer(0);
+        const int64_t cue = oldCueTracks.integer(2);
+        if (!oldCueTracks.integer(3) || !plan.validCueFiles.contains(cue)) embeddedCandidates.insert(file);
+    }
+    for (const auto id : embeddedCandidates) {
+        const auto& audio = audioById.at(id);
+        if (plan.replaceEmbeddedFiles.contains(id)) continue;
+        plan.replaceEmbeddedFiles.insert(id);
+        try {
+            auto embedded = library::parseEmbeddedFlacCue(Path(toWide(audio.path)));
+            if (embedded.files.empty()) continue;
+            std::vector<uint64_t> starts;
+            for (const auto& track : embedded.files.front().tracks) starts.push_back(*track.index01);
+            if (!starts.empty() && starts.front() > 0) {
+                CueProjection leadIn{audio.id,
+                                     0,
+                                     -1,
+                                     0,
+                                     int64_t(starts.front()),
+                                     0,
+                                     0,
+                                     audio.year,
+                                     int64_t(starts.size()),
+                                     "",
+                                     audio.album,
+                                     audio.albumArtist,
+                                     audio.artist};
+                plan.tracks.emplace(leadIn.file, leadIn.index);
+                plan.projections.push_back(std::move(leadIn));
+            }
+            for (size_t i = 0; i < starts.size(); ++i) {
+                const uint64_t end = i + 1 < starts.size() ? starts[i + 1] : audio.frames;
+                if (starts[i] >= end || end > audio.frames) throw std::runtime_error("embedded CUESHEET range is invalid");
+                CueProjection p{audio.id,
+                                0,
+                                embedded.files.front().tracks[i].number,
+                                int64_t(starts[i]),
+                                int64_t(end),
+                                0,
+                                0,
+                                audio.year,
+                                int64_t(starts.size()),
+                                "Track " + std::to_string(embedded.files.front().tracks[i].number),
+                                audio.album,
+                                audio.albumArtist,
+                                audio.artist};
+                plan.tracks.emplace(p.file, p.index);
+                plan.projections.push_back(std::move(p));
+            }
+            plan.replaceEmbeddedFiles.insert(id);
+        } catch (const std::exception& e) {
+            diagnostics.push_back(audio.path + ": embedded CUESHEET: " + e.what());
+        }
+    }
+    return plan;
+}
+
+void applyCuePlan(sqlite::Database& db, const CuePlan& plan, int64_t root) {
+    db.exec("DELETE FROM tracks WHERE cue_index<>0 AND cue_file_id IN "
+            "(SELECT id FROM files WHERE root_id=" +
+            std::to_string(root) + " AND kind='cue' AND available=0)");
+    auto oldCues = db.prepare("SELECT id FROM files WHERE root_id=? AND kind='cue' AND available=1");
+    oldCues.bind(1, root);
+    while (oldCues.step()) {
+        const auto id = oldCues.integer(0);
+        if (!plan.validCueFiles.contains(id)) db.prepare("DELETE FROM tracks WHERE cue_file_id=?").bind(1, id).run();
+    }
+    for (const auto file : plan.replaceEmbeddedFiles) {
+        auto existing = db.prepare("SELECT cue_index FROM tracks WHERE file_id=? AND cue_file_id IS NULL AND cue_index<>0");
+        existing.bind(1, file);
+        while (existing.step()) {
+            const auto index = int(existing.integer(0));
+            if (!plan.tracks.contains({file, index}))
+                db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=? AND cue_file_id IS NULL")
+                    .bind(1, file)
+                    .bind(2, int64_t(index))
+                    .run();
+        }
+    }
+    auto oldVirtual =
+        db.prepare("SELECT file_id,cue_index,cue_file_id FROM tracks WHERE cue_index<>0 AND cue_file_id IS NOT NULL");
+    while (oldVirtual.step()) {
+        const int64_t file = oldVirtual.integer(0);
+        const int index = int(oldVirtual.integer(1));
+        const int64_t cueFile = oldVirtual.integer(2);
+        if (plan.validCueFiles.contains(cueFile) && !plan.tracks.contains({file, index}))
+            db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=?").bind(1, file).bind(2, int64_t(index)).run();
+    }
+    for (const auto& p : plan.projections) {
+        if (p.index == 0) continue;
+        auto s = db.prepare("INSERT INTO tracks(file_id,cue_index,cue_file_id,start_frame,end_frame,cue_pregap_75ths,"
+                            "cue_postgap_75ths,title,album,album_artist,artist,year,track_number,track_total,disc_number,"
+                            "disc_total,format,sample_rate,bits_per_sample,channels,total_frames,rg_track_gain,rg_track_peak,"
+                            "rg_album_gain,rg_album_peak,rg_analysis_gain,rg_analysis_peak,embedded_cover,lyrics) "
+                            "SELECT file_id,?,?,?,?,?,?,?,?,?,?,?,?,?,disc_number,disc_total,format,sample_rate,bits_per_sample,"
+                            "channels,total_frames,rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,rg_analysis_gain,"
+                            "rg_analysis_peak,embedded_cover,lyrics FROM tracks WHERE file_id=? AND cue_index=0 "
+                            "ON CONFLICT(file_id,cue_index) DO UPDATE SET cue_file_id=excluded.cue_file_id,"
+                            "start_frame=excluded.start_frame,end_frame=excluded.end_frame,"
+                            "cue_pregap_75ths=excluded.cue_pregap_75ths,cue_postgap_75ths=excluded.cue_postgap_75ths,"
+                            "title=excluded.title,album=excluded.album,album_artist=excluded.album_artist,artist=excluded.artist,"
+                            "year=excluded.year,track_number=excluded.track_number,track_total=excluded.track_total");
+        s.bind(1, int64_t(p.index));
+        if (p.cueFile)
+            s.bind(2, p.cueFile);
+        else
+            s.bindNull(2);
+        s.bind(3, p.start)
+            .bind(4, p.end)
+            .bind(5, p.pregap75)
+            .bind(6, p.postgap75)
+            .bind(7, p.title)
+            .bind(8, p.album)
+            .bind(9, p.albumArtist)
+            .bind(10, p.artist)
+            .bind(11, p.year)
+            .bind(12, int64_t(p.index < 0 ? 0 : p.index))
+            .bind(13, p.trackTotal)
+            .bind(14, p.file)
+            .run();
+        auto row = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=?");
+        row.bind(1, p.file).bind(2, int64_t(p.index)).step();
+        const auto track = row.integer(0);
+        db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
+        db.prepare("INSERT INTO track_values(track_id,field,position,value) SELECT ?,field,position,value FROM track_values "
+                   "WHERE track_id=(SELECT id FROM tracks WHERE file_id=? AND cue_index=0) AND field<>'artist'")
+            .bind(1, track)
+            .bind(2, p.file)
+            .run();
+        if (!p.artist.empty())
+            db.prepare("INSERT INTO track_values(track_id,field,position,value) VALUES(?,'artist',0,?)")
+                .bind(1, track)
+                .bind(2, p.artist)
+                .run();
+    }
+}
+
 Listing list(const Path& path, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
              const std::set<std::string>& pendingIdentity, const std::set<TrustedIdentity>& trusted,
              const CancellationToken& token, const std::function<bool()>& playbackActive) {
@@ -392,6 +703,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
     std::deque<std::future<Listing>> active;
     bool complete = true;
     std::vector<Entry> batch;
+    std::vector<std::string> changedAudioPaths;
     auto flush = [&] {
         if (batch.empty()) return;
         store_
@@ -455,6 +767,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
                     if (entry.metadata) {
                         writeMetadata(db, file, *entry.metadata);
                         report.updated++;
+                        changedAudioPaths.push_back(p);
                     }
                 }
             })
@@ -528,7 +841,35 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
             }
         })
         .get();
+    if (report.complete) {
+        auto cueReader = store_.openReader();
+        CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, report.diagnostics);
+        store_.write([&](sqlite::Database& db) { applyCuePlan(db, cuePlan, root); }).get();
+    }
     return report;
+}
+
+void LibraryScanner::setCueEncoding(const Path& cuePath, std::optional<uint32_t> codePage) {
+    std::lock_guard lock(store_.scanMutex_);
+    const auto resolved = canonicalRoot(cuePath);
+    if (kind(resolved) != "cue") throw std::invalid_argument("encoding override requires a CUE file");
+    if (codePage && (!*codePage || !IsValidCodePage(*codePage))) throw std::invalid_argument("invalid CUE code page");
+    const auto cueKey = key(resolved);
+    store_
+        .write([&](sqlite::Database& db) {
+            auto file = db.prepare("SELECT id FROM files WHERE path=? AND kind='cue' AND available=1");
+            file.bind(1, cueKey);
+            if (!file.step()) throw std::invalid_argument("CUE file is not indexed");
+            const std::string stateKey = "cue_encoding:" + std::to_string(file.integer(0));
+            if (codePage)
+                db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+                    .bind(1, stateKey)
+                    .bind(2, std::to_string(*codePage))
+                    .run();
+            else
+                db.prepare("DELETE FROM app_state WHERE key=?").bind(1, stateKey).run();
+        })
+        .get();
 }
 
 FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationToken& token) {

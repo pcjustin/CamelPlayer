@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,7 @@ public:
     explicit LibraryScanner(LibraryStore& store, std::function<bool()> playbackActive = {})
         : store_(store), playbackActive_(std::move(playbackActive)) {}
     int64_t addRoot(const std::filesystem::path& path);
+    void setCueEncoding(const std::filesystem::path& cuePath, std::optional<uint32_t> codePage);
     ScanReport scan(int64_t root, const CancellationToken& token = {});
     FingerprintReport fingerprint(int64_t root, const CancellationToken& token = {});
 

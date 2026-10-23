@@ -205,6 +205,12 @@ const std::vector<Migration>& libraryMigrations() {
                     "CREATE INDEX files_unfingerprinted_size ON files(kind,size) "
                     "WHERE content_hash IS NULL AND identity_state<>2;");
         },
+        [](sqlite::Database& db) {
+            db.exec("ALTER TABLE tracks ADD COLUMN cue_pregap_75ths INTEGER NOT NULL DEFAULT 0;"
+                    "ALTER TABLE tracks ADD COLUMN cue_postgap_75ths INTEGER NOT NULL DEFAULT 0;"
+                    "CREATE VIEW library_tracks AS SELECT t.* FROM tracks t WHERE t.cue_index>0 OR "
+                    "(t.cue_index=0 AND NOT EXISTS(SELECT 1 FROM tracks v WHERE v.file_id=t.file_id AND v.cue_index<>0));");
+        },
     };
     return migrations;
 }
