@@ -18,6 +18,7 @@
     "mp3lame",
     "soxr",
     "taglib",
+    "opencc",
     {
       "name": "sqlite3",
       "features": [ "fts5" ]

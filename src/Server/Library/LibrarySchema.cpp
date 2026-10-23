@@ -211,6 +211,38 @@ const std::vector<Migration>& libraryMigrations() {
                     "CREATE VIEW library_tracks AS SELECT t.* FROM tracks t WHERE t.cue_index>0 OR "
                     "(t.cue_index=0 AND NOT EXISTS(SELECT 1 FROM tracks v WHERE v.file_id=t.file_id AND v.cue_index<>0));");
         },
+        [](sqlite::Database& db) {
+            db.exec("ALTER TABLE tracks ADD COLUMN title_sort_tag TEXT;"
+                    "ALTER TABLE tracks ADD COLUMN album_sort_tag TEXT;"
+                    "ALTER TABLE tracks ADD COLUMN artist_sort_tag TEXT;"
+                    "ALTER TABLE track_values ADD COLUMN sort_source TEXT;"
+                    "CREATE INDEX tracks_title_sort ON tracks(title_sort,id);"
+                    "CREATE INDEX tracks_artist_sort ON tracks(artist_sort,id);"
+                    "CREATE INDEX tracks_album_sort ON tracks(album_sort,id);"
+                    "CREATE INDEX albums_sort ON albums(sort_key,id);"
+                    "CREATE INDEX track_values_sort ON track_values(field,sort_key);"
+                    "UPDATE tracks SET title_norm=coalesce(title_norm,title,''),album_norm=coalesce(album_norm,album,''),"
+                    "artist_norm=coalesce(artist_norm,artist,'');"
+                    "CREATE TABLE library_revision (id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL);"
+                    "INSERT INTO library_revision VALUES(1,0);"
+                    "CREATE TRIGGER tracks_revision_insert AFTER INSERT ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER tracks_revision_update AFTER UPDATE ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER tracks_revision_delete AFTER DELETE ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER files_revision_update AFTER UPDATE OF available ON files BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER roots_revision_update AFTER UPDATE OF online ON roots BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER tracks_fts_insert AFTER INSERT ON tracks BEGIN INSERT INTO tracks_fts(rowid,title_norm,album_norm,artist_norm) "
+                    "VALUES(new.id,coalesce(new.title_norm,new.title,''),coalesce(new.album_norm,new.album,''),coalesce(new.artist_norm,new.artist,'')); END;"
+                    "CREATE TRIGGER tracks_fts_update AFTER UPDATE ON tracks "
+                    "WHEN old.title IS NOT new.title OR old.album IS NOT new.album OR old.artist IS NOT new.artist "
+                    "OR old.title_norm IS NOT new.title_norm OR old.album_norm IS NOT new.album_norm OR old.artist_norm IS NOT new.artist_norm "
+                    "BEGIN INSERT INTO tracks_fts(tracks_fts,rowid,title_norm,album_norm,artist_norm) "
+                    "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce(old.artist_norm,old.artist,''));"
+                    "INSERT INTO tracks_fts(rowid,title_norm,album_norm,artist_norm) VALUES(new.id,coalesce(new.title_norm,new.title,''),"
+                    "coalesce(new.album_norm,new.album,''),coalesce(new.artist_norm,new.artist,'')); END;"
+                    "CREATE TRIGGER tracks_fts_delete AFTER DELETE ON tracks BEGIN INSERT INTO tracks_fts(tracks_fts,rowid,title_norm,album_norm,artist_norm) "
+                    "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce(old.artist_norm,old.artist,'')); END;"
+                    "INSERT INTO tracks_fts(tracks_fts) VALUES('rebuild');");
+        },
     };
     return migrations;
 }

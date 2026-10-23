@@ -13,6 +13,7 @@
 #include "Engine/FormatRule.h"
 #include "Server/Playback/QueuePolicy.h"
 #include "Common/settings/Settings.h"
+#include "Server/Library/LibraryBrowse.h"
 
 namespace camel::server {
 
@@ -201,6 +202,10 @@ public:
     virtual void setListener(std::function<void(const Event&)> listener) = 0;
     // Host/test barrier; UI code only submits commands and consumes snapshots/events.
     virtual void waitIdle() = 0;
+    virtual LibraryTrackPage browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                          const CancellationToken& token = {}) const = 0;
+    virtual LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                          const CancellationToken& token = {}) const = 0;
 };
 
 std::shared_ptr<IServer> createLocalServer();

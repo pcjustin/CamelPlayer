@@ -13,6 +13,7 @@
 #include <taglib/tpropertymap.h>
 
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryText.h"
 #include "Common/DecoderRegistry.h"
 #include "Engine/decode/IDecoder.h"
 #include "DsdFixture.h"
@@ -120,11 +121,15 @@ TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchange
         TagLib::FLAC::File tags(file.c_str());
         TagLib::PropertyMap values;
         values.insert("TITLE", TagLib::StringList(TagLib::String("測試", TagLib::String::UTF8)));
+        values.insert("TITLESORT", TagLib::StringList("Sort title"));
         values.insert("ALBUM", TagLib::StringList("Album"));
         values.insert("ALBUMARTIST", TagLib::StringList("Album artist"));
         TagLib::StringList artists("First");
         artists.append("Second");
         values.insert("ARTIST", artists);
+        TagLib::StringList artistSorts("Z first");
+        artistSorts.append("A second");
+        values.insert("ARTISTSORT", artistSorts);
         values.insert("TRACKNUMBER", TagLib::StringList("2/10"));
         values.insert("DISCNUMBER", TagLib::StringList("1/2"));
         values.insert("DATE", TagLib::StringList("2024-10-23"));
@@ -147,7 +152,7 @@ TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchange
     EXPECT_EQ(first.updated, 1);
     auto db = store.openReader();
     auto row = db.prepare("SELECT title,format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
-                          "track_number,track_total,disc_total,rg_track_gain,year FROM tracks");
+                          "track_number,track_total,disc_total,rg_track_gain,year,title_sort,title_norm FROM tracks");
     ASSERT_TRUE(row.step());
     EXPECT_EQ(row.text(0), "測試");
     EXPECT_EQ(row.text(1), "flac");
@@ -162,6 +167,13 @@ TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchange
     EXPECT_EQ(row.integer(10), 2);
     EXPECT_DOUBLE_EQ(row.real(11), -3.5);
     EXPECT_EQ(row.integer(12), 2024);
+    EXPECT_EQ(row.blob(13), librarySortKey("Sort title"));
+    EXPECT_EQ(row.text(14), "测试");
+    auto sortedValues = db.prepare("SELECT sort_key FROM track_values WHERE field='artist' ORDER BY position");
+    ASSERT_TRUE(sortedValues.step());
+    EXPECT_EQ(sortedValues.blob(0), librarySortKey("Z first"));
+    ASSERT_TRUE(sortedValues.step());
+    EXPECT_EQ(sortedValues.blob(0), librarySortKey("A second"));
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM track_values WHERE field='artist'"), 2);
     auto albumDb = store.openReader();
     auto album = albumDb.prepare("SELECT a.title,a.album_artist,t.album_id,c.source,a.disc_count FROM tracks t "

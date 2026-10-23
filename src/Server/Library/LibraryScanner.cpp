@@ -32,6 +32,7 @@
 #include <taglib/wavfile.h>
 
 #include "Server/Library/LibraryIdentity.h"
+#include "Server/Library/LibraryText.h"
 #include "Server/Library/CueSheet.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
@@ -200,15 +201,20 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m) {
     auto row = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
     row.bind(1, file).step();
     const int64_t track = row.integer(0);
+    db.prepare("UPDATE tracks SET title_sort_tag=?,album_sort_tag=?,artist_sort_tag=? WHERE id=?")
+        .bind(1, tag(m, "TITLESORT")).bind(2, tag(m, "ALBUMSORT")).bind(3, tag(m, "ARTISTSORT")).bind(4, track).run();
     db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
     for (const auto* field : {"ARTIST", "COMPOSER", "GENRE"}) {
         int64_t position = 0;
+        const auto sorts = m.tags.value((std::string(field) + "SORT").c_str());
+        auto sort = sorts.begin();
         for (const auto& value : m.tags.value(field))
-            db.prepare("INSERT INTO track_values(track_id,field,position,value) VALUES(?,?,?,?)")
+            db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source) VALUES(?,?,?,?,?)")
                 .bind(1, track)
                 .bind(2, toUtf8(lower(toWide(field))))
                 .bind(3, position++)
                 .bind(4, value.to8Bit(true))
+                .bind(5, sort == sorts.end() ? std::string{} : (sort++)->to8Bit(true))
                 .run();
     }
     i = 0;
@@ -225,6 +231,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m) {
             update.bindNull(1);
         update.bind(2, track).run();
     }
+    updateLibraryTrackText(db, track);
 }
 
 struct Entry {
@@ -544,7 +551,7 @@ void applyCuePlan(sqlite::Database& db, const CuePlan& plan, int64_t root) {
         row.bind(1, p.file).bind(2, int64_t(p.index)).step();
         const auto track = row.integer(0);
         db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
-        db.prepare("INSERT INTO track_values(track_id,field,position,value) SELECT ?,field,position,value FROM track_values "
+        db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source) SELECT ?,field,position,value,sort_source FROM track_values "
                    "WHERE track_id=(SELECT id FROM tracks WHERE file_id=? AND cue_index=0) AND field<>'artist'")
             .bind(1, track)
             .bind(2, p.file)
@@ -554,6 +561,7 @@ void applyCuePlan(sqlite::Database& db, const CuePlan& plan, int64_t root) {
                 .bind(1, track)
                 .bind(2, p.artist)
                 .run();
+        updateLibraryTrackText(db, track);
     }
 }
 
@@ -652,6 +660,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
         row.bind(1, keyText).step();
         const auto albumId = row.integer(0);
         for (auto track : album.tracks) db.prepare("UPDATE tracks SET album_id=? WHERE id=?").bind(1, albumId).bind(2, track).run();
+        updateLibraryAlbumText(db, albumId);
 
         ArtworkQuery query;
         query.albumFolder = album.path;

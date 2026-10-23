@@ -16,6 +16,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryText.h"
 
 namespace camel::server {
 namespace {
@@ -152,6 +153,7 @@ public:
         const auto directory = settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
         if (!directory.empty() && std::filesystem::is_directory(directory)) {
             library_ = std::make_unique<LibraryStore>(directory);
+            libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
             options.playingSource = [this] {
                 const auto snapshot = engine_->snapshot();
@@ -210,6 +212,18 @@ public:
         std::unique_lock lock(mutex_);
         const auto target = issued_.id;
         idle_.wait(lock, [&] { return processed_ >= target; });
+    }
+
+    LibraryTrackPage browseLibrary(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                   const CancellationToken& token) const {
+        if (!library_) throw std::runtime_error("library is not configured");
+        return camel::server::browseTracks(*library_, offset, limit, revision, token);
+    }
+
+    LibraryTrackPage searchLibrary(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                   const CancellationToken& token) const {
+        if (!library_) throw std::runtime_error("library is not configured");
+        return camel::server::searchTracks(*library_, std::move(query), offset, limit, revision, token);
     }
 
 private:
@@ -588,6 +602,7 @@ private:
     std::filesystem::path settingsFile_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
     std::unique_ptr<LibraryStore> library_;
+    std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
@@ -636,6 +651,14 @@ void LocalServer::setListener(std::function<void(const Event&)> listener) {
 }
 void LocalServer::waitIdle() {
     impl_->waitIdle();
+}
+LibraryTrackPage LocalServer::browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                           const CancellationToken& token) const {
+    return impl_->browseLibrary(offset, limit, revision, token);
+}
+LibraryTrackPage LocalServer::searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                           const CancellationToken& token) const {
+    return impl_->searchLibrary(std::move(query), offset, limit, revision, token);
 }
 
 std::shared_ptr<IServer> createLocalServer() {

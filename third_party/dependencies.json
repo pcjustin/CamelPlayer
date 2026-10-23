@@ -342,6 +342,82 @@
                                        }
                                    ],
                        "notice":  "licenses/native/utfcpp.txt"
+                   },
+                   {
+                       "name":  "opencc",
+                       "version":  "1.4.1",
+                       "license":  "Apache-2.0",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@5ee3f11e468771328fdec4b99af290c7ef3bbfb4",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/BYVoid/OpenCC@ver.1.4.1",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "8638e5ca665c3451d716e5a65ddd998c5312975d0f69e5d0d72910104c9bc44a4989562468605db66f5f92e5ca1bf21815266dfe21a0d130bf5f02ebcbb7cba7"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/opencc.txt"
+                   },
+                   {
+                       "name":  "marisa-trie",
+                       "version":  "0.3.1",
+                       "license":  "BSD-2-Clause",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@9ed96bfba38e536fc98accdf928837988de3ab32",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/s-yata/marisa-trie@v0.3.1",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "60757e354e4f0ff47662930af5c32a762c5f348c60019abb2d502c6c21ec220731edd9be8ea36e3ec68df90a6584eb311fe1e3d4258b3392609a87b0ef427121"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/marisa-trie.txt"
+                   },
+                   {
+                       "name":  "darts-clone",
+                       "version":  "1767ab87cffe#4",
+                       "license":  "BSD-2-Clause",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@ff08f7084c4b46cef39ecdcbb67b138e9f881bf4",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/s-yata/darts-clone@1767ab87cffe7302856d1bb41e1c21b1df93f19e",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "63112a4d8d6302d2602a8f161bf5fe5ec1b5b3b3097de9b28331f5261d76c06efb48601c08df26f242ddc881b917928baf54f24ccebac65da29e94380b6db0f5"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/darts-clone.txt"
+                   },
+                   {
+                       "name":  "rapidjson",
+                       "version":  "2025-02-26#1",
+                       "license":  "MIT",
+                       "role":  "runtime or verification",
+                       "port_source":  "git+https://github.com/microsoft/vcpkg@cbbb40ac817dc0b03501ea875b0bba0b90293784",
+                       "sources":  [
+                                       {
+                                           "location":  "git+https://github.com/Tencent/rapidjson@24b5e7a8b27f42fa16b96fc70aade9106cf7102f",
+                                           "checksums":  [
+                                                             {
+                                                                 "algorithm":  "SHA512",
+                                                                 "checksumValue":  "50f8723414a6e63eadd45f97be5c44e9fff2d06216c8cc4df802f5bfc2a9416a039f2c69e9bb1882f7e756cd38a7097eea05cab76c739f45805dc41617140799"
+                                                             }
+                                                         ]
+                                       }
+                                   ],
+                       "notice":  "licenses/native/rapidjson.txt"
                    }
                ],
     "rust":  [

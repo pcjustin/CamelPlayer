@@ -81,7 +81,8 @@ bool sourceGone(const std::string& source, const std::string& destination, const
 constexpr const char* kMetadata =
     "title,album,album_artist,artist,composer,genre,year,track_number,track_total,disc_number,disc_total,"
     "format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
-    "rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak";
+    "rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,"
+    "title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort,title_sort_tag,album_sort_tag,artist_sort_tag";
 
 void merge(sqlite::Database& db, int64_t prior, int64_t current) {
     db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0 "
@@ -100,8 +101,8 @@ void merge(sqlite::Database& db, int64_t prior, int64_t current) {
     auto newTrack = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
     if (oldTrack.bind(1, prior).step() && newTrack.bind(1, current).step()) {
         db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, oldTrack.integer(0)).run();
-        db.prepare("INSERT INTO track_values(track_id,field,position,value,value_norm,sort_key) "
-                   "SELECT ?,field,position,value,value_norm,sort_key FROM track_values WHERE track_id=?")
+        db.prepare("INSERT INTO track_values(track_id,field,position,value,value_norm,sort_key,sort_source) "
+                   "SELECT ?,field,position,value,value_norm,sort_key,sort_source FROM track_values WHERE track_id=?")
             .bind(1, oldTrack.integer(0))
             .bind(2, newTrack.integer(0))
             .run();
