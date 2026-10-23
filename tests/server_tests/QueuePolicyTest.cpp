@@ -139,3 +139,27 @@ TEST(QueuePolicyTest, RepeatAllShuffleCreatesNewRoundWithoutBoundaryRepeat) {
         previous = id(next);
     }
 }
+
+TEST(QueuePolicyTest, UnavailableEntriesRemainInOrderButCannotBeSelectedOrRepeated) {
+    QueuePolicy queue;
+    queue.replace({1, 2, 3});
+    queue.select(1);
+    queue.setRepeat(RepeatMode::One);
+    EXPECT_TRUE(queue.setUnavailable(1, true));
+    EXPECT_FALSE(queue.setUnavailable(1, true));
+    queue.setUnavailable(2, true);
+    EXPECT_EQ(id(queue.upcoming()), 3);
+    EXPECT_THROW(queue.select(2), std::invalid_argument);
+    EXPECT_EQ(id(queue.current()), 1);
+    EXPECT_EQ(id(queue.next(true)), 3);
+    EXPECT_EQ(id(queue.previous(0, 44100)), 3);
+    queue.setRepeat(RepeatMode::All);
+    queue.setUnavailable(3, true);
+    EXPECT_FALSE(queue.next(true));
+    queue.setUnavailable(2, false);
+    EXPECT_EQ(id(queue.next(true)), 2);
+    queue.reorder({3, 2, 1});
+    EXPECT_TRUE(queue.unavailable(1));
+    queue.replace({1, 2, 3});
+    EXPECT_FALSE(queue.unavailable(1));
+}

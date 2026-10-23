@@ -148,6 +148,18 @@ TEST(ArtworkProvider, DiscFolderNames) {
         EXPECT_FALSE(isDiscFolderName(name)) << camel::toUtf8(name);
 }
 
+TEST(ArtworkProvider, ChildCancellationDoesNotCancelItsParentOrSiblings) {
+    CancellationToken parent;
+    auto first = parent.child(), second = parent.child();
+    first.cancel();
+    EXPECT_TRUE(first.cancelled());
+    EXPECT_FALSE(parent.cancelled());
+    EXPECT_FALSE(second.cancelled());
+    parent.cancel();
+    EXPECT_TRUE(second.cancelled());
+    EXPECT_TRUE(second.child().cancelled());
+}
+
 TEST(ArtworkProvider, AlbumDiscSuffixIsRemovedOnlyAtEnd) {
     EXPECT_EQ(albumTitleWithoutDiscSuffix(L"Album CD1"), L"Album");
     EXPECT_EQ(albumTitleWithoutDiscSuffix(L"Album [Disc 2]"), L"Album");

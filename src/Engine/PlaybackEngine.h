@@ -76,6 +76,8 @@ public:
     bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
     // Withdraws the queued file; false when it is already committed and becomes current at its boundary.
     bool clearNext();
+    // Also withdraws already decoded successors, preserving the audible track and position.
+    void discardPreloads();
 
     EngineSnapshot snapshot() const;
     // Called on the engine thread after every change; keep it short (e.g. post to the UI thread).

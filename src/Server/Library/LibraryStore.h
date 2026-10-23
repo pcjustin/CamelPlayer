@@ -11,6 +11,7 @@
 #include <functional>
 #include <future>
 #include <mutex>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,7 @@
 
 #include "Server/Library/LibrarySchema.h"
 #include "Server/Library/Sqlite.h"
+#include "Server/Artwork/ArtworkProvider.h"
 
 namespace camel::server {
 
@@ -57,6 +59,8 @@ public:
 private:
     friend class LibraryScanner;
     std::mutex scanMutex_;
+    std::mutex jobsMutex_;
+    std::multimap<int64_t, CancellationToken> jobs_;
     void writerMain();
 
     std::filesystem::path path_;

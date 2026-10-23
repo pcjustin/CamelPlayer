@@ -80,7 +80,8 @@ enum class CommandKind : uint8_t {
     Next,
     Previous,
     SetShuffle, // shuffle
-    SetRepeat   // repeat
+    SetRepeat,  // repeat
+    RemoveLibraryRoot // rootId
 };
 
 struct Command {
@@ -93,6 +94,7 @@ struct Command {
     uint64_t index = 0;
     std::vector<uint64_t> entryIds;
     uint64_t entryId = 0;
+    int64_t rootId = 0;
     std::optional<bool> shuffle;
     std::optional<RepeatMode> repeat;
     bool operator==(const Command&) const = default;

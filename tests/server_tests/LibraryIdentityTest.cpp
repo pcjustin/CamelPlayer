@@ -263,6 +263,93 @@ TEST_F(LibraryIdentityTest, LiveCopiesAndHardLinksDoNotStealIdentityEvenAfterThe
     EXPECT_EQ(id(store, "link.lrc"), link);
 }
 
+TEST_F(LibraryIdentityTest, PlaybackSourceGatesOnlyTheSameStorage) {
+    const auto source = file("old.lrc");
+    fs::path playing = source;
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store, {}, [&] { return playing; });
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_FALSE(scanner.fingerprint(root).complete);
+    playing = L"\\\\TACHIKOMA\\Music\\track.flac";
+    EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
+    file("second.lrc", "second bytes");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    playing = source;
+    EXPECT_FALSE(scanner.fingerprint(root).complete);
+    playing.clear();
+    EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
+    EXPECT_EQ(library::storageKey(source), library::storageKey(music));
+    EXPECT_FALSE(library::storageKey(source).empty());
+    EXPECT_EQ(library::storageKey(L"\\\\TACHIKOMA\\Music\\album\\track.flac"), L"\\\\tachikoma\\music");
+    EXPECT_EQ(library::storageKey(L"\\\\?\\UNC\\TACHIKOMA\\Music"), L"\\\\tachikoma\\music");
+    EXPECT_NE(library::storageKey(L"\\\\TACHIKOMA\\Other\\track.flac"), L"\\\\tachikoma\\music");
+}
+
+TEST_F(LibraryIdentityTest, RemovingRootRetainsHistoryAndReadditionRequiresVerifiedIdentity) {
+    const auto source = file("old.lrc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto original = id(store, "old.lrc");
+    rate(store, original);
+    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    store.write([=](sqlite::Database& db) {
+        db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
+        db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
+            .bind(1, original).run();
+        db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,'old','Kept')")
+            .bind(1, original).run();
+    }).get();
+    scanner.removeRoot(root);
+    scanner.removeRoot(root);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE available=1"), 0);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM roots WHERE removed IS NOT NULL AND online=0"), 1);
+    EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
+    EXPECT_EQ(scalar(store, "SELECT file_id FROM playlist_items"), original);
+    EXPECT_EQ(scalar(store, "SELECT file_id FROM queue"), original);
+    EXPECT_THROW(scanner.scan(root), std::invalid_argument);
+    EXPECT_FALSE(scanner.fingerprint(root).complete);
+    ASSERT_EQ(scanner.addRoot(music), root);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(id(store, "old.lrc"), original);
+    scanner.removeRoot(root);
+    fs::remove(source);
+    file("old.lrc", "replacement with different content");
+    ASSERT_EQ(scanner.addRoot(music), root);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_NE(id(store, "old.lrc"), original);
+    EXPECT_EQ(scalar(store, "SELECT file_id FROM stats"), original);
+}
+
+TEST_F(LibraryIdentityTest, RemovingRootCancelsRunningScanWithoutCancellingOtherRoots) {
+    file("old.lrc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    std::promise<void> entered, release;
+    auto released = release.get_future().share();
+    std::atomic<bool> first = true;
+    LibraryScanner slow(store, [&] {
+        if (first.exchange(false)) { entered.set_value(); released.wait(); }
+        return false;
+    });
+    CancellationToken parent;
+    auto scan = std::async(std::launch::async, [&] { return slow.scan(root, parent); });
+    const bool running = entered.get_future().wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    if (running) scanner.removeRoot(root);
+    release.set_value();
+    ASSERT_TRUE(running);
+    EXPECT_FALSE(scan.get().complete);
+    EXPECT_FALSE(parent.cancelled());
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE available=1"), 0);
+    fs::create_directory(dir / "other");
+    const auto other = scanner.addRoot(dir / "other");
+    EXPECT_TRUE(scanner.scan(other, parent).complete);
+}
+
 TEST_F(LibraryIdentityTest, FingerprintsYieldCancelValidateVersionsAndInvalidateOnEdits) {
     const auto source = file("old.lrc");
     bool playing = true;
@@ -429,6 +516,41 @@ TEST_F(LibraryIdentityTest, MonitorFingerprintsInTheBackgroundAndHonorsPlaybackG
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 0);
     playing = false;
     EXPECT_TRUE(wait([&] { return scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL") == 1; }));
+}
+
+TEST_F(LibraryIdentityTest, MonitorRetriesDeferredMoveMatchingAfterPlaybackWithoutPolling) {
+    const auto source = file("old.lrc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto original = id(store, "old.lrc");
+    rate(store, original);
+    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    distrustIds(store);
+    fs::rename(source, music / "new.lrc");
+    std::atomic<bool> playing = true;
+    LibraryScanner gated(store, [&] { return playing.load(); });
+    const auto deferred = gated.scan(root);
+    ASSERT_TRUE(deferred.deferred);
+    ASSERT_FALSE(deferred.complete);
+    EXPECT_EQ(id(store, "old.lrc"), original);
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::milliseconds(0);
+    options.playbackActive = [&] { return playing.load(); };
+    store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
+    LibraryMonitor monitor(store, options);
+    const auto scanned = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!scalar(store, "SELECT online FROM roots") && std::chrono::steady_clock::now() < scanned)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ASSERT_EQ(scalar(store, "SELECT online FROM roots"), 1);
+    EXPECT_EQ(id(store, "new.lrc"), 0);
+    playing = false;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (id(store, "new.lrc") != original && std::chrono::steady_clock::now() < end)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(id(store, "new.lrc"), original);
+    EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
 }
 
 } // namespace

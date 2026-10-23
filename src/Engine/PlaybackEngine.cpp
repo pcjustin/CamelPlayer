@@ -208,6 +208,7 @@ public:
     // ---- commands (control thread) ----
     void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
         resumeOnDefault_ = false;
+        waitingForSource_ = false;
         file_ = file.wstring();
         fileDecoder_ = decoder;
         startSession(0, true);
@@ -215,6 +216,7 @@ public:
 
     void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
         resumeOnDefault_ = false;
+        waitingForSource_ = false;
         teardown();
         file_ = file.wstring();
         fileDecoder_ = decoder;
@@ -265,6 +267,7 @@ public:
 
     void stop() {
         resumeOnDefault_ = false;
+        waitingForSource_ = false;
         teardown();
         position_ = 0;
         setState(PlayState::Stopped);
@@ -350,6 +353,21 @@ public:
             snap_.nextSlotFree = rust_ && !rust_->transitions().nextQueued;
         }
         publish();
+    }
+
+    void discardPreloads() {
+        if (!active_) return;
+        onTransition();
+        if (queued_.empty()) return;
+        clearNext();
+        if (queued_.empty()) return;
+        // Close waits for render callbacks before choosing the audible track and restart position.
+        closeOutput();
+        onTransition();
+        const auto position = currentPosition();
+        const bool playing = state_ == PlayState::Playing;
+        teardown();
+        startSession(position, playing);
     }
 
     bool showControlPanel() {
@@ -536,8 +554,8 @@ private:
                 std::lock_guard lock(snapMutex_);
                 snap_.format = format_;
             }
-            position_ = 0;
-            return fail(e, PlayState::Stopped);
+            position_ = waitingForSource_ ? startFrame : 0;
+            return fail(e, waitingForSource_ ? PlayState::Paused : PlayState::Stopped);
         }
         const SourceInfo src = dec->info();
         {
@@ -595,8 +613,8 @@ private:
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
                                                   plan_.dsd, timing(settings_).predecodeSeconds);
         } catch (const Error& e) {
-            position_ = 0;
-            return fail(e, PlayState::Stopped);
+            position_ = waitingForSource_ ? startFrame : 0;
+            return fail(e, waitingForSource_ ? PlayState::Paused : PlayState::Stopped);
         }
 
         base_ = startFrame;
@@ -643,6 +661,7 @@ private:
             return fail(e, waitForDevice ? PlayState::Paused : PlayState::Stopped);
         }
         active_ = true;
+        waitingForSource_ = false;
         const bool raw = rawDsd_.load(std::memory_order_relaxed);
         pendingSilence_ = !lastOpened_ || lastOpened_->generation != outputGeneration_ || lastOpened_->format != fmt_ ||
                           lastOpened_->raw != raw;
@@ -706,7 +725,7 @@ private:
         if (decodeThread_.joinable()) decodeThread_.join();
     }
 
-    void teardown() {
+    void closeOutput() {
         if (output_) {
             try {
                 output_->close();
@@ -715,6 +734,10 @@ private:
                 output_.reset();
             }
         }
+    }
+
+    void teardown() {
+        closeOutput();
         rawDsd_ = false; // the output no longer renders
         leadSilence_ = 0;
         leadDone_ = false;
@@ -769,6 +792,10 @@ private:
             err = decodeError_;
         }
         teardown();
+        if (err && GetFileAttributesW(file_.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            waitingForSource_ = true;
+            return fail(Error(err->code(), std::string("Source unavailable: ") + err->what()), PlayState::Paused);
+        }
         position_ = 0;
         if (err) return fail(*err, PlayState::Stopped);
         {
@@ -892,6 +919,7 @@ private:
     DeviceWatcherFactory watcherFactory_;
     std::unique_ptr<DeviceWatcher> watcher_; // while WASAPI follows the Windows default
     bool resumeOnDefault_ = false;           // the followed default was lost while playing
+    bool waitingForSource_ = false;
     std::unique_ptr<OutputBridge> output_;
     std::unique_ptr<RustSession> rust_;
     std::wstring file_;
@@ -993,6 +1021,9 @@ bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<
 }
 bool PlaybackEngine::clearNext() {
     return impl_->call<bool>([this] { return impl_->clearNext(); });
+}
+void PlaybackEngine::discardPreloads() {
+    impl_->call<void>([this] { impl_->discardPreloads(); });
 }
 EngineSnapshot PlaybackEngine::snapshot() const {
     return impl_->snapshot();

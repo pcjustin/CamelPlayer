@@ -243,6 +243,7 @@ struct Listing {
     std::vector<Path> children;
     std::vector<Entry> files;
     bool complete = true;
+    bool deferred = false;
     std::string error;
 };
 
@@ -746,7 +747,10 @@ Listing list(const Path& path, const std::map<std::string, Version>& known, cons
                     hashSizes.contains(entry.version.size) &&
                     !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
                     entry.digest = library::fileDigest(child, entry.version, token, playbackActive);
-                    if (!entry.digest) throw std::runtime_error("fingerprint deferred while cancelled or playing");
+                    if (!entry.digest) {
+                        out.deferred = true;
+                        throw std::runtime_error("fingerprint deferred while cancelled or playing");
+                    }
                 }
             } catch (const audio::Error& e) {
                 entry.error = e.what();
@@ -768,6 +772,8 @@ Listing list(const Path& path, const std::map<std::string, Version>& known, cons
 }
 
 } // namespace
+
+Path canonicalLibraryPath(const Path& path) { return canonicalRoot(path); }
 
 int64_t LibraryScanner::addRoot(const Path& path) {
     std::lock_guard lock(store_.scanMutex_);
@@ -808,13 +814,49 @@ int64_t LibraryScanner::addRoot(const Path& path) {
     return id;
 }
 
-ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
+std::function<bool()> LibraryScanner::playbackGate(const Path& root) const {
+    const auto storage = library::storageKey(root);
+    return [this, storage] {
+        if (playbackActive_ && playbackActive_()) return true;
+        if (!playingSource_) return false;
+        const auto source = playingSource_();
+        if (source.empty()) return false;
+        const auto playingStorage = library::storageKey(source);
+        return storage.empty() || playingStorage.empty() || storage == playingStorage;
+    };
+}
+
+void LibraryScanner::removeRoot(int64_t root) {
+    std::lock_guard lock(store_.jobsMutex_);
+    const auto [first, last] = store_.jobs_.equal_range(root);
+    for (auto job = first; job != last; ++job) job->second.cancel();
+    store_.write([root](sqlite::Database& db) {
+        auto existing = db.prepare("SELECT 1 FROM roots WHERE id=?");
+        if (!existing.bind(1, root).step()) throw std::invalid_argument("unknown library root");
+        db.prepare("UPDATE roots SET removed=COALESCE(removed,?),online=0 WHERE id=?")
+            .bind(1, now()).bind(2, root).run();
+        db.prepare("UPDATE files SET available=0 WHERE root_id=?").bind(1, root).run();
+    }).get();
+}
+
+ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) {
     std::lock_guard lock(store_.scanMutex_);
+    auto token = request.child();
+    decltype(store_.jobs_)::iterator registration;
+    {
+        std::lock_guard jobsLock(store_.jobsMutex_);
+        registration = store_.jobs_.emplace(root, token);
+    }
+    auto unregister = wil::scope_exit([&] {
+        std::lock_guard jobsLock(store_.jobsMutex_);
+        store_.jobs_.erase(registration);
+    });
     ScanReport report;
     auto reader = store_.openReader();
     auto row = reader.prepare("SELECT path FROM roots WHERE id=? AND removed IS NULL");
     if (!row.bind(1, root).step()) throw std::invalid_argument("unknown or removed library root");
     const Path path(toWide(row.text(0)));
+    const auto playbackActive = playbackGate(path);
     if (token.cancelled()) return report;
     if (!openPath(path, FILE_LIST_DIRECTORY)) {
         report.rootError = GetLastError();
@@ -849,6 +891,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
         if (batch.empty()) return;
         store_
             .write([&](sqlite::Database& db) {
+                if (token.cancelled()) return;
                 for (const auto& entry : batch) {
                     const auto p = key(entry.path);
                     auto old = db.prepare("SELECT id,size,mtime,volume_serial,file_index,created,volume_key FROM files WHERE "
@@ -916,11 +959,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
         batch.clear();
     };
     while ((!pending.empty() || !active.empty()) && !token.cancelled()) {
-        while (!pending.empty() && active.size() < 4) {
+        while (!pending.empty() && active.size() < (playbackActive() ? 1u : 4u)) {
             const auto dir = pending.front();
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, dir] {
-                return list(dir, known, hashSizes, pendingIdentity, trusted, token, playbackActive_);
+                return list(dir, known, hashSizes, pendingIdentity, trusted, token, playbackActive);
             }));
         }
         const auto ready = std::find_if(active.begin(), active.end(), [](auto& job) {
@@ -933,6 +976,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
         auto listing = ready->get();
         active.erase(ready);
         complete = complete && listing.complete;
+        report.deferred = report.deferred || listing.deferred;
         if (!listing.error.empty()) report.diagnostics.push_back(listing.error);
         store_
             .write([&](sqlite::Database& db) {
@@ -962,6 +1006,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
     report.complete = complete && !token.cancelled() && report.online;
     store_
         .write([&](sqlite::Database& db) {
+            if (token.cancelled()) return;
             db.prepare("UPDATE roots SET online=?,last_scan=CASE WHEN ? THEN ? ELSE last_scan END WHERE id=?")
                 .bind(1, int64_t(report.online))
                 .bind(2, int64_t(report.complete))
@@ -986,10 +1031,12 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
         auto cueReader = store_.openReader();
         CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, report.diagnostics);
         store_.write([&](sqlite::Database& db) {
+            if (token.cancelled()) return;
             applyCuePlan(db, cuePlan, root);
             rebuildAlbums(db, root);
         }).get();
     }
+    report.complete = report.complete && !token.cancelled();
     return report;
 }
 
@@ -1016,9 +1063,23 @@ void LibraryScanner::setCueEncoding(const Path& cuePath, std::optional<uint32_t>
         .get();
 }
 
-FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationToken& token) {
+FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationToken& request) {
+    auto token = request.child();
+    decltype(store_.jobs_)::iterator registration;
+    {
+        std::lock_guard jobsLock(store_.jobsMutex_);
+        registration = store_.jobs_.emplace(root, token);
+    }
+    auto unregister = wil::scope_exit([&] {
+        std::lock_guard jobsLock(store_.jobsMutex_);
+        store_.jobs_.erase(registration);
+    });
     FingerprintReport report;
-    if (token.cancelled() || (playbackActive_ && playbackActive_())) return report;
+    auto db = store_.openReader();
+    auto rootRow = db.prepare("SELECT path FROM roots WHERE id=? AND removed IS NULL");
+    if (!rootRow.bind(1, root).step()) return report;
+    const auto playbackActive = playbackGate(Path(toWide(rootRow.text(0))));
+    if (token.cancelled() || playbackActive()) return report;
     const bool background = bool(SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN));
     auto restorePriority = wil::scope_exit([&] {
         if (background) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
@@ -1041,13 +1102,13 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         }
     }
     for (const auto& [id, path, expected] : pending) {
-        if (token.cancelled() || (playbackActive_ && playbackActive_())) return report;
+        if (token.cancelled() || playbackActive()) return report;
         try {
-            const auto digest = library::fileDigest(Path(toWide(path)), expected, token, playbackActive_);
+            const auto digest = library::fileDigest(Path(toWide(path)), expected, token, playbackActive);
             if (!digest) return report;
             store_
                 .write([&](sqlite::Database& db) {
-                    if (token.cancelled() || (playbackActive_ && playbackActive_())) return;
+                    if (token.cancelled() || playbackActive()) return;
                     auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
                                               "WHERE id=? AND available=1 AND identity_state=0 AND content_hash IS NULL");
                     if (!current.bind(1, id).step() || current.text(0) != path ||
@@ -1061,13 +1122,14 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
             report.diagnostics.push_back(path + ": " + e.what());
         }
     }
-    report.complete = !token.cancelled() && !(playbackActive_ && playbackActive_()) && report.diagnostics.empty();
+    report.complete = !token.cancelled() && !playbackActive() && report.diagnostics.empty();
     return report;
 }
 
 class LibraryMonitor::Impl {
 public:
-    Impl(LibraryStore& store, Options options) : store_(store), scanner_(store, options.playbackActive), options_(options) {
+    Impl(LibraryStore& store, Options options)
+        : store_(store), scanner_(store, options.playbackActive, options.playingSource), options_(options) {
         if (options.offlineInterval.count() <= 0 || options.coalesce.count() < 0 || options.pollInterval.count() < 0)
             throw std::invalid_argument("invalid library monitor interval");
         worker_ = std::jthread([this](std::stop_token stop) { run(stop); });
@@ -1106,6 +1168,8 @@ private:
         std::array<uint8_t, 32768> buffer{};
         Clock::time_point due{}, lastPoll{};
         bool pending = false;
+        bool deferred = false;
+        std::function<bool()> playbackActive;
         ~Watch() {
             if (pending) {
                 CancelIoEx(directory.get(), &io);
@@ -1155,6 +1219,7 @@ private:
                         if (!watches.contains(id) || !watches.at(id)->pending) {
                             watches.erase(id);
                             auto watch = std::make_unique<Watch>();
+                            watch->playbackActive = scanner_.playbackGate(path);
                             watch->directory =
                                 openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
                             watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
@@ -1175,6 +1240,10 @@ private:
                 }
                 for (auto& [id, ptr] : watches) {
                     auto& watch = *ptr;
+                    if (watch.deferred && !watch.playbackActive()) {
+                        watch.deferred = false;
+                        watch.due = Clock::now();
+                    }
                     if (watch.pending && WaitForSingleObject(watch.event.get(), 0) == WAIT_OBJECT_0) {
                         DWORD bytes = 0;
                         const bool ok = bool(GetOverlappedResult(watch.directory.get(), &watch.io, &bytes, FALSE));
@@ -1186,6 +1255,7 @@ private:
                     if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested()) {
                         watch.due = {};
                         const auto report = scanner_.scan(id, token_);
+                        watch.deferred = report.deferred;
                         for (const auto& diagnostic : report.diagnostics) log::warn("library: %s", diagnostic.c_str());
                     }
                 }

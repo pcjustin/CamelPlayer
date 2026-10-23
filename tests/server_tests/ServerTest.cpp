@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "Server/Playback/LocalServer.h"
+#include "Server/Library/LibraryScanner.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "Engine/SamplePacker.h"
 #include "Common/util/Text.h"
@@ -27,19 +28,29 @@ struct Probe {
     std::atomic<int> opens = 0, closes = 0;
     std::function<void()> onOpen;
     std::optional<Backend> failBackend;
+    std::mutex renderMutex;
+    IRenderSource* source = nullptr;
+    DeviceFormat format;
 };
 
 class ManualOutput final : public IOutput {
 public:
     explicit ManualOutput(Probe& probe) : probe_(probe) {}
     bool supports(const DeviceFormat&) override { return true; }
-    void open(const DeviceFormat&, IRenderSource*) override {
+    void open(const DeviceFormat& format, IRenderSource* source) override {
         ++probe_.opens;
         if (probe_.onOpen) probe_.onOpen();
+        std::lock_guard lock(probe_.renderMutex);
+        probe_.format = format;
+        probe_.source = source;
     }
     void start() override {}
     void pause() override {}
-    void close() override { ++probe_.closes; }
+    void close() override {
+        std::lock_guard lock(probe_.renderMutex);
+        ++probe_.closes;
+        probe_.source = nullptr;
+    }
     OutputStatus status() const override { return {"Manual", 256, "Server test"}; }
 
 private:
@@ -76,6 +87,38 @@ protected:
         return server->snapshot();
     }
 };
+
+TEST_F(ServerTest, LibraryFingerprintingFollowsActualPlaybackState) {
+    const auto dir = testutil::tempDir() / "server-library-playback";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "music");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+        return std::make_unique<ManualOutput>(probe);
+    });
+    const auto waitFor = [](const std::function<bool()>& check) {
+        const auto end = std::chrono::steady_clock::now() + 8s;
+        while (std::chrono::steady_clock::now() < end) {
+            if (check()) return true;
+            std::this_thread::sleep_for(20ms);
+        }
+        return false;
+    };
+    ASSERT_TRUE(waitFor([&] { return store.openReader().scalar("SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL").value() == 1; }));
+    for (const auto release : {CommandKind::Pause, CommandKind::Stop}) {
+        send(select());
+        const auto file = dir / "music" / (release == CommandKind::Pause ? "pause.lrc" : "stop.lrc");
+        std::ofstream(file) << (release == CommandKind::Pause ? "lyrics" : "different lyrics");
+        ASSERT_TRUE(waitFor([&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 1; }));
+        std::this_thread::sleep_for(1200ms);
+        EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value(), 1);
+        send(command(release));
+        ASSERT_TRUE(waitFor([&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 0; }));
+    }
+    server.reset();
+}
 
 TEST(TrackSourceTest, ValidatesPathRangeAndDecoderWithoutMutableAccess) {
     EXPECT_THROW(TrackSource(""), std::invalid_argument);
@@ -424,6 +467,13 @@ TEST_F(ServerTest, RejectsInvalidQueuePayloads) {
     EXPECT_THROW(server->submit(c), std::invalid_argument);
     c = queueReplace({TrackSource("a.flac", FrameRange{1, 2})});
     EXPECT_THROW(server->submit(c), std::invalid_argument);
+    c = command(CommandKind::RemoveLibraryRoot);
+    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    c.rootId = -1;
+    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    c.kind = CommandKind::Stop;
+    c.rootId = 1;
+    EXPECT_THROW(server->submit(c), std::invalid_argument);
     EXPECT_EQ(server->snapshot().command.id, 0u);
 }
 
@@ -619,6 +669,75 @@ std::vector<int32_t> capturedSamples(const std::filesystem::path& capture) {
     std::vector<int32_t> samples(bytes.size() / 4);
     unpackSamples(bytes.data(), samples.size(), 24, SampleType::Int32, samples.data());
     return samples;
+}
+
+TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
+    const auto dir = testutil::tempDir() / "server-removed-root";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "music");
+    const auto a = dir / "music" / "a.flac", b = dir / "music" / "b.flac";
+    std::filesystem::copy_file(testutil::testFile("24-96k"), a);
+    std::filesystem::copy_file(testutil::generatedFile({"removed-root-tail", 96000, 24, 2, 0.3}), b);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+        return std::make_unique<ManualOutput>(probe);
+    });
+    auto playing = send(queueReplace({TrackSource(toUtf8(a.wstring())), TrackSource(toUtf8(b.wstring()))}));
+    const auto ids = entryIds(playing);
+    std::vector<int32_t> heard;
+    const auto pull = [&] {
+        std::lock_guard lock(probe.renderMutex);
+        if (!probe.source) return;
+        std::vector<uint8_t> bytes(4096 * probe.format.bytesPerFrame());
+        const auto got = probe.source->render(bytes.data(), 4096);
+        std::vector<int32_t> samples(got * probe.format.channels);
+        unpackSamples(bytes.data(), samples.size(), 24, probe.format.type, samples.data());
+        heard.insert(heard.end(), samples.begin(), samples.end());
+    };
+    pull();
+    std::this_thread::sleep_for(500ms);
+    Command remove = command(CommandKind::RemoveLibraryRoot);
+    remove.rootId = root;
+    const auto removed = send(remove);
+    ASSERT_FALSE(removed.commandError);
+    EXPECT_EQ(removed.queueEntryId, ids[0]);
+    EXPECT_EQ(removed.playback.state, PlaybackState::Playing);
+    EXPECT_EQ(removed.queue.entries, playing.queue.entries);
+    EXPECT_FALSE(removed.queue.upcomingEntryId);
+    const auto end = std::chrono::steady_clock::now() + 5s;
+    while (server->snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
+        pull();
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(server->snapshot().queueEntryId, ids[0]);
+    EXPECT_TRUE(heard == concatenatedReferences({a}));
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files WHERE available=1").value(), 0);
+    ASSERT_EQ(scanner.addRoot(dir / "music"), root);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto restored = std::chrono::steady_clock::now() + 3s;
+    while (!server->snapshot().queue.upcomingEntryId && std::chrono::steady_clock::now() < restored)
+        std::this_thread::sleep_for(10ms);
+    EXPECT_EQ(server->snapshot().queue.upcomingEntryId, ids[1]);
+    auto select = command(CommandKind::QueueSelect);
+    select.entryId = ids[1];
+    EXPECT_EQ(send(select).playback.state, PlaybackState::Playing);
+    send(command(CommandKind::Stop));
+    ASSERT_FALSE(send(remove).commandError);
+    const auto blocked = send(queueReplace({TrackSource(toUtf8(b.wstring()))}));
+    EXPECT_TRUE(blocked.commandError);
+    EXPECT_EQ(blocked.queue.entries.size(), 1u);
+    EXPECT_EQ(blocked.queueEntryId, 0u);
+    EXPECT_FALSE(blocked.track);
+    EXPECT_EQ(blocked.playback.state, PlaybackState::Stopped);
+    EXPECT_TRUE(send(command(CommandKind::Play)).commandError);
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
+    EXPECT_TRUE(send(command(CommandKind::TogglePause)).commandError);
+    EXPECT_EQ(server->snapshot().queueEntryId, 0u);
+    server.reset();
 }
 
 TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {

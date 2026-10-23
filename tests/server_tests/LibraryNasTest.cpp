@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 #include <wil/resource.h>
+#include <winnetwk.h>
 
 #include <fstream>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryIdentity.h"
+#include "Server/Playback/LocalServer.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -161,6 +163,186 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     EXPECT_TRUE(report["incremental"]["complete"].get<bool>());
     EXPECT_EQ(report["incremental"]["updated"].get<size_t>(), 0);
     EXPECT_EQ(report["files"], report["files_after_incremental"]);
+}
+
+TEST(LibraryNas, DISABLED_MappedDriveAndExtendedPathsUseTheSameShareKey) {
+    const auto share = nasRoot();
+    const auto drives = GetLogicalDrives();
+    ASSERT_NE(drives, 0u);
+    std::wstring device;
+    for (wchar_t letter = L'Z'; letter >= L'D'; --letter) {
+        if (!(drives & (1u << (letter - L'A')))) { device = std::wstring(1, letter) + L":"; break; }
+    }
+    ASSERT_FALSE(device.empty());
+    std::wstring remote = share.wstring();
+    NETRESOURCEW resource{};
+    resource.dwType = RESOURCETYPE_DISK;
+    resource.lpLocalName = device.data();
+    resource.lpRemoteName = remote.data();
+    ASSERT_EQ(WNetAddConnection2W(&resource, nullptr, nullptr, CONNECT_TEMPORARY), NO_ERROR);
+    auto cleanup = wil::scope_exit([&] { WNetCancelConnection2W(device.c_str(), 0, FALSE); });
+    const auto mapped = device + L"\\";
+    const auto extended = L"\\\\?\\" + mapped;
+    const auto expected = library::storageKey(share);
+    ASSERT_FALSE(expected.empty());
+    EXPECT_EQ(library::storageKey(mapped), expected);
+    EXPECT_EQ(library::storageKey(extended), expected);
+    EXPECT_EQ(library::storageKey(device + L"\\missing-test-file.flac"), expected);
+    ASSERT_EQ(WNetCancelConnection2W(device.c_str(), 0, FALSE), NO_ERROR);
+    cleanup.release();
+    wchar_t result[32768]{};
+    DWORD size = DWORD(std::size(result));
+    EXPECT_EQ(WNetGetConnectionW(device.c_str(), result, &size), ERROR_NOT_CONNECTED);
+}
+
+TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop) {
+    const auto share = nasRoot();
+    const auto fixture = share / (L".camelplayer-nas-test-playback-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                  std::to_wstring(GetTickCount64()));
+    ASSERT_EQ(fixture.parent_path(), share);
+    ASSERT_TRUE(fs::create_directory(fixture));
+    auto cleanup = wil::scope_exit([&] {
+        std::error_code error;
+        for (const auto* name : {"track.flac", "pause.lrc", "stop.lrc"}) fs::remove(fixture / name, error);
+        fs::remove(fixture, error);
+    });
+    const auto local = localRun("playback-gate");
+    std::cout << "NAS playback results: " << camel::toUtf8(local.wstring()) << std::endl;
+    fs::copy_file(testutil::testFile("16-44.1k"), fixture / "track.flac");
+    LibraryStore store(local / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(fixture);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_TRUE(scanner.fingerprint(root).complete);
+    class PassiveOutput final : public camel::audio::IOutput {
+    public:
+        bool supports(const camel::audio::DeviceFormat&) override { return true; }
+        void open(const camel::audio::DeviceFormat&, camel::audio::IRenderSource*) override {}
+        void start() override {}
+        void pause() override {}
+        void close() override {}
+        camel::audio::OutputStatus status() const override { return {"NAS test", 256, "No hardware"}; }
+    };
+    {
+        LocalServer server(camel::Settings{}, local / "db" / "settings.json", [](const camel::Settings&) {
+            return std::make_unique<PassiveOutput>();
+        });
+        for (const auto release : {CommandKind::Pause, CommandKind::Stop}) {
+            Command play;
+            play.kind = CommandKind::OpenAndPlay;
+            play.source.emplace(camel::toUtf8((fixture / "track.flac").wstring()));
+            server.submit(play);
+            server.waitIdle();
+            ASSERT_EQ(server.snapshot().playback.state, PlaybackState::Playing);
+            const bool pause = release == CommandKind::Pause;
+            std::ofstream(fixture / (pause ? "pause.lrc" : "stop.lrc")) << (pause ? "lyrics" : "different lyrics");
+            ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL") == 1; }));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL"), 1);
+            Command command;
+            command.kind = release;
+            server.submit(command);
+            server.waitIdle();
+            ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL") == 0; }));
+        }
+    }
+    for (const auto* name : {"track.flac", "pause.lrc", "stop.lrc"}) ASSERT_TRUE(fs::remove(fixture / name));
+    ASSERT_TRUE(fs::remove(fixture));
+    EXPECT_FALSE(fs::exists(fixture));
+    std::ofstream(local / "report.json") << Json{{"passed", !::testing::Test::HasFailure()},
+                                                 {"pause_releases_fingerprints", true}, {"stop_releases_fingerprints", true},
+                                                 {"nas_fixture_removed", true}}.dump(2);
+}
+
+TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
+    const auto share = nasRoot();
+    const auto remote = share / (L".camelplayer-nas-test-cross-volume-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                 std::to_wstring(GetTickCount64()));
+    ASSERT_EQ(remote.parent_path(), share);
+    ASSERT_TRUE(fs::create_directory(remote));
+    const auto local = localRun("cross-volume");
+    std::cout << "Cross-volume results: " << camel::toUtf8(local.wstring()) << std::endl;
+    Json results = Json::array();
+    for (const bool toNas : {true, false}) {
+        for (const std::string scenario : {"verified", "no-fingerprint", "duplicate", "live-copy", "offline-source"}) {
+            SCOPED_TRACE((toNas ? "local-to-NAS/" : "NAS-to-local/") + scenario);
+            const auto name = (toNas ? "to-nas-" : "to-local-") + scenario;
+            const auto caseDir = local / name;
+            const auto localMusic = caseDir / "music", nasMusic = remote / name;
+            const auto offline = (toNas ? localMusic : nasMusic).wstring() + L"-offline";
+            fs::create_directories(localMusic);
+            ASSERT_TRUE(fs::create_directory(nasMusic));
+            auto cleanup = wil::scope_exit([&] {
+                std::error_code error;
+                for (const fs::path& folder : {nasMusic, fs::path(offline)}) {
+                    if (folder.parent_path() != remote) continue;
+                    fs::remove(folder / "track.flac", error);
+                    fs::remove(folder / "duplicate.flac", error);
+                    fs::remove(folder, error);
+                }
+            });
+            const auto sourceFolder = toNas ? localMusic : nasMusic;
+            const auto targetFolder = toNas ? nasMusic : localMusic;
+            const auto source = sourceFolder / "track.flac", target = targetFolder / "track.flac";
+            fs::copy_file(testutil::testFile("16-44.1k"), source);
+            ASSERT_NE(library::storageKey(sourceFolder), library::storageKey(targetFolder));
+            ASSERT_FALSE(library::storageKey(sourceFolder).empty());
+            ASSERT_FALSE(library::storageKey(targetFolder).empty());
+            LibraryStore store(caseDir / "db");
+            LibraryScanner scanner(store);
+            const auto sourceRoot = scanner.addRoot(sourceFolder), targetRoot = scanner.addRoot(targetFolder);
+            ASSERT_TRUE(scanner.scan(sourceRoot).complete);
+            const auto original = count(store, "SELECT id FROM files WHERE available=1");
+            const auto track = count(store, "SELECT id FROM tracks");
+            store.write([=](sqlite::Database& db) {
+                db.prepare("INSERT INTO stats(file_id,rating,favorite,play_count,last_played) VALUES(?,5,1,17,123)")
+                    .bind(1, original).run();
+                db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
+                db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
+                    .bind(1, original).run();
+                db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,?,'Kept')")
+                    .bind(1, original).bind(2, camel::toUtf8(source.wstring())).run();
+            }).get();
+            if (scenario == "duplicate") {
+                fs::copy_file(source, sourceFolder / "duplicate.flac");
+                ASSERT_TRUE(scanner.scan(sourceRoot).complete);
+            }
+            if (scenario != "no-fingerprint") ASSERT_TRUE(scanner.fingerprint(sourceRoot).complete);
+            const auto digest = library::fileDigest(source, library::fileVersion(source), {}, {});
+            ASSERT_TRUE(digest);
+            fs::copy_file(source, target);
+            ASSERT_EQ(library::fileDigest(target, library::fileVersion(target), {}, {}), digest);
+            if (scenario == "offline-source") fs::rename(sourceFolder, fs::path(offline));
+            else if (scenario != "live-copy") ASSERT_TRUE(fs::remove(source));
+            const auto report = scanner.scan(targetRoot);
+            ASSERT_TRUE(report.complete);
+            const bool verified = scenario == "verified";
+            EXPECT_EQ(report.moved, verified ? 1u : 0u);
+            auto db = store.openReader();
+            auto arrival = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1");
+            ASSERT_TRUE(arrival.bind(1, targetRoot).step());
+            if (verified) {
+                EXPECT_EQ(arrival.integer(0), original);
+                EXPECT_EQ(count(store, "SELECT id FROM tracks WHERE file_id IN (SELECT file_id FROM stats)"), track);
+                EXPECT_EQ(count(store, "SELECT COUNT(*) FROM queue JOIN files ON files.id=queue.file_id WHERE queue.path=files.path"), 1);
+            } else EXPECT_NE(arrival.integer(0), original);
+            EXPECT_EQ(count(store, "SELECT file_id FROM playlist_items"), original);
+            EXPECT_EQ(count(store, "SELECT file_id FROM queue WHERE entry_id=77"), original);
+            EXPECT_EQ(count(store, "SELECT rating FROM stats"), 5);
+            EXPECT_EQ(count(store, "SELECT favorite FROM stats"), 1);
+            EXPECT_EQ(count(store, "SELECT play_count FROM stats"), 17);
+            EXPECT_EQ(count(store, "SELECT last_played FROM stats"), 123);
+            if (scenario == "offline-source") fs::rename(fs::path(offline), sourceFolder);
+            results.push_back({{"direction", toNas ? "local-to-NAS" : "NAS-to-local"}, {"scenario", scenario},
+                               {"moved", report.moved}, {"original_file_id", original}, {"arrival_file_id", arrival.integer(0)},
+                               {"source_storage", camel::toUtf8(library::storageKey(sourceFolder))},
+                               {"target_storage", camel::toUtf8(library::storageKey(targetFolder))}});
+        }
+    }
+    ASSERT_TRUE(fs::remove(remote));
+    EXPECT_FALSE(fs::exists(remote));
+    std::ofstream(local / "report.json") << Json{{"cases", results}, {"passed", !::testing::Test::HasFailure()},
+                                                 {"nas_fixture_removed", true}}.dump(2);
 }
 
 TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {

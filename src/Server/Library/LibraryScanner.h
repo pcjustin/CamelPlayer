@@ -15,8 +15,11 @@
 
 namespace camel::server {
 
+std::filesystem::path canonicalLibraryPath(const std::filesystem::path& path);
+
 struct ScanReport {
     bool complete = false;
+    bool deferred = false;
     bool online = true;
     uint32_t rootError = 0; // Win32 error distinguishes access denial from a missing/offline root
     size_t seen = 0, updated = 0, moved = 0;
@@ -33,17 +36,21 @@ struct FingerprintReport {
 class LibraryScanner {
 public:
     // The playback callback must be thread-safe; monitor scan workers and fingerprinting may call it concurrently.
-    // shortcut: an omitted callback means idle; wire application playback state with the M3-R06 scheduler.
-    explicit LibraryScanner(LibraryStore& store, std::function<bool()> playbackActive = {})
-        : store_(store), playbackActive_(std::move(playbackActive)) {}
+    explicit LibraryScanner(LibraryStore& store, std::function<bool()> playbackActive = {},
+                            std::function<std::filesystem::path()> playingSource = {})
+        : store_(store), playbackActive_(std::move(playbackActive)), playingSource_(std::move(playingSource)) {}
     int64_t addRoot(const std::filesystem::path& path);
+    void removeRoot(int64_t root);
     void setCueEncoding(const std::filesystem::path& cuePath, std::optional<uint32_t> codePage);
     ScanReport scan(int64_t root, const CancellationToken& token = {});
     FingerprintReport fingerprint(int64_t root, const CancellationToken& token = {});
 
 private:
+    friend class LibraryMonitor;
     LibraryStore& store_;
     std::function<bool()> playbackActive_;
+    std::function<std::filesystem::path()> playingSource_;
+    std::function<bool()> playbackGate(const std::filesystem::path& root) const;
 };
 
 class LibraryMonitor {
@@ -53,6 +60,7 @@ public:
         std::chrono::milliseconds offlineInterval{std::chrono::seconds(60)};
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
         std::function<bool()> playbackActive;
+        std::function<std::filesystem::path()> playingSource;
     };
     explicit LibraryMonitor(LibraryStore& store);
     LibraryMonitor(LibraryStore& store, Options options);

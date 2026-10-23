@@ -14,6 +14,7 @@
 
 #include "Server/Library/LibraryScanner.h"
 #include "Common/DecoderRegistry.h"
+#include "Engine/decode/IDecoder.h"
 #include "DsdFixture.h"
 #include "LameFixture.h"
 #include "TestUtil.h"
@@ -618,6 +619,39 @@ TEST_F(LibraryScannerTest, PeriodicScanRunsWithoutANotification) {
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; }));
     store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots WHERE removed IS NULL") == 1; }));
+}
+
+TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcurrency) {
+    using namespace camel::audio;
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::atomic<int> active = 0, maximum = 0;
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        const auto workers = ++active;
+        auto done = wil::scope_exit([&] { --active; });
+        int previous = maximum.load();
+        while (workers > previous && !maximum.compare_exchange_weak(previous, workers)) {}
+        std::this_thread::sleep_for(std::chrono::milliseconds(75));
+        return original(path, format, bits);
+    });
+    bool playing = true;
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store, [&] { return playing; });
+    const auto root = scanner.addRoot(dir / "music");
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int album = 0; album < 4; ++album) {
+            const auto folder = dir / "music" / std::to_string(album);
+            fs::create_directories(folder);
+            fs::copy_file(testutil::testFile("16-44.1k"), folder / (std::to_string(pass) + ".flac"));
+        }
+        maximum = 0;
+        ASSERT_TRUE(scanner.scan(root).complete);
+        if (playing) EXPECT_EQ(maximum.load(), 1);
+        else EXPECT_GT(maximum.load(), 1);
+        EXPECT_LE(maximum.load(), 4);
+        playing = false;
+    }
 }
 
 TEST_F(LibraryScannerTest, AttributeNotificationTriggersAnIncrementalScan) {

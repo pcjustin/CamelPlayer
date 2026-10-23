@@ -30,6 +30,7 @@ public:
         validateUnique(entryIds);
         entries_ = std::move(entryIds);
         failed_.clear();
+        unavailable_.clear();
         history_.clear();
         current_.reset();
         order_ = entries_;
@@ -67,9 +68,10 @@ public:
         return position(*current_);
     }
 
-    QueuePosition select(uint64_t entryId) {
+    QueuePosition select(uint64_t entryId, bool alreadyAudible = false) {
         if (std::find(entries_.begin(), entries_.end(), entryId) == entries_.end())
             throw std::invalid_argument("unknown queue entry");
+        if (unavailable_.contains(entryId) && !alreadyAudible) throw std::invalid_argument("queue entry is unavailable");
         if (current_ && *current_ != entryId) remember(*current_);
         current_ = entryId;
         failed_.erase(entryId);
@@ -77,23 +79,23 @@ public:
     }
 
     std::optional<QueuePosition> next(bool naturalCompletion) {
-        if (naturalCompletion && repeat_ == RepeatMode::One && current_ && !failed_.contains(*current_))
+        if (naturalCompletion && repeat_ == RepeatMode::One && current_ && eligible(*current_))
             return position(*current_);
         return advance();
     }
 
     std::optional<QueuePosition> previous(uint64_t positionFrames, uint64_t sampleRate) {
         if (!current_) return next(false);
-        if (sampleRate && positionFrames > sampleRate * 3) return position(*current_);
+        if (sampleRate && positionFrames > sampleRate * 3 && eligible(*current_)) return position(*current_);
         while (!history_.empty()) {
             const auto id = history_.back();
             history_.pop_back();
-            if (contains(id) && !failed_.contains(id)) {
+            if (contains(id) && eligible(id)) {
                 current_ = id;
                 return position(id);
             }
         }
-        return position(*current_);
+        return eligible(*current_) ? std::optional(position(*current_)) : std::nullopt;
     }
 
     // The entry next(true) would choose, without changing any state; this is the preload target.
@@ -103,6 +105,12 @@ public:
     }
 
     void markFailed(uint64_t entryId) { failed_.insert(entryId); }
+    bool setUnavailable(uint64_t entryId, bool unavailable) {
+        const bool changed = unavailable ? unavailable_.insert(entryId).second : unavailable_.erase(entryId) != 0;
+        if (changed) ++revision_;
+        return changed;
+    }
+    bool unavailable(uint64_t entryId) const { return unavailable_.contains(entryId); }
     bool shuffle() const { return shuffle_; }
     RepeatMode repeat() const { return repeat_; }
     uint64_t revision() const { return revision_; }
@@ -118,6 +126,7 @@ private:
     }
 
     bool contains(uint64_t id) const { return std::find(entries_.begin(), entries_.end(), id) != entries_.end(); }
+    bool eligible(uint64_t id) const { return !failed_.contains(id) && !unavailable_.contains(id); }
 
     QueuePosition position(uint64_t id) const {
         const auto it = std::find(entries_.begin(), entries_.end(), id);
@@ -144,7 +153,7 @@ private:
     }
 
     size_t eligibleCount() const {
-        return size_t(std::count_if(entries_.begin(), entries_.end(), [&](uint64_t id) { return !failed_.contains(id); }));
+        return size_t(std::count_if(entries_.begin(), entries_.end(), [&](uint64_t id) { return eligible(id); }));
     }
 
     void remember(uint64_t id) {
@@ -167,7 +176,7 @@ private:
             }
             const auto id = order_[index++];
             if (avoidRepeat && id == current_.value_or(0)) continue;
-            if (failed_.contains(id)) continue;
+            if (!eligible(id)) continue;
             if (current_) remember(*current_);
             current_ = id;
             return position(id);
@@ -178,6 +187,7 @@ private:
 
     std::vector<uint64_t> entries_, order_, history_;
     std::unordered_set<uint64_t> failed_;
+    std::unordered_set<uint64_t> unavailable_;
     std::optional<uint64_t> current_;
     RepeatMode repeat_ = RepeatMode::Off;
     bool shuffle_ = false;

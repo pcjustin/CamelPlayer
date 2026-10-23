@@ -42,6 +42,7 @@ Command fullCommand() {
     c.index = 1;
     c.entryIds = {3, 1, 2};
     c.entryId = 7;
+    c.rootId = 42;
     c.shuffle = true;
     c.repeat = RepeatMode::One;
     return c;
@@ -126,6 +127,23 @@ TEST(ApiJson, LiveLocalServerSnapshotSurvivesTheRoundTrip) {
     server.waitIdle();
     const Snapshot s = server.snapshot();
     EXPECT_EQ(throughText(s, snapshotFromJson), s);
+}
+
+TEST(ApiJson, RootRemovalRoundTripsAndRequiresAnIntegerRootId) {
+    Command c;
+    c.kind = CommandKind::RemoveLibraryRoot;
+    c.rootId = 42;
+    EXPECT_EQ(throughText(c, commandFromJson), c);
+    auto j = toJson(c);
+    j.erase("rootId");
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    j["rootId"] = 1.5;
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    c.kind = CommandKind::Stop;
+    c.rootId = 0;
+    j = toJson(c);
+    j.erase("rootId");
+    EXPECT_EQ(commandFromJson(j), c);
 }
 
 TEST(ApiJson, MalformedInputIsRefused) {

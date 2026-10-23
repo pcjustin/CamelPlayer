@@ -10,8 +10,11 @@
 #include <thread>
 #include <mutex>
 #include <vector>
+#include <wil/resource.h>
 
 #include "Engine/PlaybackEngine.h"
+#include "Engine/decode/IDecoder.h"
+#include "Common/DecoderRegistry.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -514,6 +517,116 @@ TEST_F(EngineStateTest, TruncatedAudioPublishesDecodeFailureAndNextFileRecovers)
     open();
     EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
     EXPECT_FALSE(engine->snapshot().error);
+}
+
+TEST_F(EngineStateTest, LostSourcePausesWithoutEndingTheTrackAndRetriesAtTheSavedPosition) {
+    const auto file = testutil::tempDir() / "interrupted-source.flac";
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), file, std::filesystem::copy_options::overwrite_existing);
+    const auto info = openDecoder(DecoderKind::Sndfile, file)->info();
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    auto interrupt = std::make_shared<std::atomic<bool>>(false);
+    class Source final : public IDecoder {
+    public:
+        Source(SourceInfo info, std::filesystem::path path, std::shared_ptr<std::atomic<bool>> interrupt)
+            : info_(info), path_(std::move(path)), interrupt_(std::move(interrupt)) { info_.totalFrames = 44100 * 60; }
+        const SourceInfo& info() const override { return info_; }
+        size_t read(int32_t* dst, size_t frames) override {
+            if (interrupt_->load()) {
+                std::filesystem::remove(path_);
+                throw Error(ErrorCode::DecodeFailed, "injected source interruption");
+            }
+            const auto count = size_t(std::min<uint64_t>(frames, info_.totalFrames - position_));
+            std::fill_n(dst, count * info_.channels, 0);
+            position_ += count;
+            return count;
+        }
+        void seek(uint64_t frame) override { position_ = frame; }
+    private:
+        SourceInfo info_;
+        std::filesystem::path path_;
+        std::shared_ptr<std::atomic<bool>> interrupt_;
+        uint64_t position_ = 0;
+    };
+    decoderRegistry().setOpener("sndfile", [=](const std::filesystem::path& path, std::string_view, uint32_t) {
+        return std::make_unique<Source>(info, path, interrupt);
+    });
+    engine->openAndPlay(file, DecoderKind::Sndfile);
+    engine->waitIdle();
+    ASSERT_EQ(engine->snapshot().state, PlayState::Playing);
+    const auto ends = engine->snapshot().trackEnds;
+    interrupt->store(true);
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (engine->snapshot().state == PlayState::Playing && std::chrono::steady_clock::now() < deadline) {
+        pull(8192);
+        std::this_thread::sleep_for(1ms);
+    }
+    engine->waitIdle();
+    const auto paused = engine->snapshot();
+    ASSERT_EQ(paused.state, PlayState::Paused);
+    EXPECT_FALSE(std::filesystem::exists(file));
+    EXPECT_EQ(paused.trackEnds, ends);
+    EXPECT_GT(paused.position, 0u);
+    EXPECT_NE(paused.errorDetail.find("Source unavailable"), std::string::npos);
+    engine->play();
+    engine->waitIdle();
+    EXPECT_EQ(engine->snapshot().state, PlayState::Paused);
+    EXPECT_EQ(engine->snapshot().position, paused.position);
+    EXPECT_EQ(engine->snapshot().trackEnds, ends);
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+    interrupt->store(false);
+    engine->play();
+    engine->waitIdle();
+    EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
+    EXPECT_EQ(engine->snapshot().position, paused.position);
+    EXPECT_FALSE(engine->snapshot().error);
+    engine->stop();
+    engine->waitIdle();
+}
+
+TEST_F(EngineStateTest, DiscardPreloadsWithdrawsAnAlreadyDecodedSuccessor) {
+    open();
+    ASSERT_TRUE(engine->queueNext(testutil::generatedFile({"withdraw-next", 96000, 24, 2, 0.3})));
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
+    ASSERT_TRUE(engine->snapshot().nextSlotFree);
+    ASSERT_EQ(engine->snapshot().queuedFiles, 1u);
+    ASSERT_EQ(pull(4096), 4096u);
+    const auto before = engine->snapshot();
+    engine->discardPreloads();
+    const auto after = engine->snapshot();
+    EXPECT_EQ(after.queuedFiles, 0u);
+    EXPECT_EQ(after.file, before.file);
+    EXPECT_EQ(after.position, before.position);
+    EXPECT_EQ(after.state, PlayState::Playing);
+    EXPECT_EQ(after.transitions, before.transitions);
+    EXPECT_EQ(after.trackEnds, before.trackEnds);
+}
+
+TEST_F(EngineStateTest, DiscardPreloadsPreservesTheTrackThatJustBecameAudible) {
+    open();
+    const auto first = engine->snapshot();
+    const auto next = testutil::generatedFile({"withdraw-audible", 96000, 24, 2, 0.3});
+    ASSERT_TRUE(engine->queueNext(next));
+    const auto waitDecoded = [&] {
+        const auto deadline = std::chrono::steady_clock::now() + 3s;
+        while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(1ms);
+        return engine->snapshot().nextSlotFree;
+    };
+    ASSERT_TRUE(waitDecoded());
+    ASSERT_TRUE(engine->queueNext(testutil::generatedFile({"withdraw-future", 96000, 24, 2, 0.4})));
+    ASSERT_EQ(pull(size_t(first.total)), first.total);
+    ASSERT_TRUE(waitDecoded());
+    ASSERT_EQ(pull(64), 64u);
+    engine->discardPreloads();
+    const auto current = engine->snapshot();
+    EXPECT_EQ(current.file, next.wstring());
+    EXPECT_EQ(current.position, 64u);
+    EXPECT_EQ(current.queuedFiles, 0u);
+    EXPECT_EQ(current.state, PlayState::Playing);
+    EXPECT_EQ(current.transitions, first.transitions + 1);
 }
 
 TEST_F(EngineStateTest, LoadingAnotherTrackClosesOutputAndResetsPosition) {

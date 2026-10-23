@@ -6,6 +6,7 @@
 
 #include <windows.h>
 #include <bcrypt.h>
+#include <winnetwk.h>
 #include <wil/resource.h>
 
 #include <iterator>
@@ -14,6 +15,8 @@
 
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryStore.h"
+
+#pragma comment(lib, "mpr.lib")
 
 namespace camel::server::library {
 namespace {
@@ -150,6 +153,32 @@ FileVersion fileVersion(const std::filesystem::path& path) {
     auto handle = open(path);
     if (!handle) throw std::runtime_error("cannot read file identity: " + toUtf8(path.wstring()));
     return version(handle.get(), path);
+}
+
+std::wstring storageKey(const std::filesystem::path& path) {
+    if (path.empty()) return {};
+    std::wstring text = path.wstring();
+    if (text.starts_with(L"\\\\?\\") && text.size() > 5 && text[5] == L':') text.erase(0, 4);
+    if (text.size() > 2 && text[1] == L':' && GetDriveTypeW(text.substr(0, 3).c_str()) == DRIVE_REMOTE) {
+        wchar_t remote[32768]{};
+        DWORD size = DWORD(std::size(remote));
+        if (WNetGetConnectionW(text.substr(0, 2).c_str(), remote, &size) != NO_ERROR) return {};
+        text = remote + text.substr(2);
+    }
+    if (_wcsnicmp(text.c_str(), L"\\\\?\\UNC\\", 8) == 0) text = L"\\\\" + text.substr(8);
+    if (text.starts_with(L"\\\\") && !text.starts_with(L"\\\\?\\")) {
+        const auto server = text.find(L'\\', 2);
+        if (server == std::wstring::npos) return {};
+        const auto end = text.find(L'\\', server + 1);
+        if (end != std::wstring::npos) text.resize(end);
+    } else {
+        wchar_t mount[32768]{}, guid[64]{};
+        if (!GetVolumePathNameW(text.c_str(), mount, DWORD(std::size(mount))) ||
+            !GetVolumeNameForVolumeMountPointW(mount, guid, DWORD(std::size(guid)))) return {};
+        text = guid;
+    }
+    CharLowerBuffW(text.data(), DWORD(text.size()));
+    return text;
 }
 
 FileVersion storedVersion(const sqlite::Statement& row, int column) {

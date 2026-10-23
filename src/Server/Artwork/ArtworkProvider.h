@@ -21,10 +21,16 @@ namespace camel::server {
 class CancellationToken {
 public:
     void cancel() { flag_->store(true, std::memory_order_release); }
-    bool cancelled() const { return flag_->load(std::memory_order_acquire); }
+    bool cancelled() const { return flag_->load(std::memory_order_acquire) || (parent_ && parent_->cancelled()); }
+    CancellationToken child() const {
+        CancellationToken token;
+        token.parent_ = std::make_shared<CancellationToken>(*this);
+        return token;
+    }
 
 private:
     std::shared_ptr<std::atomic<bool>> flag_ = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<const CancellationToken> parent_;
 };
 
 struct ArtworkQuery {

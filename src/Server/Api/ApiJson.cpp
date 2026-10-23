@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 17> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 18> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -81,7 +81,8 @@ constexpr Names<CommandKind, 17> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::Next, "next"},
                                                   {CommandKind::Previous, "previous"},
                                                   {CommandKind::SetShuffle, "setShuffle"},
-                                                  {CommandKind::SetRepeat, "setRepeat"}};
+                                                  {CommandKind::SetRepeat, "setRepeat"},
+                                                  {CommandKind::RemoveLibraryRoot, "removeLibraryRoot"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
 constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
@@ -345,6 +346,7 @@ json toJson(const Command& c) {
             {"index", c.index},
             {"entryIds", c.entryIds},
             {"entryId", c.entryId},
+            {"rootId", c.rootId},
             {"shuffle", c.shuffle ? json(*c.shuffle) : json(nullptr)},
             {"repeat", c.repeat ? json(nameOf(*c.repeat, kRepeatModes)) : json(nullptr)}};
 }
@@ -360,6 +362,7 @@ Command commandFromJson(const json& j) {
     c.index = value<uint64_t>(j, "index");
     c.entryIds = idsFrom(j, "entryIds");
     c.entryId = value<uint64_t>(j, "entryId");
+    if (j.contains("rootId") || c.kind == CommandKind::RemoveLibraryRoot) c.rootId = value<int64_t>(j, "rootId");
     c.shuffle = optional<bool>(j, "shuffle", [](const json& v) {
         if (!v.is_boolean()) invalid("shuffle is not a boolean");
         return v.get<bool>();

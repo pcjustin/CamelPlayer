@@ -11,6 +11,7 @@ namespace camel::server {
 
 class LocalServer final : public IServer {
 public:
+    // An existing settings directory also hosts library.db; an omitted or missing directory disables the library.
     explicit LocalServer(const Settings& settings, std::filesystem::path settingsFile = {},
                          audio::OutputFactory factory = audio::createOutput);
     ~LocalServer() override;

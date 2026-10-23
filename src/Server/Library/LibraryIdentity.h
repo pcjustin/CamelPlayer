@@ -20,6 +20,7 @@ struct FileVersion {
 };
 
 FileVersion fileVersion(const std::filesystem::path& path);
+std::wstring storageKey(const std::filesystem::path& path);
 // Columns: size, mtime, volume_serial, file_index, created, volume_key.
 FileVersion storedVersion(const sqlite::Statement& row, int column);
 std::optional<std::vector<uint8_t>> fileDigest(const std::filesystem::path& path, const FileVersion& expected,

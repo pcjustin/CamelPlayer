@@ -10,10 +10,12 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <map>
 #include <thread>
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "Server/Library/LibraryScanner.h"
 
 namespace camel::server {
 namespace {
@@ -33,7 +35,7 @@ bool startsEntry(CommandKind kind) {
 
 bool changesQueue(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
-           kind == CommandKind::SetShuffle;
+           kind == CommandKind::SetShuffle || kind == CommandKind::RemoveLibraryRoot;
 }
 
 // Problems of one track rather than of the device: report them and move on to the next eligible entry.
@@ -51,7 +53,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetRepeat)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::RemoveLibraryRoot)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
@@ -59,7 +61,8 @@ void validate(const Command& c) {
         (queueReplace ? c.index >= c.sources.size() : c.index != 0) ||
         c.entryIds.empty() == (c.kind == CommandKind::QueueReorder) || (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
-        c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All))
+        c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
+        (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0))
         throw std::invalid_argument("invalid Server command payload");
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
@@ -146,6 +149,17 @@ public:
           engine_(std::make_unique<audio::PlaybackEngine>(settings, std::move(factory))) {
         published_.settings = settingsDto(settings_);
         published_.playback = playback(engine_->snapshot());
+        const auto directory = settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
+        if (!directory.empty() && std::filesystem::is_directory(directory)) {
+            library_ = std::make_unique<LibraryStore>(directory);
+            LibraryMonitor::Options options;
+            options.playingSource = [this] {
+                const auto snapshot = engine_->snapshot();
+                return snapshot.state == audio::PlayState::Playing ? std::filesystem::path(snapshot.file)
+                                                                  : std::filesystem::path{};
+            };
+            libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
+        }
         if (!settings_.lastFile.empty()) {
             Command restore;
             restore.kind = CommandKind::Load;
@@ -156,6 +170,7 @@ public:
     }
 
     ~Impl() {
+        libraryMonitor_.reset();
         {
             std::lock_guard lock(mutex_);
             closing_ = true;
@@ -213,6 +228,16 @@ private:
         }
     }
 
+    void resumePlayback() {
+        const auto current = policy_.current();
+        if (engine_->snapshot().state == audio::PlayState::Stopped && !entries_.empty() &&
+            (!current || policy_.unavailable(current->entryId))) {
+            const auto next = policy_.next(false);
+            if (!next) throw std::invalid_argument("queue entries are unavailable");
+            startEntry(*next, true);
+        } else engine_->play();
+    }
+
     void execute(const Pending& pending) {
         const auto& c = pending.command;
         state_.command = pending.stamp;
@@ -229,7 +254,7 @@ private:
         } else {
             switch (c.kind) {
             case CommandKind::QueueReplace: {
-                const auto ids = replaceQueue(c.sources);
+                const auto ids = replaceQueue(c.sources, size_t(c.index));
                 startEntry(policy_.select(ids[size_t(c.index)]), true);
                 break;
             }
@@ -261,14 +286,20 @@ private:
             case CommandKind::SetRepeat:
                 if (c.repeat) policy_.setRepeat(*c.repeat);
                 break;
+            case CommandKind::RemoveLibraryRoot:
+                if (!library_) throw std::logic_error("Server library is not configured");
+                LibraryScanner(*library_).removeRoot(c.rootId);
+                refreshLibraryAvailability();
+                break;
             case CommandKind::Play:
-                engine_->play();
+                resumePlayback();
                 break;
             case CommandKind::Pause:
                 engine_->pause();
                 break;
             case CommandKind::TogglePause:
-                engine_->togglePause();
+                if (engine_->snapshot().state == audio::PlayState::Stopped) resumePlayback();
+                else engine_->togglePause();
                 break;
             case CommandKind::Stop:
                 engine_->stop();
@@ -305,16 +336,71 @@ private:
         engine_->waitIdle();
     }
 
-    std::vector<uint64_t> replaceQueue(const std::vector<TrackSource>& sources) {
+    std::vector<uint64_t> replaceQueue(const std::vector<TrackSource>& sources, size_t selected = 0) {
         std::vector<uint64_t> ids;
         std::vector<QueueEntry> entries;
+        libraryEntries_.clear();
+        if (library_ && !libraryReader_) libraryReader_.emplace(library_->openReader());
+        // shortcut: queue paths resolve serially; batch identity lookup if M3-R07 large-queue latency requires it.
         for (const auto& source : sources) {
             ids.push_back(++lastEntryId_);
             entries.push_back({ids.back(), source});
+            if (libraryReader_) {
+                try {
+                    auto& binding = libraryEntries_[ids.back()];
+                    binding.path = canonicalLibraryPath(std::filesystem::path(toWide(source.pathUtf8()))).wstring();
+                    auto file = libraryReader_->prepare("SELECT id FROM files WHERE path=? AND available=1");
+                    if (file.bind(1, toUtf8(binding.path)).step()) binding.file = file.integer(0);
+                } catch (const std::exception& e) {
+                    log::warn("library queue source: %s", e.what());
+                }
+            }
         }
         policy_.replace(ids);
         entries_ = std::move(entries);
+        libraryVersion_ = 0;
+        refreshLibraryAvailability();
+        if (policy_.unavailable(ids[selected])) {
+            engine_->stop();
+            engine_->waitIdle();
+            state_.queueEntryId = 0;
+            state_.track.reset();
+            chain_.clear();
+            throw std::invalid_argument("queue entry is unavailable");
+        }
         return ids;
+    }
+
+    void refreshLibraryAvailability() {
+        if (!libraryReader_ || libraryEntries_.empty()) return;
+        const auto version = libraryReader_->scalar("PRAGMA data_version").value();
+        if (version == libraryVersion_) return;
+        libraryVersion_ = version;
+        std::vector<std::wstring> removed;
+        auto roots = libraryReader_->prepare("SELECT path FROM roots WHERE removed IS NOT NULL");
+        while (roots.step()) {
+            auto path = toWide(roots.text(0));
+            if (!path.ends_with(L'\\')) path.push_back(L'\\');
+            removed.push_back(std::move(path));
+        }
+        for (auto& [id, binding] : libraryEntries_) {
+            bool unavailable = binding.detached;
+            if (binding.file) {
+                auto file = libraryReader_->prepare("SELECT f.available,r.online,r.removed FROM files f "
+                                                    "JOIN roots r ON r.id=f.root_id WHERE f.id=?");
+                unavailable = !file.bind(1, binding.file).step() || !file.integer(0) || !file.integer(1) || !file.isNull(2);
+            } else {
+                for (const auto& root : removed)
+                    if (binding.path.starts_with(root)) binding.detached = unavailable = true;
+            }
+            queueChanged_ = policy_.setUnavailable(id, unavailable) || queueChanged_;
+        }
+        if (std::any_of(chain_.begin(), chain_.end(), [&](uint64_t id) { return policy_.unavailable(id); })) {
+            engine_->discardPreloads();
+            commitTransition();
+            chain_.clear();
+            attempted_ = {};
+        }
     }
 
     void reorderQueue(const std::vector<uint64_t>& ids) {
@@ -331,6 +417,7 @@ private:
 
     // Ends of the previous entry that are still pending belong to playback this call supersedes.
     void startEntry(const QueuePosition& position, bool play) {
+        if (policy_.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
         engine_->waitIdle();
         const auto before = engine_->snapshot();
         seenTrackEnds_ = before.trackEnds;
@@ -359,7 +446,7 @@ private:
             const auto id = chain_.front();
             chain_.pop_front();
             auto position = policy_.next(true);
-            if (!position || position->entryId != id) position = policy_.select(id);
+            if (!position || position->entryId != id) position = policy_.select(id, true);
             const auto& source = entry(position->entryId).source;
             state_.track = source;
             state_.queueEntryId = position->entryId;
@@ -466,6 +553,7 @@ private:
             }
             if (pending) {
                 try {
+                    refreshLibraryAvailability();
                     execute(*pending);
                 } catch (const audio::Error& e) {
                     state_.commandError = Failure{e.code(), e.what()};
@@ -477,6 +565,7 @@ private:
             }
             try {
                 commitTransition();
+                refreshLibraryAvailability();
                 advanceAfterTrackEnd();
                 ensureNextQueued();
             } catch (const std::exception& e) {
@@ -498,6 +587,16 @@ private:
     Settings settings_;
     std::filesystem::path settingsFile_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
+    std::unique_ptr<LibraryStore> library_;
+    std::unique_ptr<LibraryMonitor> libraryMonitor_;
+    std::optional<sqlite::Database> libraryReader_;
+    int64_t libraryVersion_ = 0;
+    struct LibraryEntry {
+        std::wstring path;
+        int64_t file = 0;
+        bool detached = false;
+    };
+    std::map<uint64_t, LibraryEntry> libraryEntries_;
     mutable std::mutex mutex_;
     std::condition_variable cv_, idle_;
     std::deque<Pending> queue_;
