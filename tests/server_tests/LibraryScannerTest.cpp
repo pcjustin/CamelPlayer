@@ -162,7 +162,25 @@ TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchange
     EXPECT_DOUBLE_EQ(row.real(11), -3.5);
     EXPECT_EQ(row.integer(12), 2024);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM track_values WHERE field='artist'"), 2);
+    auto albumDb = store.openReader();
+    auto album = albumDb.prepare("SELECT a.title,a.album_artist,t.album_id,c.source,a.disc_count FROM tracks t "
+                                 "JOIN albums a ON a.id=t.album_id LEFT JOIN covers c ON c.id=a.cover_id");
+    ASSERT_TRUE(album.step());
+    EXPECT_EQ(album.text(0), "Album");
+    EXPECT_EQ(album.text(1), "Album artist");
+    EXPECT_EQ(album.text(3), "embedded");
+    EXPECT_EQ(album.integer(4), 2);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM albums"), 1);
     EXPECT_EQ(scanner.scan(root).updated, 0);
+    {
+        std::ofstream cover(dir / "music" / "album" / "cover.jpg", std::ios::binary);
+        cover << "folder cover";
+    }
+    ASSERT_TRUE(scanner.scan(root).complete);
+    auto coverDb = store.openReader();
+    auto cover = coverDb.prepare("SELECT c.source FROM albums a JOIN covers c ON c.id=a.cover_id");
+    ASSERT_TRUE(cover.step());
+    EXPECT_EQ(cover.text(0), "folder");
     store.write([](sqlite::Database& w) { w.exec("INSERT INTO stats(file_id,rating) SELECT id,5 FROM files"); }).get();
     {
         TagLib::FLAC::File tags(file.c_str());
@@ -173,6 +191,47 @@ TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchange
     EXPECT_EQ(scanner.scan(root).updated, 1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE title='Changed title'"), 1);
     EXPECT_EQ(count(store, "SELECT rating FROM stats"), 5);
+}
+
+TEST_F(LibraryScannerTest, GroupsDiscFoldersButKeepsEditionsSeparate) {
+    const auto cd1 = dir / "music" / "album" / "CD1";
+    const auto cd2 = dir / "music" / "album" / "CD2";
+    const auto edition = dir / "music" / "album-remaster";
+    fs::create_directories(cd1);
+    fs::create_directories(cd2);
+    fs::create_directories(edition);
+    const auto addTrack = [&](const fs::path& path, const char* albumName, const char* artist) {
+        fs::copy_file(testutil::testFile("16-44.1k"), path);
+        TagLib::FLAC::File tags(path.c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList(albumName));
+        values.insert("ARTIST", TagLib::StringList(artist));
+        ASSERT_TRUE(tags.setProperties(values).isEmpty());
+        ASSERT_TRUE(tags.save());
+    };
+    addTrack(cd1 / "one.flac", "CD1 Collection [Disc 1]", "Artist One");
+    addTrack(cd2 / "two.flac", "CD1 Collection [Disc 2]", "Artist Two");
+    addTrack(edition / "three.flac", "CD1 Collection", "Artist One");
+
+    LibraryStore store(dir / "library.db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    auto db = store.openReader();
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM albums WHERE title='CD1 Collection'").value(), 2);
+    auto merged = db.prepare("SELECT a.album_artist,COUNT(t.id) FROM albums a JOIN tracks t ON t.album_id=a.id "
+                             "WHERE a.title='CD1 Collection' GROUP BY a.id ORDER BY COUNT(t.id) DESC");
+    ASSERT_TRUE(merged.step());
+    EXPECT_EQ(merged.text(0), "Various Artists");
+    EXPECT_EQ(merged.integer(1), 2);
+    auto discs = db.prepare("SELECT t.disc_number FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.path LIKE ?");
+    discs.bind(1, "%one.flac");
+    ASSERT_TRUE(discs.step());
+    EXPECT_EQ(discs.integer(0), 1);
+    discs.reset();
+    discs.bind(1, "%two.flac");
+    ASSERT_TRUE(discs.step());
+    EXPECT_EQ(discs.integer(0), 2);
 }
 
 TEST_F(LibraryScannerTest, IndexesSidecarsAndEnforcesContentAndDepthScope) {

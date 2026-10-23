@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cwctype>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -555,6 +556,146 @@ void applyCuePlan(sqlite::Database& db, const CuePlan& plan, int64_t root) {
     }
 }
 
+void rebuildAlbums(sqlite::Database& db, int64_t root) {
+    struct Album {
+        int64_t folder = 0;
+        int64_t firstFile = 0;
+        bool firstHasCover = false;
+        Path path;
+        std::string title, artist;
+        int64_t year = 0, discs = 0;
+        std::set<std::string> artists;
+        std::vector<int64_t> tracks;
+    };
+    std::map<std::string, Album> albums;
+    auto rows = db.prepare("SELECT t.id,t.album,t.album_artist,t.artist,t.year,f.folder_id,COALESCE(d.parent_id,0),d.path,"
+                           "t.file_id,COALESCE((SELECT embedded_cover FROM tracks e WHERE e.file_id=t.file_id AND e.cue_index=0),"
+                           "t.embedded_cover),t.disc_number,t.disc_total "
+                           "FROM tracks t JOIN files f ON f.id=t.file_id JOIN folders d ON d.id=f.folder_id "
+                           "WHERE f.root_id=? AND f.available=1 ORDER BY t.disc_number,t.track_number,t.id");
+    rows.bind(1, root);
+    while (rows.step()) {
+        const auto track = rows.integer(0);
+        const auto discFolder = rows.integer(5);
+        const auto parentFolder = rows.integer(6);
+        Path folderPath(toWide(rows.text(7)));
+        const bool discSubfolder = parentFolder && isDiscFolderName(folderPath.filename().wstring());
+        const auto folder = discSubfolder ? parentFolder : discFolder;
+        if (discSubfolder) {
+            auto parent = db.prepare("SELECT path FROM folders WHERE id=?");
+            if (parent.bind(1, parentFolder).step()) folderPath = Path(toWide(parent.text(0)));
+        }
+        auto title = albumTitleWithoutDiscSuffix(toWide(rows.text(1)));
+        if (!rows.integer(10)) {
+            const auto discNumber = [](std::wstring_view value) {
+                const auto folded = lower(std::wstring(value));
+                for (size_t i = 0; i < folded.size(); ++i) {
+                    if (i && ((folded[i - 1] >= L'a' && folded[i - 1] <= L'z') ||
+                              (folded[i - 1] >= L'0' && folded[i - 1] <= L'9')))
+                        continue;
+                    size_t marker = 0;
+                    const std::wstring_view words[] = {L"cd", L"disc", L"disk"};
+                    for (const auto word : words)
+                        if (std::wstring_view(folded).substr(i, word.size()) == word) marker = word.size();
+                    if (!marker && folded[i] == L'碟') marker = 1;
+                    if (!marker) continue;
+                    size_t n = i + marker;
+                    while (n < folded.size() && std::iswspace(folded[n])) ++n;
+                    int number = 0;
+                    while (n < folded.size() && folded[n] >= L'0' && folded[n] <= L'9') number = number * 10 + (folded[n++] - L'0');
+                    if (number) return number;
+                }
+                return 0;
+            };
+            const auto originalTitle = toWide(rows.text(1));
+            const auto suffixNumber = title != originalTitle ? discNumber(std::wstring_view(originalTitle).substr(title.size())) : 0;
+            const int inferred = suffixNumber ? suffixNumber : discNumber(Path(toWide(rows.text(7))).filename().wstring());
+            if (inferred) db.prepare("UPDATE tracks SET disc_number=? WHERE id=?").bind(1, int64_t(inferred)).bind(2, track).run();
+        }
+        if (title.empty()) title = folderPath.filename().wstring();
+        const auto titleText = toUtf8(title);
+        const auto explicitArtist = rows.text(2);
+        const auto normalized = toUtf8(lower(title)) + "\n" + toUtf8(lower(toWide(explicitArtist)));
+        const auto keyText = std::to_string(folder) + "\n" + normalized;
+        auto& album = albums[keyText];
+        album.folder = folder;
+        album.title = titleText;
+        album.year = rows.integer(4);
+        album.discs = std::max({album.discs, rows.integer(10), rows.integer(11)});
+        if (!album.firstFile) {
+            album.firstFile = rows.integer(8);
+            album.firstHasCover = rows.integer(9) != 0;
+            album.path = folderPath;
+        }
+        if (!explicitArtist.empty()) album.artist = explicitArtist;
+        else if (!rows.text(3).empty()) album.artists.insert(rows.text(3));
+        album.tracks.push_back(track);
+    }
+    for (auto& [keyText, album] : albums) {
+        if (album.artist.empty()) album.artist = album.artists.size() == 1 ? *album.artists.begin() : "Various Artists";
+        db.prepare("INSERT INTO albums(folder_id,grouping_key,title,album_artist,year,disc_count,added,title_norm,artist_norm) "
+                   "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(grouping_key) DO UPDATE SET folder_id=excluded.folder_id,"
+                   "title=excluded.title,album_artist=excluded.album_artist,year=excluded.year,disc_count=excluded.disc_count,title_norm=excluded.title_norm,"
+                   "artist_norm=excluded.artist_norm")
+            .bind(1, album.folder)
+            .bind(2, keyText)
+            .bind(3, album.title)
+            .bind(4, album.artist)
+            .bind(5, album.year)
+            .bind(6, album.discs)
+            .bind(7, now())
+            .bind(8, toUtf8(lower(toWide(album.title))))
+            .bind(9, toUtf8(lower(toWide(album.artist))))
+            .run();
+        auto row = db.prepare("SELECT id FROM albums WHERE grouping_key=?");
+        row.bind(1, keyText).step();
+        const auto albumId = row.integer(0);
+        for (auto track : album.tracks) db.prepare("UPDATE tracks SET album_id=? WHERE id=?").bind(1, albumId).bind(2, track).run();
+
+        ArtworkQuery query;
+        query.albumFolder = album.path;
+        query.albumArtist = album.artist;
+        query.album = album.title;
+        auto candidates = makeFolderArtworkProvider()->find(query, {});
+        std::optional<ArtworkCandidate> image;
+        if (!candidates.empty()) image = std::move(candidates.front());
+        int64_t coverFile = 0;
+        std::string source;
+        std::string mime;
+        if (image) {
+            auto cover = db.prepare("SELECT id FROM files WHERE path=? AND kind='image' AND available=1");
+            cover.bind(1, key(image->file));
+            if (cover.step()) {
+                coverFile = cover.integer(0);
+                source = image->source;
+                mime = image->mime;
+            }
+        }
+        if (!coverFile && album.firstHasCover) {
+            coverFile = album.firstFile;
+            source = "embedded";
+        }
+        db.prepare("UPDATE albums SET cover_id=NULL WHERE id=?").bind(1, albumId).run();
+        if (coverFile) {
+            auto cover = db.prepare("SELECT id FROM covers WHERE source=? AND file_id=?");
+            cover.bind(1, source).bind(2, coverFile);
+            int64_t coverId = 0;
+            if (cover.step()) coverId = cover.integer(0);
+            else {
+                db.prepare("INSERT INTO covers(source,file_id,mime) VALUES(?,?,?)")
+                    .bind(1, source)
+                    .bind(2, coverFile)
+                    .bind(3, mime)
+                    .run();
+                coverId = db.lastInsertId();
+            }
+            db.prepare("UPDATE albums SET cover_id=? WHERE id=?").bind(1, coverId).bind(2, albumId).run();
+        }
+    }
+    db.exec("DELETE FROM albums WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.album_id=albums.id);"
+            "DELETE FROM covers WHERE NOT EXISTS(SELECT 1 FROM albums WHERE albums.cover_id=covers.id)");
+}
+
 Listing list(const Path& path, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
              const std::set<std::string>& pendingIdentity, const std::set<TrustedIdentity>& trusted,
              const CancellationToken& token, const std::function<bool()>& playbackActive) {
@@ -844,7 +985,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
     if (report.complete) {
         auto cueReader = store_.openReader();
         CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, report.diagnostics);
-        store_.write([&](sqlite::Database& db) { applyCuePlan(db, cuePlan, root); }).get();
+        store_.write([&](sqlite::Database& db) {
+            applyCuePlan(db, cuePlan, root);
+            rebuildAlbums(db, root);
+        }).get();
     }
     return report;
 }

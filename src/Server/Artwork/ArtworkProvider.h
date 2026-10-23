@@ -86,6 +86,7 @@ ArtworkChain localArtworkChain();
 
 // A disc subfolder name: "cd", "disc" or "disk" not preceded by a letter, or "碟", then optional spaces and a number.
 bool isDiscFolderName(std::wstring_view name);
+std::wstring albumTitleWithoutDiscSuffix(std::wstring_view title);
 
 // Local images larger than this are not read.
 constexpr uintmax_t kMaxArtworkBytes = 32ull << 20;

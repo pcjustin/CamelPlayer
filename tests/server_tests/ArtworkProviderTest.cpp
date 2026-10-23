@@ -147,3 +147,11 @@ TEST(ArtworkProvider, DiscFolderNames) {
     for (const wchar_t* name : {L"ABCD1", L"Discography", L"Bonus", L"CD", L"碟", L"Disco 2", L"Bucd 3"})
         EXPECT_FALSE(isDiscFolderName(name)) << camel::toUtf8(name);
 }
+
+TEST(ArtworkProvider, AlbumDiscSuffixIsRemovedOnlyAtEnd) {
+    EXPECT_EQ(albumTitleWithoutDiscSuffix(L"Album CD1"), L"Album");
+    EXPECT_EQ(albumTitleWithoutDiscSuffix(L"Album [Disc 2]"), L"Album");
+    EXPECT_EQ(albumTitleWithoutDiscSuffix(L"Album (碟3)"), L"Album");
+    EXPECT_EQ(albumTitleWithoutDiscSuffix(L"Album Discography"), L"Album Discography");
+    EXPECT_EQ(albumTitleWithoutDiscSuffix(L"CD1 Album"), L"CD1 Album");
+}

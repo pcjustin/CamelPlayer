@@ -141,4 +141,35 @@ bool isDiscFolderName(std::wstring_view name) {
     return false;
 }
 
+std::wstring albumTitleWithoutDiscSuffix(std::wstring_view title) {
+    std::wstring result(title);
+    while (!result.empty() && std::iswspace(result.back())) result.pop_back();
+    size_t end = result.size();
+    if (end && (result[end - 1] == L')' || result[end - 1] == L']')) --end;
+    size_t suffix = std::wstring::npos;
+    for (size_t i = 0; i < end; ++i) {
+        const auto candidate = std::wstring_view(result).substr(i, end - i);
+        const auto folded = lower(std::wstring(candidate));
+        const auto numbered = [&](size_t marker) {
+            size_t n = marker;
+            while (n < folded.size() && std::iswspace(folded[n])) ++n;
+            const size_t first = n;
+            while (n < folded.size() && folded[n] >= L'0' && folded[n] <= L'9') ++n;
+            return n > first && n == folded.size();
+        };
+        const bool discSuffix = (folded.starts_with(L"cd") && numbered(2)) || (folded.starts_with(L"disc") && numbered(4)) ||
+                                (folded.starts_with(L"disk") && numbered(4)) || (folded.starts_with(L"碟") && numbered(1));
+        if ((i == 0 || std::iswspace(result[i - 1]) || result[i - 1] == L'(' || result[i - 1] == L'[') && discSuffix) {
+            suffix = i;
+            break;
+        }
+    }
+    if (suffix == std::wstring::npos) return result;
+    while (suffix && std::iswspace(result[suffix - 1])) --suffix;
+    if (suffix && (result[suffix - 1] == L'(' || result[suffix - 1] == L'[')) --suffix;
+    result.resize(suffix);
+    while (!result.empty() && std::iswspace(result.back())) result.pop_back();
+    return result;
+}
+
 } // namespace camel::server
