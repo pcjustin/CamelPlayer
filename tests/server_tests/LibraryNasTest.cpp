@@ -15,6 +15,7 @@
 
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryIdentity.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -74,6 +75,62 @@ Json scan(LibraryStore& store, LibraryScanner& scanner, int64_t root, const char
 }
 
 } // namespace
+
+TEST(LibraryNas, DISABLED_UniqueFingerprintsPreserveMoveHistory) {
+    const auto root = nasRoot();
+    const auto fixture = root / (L".camelplayer-nas-test-identity-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                 std::to_wstring(GetTickCount64()));
+    ASSERT_TRUE(fs::create_directory(fixture));
+    const auto old = fixture / "old.flac", renamed = fixture / "renamed.flac", copy = fixture / "copy.flac";
+    const auto one = fixture / "one.flac", two = fixture / "two.flac";
+    auto cleanup = wil::scope_exit([&] {
+        std::error_code error;
+        for (const auto& path : {old, renamed, copy, one, two}) fs::remove(path, error);
+        fs::remove(fixture, error);
+    });
+    fs::copy_file(testutil::testFile("16-44.1k"), old);
+    ASSERT_TRUE(library::fileVersion(old).volumeKey.empty());
+    const auto local = localRun("identity");
+    std::cout << "Local identity results: " << camel::toUtf8(local.wstring()) << std::endl;
+    LibraryStore store(local);
+    LibraryScanner scanner(store);
+    const auto id = scanner.addRoot(fixture);
+    ASSERT_TRUE(scanner.scan(id).complete);
+    const auto original = count(store, "SELECT id FROM files WHERE available=1");
+    const auto track = count(store, "SELECT id FROM tracks");
+    store
+        .write([=](sqlite::Database& db) {
+            db.prepare("INSERT INTO stats(file_id,rating,favorite,play_count) VALUES(?,5,1,17)").bind(1, original).run();
+        })
+        .get();
+    ASSERT_EQ(scanner.fingerprint(id).hashed, 1);
+    fs::rename(old, renamed);
+    EXPECT_EQ(scanner.scan(id).moved, 1);
+    EXPECT_EQ(count(store, "SELECT id FROM files WHERE available=1"), original);
+    EXPECT_EQ(count(store, "SELECT rating FROM stats"), 5);
+    EXPECT_EQ(count(store, "SELECT id FROM tracks WHERE file_id IN (SELECT file_id FROM stats)"), track);
+    fs::rename(renamed, old);
+    EXPECT_EQ(scanner.scan(id).moved, 1);
+    EXPECT_EQ(count(store, "SELECT id FROM files WHERE available=1"), original);
+    fs::rename(old, renamed);
+    EXPECT_EQ(scanner.scan(id).moved, 1);
+    fs::copy_file(renamed, copy);
+    EXPECT_EQ(scanner.scan(id).moved, 0);
+    EXPECT_EQ(count(store), 2);
+    fs::remove(copy);
+    ASSERT_TRUE(scanner.scan(id).complete);
+    // A retained copy fingerprint makes this later move ambiguous; it must not acquire the original history.
+    fs::rename(renamed, one);
+    fs::copy_file(one, two);
+    EXPECT_EQ(scanner.scan(id).moved, 0);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND id IN (SELECT file_id FROM stats)"), 0);
+    Json report{{"original_id", original},
+                {"rating", count(store, "SELECT rating FROM stats")},
+                {"play_count", count(store, "SELECT play_count FROM stats")},
+                {"available", count(store)},
+                {"trusted_nas_ids", count(store, "SELECT COUNT(*) FROM files WHERE volume_key<>''")}};
+    std::ofstream(local / "report.json") << report.dump(2);
+}
 
 TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     const auto root = nasRoot();

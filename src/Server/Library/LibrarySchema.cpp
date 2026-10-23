@@ -195,6 +195,16 @@ CREATE VIRTUAL TABLE tracks_fts USING fts5(
 const std::vector<Migration>& libraryMigrations() {
     static const std::vector<Migration> migrations = {
         [](sqlite::Database& db) { db.exec(kSchemaV1); },
+        [](sqlite::Database& db) {
+            // Identity state: established (0), awaiting a complete scan (1), superseded provisional record (2).
+            db.exec("ALTER TABLE files ADD COLUMN created INTEGER NOT NULL DEFAULT 0;"
+                    "ALTER TABLE files ADD COLUMN volume_key TEXT;"
+                    "ALTER TABLE files ADD COLUMN identity_state INTEGER NOT NULL DEFAULT 0;"
+                    "CREATE INDEX files_trusted_identity ON files(volume_key,file_index,created);"
+                    "CREATE INDEX files_content_hash ON files(content_hash) WHERE content_hash IS NOT NULL;"
+                    "CREATE INDEX files_unfingerprinted_size ON files(kind,size) "
+                    "WHERE content_hash IS NULL AND identity_state<>2;");
+        },
     };
     return migrations;
 }

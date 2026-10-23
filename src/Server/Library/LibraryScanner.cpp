@@ -18,6 +18,7 @@
 #include <set>
 #include <stop_token>
 #include <thread>
+#include <tuple>
 
 #include <taglib/aifffile.h>
 #include <taglib/dsdifffile.h>
@@ -29,6 +30,7 @@
 #include <taglib/tfilestream.h>
 #include <taglib/wavfile.h>
 
+#include "Server/Library/LibraryIdentity.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Engine/decode/FormatProbe.h"
@@ -81,25 +83,9 @@ bool contains(const Path& parent, const Path& child) {
     return true;
 }
 
-struct Version {
-    int64_t size = 0, mtime = 0, volume = 0;
-    std::vector<uint8_t> index;
-    bool operator==(const Version&) const = default;
-};
-
-Version version(const Path& path) {
-    auto h = openPath(path);
-    BY_HANDLE_FILE_INFORMATION info{};
-    if (!h || !GetFileInformationByHandle(h.get(), &info)) throw std::runtime_error("cannot read file identity: " + key(path));
-    const uint64_t index = (uint64_t(info.nFileIndexHigh) << 32) | info.nFileIndexLow;
-    Version out{int64_t((uint64_t(info.nFileSizeHigh) << 32) | info.nFileSizeLow),
-                int64_t((uint64_t(info.ftLastWriteTime.dwHighDateTime) << 32) | info.ftLastWriteTime.dwLowDateTime),
-                info.dwVolumeSerialNumber,
-                {}};
-    out.index.resize(sizeof(index));
-    memcpy(out.index.data(), &index, sizeof(index));
-    return out;
-}
+using Version = library::FileVersion;
+using library::fileVersion;
+using TrustedIdentity = std::tuple<std::string, std::vector<uint8_t>, int64_t>;
 
 std::string kind(const Path& path) {
     const auto ext = lower(path.extension().wstring());
@@ -246,6 +232,7 @@ struct Entry {
     std::optional<Metadata> metadata;
     std::string error;
     bool rejected = false;
+    std::optional<std::vector<uint8_t>> digest;
 };
 
 struct Listing {
@@ -257,7 +244,9 @@ struct Listing {
     std::string error;
 };
 
-Listing list(const Path& path, const std::map<std::string, Version>& known, const CancellationToken& token) {
+Listing list(const Path& path, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
+             const std::set<std::string>& pendingIdentity, const std::set<TrustedIdentity>& trusted,
+             const CancellationToken& token, const std::function<bool()>& playbackActive) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     Listing out{path};
     try {
@@ -295,11 +284,17 @@ Listing list(const Path& path, const std::map<std::string, Version>& known, cons
             if (type.empty()) continue;
             Entry entry{child, type};
             try {
-                entry.version = version(child);
+                entry.version = fileVersion(child);
                 const auto old = known.find(key(child));
                 if (old == known.end() || old->second != entry.version) {
                     if (type == "audio") entry.metadata = metadata(child);
-                    if (version(child) != entry.version) throw std::runtime_error("file changed during metadata read");
+                    if (fileVersion(child) != entry.version) throw std::runtime_error("file changed during metadata read");
+                }
+                if ((old == known.end() || !entry.version.sameFile(old->second) || pendingIdentity.contains(key(child))) &&
+                    hashSizes.contains(entry.version.size) &&
+                    !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
+                    entry.digest = library::fileDigest(child, entry.version, token, playbackActive);
+                    if (!entry.digest) throw std::runtime_error("fingerprint deferred while cancelled or playing");
                 }
             } catch (const audio::Error& e) {
                 entry.error = e.what();
@@ -378,10 +373,20 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
         return report;
     }
     std::map<std::string, Version> known;
-    auto files = reader.prepare("SELECT path,size,mtime,volume_serial,file_index FROM files WHERE root_id=? AND available=1");
+    auto files = reader.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state "
+                                "FROM files WHERE root_id=? AND available=1");
     files.bind(1, root);
-    while (files.step())
-        known.emplace(files.text(0), Version{files.integer(1), files.integer(2), files.integer(3), files.blob(4)});
+    std::set<std::string> pendingIdentity;
+    while (files.step()) {
+        known.emplace(files.text(0), library::storedVersion(files, 1));
+        if (files.integer(7)) pendingIdentity.insert(files.text(0));
+    }
+    std::set<int64_t> hashSizes;
+    auto fingerprints = reader.prepare("SELECT DISTINCT size FROM files WHERE length(content_hash)=32");
+    while (fingerprints.step()) hashSizes.insert(fingerprints.integer(0));
+    std::set<TrustedIdentity> trusted;
+    auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
+    while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
     const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
     std::deque<Path> pending{path};
     std::deque<std::future<Listing>> active;
@@ -393,14 +398,15 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
             .write([&](sqlite::Database& db) {
                 for (const auto& entry : batch) {
                     const auto p = key(entry.path);
-                    auto old = db.prepare("SELECT id,volume_serial,file_index FROM files WHERE path=? AND available=1");
+                    auto old = db.prepare("SELECT id,size,mtime,volume_serial,file_index,created,volume_key FROM files WHERE "
+                                          "path=? AND available=1");
                     old.bind(1, p);
                     int64_t file = old.step() ? old.integer(0) : 0;
                     if (!entry.error.empty() && !entry.rejected) {
                         if (file) db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generation).bind(2, file).run();
                         continue;
                     }
-                    if (file && (old.integer(1) != entry.version.volume || old.blob(2) != entry.version.index)) {
+                    if (file && !entry.version.sameFile(library::storedVersion(old, 1))) {
                         db.prepare("UPDATE files SET available=0 WHERE id=?").bind(1, file).run();
                         file = 0;
                     }
@@ -409,8 +415,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
                     f.bind(1, folder).step();
                     const int64_t folderId = f.integer(0);
                     if (!file) {
-                        db.prepare("INSERT INTO files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen) "
-                                   "VALUES(?,?,?,?,?,?,?,?,?)")
+                        db.prepare("INSERT INTO "
+                                   "files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen,created,"
+                                   "volume_key,identity_state) "
+                                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,1)")
                             .bind(1, folderId)
                             .bind(2, root)
                             .bind(3, p)
@@ -420,18 +428,29 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
                             .bind(7, entry.version.volume)
                             .bind(8, entry.version.index)
                             .bind(9, generation)
+                            .bind(10, entry.version.created)
+                            .bind(11, entry.version.volumeKey)
                             .run();
                         file = db.lastInsertId();
                     } else {
-                        db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=? WHERE id=?")
+                        if (library::storedVersion(old, 1) != entry.version)
+                            db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
+                        db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
+                                   "volume_serial=?,file_index=?,created=?,volume_key=? WHERE id=?")
                             .bind(1, entry.version.size)
                             .bind(2, entry.version.mtime)
                             .bind(3, generation)
                             .bind(4, folderId)
                             .bind(5, root)
-                            .bind(6, file)
+                            .bind(6, entry.version.volume)
+                            .bind(7, entry.version.index)
+                            .bind(8, entry.version.created)
+                            .bind(9, entry.version.volumeKey)
+                            .bind(10, file)
                             .run();
                     }
+                    if (entry.digest)
+                        db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *entry.digest).bind(2, file).run();
                     if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0").bind(1, file).run();
                     if (entry.metadata) {
                         writeMetadata(db, file, *entry.metadata);
@@ -446,7 +465,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
         while (!pending.empty() && active.size() < 4) {
             const auto dir = pending.front();
             pending.pop_front();
-            active.push_back(std::async(std::launch::async, [&, dir] { return list(dir, known, token); }));
+            active.push_back(std::async(std::launch::async, [&, dir] {
+                return list(dir, known, hashSizes, pendingIdentity, trusted, token, playbackActive_);
+            }));
         }
         const auto ready = std::find_if(active.begin(), active.end(), [](auto& job) {
             return job.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
@@ -493,27 +514,104 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& token) {
                 .bind(3, now())
                 .bind(4, root)
                 .run();
-            if (report.complete)
+            if (report.complete) {
                 db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
                     .bind(1, root)
                     .bind(2, generation)
                     .run();
+                std::vector<int64_t> added;
+                auto pending = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1 AND identity_state=1");
+                pending.bind(1, root);
+                while (pending.step()) added.push_back(pending.integer(0));
+                report.moved = library::reconcileMoves(db, added);
+                db.prepare("UPDATE files SET identity_state=0 WHERE root_id=? AND identity_state=1").bind(1, root).run();
+            }
         })
         .get();
     return report;
 }
 
+FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationToken& token) {
+    FingerprintReport report;
+    if (token.cancelled() || (playbackActive_ && playbackActive_())) return report;
+    const bool background = bool(SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN));
+    auto restorePriority = wil::scope_exit([&] {
+        if (background) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+    });
+    struct PendingHash {
+        int64_t id;
+        std::string path;
+        Version version;
+    };
+    std::vector<PendingHash> pending;
+    {
+        auto reader = store_.openReader();
+        auto rows = reader.prepare("SELECT files.id,files.path,size,mtime,volume_serial,file_index,created,volume_key "
+                                   "FROM files JOIN roots ON roots.id=files.root_id WHERE root_id=? AND available=1 "
+                                   "AND content_hash IS NULL AND identity_state=0 AND roots.online=1 AND roots.removed IS NULL");
+        rows.bind(1, root);
+        while (rows.step()) {
+            if (token.cancelled()) return report;
+            pending.push_back({rows.integer(0), rows.text(1), library::storedVersion(rows, 2)});
+        }
+    }
+    for (const auto& [id, path, expected] : pending) {
+        if (token.cancelled() || (playbackActive_ && playbackActive_())) return report;
+        try {
+            const auto digest = library::fileDigest(Path(toWide(path)), expected, token, playbackActive_);
+            if (!digest) return report;
+            store_
+                .write([&](sqlite::Database& db) {
+                    if (token.cancelled() || (playbackActive_ && playbackActive_())) return;
+                    auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
+                                              "WHERE id=? AND available=1 AND identity_state=0 AND content_hash IS NULL");
+                    if (!current.bind(1, id).step() || current.text(0) != path ||
+                        library::storedVersion(current, 1) != expected || library::fileVersion(Path(toWide(path))) != expected)
+                        return;
+                    db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *digest).bind(2, id).run();
+                    report.hashed++;
+                })
+                .get();
+        } catch (const std::exception& e) {
+            report.diagnostics.push_back(path + ": " + e.what());
+        }
+    }
+    report.complete = !token.cancelled() && !(playbackActive_ && playbackActive_()) && report.diagnostics.empty();
+    return report;
+}
+
 class LibraryMonitor::Impl {
 public:
-    Impl(LibraryStore& store, Options options) : store_(store), scanner_(store), options_(options) {
+    Impl(LibraryStore& store, Options options) : store_(store), scanner_(store, options.playbackActive), options_(options) {
         if (options.offlineInterval.count() <= 0 || options.coalesce.count() < 0 || options.pollInterval.count() < 0)
             throw std::invalid_argument("invalid library monitor interval");
         worker_ = std::jthread([this](std::stop_token stop) { run(stop); });
+        fingerprints_ = std::jthread([this](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                try {
+                    std::vector<int64_t> ids;
+                    {
+                        auto db = store_.openReader();
+                        auto roots = db.prepare("SELECT id FROM roots WHERE removed IS NULL AND online=1");
+                        while (roots.step()) ids.push_back(roots.integer(0));
+                    }
+                    for (const auto id : ids) {
+                        if (stop.stop_requested()) break;
+                        scanner_.fingerprint(id, token_);
+                    }
+                } catch (const std::exception& e) {
+                    log::warn("library fingerprints: %s", e.what());
+                }
+                for (int i = 0; i < 20 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        });
     }
     ~Impl() {
         worker_.request_stop();
+        fingerprints_.request_stop();
         token_.cancel();
         worker_.join();
+        fingerprints_.join();
     }
 
 private:
@@ -619,6 +717,7 @@ private:
     Options options_;
     CancellationToken token_;
     std::jthread worker_;
+    std::jthread fingerprints_;
 };
 
 LibraryMonitor::LibraryMonitor(LibraryStore& store) : LibraryMonitor(store, Options{}) {}
