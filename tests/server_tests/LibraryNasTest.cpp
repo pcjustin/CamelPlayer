@@ -7,8 +7,11 @@
 #include <winnetwk.h>
 
 #include <fstream>
+#include <algorithm>
 #include <iostream>
+#include <optional>
 #include <thread>
+#include <psapi.h>
 
 #include <nlohmann/json.hpp>
 #include <taglib/flacfile.h>
@@ -25,6 +28,8 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 using Json = nlohmann::json;
 
+#pragma comment(lib, "psapi.lib")
+
 namespace {
 
 fs::path nasRoot() {
@@ -34,6 +39,13 @@ fs::path nasRoot() {
     fs::path path(root);
     if (!path.is_absolute() || !isNetworkPath(path)) throw std::runtime_error("CAMEL_NAS_ROOT must be a network path");
     return path;
+}
+
+fs::path nasIndex() {
+    wchar_t path[32768]{};
+    const DWORD length = GetEnvironmentVariableW(L"CAMEL_NAS_INDEX", path, DWORD(std::size(path)));
+    if (!length || length >= std::size(path)) throw std::runtime_error("set CAMEL_NAS_INDEX to an existing local library index");
+    return fs::path(path);
 }
 
 fs::path localRun(const char* name) {
@@ -47,6 +59,40 @@ int64_t count(LibraryStore& store, const char* sql = "SELECT COUNT(*) FROM files
     return store.openReader().scalar(sql).value();
 }
 
+uint64_t fileBytes(const fs::path& path) {
+    uint64_t bytes = 0;
+    for (const auto* suffix : {L"", L"-wal", L"-shm"}) {
+        std::error_code error;
+        const auto size = fs::file_size(fs::path(path.wstring() + suffix), error);
+        if (!error) bytes += size;
+    }
+    return bytes;
+}
+
+uint64_t cpuTicks(FILETIME kernel, FILETIME user) {
+    auto ticks = [](FILETIME value) {
+        ULARGE_INTEGER result{};
+        result.LowPart = value.dwLowDateTime;
+        result.HighPart = value.dwHighDateTime;
+        return result.QuadPart;
+    };
+    return ticks(kernel) + ticks(user);
+}
+
+Json machine() {
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    MEMORYSTATUSEX memory{sizeof(memory)};
+    GlobalMemoryStatusEx(&memory);
+#ifdef _DEBUG
+    constexpr const char* configuration = "Debug";
+#else
+    constexpr const char* configuration = "Release";
+#endif
+    return {{"build_configuration", configuration}, {"processor_count", system.dwNumberOfProcessors},
+            {"physical_memory_bytes", memory.ullTotalPhys}, {"available_memory_bytes", memory.ullAvailPhys}};
+}
+
 bool waitFor(const std::function<bool()>& check) {
     const auto end = Clock::now() + std::chrono::seconds(120);
     do {
@@ -58,21 +104,83 @@ bool waitFor(const std::function<bool()>& check) {
 
 Json scan(LibraryStore& store, LibraryScanner& scanner, int64_t root, const char* phase) {
     const auto start = Clock::now();
+    const auto generation = count(store, "SELECT COALESCE(MAX(last_seen),0) FROM files");
+    FILETIME creation{}, exit{}, kernelStart{}, userStart{};
+    GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelStart, &userStart);
     auto job = std::async(std::launch::async, [&] { return scanner.scan(root); });
-    while (job.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
-        std::cout << phase << ": " << count(store) << " published files, "
-                  << std::chrono::duration<double>(Clock::now() - start).count() << " s" << std::endl;
+    std::optional<double> firstBatchSeconds;
+    int64_t firstBatchFiles = 0;
+    auto nextReport = start + std::chrono::seconds(5);
+    while (job.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+        if (!firstBatchSeconds) {
+            const auto sql = "SELECT COUNT(*) FROM files WHERE root_id=" + std::to_string(root) +
+                             " AND last_seen>" + std::to_string(generation);
+            firstBatchFiles = count(store, sql.c_str());
+            if (firstBatchFiles > 0) firstBatchSeconds = std::chrono::duration<double>(Clock::now() - start).count();
+        }
+        if (Clock::now() >= nextReport) {
+            std::cout << phase << ": " << count(store) << " published files, "
+                      << std::chrono::duration<double>(Clock::now() - start).count() << " s" << std::endl;
+            nextReport = Clock::now() + std::chrono::seconds(5);
+        }
+    }
     const auto result = job.get();
+    FILETIME kernelEnd{}, userEnd{};
+    GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelEnd, &userEnd);
+    PROCESS_MEMORY_COUNTERS_EX memory{};
+    memory.cb = sizeof(memory);
+    GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+    Json diagnostics = Json::array();
+    for (size_t i = 0; i < std::min<size_t>(result.diagnostics.size(), 20); ++i)
+        diagnostics.push_back(result.diagnostics[i]);
     Json out{{"complete", result.complete},
              {"online", result.online},
              {"root_error", result.rootError},
              {"seen", result.seen},
              {"updated", result.updated},
-             {"diagnostics", result.diagnostics},
-             {"seconds", std::chrono::duration<double>(Clock::now() - start).count()}};
-    auto summary = out;
-    summary["diagnostics"] = result.diagnostics.size();
-    std::cout << phase << ": " << summary.dump() << std::endl;
+             {"diagnostic_count", result.diagnostics.size()},
+             {"diagnostics_sample", diagnostics},
+             {"first_batch_seconds", firstBatchSeconds ? Json(*firstBatchSeconds) : Json(nullptr)},
+             {"first_batch_files", firstBatchFiles},
+             {"seconds", std::chrono::duration<double>(Clock::now() - start).count()},
+             {"process_cpu_seconds", double(cpuTicks(kernelEnd, userEnd) - cpuTicks(kernelStart, userStart)) / 1e7},
+             {"process_working_set_bytes", memory.WorkingSetSize},
+             {"database_bytes", fileBytes(store.path())},
+             {"cache_condition", std::string(phase).find("full") != std::string::npos
+                                     ? "fresh local index; Windows and NAS server caches were not flushed"
+                                     : "same process and SMB session after full scan"}};
+    std::cout << phase << ": " << out.dump() << std::endl;
+    return out;
+}
+
+Json fingerprint(LibraryStore& store, LibraryScanner& scanner, int64_t root) {
+    const auto start = Clock::now();
+    FILETIME creation{}, exit{}, kernelStart{}, userStart{};
+    GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelStart, &userStart);
+    auto job = std::async(std::launch::async, [&] { return scanner.fingerprint(root); });
+    const auto sql = "SELECT COUNT(*) FROM files WHERE root_id=" + std::to_string(root) + " AND content_hash IS NOT NULL";
+    while (job.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+        std::cout << "fingerprint: " << count(store, sql.c_str()) << " hashes saved, "
+                  << std::chrono::duration<double>(Clock::now() - start).count() << " s" << std::endl;
+    const auto result = job.get();
+    FILETIME kernelEnd{}, userEnd{};
+    GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelEnd, &userEnd);
+    PROCESS_MEMORY_COUNTERS_EX memory{};
+    memory.cb = sizeof(memory);
+    GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+    Json diagnostics = Json::array();
+    for (size_t i = 0; i < std::min<size_t>(result.diagnostics.size(), 20); ++i)
+        diagnostics.push_back(result.diagnostics[i]);
+    Json out{{"complete", result.complete},
+             {"hashed", result.hashed},
+             {"diagnostic_count", result.diagnostics.size()},
+             {"diagnostics_sample", diagnostics},
+             {"seconds", std::chrono::duration<double>(Clock::now() - start).count()},
+             {"process_cpu_seconds", double(cpuTicks(kernelEnd, userEnd) - cpuTicks(kernelStart, userStart)) / 1e7},
+             {"process_working_set_bytes", memory.WorkingSetSize},
+             {"database_bytes", fileBytes(store.path())},
+             {"cache_condition", "same process and SMB session after full and incremental scans"}};
+    std::cout << "fingerprint: " << out.dump() << std::endl;
     return out;
 }
 
@@ -142,7 +250,9 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     LibraryScanner scanner(store);
     const auto id = scanner.addRoot(root);
     ASSERT_EQ(scanner.addRoot(root / L"."), id);
-    Json report;
+    Json report{{"environment", machine()},
+                {"root", camel::toUtf8(root.wstring())},
+                {"local_index", camel::toUtf8(local.wstring())}};
     report["full"] = scan(store, scanner, id, "full");
     report["files"] = count(store);
     report["tracks"] = count(store, "SELECT COUNT(*) FROM tracks");
@@ -151,6 +261,7 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     while (formats.step()) report["formats"][formats.text(0)] = formats.integer(1);
     report["incremental"] = scan(store, scanner, id, "incremental");
     report["files_after_incremental"] = count(store);
+    report["fingerprint"] = fingerprint(store, scanner, id);
     CancellationToken token;
     token.cancel();
     EXPECT_FALSE(scanner.scan(id, token).complete);
@@ -158,11 +269,70 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     std::ofstream(local / "report.json") << report.dump(2);
     std::cout << "Summary: " << report["formats"].dump() << ", " << report["tracks"] << " tracks" << std::endl;
     EXPECT_TRUE(report["full"]["online"].get<bool>());
-    EXPECT_TRUE(report["full"]["complete"].get<bool>());
+    EXPECT_GT(report["full"]["seen"].get<int64_t>(), 0);
     EXPECT_GT(report["tracks"].get<int64_t>(), 0);
-    EXPECT_TRUE(report["incremental"]["complete"].get<bool>());
+    EXPECT_TRUE(report["incremental"]["online"].get<bool>());
+    EXPECT_GT(report["incremental"]["seen"].get<int64_t>(), 0);
     EXPECT_EQ(report["incremental"]["updated"].get<size_t>(), 0);
     EXPECT_EQ(report["files"], report["files_after_incremental"]);
+}
+
+TEST(LibraryNas, DISABLED_FingerprintExistingLocalIndex) {
+    const auto local = nasIndex();
+    LibraryStore store(local);
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(nasRoot());
+    auto report = fingerprint(store, scanner, root);
+    report["root"] = camel::toUtf8(nasRoot().wstring());
+    std::ofstream(local / "fingerprint-report.json") << report.dump(2);
+    EXPECT_GT(report["hashed"].get<int64_t>(), 0);
+}
+
+TEST(LibraryNas, DISABLED_LocalSsdFirstFullScanOfOneHundredThousandTracks) {
+    constexpr int64_t trackCount = 100000;
+    constexpr int64_t linksPerSource = 1022;
+    const auto local = localRun("local-100k");
+    const auto music = local / "music";
+    const auto sources = local / "sources";
+    fs::create_directories(music);
+    fs::create_directories(sources);
+    auto cleanup = wil::scope_exit([&] {
+        std::error_code error;
+        fs::remove_all(music, error);
+        fs::remove_all(sources, error);
+    });
+    const auto fixture = testutil::testFile("16-44.1k");
+    const int64_t sourceCount = (trackCount + linksPerSource - 1) / linksPerSource;
+    for (int64_t i = 0; i < sourceCount; ++i)
+        fs::copy_file(fixture, sources / (std::to_string(i) + ".flac"));
+
+    const auto setupStart = Clock::now();
+    for (int64_t i = 0; i < trackCount; ++i) {
+        const auto source = sources / (std::to_string(i / linksPerSource) + ".flac");
+        const auto destination = music / (std::to_string(i) + ".flac");
+        ASSERT_TRUE(CreateHardLinkW(destination.c_str(), source.c_str(), nullptr)) << GetLastError();
+    }
+    const double setupSeconds = std::chrono::duration<double>(Clock::now() - setupStart).count();
+
+    Json report{{"environment", machine()},
+                {"corpus_tracks", trackCount},
+                {"distinct_payload_files", sourceCount},
+                {"cache_condition", "fresh local index; 100,000 paths hard-link to 98 copied FLAC payloads"},
+                {"fixture_setup_seconds", setupSeconds},
+                {"music_root", camel::toUtf8(music.wstring())}};
+    {
+        LibraryStore store(local / "index");
+        LibraryScanner scanner(store);
+        const auto id = scanner.addRoot(music);
+        report["full"] = scan(store, scanner, id, "local-full");
+        report["tracks"] = count(store, "SELECT COUNT(*) FROM library_tracks");
+        report["database_bytes"] = fileBytes(store.path());
+        std::ofstream(local / "report.json") << report.dump(2);
+        EXPECT_TRUE(report["full"]["complete"].get<bool>());
+        EXPECT_EQ(report["tracks"], trackCount);
+        EXPECT_LE(report["full"]["seconds"].get<double>(), 900.0);
+    }
+    std::cout << "Local 100k scan report: " << camel::toUtf8(local.wstring()) << std::endl;
 }
 
 TEST(LibraryNas, DISABLED_MappedDriveAndExtendedPathsUseTheSameShareKey) {

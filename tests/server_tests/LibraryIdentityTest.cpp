@@ -379,6 +379,21 @@ TEST_F(LibraryIdentityTest, FingerprintsYieldCancelValidateVersionsAndInvalidate
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
 }
 
+TEST_F(LibraryIdentityTest, FingerprintsPendingFilesAfterAnIncompleteScan) {
+    file("old.lrc", "abc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET identity_state=1 WHERE available=1"); }).get();
+
+    const auto report = scanner.fingerprint(root);
+    EXPECT_TRUE(report.complete);
+    EXPECT_EQ(report.hashed, 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
+    EXPECT_EQ(scalar(store, "SELECT identity_state FROM files WHERE available=1"), 1);
+}
+
 TEST_F(LibraryIdentityTest, HashingStopsBetweenChunksWithoutCommittingAPartialDigest) {
     const auto source = file("large.lrc", std::string(3 << 20, 'x'));
     const auto expected = library::fileVersion(source);

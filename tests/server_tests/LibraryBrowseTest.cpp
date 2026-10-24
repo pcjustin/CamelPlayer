@@ -12,6 +12,7 @@
 #include "Server/Library/LibraryBrowse.h"
 #include "Server/Library/LibraryStore.h"
 #include "Server/Library/LibraryText.h"
+#include "Server/Playback/LocalServer.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -27,8 +28,12 @@ TEST(LibraryBrowse, PagesSearchesCancelsAndRejectsStaleRevisions) {
                 "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
                 "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
                 "VALUES(1,1,1,'C:/music/one.flac','audio',1,1);"
-                "INSERT INTO tracks(id,file_id,title,title_norm,title_sort,artist,album) "
-                "VALUES(1,1,'Café orchestra','café orchestra',X'01','Artist','Album');");
+                "INSERT INTO albums(id,folder_id,grouping_key,title,album_artist,added,title_norm,artist_norm) "
+                "VALUES(1,1,'album','Café album','Artist',0,'café album','artist');"
+                "INSERT INTO tracks(id,file_id,title,title_norm,title_sort,artist,artist_norm,album,album_norm,album_id) "
+                "VALUES(1,1,'Café orchestra','café orchestra',X'01','Artist','artist','Café album','café album',1);"
+                "INSERT INTO track_values(track_id,field,position,value,value_norm) "
+                "VALUES(1,'artist',0,'Artist','artist');");
     }).get();
     EXPECT_EQ(emptyRevision, 0u);
     EXPECT_THROW(browseTracks(store, 0, 1, emptyRevision), std::runtime_error);
@@ -38,13 +43,38 @@ TEST(LibraryBrowse, PagesSearchesCancelsAndRejectsStaleRevisions) {
     EXPECT_EQ(first.tracks.front().title, "Café orchestra");
     EXPECT_TRUE(browseTracks(store, 1, 1, first.revision).tracks.empty());
     EXPECT_EQ(searchTracks(store, "Café orchestra", 0, 10, first.revision).total, 1);
+    auto grouped = searchLibrary(store, "Artist", 0, 10, first.revision);
+    EXPECT_EQ(grouped.revision, first.revision);
+    EXPECT_EQ(grouped.tracks.total, 1);
+    ASSERT_EQ(grouped.totalAlbums, 1);
+    ASSERT_EQ(grouped.albums.size(), 1u);
+    EXPECT_EQ(grouped.albums.front().title, "Café album");
+    ASSERT_EQ(grouped.totalArtists, 1);
+    ASSERT_EQ(grouped.artists.size(), 1u);
+    EXPECT_EQ(grouped.artists.front(), "Artist");
+    EXPECT_EQ(searchLibrary(store, "Ar", 0, 10, first.revision).totalArtists, 1);
     CancellationToken cancelled;
     cancelled.cancel();
     EXPECT_THROW(browseTracks(store, 0, 1, 0, cancelled), std::runtime_error);
+    EXPECT_THROW(searchLibrary(store, "Artist", 0, 10, 0, cancelled), std::runtime_error);
     store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Changed'"); }).get();
     EXPECT_THROW(browseTracks(store, 0, 1, first.revision), std::runtime_error);
     EXPECT_THROW(browseTracks(store, -1, 1), std::invalid_argument);
     EXPECT_THROW(browseTracks(store, 0, 501), std::invalid_argument);
+}
+
+TEST(LocalServer, ExposesVersionedBrowseAndGroupedSearch) {
+    const auto directory = testutil::tempDir() / "local-server-library-api";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    LocalServer server(camel::Settings{}, directory / "settings.json");
+    IServer& api = server;
+    const auto page = api.browseTracks(0, 10, std::nullopt);
+    EXPECT_EQ(page.total, 0);
+    const auto results = api.searchLibrary("Artist", 0, 10, page.revision);
+    EXPECT_EQ(results.totalAlbums, 0);
+    EXPECT_EQ(results.totalArtists, 0);
+    EXPECT_EQ(results.tracks.revision, page.revision);
 }
 
 TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredThousandTracks) {
@@ -65,18 +95,32 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     const auto queryStart = Clock::now();
     for (int i = 0; i < 30; ++i) normalizeLibrarySearch("099999 Café Orchestra");
     const double normalizeAverageMs = std::chrono::duration<double, std::milli>(Clock::now() - queryStart).count() / 30.0;
-    for (int i = 0; i < 8; ++i) ASSERT_EQ(searchTracks(store, "099999 Café Orchestra", 0, 50).tracks.size(), 1u);
+    for (int i = 0; i < 8; ++i) ASSERT_EQ(searchLibrary(store, "099999 Café Orchestra", 0, 50).tracks.tracks.size(), 1u);
     std::vector<double> samples;
     samples.reserve(30);
     FILETIME creation{}, exit{}, kernelStart{}, userStart{}, kernelEnd{}, userEnd{};
     GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelStart, &userStart);
     for (int i = 0; i < 30; ++i) {
         const auto start = Clock::now();
-        auto page = searchTracks(store, "099999 Café Orchestra", 0, 50);
+        auto page = searchLibrary(store, "099999 Café Orchestra", 0, 50);
         samples.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
-        ASSERT_EQ(page.total, 1);
-        ASSERT_EQ(page.tracks.front().id, 99999);
+        ASSERT_EQ(page.tracks.total, 1);
+        ASSERT_EQ(page.tracks.tracks.front().id, 99999);
     }
+    const auto fallbackP95 = [&](const std::string& query) {
+        for (int i = 0; i < 8; ++i) searchLibrary(store, query, 0, 50);
+        std::vector<double> timings;
+        timings.reserve(30);
+        for (int i = 0; i < 30; ++i) {
+            const auto start = Clock::now();
+            searchLibrary(store, query, 0, 50);
+            timings.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
+        }
+        std::sort(timings.begin(), timings.end());
+        return timings[size_t(timings.size() * 0.95)];
+    };
+    const double oneCharacterP95 = fallbackP95("a");
+    const double twoCharacterP95 = fallbackP95("ab");
     GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelEnd, &userEnd);
     std::sort(samples.begin(), samples.end());
     const double p95 = samples[size_t(samples.size() * 0.95)];
@@ -100,6 +144,8 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     RecordProperty("corpus_tracks", 100000);
     RecordProperty("query_runs", samples.size());
     RecordProperty("warm_search_first_page_p95_ms", p95);
+    RecordProperty("one_character_fallback_p95_ms", oneCharacterP95);
+    RecordProperty("two_character_fallback_p95_ms", twoCharacterP95);
     RecordProperty("normalization_average_ms", normalizeAverageMs);
     RecordProperty("database_bytes", databaseBytes);
     RecordProperty("processor_count", system.dwNumberOfProcessors);

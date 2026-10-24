@@ -220,10 +220,16 @@ public:
         return camel::server::browseTracks(*library_, offset, limit, revision, token);
     }
 
-    LibraryTrackPage searchLibrary(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
-                                   const CancellationToken& token) const {
+    LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                  const CancellationToken& token) const {
         if (!library_) throw std::runtime_error("library is not configured");
         return camel::server::searchTracks(*library_, std::move(query), offset, limit, revision, token);
+    }
+
+    LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
+                                       std::optional<uint64_t> revision, const CancellationToken& token) const {
+        if (!library_) throw std::runtime_error("library is not configured");
+        return camel::server::searchLibrary(*library_, std::move(query), offset, limit, revision, token);
     }
 
 private:
@@ -658,6 +664,11 @@ LibraryTrackPage LocalServer::browseTracks(int64_t offset, int64_t limit, std::o
 }
 LibraryTrackPage LocalServer::searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                            const CancellationToken& token) const {
+    return impl_->searchTracks(std::move(query), offset, limit, revision, token);
+}
+LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offset, int64_t limit,
+                                                std::optional<uint64_t> revision,
+                                                const CancellationToken& token) const {
     return impl_->searchLibrary(std::move(query), offset, limit, revision, token);
 }
 

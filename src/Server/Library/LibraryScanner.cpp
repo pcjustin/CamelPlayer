@@ -1103,7 +1103,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         auto reader = store_.openReader();
         auto rows = reader.prepare("SELECT files.id,files.path,size,mtime,volume_serial,file_index,created,volume_key "
                                    "FROM files JOIN roots ON roots.id=files.root_id WHERE root_id=? AND available=1 "
-                                   "AND content_hash IS NULL AND identity_state=0 AND roots.online=1 AND roots.removed IS NULL");
+                                   "AND content_hash IS NULL AND identity_state<>2 AND roots.online=1 AND roots.removed IS NULL");
         rows.bind(1, root);
         while (rows.step()) {
             if (token.cancelled()) return report;
@@ -1119,7 +1119,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
                 .write([&](sqlite::Database& db) {
                     if (token.cancelled() || playbackActive()) return;
                     auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
-                                              "WHERE id=? AND available=1 AND identity_state=0 AND content_hash IS NULL");
+                                              "WHERE id=? AND available=1 AND identity_state<>2 AND content_hash IS NULL");
                     if (!current.bind(1, id).step() || current.text(0) != path ||
                         library::storedVersion(current, 1) != expected || library::fileVersion(Path(toWide(path))) != expected)
                         return;

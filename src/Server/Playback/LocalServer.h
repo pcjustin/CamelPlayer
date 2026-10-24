@@ -23,6 +23,9 @@ public:
                                   const CancellationToken& token = {}) const override;
     LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                   const CancellationToken& token = {}) const override;
+    LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
+                                       std::optional<uint64_t> revision,
+                                       const CancellationToken& token = {}) const override;
 
 private:
     class Impl;

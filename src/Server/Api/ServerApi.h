@@ -206,6 +206,9 @@ public:
                                           const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                           const CancellationToken& token = {}) const = 0;
+    virtual LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
+                                               std::optional<uint64_t> revision,
+                                               const CancellationToken& token = {}) const = 0;
 };
 
 std::shared_ptr<IServer> createLocalServer();

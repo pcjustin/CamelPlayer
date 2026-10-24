@@ -24,6 +24,19 @@ struct LibraryTrackPage {
     std::vector<LibraryTrack> tracks;
 };
 
+struct LibraryAlbumResult {
+    int64_t id = 0;
+    std::string title, artist;
+};
+
+struct LibrarySearchResults {
+    uint64_t revision = 0;
+    LibraryTrackPage tracks;
+    int64_t totalAlbums = 0, totalArtists = 0;
+    std::vector<LibraryAlbumResult> albums;
+    std::vector<std::string> artists;
+};
+
 // A nonzero expected revision makes paging fail once a scan or edit changes the result set.
 LibraryTrackPage browseTracks(const LibraryStore& store, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision = std::nullopt,
@@ -31,5 +44,8 @@ LibraryTrackPage browseTracks(const LibraryStore& store, int64_t offset, int64_t
 LibraryTrackPage searchTracks(const LibraryStore& store, std::string query, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision = std::nullopt,
                               const CancellationToken& token = {});
+LibrarySearchResults searchLibrary(const LibraryStore& store, std::string query, int64_t offset, int64_t limit,
+                                   std::optional<uint64_t> expectedRevision = std::nullopt,
+                                   const CancellationToken& token = {});
 
 } // namespace camel::server
