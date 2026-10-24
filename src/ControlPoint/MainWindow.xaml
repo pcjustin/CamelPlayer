@@ -204,6 +204,28 @@
                 <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right" Text="0:00 / 0:00" />
             </Grid>
             <Grid Grid.Row="2" ColumnSpacing="8" VerticalAlignment="Center">
+                <Grid.Resources>
+                    <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleButtonBorderBrushPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleButtonBorderBrushPressed" Color="Transparent" />
+                    <Style x:Key="TransportButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                        <Setter Property="Width" Value="40" />
+                        <Setter Property="Height" Value="40" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="CornerRadius" Value="20" />
+                    </Style>
+                    <Style x:Key="TransportToggleStyle" TargetType="ToggleButton" BasedOn="{StaticResource DefaultToggleButtonStyle}">
+                        <Setter Property="Width" Value="40" />
+                        <Setter Property="Height" Value="40" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="CornerRadius" Value="20" />
+                    </Style>
+                </Grid.Resources>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -213,6 +235,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="68" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="CoverButton" Click="OnCoverClick" Padding="0"
                             Background="Transparent" BorderThickness="0" VerticalAlignment="Center">
@@ -233,21 +256,41 @@
                             <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" />
                         </HyperlinkButton>
                     </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="16,0,0,0">
+                        <ToggleButton x:Name="ShuffleButton" Click="OnShuffleClick" Style="{StaticResource TransportToggleStyle}">
+                            <SymbolIcon Symbol="Shuffle" />
+                        </ToggleButton>
+                        <Button x:Name="StopButton" Click="OnStopClick" Style="{StaticResource TransportButtonStyle}">
+                            <SymbolIcon Symbol="Stop" />
+                        </Button>
+                        <Button x:Name="PreviousButton" Click="OnPreviousClick" Style="{StaticResource TransportButtonStyle}">
+                            <SymbolIcon Symbol="Previous" />
+                        </Button>
+                    </StackPanel>
                 </Grid>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-                <Button x:Name="PreviousButton" Click="OnPreviousClick"><SymbolIcon Symbol="Previous" /></Button>
-                <Button x:Name="PlayPauseButton" Click="OnPlayPauseClick" Style="{StaticResource AccentButtonStyle}">
+                <Button x:Name="PlayPauseButton" Grid.Column="1" Click="OnPlayPauseClick" Style="{StaticResource AccentButtonStyle}"
+                        Width="48" Height="48" Padding="0" CornerRadius="24" VerticalAlignment="Center">
                     <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
                 </Button>
-                <Button x:Name="NextButton" Click="OnNextClick"><SymbolIcon Symbol="Next" /></Button>
-                </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center"
-                            HorizontalAlignment="Right">
-                    <ToggleButton x:Name="ShuffleButton" Click="OnShuffleClick"><SymbolIcon Symbol="Shuffle" /></ToggleButton>
-                    <Button x:Name="StopButton" Click="OnStopClick"><SymbolIcon Symbol="Stop" /></Button>
-                    <Button x:Name="RepeatButton" Click="OnRepeatClick"><SymbolIcon x:Name="RepeatIcon" Symbol="RepeatAll" /></Button>
-                    <ToggleButton x:Name="QueueToggleButton" Click="OnQueueToggleClick"><SymbolIcon Symbol="Bullets" /></ToggleButton>
-                </StackPanel>
+                <Grid Grid.Column="2" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button x:Name="NextButton" Click="OnNextClick" Style="{StaticResource TransportButtonStyle}">
+                            <SymbolIcon Symbol="Next" />
+                        </Button>
+                        <Button x:Name="RepeatButton" Click="OnRepeatClick" Style="{StaticResource TransportButtonStyle}">
+                            <SymbolIcon x:Name="RepeatIcon" Symbol="RepeatAll" />
+                        </Button>
+                    </StackPanel>
+                    <ToggleButton x:Name="QueueToggleButton" Grid.Column="2" Click="OnQueueToggleClick"
+                                  Style="{StaticResource TransportToggleStyle}" VerticalAlignment="Center">
+                        <SymbolIcon Symbol="Bullets" />
+                    </ToggleButton>
+                </Grid>
             </Grid>
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
                 <Ellipse x:Name="Lamp" Width="10" Height="10" VerticalAlignment="Center" Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
