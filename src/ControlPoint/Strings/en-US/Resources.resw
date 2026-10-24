@@ -7,7 +7,6 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
-  <data name="Nav_NowPlaying.Content" xml:space="preserve"><value>Now Playing</value></data>
   <data name="Nav_Albums.Content" xml:space="preserve"><value>Albums</value></data>
   <data name="Nav_Artists.Content" xml:space="preserve"><value>Artists</value></data>
   <data name="Nav_Composers.Content" xml:space="preserve"><value>Composers</value></data>
@@ -102,7 +101,6 @@
   <data name="Status_Idle" xml:space="preserve"><value>No stream open.</value></data>
   <data name="SignalPath_File" xml:space="preserve"><value>File</value></data>
   <data name="SignalPath_Pad" xml:space="preserve"><value>integer zero padding</value></data>
-  <data name="Tip_Open" xml:space="preserve"><value>Open an audio file</value></data>
   <data name="Tip_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>Stop</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>Cannot open the file</value></data>
@@ -135,4 +133,26 @@
   <data name="Library_AlbumsPending" xml:space="preserve"><value>Albums appear here as the library folders are scanned.</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>Scanning the library: {0} of {1} files checked</value></data>
   <data name="Library_Finishing" xml:space="preserve"><value>Scan checked every file; organizing albums and CUE sheets…</value></data>
+  <data name="Queue_Title.Text" xml:space="preserve"><value>Queue</value></data>
+  <data name="Queue_Close.Content" xml:space="preserve"><value>Close</value></data>
+  <data name="Queue_RemoveEntry" xml:space="preserve"><value>Remove track from queue</value></data>
+  <data name="Queue_Clear.Content" xml:space="preserve"><value>Clear queue</value></data>
+  <data name="Queue_Save.Content" xml:space="preserve"><value>Save queue as playlist</value></data>
+  <data name="Queue_SaveTitle" xml:space="preserve"><value>Save queue as playlist</value></data>
+  <data name="Queue_DefaultName" xml:space="preserve"><value>Queue</value></data>
+  <data name="Queue_SavePrimary" xml:space="preserve"><value>Save</value></data>
+  <data name="Queue_Saved" xml:space="preserve"><value>Playlist saved</value></data>
+  <data name="Queue_SaveFailed" xml:space="preserve"><value>Could not save the queue as a playlist</value></data>
+  <data name="Library_AddQueue.AutomationProperties.Name" xml:space="preserve"><value>Add to queue</value></data>
+  <data name="Library_AddQueue.ToolTipService.ToolTip" xml:space="preserve"><value>Add to queue</value></data>
+  <data name="Library_PlayNext.AutomationProperties.Name" xml:space="preserve"><value>Play next</value></data>
+  <data name="Library_PlayNext.ToolTipService.ToolTip" xml:space="preserve"><value>Play next</value></data>
+  <data name="Library_AddAlbum.Text" xml:space="preserve"><value>Add album to end of queue</value></data>
+  <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>Play album next</value></data>
+  <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>Play album</value></data>
+  <data name="Library_AlbumPlaybackOptions.Content" xml:space="preserve"><value>Album playback options</value></data>
+  <data name="Tip_Previous" xml:space="preserve"><value>Previous</value></data>
+  <data name="Tip_Next" xml:space="preserve"><value>Next</value></data>
+  <data name="Tip_Shuffle" xml:space="preserve"><value>Shuffle</value></data>
+  <data name="Tip_Repeat" xml:space="preserve"><value>Repeat: off, one, or queue</value></data>
 </root>

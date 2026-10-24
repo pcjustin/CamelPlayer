@@ -89,7 +89,11 @@ enum class CommandKind : uint8_t {
     RemoveLibraryRoot, // rootId
     ResetPlayStatistics, // tracks: delete their plays and zero their counters
     ResetAllPlayStatistics,
-    AddLibraryRoot // path: a folder to index; overlapping and alias paths are normalized by the Server
+    AddLibraryRoot, // path: a folder to index; overlapping and alias paths are normalized by the Server
+    QueueAdd,       // sources: append entries without changing the current track
+    QueuePlayNext,  // sources: insert entries after the current entry
+    QueueRemove,    // entryIds: remove entries without stopping the current track
+    QueueClear      // keep the current queue entry, if any
 };
 
 struct Command {
@@ -157,6 +161,8 @@ struct DeviceCatalog {
 struct QueueEntry {
     uint64_t id = 0;
     TrackSource source;
+    std::string title, artist, album;
+    int64_t albumId = 0;
     bool operator==(const QueueEntry&) const = default;
 };
 

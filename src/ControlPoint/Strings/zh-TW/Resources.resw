@@ -7,7 +7,6 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
-  <data name="Nav_NowPlaying.Content" xml:space="preserve"><value>正在播放</value></data>
   <data name="Nav_Albums.Content" xml:space="preserve"><value>專輯</value></data>
   <data name="Nav_Artists.Content" xml:space="preserve"><value>演出者</value></data>
   <data name="Nav_Composers.Content" xml:space="preserve"><value>作曲家</value></data>
@@ -102,7 +101,6 @@
   <data name="Status_Idle" xml:space="preserve"><value>目前沒有開啟的串流。</value></data>
   <data name="SignalPath_File" xml:space="preserve"><value>檔案</value></data>
   <data name="SignalPath_Pad" xml:space="preserve"><value>整數補零</value></data>
-  <data name="Tip_Open" xml:space="preserve"><value>開啟音樂檔案</value></data>
   <data name="Tip_PlayPause" xml:space="preserve"><value>播放 / 暫停</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>停止</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>無法開啟檔案</value></data>
@@ -135,4 +133,26 @@
   <data name="Library_AlbumsPending" xml:space="preserve"><value>專輯會在掃描資料夾時陸續出現。</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>正在掃描媒體庫：已檢查 {0} / {1} 個檔案</value></data>
   <data name="Library_Finishing" xml:space="preserve"><value>已檢查所有檔案，正在整理專輯與 CUE…</value></data>
+  <data name="Queue_Title.Text" xml:space="preserve"><value>播放佇列</value></data>
+  <data name="Queue_Close.Content" xml:space="preserve"><value>關閉</value></data>
+  <data name="Queue_RemoveEntry" xml:space="preserve"><value>從佇列移除此曲</value></data>
+  <data name="Queue_Clear.Content" xml:space="preserve"><value>清空佇列</value></data>
+  <data name="Queue_Save.Content" xml:space="preserve"><value>將佇列儲存為播放清單</value></data>
+  <data name="Queue_SaveTitle" xml:space="preserve"><value>將佇列儲存為播放清單</value></data>
+  <data name="Queue_DefaultName" xml:space="preserve"><value>播放佇列</value></data>
+  <data name="Queue_SavePrimary" xml:space="preserve"><value>儲存</value></data>
+  <data name="Queue_Saved" xml:space="preserve"><value>播放清單已儲存</value></data>
+  <data name="Queue_SaveFailed" xml:space="preserve"><value>無法將佇列儲存為播放清單</value></data>
+  <data name="Library_AddQueue.AutomationProperties.Name" xml:space="preserve"><value>加入佇列</value></data>
+  <data name="Library_AddQueue.ToolTipService.ToolTip" xml:space="preserve"><value>加入佇列</value></data>
+  <data name="Library_PlayNext.AutomationProperties.Name" xml:space="preserve"><value>接著播放</value></data>
+  <data name="Library_PlayNext.ToolTipService.ToolTip" xml:space="preserve"><value>接著播放</value></data>
+  <data name="Library_AddAlbum.Text" xml:space="preserve"><value>加入佇列末端</value></data>
+  <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>插播整張專輯</value></data>
+  <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>播放整張專輯</value></data>
+  <data name="Library_AlbumPlaybackOptions.Content" xml:space="preserve"><value>專輯播放選項</value></data>
+  <data name="Tip_Previous" xml:space="preserve"><value>上一首</value></data>
+  <data name="Tip_Next" xml:space="preserve"><value>下一首</value></data>
+  <data name="Tip_Shuffle" xml:space="preserve"><value>隨機播放</value></data>
+  <data name="Tip_Repeat" xml:space="preserve"><value>循環：關閉、單曲或佇列</value></data>
 </root>

@@ -28,7 +28,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring Detail() const { return row_.detail; }
     hstring Trailing() const { return row_.trailing; }
     bool IsFolder() const { return row_.folder; }
-    bool IsTrack() const { return !row_.folder; }
+    bool IsTrack() const { return !row_.folder && row_.id != 0 && !row_.value.empty(); }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
     }

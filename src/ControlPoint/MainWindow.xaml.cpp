@@ -11,9 +11,11 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 
 #include "UiText.h"
 #include "ArtworkLoader.h"
+#include "Common/settings/Settings.h"
 #include "Common/util/Text.h"
 
 using namespace winrt;
@@ -126,14 +128,23 @@ void MainWindow::InitializeComponent() {
         }
     });
 
-    for (auto [button, key] : {std::pair{OpenButton(), L"Tip_Open"}, std::pair{PlayPauseButton(), L"Tip_PlayPause"},
-                               std::pair{StopButton(), L"Tip_Stop"}}) {
+    const auto setButtonTip = [](const auto& button, const wchar_t* key) {
         ToolTipService::SetToolTip(button, box_value(tr(key)));
-        Automation::AutomationProperties::SetName(button, tr(key)); // icon-only buttons need a name for screen readers
-    }
+        Automation::AutomationProperties::SetName(button, tr(key));
+    };
+    setButtonTip(PlayPauseButton(), L"Tip_PlayPause");
+    setButtonTip(StopButton(), L"Tip_Stop");
+    setButtonTip(PreviousButton(), L"Tip_Previous");
+    setButtonTip(NextButton(), L"Tip_Next");
+    setButtonTip(ShuffleButton(), L"Tip_Shuffle");
+    setButtonTip(RepeatButton(), L"Tip_Repeat");
+    setButtonTip(QueueToggleButton(), L"Queue_Title");
 
     populateSettings();
     get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); });
+    std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
+    queueState >> queueOpen_;
+    updateQueuePanel();
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
     refresh.kind = CommandKind::RefreshDevices;
@@ -386,16 +397,71 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         sliderUpdating_ = false;
     }
     TimeText().Text(ui::formatTime(pos) + L" / " + ui::formatTime(total));
+    const bool hasTrack = !s.pathUtf8.empty();
+    PlayPauseButton().IsEnabled(hasTrack);
+    StopButton().IsEnabled(hasTrack);
+    PreviousButton().IsEnabled(hasTrack);
+    NextButton().IsEnabled(hasTrack);
+    CoverButton().IsEnabled(hasTrack);
+    PositionSlider().IsEnabled(hasTrack);
+    ShuffleButton().IsChecked(snapshot.queue.shuffle);
+    RepeatIcon().Symbol(snapshot.queue.repeat == RepeatMode::One ? Symbol::RepeatOne : Symbol::RepeatAll);
+    RepeatIcon().Opacity(snapshot.queue.repeat == RepeatMode::Off ? 0.35 : 1.0);
+    if (shownQueueRevision_ != snapshot.queue.revision || shownQueueEntryId_ != snapshot.queueEntryId) {
+        shownQueueRevision_ = snapshot.queue.revision;
+        shownQueueEntryId_ = snapshot.queueEntryId;
+        QueueList().Items().Clear();
+        for (const auto& entry : snapshot.queue.entries) {
+            const std::filesystem::path path(toWide(entry.source.pathUtf8()));
+            Grid item;
+            ColumnDefinition titleColumn;
+            titleColumn.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+            ColumnDefinition removeColumn;
+            removeColumn.Width(GridLengthHelper::Auto());
+            item.ColumnDefinitions().Append(titleColumn);
+            item.ColumnDefinitions().Append(removeColumn);
+            item.Tag(box_value(entry.id));
+            TextBlock title;
+            title.Text((entry.id == snapshot.queueEntryId ? L"▶ " : L"") + path.stem().wstring());
+            title.VerticalAlignment(VerticalAlignment::Center);
+            ToolTipService::SetToolTip(title, box_value(ui::utf8(entry.source.pathUtf8())));
+            item.Children().Append(title);
+            Button remove;
+            SymbolIcon removeIcon;
+            removeIcon.Symbol(Symbol::Delete);
+            remove.Content(removeIcon);
+            remove.Tag(box_value(entry.id));
+            ToolTipService::SetToolTip(remove, box_value(tr(L"Queue_RemoveEntry")));
+            Automation::AutomationProperties::SetName(remove, tr(L"Queue_RemoveEntry"));
+            remove.Click({this, &MainWindow::OnQueueRemoveEntryClick});
+            Grid::SetColumn(remove, 1);
+            item.Children().Append(remove);
+            QueueList().Items().Append(item);
+        }
+    }
 
-    // Now playing
+    const auto currentEntry = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
+                                           [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (s.pathUtf8.empty()) {
         TitleText().Text(tr(L"NoFile"));
-        PathText().Text(L"");
+        ArtistLinkText().Text(L"");
+        AlbumLinkText().Text(L"");
+        ArtistLink().Visibility(Visibility::Collapsed);
+        AlbumLink().Visibility(Visibility::Collapsed);
         SourceText().Text(L"");
     } else {
         const std::filesystem::path p(toWide(s.pathUtf8));
-        TitleText().Text(p.stem().wstring());
-        PathText().Text(ui::utf8(s.pathUtf8));
+        TitleText().Text(currentEntry != snapshot.queue.entries.end() && !currentEntry->title.empty()
+                             ? ui::utf8(currentEntry->title)
+                             : hstring(p.stem().wstring()));
+        ArtistLinkText().Text(currentEntry == snapshot.queue.entries.end() ? hstring{} : ui::utf8(currentEntry->artist));
+        ArtistLink().Visibility(currentEntry != snapshot.queue.entries.end() && !currentEntry->artist.empty()
+                                    ? Visibility::Visible
+                                    : Visibility::Collapsed);
+        AlbumLinkText().Text(currentEntry == snapshot.queue.entries.end() ? hstring{} : ui::utf8(currentEntry->album));
+        AlbumLink().Visibility(currentEntry != snapshot.queue.entries.end() && !currentEntry->album.empty()
+                                   ? Visibility::Visible
+                                   : Visibility::Collapsed);
         if (s.source) {
             wchar_t buf[256];
             if (s.format == AudioFormat::Dsd) // the decoder counts byte frames of eight DSD samples
@@ -483,6 +549,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (s.revision != shownRevision_) {
         shownRevision_ = s.revision;
         if (s.error) {
+            ErrorBar().Severity(InfoBarSeverity::Warning);
             ErrorBar().Title(ui::errorTitle(*s.error));
             ErrorBar().Message(ui::utf8(s.errorDetail));
             ErrorBar().IsOpen(true);
@@ -494,6 +561,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (snapshot.command.id != shownCommandId_) {
         shownCommandId_ = snapshot.command.id;
         if (snapshot.commandError) {
+            ErrorBar().Severity(InfoBarSeverity::Warning);
             ErrorBar().Title(ui::errorTitle(snapshot.commandError->code));
             ErrorBar().Message(ui::utf8(snapshot.commandError->detail));
             ErrorBar().IsOpen(true);
@@ -515,7 +583,6 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
 }
 
 void MainWindow::showPage(hstring const& tag) {
-    NowPlayingPanel().Visibility(tag == L"nowplaying" ? Visibility::Visible : Visibility::Collapsed);
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
                          tag == L"years" || tag == L"tracks" || tag == L"folders";
@@ -523,7 +590,7 @@ void MainWindow::showPage(hstring const& tag) {
     auto view = get_self<LibraryView>(Library());
     if (library) view->show(tag, PlaceholderTitle().Text());
     else view->hide();
-    const bool placeholder = !library && tag != L"nowplaying" && tag != L"settings";
+    const bool placeholder = !library && tag != L"settings";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") refreshRoots();
 }
@@ -597,27 +664,9 @@ void MainWindow::OnRemoveFolderClick(Windows::Foundation::IInspectable const&, R
     refreshRoots();
 }
 
-winrt::fire_and_forget MainWindow::OnOpenClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    auto strong = get_strong();
-    Microsoft::Windows::Storage::Pickers::FileOpenPicker picker(AppWindow().Id());
-    // The decoder is chosen from the file's contents; the extension only filters the list.
-    for (const wchar_t* extension : {L".flac", L".m4a", L".alac", L".wav", L".aif", L".aiff", L".aifc", L".aac", L".mp3"})
-        picker.FileTypeFilter().Append(extension);
-    picker.SuggestedStartLocation(Microsoft::Windows::Storage::Pickers::PickerLocationId::MusicLibrary);
-    auto result = co_await picker.PickSingleFileAsync();
-    if (!result || !server_) co_return;
-    Command command;
-    command.kind = CommandKind::OpenAndPlay;
-    command.source.emplace(toUtf8(std::wstring_view(result.Path())));
-    submitCommand(std::move(command));
-}
-
-void MainWindow::OnPlayPauseClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const& args) {
+void MainWindow::OnPlayPauseClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (!server_) return;
-    if (server_->snapshot().playback.pathUtf8.empty()) {
-        OnOpenClick(sender, args);
-        return;
-    }
+    if (server_->snapshot().playback.pathUtf8.empty()) return;
     Command command;
     command.kind = CommandKind::TogglePause;
     submitCommand(std::move(command));
@@ -625,6 +674,169 @@ void MainWindow::OnPlayPauseClick(Windows::Foundation::IInspectable const& sende
 
 void MainWindow::OnStopClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     submitCommand(Command{});
+}
+
+void MainWindow::OnPreviousClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    Command command;
+    command.kind = CommandKind::Previous;
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnNextClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    Command command;
+    command.kind = CommandKind::Next;
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnShuffleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_) return;
+    Command command;
+    command.kind = CommandKind::SetShuffle;
+    command.shuffle = !server_->snapshot().queue.shuffle;
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnRepeatClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_) return;
+    const auto mode = server_->snapshot().queue.repeat;
+    Command command;
+    command.kind = CommandKind::SetRepeat;
+    command.repeat = mode == RepeatMode::Off ? RepeatMode::One : mode == RepeatMode::One ? RepeatMode::All : RepeatMode::Off;
+    submitCommand(std::move(command));
+}
+
+void MainWindow::updateQueuePanel() {
+    QueuePanel().Visibility(queueOpen_ ? Visibility::Visible : Visibility::Collapsed);
+    QueueColumn().Width(GridLengthHelper::FromPixels(queueOpen_ ? 360 : 0));
+    QueueToggleButton().IsChecked(queueOpen_);
+    std::ofstream queueState(camel::dataDirectory() / L"queue-panel-open", std::ios::trunc);
+    queueState << queueOpen_;
+}
+
+void MainWindow::OnQueueToggleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    queueOpen_ = !queueOpen_;
+    updateQueuePanel();
+}
+
+void MainWindow::removeSelectedQueueEntries() {
+    if (QueueList().SelectedItems().Size() == 0) return;
+    Command command;
+    command.kind = CommandKind::QueueRemove;
+    for (const auto& item : QueueList().SelectedItems())
+        command.entryIds.push_back(unbox_value<uint64_t>(item.as<FrameworkElement>().Tag()));
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnQueueClearClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    Command command;
+    command.kind = CommandKind::QueueClear;
+    submitCommand(std::move(command));
+}
+
+winrt::fire_and_forget MainWindow::OnQueueSaveClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    dialog.XamlRoot(ContentLayout().XamlRoot());
+    dialog.Title(box_value(tr(L"Queue_SaveTitle")));
+    TextBox name;
+    name.Text(tr(L"Queue_DefaultName"));
+    dialog.Content(name);
+    dialog.PrimaryButtonText(tr(L"Queue_SavePrimary"));
+    dialog.CloseButtonText(tr(L"Queue_Close"));
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || !server_) co_return;
+    const auto text = name.Text();
+    const auto value = toUtf8(std::wstring_view(text.c_str(), text.size()));
+    auto server = server_;
+    auto weak = get_weak();
+    auto dispatcher = DispatcherQueue();
+    co_await resume_background();
+    try {
+        server->saveQueueAsPlaylist(value);
+        dispatcher.TryEnqueue([weak] {
+            if (auto self = weak.get()) {
+                self->ErrorBar().Title(tr(L"Queue_Saved"));
+                self->ErrorBar().Message(L"");
+                self->ErrorBar().Severity(InfoBarSeverity::Success);
+                self->ErrorBar().IsOpen(true);
+            }
+        });
+    } catch (const std::exception&) {
+        dispatcher.TryEnqueue([weak] {
+            if (auto self = weak.get()) {
+                self->ErrorBar().Title(tr(L"Queue_SaveFailed"));
+                self->ErrorBar().Message(L"");
+                self->ErrorBar().Severity(InfoBarSeverity::Error);
+                self->ErrorBar().IsOpen(true);
+            }
+        });
+    }
+}
+
+void MainWindow::OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, Input::DoubleTappedRoutedEventArgs const&) {
+    if (!QueueList().SelectedItem()) return;
+    const auto item = QueueList().SelectedItem().as<FrameworkElement>();
+    Command command;
+    command.kind = CommandKind::QueueSelect;
+    command.entryId = unbox_value<uint64_t>(item.Tag());
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnQueueRemoveEntryClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    Command command;
+    command.kind = CommandKind::QueueRemove;
+    command.entryIds.push_back(unbox_value<uint64_t>(sender.as<FrameworkElement>().Tag()));
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnQueueKeyDown(Windows::Foundation::IInspectable const&, Input::KeyRoutedEventArgs const& e) {
+    if (e.Key() != Windows::System::VirtualKey::Delete || QueueList().SelectedItems().Size() == 0) return;
+    e.Handled(true);
+    removeSelectedQueueEntries();
+}
+
+void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsCompletedEventArgs const&) {
+    if (QueueList().Items().Size() < 2) return;
+    Command command;
+    command.kind = CommandKind::QueueReorder;
+    for (const auto& item : QueueList().Items())
+        command.entryIds.push_back(unbox_value<uint64_t>(item.as<FrameworkElement>().Tag()));
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnCoverClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_ || server_->snapshot().playback.pathUtf8.empty()) return;
+    Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+    const auto snapshot = server_->snapshot();
+    const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
+                                      [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
+    if (current != snapshot.queue.entries.end() && current->albumId > 0) {
+        Library().Visibility(Visibility::Visible);
+        get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album));
+    } else {
+        showPage(L"albums");
+    }
+}
+
+void MainWindow::OnAlbumLinkClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_) return;
+    const auto snapshot = server_->snapshot();
+    const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
+                                      [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
+    if (current == snapshot.queue.entries.end() || current->albumId <= 0) return;
+    Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+    Library().Visibility(Visibility::Visible);
+    get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album));
+}
+
+void MainWindow::OnArtistLinkClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_) return;
+    const auto snapshot = server_->snapshot();
+    const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
+                                      [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
+    if (current == snapshot.queue.entries.end() || current->artist.empty()) return;
+    Nav().SelectedItem(Nav().MenuItems().GetAt(1));
+    Library().Visibility(Visibility::Visible);
+    get_self<LibraryView>(Library())->showArtist(ui::utf8(current->artist));
 }
 
 void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,
@@ -642,8 +854,8 @@ void MainWindow::OnNavSelectionChanged(NavigationView const&, NavigationViewSele
     }
     auto item = e.SelectedItemContainer();
     if (!item) return;
-    const hstring tag = unbox_value_or<hstring>(item.Tag(), L"nowplaying");
-    if (tag != L"nowplaying") PlaceholderTitle().Text(unbox_value_or<hstring>(item.Content(), L""));
+    const hstring tag = unbox_value_or<hstring>(item.Tag(), L"albums");
+    PlaceholderTitle().Text(unbox_value_or<hstring>(item.Content(), L""));
     showPage(tag);
 }
 

@@ -10,6 +10,7 @@
 #endif
 
 #include "Common/util/Log.h"
+#include "Common/util/Text.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
 
@@ -105,6 +106,28 @@ void LibraryView::show(hstring const& tag, hstring const& title) {
     });
 }
 
+void LibraryView::showAlbum(int64_t album, hstring const& title) {
+    if (!server_ || album <= 0) return;
+    View view;
+    view.mode = Mode::AlbumDetail;
+    view.album = album;
+    view.title = title;
+    back_.clear();
+    open(std::move(view), false);
+    refreshTimer_.Start();
+}
+
+void LibraryView::showArtist(hstring const& artist) {
+    if (!server_ || artist.empty()) return;
+    View view;
+    view.mode = Mode::Albums;
+    view.filter = LibraryGroupFilter{LibraryGroupField::Artist, camel::toUtf8(std::wstring_view(artist.c_str(), artist.size()))};
+    view.title = artist;
+    back_.clear();
+    open(std::move(view), false);
+    refreshTimer_.Start();
+}
+
 void LibraryView::showEmpty(int64_t total) {
     const bool noRoots = hasRoots_ && !*hasRoots_;
     const bool pending = total == 0 && current_.mode == Mode::Albums && !current_.filter;
@@ -129,6 +152,7 @@ void LibraryView::open(View view, bool push) {
     cancelArtwork();
     DetailCover().Source(nullptr);
     DetailCover().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
+    AlbumActions().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     if (push) back_.push_back(current_);
     current_ = std::move(view);
     ++generation_;
@@ -275,6 +299,80 @@ void LibraryView::playTracks(const std::vector<LibraryTrackRow>& tracks, size_t 
     for (const auto& t : tracks) command.sources.emplace_back(t.path);
     command.index = index;
     submit_(std::move(command));
+}
+
+void LibraryView::queueTracks(const std::vector<LibraryTrackRow>& tracks, bool playNext) {
+    if (!submit_ || tracks.empty()) return;
+    Command command;
+    command.kind = playNext ? CommandKind::QueuePlayNext : CommandKind::QueueAdd;
+    for (const auto& track : tracks) command.sources.emplace_back(track.path);
+    submit_(std::move(command));
+}
+
+void LibraryView::queueAlbum(int64_t album, bool playNext) {
+    if (!server_ || album <= 0) return;
+    background([this, server = server_, album, playNext] {
+        auto tracks = server->albumDetail(album).tracks;
+        return std::function<void()>([this, tracks = std::move(tracks), playNext] { queueTracks(tracks, playNext); });
+    });
+}
+
+void LibraryView::playAlbum(int64_t album) {
+    if (!server_ || album <= 0) return;
+    background([this, server = server_, album] {
+        auto tracks = server->albumDetail(album).tracks;
+        return std::function<void()>([this, tracks = std::move(tracks)] { playTracks(tracks, 0); });
+    });
+}
+
+void LibraryView::queueItem(const ui::BrowseRow& row, bool playNext) {
+    if (current_.mode == Mode::Folders && row.folder) {
+        queueFolder(row.id, playNext);
+    } else if (current_.mode == Mode::AlbumDetail) {
+        const auto track = std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
+        if (track != detailTracks_.end()) queueTracks({*track}, playNext);
+    } else if ((current_.mode == Mode::Tracks || current_.mode == Mode::Folders) && !row.value.empty()) {
+        Command command;
+        command.kind = playNext ? CommandKind::QueuePlayNext : CommandKind::QueueAdd;
+        command.sources.emplace_back(row.value);
+        if (submit_) submit_(std::move(command));
+    }
+}
+
+void LibraryView::queueFolder(int64_t folder, bool playNext) {
+    if (!server_ || folder <= 0) return;
+    background([this, server = server_, folder, playNext] {
+        std::vector<int64_t> pending{folder};
+        std::vector<LibraryTrackRow> tracks;
+        for (size_t i = 0; i < pending.size(); ++i) {
+            const auto listing = server->browseFolder(pending[i]);
+            tracks.insert(tracks.end(), listing.tracks.begin(), listing.tracks.end());
+            for (const auto& child : listing.folders) pending.push_back(child.id);
+        }
+        return std::function<void()>([this, tracks = std::move(tracks), playNext] { queueTracks(tracks, playNext); });
+    });
+}
+
+void LibraryView::OnAddQueueClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    const auto item = sender.as<FrameworkElement>().DataContext().as<CamelPlayer::BrowseItem>();
+    queueItem(ui::LibraryCollection::rowOf(item), false);
+}
+
+void LibraryView::OnPlayNextClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    const auto item = sender.as<FrameworkElement>().DataContext().as<CamelPlayer::BrowseItem>();
+    queueItem(ui::LibraryCollection::rowOf(item), true);
+}
+
+void LibraryView::OnAddAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    queueAlbum(current_.album, false);
+}
+
+void LibraryView::OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    queueAlbum(current_.album, true);
+}
+
+void LibraryView::OnPlayAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    playAlbum(current_.album);
 }
 
 winrt::fire_and_forget LibraryView::background(std::function<std::function<void()>()> work) {

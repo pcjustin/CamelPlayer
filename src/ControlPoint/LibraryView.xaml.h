@@ -20,6 +20,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit);
     // albums, artists, composers, genres, years, tracks or folders; starts a fresh navigation history.
     void show(hstring const& tag, hstring const& title);
+    void showAlbum(int64_t album, hstring const& title);
+    void showArtist(hstring const& artist);
     void hide();
 
     void OnBackClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -30,6 +32,11 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnTrailClicked(Microsoft::UI::Xaml::Controls::BreadcrumbBar const&,
                         Microsoft::UI::Xaml::Controls::BreadcrumbBarItemClickedEventArgs const&);
     void OnFolderItemClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
+    void OnAddQueueClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayNextClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnAddAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -64,6 +71,11 @@ private:
     void loadAlbumDetail();
     void loadFolder();
     void playTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, size_t index);
+    void queueItem(const ui::BrowseRow& row, bool playNext);
+    void queueAlbum(int64_t album, bool playNext);
+    void playAlbum(int64_t album);
+    void queueFolder(int64_t folder, bool playNext);
+    void queueTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, bool playNext);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.
     winrt::fire_and_forget background(std::function<std::function<void()>()> work);
 

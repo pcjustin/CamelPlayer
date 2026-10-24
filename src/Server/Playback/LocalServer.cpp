@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <iterator>
 #include <mutex>
 #include <map>
 #include <thread>
@@ -39,7 +40,9 @@ bool startsEntry(CommandKind kind) {
 
 bool changesQueue(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
-           kind == CommandKind::SetShuffle || kind == CommandKind::RemoveLibraryRoot;
+           kind == CommandKind::QueueAdd || kind == CommandKind::QueuePlayNext || kind == CommandKind::QueueRemove ||
+           kind == CommandKind::QueueClear || kind == CommandKind::SetShuffle || kind == CommandKind::SetRepeat ||
+           kind == CommandKind::RemoveLibraryRoot;
 }
 
 // Problems of one track rather than of the device: report them and move on to the next eligible entry.
@@ -57,13 +60,15 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::AddLibraryRoot)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::QueueClear)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
+    const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
+    const bool queueIds = c.kind == CommandKind::QueueReorder || c.kind == CommandKind::QueueRemove;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
-        (c.frame != 0 && c.kind != CommandKind::Seek) || c.sources.empty() == queueReplace ||
+        (c.frame != 0 && c.kind != CommandKind::Seek) || c.sources.empty() == queueSources ||
         (queueReplace ? c.index >= c.sources.size() : c.index != 0) ||
-        c.entryIds.empty() == (c.kind == CommandKind::QueueReorder) || (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
+        c.entryIds.empty() == queueIds || (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) ||
@@ -320,6 +325,18 @@ private:
             case CommandKind::QueueReorder:
                 reorderQueue(c.entryIds);
                 break;
+            case CommandKind::QueueAdd:
+                appendQueue(c.sources, false);
+                break;
+            case CommandKind::QueuePlayNext:
+                appendQueue(c.sources, true);
+                break;
+            case CommandKind::QueueRemove:
+                removeQueue(c.entryIds);
+                break;
+            case CommandKind::QueueClear:
+                clearQueue();
+                break;
             case CommandKind::QueueSelect:
                 startEntry(policy_.select(c.entryId), true);
                 break;
@@ -409,25 +426,11 @@ private:
     }
 
     std::vector<uint64_t> replaceQueue(const std::vector<TrackSource>& sources, size_t selected = 0) {
-        std::vector<uint64_t> ids;
-        std::vector<QueueEntry> entries;
         libraryEntries_.clear();
-        if (library_ && !libraryReader_) libraryReader_.emplace(library_->openReader());
-        // shortcut: queue paths resolve serially; batch identity lookup if M3-R07 large-queue latency requires it.
-        for (const auto& source : sources) {
-            ids.push_back(++lastEntryId_);
-            entries.push_back({ids.back(), source});
-            if (libraryReader_) {
-                try {
-                    auto& binding = libraryEntries_[ids.back()];
-                    binding.path = canonicalLibraryPath(std::filesystem::path(toWide(source.pathUtf8()))).wstring();
-                    auto file = libraryReader_->prepare("SELECT id FROM files WHERE path=? AND available=1");
-                    if (file.bind(1, toUtf8(binding.path)).step()) binding.file = file.integer(0);
-                } catch (const std::exception& e) {
-                    log::warn("library queue source: %s", e.what());
-                }
-            }
-        }
+        auto entries = buildQueueEntries(sources);
+        std::vector<uint64_t> ids;
+        ids.reserve(entries.size());
+        for (const auto& e : entries) ids.push_back(e.id);
         policy_.replace(ids);
         entries_ = std::move(entries);
         libraryVersion_ = 0;
@@ -441,6 +444,68 @@ private:
             throw std::invalid_argument("queue entry is unavailable");
         }
         return ids;
+    }
+
+    std::vector<QueueEntry> buildQueueEntries(const std::vector<TrackSource>& sources) {
+        std::vector<QueueEntry> entries;
+        entries.reserve(sources.size());
+        if (library_ && !libraryReader_) libraryReader_.emplace(library_->openReader());
+        // shortcut: queue paths resolve serially; batch identity lookup if M3-R07 large-queue latency requires it.
+        for (const auto& source : sources) {
+            const auto id = ++lastEntryId_;
+            entries.push_back({id, source});
+            if (libraryReader_) {
+                try {
+                    auto& binding = libraryEntries_[id];
+                    binding.path = canonicalLibraryPath(std::filesystem::path(toWide(source.pathUtf8()))).wstring();
+                    auto file = libraryReader_->prepare(
+                        "SELECT f.id,coalesce(t.title,''),coalesce(t.artist,''),"
+                        "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
+                        "LEFT JOIN library_tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
+                        "WHERE f.path=? AND f.available=1 ORDER BY t.cue_index LIMIT 1");
+                    if (file.bind(1, toUtf8(binding.path)).step()) {
+                        binding.file = file.integer(0);
+                        auto& entry = entries.back();
+                        entry.title = file.text(1);
+                        entry.artist = file.text(2);
+                        entry.album = file.text(3);
+                        entry.albumId = file.integer(4);
+                    }
+                } catch (const std::exception& e) {
+                    log::warn("library queue source: %s", e.what());
+                }
+            }
+        }
+        return entries;
+    }
+
+    void appendQueue(const std::vector<TrackSource>& sources, bool playNext) {
+        auto entries = buildQueueEntries(sources);
+        std::vector<uint64_t> ids;
+        ids.reserve(entries.size());
+        for (const auto& e : entries) ids.push_back(e.id);
+        policy_.append(ids, playNext);
+        entries_.insert(entries_.end(), std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
+        libraryVersion_ = 0;
+        refreshLibraryAvailability();
+    }
+
+    void removeQueue(const std::vector<uint64_t>& ids) {
+        policy_.remove(ids);
+        std::erase_if(entries_, [&](const QueueEntry& e) { return std::find(ids.begin(), ids.end(), e.id) != ids.end(); });
+        for (const auto id : ids) libraryEntries_.erase(id);
+    }
+
+    void clearQueue() {
+        const uint64_t current = state_.queueEntryId;
+        const auto keep = std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == current; });
+        policy_.clearExcept(keep == entries_.end() ? std::nullopt : std::optional(current));
+        if (keep == entries_.end()) entries_.clear();
+        else {
+            QueueEntry currentEntry = *keep;
+            entries_ = {std::move(currentEntry)};
+        }
+        std::erase_if(libraryEntries_, [&](const auto& item) { return item.first != current; });
     }
 
     void refreshLibraryAvailability() {

@@ -16,9 +16,23 @@ struct MainWindow : MainWindowT<MainWindow> {
     void InitializeComponent();
 
     // XAML event handlers
-    winrt::fire_and_forget OnOpenClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayPauseClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnStopClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPreviousClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnNextClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnShuffleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRepeatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueClearClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnQueueSaveClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+    void OnQueueRemoveEntryClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
+    void OnQueueDragItemsCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
+                                   Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
+    void OnCoverClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnArtistLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSliderValueChanged(Windows::Foundation::IInspectable const&,
                               Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
     void OnNavSelectionChanged(Microsoft::UI::Xaml::Controls::NavigationView const&,
@@ -49,6 +63,7 @@ private:
     void applySnapshot(const camel::server::Snapshot& snapshot);
     void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
+    void removeSelectedQueueEntries();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
     winrt::fire_and_forget refreshRoots();
     // Shows the running library scan in Settings; reads counters, not the database.
@@ -65,9 +80,13 @@ private:
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
+    bool queueOpen_ = false;
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;
     uint64_t shownCommandId_ = 0;
+    uint64_t shownQueueRevision_ = UINT64_MAX;
+    uint64_t shownQueueEntryId_ = UINT64_MAX;
+    void updateQueuePanel();
     winrt::hstring shownScan_;
     uint64_t shownDevicesRevision_ = 0;
 };

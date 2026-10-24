@@ -18,6 +18,8 @@
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="Auto" MinWidth="56" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
@@ -26,6 +28,10 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock Grid.Column="3" Text="{x:Bind Trailing, Mode=OneWay}" TextAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Grid.Column="4" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Padding="6"
+                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><SymbolIcon Symbol="Add" /></Button>
+                <Button Grid.Column="5" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Padding="6"
+                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><SymbolIcon Symbol="Forward" /></Button>
             </Grid>
         </DataTemplate>
         <!-- Folder pages list subfolders (a root also shows where it is) and then the folder's tracks. -->
@@ -35,6 +41,8 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="40" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Grid>
                         <FontIcon Glyph="&#xE8B7;" FontSize="28" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -46,6 +54,8 @@
                         <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
+                    <Button Grid.Column="2" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Padding="6"><SymbolIcon Symbol="Add" /></Button>
+                    <Button Grid.Column="3" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Padding="6"><SymbolIcon Symbol="Forward" /></Button>
                 </Grid>
                 <Grid ColumnSpacing="16" Visibility="{x:Bind IsTrack, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
@@ -54,6 +64,8 @@
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="Auto" MinWidth="56" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Grid>
                         <FontIcon Glyph="&#xE8D6;" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -67,6 +79,8 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" TextAlignment="Right"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button Grid.Column="5" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Padding="6"><SymbolIcon Symbol="Add" /></Button>
+                    <Button Grid.Column="6" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Padding="6"><SymbolIcon Symbol="Forward" /></Button>
                 </Grid>
             </Grid>
         </DataTemplate>
@@ -110,6 +124,17 @@
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
                     <TextBlock x:Name="HeaderDetail" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                        <Button x:Uid="Library_AlbumPlaybackOptions">
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Uid="Library_PlayAlbum" Click="OnPlayAlbumClick" />
+                                    <MenuFlyoutItem x:Uid="Library_AddAlbum" Click="OnAddAlbumClick" />
+                                    <MenuFlyoutItem x:Uid="Library_PlayAlbumNext" Click="OnPlayNextAlbumClick" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                    </StackPanel>
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
                 </StackPanel>
             </Grid>

@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 21> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 25> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -85,7 +85,11 @@ constexpr Names<CommandKind, 21> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::RemoveLibraryRoot, "removeLibraryRoot"},
                                                   {CommandKind::ResetPlayStatistics, "resetPlayStatistics"},
                                                   {CommandKind::ResetAllPlayStatistics, "resetAllPlayStatistics"},
-                                                  {CommandKind::AddLibraryRoot, "addLibraryRoot"}};
+                                                  {CommandKind::AddLibraryRoot, "addLibraryRoot"},
+                                                  {CommandKind::QueueAdd, "queueAdd"},
+                                                  {CommandKind::QueuePlayNext, "queuePlayNext"},
+                                                  {CommandKind::QueueRemove, "queueRemove"},
+                                                  {CommandKind::QueueClear, "queueClear"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
 constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
@@ -296,7 +300,9 @@ std::vector<DeviceInfo> devicesFrom(const json& j, const char* key) {
 
 json toJson(const QueueSnapshot& q) {
     json entries = json::array();
-    for (const auto& e : q.entries) entries.push_back({{"id", e.id}, {"source", toJson(e.source)}});
+    for (const auto& e : q.entries)
+        entries.push_back({{"id", e.id}, {"source", toJson(e.source)}, {"title", e.title}, {"artist", e.artist},
+                           {"album", e.album}, {"albumId", e.albumId}});
     return {{"revision", q.revision},
             {"entries", entries},
             {"upcomingEntryId", q.upcomingEntryId ? json(*q.upcomingEntryId) : json(nullptr)},
@@ -307,8 +313,14 @@ json toJson(const QueueSnapshot& q) {
 QueueSnapshot queueFrom(const json& j) {
     QueueSnapshot q;
     q.revision = value<uint64_t>(j, "revision");
-    for (const auto& e : array(j, "entries"))
-        q.entries.push_back({value<uint64_t>(e, "id"), trackSourceFrom(field(e, "source"))});
+    for (const auto& e : array(j, "entries")) {
+        QueueEntry entry{value<uint64_t>(e, "id"), trackSourceFrom(field(e, "source"))};
+        if (e.contains("title")) entry.title = value<std::string>(e, "title");
+        if (e.contains("artist")) entry.artist = value<std::string>(e, "artist");
+        if (e.contains("album")) entry.album = value<std::string>(e, "album");
+        if (e.contains("albumId")) entry.albumId = value<int64_t>(e, "albumId");
+        q.entries.push_back(std::move(entry));
+    }
     q.upcomingEntryId = optional<uint64_t>(j, "upcomingEntryId", [](const json& v) {
         if (!v.is_number_unsigned()) invalid("upcomingEntryId is not an unsigned integer");
         return v.get<uint64_t>();

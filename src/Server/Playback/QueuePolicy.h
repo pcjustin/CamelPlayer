@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <random>
@@ -39,6 +40,54 @@ public:
         return revision_;
     }
 
+    uint64_t append(const std::vector<uint64_t>& entryIds, bool playNext) {
+        validateUnique(entryIds);
+        if (std::any_of(entryIds.begin(), entryIds.end(), [&](uint64_t id) { return contains(id); }))
+            throw std::invalid_argument("appended queue entry IDs must be new");
+        const auto at = playNext && current_ ? std::find(order_.begin(), order_.end(), *current_) : order_.end();
+        const auto index = at == order_.end() ? order_.size() : size_t(std::distance(order_.begin(), at)) + 1;
+        entries_.insert(entries_.end(), entryIds.begin(), entryIds.end());
+        order_.insert(order_.begin() + std::ptrdiff_t(index), entryIds.begin(), entryIds.end());
+        ++revision_;
+        return revision_;
+    }
+
+    uint64_t remove(const std::vector<uint64_t>& entryIds) {
+        validateUnique(entryIds);
+        if (std::any_of(entryIds.begin(), entryIds.end(), [&](uint64_t id) { return !contains(id); }))
+            throw std::invalid_argument("cannot remove an unknown queue entry");
+        entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [&](uint64_t id) {
+                           return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end();
+                       }),
+                       entries_.end());
+        order_.erase(std::remove_if(order_.begin(), order_.end(), [&](uint64_t id) {
+                         return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end() && current_ != id;
+                     }),
+                     order_.end());
+        for (const auto id : entryIds) {
+            if (current_ != id) {
+                failed_.erase(id);
+                unavailable_.erase(id);
+            }
+        }
+        ++revision_;
+        return revision_;
+    }
+
+    uint64_t clearExcept(std::optional<uint64_t> entryId) {
+        if (entryId && !contains(*entryId)) entryId.reset();
+        entries_.clear();
+        order_.clear();
+        failed_.clear();
+        unavailable_.clear();
+        if (entryId) {
+            entries_.push_back(*entryId);
+            order_.push_back(*entryId);
+        }
+        ++revision_;
+        return revision_;
+    }
+
     uint64_t reorder(const std::vector<uint64_t>& entryIds) {
         if (entryIds.size() != entries_.size()) throw std::invalid_argument("reorder must contain every queue entry");
         validateUnique(entryIds);
@@ -61,10 +110,14 @@ public:
         ++revision_;
     }
 
-    void setRepeat(RepeatMode mode) { repeat_ = mode; }
+    void setRepeat(RepeatMode mode) {
+        if (repeat_ == mode) return;
+        repeat_ = mode;
+        ++revision_;
+    }
 
     std::optional<QueuePosition> current() const {
-        if (!current_) return std::nullopt;
+        if (!current_ || !contains(*current_)) return std::nullopt;
         return position(*current_);
     }
 
@@ -126,7 +179,7 @@ private:
     }
 
     bool contains(uint64_t id) const { return std::find(entries_.begin(), entries_.end(), id) != entries_.end(); }
-    bool eligible(uint64_t id) const { return !failed_.contains(id) && !unavailable_.contains(id); }
+    bool eligible(uint64_t id) const { return contains(id) && !failed_.contains(id) && !unavailable_.contains(id); }
 
     QueuePosition position(uint64_t id) const {
         const auto it = std::find(entries_.begin(), entries_.end(), id);
