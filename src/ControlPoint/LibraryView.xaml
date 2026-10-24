@@ -11,8 +11,21 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:CamelPlayer">
     <UserControl.Resources>
+        <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+        <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+        <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+        <Style x:Key="RowActionStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="18" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
         <DataTemplate x:Key="RowTemplate" x:DataType="local:BrowseItem">
-            <Grid Padding="0,6" ColumnSpacing="16">
+            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnRowContextRequested">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="3*" />
                     <ColumnDefinition Width="2*" />
@@ -21,22 +34,22 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="3" Text="{x:Bind Trailing, Mode=OneWay}" TextAlignment="Right"
+                <TextBlock Grid.Column="3" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Button Grid.Column="4" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Padding="6"
-                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><SymbolIcon Symbol="Add" /></Button>
-                <Button Grid.Column="5" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Padding="6"
-                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><SymbolIcon Symbol="Forward" /></Button>
+                <Button Grid.Column="4" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Style="{StaticResource RowActionStyle}"
+                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><FontIcon Glyph="&#xE710;" FontSize="14" /></Button>
+                <Button Grid.Column="5" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Style="{StaticResource RowActionStyle}"
+                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><FontIcon Glyph="&#xE893;" FontSize="14" /></Button>
             </Grid>
         </DataTemplate>
         <!-- Folder pages list subfolders (a root also shows where it is) and then the folder's tracks. -->
         <DataTemplate x:Key="FolderRowTemplate" x:DataType="local:BrowseItem">
-            <Grid Padding="0,6">
+            <Grid Padding="0,6" Background="Transparent" ContextRequested="OnRowContextRequested">
                 <Grid ColumnSpacing="16" Visibility="{x:Bind IsFolder, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="40" />
@@ -54,8 +67,8 @@
                         <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
-                    <Button Grid.Column="2" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Padding="6"><SymbolIcon Symbol="Add" /></Button>
-                    <Button Grid.Column="3" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Padding="6"><SymbolIcon Symbol="Forward" /></Button>
+                    <Button Grid.Column="2" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE710;" FontSize="14" /></Button>
+                    <Button Grid.Column="3" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE893;" FontSize="14" /></Button>
                 </Grid>
                 <Grid ColumnSpacing="16" Visibility="{x:Bind IsTrack, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
@@ -72,30 +85,32 @@
                         <Image x:Name="TrackCover" Width="40" Height="40" Stretch="UniformToFill" Loaded="OnArtworkLoaded"
                                Unloaded="OnArtworkUnloaded" DataContextChanged="OnArtworkContextChanged" />
                     </Grid>
-                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                    <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" TextAlignment="Right"
+                    <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Button Grid.Column="5" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Padding="6"><SymbolIcon Symbol="Add" /></Button>
-                    <Button Grid.Column="6" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Padding="6"><SymbolIcon Symbol="Forward" /></Button>
+                    <Button Grid.Column="5" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE710;" FontSize="14" /></Button>
+                    <Button Grid.Column="6" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE893;" FontSize="14" /></Button>
                 </Grid>
             </Grid>
         </DataTemplate>
         <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">
-            <StackPanel Width="168" Spacing="2" Padding="4">
-                <Border Height="160" CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+            <StackPanel Width="176" Spacing="2" Padding="8">
+                <Border Width="160" Height="160" CornerRadius="8" Margin="0,0,0,6"
+                        Background="{ThemeResource ControlFillColorSecondaryBrush}">
                     <Grid>
                         <FontIcon Glyph="&#xE93C;" FontSize="40" Opacity="0.4" />
                         <Image Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
                                DataContextChanged="OnArtworkContextChanged" />
                     </Grid>
                 </Border>
-                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" />
-                <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                           Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                           Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
         </DataTemplate>
     </UserControl.Resources>
@@ -120,17 +135,30 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Image x:Name="DetailCover" Width="160" Height="160" Stretch="Uniform" Visibility="Collapsed" />
+                <Border CornerRadius="8" VerticalAlignment="Top">
+                    <Image x:Name="DetailCover" Width="160" Height="160" Stretch="Uniform" Visibility="Collapsed" />
+                </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock x:Name="HeaderDetail" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-                    <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
-                        <Button x:Uid="Library_AlbumPlaybackOptions">
+                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                    <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
+                        <Button Style="{StaticResource AccentButtonStyle}" Padding="16,6">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE768;" FontSize="14" />
+                                <TextBlock x:Uid="Library_AlbumPlaybackOptions" />
+                                <FontIcon Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
+                            </StackPanel>
                             <Button.Flyout>
                                 <MenuFlyout>
-                                    <MenuFlyoutItem x:Uid="Library_PlayAlbum" Click="OnPlayAlbumClick" />
-                                    <MenuFlyoutItem x:Uid="Library_AddAlbum" Click="OnAddAlbumClick" />
-                                    <MenuFlyoutItem x:Uid="Library_PlayAlbumNext" Click="OnPlayNextAlbumClick" />
+                                    <MenuFlyoutItem x:Uid="Library_PlayAlbum" Click="OnPlayAlbumClick">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Uid="Library_PlayAlbumNext" Click="OnPlayNextAlbumClick">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE893;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Uid="Library_AddAlbum" Click="OnAddAlbumClick">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>

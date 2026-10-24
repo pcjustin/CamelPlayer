@@ -37,6 +37,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnAddAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -93,6 +94,8 @@ private:
     std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
+    Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr};
+    ui::BrowseRow menuRow_;
 };
 
 } // namespace winrt::CamelPlayer::implementation

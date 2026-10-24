@@ -150,9 +150,14 @@
   <data name="Library_AddAlbum.Text" xml:space="preserve"><value>加入佇列末端</value></data>
   <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>插播整張專輯</value></data>
   <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>播放整張專輯</value></data>
-  <data name="Library_AlbumPlaybackOptions.Content" xml:space="preserve"><value>專輯播放選項</value></data>
+  <data name="Library_AlbumPlaybackOptions.Text" xml:space="preserve"><value>專輯播放選項</value></data>
   <data name="Tip_Previous" xml:space="preserve"><value>上一首</value></data>
   <data name="Tip_Next" xml:space="preserve"><value>下一首</value></data>
   <data name="Tip_Shuffle" xml:space="preserve"><value>隨機播放</value></data>
   <data name="Tip_Repeat" xml:space="preserve"><value>循環：關閉、單曲或佇列</value></data>
+  <data name="Library_MenuPlayNext" xml:space="preserve"><value>接著播放</value></data>
+  <data name="Library_MenuAddQueue" xml:space="preserve"><value>加到佇列尾端</value></data>
+  <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>關閉播放佇列</value></data>
+  <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>關閉播放佇列</value></data>
+  <data name="Queue_Empty.Text" xml:space="preserve"><value>播放佇列是空的。在曲目、資料夾和專輯上使用「接著播放」或「加入佇列」。</value></data>
 </root>

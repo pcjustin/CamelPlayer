@@ -363,6 +363,30 @@ void LibraryView::OnPlayNextClick(Windows::Foundation::IInspectable const& sende
     queueItem(ui::LibraryCollection::rowOf(item), true);
 }
 
+void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
+    const auto element = sender.as<FrameworkElement>();
+    const auto item = element.DataContext().try_as<CamelPlayer::BrowseItem>();
+    if (!item || !(item.IsTrack() || (current_.mode == Mode::Folders && item.IsFolder()))) return;
+    menuRow_ = ui::LibraryCollection::rowOf(item);
+    if (!rowMenu_) {
+        rowMenu_ = MenuFlyout();
+        for (const auto& [key, glyph, playNext] : {std::tuple{L"Library_MenuPlayNext", L"\xE893", true},
+                                                   std::tuple{L"Library_MenuAddQueue", L"\xE710", false}}) {
+            MenuFlyoutItem entry;
+            entry.Text(tr(key));
+            FontIcon icon;
+            icon.Glyph(glyph);
+            entry.Icon(icon);
+            entry.Click([this, playNext](auto&&, auto&&) { queueItem(menuRow_, playNext); });
+            rowMenu_.Items().Append(entry);
+        }
+    }
+    Primitives::FlyoutShowOptions options;
+    if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
+    rowMenu_.ShowAt(element, options);
+    e.Handled(true);
+}
+
 void LibraryView::OnAddAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     queueAlbum(current_.album, false);
 }

@@ -150,9 +150,14 @@
   <data name="Library_AddAlbum.Text" xml:space="preserve"><value>Add album to end of queue</value></data>
   <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>Play album next</value></data>
   <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>Play album</value></data>
-  <data name="Library_AlbumPlaybackOptions.Content" xml:space="preserve"><value>Album playback options</value></data>
+  <data name="Library_AlbumPlaybackOptions.Text" xml:space="preserve"><value>Album playback options</value></data>
   <data name="Tip_Previous" xml:space="preserve"><value>Previous</value></data>
   <data name="Tip_Next" xml:space="preserve"><value>Next</value></data>
   <data name="Tip_Shuffle" xml:space="preserve"><value>Shuffle</value></data>
   <data name="Tip_Repeat" xml:space="preserve"><value>Repeat: off, one, or queue</value></data>
+  <data name="Library_MenuPlayNext" xml:space="preserve"><value>Play next</value></data>
+  <data name="Library_MenuAddQueue" xml:space="preserve"><value>Add to end of queue</value></data>
+  <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>Close queue</value></data>
+  <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>Close queue</value></data>
+  <data name="Queue_Empty.Text" xml:space="preserve"><value>The queue is empty. Use Play next or Add to queue on tracks, folders and albums.</value></data>
 </root>

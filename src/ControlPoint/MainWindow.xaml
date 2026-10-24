@@ -161,22 +161,45 @@
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
-                <Grid x:Name="QueuePanel" Grid.Column="1" Visibility="Collapsed" Padding="16"
-                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,0,0,0" RowSpacing="8">
+                <Grid x:Name="QueuePanel" Grid.Column="1" Visibility="Collapsed" Padding="16,16,8,16"
+                      Background="{ThemeResource LayerFillColorDefaultBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,0,0,0" RowSpacing="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <Grid ColumnSpacing="8">
+                    <Grid ColumnSpacing="8" Padding="0,0,8,0">
+                        <Grid.Resources>
+                            <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                        </Grid.Resources>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" x:Uid="Queue_Close" Click="OnQueueToggleClick" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <TextBlock x:Name="QueueCountText" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <Button Grid.Column="1" x:Uid="Queue_ClosePanel" Click="OnQueueToggleClick" Width="36" Height="36"
+                                Padding="0" CornerRadius="18" VerticalAlignment="Top">
+                            <FontIcon Glyph="&#xE711;" FontSize="14" />
+                        </Button>
                     </Grid>
                     <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="Single" CanDragItems="True" CanReorderItems="True"
                               DragItemsCompleted="OnQueueDragItemsCompleted" DoubleTapped="OnQueueDoubleTapped"
-                              KeyDown="OnQueueKeyDown" />
-                    <StackPanel Grid.Row="2" Spacing="8">
+                              KeyDown="OnQueueKeyDown">
+                        <ListView.Resources>
+                            <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                        </ListView.Resources>
+                    </ListView>
+                    <TextBlock x:Name="QueueEmptyText" x:Uid="Queue_Empty" Grid.Row="1" TextWrapping="Wrap" Margin="0,0,8,0"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                    <StackPanel Grid.Row="2" Spacing="8" Padding="0,0,8,0">
                         <Button x:Uid="Queue_Clear" Click="OnQueueClearClick" HorizontalAlignment="Stretch" />
                         <Button x:Uid="Queue_Save" Click="OnQueueSaveClick" HorizontalAlignment="Stretch" />
                     </StackPanel>
@@ -185,7 +208,7 @@
         </NavigationView>
 
         <!-- Full-width playback bar (docs/Plan.md §8.1) -->
-        <Grid Grid.Row="1" Padding="16,8,16,8" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
+        <Grid Grid.Row="1" Padding="24,8,24,12" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -201,7 +224,8 @@
                 </Grid.ColumnDefinitions>
                 <Slider x:Name="PositionSlider" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
                         VerticalAlignment="Center" ValueChanged="OnSliderValueChanged" />
-                <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right" Text="0:00 / 0:00" />
+                <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right" Text="0:00 / 0:00"
+                           Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </Grid>
             <Grid Grid.Row="2" ColumnSpacing="8" VerticalAlignment="Center">
                 <Grid.Resources>

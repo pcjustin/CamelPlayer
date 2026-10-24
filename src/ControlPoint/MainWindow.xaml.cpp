@@ -12,6 +12,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <winrt/Microsoft.UI.Interop.h>
 
 #include "UiText.h"
 #include "ArtworkLoader.h"
@@ -91,6 +92,11 @@ void readTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox 
 void MainWindow::InitializeComponent() {
     MainWindowT<MainWindow>::InitializeComponent();
     AppWindow().Resize({1180, 780});
+    if (const auto presenter = AppWindow().Presenter().try_as<Microsoft::UI::Windowing::OverlappedPresenter>()) {
+        const double scale = ::GetDpiForWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id())) / 96.0;
+        presenter.PreferredMinimumWidth(static_cast<int32_t>(800 * scale));
+        presenter.PreferredMinimumHeight(static_cast<int32_t>(600 * scale));
+    }
     std::wstring executablePath(32768, L'\0');
     const DWORD executablePathLength =
         ::GetModuleFileNameW(nullptr, executablePath.data(), static_cast<DWORD>(executablePath.size()));
@@ -145,6 +151,7 @@ void MainWindow::InitializeComponent() {
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     updateQueuePanel();
+    Nav().SizeChanged([this](auto&&, auto&&) { fitNavigationPane(); });
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
     refresh.kind = CommandKind::RefreshDevices;
@@ -411,30 +418,57 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownQueueRevision_ = snapshot.queue.revision;
         shownQueueEntryId_ = snapshot.queueEntryId;
         QueueList().Items().Clear();
+        std::wstring count(tr(L"Library_Tracks"));
+        if (const auto at = count.find(L"{0}"); at != std::wstring::npos)
+            count.replace(at, 3, std::to_wstring(snapshot.queue.entries.size()));
+        QueueCountText().Text(count);
+        QueueEmptyText().Visibility(snapshot.queue.entries.empty() ? Visibility::Visible : Visibility::Collapsed);
         for (const auto& entry : snapshot.queue.entries) {
             const std::filesystem::path path(toWide(entry.source.pathUtf8()));
+            const bool current = entry.id == snapshot.queueEntryId;
             Grid item;
-            ColumnDefinition titleColumn;
-            titleColumn.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-            ColumnDefinition removeColumn;
-            removeColumn.Width(GridLengthHelper::Auto());
-            item.ColumnDefinitions().Append(titleColumn);
-            item.ColumnDefinitions().Append(removeColumn);
+            item.ColumnSpacing(8);
+            for (const auto width : {GridLengthHelper::FromPixels(20), GridLengthHelper::FromValueAndType(1, GridUnitType::Star),
+                                     GridLengthHelper::Auto()}) {
+                ColumnDefinition column;
+                column.Width(width);
+                item.ColumnDefinitions().Append(column);
+            }
             item.Tag(box_value(entry.id));
             TextBlock title;
-            title.Text((entry.id == snapshot.queueEntryId ? L"▶ " : L"") + path.stem().wstring());
+            title.Text(path.stem().wstring());
+            title.TextTrimming(TextTrimming::CharacterEllipsis);
             title.VerticalAlignment(VerticalAlignment::Center);
             ToolTipService::SetToolTip(title, box_value(ui::utf8(entry.source.pathUtf8())));
+            Grid::SetColumn(title, 1);
+            if (current) {
+                const auto accent =
+                    Application::Current().Resources().TryLookup(box_value(L"AccentTextFillColorPrimaryBrush")).try_as<Media::Brush>();
+                FontIcon playing;
+                playing.Glyph(L"\xE767");
+                playing.FontSize(14);
+                if (accent) {
+                    playing.Foreground(accent);
+                    title.Foreground(accent);
+                }
+                item.Children().Append(playing);
+                title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+            }
             item.Children().Append(title);
             Button remove;
-            SymbolIcon removeIcon;
-            removeIcon.Symbol(Symbol::Delete);
+            remove.Width(32);
+            remove.Height(32);
+            remove.Padding(ThicknessHelper::FromUniformLength(0));
+            remove.CornerRadius(CornerRadiusHelper::FromUniformRadius(16));
+            FontIcon removeIcon;
+            removeIcon.Glyph(L"\xE711");
+            removeIcon.FontSize(12);
             remove.Content(removeIcon);
             remove.Tag(box_value(entry.id));
             ToolTipService::SetToolTip(remove, box_value(tr(L"Queue_RemoveEntry")));
             Automation::AutomationProperties::SetName(remove, tr(L"Queue_RemoveEntry"));
             remove.Click({this, &MainWindow::OnQueueRemoveEntryClick});
-            Grid::SetColumn(remove, 1);
+            Grid::SetColumn(remove, 2);
             item.Children().Append(remove);
             QueueList().Items().Append(item);
         }
@@ -705,10 +739,18 @@ void MainWindow::OnRepeatClick(Windows::Foundation::IInspectable const&, RoutedE
     submitCommand(std::move(command));
 }
 
+void MainWindow::fitNavigationPane() {
+    const bool compact = queueOpen_ && Nav().ActualWidth() > 0 && Nav().ActualWidth() < 1200;
+    if (compact == navCompacted_) return;
+    navCompacted_ = compact;
+    Nav().IsPaneOpen(!compact);
+}
+
 void MainWindow::updateQueuePanel() {
     QueuePanel().Visibility(queueOpen_ ? Visibility::Visible : Visibility::Collapsed);
     QueueColumn().Width(GridLengthHelper::FromPixels(queueOpen_ ? 360 : 0));
     QueueToggleButton().IsChecked(queueOpen_);
+    fitNavigationPane();
     std::ofstream queueState(camel::dataDirectory() / L"queue-panel-open", std::ios::trunc);
     queueState << queueOpen_;
 }

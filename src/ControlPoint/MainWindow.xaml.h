@@ -81,12 +81,15 @@ private:
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;
+    bool navCompacted_ = false;
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;
     uint64_t shownCommandId_ = 0;
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueEntryId_ = UINT64_MAX;
     void updateQueuePanel();
+    // Collapses the navigation pane to icons while the queue panel would leave too little content width.
+    void fitNavigationPane();
     winrt::hstring shownScan_;
     uint64_t shownDevicesRevision_ = 0;
 };
