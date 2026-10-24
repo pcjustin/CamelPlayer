@@ -26,6 +26,7 @@ public:
     LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
                                        std::optional<uint64_t> revision,
                                        const CancellationToken& token = {}) const override;
+    PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const override;
 
 private:
     class Impl;

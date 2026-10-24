@@ -247,6 +247,15 @@ const std::vector<Migration>& libraryMigrations() {
             // An estimated total_frames is replaced by the exact length the first time playback opens the file.
             db.exec("ALTER TABLE tracks ADD COLUMN length_estimated INTEGER NOT NULL DEFAULT 0;");
         },
+        [](sqlite::Database& db) {
+            // One row per play session (started: UTC ms; utc_offset: local minutes east of UTC); kept permanently.
+            db.exec("ALTER TABLE stats ADD COLUMN listened_ms INTEGER NOT NULL DEFAULT 0;"
+                    "CREATE TABLE play_events (id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),"
+                    "cue_index INTEGER NOT NULL DEFAULT 0, started INTEGER NOT NULL, utc_offset INTEGER NOT NULL,"
+                    "heard_ms INTEGER NOT NULL, counted INTEGER NOT NULL DEFAULT 0);"
+                    "CREATE INDEX play_events_started ON play_events(started);"
+                    "CREATE INDEX play_events_track ON play_events(file_id,cue_index);");
+        },
     };
     return migrations;
 }

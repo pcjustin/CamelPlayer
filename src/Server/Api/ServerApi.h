@@ -14,6 +14,7 @@
 #include "Server/Playback/QueuePolicy.h"
 #include "Common/settings/Settings.h"
 #include "Server/Library/LibraryBrowse.h"
+#include "Server/Library/PlayStatistics.h"
 
 namespace camel::server {
 
@@ -82,7 +83,9 @@ enum class CommandKind : uint8_t {
     Previous,
     SetShuffle, // shuffle
     SetRepeat,  // repeat
-    RemoveLibraryRoot // rootId
+    RemoveLibraryRoot, // rootId
+    ResetPlayStatistics, // tracks: delete their plays and zero their counters
+    ResetAllPlayStatistics
 };
 
 struct Command {
@@ -98,6 +101,7 @@ struct Command {
     int64_t rootId = 0;
     std::optional<bool> shuffle;
     std::optional<RepeatMode> repeat;
+    std::vector<LibraryTrackKey> tracks;
     bool operator==(const Command&) const = default;
 };
 
@@ -209,6 +213,7 @@ public:
     virtual LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
                                                std::optional<uint64_t> revision,
                                                const CancellationToken& token = {}) const = 0;
+    virtual PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const = 0;
 };
 
 std::shared_ptr<IServer> createLocalServer();

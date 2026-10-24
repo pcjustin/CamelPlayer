@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <objbase.h>
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -17,6 +18,7 @@
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
+#include "Server/Library/PlayStatistics.h"
 
 namespace camel::server {
 namespace {
@@ -54,7 +56,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::RemoveLibraryRoot)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::ResetAllPlayStatistics)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
@@ -63,7 +65,8 @@ void validate(const Command& c) {
         c.entryIds.empty() == (c.kind == CommandKind::QueueReorder) || (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
-        (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0))
+        (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) ||
+        c.tracks.empty() == (c.kind == CommandKind::ResetPlayStatistics))
         throw std::invalid_argument("invalid Server command payload");
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
@@ -232,6 +235,11 @@ public:
         return camel::server::searchLibrary(*library_, std::move(query), offset, limit, revision, token);
     }
 
+    PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
+        if (!library_) throw std::runtime_error("library is not configured");
+        return camel::server::playStatistics(*library_, query, token);
+    }
+
 private:
     struct Pending {
         Command command;
@@ -325,7 +333,15 @@ private:
                 engine_->stop();
                 break;
             case CommandKind::Seek:
+                if (session_) session_->interrupt();
                 engine_->seek(c.frame);
+                break;
+            case CommandKind::ResetPlayStatistics:
+            case CommandKind::ResetAllPlayStatistics:
+                if (!library_) throw std::logic_error("Server library is not configured");
+                if (session_ && (c.tracks.empty() || std::ranges::find(c.tracks, session_->track()) != c.tracks.end()))
+                    session_->discard();
+                resetPlayStatistics(*library_, c.tracks);
                 break;
             case CommandKind::ApplySettings: {
                 if (c.settings) {
@@ -490,6 +506,64 @@ private:
                                                     playback.source->totalFrames);
     }
 
+    // A play session lasts while one library entry stays current (docs/Plan.md §7.8).
+    void updatePlaySession() {
+        if (!library_) return;
+        const auto playback = engine_->snapshot();
+        const auto now = std::chrono::steady_clock::now();
+        // Audio the device can have played since the previous pass; larger jumps are seeks or restarts.
+        const auto reachable = [&](uint32_t rate) {
+            return uint64_t((std::chrono::duration<double>(now - sessionSeen_).count() * 1.25 + 0.25) * rate);
+        };
+        if (session_) {
+            const bool current = playback.transitions == sessionTransitions_ && playback.trackEnds == sessionTrackEnds_ &&
+                                 state_.queueEntryId == sessionEntry_ && playback.file == sessionFile_;
+            if (!current || playback.state == audio::PlayState::Stopped) {
+                // A gapless transition or natural end heard the rest of the track; a failure keeps what was observed.
+                if (playback.transitions != sessionTransitions_ || (playback.trackEnds != sessionTrackEnds_ && !playback.error))
+                    session_->finish();
+                session_->persist(*library_);
+                session_.reset();
+            } else if (playback.state == audio::PlayState::Playing) {
+                // Rendering can move into a queued file before the engine publishes the transition; a jump back
+                // to its start belongs to the next file, so this session waits for the transition instead.
+                const auto last = session_->position();
+                const bool nextFile = playback.queuedFiles > 0 && last && playback.position < *last &&
+                                      playback.position <= reachable(sessionRate_);
+                if (!nextFile) session_->observe(playback.position, reachable(sessionRate_));
+            } else {
+                session_->interrupt();
+            }
+        }
+        if (!session_ && state_.queueEntryId && playback.state != audio::PlayState::Stopped && playback.source &&
+            playback.source->sampleRate) {
+            const auto binding = libraryEntries_.find(state_.queueEntryId);
+            if (binding != libraryEntries_.end() && binding->second.file &&
+                playback.file == toWide(entry(state_.queueEntryId).source.pathUtf8())) {
+                session_.emplace(LibraryTrackKey{binding->second.file, 0}, playback.source->sampleRate, playback.total);
+                sessionEntry_ = state_.queueEntryId;
+                sessionFile_ = playback.file;
+                sessionTransitions_ = playback.transitions;
+                sessionTrackEnds_ = playback.trackEnds;
+                sessionRate_ = playback.source->sampleRate;
+                sessionPersisted_ = now;
+                sessionCountPersisted_ = false;
+                // A track that started since the previous pass is credited from its first frame.
+                if (playback.state == audio::PlayState::Playing) {
+                    session_->observe(0, 0);
+                    session_->observe(playback.position, reachable(sessionRate_));
+                }
+            }
+        }
+        sessionSeen_ = now;
+        if (!session_) return;
+        if (now - sessionPersisted_ >= std::chrono::seconds(30) || (session_->counted() && !sessionCountPersisted_)) {
+            session_->persist(*library_);
+            sessionPersisted_ = now;
+            sessionCountPersisted_ = session_->counted();
+        }
+    }
+
     // Keeps the entries that follow queued in the engine while a stream is open, so they play gaplessly. The engine
     // takes one more as soon as its decoder moves on to the previous one, seconds before that one is heard.
     void ensureNextQueued() {
@@ -587,6 +661,7 @@ private:
             }
             if (pending) {
                 try {
+                    updatePlaySession();
                     refreshLibraryAvailability();
                     execute(*pending);
                 } catch (const audio::Error& e) {
@@ -603,6 +678,7 @@ private:
                 advanceAfterTrackEnd();
                 ensureNextQueued();
                 recordPlaybackLength();
+                updatePlaySession();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -615,6 +691,7 @@ private:
                 idle_.notify_all();
             }
         }
+        if (session_) session_->persist(*library_);
         engine_.reset();
         if (SUCCEEDED(initialized)) CoUninitialize();
     }
@@ -634,6 +711,12 @@ private:
         bool lengthRecorded = false;
     };
     std::map<uint64_t, LibraryEntry> libraryEntries_;
+    std::optional<PlaySession> session_;
+    uint64_t sessionEntry_ = 0, sessionTransitions_ = 0, sessionTrackEnds_ = 0;
+    std::wstring sessionFile_;
+    uint32_t sessionRate_ = 0;
+    std::chrono::steady_clock::time_point sessionSeen_ = std::chrono::steady_clock::now(), sessionPersisted_;
+    bool sessionCountPersisted_ = false;
     mutable std::mutex mutex_;
     std::condition_variable cv_, idle_;
     std::deque<Pending> queue_;
@@ -686,6 +769,9 @@ LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offse
                                                 std::optional<uint64_t> revision,
                                                 const CancellationToken& token) const {
     return impl_->searchLibrary(std::move(query), offset, limit, revision, token);
+}
+PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
+    return impl_->playStatistics(query, token);
 }
 
 std::shared_ptr<IServer> createLocalServer() {

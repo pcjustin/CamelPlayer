@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 18> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 20> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -82,7 +82,9 @@ constexpr Names<CommandKind, 18> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::Previous, "previous"},
                                                   {CommandKind::SetShuffle, "setShuffle"},
                                                   {CommandKind::SetRepeat, "setRepeat"},
-                                                  {CommandKind::RemoveLibraryRoot, "removeLibraryRoot"}};
+                                                  {CommandKind::RemoveLibraryRoot, "removeLibraryRoot"},
+                                                  {CommandKind::ResetPlayStatistics, "resetPlayStatistics"},
+                                                  {CommandKind::ResetAllPlayStatistics, "resetAllPlayStatistics"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
 constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
@@ -324,6 +326,15 @@ std::vector<uint64_t> idsFrom(const json& j, const char* key) {
     return out;
 }
 
+std::vector<LibraryTrackKey> trackKeysFrom(const json& j, const char* key) {
+    std::vector<LibraryTrackKey> out;
+    for (const auto& v : array(j, key)) {
+        if (!v.is_object()) invalid(std::string(key) + " holds a non-object");
+        out.push_back({value<int64_t>(v, "file"), value<int64_t>(v, "cueIndex")});
+    }
+    return out;
+}
+
 } // namespace
 
 json toJson(const CommandStamp& s) {
@@ -335,8 +346,9 @@ CommandStamp commandStampFromJson(const json& j) {
 }
 
 json toJson(const Command& c) {
-    json sources = json::array();
+    json sources = json::array(), tracks = json::array();
     for (const auto& s : c.sources) sources.push_back(toJson(s));
+    for (const auto& t : c.tracks) tracks.push_back({{"file", t.file}, {"cueIndex", t.cueIndex}});
     return {{"apiVersion", c.apiVersion},
             {"kind", nameOf(c.kind, kCommandKinds)},
             {"source", optionalJson(c.source)},
@@ -348,7 +360,8 @@ json toJson(const Command& c) {
             {"entryId", c.entryId},
             {"rootId", c.rootId},
             {"shuffle", c.shuffle ? json(*c.shuffle) : json(nullptr)},
-            {"repeat", c.repeat ? json(nameOf(*c.repeat, kRepeatModes)) : json(nullptr)}};
+            {"repeat", c.repeat ? json(nameOf(*c.repeat, kRepeatModes)) : json(nullptr)},
+            {"tracks", tracks}};
 }
 
 Command commandFromJson(const json& j) {
@@ -368,6 +381,7 @@ Command commandFromJson(const json& j) {
         return v.get<bool>();
     });
     c.repeat = optional<RepeatMode>(j, "repeat", [](const json& v) { return enumFrom(v, kRepeatModes, "repeat mode"); });
+    if (j.contains("tracks") || c.kind == CommandKind::ResetPlayStatistics) c.tracks = trackKeysFrom(j, "tracks");
     return c;
 }
 

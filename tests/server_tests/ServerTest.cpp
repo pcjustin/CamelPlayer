@@ -652,6 +652,165 @@ TEST(ServerGaplessTest, MatchingTracksConcatenateBitExactlyThroughOneDeviceOpen)
     std::filesystem::remove(capture);
 }
 
+// Library files played in real time through a 32-bit capture device, for play-statistics checks (docs/Plan.md §7.8).
+class LibraryPlaybackTest : public ::testing::Test {
+protected:
+    std::filesystem::path dir;
+    std::unique_ptr<LibraryStore> store;
+    std::unique_ptr<LibraryScanner> scanner;
+    std::unique_ptr<LocalServer> server;
+    int64_t root = 0;
+    CaptureOptions options;
+
+    std::filesystem::path setUp(const std::vector<std::filesystem::path>& files) {
+        dir = testutil::tempDir() / "server-play" /
+              (std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) + "-" +
+               std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+        std::filesystem::create_directories(dir / "music");
+        for (const auto& file : files) std::filesystem::copy_file(file, dir / "music" / file.filename());
+        store = std::make_unique<LibraryStore>(dir / "db");
+        scanner = std::make_unique<LibraryScanner>(*store);
+        root = scanner->addRoot(dir / "music");
+        EXPECT_TRUE(scanner->scan(root).complete);
+        options.file = dir / "capture.raw";
+        options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+        options.realtime = true;
+        server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                               [&](const Settings&) { return createCaptureOutput(options); });
+        return dir / "music";
+    }
+    void TearDown() override {
+        server.reset();
+        scanner.reset();
+        store.reset();
+        std::error_code ignored;
+        std::filesystem::remove_all(dir, ignored);
+    }
+
+    Snapshot send(Command c) {
+        server->submit(std::move(c));
+        server->waitIdle();
+        return server->snapshot();
+    }
+    bool waitFor(const std::function<bool()>& check, std::chrono::milliseconds timeout = 15s) {
+        const auto end = std::chrono::steady_clock::now() + timeout;
+        while (!check()) {
+            if (std::chrono::steady_clock::now() >= end) return false;
+            std::this_thread::sleep_for(10ms);
+        }
+        return true;
+    }
+    bool stopped() { return server->snapshot().playback.state == PlaybackState::Stopped; }
+    // Plays are persisted through the Server's own writer, so tests wait for them rather than for a barrier.
+    PlayStatistics plays(int64_t expected) {
+        PlayStatistics result;
+        EXPECT_TRUE(waitFor([&] { return (result = server->playStatistics({})).historyTotal >= expected; }));
+        return result;
+    }
+    int64_t file(const std::filesystem::path& path) {
+        auto row = store->openReader().prepare("SELECT id FROM files WHERE path LIKE ? AND available=1");
+        return row.bind(1, "%" + toUtf8(path.filename().wstring())).step() ? row.integer(0) : 0;
+    }
+    TrackSource track(const std::filesystem::path& path) { return TrackSource(toUtf8((dir / "music" / path.filename()).wstring())); }
+};
+
+TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLength) {
+    const auto a = testutil::generatedFile({"play-gapless-a", 48000, 16, 2, 0.6});
+    const auto b = testutil::generatedFile({"play-gapless-b", 48000, 16, 2, 0.4});
+    setUp({a, b});
+    send(queueReplace({track(a), track(b)}));
+    ASSERT_TRUE(waitFor([&] { return stopped() && server->snapshot().queueEntryId == server->snapshot().queue.entries.back().id; }));
+    const auto statistics = plays(2);
+    ASSERT_EQ(statistics.history.size(), 2u);
+    EXPECT_EQ(statistics.history[0].track.file, file(b)); // newest first
+    EXPECT_EQ(statistics.history[1].track.file, file(a));
+    EXPECT_NEAR(double(statistics.history[0].heardMs), 400.0, 60.0);
+    EXPECT_NEAR(double(statistics.history[1].heardMs), 600.0, 60.0);
+    EXPECT_TRUE(statistics.history[0].counted && statistics.history[1].counted);
+    EXPECT_EQ(statistics.overview.plays, 2);
+}
+
+TEST_F(LibraryPlaybackTest, EachRepeatOneLoopIsANewPlay) {
+    const auto a = testutil::generatedFile({"play-repeat", 48000, 16, 2, 0.4});
+    setUp({a});
+    Command repeat = command(CommandKind::SetRepeat);
+    repeat.repeat = RepeatMode::One;
+    send(repeat);
+    send(queueReplace({track(a)}));
+    ASSERT_TRUE(waitFor([&] { return server->playStatistics({}).overview.plays >= 3; }));
+    send(command(CommandKind::Stop));
+    const auto statistics = server->playStatistics({});
+    EXPECT_EQ(statistics.tracks.size(), 1u);
+    EXPECT_GE(statistics.tracks[0].plays, 3);
+    EXPECT_GE(statistics.historyTotal, 3);
+}
+
+TEST_F(LibraryPlaybackTest, ASeekForwardCreditsOnlyTheAudioActuallyHeard) {
+    const auto a = testutil::generatedFile({"play-seek", 48000, 16, 2, 3.0});
+    setUp({a});
+    send(queueReplace({track(a)}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.position >= 9600; })); // 0.2 s
+    Command seek = command(CommandKind::Seek);
+    seek.frame = 48000 * 27 / 10;
+    send(seek);
+    ASSERT_TRUE(waitFor([&] { return stopped(); }));
+    const auto statistics = plays(1);
+    ASSERT_EQ(statistics.history.size(), 1u);
+    EXPECT_GT(statistics.history[0].heardMs, 300); // about 0.2 s before and 0.3 s after the seek
+    EXPECT_LT(statistics.history[0].heardMs, 1000);
+    EXPECT_FALSE(statistics.history[0].counted); // well below half of three seconds
+}
+
+TEST_F(LibraryPlaybackTest, ADecodeFailureKeepsOnlyTheAudioHeardBeforeIt) {
+    // The engine stops as soon as decoding fails, discarding predecoded audio, so little of the file is ever heard.
+    const auto truncated = testutil::tempDir() / "play-truncated.flac";
+    testaudio::writeTruncated(testutil::generatedFile({"play-truncated-source", 48000, 16, 2, 6.0}), truncated, 0.9);
+    setUp({truncated});
+    send(queueReplace({track(truncated)}));
+    ASSERT_TRUE(waitFor([&] { return stopped(); }));
+    EXPECT_EQ(server->snapshot().playback.error, ErrorCode::DecodeFailed);
+    waitFor([&] { return server->playStatistics({}).historyTotal > 0; }, 2s); // nothing heard records nothing
+    const auto statistics = server->playStatistics({});
+    ASSERT_LE(statistics.history.size(), 1u);
+    for (const auto& play : statistics.history) {
+        EXPECT_LT(play.heardMs, 1000); // the rest of the six seconds is not credited
+        EXPECT_FALSE(play.counted);
+    }
+}
+
+TEST_F(LibraryPlaybackTest, TheCountIsSavedWhilePlayingSoACrashCannotLoseIt) {
+    const auto a = testutil::generatedFile({"play-durable", 48000, 16, 2, 6.0});
+    setUp({a});
+    send(queueReplace({track(a)}));
+    const auto sql = "SELECT COUNT(*) FROM play_events WHERE counted=1 AND file_id=" + std::to_string(file(a));
+    ASSERT_TRUE(waitFor([&] { return store->openReader().scalar(sql) == 1; }, 10s));
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing); // persisted at 3 s, before the play ended
+    send(command(CommandKind::Stop));
+}
+
+TEST_F(LibraryPlaybackTest, PlaysSurviveRootRemovalAndReconnectWithTheRoot) {
+    const auto a = testutil::generatedFile({"play-root", 48000, 16, 2, 0.4});
+    setUp({a});
+    const auto id = file(a);
+    send(queueReplace({track(a)}));
+    ASSERT_TRUE(waitFor([&] { return stopped(); }));
+    ASSERT_EQ(plays(1).history.size(), 1u);
+    Command remove = command(CommandKind::RemoveLibraryRoot);
+    remove.rootId = root;
+    ASSERT_FALSE(send(remove).commandError);
+    auto removed = server->playStatistics({});
+    ASSERT_EQ(removed.history.size(), 1u);
+    EXPECT_FALSE(removed.history[0].available);
+    EXPECT_EQ(removed.overview.plays, 1);
+    ASSERT_EQ(scanner->addRoot(dir / "music"), root);
+    ASSERT_TRUE(scanner->scan(root).complete);
+    auto restored = server->playStatistics({});
+    ASSERT_EQ(restored.history.size(), 1u);
+    EXPECT_EQ(restored.history[0].track.file, id);
+    EXPECT_TRUE(restored.history[0].available);
+    EXPECT_EQ(restored.tracks[0].plays, 1);
+}
+
 std::vector<int32_t> concatenatedReferences(const std::vector<std::filesystem::path>& files) {
     std::vector<int32_t> samples;
     for (const auto& file : files) {
@@ -765,6 +924,55 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
     while (!corrected() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(20ms);
     EXPECT_TRUE(corrected());
     send(command(CommandKind::Stop));
+    server.reset();
+}
+
+TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) {
+    const auto dir = testutil::tempDir() / "server-play-statistics";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "music");
+    const auto path = dir / "music" / "a.flac";
+    std::filesystem::copy_file(testutil::generatedFile({"play-statistics", 48000, 16, 2, 0.5}), path);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    const auto file = store.openReader().scalar("SELECT id FROM files WHERE kind='audio'").value();
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+        return std::make_unique<ManualOutput>(probe);
+    });
+    ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
+    const auto end = std::chrono::steady_clock::now() + 10s;
+    while (server->snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
+        {
+            std::lock_guard lock(probe.renderMutex);
+            if (probe.source) {
+                std::vector<uint8_t> bytes(480 * probe.format.bytesPerFrame());
+                probe.source->render(bytes.data(), 480);
+            }
+        }
+        std::this_thread::sleep_for(10ms); // about real time, so the Server observes continuous playback
+    }
+    ASSERT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
+    server->waitIdle();
+    const auto statistics = server->playStatistics({});
+    ASSERT_EQ(statistics.history.size(), 1u);
+    EXPECT_EQ(statistics.history[0].track, (LibraryTrackKey{file, 0}));
+    EXPECT_TRUE(statistics.history[0].counted);
+    EXPECT_NEAR(double(statistics.history[0].heardMs), 500.0, 50.0);
+    EXPECT_EQ(statistics.overview.plays, 1);
+    EXPECT_EQ(store.openReader().scalar("SELECT play_count FROM stats WHERE file_id=" + std::to_string(file)), 1);
+
+    Command reset = command(CommandKind::ResetPlayStatistics);
+    EXPECT_THROW(server->submit(reset), std::invalid_argument);
+    reset.tracks = {{file, 0}};
+    ASSERT_FALSE(send(reset).commandError);
+    EXPECT_EQ(server->playStatistics({}).historyTotal, 0);
+    EXPECT_EQ(store.openReader().scalar("SELECT play_count+listened_ms FROM stats WHERE file_id=" + std::to_string(file)), 0);
+    Command all = command(CommandKind::ResetAllPlayStatistics);
+    all.tracks = {{file, 0}};
+    EXPECT_THROW(server->submit(all), std::invalid_argument);
+    all.tracks.clear();
+    EXPECT_FALSE(send(all).commandError);
     server.reset();
 }
 

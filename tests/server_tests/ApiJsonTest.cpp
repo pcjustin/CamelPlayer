@@ -146,6 +146,24 @@ TEST(ApiJson, RootRemovalRoundTripsAndRequiresAnIntegerRootId) {
     EXPECT_EQ(commandFromJson(j), c);
 }
 
+TEST(ApiJson, PlayStatisticsResetRoundTripsTrackKeys) {
+    Command c;
+    c.kind = CommandKind::ResetPlayStatistics;
+    c.tracks = {{7, 0}, {8, 3}};
+    EXPECT_EQ(throughText(c, commandFromJson), c);
+    auto j = toJson(c);
+    j.erase("tracks");
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    j["tracks"] = json::array({{{"file", 7}}});
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    Command all;
+    all.kind = CommandKind::ResetAllPlayStatistics;
+    EXPECT_EQ(throughText(all, commandFromJson), all);
+    j = toJson(all);
+    j.erase("tracks");
+    EXPECT_EQ(commandFromJson(j), all);
+}
+
 TEST(ApiJson, MalformedInputIsRefused) {
     json j = toJson(fullCommand());
     for (const char* key : {"kind", "frame", "sources", "repeat"}) {

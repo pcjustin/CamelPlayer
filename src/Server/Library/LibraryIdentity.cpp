@@ -267,8 +267,8 @@ size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added) {
         auto next = db.prepare("SELECT path,kind,size,mtime,volume_serial,file_index,created,volume_key,content_hash "
                                "FROM files WHERE id=? AND available=1");
         if (!next.bind(1, current).step()) continue;
-        auto stats = db.prepare("SELECT 1 FROM stats WHERE file_id=?");
-        if (stats.bind(1, current).step()) continue;
+        auto stats = db.prepare("SELECT 1 FROM stats WHERE file_id=? UNION ALL SELECT 1 FROM play_events WHERE file_id=?");
+        if (stats.bind(1, current).bind(2, current).step()) continue;
         const auto destination = next.text(0), kind = next.text(1);
         const auto currentVersion = storedVersion(next, 2);
         std::vector<int64_t> candidates;
