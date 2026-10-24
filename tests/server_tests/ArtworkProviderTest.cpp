@@ -86,7 +86,7 @@ TEST(ArtworkProvider, ChainFallsBackToTheParentOnlyForDiscFolders) {
     std::filesystem::create_directories(album / "CD2");
     std::filesystem::create_directories(album / "Bonus");
     const auto chain = localArtworkChain();
-    EXPECT_EQ(chain.ids(), (std::vector<std::string>{"folder", "parent-folder"}));
+    EXPECT_EQ(chain.ids(), (std::vector<std::string>{"folder", "embedded", "parent-folder"}));
     ArtworkQuery query;
     query.albumFolder = album / "CD2";
     auto found = chain.first(query, {}, false);

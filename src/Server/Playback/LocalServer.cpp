@@ -156,6 +156,7 @@ public:
         published_.playback = playback(engine_->snapshot());
         const auto directory = settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
         if (!directory.empty() && std::filesystem::is_directory(directory)) {
+            artwork_ = std::make_unique<ArtworkCache>(directory / "thumbs");
             library_ = std::make_unique<LibraryStore>(directory);
             libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
@@ -238,6 +239,10 @@ public:
 
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
         return camel::server::playStatistics(library(), query, token);
+    }
+
+    std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
+        return artwork_ ? artwork_->get(library_.get(), request, token) : std::nullopt;
     }
 
     LibraryStore& library() const {
@@ -742,6 +747,7 @@ private:
     Settings settings_;
     std::filesystem::path settingsFile_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
+    std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
     std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
@@ -829,6 +835,10 @@ LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending
                                                  std::optional<uint64_t> revision, const CancellationToken& token) const {
     return camel::server::browseTrackRows(impl_->library(), sort, descending, offset, limit, revision, token);
 }
+std::optional<ArtworkReference> LocalServer::artwork(const ArtworkRequest& request, const CancellationToken& token) const {
+    return impl_->artwork(request, token);
+}
+
 LibraryAlbumDetail LocalServer::albumDetail(int64_t album, const CancellationToken& token) const {
     return camel::server::albumDetail(impl_->library(), album, token);
 }

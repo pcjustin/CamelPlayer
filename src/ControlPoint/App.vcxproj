@@ -88,6 +88,7 @@
       <DependentUpon>BrowseItem.idl</DependentUpon>
     </ClInclude>
     <ClInclude Include="LibraryCollection.h" />
+    <ClInclude Include="ArtworkLoader.h" />
     <ClInclude Include="LibraryView.xaml.h">
       <DependentUpon>LibraryView.xaml</DependentUpon>
     </ClInclude>

@@ -13,6 +13,7 @@
 #include <filesystem>
 
 #include "UiText.h"
+#include "ArtworkLoader.h"
 #include "Common/util/Text.h"
 
 using namespace winrt;
@@ -139,6 +140,7 @@ void MainWindow::InitializeComponent() {
     submitCommand(std::move(refresh));
 
     Closed([this](auto&&, auto&&) {
+        artworkToken_.cancel();
         uiTimer_.Stop();
         seekTimer_.Stop();
         server_->setListener({});
@@ -365,6 +367,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         populateDeviceLists(snapshot.devices);
     }
     const auto& s = snapshot.playback;
+    if (artworkPath_ != s.pathUtf8) {
+        artworkPath_ = s.pathUtf8;
+        artworkToken_.cancel();
+        artworkToken_ = {};
+        PlaybackCover().Source(nullptr);
+        if (!artworkPath_.empty()) ui::loadArtwork(PlaybackCover(), server_, {ArtworkKind::Track, 0, artworkPath_}, artworkToken_);
+    }
     const uint32_t rate = s.source ? s.source->sampleRate : 0;
     const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
     const double total = rate ? framesToSeconds(s.total, rate) : 0.0;

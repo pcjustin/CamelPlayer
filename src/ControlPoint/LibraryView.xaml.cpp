@@ -11,6 +11,7 @@
 
 #include "Common/util/Log.h"
 #include "UiText.h"
+#include "ArtworkLoader.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -116,6 +117,7 @@ void LibraryView::showEmpty(int64_t total) {
 }
 
 void LibraryView::hide() {
+    cancelArtwork();
     if (refreshTimer_) refreshTimer_.Stop();
     ++generation_;
     collection_ = nullptr;
@@ -124,6 +126,9 @@ void LibraryView::hide() {
 }
 
 void LibraryView::open(View view, bool push) {
+    cancelArtwork();
+    DetailCover().Source(nullptr);
+    DetailCover().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     if (push) back_.push_back(current_);
     current_ = std::move(view);
     ++generation_;
@@ -216,6 +221,7 @@ void LibraryView::startCollection() {
 }
 
 void LibraryView::loadAlbumDetail() {
+    ui::loadArtwork(DetailCover(), server_, {ArtworkKind::Album, current_.album, {}, 600}, detailArtwork_);
     detailTracks_.clear();
     background([this, server = server_, id = current_.album, texts = Texts{}] {
         auto detail = std::make_shared<LibraryAlbumDetail>(server->albumDetail(id));
@@ -287,6 +293,61 @@ winrt::fire_and_forget LibraryView::background(std::function<std::function<void(
         auto self = weak.get();
         if (self && self->generation_ == generation && apply) apply();
     });
+}
+
+void LibraryView::cancelArtwork() {
+    detailArtwork_.cancel();
+    detailArtwork_ = {};
+    for (auto& [key, slot] : artworkSlots_) slot.token.cancel();
+    artworkSlots_.clear();
+}
+
+void LibraryView::loadRowArtwork(Image const& image) {
+    const auto it = artworkSlots_.find(get_abi(image));
+    if (it == artworkSlots_.end()) return;
+    it->second.token.cancel();
+    it->second.token = {};
+    image.Source(nullptr);
+    const auto value = image.DataContext().try_as<CamelPlayer::BrowseItem>();
+    if (!value) return;
+    const auto& row = get_self<BrowseItem>(value)->row();
+    const bool trackCover = image.Name() == L"TrackCover";
+    if (!row.id || (image.Name() == L"FolderCover" && !row.folder) || (trackCover && row.folder)) return;
+    const auto kind = row.folder ? ArtworkKind::Folder : trackCover ? ArtworkKind::Track : ArtworkKind::Album;
+    ui::loadArtwork(image, server_, {kind, row.id, trackCover ? row.value : std::string{}}, it->second.token);
+}
+
+void LibraryView::bindArtwork(Image const& image) {
+    if (const auto old = artworkSlots_.find(get_abi(image)); old != artworkSlots_.end()) {
+        old->second.token.cancel();
+        artworkSlots_.erase(old);
+    }
+    image.Source(nullptr);
+    if (!image.IsLoaded()) return;
+    const auto value = image.DataContext().try_as<CamelPlayer::BrowseItem>();
+    if (!value) return;
+    auto& slot = artworkSlots_[get_abi(image)];
+    slot.changed = value.PropertyChanged(auto_revoke, [weak = get_weak(), target = make_weak(image)](auto&&, auto&&) {
+        if (auto self = weak.get()) if (auto image = target.get()) self->loadRowArtwork(image);
+    });
+    loadRowArtwork(image);
+}
+
+void LibraryView::OnArtworkLoaded(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    bindArtwork(sender.as<Image>());
+}
+
+void LibraryView::OnArtworkUnloaded(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    const auto it = artworkSlots_.find(get_abi(sender.as<Image>()));
+    if (it != artworkSlots_.end()) {
+        it->second.token.cancel();
+        artworkSlots_.erase(it);
+    }
+    sender.as<Image>().Source(nullptr);
+}
+
+void LibraryView::OnArtworkContextChanged(FrameworkElement const& sender, DataContextChangedEventArgs const&) {
+    bindArtwork(sender.as<Image>());
 }
 
 void LibraryView::OnBackClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

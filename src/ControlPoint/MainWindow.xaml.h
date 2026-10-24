@@ -54,6 +54,8 @@ private:
     // Shows the running library scan in Settings; reads counters, not the database.
     void showScanProgress();
 
+    camel::server::CancellationToken artworkToken_;
+    std::string artworkPath_;
     camel::server::SettingsDto settings_;
     std::shared_ptr<camel::server::IServer> server_;
     camel::server::SnapshotCursor cursor_;

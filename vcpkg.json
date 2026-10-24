@@ -18,6 +18,7 @@
     "mp3lame",
     "soxr",
     "taglib",
+    "libwebp",
     "opencc",
     {
       "name": "sqlite3",

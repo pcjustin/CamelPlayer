@@ -6,12 +6,14 @@
 
 #include "LibraryView.g.h"
 #include "LibraryCollection.h"
+#include <unordered_map>
 #include "Server/Api/ServerApi.h"
 
 namespace winrt::CamelPlayer::implementation {
 
 struct LibraryView : LibraryViewT<LibraryView> {
     LibraryView() = default;
+    ~LibraryView() { cancelArtwork(); }
     void InitializeComponent();
 
     // The window supplies the Server and the command path its player bar follows.
@@ -29,7 +31,20 @@ struct LibraryView : LibraryViewT<LibraryView> {
                         Microsoft::UI::Xaml::Controls::BreadcrumbBarItemClickedEventArgs const&);
     void OnFolderItemClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
 
+    void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&, Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
+
 private:
+    struct ArtworkSlot {
+        CamelPlayer::BrowseItem::PropertyChanged_revoker changed;
+        camel::server::CancellationToken token;
+    };
+    void bindArtwork(Microsoft::UI::Xaml::Controls::Image const& image);
+    void loadRowArtwork(Microsoft::UI::Xaml::Controls::Image const& image);
+    void cancelArtwork();
+    std::unordered_map<void*, ArtworkSlot> artworkSlots_;
+    camel::server::CancellationToken detailArtwork_;
     enum class Mode { Albums, Groups, Tracks, AlbumDetail, Folders };
     struct View {
         Mode mode = Mode::Albums;

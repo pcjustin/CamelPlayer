@@ -6,8 +6,19 @@
 
 #include <cwctype>
 #include <exception>
+#include <stdexcept>
 #include <fstream>
 #include <iterator>
+#include <taglib/flacfile.h>
+#include <taglib/wavfile.h>
+#include <taglib/aifffile.h>
+#include <taglib/mp4file.h>
+#include <taglib/mpegfile.h>
+#include <taglib/dsffile.h>
+#include <taglib/dsdifffile.h>
+#include "Engine/decode/FormatProbe.h"
+#include <taglib/tfilestream.h>
+#include <taglib/tvariant.h>
 
 #include "Common/util/Log.h"
 
@@ -44,6 +55,72 @@ std::optional<ArtworkCandidate> folderImageFile(const std::filesystem::path& fol
     candidate.file = best->second;
     return candidate;
 }
+
+class ImageStream : public TagLib::FileStream {
+public:
+    ImageStream(const std::filesystem::path& path, const CancellationToken& token)
+        : FileStream(path.c_str(), true), token_(token) {}
+    TagLib::ByteVector readBlock(size_t length) override {
+        if (token_.cancelled() || length > budget_) throw std::runtime_error("artwork metadata read limit");
+        budget_ -= length;
+        return FileStream::readBlock(length);
+    }
+
+private:
+    size_t budget_ = 64ull << 20;
+    CancellationToken token_;
+};
+class EmbeddedProvider final : public IArtworkProvider {
+public:
+    std::string id() const override { return "embedded"; }
+    bool needsNetwork() const override { return false; }
+    std::vector<ArtworkCandidate> find(const ArtworkQuery& query, const CancellationToken& token) override {
+        const auto& path = query.firstTrack;
+        if (path.empty() || token.cancelled()) return {};
+        ImageStream stream(path, token);
+        std::unique_ptr<TagLib::File> file;
+        switch (audio::probeFormat(path)) {
+        case audio::AudioFormat::Flac:
+            file = std::make_unique<TagLib::FLAC::File>(&stream, false);
+            break;
+        case audio::AudioFormat::Wav:
+            file = std::make_unique<TagLib::RIFF::WAV::File>(&stream, false);
+            break;
+        case audio::AudioFormat::Aiff:
+            file = std::make_unique<TagLib::RIFF::AIFF::File>(&stream, false);
+            break;
+        case audio::AudioFormat::Alac:
+        case audio::AudioFormat::Aac:
+            file = std::make_unique<TagLib::MP4::File>(&stream, false);
+            break;
+        case audio::AudioFormat::Mp3:
+            file = std::make_unique<TagLib::MPEG::File>(&stream, false);
+            break;
+        case audio::AudioFormat::Dsd: {
+            const auto header = stream.readBlock(4);
+            stream.seek(0);
+            if (header == TagLib::ByteVector("DSD ", 4))
+                file = std::make_unique<TagLib::DSF::File>(&stream, false);
+            else
+                file = std::make_unique<TagLib::DSDIFF::File>(&stream, false);
+            break;
+        }
+        }
+        if (!file || !file->isValid()) return {};
+        const auto pictures = file->complexProperties("PICTURE");
+        for (const auto& picture : pictures) {
+            const auto type = picture.value("pictureType").toString();
+            if (type != "Front Cover" && !type.isEmpty()) continue;
+            const auto bytes = picture.value("data").toByteVector();
+            if (bytes.isEmpty() || bytes.size() > kMaxArtworkBytes) continue;
+            ArtworkCandidate out;
+            out.source = "embedded";
+            out.bytes.assign(bytes.begin(), bytes.end());
+            return {std::move(out)};
+        }
+        return {};
+    }
+};
 
 class FolderProvider final : public IArtworkProvider {
 public:
@@ -133,9 +210,14 @@ std::unique_ptr<IArtworkProvider> makeParentFolderArtworkProvider() {
     return std::make_unique<FolderProvider>(true);
 }
 
+std::unique_ptr<IArtworkProvider> makeEmbeddedArtworkProvider() {
+    return std::make_unique<EmbeddedProvider>();
+}
+
 ArtworkChain localArtworkChain() {
     ArtworkChain chain;
     chain.add(makeFolderArtworkProvider());
+    chain.add(makeEmbeddedArtworkProvider());
     chain.add(makeParentFolderArtworkProvider());
     return chain;
 }

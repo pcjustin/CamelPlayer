@@ -90,8 +90,8 @@ std::optional<std::pair<size_t, const char*>> folderArtworkRank(const std::files
 std::optional<ArtworkCandidate> findFolderArtworkFile(const std::filesystem::path& folder, const CancellationToken& token);
 // The same names in the parent folder when the album folder is a disc subfolder (CD1, Disc 2, 碟 3).
 std::unique_ptr<IArtworkProvider> makeParentFolderArtworkProvider();
-// Local providers in the §7.4 order; the embedded-cover provider (M3) and the online providers (M4) are added between
-// and after them.
+std::unique_ptr<IArtworkProvider> makeEmbeddedArtworkProvider();
+// Local providers in the §7.4 order; online providers follow them.
 ArtworkChain localArtworkChain();
 
 // A disc subfolder name: "cd", "disc" or "disk" not preceded by a letter, or "碟", then optional spaces and a number.
