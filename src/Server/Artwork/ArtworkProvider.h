@@ -84,6 +84,8 @@ private:
 
 // `cover|folder|front.(jpg|jpeg|png|webp)` in the album folder, in that name and extension order, case-insensitive.
 std::unique_ptr<IArtworkProvider> makeFolderArtworkProvider();
+// Locate the selected image without reading its payload.
+std::optional<ArtworkCandidate> findFolderArtworkFile(const std::filesystem::path& folder, const CancellationToken& token);
 // The same names in the parent folder when the album folder is a disc subfolder (CD1, Disc 2, 碟 3).
 std::unique_ptr<IArtworkProvider> makeParentFolderArtworkProvider();
 // Local providers in the §7.4 order; the embedded-cover provider (M3) and the online providers (M4) are added between

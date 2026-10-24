@@ -24,7 +24,7 @@ std::wstring lower(std::wstring s) {
 }
 
 // The best-ranked cover image directly in `folder`.
-std::optional<ArtworkCandidate> folderImage(const std::filesystem::path& folder, const std::string& source,
+std::optional<ArtworkCandidate> folderImageFile(const std::filesystem::path& folder, const std::string& source,
                                             const CancellationToken& token) {
     std::error_code ec;
     if (folder.empty() || !std::filesystem::is_directory(folder, ec)) return std::nullopt;
@@ -44,12 +44,8 @@ std::optional<ArtworkCandidate> folderImage(const std::filesystem::path& folder,
     if (!best) return std::nullopt;
     const auto size = std::filesystem::file_size(best->second, ec);
     if (ec || size == 0 || size > kMaxArtworkBytes) return std::nullopt;
-    std::ifstream in(best->second, std::ios::binary);
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (bytes.size() != size) return std::nullopt;
     ArtworkCandidate candidate;
     candidate.mime = kExtensions[best->first % std::size(kExtensions)].second;
-    candidate.bytes = std::move(bytes);
     candidate.source = source;
     candidate.file = best->second;
     return candidate;
@@ -66,7 +62,15 @@ public:
             if (!isDiscFolderName(folder.filename().wstring())) return {};
             folder = folder.parent_path();
         }
-        if (auto image = folderImage(folder, id(), token)) return {std::move(*image)};
+        if (auto image = folderImageFile(folder, id(), token)) {
+            std::error_code ec;
+            const auto size = std::filesystem::file_size(image->file, ec);
+            if (ec || !size || size > kMaxArtworkBytes) return {};
+            std::ifstream input(image->file, std::ios::binary);
+            image->bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+            if (image->bytes.size() != size) return {};
+            return {std::move(*image)};
+        }
         return {};
     }
 
@@ -115,6 +119,10 @@ std::vector<std::string> ArtworkChain::ids() const {
 
 std::unique_ptr<IArtworkProvider> makeFolderArtworkProvider() {
     return std::make_unique<FolderProvider>(false);
+}
+
+std::optional<ArtworkCandidate> findFolderArtworkFile(const std::filesystem::path& folder, const CancellationToken& token) {
+    return folderImageFile(folder, "folder", token);
 }
 
 std::unique_ptr<IArtworkProvider> makeParentFolderArtworkProvider() {

@@ -62,7 +62,8 @@ std::vector<std::pair<int, std::filesystem::path>> backups(const std::filesystem
 }
 
 void configure(sqlite::Database& db) {
-    db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;");
+    // Scan batches touch FTS and index pages across the whole database; the default 2 MiB cache rereads them per row.
+    db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -65536;");
 }
 
 } // namespace

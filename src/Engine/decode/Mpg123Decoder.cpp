@@ -4,6 +4,7 @@
 
 // MP3 through libmpg123 with gapless decoding: LAME/Xing encoder delay and padding are trimmed by the library.
 #include "Engine/decode/DecoderImpl.h"
+#include "Engine/decode/FormatProbe.h"
 
 #include <mpg123.h>
 
@@ -19,7 +20,7 @@ namespace {
 
 class Mpg123Decoder final : public IDecoder {
 public:
-    Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits) {
+    Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool scan = true) {
         static std::once_flag once;
         std::call_once(once, [] { mpg123_init(); });
         int error = MPG123_OK;
@@ -40,7 +41,7 @@ public:
             fail(ErrorCode::UnsupportedStream, "mpg123_getformat");
         mpg123_format_none(mh_); // the format must not change mid-stream
         mpg123_format(mh_, rate, channels, encoding);
-        if (mpg123_scan(mh_) != MPG123_OK) fail(ErrorCode::DecodeFailed, "mpg123_scan"); // exact length and seek index
+        if (scan && mpg123_scan(mh_) != MPG123_OK) fail(ErrorCode::DecodeFailed, "mpg123_scan"); // exact length and seek index
         const int64_t length = mpg123_length64(mh_);
         info_.sampleRate = uint32_t(rate);
         info_.channels = uint32_t(channels);
@@ -102,6 +103,12 @@ private:
 
 std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t lossyBits) {
     return std::make_unique<Mpg123Decoder>(path, lossyBits);
+}
+
+SourceInfo probeMp3Info(const std::filesystem::path& path, bool& estimated) {
+    estimated = !lossyLengthDeclared(path);
+    const Mpg123Decoder decoder(path, 24, false);
+    return decoder.info();
 }
 
 } // namespace camel::audio

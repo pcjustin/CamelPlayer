@@ -8,6 +8,8 @@
 #include <wil/resource.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <charconv>
 #include <cwctype>
 #include <cstdlib>
@@ -20,6 +22,7 @@
 #include <stop_token>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 #include <taglib/aifffile.h>
 #include <taglib/dsdifffile.h>
@@ -30,6 +33,7 @@
 #include <taglib/tpropertymap.h>
 #include <taglib/tfilestream.h>
 #include <taglib/wavfile.h>
+#include <taglib/tbytevectorstream.h>
 
 #include "Server/Library/LibraryIdentity.h"
 #include "Server/Library/LibraryText.h"
@@ -61,18 +65,20 @@ wil::unique_handle openPath(const Path& path, DWORD access = FILE_READ_ATTRIBUTE
                                           OPEN_EXISTING, flags, nullptr));
 }
 
-Path canonicalRoot(const Path& path) {
-    auto handle = openPath(path);
-    if (!handle) throw std::runtime_error("cannot access library path: " + toUtf8(path.wstring()));
-    const DWORD count = GetFinalPathNameByHandleW(handle.get(), nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    if (!count) throw std::runtime_error("cannot resolve library path");
-    std::wstring text(count, L'\0');
-    const DWORD size = GetFinalPathNameByHandleW(handle.get(), text.data(), count, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    if (!size || size >= count) throw std::runtime_error("cannot resolve library path");
+Path finalPath(HANDLE handle) {
+    std::wstring text(32768, L'\0');
+    const DWORD size = GetFinalPathNameByHandleW(handle, text.data(), DWORD(text.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (!size || size >= text.size()) throw std::runtime_error("cannot resolve library path");
     text.resize(size);
     Path result(lower(text));
     while (result != result.root_path() && result.filename().empty()) result = result.parent_path();
     return result;
+}
+
+Path canonicalRoot(const Path& path) {
+    auto handle = openPath(path);
+    if (!handle) throw std::runtime_error("cannot access library path: " + toUtf8(path.wstring()));
+    return finalPath(handle.get());
 }
 
 std::string key(const Path& path) {
@@ -106,13 +112,77 @@ struct Metadata {
     audio::SourceInfo info;
     TagLib::PropertyMap tags;
     bool cover = false;
+    std::optional<bool> embeddedCue;
+    bool lengthEstimated = false;
 };
 
-Metadata metadata(const Path& path) {
+Metadata metadata(const Path& path, int64_t fileSize) {
+    std::array<char, 64 * 1024> buffer;
+    std::ifstream input;
+    input.rdbuf()->pubsetbuf(buffer.data(), buffer.size());
+    input.open(path, std::ios::binary);
+    char signature[4]{};
+    input.read(signature, sizeof(signature));
+    if (memcmp(signature, "fLaC", 4) == 0) {
+        // Skip artwork payloads and let TagLib parse only STREAMINFO and Vorbis comments in memory.
+        const auto size = uint64_t(fileSize);
+        uint64_t position = 4;
+        TagLib::ByteVector blocks("fLaC", 4);
+        unsigned int lastHeader = 4;
+        bool last = false, cover = false, embeddedCue = false;
+        do {
+            char header[4]{};
+            input.read(header, sizeof(header));
+            position += sizeof(header);
+            const auto type = uint8_t(header[0]) & 0x7f;
+            const uint32_t length = (uint32_t(uint8_t(header[1])) << 16) |
+                                    (uint32_t(uint8_t(header[2])) << 8) | uint8_t(header[3]);
+            if (!input || position > size || length > size - position ||
+                (blocks.size() == 4 && (type != 0 || length != 34)))
+                throw audio::Error(audio::ErrorCode::UnsupportedStream, "invalid FLAC metadata block");
+            last = (uint8_t(header[0]) & 0x80) != 0;
+            if (type == 0 || type == 4) {
+                lastHeader = blocks.size();
+                header[0] = char(type);
+                blocks.append(TagLib::ByteVector(header, 4));
+                std::string data(length, '\0');
+                input.read(data.data(), length);
+                if (!input) throw audio::Error(audio::ErrorCode::UnsupportedStream, "truncated FLAC metadata");
+                blocks.append(TagLib::ByteVector(data.data(), length));
+            } else {
+                cover = cover || type == 6;
+                embeddedCue = embeddedCue || type == 5;
+                input.seekg(length, std::ios::cur);
+            }
+            position += length;
+        } while (!last);
+        blocks[lastHeader] = char(uint8_t(blocks[lastHeader]) | 0x80);
+        TagLib::ByteVectorStream stream(blocks);
+        TagLib::FLAC::File file(&stream);
+        const auto* properties = file.audioProperties();
+        if (!file.isValid() || !properties)
+            throw audio::Error(audio::ErrorCode::UnsupportedStream, "invalid FLAC metadata");
+        const auto bits = properties->bitsPerSample();
+        if ((bits != 16 && bits != 24) || properties->sampleRate() <= 0 || properties->channels() <= 0)
+            throw audio::Error(audio::ErrorCode::UnsupportedStream, "unsupported FLAC bit depth");
+        Metadata out;
+        out.format = "flac";
+        out.info.sampleRate = properties->sampleRate();
+        out.info.channels = properties->channels();
+        out.info.bitsPerSample = bits;
+        out.info.totalFrames = properties->sampleFrames();
+        out.tags = file.properties();
+        out.cover = cover;
+        out.embeddedCue = embeddedCue;
+        return out;
+    }
     const auto format = audio::probeFormat(path);
-    // Decoder opening enforces the same codec/profile/depth scope as playback without decoding audio.
-    const auto decoder = audio::openDecoder(audio::defaultDecoder(format), path);
-    Metadata out{audio::formatId(format), decoder->info(), {}, false};
+    audio::SourceInfo info;
+    bool estimated = false;
+    if (format == audio::AudioFormat::Mp3) info = audio::probeMp3Info(path, estimated);
+    else if (format == audio::AudioFormat::Aac) info = audio::probeAacInfo(path);
+    else info = audio::openDecoder(audio::defaultDecoder(format), path)->info();
+    Metadata out{audio::formatId(format), info, {}, false, false, estimated};
     if (format == audio::AudioFormat::Dsd) {
         out.info.sampleRate *= 8;
         out.info.totalFrames *= 8;
@@ -172,16 +242,26 @@ int number(const Metadata& m, const char* name, bool total = false) {
     return parsed.ec == std::errc{} ? std::max(0, value) : 0;
 }
 
-void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m) {
+// One upsert carries the derived search and sort columns, so the row is written and FTS-indexed once.
+void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::wstring_view locale) {
     auto s = db.prepare("INSERT INTO tracks(file_id,title,album,album_artist,artist,composer,genre,year,track_number,track_total,"
-                        "disc_number,disc_total,format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(file_id,cue_index) DO UPDATE SET "
+                        "disc_number,disc_total,format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
+                        "length_estimated,title_sort_tag,album_sort_tag,artist_sort_tag,rg_track_gain,rg_track_peak,"
+                        "rg_album_gain,rg_album_peak,title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(file_id,cue_index) DO UPDATE SET "
                         "title=excluded.title,album=excluded.album,album_artist=excluded.album_artist,artist=excluded.artist,"
                         "composer=excluded.composer,genre=excluded.genre,year=excluded.year,track_number=excluded.track_number,"
                         "track_total=excluded.track_total,disc_number=excluded.disc_number,disc_total=excluded.disc_total,"
                         "format=excluded.format,sample_rate=excluded.sample_rate,bits_per_sample=excluded.bits_per_sample,"
                         "channels=excluded.channels,total_frames=excluded.total_frames,embedded_cover=excluded.embedded_cover,"
-                        "lyrics=excluded.lyrics");
+                        "lyrics=excluded.lyrics,length_estimated=excluded.length_estimated,"
+                        "title_sort_tag=excluded.title_sort_tag,album_sort_tag=excluded.album_sort_tag,"
+                        "artist_sort_tag=excluded.artist_sort_tag,rg_track_gain=excluded.rg_track_gain,"
+                        "rg_track_peak=excluded.rg_track_peak,rg_album_gain=excluded.rg_album_gain,"
+                        "rg_album_peak=excluded.rg_album_peak,title_norm=excluded.title_norm,album_norm=excluded.album_norm,"
+                        "artist_norm=excluded.artist_norm,title_sort=excluded.title_sort,album_sort=excluded.album_sort,"
+                        "artist_sort=excluded.artist_sort");
     s.bind(1, file);
     int i = 2;
     for (const auto* field : {"TITLE", "ALBUM", "ALBUMARTIST", "ARTIST", "COMPOSER", "GENRE"}) s.bind(i++, tag(m, field));
@@ -197,41 +277,49 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m) {
         .bind(17, int64_t(m.info.totalFrames))
         .bind(18, int64_t(m.cover))
         .bind(19, tag(m, "LYRICS").empty() ? "none" : "embedded")
-        .run();
-    auto row = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
-    row.bind(1, file).step();
-    const int64_t track = row.integer(0);
-    db.prepare("UPDATE tracks SET title_sort_tag=?,album_sort_tag=?,artist_sort_tag=? WHERE id=?")
-        .bind(1, tag(m, "TITLESORT")).bind(2, tag(m, "ALBUMSORT")).bind(3, tag(m, "ARTISTSORT")).bind(4, track).run();
-    db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
-    for (const auto* field : {"ARTIST", "COMPOSER", "GENRE"}) {
-        int64_t position = 0;
-        const auto sorts = m.tags.value((std::string(field) + "SORT").c_str());
-        auto sort = sorts.begin();
-        for (const auto& value : m.tags.value(field))
-            db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source) VALUES(?,?,?,?,?)")
-                .bind(1, track)
-                .bind(2, toUtf8(lower(toWide(field))))
-                .bind(3, position++)
-                .bind(4, value.to8Bit(true))
-                .bind(5, sort == sorts.end() ? std::string{} : (sort++)->to8Bit(true))
-                .run();
-    }
-    i = 0;
+        .bind(20, int64_t(m.lengthEstimated));
+    i = 21;
+    for (const auto* field : {"TITLESORT", "ALBUMSORT", "ARTISTSORT"}) s.bind(i++, tag(m, field));
     for (const auto* field :
          {"REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK", "REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_PEAK"}) {
-        const char* columns[] = {"rg_track_gain", "rg_track_peak", "rg_album_gain", "rg_album_peak"};
-        auto update = db.prepare(std::string("UPDATE tracks SET ") + columns[i++] + "=? WHERE id=?");
         const auto value = tag(m, field);
         char* end = nullptr;
         const double parsed = std::strtod(value.c_str(), &end);
         if (end != value.c_str() && std::isfinite(parsed))
-            update.bind(1, parsed);
+            s.bind(i++, parsed);
         else
-            update.bindNull(1);
-        update.bind(2, track).run();
+            s.bindNull(i++);
     }
-    updateLibraryTrackText(db, track);
+    for (const auto* field : {"TITLE", "ALBUM", "ARTIST"}) s.bind(i++, normalizeLibrarySearch(tag(m, field)));
+    for (const auto& [field, sortField] : {std::pair{"TITLE", "TITLESORT"}, {"ALBUM", "ALBUMSORT"}, {"ARTIST", "ARTISTSORT"}}) {
+        const auto sortTag = tag(m, sortField);
+        s.bind(i++, librarySortKey(sortTag.empty() ? tag(m, field) : sortTag, locale));
+    }
+    s.run();
+    auto row = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
+    row.bind(1, file).step();
+    const int64_t track = row.integer(0);
+    db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
+    auto value = db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source,value_norm,sort_key) "
+                            "VALUES(?,?,?,?,?,?,?)");
+    for (const auto* field : {"ARTIST", "COMPOSER", "GENRE"}) {
+        int64_t position = 0;
+        const auto sorts = m.tags.value((std::string(field) + "SORT").c_str());
+        auto sort = sorts.begin();
+        for (const auto& item : m.tags.value(field)) {
+            const auto text = item.to8Bit(true);
+            const auto source = sort == sorts.end() ? std::string{} : (sort++)->to8Bit(true);
+            value.bind(1, track)
+                .bind(2, toUtf8(lower(toWide(field))))
+                .bind(3, position++)
+                .bind(4, text)
+                .bind(5, source)
+                .bind(6, normalizeLibrarySearch(text))
+                .bind(7, librarySortKey(source.empty() ? text : source, locale))
+                .run();
+            value.reset();
+        }
+    }
 }
 
 struct Entry {
@@ -242,16 +330,19 @@ struct Entry {
     std::string error;
     bool rejected = false;
     std::optional<std::vector<uint8_t>> digest;
+    bool listedVersion = false;
 };
 
+enum class ListedIds { Unknown, Accepted, Rejected };
+
 struct Listing {
-    // shortcut: metadata is buffered per directory; stream batches if large flat folders miss scan latency targets.
     Path path;
     std::vector<Path> children;
     std::vector<Entry> files;
     bool complete = true;
     bool deferred = false;
     std::string error;
+    bool fileWork = false;
 };
 
 struct CueProjection {
@@ -294,6 +385,7 @@ uint64_t cueSamples(uint64_t frames75, uint64_t sampleRate) {
 }
 
 CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, const std::vector<std::string>& changedAudio,
+                    const std::map<std::string, bool>& embeddedHints, bool retryDerived,
                     std::vector<std::string>& diagnostics) {
     struct Audio {
         int64_t id;
@@ -420,7 +512,7 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
     std::set<std::string> changedPaths(changedAudio.begin(), changedAudio.end());
     std::set<int64_t> embeddedCandidates;
     for (const auto& [id, audio] : audioById)
-        if (changedPaths.contains(audio.path)) embeddedCandidates.insert(id);
+        if (retryDerived || changedPaths.contains(audio.path)) embeddedCandidates.insert(id);
     auto oldCueTracks = db.prepare("SELECT DISTINCT t.file_id,f.path,cf.id,cf.available FROM tracks t "
                                    "JOIN files f ON f.id=t.file_id LEFT JOIN files cf ON cf.id=t.cue_file_id "
                                    "WHERE f.root_id=? AND f.available=1 AND f.kind='audio' AND t.cue_index<>0 "
@@ -435,6 +527,7 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
         const auto& audio = audioById.at(id);
         if (plan.replaceEmbeddedFiles.contains(id)) continue;
         plan.replaceEmbeddedFiles.insert(id);
+        if (const auto hint = embeddedHints.find(audio.path); hint != embeddedHints.end() && !hint->second) continue;
         try {
             auto embedded = library::parseEmbeddedFlacCue(Path(toWide(audio.path)));
             if (embedded.files.empty()) continue;
@@ -662,13 +755,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
         for (auto track : album.tracks) db.prepare("UPDATE tracks SET album_id=? WHERE id=?").bind(1, albumId).bind(2, track).run();
         updateLibraryAlbumText(db, albumId);
 
-        ArtworkQuery query;
-        query.albumFolder = album.path;
-        query.albumArtist = album.artist;
-        query.album = album.title;
-        auto candidates = makeFolderArtworkProvider()->find(query, {});
-        std::optional<ArtworkCandidate> image;
-        if (!candidates.empty()) image = std::move(candidates.front());
+        const auto image = findFolderArtworkFile(album.path, {});
         int64_t coverFile = 0;
         std::string source;
         std::string mime;
@@ -706,13 +793,83 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
             "DELETE FROM covers WHERE NOT EXISTS(SELECT 1 FROM albums WHERE albums.cover_id=covers.id)");
 }
 
-Listing list(const Path& path, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
-             const std::set<std::string>& pendingIdentity, const std::set<TrustedIdentity>& trusted,
-             const CancellationToken& token, const std::function<bool()>& playbackActive) {
+Listing readEntries(Listing out, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
+                    const std::set<std::string>& pendingIdentity, const std::set<std::string>& knownHashes,
+                    const std::set<TrustedIdentity>& trusted,
+                    const CancellationToken& token, const std::function<bool()>& playbackActive) {
+    SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+    auto restore = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
+    // Entries settled by the listing need no file access, so the alias check runs before the first file is opened.
+    std::optional<std::string> aliasError;
+    bool aliasChecked = false;
+    const auto directoryValid = [&] {
+        if (!std::exchange(aliasChecked, true)) {
+            try {
+                if (canonicalRoot(out.path) != Path(lower(out.path.wstring())))
+                    throw std::runtime_error("directory now resolves through an alias: " + key(out.path));
+            } catch (const std::exception& e) {
+                aliasError = e.what();
+            }
+        }
+        return !aliasError;
+    };
+    for (auto& entry : out.files) {
+        if (token.cancelled()) {
+            out.complete = false;
+            break;
+        }
+        const auto& child = entry.path;
+        const auto& type = entry.kind;
+        try {
+            const auto fileKey = key(child);
+            const auto old = known.find(fileKey);
+            if (!entry.listedVersion || (old != known.end() && !old->second.created && old->second.index.size() == 8)) {
+                if (!directoryValid()) break;
+                entry.version = fileVersion(child);
+            }
+            if (old == known.end() || old->second != entry.version) {
+                if (type == "audio") {
+                    if (!directoryValid()) break;
+                    entry.metadata = metadata(child, entry.version.size);
+                    if (fileVersion(child) != entry.version) throw std::runtime_error("file changed during metadata read");
+                }
+            }
+            const bool hashed = old != known.end() && old->second == entry.version && knownHashes.contains(fileKey);
+            if (!hashed && (old == known.end() || !entry.version.sameFile(old->second) || pendingIdentity.contains(fileKey)) &&
+                hashSizes.contains(entry.version.size) &&
+                !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
+                if (!directoryValid()) break;
+                entry.digest = library::fileDigest(child, entry.version, token, playbackActive);
+                if (!entry.digest) {
+                    out.deferred = true;
+                    throw std::runtime_error("fingerprint deferred while cancelled or playing");
+                }
+            }
+        } catch (const audio::Error& e) {
+            entry.error = e.what();
+            entry.rejected = e.code() == audio::ErrorCode::UnsupportedStream;
+            if (!entry.rejected) out.complete = false;
+        } catch (const std::exception& e) {
+            entry.error = e.what();
+            out.complete = false;
+        }
+    }
+    if (aliasError) {
+        out.complete = false;
+        out.error = *aliasError;
+        out.files.clear();
+    }
+    return out;
+}
+
+Listing list(const Path& path, const CancellationToken& token, bool network, std::atomic<ListedIds>& listedIds) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     Listing out{path};
+    wil::unique_handle directory;
     try {
-        if (canonicalRoot(path) != Path(lower(path.wstring())))
+        directory = openPath(path, FILE_LIST_DIRECTORY);
+        if (!directory) throw std::runtime_error("cannot access library path: " + toUtf8(path.wstring()));
+        if (finalPath(directory.get()) != Path(lower(path.wstring())))
             throw std::runtime_error("directory now resolves through an alias: " + key(path));
     } catch (const std::exception& e) {
         out.complete = false;
@@ -720,6 +877,46 @@ Listing list(const Path& path, const std::map<std::string, Version>& known, cons
         SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
         return out;
     }
+    if (network && listedIds.load() != ListedIds::Rejected) {
+        if (auto entries = library::directoryEntries(directory.get(), token)) {
+            for (auto& item : *entries) {
+                if (token.cancelled()) {
+                    out.complete = false;
+                    break;
+                }
+                if (item.name == L"." || item.name == L"..") continue;
+                if (item.attributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+                const Path child = path / item.name;
+                if (item.attributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    out.children.push_back(child);
+                    continue;
+                }
+                const auto type = kind(child);
+                if (type.empty()) continue;
+                Entry entry{child, type};
+                entry.version = std::move(item.version);
+                entry.listedVersion = true;
+                out.files.push_back(std::move(entry));
+            }
+            // One direct query per scan confirms the server reports the same IDs as a file handle.
+            if (listedIds.load() == ListedIds::Unknown && !out.files.empty()) {
+                bool matches = false;
+                try {
+                    matches = library::fileVersion(out.files.front().path) == out.files.front().version;
+                } catch (const std::exception&) {
+                }
+                auto expected = ListedIds::Unknown;
+                if (!matches) listedIds = ListedIds::Rejected;
+                else listedIds.compare_exchange_strong(expected, ListedIds::Accepted);
+            }
+            if (listedIds.load() == ListedIds::Rejected)
+                for (auto& entry : out.files) entry.listedVersion = false;
+            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+            return out;
+        }
+        if (!token.cancelled()) listedIds = ListedIds::Rejected;
+    }
+    directory.reset();
     WIN32_FIND_DATAW data{};
     wil::unique_hfind find(FindFirstFileExW((path / L"*").c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr,
                                             FIND_FIRST_EX_LARGE_FETCH));
@@ -744,32 +941,7 @@ Listing list(const Path& path, const std::map<std::string, Version>& known, cons
             }
             const auto type = kind(child);
             if (type.empty()) continue;
-            Entry entry{child, type};
-            try {
-                entry.version = fileVersion(child);
-                const auto old = known.find(key(child));
-                if (old == known.end() || old->second != entry.version) {
-                    if (type == "audio") entry.metadata = metadata(child);
-                    if (fileVersion(child) != entry.version) throw std::runtime_error("file changed during metadata read");
-                }
-                if ((old == known.end() || !entry.version.sameFile(old->second) || pendingIdentity.contains(key(child))) &&
-                    hashSizes.contains(entry.version.size) &&
-                    !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
-                    entry.digest = library::fileDigest(child, entry.version, token, playbackActive);
-                    if (!entry.digest) {
-                        out.deferred = true;
-                        throw std::runtime_error("fingerprint deferred while cancelled or playing");
-                    }
-                }
-            } catch (const audio::Error& e) {
-                entry.error = e.what();
-                entry.rejected = e.code() == audio::ErrorCode::UnsupportedStream;
-                if (!entry.rejected) out.complete = false;
-            } catch (const std::exception& e) {
-                entry.error = e.what();
-                out.complete = false;
-            }
-            out.files.push_back(std::move(entry));
+            out.files.push_back(Entry{child, type});
         } while (FindNextFileW(find.get(), &data));
         if (!token.cancelled() && GetLastError() != ERROR_NO_MORE_FILES) {
             out.complete = false;
@@ -849,6 +1021,8 @@ void LibraryScanner::removeRoot(int64_t root) {
 }
 
 ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) {
+    ++store_.activeScans_;
+    auto finishScan = wil::scope_exit([this] { --store_.activeScans_; });
     std::lock_guard lock(store_.scanMutex_);
     auto token = request.child();
     decltype(store_.jobs_)::iterator registration;
@@ -865,6 +1039,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     auto row = reader.prepare("SELECT path FROM roots WHERE id=? AND removed IS NULL");
     if (!row.bind(1, root).step()) throw std::invalid_argument("unknown or removed library root");
     const Path path(toWide(row.text(0)));
+    row.reset();
+    // More in-flight metadata requests hide SMB latency; playback still limits the storage to one worker.
+    const bool network = isNetworkPath(path);
+    const unsigned idleWorkers = network ? 16u : 4u;
+    std::atomic<ListedIds> listedIds = ListedIds::Unknown;
     const auto playbackActive = playbackGate(path);
     if (token.cancelled()) return report;
     if (!openPath(path, FILE_LIST_DIRECTORY)) {
@@ -876,13 +1055,15 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         return report;
     }
     std::map<std::string, Version> known;
-    auto files = reader.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state "
+    auto files = reader.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state,length(content_hash)=32 "
                                 "FROM files WHERE root_id=? AND available=1");
     files.bind(1, root);
     std::set<std::string> pendingIdentity;
+    std::set<std::string> knownHashes;
     while (files.step()) {
         known.emplace(files.text(0), library::storedVersion(files, 1));
         if (files.integer(7)) pendingIdentity.insert(files.text(0));
+        if (files.integer(8)) knownHashes.insert(files.text(0));
     }
     std::set<int64_t> hashSizes;
     auto fingerprints = reader.prepare("SELECT DISTINCT size FROM files WHERE length(content_hash)=32");
@@ -891,88 +1072,121 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
     while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
     const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
-    std::deque<Path> pending{path};
+    std::deque<Listing> pending{Listing{path}};
     std::deque<std::future<Listing>> active;
     bool complete = true;
     std::vector<Entry> batch;
     std::vector<std::string> changedAudioPaths;
+    std::map<std::string, bool> embeddedHints;
+    const auto derivedKey = "library_derived_dirty:" + std::to_string(root);
+    auto dirty = reader.prepare("SELECT 1 FROM app_state WHERE key=?");
+    bool derivedChanged = dirty.bind(1, derivedKey).step();
+    dirty.reset();
+    const bool retryDerived = derivedChanged || !pendingIdentity.empty();
+    // Writes run in submission order on the store's writer; the dispatcher waits only when several are outstanding.
+    std::deque<std::future<void>> writes;
+    auto drainWrites = wil::scope_exit([&] {
+        for (auto& write : writes) write.wait();
+    });
+    const auto submit = [&](std::function<void(sqlite::Database&)> work) {
+        writes.push_back(store_.write(std::move(work)));
+        while (!writes.empty() &&
+               (writes.size() > 4 || writes.front().wait_for(std::chrono::seconds(0)) == std::future_status::ready)) {
+            writes.front().get();
+            writes.pop_front();
+        }
+    };
     auto flush = [&] {
         if (batch.empty()) return;
-        store_
-            .write([&](sqlite::Database& db) {
-                if (token.cancelled()) return;
-                for (const auto& entry : batch) {
-                    const auto p = key(entry.path);
-                    auto old = db.prepare("SELECT id,size,mtime,volume_serial,file_index,created,volume_key FROM files WHERE "
-                                          "path=? AND available=1");
-                    old.bind(1, p);
-                    int64_t file = old.step() ? old.integer(0) : 0;
-                    if (!entry.error.empty() && !entry.rejected) {
-                        if (file) db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generation).bind(2, file).run();
-                        continue;
-                    }
-                    if (file && !entry.version.sameFile(library::storedVersion(old, 1))) {
-                        db.prepare("UPDATE files SET available=0 WHERE id=?").bind(1, file).run();
-                        file = 0;
-                    }
-                    const auto folder = key(entry.path.parent_path());
-                    auto f = db.prepare("SELECT id FROM folders WHERE path=?");
-                    f.bind(1, folder).step();
-                    const int64_t folderId = f.integer(0);
-                    if (!file) {
-                        db.prepare("INSERT INTO "
-                                   "files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen,created,"
-                                   "volume_key,identity_state) "
-                                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,1)")
-                            .bind(1, folderId)
-                            .bind(2, root)
-                            .bind(3, p)
-                            .bind(4, entry.kind)
-                            .bind(5, entry.version.size)
-                            .bind(6, entry.version.mtime)
-                            .bind(7, entry.version.volume)
-                            .bind(8, entry.version.index)
-                            .bind(9, generation)
-                            .bind(10, entry.version.created)
-                            .bind(11, entry.version.volumeKey)
-                            .run();
-                        file = db.lastInsertId();
-                    } else {
-                        if (library::storedVersion(old, 1) != entry.version)
-                            db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
-                        db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
-                                   "volume_serial=?,file_index=?,created=?,volume_key=? WHERE id=?")
-                            .bind(1, entry.version.size)
-                            .bind(2, entry.version.mtime)
-                            .bind(3, generation)
-                            .bind(4, folderId)
-                            .bind(5, root)
-                            .bind(6, entry.version.volume)
-                            .bind(7, entry.version.index)
-                            .bind(8, entry.version.created)
-                            .bind(9, entry.version.volumeKey)
-                            .bind(10, file)
-                            .run();
-                    }
-                    if (entry.digest)
-                        db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *entry.digest).bind(2, file).run();
-                    if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0").bind(1, file).run();
-                    if (entry.metadata) {
-                        writeMetadata(db, file, *entry.metadata);
-                        report.updated++;
-                        changedAudioPaths.push_back(p);
-                    }
-                }
-            })
-            .get();
+        auto entries = std::make_shared<std::vector<Entry>>(std::move(batch));
         batch.clear();
+        submit([&, entries](sqlite::Database& db) {
+            if (token.cancelled()) return;
+            auto seen = db.prepare("UPDATE files SET last_seen=? WHERE id=?");
+            auto old = db.prepare("SELECT id,size,mtime,volume_serial,file_index,created,volume_key,root_id FROM files WHERE "
+                                  "path=? AND available=1");
+            auto folders = db.prepare("SELECT id FROM folders WHERE path=?");
+            auto localeRow = db.prepare("SELECT value FROM app_state WHERE key='sort_locale'");
+            const std::wstring locale = localeRow.step() ? toWide(localeRow.text(0)) : L"zh-TW";
+            for (const auto& entry : *entries) {
+                const auto p = key(entry.path);
+                old.reset();
+                old.bind(1, p);
+                int64_t file = old.step() ? old.integer(0) : 0;
+                if (!entry.error.empty() && !entry.rejected) {
+                    if (file) db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generation).bind(2, file).run();
+                    continue;
+                }
+                if (file && old.integer(7) == root && library::storedVersion(old, 1) == entry.version &&
+                    entry.error.empty() && !entry.digest) {
+                    seen.bind(1, generation).bind(2, file).run();
+                    seen.reset();
+                    continue;
+                }
+                if (!file || library::storedVersion(old, 1) != entry.version) derivedChanged = true;
+                if (file && !entry.version.sameFile(library::storedVersion(old, 1))) {
+                    db.prepare("UPDATE files SET available=0 WHERE id=?").bind(1, file).run();
+                    file = 0;
+                }
+                folders.reset();
+                folders.bind(1, key(entry.path.parent_path())).step();
+                const int64_t folderId = folders.integer(0);
+                if (!file) {
+                    db.prepare("INSERT INTO "
+                               "files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen,created,"
+                               "volume_key,identity_state) "
+                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,1)")
+                        .bind(1, folderId)
+                        .bind(2, root)
+                        .bind(3, p)
+                        .bind(4, entry.kind)
+                        .bind(5, entry.version.size)
+                        .bind(6, entry.version.mtime)
+                        .bind(7, entry.version.volume)
+                        .bind(8, entry.version.index)
+                        .bind(9, generation)
+                        .bind(10, entry.version.created)
+                        .bind(11, entry.version.volumeKey)
+                        .run();
+                    file = db.lastInsertId();
+                } else {
+                    if (library::storedVersion(old, 1) != entry.version)
+                        db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
+                    db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
+                               "volume_serial=?,file_index=?,created=?,volume_key=? WHERE id=?")
+                        .bind(1, entry.version.size)
+                        .bind(2, entry.version.mtime)
+                        .bind(3, generation)
+                        .bind(4, folderId)
+                        .bind(5, root)
+                        .bind(6, entry.version.volume)
+                        .bind(7, entry.version.index)
+                        .bind(8, entry.version.created)
+                        .bind(9, entry.version.volumeKey)
+                        .bind(10, file)
+                        .run();
+                }
+                if (entry.digest)
+                    db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *entry.digest).bind(2, file).run();
+                if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0").bind(1, file).run();
+                if (entry.metadata) {
+                    writeMetadata(db, file, *entry.metadata, locale);
+                    report.updated++;
+                    changedAudioPaths.push_back(p);
+                    if (entry.metadata->embeddedCue) embeddedHints[p] = *entry.metadata->embeddedCue;
+                }
+            }
+            if (derivedChanged)
+                db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)").bind(1, derivedKey).run();
+        });
     };
     while ((!pending.empty() || !active.empty()) && !token.cancelled()) {
-        while (!pending.empty() && active.size() < (playbackActive() ? 1u : 4u)) {
-            const auto dir = pending.front();
+        while (!pending.empty() && active.size() < (playbackActive() ? 1u : idleWorkers)) {
+            auto work = std::move(pending.front());
             pending.pop_front();
-            active.push_back(std::async(std::launch::async, [&, dir] {
-                return list(dir, known, hashSizes, pendingIdentity, trusted, token, playbackActive);
+            active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
+                if (!work.fileWork) return list(work.path, token, network, listedIds);
+                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, token, playbackActive);
             }));
         }
         const auto ready = std::find_if(active.begin(), active.end(), [](auto& job) {
@@ -987,17 +1201,27 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         complete = complete && listing.complete;
         report.deferred = report.deferred || listing.deferred;
         if (!listing.error.empty()) report.diagnostics.push_back(listing.error);
-        store_
-            .write([&](sqlite::Database& db) {
+        if (!listing.fileWork) {
+            submit([root, folder = key(listing.path),
+                    parent = listing.path == path ? std::string{} : key(listing.path.parent_path())](sqlite::Database& db) {
                 db.prepare("INSERT INTO folders(root_id,path,parent_id) VALUES(?,?,(SELECT id FROM folders WHERE path=?)) "
                            "ON CONFLICT(path) DO UPDATE SET root_id=excluded.root_id,parent_id=excluded.parent_id")
                     .bind(1, root)
-                    .bind(2, key(listing.path))
-                    .bind(3, listing.path == path ? std::string{} : key(listing.path.parent_path()))
+                    .bind(2, folder)
+                    .bind(3, parent)
                     .run();
-            })
-            .get();
-        for (auto& child : listing.children) pending.push_back(std::move(child));
+            });
+            for (auto& child : listing.children) pending.push_back(Listing{std::move(child)});
+            for (size_t end = listing.files.size(); end > 0;) {
+                const size_t begin = end > 64 ? end - 64 : 0;
+                Listing work{listing.path};
+                work.fileWork = true;
+                for (size_t i = begin; i < end; ++i) work.files.push_back(std::move(listing.files[i]));
+                pending.push_front(std::move(work));
+                end = begin;
+            }
+            continue;
+        }
         for (auto& entry : listing.files) {
             report.seen++;
             if (!entry.error.empty()) report.diagnostics.push_back(key(entry.path) + ": " + entry.error);
@@ -1007,6 +1231,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     }
     for (auto& job : active) job.get();
     flush();
+    for (; !writes.empty(); writes.pop_front()) writes.front().get();
     report.online = bool(openPath(path, FILE_LIST_DIRECTORY));
     if (!report.online) {
         report.rootError = GetLastError();
@@ -1016,37 +1241,58 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     store_
         .write([&](sqlite::Database& db) {
             if (token.cancelled()) return;
-            db.prepare("UPDATE roots SET online=?,last_scan=CASE WHEN ? THEN ? ELSE last_scan END WHERE id=?")
+            db.prepare("UPDATE roots SET online=? WHERE id=? AND online<>?")
                 .bind(1, int64_t(report.online))
-                .bind(2, int64_t(report.complete))
-                .bind(3, now())
-                .bind(4, root)
+                .bind(2, root)
+                .bind(3, int64_t(report.online))
                 .run();
             if (report.complete) {
+                db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
                 db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
                     .bind(1, root)
                     .bind(2, generation)
                     .run();
+                derivedChanged = derivedChanged || db.scalar("SELECT changes()").value_or(0) != 0;
                 std::vector<int64_t> added;
                 auto pending = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1 AND identity_state=1");
                 pending.bind(1, root);
                 while (pending.step()) added.push_back(pending.integer(0));
+                derivedChanged = derivedChanged || !added.empty();
                 report.moved = library::reconcileMoves(db, added);
                 db.prepare("UPDATE files SET identity_state=0 WHERE root_id=? AND identity_state=1").bind(1, root).run();
+                if (derivedChanged)
+                    db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)").bind(1, derivedKey).run();
             }
         })
         .get();
-    if (report.complete) {
+    if (report.complete && derivedChanged) {
         auto cueReader = store_.openReader();
-        CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, report.diagnostics);
+        CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, embeddedHints, retryDerived, report.diagnostics);
         store_.write([&](sqlite::Database& db) {
             if (token.cancelled()) return;
             applyCuePlan(db, cuePlan, root);
             rebuildAlbums(db, root);
+            db.prepare("DELETE FROM app_state WHERE key=?").bind(1, derivedKey).run();
         }).get();
     }
     report.complete = report.complete && !token.cancelled();
     return report;
+}
+
+void LibraryScanner::recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames) {
+    store_.write([file, sampleRate, frames](sqlite::Database& db) {
+        db.prepare("UPDATE tracks SET total_frames=?,length_estimated=0 "
+                   "WHERE file_id=? AND cue_index=0 AND length_estimated=1 AND sample_rate=?")
+            .bind(1, int64_t(frames))
+            .bind(2, file)
+            .bind(3, int64_t(sampleRate))
+            .run();
+        // External CUE ranges ending at the old estimate are rebuilt by the next complete scan.
+        if (db.scalar("SELECT changes()").value_or(0))
+            db.prepare("INSERT OR REPLACE INTO app_state(key,value) SELECT 'library_derived_dirty:'||root_id,1 FROM files WHERE id=?")
+                .bind(1, file)
+                .run();
+    });
 }
 
 void LibraryScanner::setCueEncoding(const Path& cuePath, std::optional<uint32_t> codePage) {
@@ -1057,10 +1303,12 @@ void LibraryScanner::setCueEncoding(const Path& cuePath, std::optional<uint32_t>
     const auto cueKey = key(resolved);
     store_
         .write([&](sqlite::Database& db) {
-            auto file = db.prepare("SELECT id FROM files WHERE path=? AND kind='cue' AND available=1");
+            auto file = db.prepare("SELECT id,root_id FROM files WHERE path=? AND kind='cue' AND available=1");
             file.bind(1, cueKey);
             if (!file.step()) throw std::invalid_argument("CUE file is not indexed");
             const std::string stateKey = "cue_encoding:" + std::to_string(file.integer(0));
+            db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)")
+                .bind(1, "library_derived_dirty:" + std::to_string(file.integer(1))).run();
             if (codePage)
                 db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
                     .bind(1, stateKey)
@@ -1087,8 +1335,10 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
     auto db = store_.openReader();
     auto rootRow = db.prepare("SELECT path FROM roots WHERE id=? AND removed IS NULL");
     if (!rootRow.bind(1, root).step()) return report;
-    const auto playbackActive = playbackGate(Path(toWide(rootRow.text(0))));
-    if (token.cancelled() || playbackActive()) return report;
+    const auto playing = playbackGate(Path(toWide(rootRow.text(0))));
+    const auto backgroundBlocked = [this, playing] { return store_.activeScans_.load() != 0 || playing(); };
+    rootRow.reset();
+    if (token.cancelled() || backgroundBlocked()) return report;
     const bool background = bool(SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN));
     auto restorePriority = wil::scope_exit([&] {
         if (background) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
@@ -1106,18 +1356,18 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
                                    "AND content_hash IS NULL AND identity_state<>2 AND roots.online=1 AND roots.removed IS NULL");
         rows.bind(1, root);
         while (rows.step()) {
-            if (token.cancelled()) return report;
+            if (token.cancelled() || backgroundBlocked()) return report;
             pending.push_back({rows.integer(0), rows.text(1), library::storedVersion(rows, 2)});
         }
     }
     for (const auto& [id, path, expected] : pending) {
-        if (token.cancelled() || playbackActive()) return report;
+        if (token.cancelled() || backgroundBlocked()) return report;
         try {
-            const auto digest = library::fileDigest(Path(toWide(path)), expected, token, playbackActive);
+            const auto digest = library::fileDigest(Path(toWide(path)), expected, token, backgroundBlocked);
             if (!digest) return report;
             store_
                 .write([&](sqlite::Database& db) {
-                    if (token.cancelled() || playbackActive()) return;
+                    if (token.cancelled() || backgroundBlocked()) return;
                     auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
                                               "WHERE id=? AND available=1 AND identity_state<>2 AND content_hash IS NULL");
                     if (!current.bind(1, id).step() || current.text(0) != path ||
@@ -1131,7 +1381,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
             report.diagnostics.push_back(path + ": " + e.what());
         }
     }
-    report.complete = !token.cancelled() && !playbackActive() && report.diagnostics.empty();
+    report.complete = !token.cancelled() && !backgroundBlocked() && report.diagnostics.empty();
     return report;
 }
 

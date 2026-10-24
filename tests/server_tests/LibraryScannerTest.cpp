@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <algorithm>
 #include <thread>
 #include <wil/resource.h>
 
@@ -16,6 +17,7 @@
 #include "Server/Library/LibraryText.h"
 #include "Common/DecoderRegistry.h"
 #include "Engine/decode/IDecoder.h"
+#include "Engine/decode/FormatProbe.h"
 #include "DsdFixture.h"
 #include "LameFixture.h"
 #include "TestUtil.h"
@@ -262,6 +264,165 @@ TEST_F(LibraryScannerTest, IndexesSidecarsAndEnforcesContentAndDepthScope) {
     EXPECT_EQ(report.diagnostics.size(), 3); // The malformed CUE is reported.
     EXPECT_EQ(count(store), 6);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE format='flac'"), 1);
+}
+
+TEST_F(LibraryScannerTest, FlacMetadataDoesNotOpenAPlaybackDecoder) {
+    using namespace camel::audio;
+    audio();
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::atomic<int> opens = 0;
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        ++opens;
+        return original(path, format, bits);
+    });
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    EXPECT_EQ(opens.load(), 0);
+    EXPECT_EQ(count(store, "SELECT total_frames FROM tracks"), 88200);
+}
+
+TEST_F(LibraryScannerTest, FlacMetadataSkipsLargeArtworkAndRejectsTruncatedBlocks) {
+    const auto path = audio();
+    {
+        TagLib::FLAC::File tags(path.c_str());
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::FrontCover);
+        picture->setMimeType("image/png");
+        picture->setData(TagLib::ByteVector(8 << 20, 'x'));
+        tags.addPicture(picture);
+        tags.tag()->setTitle("Large cover");
+        ASSERT_TRUE(tags.save());
+    }
+    const auto truncated = path.parent_path() / "truncated.flac";
+    fs::copy_file(path, truncated);
+    fs::resize_file(truncated, 64);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto report = scanner.scan(scanner.addRoot(dir / "music"));
+    EXPECT_TRUE(report.complete);
+    EXPECT_EQ(report.diagnostics.size(), 1u);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE embedded_cover=1 AND title='Large cover' AND total_frames=88200"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
+}
+
+TEST_F(LibraryScannerTest, ExternalArtworkIsIndexedWithoutReadingItsPayload) {
+    audio();
+    const auto cover = dir / "music" / "album" / "cover.jpg";
+    {
+        std::ofstream output(cover, std::ios::binary);
+        const std::string bytes(8 << 20, 'x');
+        output.write(bytes.data(), std::streamsize(bytes.size()));
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    IO_COUNTERS before{}, after{};
+    ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &before));
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &after));
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM covers WHERE source='folder'"), 1);
+    EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, 2ull << 20);
+}
+
+TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWithoutReadingThem) {
+    using namespace camel::audio;
+    using namespace camel::audio::testaudio;
+    const auto pcm = makeSignal({"short", 44100, 16, 2, 10.0});
+    for (const bool header : {true, false}) {
+        const auto path = dir / "music" / "album" / (header ? "tagged.mp3" : "plain.mp3");
+        testutil::writeMp3(path, pcm, 44100, 16, 2, header);
+        IO_COUNTERS before{}, after{};
+        ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &before));
+        bool estimated = !header;
+        const auto info = probeMp3Info(path, estimated);
+        ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &after));
+        EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, fs::file_size(path) / 2);
+        EXPECT_EQ(estimated, !header);
+        const auto exact = openDecoder(DecoderKind::Mpg123, path)->info().totalFrames;
+        if (header) EXPECT_EQ(info.totalFrames, exact);
+        else EXPECT_NEAR(double(info.totalFrames), double(exact), exact * 0.02);
+        EXPECT_EQ(info.sampleRate, 44100u);
+        EXPECT_EQ(info.channels, 2u);
+        EXPECT_EQ(info.bitsPerSample, 24u);
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks t JOIN files f ON f.id=t.file_id "
+                           "WHERE f.path LIKE '%plain.mp3' AND t.length_estimated=1"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE length_estimated=1"), 1);
+    const auto plain = count(store, "SELECT id FROM files WHERE path LIKE '%plain.mp3'");
+    const auto revision = count(store, "SELECT value FROM library_revision WHERE id=1");
+    scanner.recordExactLength(plain, 48000, 1);
+    scanner.recordExactLength(plain, 44100, 441000);
+    store.write([](sqlite::Database&) {}).get();
+    const auto corrected = "SELECT total_frames FROM tracks WHERE length_estimated=0 AND file_id=" + std::to_string(plain);
+    EXPECT_EQ(count(store, corrected.c_str()), 441000);
+    EXPECT_GT(count(store, "SELECT value FROM library_revision WHERE id=1"), revision);
+    const auto dirty = "SELECT COUNT(*) FROM app_state WHERE key='library_derived_dirty:" + std::to_string(root) + "'";
+    EXPECT_EQ(count(store, dirty.c_str()), 1);
+    scanner.recordExactLength(plain, 44100, 7);
+    store.write([](sqlite::Database&) {}).get();
+    EXPECT_EQ(count(store, corrected.c_str()), 441000);
+}
+
+TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResumesAfterFailure) {
+    const auto path = audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto revision = count(store, "SELECT value FROM library_revision WHERE id=1");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT value FROM library_revision WHERE id=1"), revision);
+    {
+        TagLib::FLAC::File tags(path.c_str());
+        tags.tag()->setAlbum("Changed album");
+        ASSERT_TRUE(tags.save());
+    }
+    fs::last_write_time(path, fs::last_write_time(path) + std::chrono::seconds(2));
+    const auto blocked = audio("blocked.flac");
+    wil::unique_handle handle(CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    ASSERT_TRUE(handle);
+    EXPECT_FALSE(scanner.scan(root).complete);
+    handle.reset();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM albums WHERE title='Changed album'"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_derived_dirty:%'"), 0);
+}
+
+TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
+    using namespace camel::audio;
+    using namespace camel::audio::testaudio;
+    const auto path = dir / "music" / "album" / "track.m4a";
+    writeAac(path, makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2, false);
+    const auto expected = probeAacInfo(path);
+    EXPECT_EQ(expected.totalFrames, openDecoder(DecoderKind::Symphonia, path)->info().totalFrames);
+    std::ifstream input(path, std::ios::binary);
+    std::vector<char> bytes((std::istreambuf_iterator<char>(input)), {});
+    input.close();
+    const std::string marker = "mdat";
+    const auto found = std::search(bytes.begin(), bytes.end(), marker.begin(), marker.end());
+    ASSERT_NE(found, bytes.end());
+    const auto offset = size_t(found - bytes.begin());
+    ASSERT_GE(offset, 4u);
+    const uint32_t size = (uint32_t(uint8_t(bytes[offset-4])) << 24) | (uint32_t(uint8_t(bytes[offset-3])) << 16) |
+                          (uint32_t(uint8_t(bytes[offset-2])) << 8) | uint8_t(bytes[offset-1]);
+    ASSERT_GE(size, 8u);
+    ASSERT_LE(offset - 4 + size, bytes.size());
+    std::fill(bytes.begin() + offset + 4, bytes.begin() + offset - 4 + size, 0);
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(bytes.data(), std::streamsize(bytes.size()));
+    output.close();
+    EXPECT_EQ(probeAacInfo(path), expected);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    EXPECT_EQ(count(store, "SELECT total_frames FROM tracks"), int64_t(expected.totalFrames));
 }
 
 TEST_F(LibraryScannerTest, ExternalCueBuildsVirtualRangesAndRestoresWholeFileWhenRemoved) {
@@ -538,14 +699,15 @@ TEST_F(LibraryScannerTest, SlowDirectoryDoesNotBlockCompletedWorkers) {
     std::promise<void> release, started;
     auto gate = release.get_future().share();
     registry.setOpener(id, [&, opener](const fs::path& path, std::string_view format, uint32_t bits) {
-        if (path.filename() == "slow.flac") {
+        if (path.filename() == "slow.wav") {
             started.set_value();
             gate.wait();
         }
         return opener(path, format, bits);
     });
     fs::create_directory(dir / "music" / "00-slow");
-    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "00-slow" / "slow.flac");
+    using namespace camel::audio::testaudio;
+    writeWav(dir / "music" / "00-slow" / "slow.wav", makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
     fs::create_directory(dir / "music" / "01-fast");
     for (int i = 0; i < 500; i++) std::ofstream(dir / "music" / "01-fast" / (std::to_string(i) + ".lrc")) << "words";
     LibraryStore store(dir / "db");
@@ -562,6 +724,86 @@ TEST_F(LibraryScannerTest, SlowDirectoryDoesNotBlockCompletedWorkers) {
     released = true;
     EXPECT_TRUE(job.get().complete);
     EXPECT_EQ(count(store), 501);
+}
+
+TEST_F(LibraryScannerTest, SlowFileDoesNotBlockPublishingOtherFilesInTheSameDirectory) {
+    using namespace camel::audio;
+    using namespace camel::audio::testaudio;
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::promise<void> started, release;
+    const auto gate = release.get_future().share();
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        if (path.filename() == "slow.wav") { started.set_value(); gate.wait(); }
+        return original(path, format, bits);
+    });
+    const auto folder = dir / "music" / "album";
+    writeWav(folder / "slow.wav", makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
+    for (int i = 0; i < 600; ++i) std::ofstream(folder / (std::to_string(i) + ".lrc")) << "lyrics";
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    auto job = std::async(std::launch::async, [&] { return scanner.scan(root); });
+    bool released = false;
+    auto unblock = wil::scope_exit([&] { if (!released) release.set_value(); });
+    EXPECT_EQ(started.get_future().wait_for(std::chrono::seconds(8)), std::future_status::ready);
+    EXPECT_TRUE(waitFor([&] { return count(store) >= 500; }));
+    release.set_value();
+    released = true;
+    EXPECT_TRUE(job.get().complete);
+    EXPECT_EQ(count(store), 601);
+}
+
+TEST_F(LibraryScannerTest, FingerprintsDeferDuringAScanAndResumeAfterItFinishes) {
+    using namespace camel::audio;
+    using namespace camel::audio::testaudio;
+    const auto folder = dir / "music" / "album";
+    std::ofstream(folder / "words.lrc") << "lyrics";
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::promise<void> started, release;
+    const auto gate = release.get_future().share();
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        started.set_value();
+        gate.wait();
+        return original(path, format, bits);
+    });
+    writeWav(folder / "slow.wav", makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
+    auto job = std::async(std::launch::async, [&] { return scanner.scan(root); });
+    bool released = false;
+    auto unblock = wil::scope_exit([&] { if (!released) release.set_value(); });
+    EXPECT_EQ(started.get_future().wait_for(std::chrono::seconds(8)), std::future_status::ready);
+    const auto deferred = scanner.fingerprint(root);
+    EXPECT_FALSE(deferred.complete);
+    EXPECT_EQ(deferred.hashed, 0);
+    release.set_value();
+    released = true;
+    ASSERT_TRUE(job.get().complete);
+    const auto finished = scanner.fingerprint(root);
+    EXPECT_TRUE(finished.complete);
+    EXPECT_EQ(finished.hashed, 2);
+}
+
+TEST_F(LibraryScannerTest, UnchangedPendingFilesReuseTheirRecordedFingerprint) {
+    std::ofstream(dir / "music" / "album" / "words.lrc") << "lyrics";
+    bool playing = false;
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store, [&] { return playing; });
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET identity_state=1"); }).get();
+    playing = true;
+    const auto report = scanner.scan(root);
+    EXPECT_TRUE(report.complete);
+    EXPECT_FALSE(report.deferred);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL AND identity_state=0"), 1);
 }
 
 TEST_F(LibraryScannerTest, ReparseDirectoriesDoNotEscapeOrLoop) {
@@ -597,6 +839,13 @@ TEST_F(LibraryScannerTest, ReparseDirectoriesDoNotEscapeOrLoop) {
 }
 
 TEST_F(LibraryScannerTest, MonitorScansChangesAndReconnectsAnOfflineRoot) {
+    const auto renameWhenReleased = [&](const fs::path& from, const fs::path& to) {
+        return waitFor([&] {
+            std::error_code error;
+            fs::rename(from, to, error);
+            return !error;
+        });
+    };
     audio();
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
@@ -611,10 +860,10 @@ TEST_F(LibraryScannerTest, MonitorScansChangesAndReconnectsAnOfflineRoot) {
     ASSERT_TRUE(waitFor([&] { return count(store) == 2; }));
     fs::remove(dir / "music" / "album" / "one.flac");
     ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
-    fs::rename(dir / "music", dir / "offline");
+    ASSERT_TRUE(renameWhenReleased(dir / "music", dir / "offline"));
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots WHERE removed IS NULL") == 0; }));
     EXPECT_EQ(count(store), 1);
-    fs::rename(dir / "offline", dir / "music");
+    ASSERT_TRUE(renameWhenReleased(dir / "offline", dir / "music"));
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots WHERE removed IS NULL") == 1; }));
     EXPECT_EQ(count(store), 1);
 }
@@ -655,7 +904,8 @@ TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcur
         for (int album = 0; album < 4; ++album) {
             const auto folder = dir / "music" / std::to_string(album);
             fs::create_directories(folder);
-            fs::copy_file(testutil::testFile("16-44.1k"), folder / (std::to_string(pass) + ".flac"));
+            using namespace camel::audio::testaudio;
+            writeWav(folder / (std::to_string(pass) + ".wav"), makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
         }
         maximum = 0;
         ASSERT_TRUE(scanner.scan(root).complete);

@@ -476,6 +476,20 @@ private:
         persist();
     }
 
+    // mpg123 scans the whole stream when playback opens it, so its length replaces a scan-time estimate.
+    void recordPlaybackLength() {
+        if (!library_ || !state_.queueEntryId) return;
+        const auto binding = libraryEntries_.find(state_.queueEntryId);
+        if (binding == libraryEntries_.end() || !binding->second.file || binding->second.lengthRecorded) return;
+        const auto playback = engine_->snapshot();
+        if (!playback.source || !playback.source->totalFrames || playback.decoder != audio::DecoderKind::Mpg123 ||
+            playback.file != toWide(entry(state_.queueEntryId).source.pathUtf8()))
+            return;
+        binding->second.lengthRecorded = true;
+        LibraryScanner(*library_).recordExactLength(binding->second.file, playback.source->sampleRate,
+                                                    playback.source->totalFrames);
+    }
+
     // Keeps the entries that follow queued in the engine while a stream is open, so they play gaplessly. The engine
     // takes one more as soon as its decoder moves on to the previous one, seconds before that one is heard.
     void ensureNextQueued() {
@@ -588,6 +602,7 @@ private:
                 refreshLibraryAvailability();
                 advanceAfterTrackEnd();
                 ensureNextQueued();
+                recordPlaybackLength();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -616,6 +631,7 @@ private:
         std::wstring path;
         int64_t file = 0;
         bool detached = false;
+        bool lengthRecorded = false;
     };
     std::map<uint64_t, LibraryEntry> libraryEntries_;
     mutable std::mutex mutex_;

@@ -42,6 +42,8 @@ public:
     int64_t addRoot(const std::filesystem::path& path);
     void removeRoot(int64_t root);
     void setCueEncoding(const std::filesystem::path& cuePath, std::optional<uint32_t> codePage);
+    // Queues replacing a scan-time length estimate with the exact length playback measured; exact rows are unchanged.
+    void recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames);
     ScanReport scan(int64_t root, const CancellationToken& token = {});
     FingerprintReport fingerprint(int64_t root, const CancellationToken& token = {});
 

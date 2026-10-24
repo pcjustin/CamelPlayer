@@ -4,6 +4,7 @@
 
 // FLAC, ALAC, WAV, AIFF, AAC and MP3 through Symphonia (Rust, rust/symphonia_ffi).
 #include "Engine/decode/DecoderImpl.h"
+#include "Engine/decode/FormatProbe.h"
 
 #include <bit>
 #include <cstring>
@@ -84,6 +85,14 @@ private:
 
 std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path, uint32_t lossyBits) {
     return std::make_unique<SymphoniaDecoder>(path, lossyBits);
+}
+
+SourceInfo probeAacInfo(const std::filesystem::path& path) {
+    const SymphoniaDecoder decoder(path, 24);
+    auto info = decoder.info();
+    if (const auto trim = mp4EncoderTrim(path, info.sampleRate)) info.totalFrames = trim->frames;
+    else if (!lossyLengthDeclared(path)) info.totalFrames = 0;
+    return info;
 }
 
 } // namespace camel::audio

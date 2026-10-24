@@ -243,6 +243,10 @@ const std::vector<Migration>& libraryMigrations() {
                     "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce(old.artist_norm,old.artist,'')); END;"
                     "INSERT INTO tracks_fts(tracks_fts) VALUES('rebuild');");
         },
+        [](sqlite::Database& db) {
+            // An estimated total_frames is replaced by the exact length the first time playback opens the file.
+            db.exec("ALTER TABLE tracks ADD COLUMN length_estimated INTEGER NOT NULL DEFAULT 0;");
+        },
     };
     return migrations;
 }

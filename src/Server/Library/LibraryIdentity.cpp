@@ -12,6 +12,8 @@
 #include <iterator>
 #include <cstring>
 #include <set>
+#include <array>
+#include <cstddef>
 
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryStore.h"
@@ -80,7 +82,7 @@ bool sourceGone(const std::string& source, const std::string& destination, const
 
 constexpr const char* kMetadata =
     "title,album,album_artist,artist,composer,genre,year,track_number,track_total,disc_number,disc_total,"
-    "format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
+    "format,sample_rate,bits_per_sample,channels,total_frames,length_estimated,embedded_cover,lyrics,"
     "rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,"
     "title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort,title_sort_tag,album_sort_tag,artist_sort_tag";
 
@@ -154,6 +156,45 @@ FileVersion fileVersion(const std::filesystem::path& path) {
     auto handle = open(path);
     if (!handle) throw std::runtime_error("cannot read file identity: " + toUtf8(path.wstring()));
     return version(handle.get(), path);
+}
+
+std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const CancellationToken& token) {
+    BY_HANDLE_FILE_INFORMATION directory{};
+    if (!GetFileInformationByHandle(handle, &directory) || (directory.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+        return std::nullopt;
+    alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64 * 1024> buffer;
+    std::vector<DirectoryEntry> result;
+    auto request = FileIdBothDirectoryRestartInfo;
+    for (;;) {
+        if (token.cancelled()) return std::nullopt;
+        if (!GetFileInformationByHandleEx(handle, request, buffer.data(), DWORD(buffer.size()))) {
+            if (GetLastError() == ERROR_NO_MORE_FILES) break;
+            return std::nullopt;
+        }
+        request = FileIdBothDirectoryInfo;
+        size_t offset = 0;
+        for (;;) {
+            constexpr auto header = offsetof(FILE_ID_BOTH_DIR_INFO, FileName);
+            if (offset > buffer.size() - header) return std::nullopt;
+            const auto* entry = reinterpret_cast<const FILE_ID_BOTH_DIR_INFO*>(buffer.data() + offset);
+            if (entry->FileNameLength % sizeof(wchar_t) || entry->FileNameLength > buffer.size() - offset - header)
+                return std::nullopt;
+            DirectoryEntry item{std::wstring(entry->FileName, entry->FileNameLength / sizeof(wchar_t)), entry->FileAttributes};
+            if (!(entry->FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+                item.version = {entry->EndOfFile.QuadPart, entry->LastWriteTime.QuadPart, directory.dwVolumeSerialNumber,
+                                {}, entry->CreationTime.QuadPart};
+                item.version.index.resize(sizeof(entry->FileId.QuadPart));
+                memcpy(item.version.index.data(), &entry->FileId.QuadPart, item.version.index.size());
+                item.version.legacyIndex = item.version.index;
+            }
+            result.push_back(std::move(item));
+            if (!entry->NextEntryOffset) break;
+            if (entry->NextEntryOffset < header || entry->NextEntryOffset % alignof(FILE_ID_BOTH_DIR_INFO) ||
+                entry->NextEntryOffset > buffer.size() - offset) return std::nullopt;
+            offset += entry->NextEntryOffset;
+        }
+    }
+    return result;
 }
 
 std::wstring storageKey(const std::filesystem::path& path) {

@@ -6,6 +6,7 @@
 // damaged file; migrations are backed up first and a failed migration restores the previous database.
 #pragma once
 #include <condition_variable>
+#include <atomic>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -58,6 +59,7 @@ public:
 
 private:
     friend class LibraryScanner;
+    std::atomic<unsigned> activeScans_{0};
     std::mutex scanMutex_;
     std::mutex jobsMutex_;
     std::multimap<int64_t, CancellationToken> jobs_;

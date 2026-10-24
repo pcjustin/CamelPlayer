@@ -15,6 +15,8 @@
 #include "OutputBridge/CaptureOutput.h"
 #include "Engine/SamplePacker.h"
 #include "Common/util/Text.h"
+#include "Engine/decode/IDecoder.h"
+#include "LameFixture.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -737,6 +739,32 @@ TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
     EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
     EXPECT_TRUE(send(command(CommandKind::TogglePause)).commandError);
     EXPECT_EQ(server->snapshot().queueEntryId, 0u);
+    server.reset();
+}
+
+TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
+    const auto dir = testutil::tempDir() / "server-estimated-mp3";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "music");
+    const auto path = dir / "music" / "plain.mp3";
+    testutil::writeMp3(path, testaudio::makeSignal({"short", 44100, 16, 2, 2.0}), 44100, 16, 2, false);
+    const auto exact = openDecoder(DecoderKind::Mpg123, path)->info().totalFrames;
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET total_frames=1 WHERE length_estimated=1"); }).get();
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+        return std::make_unique<ManualOutput>(probe);
+    });
+    ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
+    const auto end = std::chrono::steady_clock::now() + 5s;
+    const auto corrected = [&] {
+        return store.openReader().scalar("SELECT COUNT(*) FROM tracks WHERE length_estimated=0 AND total_frames=" +
+                                         std::to_string(exact)) == 1;
+    };
+    while (!corrected() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(20ms);
+    EXPECT_TRUE(corrected());
+    send(command(CommandKind::Stop));
     server.reset();
 }
 

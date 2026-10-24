@@ -19,7 +19,15 @@ struct FileVersion {
     bool sameFile(const FileVersion& other) const;
 };
 
+struct DirectoryEntry {
+    std::wstring name;
+    uint32_t attributes = 0;
+    FileVersion version; // files only
+};
+
 FileVersion fileVersion(const std::filesystem::path& path);
+// Enumerates an open directory handle with its file IDs; a null result requests FindFirstFileExW and per-file queries.
+std::optional<std::vector<DirectoryEntry>> directoryEntries(void* directory, const CancellationToken& token);
 std::wstring storageKey(const std::filesystem::path& path);
 // Columns: size, mtime, volume_serial, file_index, created, volume_key.
 FileVersion storedVersion(const sqlite::Statement& row, int column);
