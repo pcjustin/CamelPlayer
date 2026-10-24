@@ -15,15 +15,6 @@
         <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
-        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
-        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
-        <Style x:Key="RowActionStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
-            <Setter Property="Width" Value="36" />
-            <Setter Property="Height" Value="36" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="CornerRadius" Value="18" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
         <DataTemplate x:Key="RowTemplate" x:DataType="local:BrowseItem">
             <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnRowContextRequested">
                 <Grid.ColumnDefinitions>
@@ -31,8 +22,6 @@
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="Auto" MinWidth="56" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 <TextBlock Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
@@ -41,10 +30,6 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock Grid.Column="3" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Button Grid.Column="4" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Style="{StaticResource RowActionStyle}"
-                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><FontIcon Glyph="&#xE710;" FontSize="14" /></Button>
-                <Button Grid.Column="5" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Style="{StaticResource RowActionStyle}"
-                        Visibility="{x:Bind IsTrack, Mode=OneWay}"><FontIcon Glyph="&#xE893;" FontSize="14" /></Button>
             </Grid>
         </DataTemplate>
         <!-- Folder pages list subfolders (a root also shows where it is) and then the folder's tracks. -->
@@ -54,8 +39,6 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="40" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Grid>
                         <FontIcon Glyph="&#xE8B7;" FontSize="28" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -67,8 +50,6 @@
                         <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
-                    <Button Grid.Column="2" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE710;" FontSize="14" /></Button>
-                    <Button Grid.Column="3" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE893;" FontSize="14" /></Button>
                 </Grid>
                 <Grid ColumnSpacing="16" Visibility="{x:Bind IsTrack, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
@@ -77,8 +58,6 @@
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="Auto" MinWidth="56" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Grid>
                         <FontIcon Glyph="&#xE8D6;" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -92,8 +71,6 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Button Grid.Column="5" x:Uid="Library_AddQueue" Click="OnAddQueueClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE710;" FontSize="14" /></Button>
-                    <Button Grid.Column="6" x:Uid="Library_PlayNext" Click="OnPlayNextClick" Style="{StaticResource RowActionStyle}"><FontIcon Glyph="&#xE893;" FontSize="14" /></Button>
                 </Grid>
             </Grid>
         </DataTemplate>

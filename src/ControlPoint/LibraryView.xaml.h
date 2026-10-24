@@ -32,8 +32,6 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnTrailClicked(Microsoft::UI::Xaml::Controls::BreadcrumbBar const&,
                         Microsoft::UI::Xaml::Controls::BreadcrumbBarItemClickedEventArgs const&);
     void OnFolderItemClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
-    void OnAddQueueClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnPlayNextClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnAddAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

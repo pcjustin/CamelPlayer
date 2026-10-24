@@ -143,10 +143,6 @@
   <data name="Queue_SavePrimary" xml:space="preserve"><value>儲存</value></data>
   <data name="Queue_Saved" xml:space="preserve"><value>播放清單已儲存</value></data>
   <data name="Queue_SaveFailed" xml:space="preserve"><value>無法將佇列儲存為播放清單</value></data>
-  <data name="Library_AddQueue.AutomationProperties.Name" xml:space="preserve"><value>加入佇列</value></data>
-  <data name="Library_AddQueue.ToolTipService.ToolTip" xml:space="preserve"><value>加入佇列</value></data>
-  <data name="Library_PlayNext.AutomationProperties.Name" xml:space="preserve"><value>接著播放</value></data>
-  <data name="Library_PlayNext.ToolTipService.ToolTip" xml:space="preserve"><value>接著播放</value></data>
   <data name="Library_AddAlbum.Text" xml:space="preserve"><value>加入佇列末端</value></data>
   <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>插播整張專輯</value></data>
   <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>播放整張專輯</value></data>
@@ -159,5 +155,5 @@
   <data name="Library_MenuAddQueue" xml:space="preserve"><value>加到佇列尾端</value></data>
   <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>關閉播放佇列</value></data>
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>關閉播放佇列</value></data>
-  <data name="Queue_Empty.Text" xml:space="preserve"><value>播放佇列是空的。在曲目、資料夾和專輯上使用「接著播放」或「加入佇列」。</value></data>
+  <data name="Queue_Empty.Text" xml:space="preserve"><value>播放佇列是空的。在曲目或資料夾上按右鍵，選擇「接著播放」或「加到佇列尾端」。</value></data>
 </root>

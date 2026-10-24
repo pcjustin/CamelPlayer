@@ -143,10 +143,6 @@
   <data name="Queue_SavePrimary" xml:space="preserve"><value>Save</value></data>
   <data name="Queue_Saved" xml:space="preserve"><value>Playlist saved</value></data>
   <data name="Queue_SaveFailed" xml:space="preserve"><value>Could not save the queue as a playlist</value></data>
-  <data name="Library_AddQueue.AutomationProperties.Name" xml:space="preserve"><value>Add to queue</value></data>
-  <data name="Library_AddQueue.ToolTipService.ToolTip" xml:space="preserve"><value>Add to queue</value></data>
-  <data name="Library_PlayNext.AutomationProperties.Name" xml:space="preserve"><value>Play next</value></data>
-  <data name="Library_PlayNext.ToolTipService.ToolTip" xml:space="preserve"><value>Play next</value></data>
   <data name="Library_AddAlbum.Text" xml:space="preserve"><value>Add album to end of queue</value></data>
   <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>Play album next</value></data>
   <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>Play album</value></data>
@@ -159,5 +155,5 @@
   <data name="Library_MenuAddQueue" xml:space="preserve"><value>Add to end of queue</value></data>
   <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>Close queue</value></data>
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>Close queue</value></data>
-  <data name="Queue_Empty.Text" xml:space="preserve"><value>The queue is empty. Use Play next or Add to queue on tracks, folders and albums.</value></data>
+  <data name="Queue_Empty.Text" xml:space="preserve"><value>The queue is empty. Right-click a track or folder and choose Play next or Add to end of queue.</value></data>
 </root>

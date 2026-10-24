@@ -353,16 +353,6 @@ void LibraryView::queueFolder(int64_t folder, bool playNext) {
     });
 }
 
-void LibraryView::OnAddQueueClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
-    const auto item = sender.as<FrameworkElement>().DataContext().as<CamelPlayer::BrowseItem>();
-    queueItem(ui::LibraryCollection::rowOf(item), false);
-}
-
-void LibraryView::OnPlayNextClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
-    const auto item = sender.as<FrameworkElement>().DataContext().as<CamelPlayer::BrowseItem>();
-    queueItem(ui::LibraryCollection::rowOf(item), true);
-}
-
 void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
     const auto element = sender.as<FrameworkElement>();
     const auto item = element.DataContext().try_as<CamelPlayer::BrowseItem>();
