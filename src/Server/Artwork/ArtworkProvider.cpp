@@ -32,14 +32,8 @@ std::optional<ArtworkCandidate> folderImageFile(const std::filesystem::path& fol
     for (const auto& entry : std::filesystem::directory_iterator(folder, ec)) {
         if (token.cancelled()) return std::nullopt;
         if (!entry.is_regular_file(ec)) continue;
-        const std::wstring stem = lower(entry.path().stem().wstring());
-        const std::wstring ext = lower(entry.path().extension().wstring());
-        for (size_t n = 0; n < std::size(kNames); n++)
-            for (size_t e = 0; e < std::size(kExtensions); e++)
-                if (stem == kNames[n] && ext == kExtensions[e].first) {
-                    const size_t rank = n * std::size(kExtensions) + e;
-                    if (!best || rank < best->first) best = {rank, entry.path()};
-                }
+        if (const auto rank = folderArtworkRank(entry.path()); rank && (!best || rank->first < best->first))
+            best = {rank->first, entry.path()};
     }
     if (!best) return std::nullopt;
     const auto size = std::filesystem::file_size(best->second, ec);
@@ -119,6 +113,16 @@ std::vector<std::string> ArtworkChain::ids() const {
 
 std::unique_ptr<IArtworkProvider> makeFolderArtworkProvider() {
     return std::make_unique<FolderProvider>(false);
+}
+
+std::optional<std::pair<size_t, const char*>> folderArtworkRank(const std::filesystem::path& file) {
+    const std::wstring stem = lower(file.stem().wstring());
+    const std::wstring ext = lower(file.extension().wstring());
+    for (size_t n = 0; n < std::size(kNames); n++)
+        for (size_t e = 0; e < std::size(kExtensions); e++)
+            if (stem == kNames[n] && ext == kExtensions[e].first)
+                return std::pair{n * std::size(kExtensions) + e, kExtensions[e].second};
+    return std::nullopt;
 }
 
 std::optional<ArtworkCandidate> findFolderArtworkFile(const std::filesystem::path& folder, const CancellationToken& token) {

@@ -1,0 +1,15 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+namespace CamelPlayer {
+// One row or tile of a library view; a placeholder until its page arrives, then filled in place.
+[default_interface] runtimeclass BrowseItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged {
+    String Title { get; };
+    String Subtitle { get; };
+    String Detail { get; };
+    String Trailing { get; }; // right-aligned: a duration or a count
+    Boolean IsFolder { get; };
+    Boolean IsTrack { get; };
+}
+} // namespace CamelPlayer

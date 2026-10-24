@@ -3,16 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "Server/Library/Playlists.h"
 
-#include <windows.h>
-#include <wil/resource.h>
-
 #include <algorithm>
 #include <chrono>
 #include <set>
 #include <stdexcept>
 #include <sqlite3.h>
 
-#include "Common/util/Text.h"
+#include "Server/Library/LibraryViews.h"
 
 namespace camel::server {
 namespace {
@@ -43,19 +40,11 @@ struct Expansion {
     std::string firstName;
 };
 
-// The folder's on-disk spelling; stored keys are lowercase.
-std::string folderName(const std::string& key) {
-    const std::filesystem::path path(toWide(key));
-    WIN32_FIND_DATAW data{};
-    wil::unique_hfind find(FindFirstFileExW(path.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0));
-    return toUtf8(find ? data.cFileName : path.filename().wstring());
-}
-
 std::string sourceName(sqlite::Database& db, const PlaylistSource& source) {
     switch (source.kind) {
     case PlaylistSource::Kind::Folder: {
         auto row = db.prepare("SELECT path FROM folders WHERE id=?");
-        return row.bind(1, source.id).step() ? folderName(row.text(0)) : std::string{};
+        return row.bind(1, source.id).step() ? libraryDisplayName(row.text(0)) : std::string{};
     }
     case PlaylistSource::Kind::Album: {
         auto row = db.prepare("SELECT title FROM albums WHERE id=?");

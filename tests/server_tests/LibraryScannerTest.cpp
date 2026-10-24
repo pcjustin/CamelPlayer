@@ -117,6 +117,21 @@ TEST_F(LibraryScannerTest, NormalizesAliasesAndOverlappingRootsInBothOrders) {
     EXPECT_THROW(scanner.addRoot(dir / "music" / "album" / "one.flac"), std::invalid_argument);
 }
 
+TEST_F(LibraryScannerTest, ACompactDateYieldsItsYear) {
+    const auto file = audio();
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("DATE", TagLib::StringList("20200501"));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    EXPECT_EQ(count(store, "SELECT year FROM tracks"), 2020);
+}
+
 TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchangedMetadata) {
     const auto file = audio();
     {
@@ -880,6 +895,109 @@ TEST_F(LibraryScannerTest, PeriodicScanRunsWithoutANotification) {
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; }));
     store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots WHERE removed IS NULL") == 1; }));
+}
+
+TEST_F(LibraryScannerTest, AReachableRootIsOnlineBeforeItsScanFinishes) {
+    using namespace camel::audio;
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::atomic<bool> release = false;
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        while (!release) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return original(path, format, bits);
+    });
+    fs::create_directories(dir / "music" / "album");
+    testaudio::writeWav(dir / "music" / "album" / "a.wav", testaudio::makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
+    LibraryMonitor::Options options;
+    options.offlineInterval = std::chrono::milliseconds(50);
+    LibraryMonitor monitor(store, options);
+    auto finish = wil::scope_exit([&] { release = true; }); // before the monitor joins its blocked scan
+    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots WHERE removed IS NULL") == 1; }));
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL"), 0);
+}
+
+TEST_F(LibraryScannerTest, AlbumsAppearWithEachBatchOfAFirstScan) {
+    using namespace camel::audio;
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::atomic<bool> release = false;
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        while (path.filename() == L"late.wav" && !release) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return original(path, format, bits);
+    });
+    const auto signal = testaudio::makeSignal({"short", 44100, 16, 2, 0.01});
+    fs::create_directories(dir / "music" / "first");
+    fs::create_directories(dir / "music" / "late");
+    for (int i = 0; i < 500; ++i) testaudio::writeWav(dir / "music" / "first" / (std::to_string(i) + ".wav"), signal, 44100, 16, 2);
+    testaudio::writeWav(dir / "music" / "late" / "late.wav", signal, 44100, 16, 2);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    auto scan = std::async(std::launch::async, [&] { return scanner.scan(root); });
+    auto finish = wil::scope_exit([&] { release = true; }); // before the scan future joins
+    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM albums") == 1; }));
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE album_id IS NOT NULL"), 500);
+    const auto progress = store.scanProgress();
+    EXPECT_EQ(progress.scans, 1);
+    EXPECT_EQ(progress.found, 501);
+    EXPECT_EQ(progress.checked, 500);
+    EXPECT_EQ(progress.finishing, 0);
+    release = true;
+    EXPECT_TRUE(scan.get().complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM albums"), 2);
+    EXPECT_EQ(store.scanProgress().scans, 0);
+    EXPECT_EQ(store.scanProgress().found, 0);
+}
+
+TEST_F(LibraryScannerTest, AnotherRootIsAddedAndScannedWhileALongScanRuns) {
+    using namespace camel::audio;
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::atomic<bool> release = false;
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        while (path.filename() == L"late.wav" && !release) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return original(path, format, bits);
+    });
+    const auto signal = testaudio::makeSignal({"short", 44100, 16, 2, 0.01});
+    fs::create_directories(dir / "music" / "late");
+    fs::create_directories(dir / "other" / "album");
+    testaudio::writeWav(dir / "music" / "late" / "late.wav", signal, 44100, 16, 2);
+    testaudio::writeWav(dir / "other" / "album" / "b.wav", signal, 44100, 16, 2);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto first = scanner.addRoot(dir / "music");
+    std::optional<std::future<int64_t>> add;
+    auto slow = std::async(std::launch::async, [&] { return scanner.scan(first); });
+    auto finish = wil::scope_exit([&] { release = true; }); // before the futures join
+    ASSERT_TRUE(waitFor([&] { return store.scanProgress().found == 1; }));
+    add = std::async(std::launch::async, [&] { return scanner.addRoot(dir / "other"); });
+    ASSERT_EQ(add->wait_for(std::chrono::seconds(10)), std::future_status::ready);
+    const auto second = add->get();
+    EXPECT_TRUE(scanner.scan(second).complete); // while the first root's scan still waits
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM albums"), 1);
+    release = true;
+    EXPECT_TRUE(slow.get().complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM albums"), 2);
+}
+
+TEST_F(LibraryScannerTest, AnUnchangedTrackWithoutAnAlbumIsGroupedByTheNextScan) {
+    audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET album_id=NULL; DELETE FROM albums;"); }).get();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM albums"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE album_id IS NOT NULL"), 1);
 }
 
 TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcurrency) {

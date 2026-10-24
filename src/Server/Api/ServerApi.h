@@ -14,6 +14,7 @@
 #include "Server/Playback/QueuePolicy.h"
 #include "Common/settings/Settings.h"
 #include "Server/Library/LibraryBrowse.h"
+#include "Server/Library/LibraryViews.h"
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
 
@@ -86,7 +87,8 @@ enum class CommandKind : uint8_t {
     SetRepeat,  // repeat
     RemoveLibraryRoot, // rootId
     ResetPlayStatistics, // tracks: delete their plays and zero their counters
-    ResetAllPlayStatistics
+    ResetAllPlayStatistics,
+    AddLibraryRoot // path: a folder to index; overlapping and alias paths are normalized by the Server
 };
 
 struct Command {
@@ -103,6 +105,7 @@ struct Command {
     std::optional<bool> shuffle;
     std::optional<RepeatMode> repeat;
     std::vector<LibraryTrackKey> tracks;
+    std::string path;
     bool operator==(const Command&) const = default;
 };
 
@@ -217,6 +220,18 @@ public:
     virtual PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const = 0;
     // Playlists (docs/Plan.md §7.9) run on the caller's thread and write through the library writer, so large
     // selections never hold up playback commands.
+    // Browse views (docs/Plan.md §8.2); call them off the UI thread.
+    virtual LibraryAlbumPage browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
+                                          int64_t limit, std::optional<uint64_t> revision,
+                                          const CancellationToken& token = {}) const = 0;
+    virtual LibraryGroupPage browseGroups(LibraryGroupField field, int64_t offset, int64_t limit,
+                                          std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
+    virtual LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
+                                                std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
+    virtual LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const = 0;
+    virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;
+    virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
+    virtual LibraryScanProgress libraryScanProgress() const = 0;
     virtual std::vector<PlaylistSummary> playlists() const = 0;
     virtual PlaylistPage playlistItems(int64_t playlist, int64_t offset, int64_t limit) const = 0;
     virtual SelectionPreview previewSelection(const std::vector<PlaylistSource>& sources,

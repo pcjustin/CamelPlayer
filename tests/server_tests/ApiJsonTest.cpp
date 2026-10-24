@@ -164,6 +164,16 @@ TEST(ApiJson, PlayStatisticsResetRoundTripsTrackKeys) {
     EXPECT_EQ(commandFromJson(j), all);
 }
 
+TEST(ApiJson, AddingALibraryRootRoundTripsItsPath) {
+    Command c;
+    c.kind = CommandKind::AddLibraryRoot;
+    c.path = "\\\\nas\\音樂";
+    EXPECT_EQ(throughText(c, commandFromJson), c);
+    auto j = toJson(c);
+    j.erase("path");
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+}
+
 TEST(ApiJson, MalformedInputIsRefused) {
     json j = toJson(fullCommand());
     for (const char* key : {"kind", "frame", "sources", "repeat"}) {

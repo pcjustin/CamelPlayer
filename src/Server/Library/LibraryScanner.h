@@ -53,6 +53,7 @@ private:
     std::function<bool()> playbackActive_;
     std::function<std::filesystem::path()> playingSource_;
     std::function<bool()> playbackGate(const std::filesystem::path& root) const;
+    std::mutex& rootLock(int64_t root);
 };
 
 class LibraryMonitor {
@@ -69,6 +70,8 @@ public:
     ~LibraryMonitor();
     LibraryMonitor(const LibraryMonitor&) = delete;
     LibraryMonitor& operator=(const LibraryMonitor&) = delete;
+    // Rereads the registered roots on the next pass instead of after the availability interval.
+    void refreshRoots();
 
 private:
     class Impl;

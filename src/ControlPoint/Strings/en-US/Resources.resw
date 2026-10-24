@@ -115,4 +115,24 @@
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>The device cannot play this format bit-perfectly; skipped</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>Driver error</value></data>
   <data name="Error_Other" xml:space="preserve"><value>Playback error</value></data>
+  <data name="Library_Empty.Text" xml:space="preserve"><value>No music yet. Add a folder under Settings › Library; it is indexed in the background.</value></data>
+  <data name="Library_Unknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="Library_Albums" xml:space="preserve"><value>{0} albums</value></data>
+  <data name="Library_Tracks" xml:space="preserve"><value>{0} tracks</value></data>
+  <data name="Library_Folder" xml:space="preserve"><value>Folder</value></data>
+  <data name="Library_SortTitle" xml:space="preserve"><value>Title</value></data>
+  <data name="Library_SortArtist" xml:space="preserve"><value>Artist</value></data>
+  <data name="Library_SortAlbum" xml:space="preserve"><value>Album</value></data>
+  <data name="Library_SortYear" xml:space="preserve"><value>Year</value></data>
+  <data name="Library_SortDuration" xml:space="preserve"><value>Duration</value></data>
+  <data name="Library_SortAdded" xml:space="preserve"><value>Date added</value></data>
+  <data name="Library_Descending" xml:space="preserve"><value>Descending</value></data>
+  <data name="Library_Back" xml:space="preserve"><value>Back</value></data>
+  <data name="Settings_Library.Text" xml:space="preserve"><value>Library</value></data>
+  <data name="Settings_AddFolder.Content" xml:space="preserve"><value>Add folder…</value></data>
+  <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>Remove folder</value></data>
+  <data name="Settings_FolderOffline" xml:space="preserve"><value>offline</value></data>
+  <data name="Library_AlbumsPending" xml:space="preserve"><value>Albums appear here as the library folders are scanned.</value></data>
+  <data name="Library_Scanning" xml:space="preserve"><value>Scanning the library: {0} of {1} files checked</value></data>
+  <data name="Library_Finishing" xml:space="preserve"><value>Scan checked every file; organizing albums and CUE sheets…</value></data>
 </root>

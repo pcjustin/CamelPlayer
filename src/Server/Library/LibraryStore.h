@@ -13,6 +13,7 @@
 #include <future>
 #include <mutex>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -28,6 +29,14 @@ namespace camel::server {
 class MigrationError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
+};
+
+// The scans in progress (none when idle), summed over roots: files their listings found so far, files they checked,
+// and how many have checked everything and are finishing (applying CUE sheets, regrouping albums).
+struct LibraryScanProgress {
+    int64_t scans = 0;
+    int64_t found = 0, checked = 0;
+    int64_t finishing = 0;
 };
 
 class LibraryStore {
@@ -54,13 +63,20 @@ public:
     std::future<void> write(std::function<void(sqlite::Database&)> work);
     // A read-only connection for the calling thread; WAL lets it read while the writer writes.
     sqlite::Database openReader() const;
+    LibraryScanProgress scanProgress() const {
+        return {scanning_.load(), scanFound_.load(), scanChecked_.load(), scanFinishing_.load()};
+    }
 
     static constexpr int kKeptBackups = 3;
 
 private:
     friend class LibraryScanner;
     std::atomic<unsigned> activeScans_{0};
+    std::atomic<int64_t> scanning_{0}, scanFound_{0}, scanChecked_{0}, scanFinishing_{0};
+    // Different roots scan at the same time; scanMutex_ serializes what crosses roots (finishing a scan, CUE edits,
+    // absorbing roots), and each root's lock (under jobsMutex_) keeps one scan per root.
     std::mutex scanMutex_;
+    std::map<int64_t, std::unique_ptr<std::mutex>> rootLocks_;
     std::mutex jobsMutex_;
     std::multimap<int64_t, CancellationToken> jobs_;
     void writerMain();

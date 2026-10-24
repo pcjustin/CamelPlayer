@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+<!-- Library pages (docs/Plan.md §8.2): every list is virtualized and filled from the Server off the UI thread. -->
+<UserControl
+    x:Class="CamelPlayer.LibraryView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CamelPlayer">
+    <UserControl.Resources>
+        <DataTemplate x:Key="RowTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,6" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" MinWidth="56" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="3" Text="{x:Bind Trailing, Mode=OneWay}" TextAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </DataTemplate>
+        <!-- Folder pages list subfolders (a root also shows where it is) and then the folder's tracks. -->
+        <DataTemplate x:Key="FolderRowTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,6">
+                <Grid ColumnSpacing="16" Visibility="{x:Bind IsFolder, Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8B7;" FontSize="28" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Grid>
+                <Grid ColumnSpacing="16" Visibility="{x:Bind IsTrack, Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="Auto" MinWidth="56" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8D6;" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" TextAlignment="Right"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </Grid>
+        </DataTemplate>
+        <!-- Covers arrive with the artwork cache (M4-R03). -->
+        <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">
+            <StackPanel Width="168" Spacing="2" Padding="4">
+                <Border Height="160" CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                    <FontIcon Glyph="&#xE93C;" FontSize="40" Opacity="0.4" />
+                </Border>
+                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" />
+                <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button x:Name="BackButton" Click="OnBackClick" Visibility="Collapsed" VerticalAlignment="Center">
+                <SymbolIcon Symbol="Back" />
+            </Button>
+            <StackPanel Grid.Column="1">
+                <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="HeaderDetail" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
+            </StackPanel>
+            <ComboBox x:Name="SortCombo" Grid.Column="2" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
+            <ToggleButton x:Name="DescendingToggle" Grid.Column="3" VerticalAlignment="Center" Click="OnDescendingClick">
+                <SymbolIcon Symbol="Sort" />
+            </ToggleButton>
+        </Grid>
+
+        <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                  IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" />
+        <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="None"
+                  IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" />
+        <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="None"
+                  IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />
+        <TextBlock x:Name="EmptyText" Grid.Row="1" TextWrapping="Wrap" Visibility="Collapsed"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    </Grid>
+</UserControl>

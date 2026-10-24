@@ -57,7 +57,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::ResetAllPlayStatistics)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::AddLibraryRoot)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
@@ -67,7 +67,7 @@ void validate(const Command& c) {
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) ||
-        c.tracks.empty() == (c.kind == CommandKind::ResetPlayStatistics))
+        c.tracks.empty() == (c.kind == CommandKind::ResetPlayStatistics) || c.path.empty() == (c.kind == CommandKind::AddLibraryRoot))
         throw std::invalid_argument("invalid Server command payload");
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
@@ -340,6 +340,11 @@ private:
             case CommandKind::SetRepeat:
                 if (c.repeat) policy_.setRepeat(*c.repeat);
                 break;
+            case CommandKind::AddLibraryRoot:
+                if (!library_) throw std::logic_error("Server library is not configured");
+                LibraryScanner(*library_).addRoot(std::filesystem::path(toWide(c.path)));
+                libraryMonitor_->refreshRoots();
+                break;
             case CommandKind::RemoveLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
                 LibraryScanner(*library_).removeRoot(c.rootId);
@@ -477,6 +482,18 @@ private:
         return *std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == id; });
     }
 
+    // Library sources arrive as lowercase index keys; the file opens and shows under its on-disk spelling, which is
+    // resolved once, when the entry is first opened, since a NAS lookup per queued track would stall large queues.
+    const TrackSource& playable(uint64_t id) {
+        auto& queued = *std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == id; });
+        const auto binding = libraryEntries_.find(id);
+        if (binding != libraryEntries_.end() && binding->second.file && !binding->second.spelled) {
+            binding->second.spelled = true;
+            queued.source = TrackSource(libraryDisplayPath(queued.source.pathUtf8()), queued.source.range(), queued.source.decoder());
+        }
+        return queued.source;
+    }
+
     // Ends of the previous entry that are still pending belong to playback this call supersedes.
     void startEntry(const QueuePosition& position, bool play) {
         if (policy_.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
@@ -485,7 +502,7 @@ private:
         seenTrackEnds_ = before.trackEnds;
         seenTransitions_ = before.transitions;
         chain_.clear();
-        const auto& source = entry(position.entryId).source;
+        const auto& source = playable(position.entryId);
         const std::filesystem::path path(toWide(source.pathUtf8()));
         state_.track = source;
         state_.queueEntryId = position.entryId;
@@ -614,7 +631,7 @@ private:
         const QueueAttempt attempt{state_.queueEntryId, upcoming->entryId, policy_.revision(), chain_.size()};
         if (attempt == attempted_) return;
         attempted_ = attempt;
-        const auto& source = entry(upcoming->entryId).source;
+        const auto& source = playable(upcoming->entryId);
         if (source.decoder() != state_.track->decoder()) return;
         if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder()))
             chain_.push_back(upcoming->entryId);
@@ -735,6 +752,7 @@ private:
         int64_t file = 0;
         bool detached = false;
         bool lengthRecorded = false;
+        bool spelled = false;
     };
     std::map<uint64_t, LibraryEntry> libraryEntries_;
     std::optional<PlaySession> session_;
@@ -798,6 +816,30 @@ LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offse
 }
 PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
     return impl_->playStatistics(query, token);
+}
+LibraryAlbumPage LocalServer::browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
+                                           int64_t limit, std::optional<uint64_t> revision, const CancellationToken& token) const {
+    return camel::server::browseAlbums(impl_->library(), sort, filter, offset, limit, revision, token);
+}
+LibraryGroupPage LocalServer::browseGroups(LibraryGroupField field, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                           const CancellationToken& token) const {
+    return camel::server::browseGroups(impl_->library(), field, offset, limit, revision, token);
+}
+LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
+                                                 std::optional<uint64_t> revision, const CancellationToken& token) const {
+    return camel::server::browseTrackRows(impl_->library(), sort, descending, offset, limit, revision, token);
+}
+LibraryAlbumDetail LocalServer::albumDetail(int64_t album, const CancellationToken& token) const {
+    return camel::server::albumDetail(impl_->library(), album, token);
+}
+LibraryFolderListing LocalServer::browseFolder(std::optional<int64_t> folder, const CancellationToken& token) const {
+    return camel::server::browseFolder(impl_->library(), folder, token);
+}
+std::vector<LibraryRootInfo> LocalServer::libraryRoots() const {
+    return camel::server::libraryRoots(impl_->library());
+}
+LibraryScanProgress LocalServer::libraryScanProgress() const {
+    return impl_->library().scanProgress();
 }
 std::vector<PlaylistSummary> LocalServer::playlists() const {
     return listPlaylists(impl_->library());

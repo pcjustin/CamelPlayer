@@ -714,6 +714,43 @@ protected:
     TrackSource track(const std::filesystem::path& path) { return TrackSource(toUtf8((dir / "music" / path.filename()).wstring())); }
 };
 
+TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
+    setUp({});
+    const auto second = dir / "second";
+    std::filesystem::create_directories(second / "album");
+    std::filesystem::copy_file(testutil::generatedFile({"added-root", 48000, 16, 2, 0.2}), second / "album" / "a.flac");
+    Command add = command(CommandKind::AddLibraryRoot);
+    EXPECT_THROW(server->submit(add), std::invalid_argument);
+    add.path = toUtf8(second.wstring());
+    ASSERT_FALSE(send(add).commandError);
+    EXPECT_EQ(server->libraryRoots().size(), 2u);
+    // The monitor rereads roots on its next pass rather than after its 60-second availability interval.
+    // Tracks and their albums appear with each written batch.
+    ASSERT_TRUE(waitFor([&] { return server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).total == 1; }, 20s));
+    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, 0, 10, std::nullopt).total, 1);
+    const auto albums = server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt);
+    EXPECT_EQ(server->albumDetail(albums.albums[0].id).tracks.size(), 1u);
+    const auto roots = server->browseFolder(std::nullopt);
+    EXPECT_EQ(roots.folders.size(), 2u);
+    Command missing = command(CommandKind::AddLibraryRoot);
+    missing.path = toUtf8((dir / "does-not-exist").wstring());
+    EXPECT_TRUE(send(missing).commandError);
+}
+
+TEST_F(LibraryPlaybackTest, ALibraryTrackPlaysUnderItsOnDiskSpelling) {
+    const auto music = setUp({});
+    std::filesystem::copy_file(testutil::generatedFile({"spelling", 48000, 16, 2, 0.3}), music / "Mixed Case.flac");
+    ASSERT_TRUE(scanner->scan(root).complete);
+    const auto rows = server->browseTrackRows(TrackSort::Title, false, 0, 10, std::nullopt);
+    ASSERT_EQ(rows.tracks.size(), 1u);
+    ASSERT_NE(rows.tracks[0].path.find("mixed case.flac"), std::string::npos); // the lowercase index key
+    send(queueReplace({TrackSource(rows.tracks[0].path)}));
+    const auto path = server->snapshot().playback.pathUtf8;
+    EXPECT_EQ(std::filesystem::path(toWide(path)).filename(), L"Mixed Case.flac");
+    EXPECT_FALSE(path.starts_with(R"(\\?\)"));
+    EXPECT_EQ(server->snapshot().queue.entries[0].source.pathUtf8(), path);
+}
+
 TEST_F(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLibrary) {
     const auto a = testutil::generatedFile({"queue-save-a", 48000, 16, 2, 0.3});
     setUp({a});

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "MainWindow.g.h"
+#include "LibraryView.xaml.h"
 #include "Server/Api/ServerApi.h"
 
 namespace winrt::CamelPlayer::implementation {
@@ -31,6 +32,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     winrt::fire_and_forget OnAsioPanelClick(Windows::Foundation::IInspectable const&,
                                             Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnAddFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRemoveFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
     void populateSettings(); // fills every control from settings_
@@ -46,11 +49,16 @@ private:
     void applySnapshot(const camel::server::Snapshot& snapshot);
     void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
+    // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
+    winrt::fire_and_forget refreshRoots();
+    // Shows the running library scan in Settings; reads counters, not the database.
+    void showScanProgress();
 
     camel::server::SettingsDto settings_;
     std::shared_ptr<camel::server::IServer> server_;
     camel::server::SnapshotCursor cursor_;
     std::vector<camel::server::DeviceInfo> wasapiDevices_, asioDrivers_, ksPins_;
+    std::vector<camel::server::LibraryRootInfo> roots_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer uiTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
     bool populating_ = false;     // ignore control events while filling controls
@@ -58,6 +66,7 @@ private:
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;
     uint64_t shownCommandId_ = 0;
+    winrt::hstring shownScan_;
     uint64_t shownDevicesRevision_ = 0;
 };
 

@@ -132,6 +132,7 @@ void MainWindow::InitializeComponent() {
     }
 
     populateSettings();
+    get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); });
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
     refresh.kind = CommandKind::RefreshDevices;
@@ -327,7 +328,30 @@ void MainWindow::updateBackendGroups() {
 }
 
 void MainWindow::refreshFromServer() {
-    if (server_) applySnapshot(server_->snapshot());
+    if (!server_) return;
+    applySnapshot(server_->snapshot());
+    showScanProgress();
+}
+
+void MainWindow::showScanProgress() {
+    LibraryScanProgress progress;
+    try {
+        progress = server_->libraryScanProgress();
+    } catch (const std::exception&) {
+        return; // no library configured
+    }
+    std::wstring text;
+    if (progress.scans && progress.finishing == progress.scans) {
+        text = tr(L"Library_Finishing");
+    } else if (progress.scans) {
+        text = tr(L"Library_Scanning");
+        for (const auto& [marker, n] : {std::pair{L"{0}", progress.checked}, std::pair{L"{1}", progress.found}})
+            if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, 3, std::to_wstring(n));
+    }
+    if (text == shownScan_) return;
+    shownScan_ = hstring(text);
+    ScanText().Text(shownScan_);
+    ScanText().Visibility(text.empty() ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void MainWindow::submitCommand(Command command) {
@@ -484,8 +508,84 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
 void MainWindow::showPage(hstring const& tag) {
     NowPlayingPanel().Visibility(tag == L"nowplaying" ? Visibility::Visible : Visibility::Collapsed);
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
-    const bool placeholder = tag != L"nowplaying" && tag != L"settings";
+    const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
+                         tag == L"years" || tag == L"tracks" || tag == L"folders";
+    Library().Visibility(library ? Visibility::Visible : Visibility::Collapsed);
+    auto view = get_self<LibraryView>(Library());
+    if (library) view->show(tag, PlaceholderTitle().Text());
+    else view->hide();
+    const bool placeholder = !library && tag != L"nowplaying" && tag != L"settings";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
+    if (tag == L"settings") refreshRoots();
+}
+
+winrt::fire_and_forget MainWindow::refreshRoots() {
+    auto weak = get_weak();
+    auto server = server_;
+    auto queue = DispatcherQueue();
+    if (!server) co_return;
+    co_await winrt::resume_background();
+    std::vector<LibraryRootInfo> roots;
+    try {
+        server->waitIdle();
+        roots = server->libraryRoots();
+    } catch (const std::exception&) {
+        co_return; // no library configured
+    }
+    queue.TryEnqueue([weak, roots] {
+        auto self = weak.get();
+        if (!self) return;
+        self->roots_ = roots;
+        self->RootList().Items().Clear();
+        for (const auto& root : roots) {
+            std::wstring location(ui::utf8(root.location));
+            if (!root.online) location += L"  (" + std::wstring(tr(L"Settings_FolderOffline")) + L")";
+            TextBlock name;
+            name.Text(ui::utf8(root.name));
+            TextBlock where;
+            where.Text(hstring(location));
+            where.TextTrimming(TextTrimming::CharacterEllipsis);
+            where.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            where.Foreground(Application::Current().Resources().Lookup(box_value(L"TextFillColorSecondaryBrush")).as<Media::Brush>());
+            StackPanel lines;
+            lines.VerticalAlignment(VerticalAlignment::Center);
+            lines.Children().Append(name);
+            lines.Children().Append(where);
+            FontIcon icon;
+            icon.Glyph(L"\xE8B7");
+            icon.FontSize(28);
+            StackPanel row;
+            row.Orientation(Orientation::Horizontal);
+            row.Spacing(16);
+            row.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+            row.Children().Append(icon);
+            row.Children().Append(lines);
+            self->RootList().Items().Append(row);
+        }
+    });
+}
+
+winrt::fire_and_forget MainWindow::OnAddFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    Microsoft::Windows::Storage::Pickers::FolderPicker picker(AppWindow().Id());
+    picker.SuggestedStartLocation(Microsoft::Windows::Storage::Pickers::PickerLocationId::MusicLibrary);
+    auto result = co_await picker.PickSingleFolderAsync();
+    if (!result || !server_) co_return;
+    Command command;
+    command.kind = CommandKind::AddLibraryRoot;
+    command.path = toUtf8(std::wstring_view(result.Path()));
+    submitCommand(std::move(command));
+    refreshRoots();
+}
+
+void MainWindow::OnRemoveFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    const int index = RootList().SelectedIndex();
+    if (index < 0 || size_t(index) >= roots_.size()) return;
+    Command command;
+    command.kind = CommandKind::RemoveLibraryRoot;
+    command.rootId = roots_[size_t(index)].id;
+    submitCommand(std::move(command));
+    refreshRoots();
 }
 
 winrt::fire_and_forget MainWindow::OnOpenClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

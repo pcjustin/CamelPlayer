@@ -271,6 +271,11 @@ const std::vector<Migration>& libraryMigrations() {
                     "CREATE INDEX playlist_items_order ON playlist_items(playlist_id,position);"
                     "CREATE INDEX playlist_items_track ON playlist_items(file_id,cue_index);");
         },
+        [](sqlite::Database& db) {
+            // Compact YYYYMMDD dates were stored whole as the year.
+            db.exec("UPDATE tracks SET year=CAST(substr(year,1,4) AS INTEGER) WHERE year>9999;"
+                    "UPDATE albums SET year=CAST(substr(year,1,4) AS INTEGER) WHERE year>9999;");
+        },
     };
     return migrations;
 }

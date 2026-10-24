@@ -242,6 +242,13 @@ int number(const Metadata& m, const char* name, bool total = false) {
     return parsed.ec == std::errc{} ? std::max(0, value) : 0;
 }
 
+// DATE holds a year, an ISO date or a compact YYYYMMDD date.
+int year(const Metadata& m) {
+    int value = number(m, "DATE");
+    while (value > 9999) value /= 10;
+    return value;
+}
+
 // One upsert carries the derived search and sort columns, so the row is written and FTS-indexed once.
 void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::wstring_view locale) {
     auto s = db.prepare("INSERT INTO tracks(file_id,title,album,album_artist,artist,composer,genre,year,track_number,track_total,"
@@ -265,7 +272,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
     s.bind(1, file);
     int i = 2;
     for (const auto* field : {"TITLE", "ALBUM", "ALBUMARTIST", "ARTIST", "COMPOSER", "GENRE"}) s.bind(i++, tag(m, field));
-    s.bind(8, int64_t(number(m, "DATE")))
+    s.bind(8, int64_t(year(m)))
         .bind(9, int64_t(number(m, "TRACKNUMBER")))
         .bind(10, int64_t(number(m, "TRACKTOTAL") ? number(m, "TRACKTOTAL") : number(m, "TRACKNUMBER", true)))
         .bind(11, int64_t(number(m, "DISCNUMBER")))
@@ -658,12 +665,28 @@ void applyCuePlan(sqlite::Database& db, const CuePlan& plan, int64_t root) {
     }
 }
 
-void rebuildAlbums(sqlite::Database& db, int64_t root) {
+// Without `fileFolders` every album of the root is rebuilt; with them, only the albums of those folders, so a long
+// first scan fills the album wall batch by batch.
+void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::set<int64_t>>& fileFolders = std::nullopt) {
+    std::set<int64_t> albumFolders;
+    std::string scope;
+    if (fileFolders) {
+        auto folder = db.prepare("SELECT parent_id,path FROM folders WHERE id=?");
+        for (const auto id : *fileFolders) {
+            folder.reset();
+            if (!folder.bind(1, id).step()) continue;
+            const bool disc = !folder.isNull(0) && isDiscFolderName(Path(toWide(folder.text(1))).filename().wstring());
+            albumFolders.insert(disc ? folder.integer(0) : id);
+        }
+        if (albumFolders.empty()) return;
+        std::string list;
+        for (const auto id : albumFolders) list += (list.empty() ? "" : ",") + std::to_string(id);
+        scope = " AND (f.folder_id IN (" + list + ") OR d.parent_id IN (" + list + "))";
+    }
     struct Album {
         int64_t folder = 0;
         int64_t firstFile = 0;
         bool firstHasCover = false;
-        Path path;
         std::string title, artist;
         int64_t year = 0, discs = 0;
         std::set<std::string> artists;
@@ -674,7 +697,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
                            "t.file_id,COALESCE((SELECT embedded_cover FROM tracks e WHERE e.file_id=t.file_id AND e.cue_index=0),"
                            "t.embedded_cover),t.disc_number,t.disc_total "
                            "FROM tracks t JOIN files f ON f.id=t.file_id JOIN folders d ON d.id=f.folder_id "
-                           "WHERE f.root_id=? AND f.available=1 ORDER BY t.disc_number,t.track_number,t.id");
+                           "WHERE f.root_id=? AND f.available=1" + scope + " ORDER BY t.disc_number,t.track_number,t.id");
     rows.bind(1, root);
     while (rows.step()) {
         const auto track = rows.integer(0);
@@ -683,6 +706,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
         Path folderPath(toWide(rows.text(7)));
         const bool discSubfolder = parentFolder && isDiscFolderName(folderPath.filename().wstring());
         const auto folder = discSubfolder ? parentFolder : discFolder;
+        if (fileFolders && !albumFolders.contains(folder)) continue;
         if (discSubfolder) {
             auto parent = db.prepare("SELECT path FROM folders WHERE id=?");
             if (parent.bind(1, parentFolder).step()) folderPath = Path(toWide(parent.text(0)));
@@ -727,7 +751,6 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
         if (!album.firstFile) {
             album.firstFile = rows.integer(8);
             album.firstHasCover = rows.integer(9) != 0;
-            album.path = folderPath;
         }
         if (!explicitArtist.empty()) album.artist = explicitArtist;
         else if (!rows.text(3).empty()) album.artists.insert(rows.text(3));
@@ -755,18 +778,25 @@ void rebuildAlbums(sqlite::Database& db, int64_t root) {
         for (auto track : album.tracks) db.prepare("UPDATE tracks SET album_id=? WHERE id=?").bind(1, albumId).bind(2, track).run();
         updateLibraryAlbumText(db, albumId);
 
-        const auto image = findFolderArtworkFile(album.path, {});
+        // The scan indexed the folder's images, so the cover is chosen without listing the folder again (slow on a NAS).
         int64_t coverFile = 0;
         std::string source;
         std::string mime;
-        if (image) {
-            auto cover = db.prepare("SELECT id FROM files WHERE path=? AND kind='image' AND available=1");
-            cover.bind(1, key(image->file));
-            if (cover.step()) {
-                coverFile = cover.integer(0);
-                source = image->source;
-                mime = image->mime;
+        std::optional<std::pair<size_t, const char*>> best;
+        int64_t bestSize = 0;
+        auto images = db.prepare("SELECT id,path,size FROM files WHERE folder_id=? AND kind='image' AND available=1");
+        images.bind(1, album.folder);
+        while (images.step())
+            if (const auto rank = folderArtworkRank(Path(toWide(images.text(1)))); rank && (!best || rank->first < best->first)) {
+                best = rank;
+                bestSize = images.integer(2);
+                coverFile = images.integer(0);
             }
+        if (best && bestSize > 0 && uintmax_t(bestSize) <= kMaxArtworkBytes) {
+            source = "folder";
+            mime = best->second;
+        } else {
+            coverFile = 0;
         }
         if (!coverFile && album.firstHasCover) {
             coverFile = album.firstFile;
@@ -957,11 +987,34 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
 Path canonicalLibraryPath(const Path& path) { return canonicalRoot(path); }
 
 int64_t LibraryScanner::addRoot(const Path& path) {
-    std::lock_guard lock(store_.scanMutex_);
     const Path resolved = canonicalRoot(path);
     const DWORD attr = GetFileAttributesW(resolved.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
         throw std::invalid_argument("root must be a directory");
+    // A root beside the others is registered at once, even while another root's scan runs (a first NAS scan takes
+    // hours); one that absorbs existing roots first stops their scans, which would otherwise write their old root ids.
+    std::vector<int64_t> absorbed;
+    {
+        auto db = store_.openReader();
+        auto roots = db.prepare("SELECT id,path FROM roots WHERE removed IS NULL");
+        while (roots.step()) {
+            const Path existing(toWide(roots.text(1)));
+            if (contains(resolved, existing) && !contains(existing, resolved)) absorbed.push_back(roots.integer(0));
+        }
+    }
+    std::vector<std::unique_lock<std::mutex>> stopped;
+    std::unique_lock<std::mutex> crossRoot;
+    if (!absorbed.empty()) {
+        {
+            std::lock_guard jobsLock(store_.jobsMutex_);
+            for (const auto child : absorbed) {
+                const auto [first, last] = store_.jobs_.equal_range(child);
+                for (auto job = first; job != last; ++job) job->second.cancel();
+            }
+        }
+        for (const auto child : absorbed) stopped.emplace_back(rootLock(child));
+        crossRoot = std::unique_lock(store_.scanMutex_);
+    }
     int64_t id = 0;
     store_
         .write([&](sqlite::Database& db) {
@@ -995,6 +1048,13 @@ int64_t LibraryScanner::addRoot(const Path& path) {
     return id;
 }
 
+std::mutex& LibraryScanner::rootLock(int64_t root) {
+    std::lock_guard lock(store_.jobsMutex_);
+    auto& mutex = store_.rootLocks_[root];
+    if (!mutex) mutex = std::make_unique<std::mutex>();
+    return *mutex;
+}
+
 std::function<bool()> LibraryScanner::playbackGate(const Path& root) const {
     const auto storage = library::storageKey(root);
     return [this, storage] {
@@ -1023,7 +1083,7 @@ void LibraryScanner::removeRoot(int64_t root) {
 ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) {
     ++store_.activeScans_;
     auto finishScan = wil::scope_exit([this] { --store_.activeScans_; });
-    std::lock_guard lock(store_.scanMutex_);
+    std::lock_guard lock(rootLock(root));
     auto token = request.child();
     decltype(store_.jobs_)::iterator registration;
     {
@@ -1033,6 +1093,15 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     auto unregister = wil::scope_exit([&] {
         std::lock_guard jobsLock(store_.jobsMutex_);
         store_.jobs_.erase(registration);
+    });
+    int64_t found = 0, checked = 0;
+    bool finishing = false;
+    ++store_.scanning_;
+    auto idle = wil::scope_exit([&] {
+        --store_.scanning_;
+        store_.scanFound_ -= found;
+        store_.scanChecked_ -= checked;
+        if (finishing) --store_.scanFinishing_;
     });
     ScanReport report;
     auto reader = store_.openReader();
@@ -1108,6 +1177,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
             auto folders = db.prepare("SELECT id FROM folders WHERE path=?");
             auto localeRow = db.prepare("SELECT value FROM app_state WHERE key='sort_locale'");
             const std::wstring locale = localeRow.step() ? toWide(localeRow.text(0)) : L"zh-TW";
+            std::set<int64_t> trackFolders;
+            auto ungrouped = db.prepare("SELECT f.folder_id FROM tracks t JOIN files f ON f.id=t.file_id "
+                                        "WHERE t.file_id=? AND t.album_id IS NULL LIMIT 1");
             for (const auto& entry : *entries) {
                 const auto p = key(entry.path);
                 old.reset();
@@ -1121,6 +1193,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                     entry.error.empty() && !entry.digest) {
                     seen.bind(1, generation).bind(2, file).run();
                     seen.reset();
+                    // Tracks indexed by an interrupted first scan have no album yet.
+                    ungrouped.reset();
+                    if (ungrouped.bind(1, file).step()) trackFolders.insert(ungrouped.integer(0));
                     continue;
                 }
                 if (!file || library::storedVersion(old, 1) != entry.version) derivedChanged = true;
@@ -1169,6 +1244,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                 if (entry.digest)
                     db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *entry.digest).bind(2, file).run();
                 if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0").bind(1, file).run();
+                if (entry.rejected || entry.metadata) trackFolders.insert(folderId);
                 if (entry.metadata) {
                     writeMetadata(db, file, *entry.metadata, locale);
                     report.updated++;
@@ -1176,6 +1252,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                     if (entry.metadata->embeddedCue) embeddedHints[p] = *entry.metadata->embeddedCue;
                 }
             }
+            if (!trackFolders.empty()) rebuildAlbums(db, root, trackFolders);
             if (derivedChanged)
                 db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)").bind(1, derivedKey).run();
         });
@@ -1212,6 +1289,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                     .run();
             });
             for (auto& child : listing.children) pending.push_back(Listing{std::move(child)});
+            found += int64_t(listing.files.size());
+            store_.scanFound_ += int64_t(listing.files.size());
             for (size_t end = listing.files.size(); end > 0;) {
                 const size_t begin = end > 64 ? end - 64 : 0;
                 Listing work{listing.path};
@@ -1224,6 +1303,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         }
         for (auto& entry : listing.files) {
             report.seen++;
+            ++checked;
+            ++store_.scanChecked_;
             if (!entry.error.empty()) report.diagnostics.push_back(key(entry.path) + ": " + entry.error);
             batch.push_back(std::move(entry));
             if (batch.size() == 500) flush();
@@ -1238,6 +1319,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         report.diagnostics.push_back("root became unavailable (" + std::to_string(report.rootError) + "): " + key(path));
     }
     report.complete = complete && !token.cancelled() && report.online;
+    std::lock_guard crossRoot(store_.scanMutex_);
+    finishing = true;
+    ++store_.scanFinishing_;
     store_
         .write([&](sqlite::Database& db) {
             if (token.cancelled()) return;
@@ -1420,6 +1504,8 @@ public:
         fingerprints_.join();
     }
 
+    void refreshRoots() { refresh_ = true; }
+
 private:
     struct Watch {
         wil::unique_handle directory, event;
@@ -1452,11 +1538,13 @@ private:
     void run(std::stop_token stop) {
         SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
         std::map<int64_t, std::unique_ptr<Watch>> watches;
+        // Each root scans on its own thread, so a long NAS scan neither delays other roots nor these checks.
+        std::map<int64_t, std::future<ScanReport>> scans;
         auto check = Clock::time_point{};
         while (!stop.stop_requested()) {
             try {
                 const auto time = Clock::now();
-                if (time >= check) {
+                if (time >= check || refresh_.exchange(false)) {
                     check = time + options_.offlineInterval;
                     std::set<int64_t> live;
                     auto db = store_.openReader();
@@ -1475,6 +1563,13 @@ private:
                                 .get();
                             continue;
                         }
+                        // A first NAS scan can take hours or wait for playback; the root is browsable again meanwhile.
+                        if (!roots.integer(2))
+                            store_
+                                .write([id](sqlite::Database& w) {
+                                    w.prepare("UPDATE roots SET online=1 WHERE id=?").bind(1, id).run();
+                                })
+                                .get();
                         if (!watches.contains(id) || !watches.at(id)->pending) {
                             watches.erase(id);
                             auto watch = std::make_unique<Watch>();
@@ -1511,11 +1606,30 @@ private:
                         if (watch.due == Clock::time_point{} || (ok && bytes)) watch.due = Clock::now() + options_.coalesce;
                         watch.arm();
                     }
-                    if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested()) {
+                    if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested() &&
+                        !scans.contains(id)) {
                         watch.due = {};
-                        const auto report = scanner_.scan(id, token_);
-                        watch.deferred = report.deferred;
+                        scans.emplace(id, std::async(std::launch::async, [this, id] {
+                            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+                            auto normal = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
+                            return scanner_.scan(id, token_);
+                        }));
+                    }
+                }
+                for (auto it = scans.begin(); it != scans.end();) {
+                    if (it->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                        ++it;
+                        continue;
+                    }
+                    const auto id = it->first;
+                    auto job = std::move(it->second);
+                    it = scans.erase(it);
+                    try {
+                        const auto report = job.get();
+                        if (const auto watch = watches.find(id); watch != watches.end()) watch->second->deferred = report.deferred;
                         for (const auto& diagnostic : report.diagnostics) log::warn("library: %s", diagnostic.c_str());
+                    } catch (const std::exception& e) {
+                        log::warn("library scan: %s", e.what());
                     }
                 }
             } catch (const std::exception& e) {
@@ -1530,6 +1644,7 @@ private:
     LibraryScanner scanner_;
     Options options_;
     CancellationToken token_;
+    std::atomic<bool> refresh_ = false;
     std::jthread worker_;
     std::jthread fingerprints_;
 };
@@ -1537,5 +1652,8 @@ private:
 LibraryMonitor::LibraryMonitor(LibraryStore& store) : LibraryMonitor(store, Options{}) {}
 LibraryMonitor::LibraryMonitor(LibraryStore& store, Options options) : impl_(std::make_unique<Impl>(store, options)) {}
 LibraryMonitor::~LibraryMonitor() = default;
+void LibraryMonitor::refreshRoots() {
+    impl_->refreshRoots();
+}
 
 } // namespace camel::server

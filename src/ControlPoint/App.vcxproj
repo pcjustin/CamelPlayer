@@ -84,10 +84,18 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="UiText.h" />
+    <ClInclude Include="BrowseItem.h">
+      <DependentUpon>BrowseItem.idl</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="LibraryCollection.h" />
+    <ClInclude Include="LibraryView.xaml.h">
+      <DependentUpon>LibraryView.xaml</DependentUpon>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="MainWindow.xaml" />
+    <Page Include="LibraryView.xaml" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -101,12 +109,23 @@
     </ClCompile>
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="UiText.cpp" />
+    <ClCompile Include="BrowseItem.cpp">
+      <DependentUpon>BrowseItem.idl</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="LibraryView.xaml.cpp">
+      <DependentUpon>LibraryView.xaml</DependentUpon>
+    </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="MainWindow.idl">
       <SubType>Code</SubType>
       <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Midl>
+    <Midl Include="BrowseItem.idl" />
+    <Midl Include="LibraryView.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>LibraryView.xaml</DependentUpon>
     </Midl>
   </ItemGroup>
   <ItemGroup>
