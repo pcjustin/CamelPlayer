@@ -15,6 +15,7 @@
 #include "Common/settings/Settings.h"
 #include "Server/Library/LibraryBrowse.h"
 #include "Server/Library/PlayStatistics.h"
+#include "Server/Library/Playlists.h"
 
 namespace camel::server {
 
@@ -214,6 +215,19 @@ public:
                                                std::optional<uint64_t> revision,
                                                const CancellationToken& token = {}) const = 0;
     virtual PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const = 0;
+    // Playlists (docs/Plan.md §7.9) run on the caller's thread and write through the library writer, so large
+    // selections never hold up playback commands.
+    virtual std::vector<PlaylistSummary> playlists() const = 0;
+    virtual PlaylistPage playlistItems(int64_t playlist, int64_t offset, int64_t limit) const = 0;
+    virtual SelectionPreview previewSelection(const std::vector<PlaylistSource>& sources,
+                                              const CancellationToken& token = {}) const = 0;
+    virtual PlaylistChange createPlaylist(std::string name, const std::vector<PlaylistSource>& sources,
+                                          const CancellationToken& token = {}) = 0;
+    virtual PlaylistChange addToPlaylist(int64_t playlist, std::optional<int64_t> revision,
+                                         const std::vector<PlaylistSource>& sources, const CancellationToken& token = {}) = 0;
+    virtual PlaylistChange saveQueueAsPlaylist(std::string name) = 0;
+    virtual PlaylistChange editPlaylist(const PlaylistEdit& edit) = 0;
+    virtual bool undoPlaylistChange(const PlaylistUndo& undo) = 0;
 };
 
 std::shared_ptr<IServer> createLocalServer();

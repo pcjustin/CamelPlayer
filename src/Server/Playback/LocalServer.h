@@ -27,6 +27,17 @@ public:
                                        std::optional<uint64_t> revision,
                                        const CancellationToken& token = {}) const override;
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const override;
+    std::vector<PlaylistSummary> playlists() const override;
+    PlaylistPage playlistItems(int64_t playlist, int64_t offset, int64_t limit) const override;
+    SelectionPreview previewSelection(const std::vector<PlaylistSource>& sources,
+                                      const CancellationToken& token = {}) const override;
+    PlaylistChange createPlaylist(std::string name, const std::vector<PlaylistSource>& sources,
+                                  const CancellationToken& token = {}) override;
+    PlaylistChange addToPlaylist(int64_t playlist, std::optional<int64_t> revision, const std::vector<PlaylistSource>& sources,
+                                 const CancellationToken& token = {}) override;
+    PlaylistChange saveQueueAsPlaylist(std::string name) override;
+    PlaylistChange editPlaylist(const PlaylistEdit& edit) override;
+    bool undoPlaylistChange(const PlaylistUndo& undo) override;
 
 private:
     class Impl;

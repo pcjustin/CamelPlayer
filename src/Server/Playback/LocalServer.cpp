@@ -19,6 +19,7 @@
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/PlayStatistics.h"
+#include "Server/Library/Playlists.h"
 
 namespace camel::server {
 namespace {
@@ -236,8 +237,33 @@ public:
     }
 
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
+        return camel::server::playStatistics(library(), query, token);
+    }
+
+    LibraryStore& library() const {
         if (!library_) throw std::runtime_error("library is not configured");
-        return camel::server::playStatistics(*library_, query, token);
+        return *library_;
+    }
+
+    // The published queue keeps every entry: library files keep their identity, others only their path.
+    PlaylistChange saveQueueAsPlaylist(std::string name) {
+        auto& store = library();
+        const auto queue = snapshot().queue;
+        auto reader = store.openReader();
+        auto file = reader.prepare("SELECT id FROM files WHERE path=? AND available=1");
+        std::vector<PlaylistEntry> entries;
+        for (const auto& entry : queue.entries) {
+            PlaylistEntry item{std::nullopt, entry.source.pathUtf8()};
+            try {
+                const auto key = toUtf8(canonicalLibraryPath(std::filesystem::path(toWide(entry.source.pathUtf8()))).wstring());
+                file.reset();
+                if (file.bind(1, key).step()) item.track = LibraryTrackKey{file.integer(0), 0};
+            } catch (const std::exception&) {
+                // An inaccessible path is saved without a library identity.
+            }
+            entries.push_back(std::move(item));
+        }
+        return savePlaylist(store, std::move(name), entries);
     }
 
 private:
@@ -772,6 +798,32 @@ LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offse
 }
 PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
     return impl_->playStatistics(query, token);
+}
+std::vector<PlaylistSummary> LocalServer::playlists() const {
+    return listPlaylists(impl_->library());
+}
+PlaylistPage LocalServer::playlistItems(int64_t playlist, int64_t offset, int64_t limit) const {
+    return camel::server::playlistItems(impl_->library(), playlist, offset, limit);
+}
+SelectionPreview LocalServer::previewSelection(const std::vector<PlaylistSource>& sources, const CancellationToken& token) const {
+    return camel::server::previewSelection(impl_->library(), sources, token);
+}
+PlaylistChange LocalServer::createPlaylist(std::string name, const std::vector<PlaylistSource>& sources,
+                                           const CancellationToken& token) {
+    return camel::server::createPlaylist(impl_->library(), std::move(name), sources, token);
+}
+PlaylistChange LocalServer::addToPlaylist(int64_t playlist, std::optional<int64_t> revision,
+                                          const std::vector<PlaylistSource>& sources, const CancellationToken& token) {
+    return camel::server::addToPlaylist(impl_->library(), playlist, revision, sources, token);
+}
+PlaylistChange LocalServer::saveQueueAsPlaylist(std::string name) {
+    return impl_->saveQueueAsPlaylist(std::move(name));
+}
+PlaylistChange LocalServer::editPlaylist(const PlaylistEdit& edit) {
+    return camel::server::editPlaylist(impl_->library(), edit);
+}
+bool LocalServer::undoPlaylistChange(const PlaylistUndo& undo) {
+    return camel::server::undoPlaylistChange(impl_->library(), undo);
 }
 
 std::shared_ptr<IServer> createLocalServer() {

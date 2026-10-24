@@ -256,6 +256,21 @@ const std::vector<Migration>& libraryMigrations() {
                     "CREATE INDEX play_events_started ON play_events(started);"
                     "CREATE INDEX play_events_track ON play_events(file_id,cue_index);");
         },
+        [](sqlite::Database& db) {
+            // Items get stable ids for quick Undo and an added time for sorting; positions are renumbered on edits.
+            db.exec("ALTER TABLE playlists ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;"
+                    "CREATE UNIQUE INDEX playlists_name ON playlists(name);"
+                    "CREATE TABLE playlist_items_v7 (id INTEGER PRIMARY KEY,"
+                    "playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,"
+                    "position INTEGER NOT NULL, file_id INTEGER REFERENCES files(id), cue_index INTEGER NOT NULL DEFAULT 0,"
+                    "source_description TEXT NOT NULL, added INTEGER NOT NULL DEFAULT 0);"
+                    "INSERT INTO playlist_items_v7(playlist_id,position,file_id,cue_index,source_description) "
+                    "SELECT playlist_id,position,file_id,cue_index,source_description FROM playlist_items;"
+                    "DROP TABLE playlist_items;"
+                    "ALTER TABLE playlist_items_v7 RENAME TO playlist_items;"
+                    "CREATE INDEX playlist_items_order ON playlist_items(playlist_id,position);"
+                    "CREATE INDEX playlist_items_track ON playlist_items(file_id,cue_index);");
+        },
     };
     return migrations;
 }

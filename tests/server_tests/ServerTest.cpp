@@ -714,6 +714,24 @@ protected:
     TrackSource track(const std::filesystem::path& path) { return TrackSource(toUtf8((dir / "music" / path.filename()).wstring())); }
 };
 
+TEST_F(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLibrary) {
+    const auto a = testutil::generatedFile({"queue-save-a", 48000, 16, 2, 0.3});
+    setUp({a});
+    const auto outside = testutil::testFile("16-44.1k");
+    send(queueReplace({track(a), TrackSource(toUtf8(outside.wstring())), track(a)}));
+    send(command(CommandKind::Stop));
+    const auto saved = server->saveQueueAsPlaylist("Queue");
+    EXPECT_EQ(saved.added, 3);
+    const auto page = server->playlistItems(saved.playlist, 0, 10);
+    ASSERT_EQ(page.items.size(), 3u);
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a), 0}));
+    EXPECT_FALSE(page.items[1].track);
+    EXPECT_EQ(page.items[1].source, toUtf8(outside.wstring()));
+    EXPECT_EQ(page.items[2].track, page.items[0].track);
+    EXPECT_TRUE(server->undoPlaylistChange(saved.undo));
+    EXPECT_TRUE(server->playlists().empty());
+}
+
 TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLength) {
     const auto a = testutil::generatedFile({"play-gapless-a", 48000, 16, 2, 0.6});
     const auto b = testutil::generatedFile({"play-gapless-b", 48000, 16, 2, 0.4});
