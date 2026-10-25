@@ -410,6 +410,35 @@ TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResu
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_derived_dirty:%'"), 0);
 }
 
+TEST_F(LibraryScannerTest, OneChangedFileDoesNotCountEveryTrackAsALibraryChange) {
+    constexpr int kFolders = 4, kFiles = 5;
+    for (int folder = 0; folder < kFolders; ++folder) {
+        fs::create_directories(dir / "music" / ("album" + std::to_string(folder)));
+        for (int file = 0; file < kFiles; ++file)
+            fs::copy_file(testutil::testFile("16-44.1k"),
+                          dir / "music" / ("album" + std::to_string(folder)) / (std::to_string(file) + ".flac"));
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE album_id IS NOT NULL"), kFolders * kFiles);
+    const auto revision = count(store, "SELECT value FROM library_revision WHERE id=1");
+
+    const auto changed = dir / "music" / "album0" / "0.flac";
+    {
+        TagLib::FLAC::File tags(changed.c_str());
+        tags.tag()->setTitle("Retitled");
+        ASSERT_TRUE(tags.save());
+    }
+    fs::last_write_time(changed, fs::last_write_time(changed) + std::chrono::seconds(2));
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE title='Retitled'"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE album_id IS NOT NULL"), kFolders * kFiles);
+    // A few steps for the changed track and the album rebuilds, never one per track of the root.
+    EXPECT_LT(count(store, "SELECT value FROM library_revision WHERE id=1") - revision, kFiles);
+}
+
 TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
     using namespace camel::audio;
     using namespace camel::audio::testaudio;

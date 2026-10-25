@@ -736,7 +736,11 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             const auto originalTitle = toWide(rows.text(1));
             const auto suffixNumber = title != originalTitle ? discNumber(std::wstring_view(originalTitle).substr(title.size())) : 0;
             const int inferred = suffixNumber ? suffixNumber : discNumber(Path(toWide(rows.text(7))).filename().wstring());
-            if (inferred) db.prepare("UPDATE tracks SET disc_number=? WHERE id=?").bind(1, int64_t(inferred)).bind(2, track).run();
+            if (inferred)
+                db.prepare("UPDATE tracks SET disc_number=?1 WHERE id=?2 AND disc_number IS NOT ?1")
+                    .bind(1, int64_t(inferred))
+                    .bind(2, track)
+                    .run();
         }
         if (title.empty()) title = folderPath.filename().wstring();
         const auto titleText = toUtf8(title);
@@ -775,7 +779,9 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         auto row = db.prepare("SELECT id FROM albums WHERE grouping_key=?");
         row.bind(1, keyText).step();
         const auto albumId = row.integer(0);
-        for (auto track : album.tracks) db.prepare("UPDATE tracks SET album_id=? WHERE id=?").bind(1, albumId).bind(2, track).run();
+        // Rewriting an unchanged album_id would count as a library change for every track of a rescanned root.
+        for (auto track : album.tracks)
+            db.prepare("UPDATE tracks SET album_id=?1 WHERE id=?2 AND album_id IS NOT ?1").bind(1, albumId).bind(2, track).run();
         updateLibraryAlbumText(db, albumId);
 
         // The scan indexed the folder's images, so the cover is chosen without listing the folder again (slow on a NAS).
@@ -820,7 +826,9 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         }
     }
     db.exec("DELETE FROM albums WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.album_id=albums.id);"
-            "DELETE FROM covers WHERE NOT EXISTS(SELECT 1 FROM albums WHERE albums.cover_id=covers.id)");
+            "DELETE FROM covers WHERE NOT EXISTS(SELECT 1 FROM albums WHERE albums.cover_id=covers.id);"
+            // Album rows carry no revision trigger; one step covers titles and covers this rebuild changed.
+            "UPDATE library_revision SET value=value+1 WHERE id=1");
 }
 
 Listing readEntries(Listing out, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
@@ -1558,7 +1566,7 @@ private:
                             watches.erase(id);
                             store_
                                 .write([id](sqlite::Database& w) {
-                                    w.prepare("UPDATE roots SET online=0 WHERE id=?").bind(1, id).run();
+                                    w.prepare("UPDATE roots SET online=0 WHERE id=? AND online<>0").bind(1, id).run();
                                 })
                                 .get();
                             continue;

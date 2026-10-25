@@ -42,7 +42,7 @@ public:
         load(0, std::nullopt);
     }
 
-    // Rereads the first page without a pinned revision; a newer library state resets the view.
+    // Rereads the first page without a pinned revision; a newer library state updates the view where it is read.
     void refresh() {
         if (!refreshing_) load(0, std::nullopt, true);
     }
@@ -99,11 +99,13 @@ public:
     }
 
 private:
-    struct ResetArgs : winrt::implements<ResetArgs, winrt::Windows::Foundation::Collections::IVectorChangedEventArgs> {
-        winrt::Windows::Foundation::Collections::CollectionChange CollectionChange() const {
-            return winrt::Windows::Foundation::Collections::CollectionChange::Reset;
-        }
-        uint32_t Index() const { return 0; }
+    struct ChangeArgs : winrt::implements<ChangeArgs, winrt::Windows::Foundation::Collections::IVectorChangedEventArgs> {
+        ChangeArgs(winrt::Windows::Foundation::Collections::CollectionChange change, uint32_t index)
+            : change_(change), index_(index) {}
+        winrt::Windows::Foundation::Collections::CollectionChange CollectionChange() const { return change_; }
+        uint32_t Index() const { return index_; }
+        winrt::Windows::Foundation::Collections::CollectionChange change_;
+        uint32_t index_;
     };
 
     struct Iterator : winrt::implements<Iterator, winrt::Windows::Foundation::Collections::IIterator<IInspectable>> {
@@ -159,9 +161,14 @@ private:
         }
         const auto revision = listing_.revision();
         if (refresh && revision && *revision == result.revision) return;
+        const uint32_t before = Size();
         if (listing_.deliver(page, result.revision, result.total, std::move(result.rows))) {
-            items_.clear();
-            changed_(*this, winrt::make<ResetArgs>());
+            if (refresh && !items_.empty())
+                revise(before);
+            else {
+                items_.clear();
+                changed_(*this, winrt::make<ChangeArgs>(winrt::Windows::Foundation::Collections::CollectionChange::Reset, 0u));
+            }
             if (reset_) reset_(listing_.size());
             return;
         }
@@ -172,6 +179,22 @@ private:
             if (const auto* row = listing_.at(i))
                 winrt::get_self<winrt::CamelPlayer::implementation::BrowseItem>(found->second.as<Item>())->fill(*row);
         }
+    }
+
+    // A scan or edit produced a newer library state while the view is read. Like Roon, the view stays where it is:
+    // realized items show the new rows at their positions (pages not yet cached arrive as usual), and only the end of
+    // the list grows or shrinks. A reset would scroll back to the top on every library change.
+    void revise(uint32_t before) {
+        using winrt::Windows::Foundation::Collections::CollectionChange;
+        const uint32_t after = Size();
+        std::erase_if(items_, [after](const auto& pair) { return pair.first >= after; });
+        for (auto& [index, item] : items_) {
+            auto* self = winrt::get_self<winrt::CamelPlayer::implementation::BrowseItem>(item.as<Item>());
+            if (const auto* row = listing_.at(index)) self->fill(*row);
+        }
+        schedule();
+        for (uint32_t i = before; i < after; ++i) changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemInserted, i));
+        for (uint32_t i = before; i > after; --i) changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemRemoved, i - 1));
     }
 
     // Keeps the items around the reading position so scrolling a 100k-row view does not keep 100k objects alive.
