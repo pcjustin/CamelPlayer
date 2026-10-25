@@ -288,8 +288,60 @@
                                 </StackPanel>
                                 <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
                                 <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
+                                <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
                                 <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
                                            Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="20" />
+                                    <TextBlock x:Uid="Reset_Title" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <TextBlock x:Uid="Reset_DataHeader" Style="{StaticResource GroupHeaderStyle}" />
+                                <TextBlock x:Name="DataLocationText" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+                                <TextBlock x:Name="DataSizesText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                <Button x:Uid="Reset_OpenFolder" Click="OnOpenDataFolderClick" />
+                                <Grid ColumnSpacing="16" RowSpacing="16" Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Uid="Reset_PlaybackTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock x:Uid="Reset_PlaybackText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" x:Uid="Reset_Button" Tag="playback" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Row="1">
+                                        <TextBlock x:Uid="Reset_InterfaceTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock x:Uid="Reset_InterfaceText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Row="1" Grid.Column="1" x:Uid="Reset_Button" Tag="interface" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Row="2">
+                                        <TextBlock x:Uid="Reset_LibraryTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock x:Uid="Reset_LibraryText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Row="2" Grid.Column="1" x:Uid="Reset_RebuildButton" Tag="library" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Row="3">
+                                        <TextBlock x:Uid="Reset_CoversTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock x:Uid="Reset_CoversText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Row="3" Grid.Column="1" x:Uid="Reset_ClearButton" Tag="covers" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Row="4">
+                                        <TextBlock x:Uid="Reset_AllTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock x:Uid="Reset_AllText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Row="4" Grid.Column="1" x:Uid="Reset_AllButton" Tag="all" Click="OnResetClick" VerticalAlignment="Center" />
+                                </Grid>
                             </StackPanel>
                         </Border>
                     </StackPanel>

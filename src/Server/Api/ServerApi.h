@@ -56,6 +56,7 @@ struct SettingsDto {
     std::string language;
     CloseAction closeAction = CloseAction::Tray;
     bool trayNoticeShown = false;
+    bool firstRunDone = false;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };
@@ -231,6 +232,10 @@ public:
     // Playlists (docs/Plan.md §7.9) run on the caller's thread and write through the library writer, so large
     // selections never hold up playback commands.
     // Browse views (docs/Plan.md §8.2); call them off the UI thread.
+    // Settings › Reset (docs/Plan.md §8.2): reread every tag of every root, keeping play statistics and playlists;
+    // delete the generated cover thumbnails.
+    virtual void rereadLibrary() = 0;
+    virtual void clearArtworkCache() = 0;
     // Home (docs/Plan.md §8.2): albums by their latest play, newest first.
     virtual LibraryAlbumPage recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token = {}) const = 0;
     virtual LibraryAlbumPage browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,

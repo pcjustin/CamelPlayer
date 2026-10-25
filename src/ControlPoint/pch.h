@@ -30,7 +30,6 @@
 #include <winrt/Microsoft.UI.Text.h>
 #include <winrt/Microsoft.Windows.ApplicationModel.Resources.h>
 #include <winrt/Microsoft.Windows.Globalization.h>
-#include <winrt/Microsoft.Windows.Storage.Pickers.h>
 
 #include <array>
 #include <memory>

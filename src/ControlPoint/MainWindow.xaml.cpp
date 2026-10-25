@@ -12,12 +12,16 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
 #include "UiText.h"
 #include "ArtworkLoader.h"
 #include "Common/settings/Settings.h"
+#include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
@@ -188,6 +192,7 @@ void MainWindow::InitializeComponent() {
     queueState >> queueOpen_;
     updateQueuePanel();
     Nav().SizeChanged([this](auto&&, auto&&) { fitNavigationPane(); });
+    ContentLayout().Loaded([this](auto&&, auto&&) { showFirstRunGuideIfDue(); }); // a dialog needs a XamlRoot
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
     refresh.kind = CommandKind::RefreshDevices;
@@ -917,7 +922,40 @@ void MainWindow::showPage(hstring const& tag) {
     else view->hide();
     const bool placeholder = !library && tag != L"settings" && tag != L"home";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
-    if (tag == L"settings") refreshRoots();
+    if (tag == L"settings") {
+        refreshRoots();
+        showDataLocation();
+    }
+}
+
+// Library folders as Settings shows them: icon, name and location (docs/Plan.md §8.2).
+void MainWindow::showRoots(ListView const& list) {
+    list.Items().Clear();
+    for (const auto& root : roots_) {
+        std::wstring location(ui::utf8(root.location));
+        if (!root.online) location += L"  (" + std::wstring(tr(L"Settings_FolderOffline")) + L")";
+        TextBlock name;
+        name.Text(ui::utf8(root.name));
+        TextBlock where;
+        where.Text(hstring(location));
+        where.TextTrimming(TextTrimming::CharacterEllipsis);
+        where.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        where.Foreground(Application::Current().Resources().Lookup(box_value(L"TextFillColorSecondaryBrush")).as<Media::Brush>());
+        StackPanel lines;
+        lines.VerticalAlignment(VerticalAlignment::Center);
+        lines.Children().Append(name);
+        lines.Children().Append(where);
+        FontIcon icon;
+        icon.Glyph(L"\xE8B7");
+        icon.FontSize(28);
+        StackPanel row;
+        row.Orientation(Orientation::Horizontal);
+        row.Spacing(16);
+        row.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+        row.Children().Append(icon);
+        row.Children().Append(lines);
+        list.Items().Append(row);
+    }
 }
 
 winrt::fire_and_forget MainWindow::refreshRoots() {
@@ -937,46 +975,62 @@ winrt::fire_and_forget MainWindow::refreshRoots() {
         auto self = weak.get();
         if (!self) return;
         self->roots_ = roots;
-        self->RootList().Items().Clear();
-        for (const auto& root : roots) {
-            std::wstring location(ui::utf8(root.location));
-            if (!root.online) location += L"  (" + std::wstring(tr(L"Settings_FolderOffline")) + L")";
-            TextBlock name;
-            name.Text(ui::utf8(root.name));
-            TextBlock where;
-            where.Text(hstring(location));
-            where.TextTrimming(TextTrimming::CharacterEllipsis);
-            where.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            where.Foreground(Application::Current().Resources().Lookup(box_value(L"TextFillColorSecondaryBrush")).as<Media::Brush>());
-            StackPanel lines;
-            lines.VerticalAlignment(VerticalAlignment::Center);
-            lines.Children().Append(name);
-            lines.Children().Append(where);
-            FontIcon icon;
-            icon.Glyph(L"\xE8B7");
-            icon.FontSize(28);
-            StackPanel row;
-            row.Orientation(Orientation::Horizontal);
-            row.Spacing(16);
-            row.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
-            row.Children().Append(icon);
-            row.Children().Append(lines);
-            self->RootList().Items().Append(row);
-        }
+        self->showRoots(self->RootList());
+        if (self->guideFolders_) self->showRoots(self->guideFolders_);
     });
 }
 
+namespace {
+
+// A folder, or a Windows library expanded to the folders it holds now (later library changes are not followed).
+std::vector<std::wstring> pickMusicFolders(HWND owner) {
+    std::vector<std::wstring> folders;
+    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
+    FILEOPENDIALOGOPTIONS options{};
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_ALLNONSTORAGEITEMS);
+    winrt::com_ptr<IShellItem> music;
+    if (SUCCEEDED(SHGetKnownFolderItem(FOLDERID_MusicLibrary, KF_FLAG_DEFAULT, nullptr, IID_PPV_ARGS(music.put()))))
+        dialog->SetFolder(music.get());
+    if (FAILED(dialog->Show(owner))) return folders;
+    winrt::com_ptr<IShellItem> item;
+    if (FAILED(dialog->GetResult(item.put()))) return folders;
+    const auto add = [&](IShellItem* folder) {
+        PWSTR path = nullptr;
+        if (SUCCEEDED(folder->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+            folders.emplace_back(path);
+            CoTaskMemFree(path);
+        }
+    };
+    winrt::com_ptr<IShellLibrary> library;
+    winrt::com_ptr<IShellItemArray> members;
+    if (SUCCEEDED(SHLoadLibraryFromItem(item.get(), STGM_READ, IID_PPV_ARGS(library.put()))) &&
+        SUCCEEDED(library->GetFolders(LFF_FORCEFILESYSTEM, IID_PPV_ARGS(members.put())))) {
+        DWORD count = 0;
+        members->GetCount(&count);
+        for (DWORD i = 0; i < count; ++i) {
+            winrt::com_ptr<IShellItem> member;
+            if (SUCCEEDED(members->GetItemAt(i, member.put()))) add(member.get());
+        }
+    } else {
+        add(item.get());
+    }
+    return folders;
+}
+
+} // namespace
+
 winrt::fire_and_forget MainWindow::OnAddFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
-    Microsoft::Windows::Storage::Pickers::FolderPicker picker(AppWindow().Id());
-    picker.SuggestedStartLocation(Microsoft::Windows::Storage::Pickers::PickerLocationId::MusicLibrary);
-    auto result = co_await picker.PickSingleFolderAsync();
-    if (!result || !server_) co_return;
-    Command command;
-    command.kind = CommandKind::AddLibraryRoot;
-    command.path = toUtf8(std::wstring_view(result.Path()));
-    submitCommand(std::move(command));
-    refreshRoots();
+    const auto folders = pickMusicFolders(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()));
+    if (!server_) co_return;
+    for (const auto& folder : folders) {
+        Command command;
+        command.kind = CommandKind::AddLibraryRoot;
+        command.path = toUtf8(folder);
+        submitCommand(std::move(command));
+    }
+    if (!folders.empty()) refreshRoots();
 }
 
 void MainWindow::OnRemoveFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -1160,6 +1214,267 @@ void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::K
     if (Nav().IsPaneOpen() == false) Nav().IsPaneOpen(true); // the box is hidden behind its icon in the compact pane
     SearchBox().Focus(FocusState::Keyboard);
     e.Handled(true);
+}
+
+void MainWindow::applySettingsNow() {
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = settings_;
+    submitCommand(std::move(command));
+    populateSettings();
+}
+
+// Where CamelPlayer keeps its data (never next to the program, docs/Plan.md release section) and how large it is.
+winrt::fire_and_forget MainWindow::showDataLocation() {
+    const auto data = camel::dataDirectory();
+    DataLocationText().Text(hstring(data.wstring()));
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    std::error_code error;
+    const auto size = [&](const std::filesystem::path& path) -> uintmax_t {
+        if (std::filesystem::is_regular_file(path, error)) return std::filesystem::file_size(path, error);
+        uintmax_t total = 0;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(path, error))
+            if (entry.is_regular_file(error)) total += entry.file_size(error);
+        return total;
+    };
+    const uintmax_t library = size(data / L"library.db") + size(data / L"library.db-wal") + size(data / L"library.db-shm");
+    const uintmax_t covers = size(data / L"thumbs"), settings = size(camel::settingsPath()), logs = size(data / L"logs");
+    queue.TryEnqueue([weak, library, covers, settings, logs] {
+        auto self = weak.get();
+        if (!self) return;
+        const auto bytes = [](uintmax_t n) {
+            wchar_t text[32];
+            if (n >= (1ull << 30)) swprintf(text, 32, L"%.1f GB", n / double(1ull << 30));
+            else if (n >= (1ull << 20)) swprintf(text, 32, L"%.1f MB", n / double(1ull << 20));
+            else swprintf(text, 32, L"%.1f KB", n / 1024.0);
+            return std::wstring(text);
+        };
+        std::wstring text(tr(L"Reset_Sizes"));
+        const std::array<std::wstring, 4> values{bytes(library), bytes(covers), bytes(settings), bytes(logs)};
+        for (size_t i = 0; i < values.size(); ++i) {
+            const std::wstring marker = L"{" + std::to_wstring(i) + L"}";
+            if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, marker.size(), values[i]);
+        }
+        self->DataSizesText().Text(hstring(text));
+    });
+}
+
+void MainWindow::OnOpenDataFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    ShellExecuteW(nullptr, L"open", camel::dataDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// Settings › Reset (docs/Plan.md §8.2): every reset says what it changes and asks first; resetting everything also
+// needs a checked acknowledgement because play statistics and playlists go with it.
+winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    const hstring kind = unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L"");
+    const std::wstring key = kind == L"playback"  ? L"Playback"
+                             : kind == L"interface" ? L"Interface"
+                             : kind == L"library"   ? L"Library"
+                             : kind == L"covers"    ? L"Covers"
+                                                    : L"All";
+    ContentDialog dialog;
+    dialog.XamlRoot(ContentLayout().XamlRoot());
+    dialog.Title(box_value(tr((L"Reset_" + key + L"Title/Text").c_str())));
+    StackPanel content;
+    content.Spacing(12);
+    TextBlock explanation;
+    explanation.Text(tr((L"Reset_" + key + L"Confirm").c_str()));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    content.Children().Append(explanation);
+    CheckBox understood{nullptr};
+    if (kind == L"all") {
+        understood = CheckBox();
+        understood.Content(box_value(tr(L"Reset_AllAcknowledge")));
+        content.Children().Append(understood);
+    }
+    dialog.Content(content);
+    dialog.PrimaryButtonText(tr(kind == L"all" ? L"Reset_AllPrimary" : L"Reset_Confirm"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Close);
+    if (understood) {
+        dialog.IsPrimaryButtonEnabled(false);
+        understood.Checked([dialog](auto&&, auto&&) { dialog.IsPrimaryButtonEnabled(true); });
+        understood.Unchecked([dialog](auto&&, auto&&) { dialog.IsPrimaryButtonEnabled(false); });
+    }
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+
+    if (kind == L"playback") {
+        settings_ = settingsDto(camel::resetPlayback(nativeSettings(settings_)));
+        applySettingsNow();
+    } else if (kind == L"interface") {
+        settings_ = settingsDto(camel::resetInterface(nativeSettings(settings_)));
+        queueOpen_ = false;
+        updateQueuePanel();
+        applySettingsNow();
+        LanguageNote().Visibility(Visibility::Visible); // the language follows Windows again after a restart
+    } else if (kind == L"library" || kind == L"covers") {
+        auto server = server_;
+        auto queue = DispatcherQueue();
+        const bool library = kind == L"library";
+        co_await winrt::resume_background();
+        try {
+            if (library) server->rereadLibrary();
+            else server->clearArtworkCache();
+        } catch (const std::exception& e) {
+            camel::log::warn("reset: %s", e.what());
+        }
+        queue.TryEnqueue([weak = get_weak()] {
+            if (auto self = weak.get()) self->showDataLocation();
+        });
+    } else {
+        // The next instance removes the data before its Server opens it, then starts like a new installation.
+        std::ofstream(camel::dataDirectory() / L"reset-pending") << 1;
+        std::wstring executable(32768, L'\0');
+        executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
+        ShellExecuteW(nullptr, L"open", executable.c_str(), L"--after-reset", nullptr, SW_SHOWNORMAL);
+        exiting_ = true;
+        Close();
+    }
+}
+
+void MainWindow::OnGuideClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    showFirstRunGuide();
+}
+
+// Only a new installation sees the guide by itself: never finished or skipped, and no library folder yet.
+winrt::fire_and_forget MainWindow::showFirstRunGuideIfDue() {
+    if (settings_.firstRunDone || !server_) co_return;
+    auto weak = get_weak();
+    auto server = server_;
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    bool empty = true;
+    try {
+        empty = server->libraryRoots().empty();
+    } catch (const std::exception&) {
+    }
+    if (empty)
+        queue.TryEnqueue([weak] {
+            if (auto self = weak.get()) self->showFirstRunGuide();
+        });
+}
+
+winrt::fire_and_forget MainWindow::showFirstRunGuide() {
+    if (guideFolders_ || !server_) co_return; // already open
+    auto strong = get_strong();
+    const auto text = [](const wchar_t* key) {
+        TextBlock block;
+        block.Text(tr(key));
+        block.TextWrapping(TextWrapping::Wrap);
+        return block;
+    };
+
+    StackPanel welcome;
+    welcome.Children().Append(text(L"Guide_Welcome"));
+
+    StackPanel folders;
+    folders.Spacing(12);
+    folders.Children().Append(text(L"Guide_Folders"));
+    Button add;
+    add.Content(box_value(tr(L"Settings_AddFolder/Content")));
+    add.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+    add.Click([this](auto&&, auto&&) { OnAddFolderClick(nullptr, nullptr); });
+    folders.Children().Append(add);
+    guideFolders_ = ListView();
+    guideFolders_.SelectionMode(ListViewSelectionMode::None);
+    guideFolders_.MaxHeight(200);
+    folders.Children().Append(guideFolders_);
+    refreshRoots();
+
+    // Output: a backend and its device; WASAPI follows the Windows default device unless one is chosen.
+    StackPanel output;
+    output.Spacing(12);
+    output.Children().Append(text(L"Guide_Output"));
+    ComboBox backend;
+    backend.Header(box_value(tr(L"Settings_Backend/Header")));
+    backend.Width(320);
+    for (const auto* name : {L"WASAPI", L"ASIO", L"Kernel Streaming"}) backend.Items().Append(box_value(hstring(name)));
+    ComboBox device;
+    device.Header(box_value(tr(L"Settings_Device/Header")));
+    device.Width(420);
+    auto devices = std::make_shared<std::vector<std::string>>(); // ids in the order shown
+    const auto fillDevices = [this, device, devices](Backend chosen) {
+        const auto catalog = server_->snapshot().devices;
+        const auto& list = chosen == Backend::Wasapi ? catalog.wasapi : chosen == Backend::Asio ? catalog.asio : catalog.ks;
+        const std::string& saved = chosen == Backend::Wasapi ? settings_.wasapi.deviceId
+                                   : chosen == Backend::Asio ? settings_.asio.driverClsid
+                                                             : settings_.ks.deviceId;
+        device.Items().Clear();
+        devices->clear();
+        if (chosen == Backend::Wasapi) {
+            device.Items().Append(box_value(tr(L"Device_Default")));
+            devices->push_back({});
+        }
+        for (const auto& entry : list) {
+            device.Items().Append(box_value(ui::utf8(entry.name)));
+            devices->push_back(entry.id);
+        }
+        const auto selected = std::find(devices->begin(), devices->end(), saved);
+        device.SelectedIndex(devices->empty() ? -1 : selected == devices->end() ? 0 : int32_t(selected - devices->begin()));
+    };
+    backend.SelectionChanged(
+        [fillDevices, backend](auto&&, auto&&) { fillDevices(Backend(std::max(0, backend.SelectedIndex()))); });
+    backend.SelectedIndex(int32_t(settings_.backend));
+    output.Children().Append(backend);
+    output.Children().Append(device);
+
+    StackPanel done;
+    done.Children().Append(text(L"Guide_Done"));
+
+    const std::array<std::pair<const wchar_t*, UIElement>, 4> steps{{{L"Guide_WelcomeTitle", welcome},
+                                                                     {L"Guide_FoldersTitle", folders},
+                                                                     {L"Guide_OutputTitle", output},
+                                                                     {L"Guide_DoneTitle", done}}};
+    ContentDialog dialog;
+    dialog.XamlRoot(ContentLayout().XamlRoot());
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    size_t step = 0;
+    const auto show = [&] {
+        dialog.Title(box_value(tr(steps[step].first)));
+        dialog.Content(steps[step].second);
+        const bool last = step + 1 == steps.size();
+        dialog.PrimaryButtonText(tr(last ? L"Guide_Finish" : L"Guide_Next"));
+        dialog.SecondaryButtonText(step > 0 && !last ? tr(L"Guide_Back") : hstring{});
+        dialog.CloseButtonText(last ? hstring{} : tr(L"Guide_Skip"));
+    };
+    dialog.PrimaryButtonClick([&](auto&&, ContentDialogButtonClickEventArgs const& e) {
+        if (step + 1 == steps.size()) return;
+        e.Cancel(true);
+        ++step;
+        show();
+    });
+    dialog.SecondaryButtonClick([&](auto&&, ContentDialogButtonClickEventArgs const& e) {
+        e.Cancel(true);
+        if (step > 0) --step;
+        show();
+    });
+    show();
+    const auto result = co_await dialog.ShowAsync();
+    guideFolders_ = nullptr;
+
+    // Finishing applies the chosen output; skipping keeps the defaults. Either way the guide is done.
+    if (result == ContentDialogResult::Primary) {
+        settings_.backend = Backend(std::max(0, backend.SelectedIndex()));
+        const auto index = device.SelectedIndex();
+        if (index >= 0 && size_t(index) < devices->size()) {
+            const std::string& id = (*devices)[size_t(index)];
+            if (settings_.backend == Backend::Wasapi)
+                settings_.wasapi.deviceId = id;
+            else if (settings_.backend == Backend::Asio)
+                settings_.asio.driverClsid = id;
+            else
+                settings_.ks.deviceId = id;
+        }
+    }
+    settings_.firstRunDone = true;
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = settings_;
+    submitCommand(std::move(command));
+    populateSettings();
 }
 
 void MainWindow::OnFormatClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

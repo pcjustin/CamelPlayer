@@ -56,6 +56,10 @@ private:
     std::mutex& rootLock(int64_t root);
 };
 
+// Settings › Rebuild library: the next complete scan of every root rereads each file's tags, CUE sheets and covers,
+// keeping file identities (so play statistics and playlists stay) and stored fingerprints.
+void requestMetadataReread(LibraryStore& store);
+
 class LibraryMonitor {
 public:
     struct Options {
@@ -72,6 +76,8 @@ public:
     LibraryMonitor& operator=(const LibraryMonitor&) = delete;
     // Rereads the registered roots on the next pass instead of after the availability interval.
     void refreshRoots();
+    // Scans every online root now.
+    void rescanAll();
 
 private:
     class Impl;

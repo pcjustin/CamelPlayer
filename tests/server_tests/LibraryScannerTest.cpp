@@ -410,6 +410,31 @@ TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResu
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_derived_dirty:%'"), 0);
 }
 
+TEST_F(LibraryScannerTest, AnAllTagsRereadKeepsIdentityAndFingerprint) {
+    audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto title = [&] {
+        auto row = store.openReader().prepare("SELECT title FROM tracks");
+        return row.step() ? row.text(0) : std::string{};
+    };
+    const std::string tagged = title();
+    const auto file = count(store, "SELECT id FROM files WHERE kind='audio'");
+    store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Stale'; UPDATE files SET content_hash=zeroblob(32)"); })
+        .get();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(title(), "Stale"); // an unchanged file is not read again
+
+    requestMetadataReread(store);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(title(), tagged);
+    EXPECT_EQ(count(store, "SELECT id FROM files WHERE kind='audio'"), file);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE length(content_hash)=32"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_reread:%'"), 0);
+}
+
 TEST_F(LibraryScannerTest, OneChangedFileDoesNotCountEveryTrackAsALibraryChange) {
     constexpr int kFolders = 4, kFiles = 5;
     for (int folder = 0; folder < kFolders; ++folder) {

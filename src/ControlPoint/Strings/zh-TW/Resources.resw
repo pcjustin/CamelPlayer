@@ -214,4 +214,45 @@
   <data name="Home_Minutes" xml:space="preserve"><value>{0} 分</value></data>
   <data name="Home_HoursMinutes" xml:space="preserve"><value>{0} 小時 {1} 分</value></data>
   <data name="Home_DaysHours" xml:space="preserve"><value>{0} 天 {1} 小時</value></data>
+  <data name="Settings_Guide.Content" xml:space="preserve"><value>重新開啟入門引導</value></data>
+  <data name="Guide_WelcomeTitle" xml:space="preserve"><value>歡迎使用 CamelPlayer</value></data>
+  <data name="Guide_Welcome" xml:space="preserve"><value>只要兩步：選擇音樂所在的資料夾，再選擇播放的輸出方式。也可以略過，之後在「設定」修改。</value></data>
+  <data name="Guide_FoldersTitle" xml:space="preserve"><value>加入音樂資料夾</value></data>
+  <data name="Guide_Folders" xml:space="preserve"><value>可以加入多個資料夾，本機或 NAS 都可以。CamelPlayer 會在背景建立媒體庫。</value></data>
+  <data name="Guide_OutputTitle" xml:space="preserve"><value>選擇輸出</value></data>
+  <data name="Guide_Output" xml:space="preserve"><value>WASAPI 跟隨 Windows 預設裝置適用所有電腦；若要用 DAC，可改選 ASIO、Kernel Streaming 或指定裝置。</value></data>
+  <data name="Guide_DoneTitle" xml:space="preserve"><value>準備就緒</value></data>
+  <data name="Guide_Done" xml:space="preserve"><value>媒體庫正在背景掃描，專輯會陸續出現。之後可在「設定」修改這些選項或重新開啟這個引導。</value></data>
+  <data name="Guide_Next" xml:space="preserve"><value>下一步</value></data>
+  <data name="Guide_Back" xml:space="preserve"><value>上一步</value></data>
+  <data name="Guide_Skip" xml:space="preserve"><value>略過</value></data>
+  <data name="Guide_Finish" xml:space="preserve"><value>完成</value></data>
+  <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer 找不到或無法建立 %LOCALAPPDATA% 中的資料夾，因此無法啟動。請確認該資料夾存在且你的帳號可以寫入。</value></data>
+  <data name="Reset_Title.Text" xml:space="preserve"><value>重置與資料</value></data>
+  <data name="Reset_DataHeader.Text" xml:space="preserve"><value>資料位置</value></data>
+  <data name="Reset_Sizes" xml:space="preserve"><value>媒體庫 {0} · 封面 {1} · 設定 {2} · 紀錄檔 {3}</value></data>
+  <data name="Reset_OpenFolder.Content" xml:space="preserve"><value>在檔案總管中開啟</value></data>
+  <data name="Reset_Button.Content" xml:space="preserve"><value>重置</value></data>
+  <data name="Reset_RebuildButton.Content" xml:space="preserve"><value>重建</value></data>
+  <data name="Reset_ClearButton.Content" xml:space="preserve"><value>清除</value></data>
+  <data name="Reset_AllButton.Content" xml:space="preserve"><value>全部重置</value></data>
+  <data name="Reset_PlaybackTitle.Text" xml:space="preserve"><value>播放與輸出</value></data>
+  <data name="Reset_PlaybackText.Text" xml:space="preserve"><value>後端、裝置、各後端參數、轉換與解碼器回到預設值（WASAPI 跟隨 Windows 預設裝置）。</value></data>
+  <data name="Reset_PlaybackConfirm" xml:space="preserve"><value>輸出會回到 WASAPI 跟隨 Windows 預設裝置，各後端參數、轉換與解碼器也回到預設值。媒體庫、統計與介面設定不受影響。</value></data>
+  <data name="Reset_InterfaceTitle.Text" xml:space="preserve"><value>介面</value></data>
+  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>語言、關閉視窗時的行為、佇列面板、系統列提示與入門引導回到預設值。</value></data>
+  <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>重新啟動後語言改回跟隨 Windows；關閉視窗會縮到系統列；佇列面板會關閉；系統列提示與入門引導視為尚未顯示。</value></data>
+  <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>重建媒體庫</value></data>
+  <data name="Reset_LibraryText.Text" xml:space="preserve"><value>重新讀取每個檔案的標籤、CUE 與封面並重建專輯；播放統計與播放清單會保留。</value></data>
+  <data name="Reset_LibraryConfirm" xml:space="preserve"><value>所有媒體庫資料夾中的檔案都會在背景重新讀取，NAS 上的大型媒體庫可能需要一小時以上。播放統計、播放清單與資料夾清單會保留。</value></data>
+  <data name="Reset_CoversTitle.Text" xml:space="preserve"><value>封面快取</value></data>
+  <data name="Reset_CoversText.Text" xml:space="preserve"><value>刪除產生的封面縮圖，顯示時會重新產生。</value></data>
+  <data name="Reset_CoversConfirm" xml:space="preserve"><value>產生的封面縮圖會被刪除，顯示封面時再重新產生。音樂檔案不受影響。</value></data>
+  <data name="Reset_AllTitle.Text" xml:space="preserve"><value>全部重置</value></data>
+  <data name="Reset_AllText.Text" xml:space="preserve"><value>回到全新安裝：刪除設定、媒體庫與資料夾清單、播放統計、播放清單、封面快取與紀錄檔。音樂檔案不受影響。</value></data>
+  <data name="Reset_AllConfirm" xml:space="preserve"><value>CamelPlayer 會重新啟動，刪除設定、媒體庫資料庫（含資料夾清單、播放統計與播放清單）、封面快取與紀錄檔，接著開啟入門引導。音樂檔案不受影響。</value></data>
+  <data name="Reset_AllAcknowledge" xml:space="preserve"><value>我了解播放統計與播放清單會被刪除</value></data>
+  <data name="Reset_AllPrimary" xml:space="preserve"><value>重置並重新啟動</value></data>
+  <data name="Reset_Confirm" xml:space="preserve"><value>重置</value></data>
+  <data name="Reset_Cancel" xml:space="preserve"><value>取消</value></data>
 </root>

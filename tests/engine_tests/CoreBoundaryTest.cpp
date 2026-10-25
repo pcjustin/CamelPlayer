@@ -278,6 +278,47 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
     std::filesystem::remove(file);
 }
 
+TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
+    Settings settings;
+    settings.backend = Backend::Asio;
+    settings.asio.driverClsid = "{DAVE}";
+    settings.asio.bufferSize = 2048;
+    settings.wasapi.deviceId = "endpoint";
+    settings.convertWhenUnsupported = true;
+    settings.decoderByFormat[AudioFormat::Flac] = DecoderKind::DrFlac;
+    settings.language = "zh-TW";
+    settings.closeAction = CloseAction::Exit;
+    settings.trayNoticeShown = settings.firstRunDone = true;
+    settings.lastFile = L"C:\\music\\a.flac";
+
+    const auto playback = resetPlayback(settings);
+    EXPECT_EQ(playback.backend, Backend::Wasapi);
+    EXPECT_EQ(playback.asio, AsioSettings{});
+    EXPECT_EQ(playback.wasapi, WasapiSettings{});
+    EXPECT_FALSE(playback.convertWhenUnsupported);
+    EXPECT_FALSE(playback.decoderByFormat[AudioFormat::Flac]);
+    EXPECT_EQ(playback.language, "zh-TW");
+    EXPECT_EQ(playback.closeAction, CloseAction::Exit);
+    EXPECT_TRUE(playback.trayNoticeShown && playback.firstRunDone);
+    EXPECT_EQ(playback.lastFile, settings.lastFile);
+
+    const auto ui = resetInterface(settings);
+    EXPECT_EQ(ui.language, "");
+    EXPECT_EQ(ui.closeAction, CloseAction::Tray);
+    EXPECT_FALSE(ui.trayNoticeShown || ui.firstRunDone);
+    EXPECT_EQ(ui.backend, Backend::Asio);
+    EXPECT_EQ(ui.asio, settings.asio);
+    EXPECT_TRUE(ui.convertWhenUnsupported);
+}
+
+TEST(SettingsBoundary, TheFirstRunGuideIsDueUntilFinishedOrSkipped) {
+    EXPECT_FALSE(Settings{}.firstRunDone);
+    Settings settings;
+    settings.firstRunDone = true;
+    EXPECT_TRUE(fromJson(toJson(settings)).firstRunDone);
+    EXPECT_FALSE(fromJson(R"({"firstRunDone":"yes"})").firstRunDone);
+}
+
 TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {
     EXPECT_EQ(Settings{}.closeAction, CloseAction::Tray);
     EXPECT_FALSE(Settings{}.trayNoticeShown);

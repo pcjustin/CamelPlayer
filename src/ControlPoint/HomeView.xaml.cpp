@@ -159,7 +159,7 @@ winrt::fire_and_forget HomeView::refresh() {
         hstring counts = formatted(L"Library_Albums", {data->added.total}) + L" · " +
                          formatted(L"Library_Tracks", {data->tracks}) + L" · " +
                          formatted(L"Search_ArtistCount", {data->artists});
-        self->LibraryCounts().Text(counts);
+        self->LibraryCounts().Text(data->tracks ? counts : tr(L"Library_Empty/Text"));
     });
 }
 

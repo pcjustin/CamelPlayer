@@ -833,7 +833,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
 
 Listing readEntries(Listing out, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
                     const std::set<std::string>& pendingIdentity, const std::set<std::string>& knownHashes,
-                    const std::set<TrustedIdentity>& trusted,
+                    const std::set<TrustedIdentity>& trusted, bool reread,
                     const CancellationToken& token, const std::function<bool()>& playbackActive) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     auto restore = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
@@ -865,7 +865,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known, co
                 if (!directoryValid()) break;
                 entry.version = fileVersion(child);
             }
-            if (old == known.end() || old->second != entry.version) {
+            if (reread || old == known.end() || old->second != entry.version) {
                 if (type == "audio") {
                     if (!directoryValid()) break;
                     entry.metadata = metadata(child, entry.version.size);
@@ -1159,6 +1159,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     auto dirty = reader.prepare("SELECT 1 FROM app_state WHERE key=?");
     bool derivedChanged = dirty.bind(1, derivedKey).step();
     dirty.reset();
+    const auto rereadKey = "library_reread:" + std::to_string(root);
+    dirty.bind(1, rereadKey);
+    const bool reread = dirty.step();
+    dirty.reset();
+    derivedChanged = derivedChanged || reread;
     const bool retryDerived = derivedChanged || !pendingIdentity.empty();
     // Writes run in submission order on the store's writer; the dispatcher waits only when several are outstanding.
     std::deque<std::future<void>> writes;
@@ -1198,7 +1203,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                     continue;
                 }
                 if (file && old.integer(7) == root && library::storedVersion(old, 1) == entry.version &&
-                    entry.error.empty() && !entry.digest) {
+                    entry.error.empty() && !entry.digest && !entry.metadata) {
                     seen.bind(1, generation).bind(2, file).run();
                     seen.reset();
                     // Tracks indexed by an interrupted first scan have no album yet.
@@ -1271,7 +1276,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
                 if (!work.fileWork) return list(work.path, token, network, listedIds);
-                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, token, playbackActive);
+                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, token,
+                                   playbackActive);
             }));
         }
         const auto ready = std::find_if(active.begin(), active.end(), [](auto& job) {
@@ -1340,6 +1346,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                 .run();
             if (report.complete) {
                 db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
+                db.prepare("DELETE FROM app_state WHERE key=?").bind(1, rereadKey).run();
                 db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
                     .bind(1, root)
                     .bind(2, generation)
@@ -1513,6 +1520,7 @@ public:
     }
 
     void refreshRoots() { refresh_ = true; }
+    void rescanAll() { rescan_ = true; }
 
 private:
     struct Watch {
@@ -1600,8 +1608,10 @@ private:
                     }
                     std::erase_if(watches, [&](const auto& pair) { return !live.contains(pair.first); });
                 }
+                const bool rescan = rescan_.exchange(false);
                 for (auto& [id, ptr] : watches) {
                     auto& watch = *ptr;
+                    if (rescan) watch.due = Clock::now();
                     if (watch.deferred && !watch.playbackActive()) {
                         watch.deferred = false;
                         watch.due = Clock::now();
@@ -1653,6 +1663,7 @@ private:
     Options options_;
     CancellationToken token_;
     std::atomic<bool> refresh_ = false;
+    std::atomic<bool> rescan_ = false;
     std::jthread worker_;
     std::jthread fingerprints_;
 };
@@ -1662,6 +1673,18 @@ LibraryMonitor::LibraryMonitor(LibraryStore& store, Options options) : impl_(std
 LibraryMonitor::~LibraryMonitor() = default;
 void LibraryMonitor::refreshRoots() {
     impl_->refreshRoots();
+}
+void LibraryMonitor::rescanAll() {
+    impl_->rescanAll();
+}
+
+void requestMetadataReread(LibraryStore& store) {
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT OR REPLACE INTO app_state(key,value) "
+                    "SELECT 'library_reread:'||id,1 FROM roots WHERE removed IS NULL");
+        })
+        .get();
 }
 
 } // namespace camel::server

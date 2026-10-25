@@ -6,20 +6,50 @@
 #include "pch.h"
 
 #include "App.xaml.h"
+
+#include <filesystem>
+
 #include "TrayIcon.h"
+#include "UiText.h"
 #include "Server/Api/ServerApi.h"
 #include "Common/util/CrashDump.h"
 #include "Common/util/Log.h"
+#include "Common/util/Text.h"
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    const auto logs = camel::dataDirectory() / L"logs";
-    camel::installCrashDumps(logs);
-    camel::log::init(logs, L"CamelPlayer");
-    camel::log::info("CamelPlayer starting");
+namespace {
 
+// Settings › Reset everything leaves this marker and restarts; the data, logs included, goes before logging starts
+// and the Server opens it, so the next start is a fresh installation. Returns what could not be removed.
+std::vector<std::wstring> applyPendingReset(const std::filesystem::path& data) {
+    std::vector<std::wstring> kept;
+    std::error_code error;
+    if (!std::filesystem::exists(data / L"reset-pending", error)) return kept;
+    for (const auto& entry : std::filesystem::directory_iterator(data, error)) {
+        std::filesystem::remove_all(entry.path(), error);
+        if (error) kept.push_back(entry.path().filename().wstring());
+    }
+    return kept;
+}
+
+} // namespace
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
+    // Data lives only in %LOCALAPPDATA%\CamelPlayer; an unzipped release must never write next to the program.
+    if (camel::dataDirectory().empty()) {
+        MessageBoxW(nullptr, ui::tr(L"Error_NoDataFolder").c_str(), L"CamelPlayer v2", MB_ICONERROR | MB_OK);
+        return 1;
+    }
     // One instance per Windows user (docs/Plan.md §8.4), decided before the Server opens the library: a second launch
     // shows the running instance's window, even from the notification area, and exits.
-    const HANDLE instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
+    HANDLE instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
+    // After a full reset the previous instance is still exiting; wait for it rather than activating it.
+    if (instance && GetLastError() == ERROR_ALREADY_EXISTS && wcsstr(commandLine, L"--after-reset")) {
+        for (int attempt = 0; attempt < 150 && instance && GetLastError() == ERROR_ALREADY_EXISTS; ++attempt) {
+            CloseHandle(instance);
+            Sleep(200);
+            instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
+        }
+    }
     if (instance && GetLastError() == ERROR_ALREADY_EXISTS) {
         for (int attempt = 0; attempt < 50; ++attempt) { // the first instance may still be starting
             if (const HWND tray = FindWindowW(ui::TrayIcon::kWindowClass, nullptr)) {
@@ -31,10 +61,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             }
             Sleep(100);
         }
-        camel::log::info("CamelPlayer already running; showed its window");
         CloseHandle(instance);
         return 0;
     }
+
+    const auto notRemoved = applyPendingReset(camel::dataDirectory());
+    const auto logs = camel::dataDirectory() / L"logs";
+    camel::installCrashDumps(logs);
+    camel::log::init(logs, L"CamelPlayer");
+    camel::log::info("CamelPlayer starting");
+    for (const auto& name : notRemoved) camel::log::warn("reset: could not remove %s", camel::toUtf8(name).c_str());
 
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     auto server = camel::server::createLocalServer();

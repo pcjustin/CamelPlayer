@@ -29,6 +29,9 @@ struct MainWindow : MainWindowT<MainWindow> {
                                 Microsoft::UI::Xaml::Controls::AutoSuggestBoxQuerySubmittedEventArgs const&);
     void OnSearchAccelerator(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&,
                              Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const&);
+    winrt::fire_and_forget OnResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnOpenDataFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnGuideClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnFormatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueClearClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -91,6 +94,13 @@ private:
     void removeSelectedQueueEntries();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
     winrt::fire_and_forget refreshRoots();
+    void showRoots(Microsoft::UI::Xaml::Controls::ListView const& list);
+    winrt::fire_and_forget showDataLocation();
+    void applySettingsNow();
+    // First-run guide (docs/Plan.md release section): folders, then output; finishing or skipping records it.
+    winrt::fire_and_forget showFirstRunGuide();
+    winrt::fire_and_forget showFirstRunGuideIfDue();
+    Microsoft::UI::Xaml::Controls::ListView guideFolders_{nullptr};
     // Shows the running library scan in Settings; reads counters, not the database.
     void showScanProgress();
 

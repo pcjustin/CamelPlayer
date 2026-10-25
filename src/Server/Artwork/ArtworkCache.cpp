@@ -255,6 +255,15 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
     return ArtworkReference{key, target};
 }
 
+void ArtworkCache::clear() {
+    std::lock_guard lock(mutex_);
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(directory_, error))
+        std::filesystem::remove_all(entry.path(), error); // a thumbnail being read stays until its reader closes it
+    embedded_.clear();
+    diskBytes_.reset();
+}
+
 void ArtworkCache::trim() {
     if (diskBytes_ && *diskBytes_ <= maxBytes_) return;
     std::vector<std::filesystem::directory_entry> files;

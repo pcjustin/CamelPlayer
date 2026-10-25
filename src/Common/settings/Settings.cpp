@@ -199,6 +199,7 @@ std::string toJson(const Settings& s) {
     j["language"] = s.language;
     j["closeAction"] = s.closeAction == CloseAction::Exit ? "exit" : "tray";
     j["trayNoticeShown"] = s.trayNoticeShown;
+    j["firstRunDone"] = s.firstRunDone;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
@@ -291,6 +292,7 @@ Settings fromJson(const std::string& text) {
     s.language = str(j, "language", "");
     s.closeAction = str(j, "closeAction", "tray") == "exit" ? CloseAction::Exit : CloseAction::Tray;
     s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
+    s.firstRunDone = boolean(j, "firstRunDone", false);
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
         const json& w = j["wasapi"];
@@ -347,8 +349,29 @@ std::filesystem::path dataDirectory() {
         dir = std::filesystem::path(base) / L"CamelPlayer";
     CoTaskMemFree(base);
     std::error_code ec;
+    if (dir.empty()) return {}; // never fall back to the working directory, which may be the program folder
     std::filesystem::create_directories(dir, ec);
-    return dir;
+    return std::filesystem::is_directory(dir, ec) ? dir : std::filesystem::path{};
+}
+
+Settings resetPlayback(const Settings& s) {
+    Settings reset;
+    reset.language = s.language;
+    reset.closeAction = s.closeAction;
+    reset.trayNoticeShown = s.trayNoticeShown;
+    reset.firstRunDone = s.firstRunDone;
+    reset.lastFile = s.lastFile;
+    return reset;
+}
+
+Settings resetInterface(const Settings& s) {
+    const Settings defaults;
+    Settings reset = s;
+    reset.language = defaults.language;
+    reset.closeAction = defaults.closeAction;
+    reset.trayNoticeShown = defaults.trayNoticeShown;
+    reset.firstRunDone = defaults.firstRunDone;
+    return reset;
 }
 
 std::filesystem::path settingsPath() {

@@ -137,8 +137,14 @@ struct Settings {
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
     CloseAction closeAction = CloseAction::Tray;
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
+    bool firstRunDone = false;    // the first-run guide was finished or skipped
     std::wstring lastFile;
 };
+
+// Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion
+// and decoders. Interface: language, close action, the tray notice and the first-run guide. Each keeps the other group.
+Settings resetPlayback(const Settings& s);
+Settings resetInterface(const Settings& s);
 
 // The selected backend's fixed rate (0: follow the file) and timing.
 uint32_t fixedRate(const Settings& s);

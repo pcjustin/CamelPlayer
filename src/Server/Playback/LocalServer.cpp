@@ -247,6 +247,15 @@ public:
         return camel::server::playStatistics(library(), query, token);
     }
 
+    void rereadLibrary() {
+        requestMetadataReread(library());
+        if (libraryMonitor_) libraryMonitor_->rescanAll();
+    }
+
+    void clearArtworkCache() {
+        if (artwork_) artwork_->clear();
+    }
+
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
         return artwork_ ? artwork_->get(library_.get(), request, token) : std::nullopt;
     }
@@ -889,6 +898,14 @@ LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offse
 PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
     return impl_->playStatistics(query, token);
 }
+void LocalServer::rereadLibrary() {
+    impl_->rereadLibrary();
+}
+
+void LocalServer::clearArtworkCache() {
+    impl_->clearArtworkCache();
+}
+
 LibraryAlbumPage LocalServer::recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token) const {
     return camel::server::recentlyPlayedAlbums(impl_->library(), offset, limit, token);
 }

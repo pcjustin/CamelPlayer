@@ -25,6 +25,8 @@ public:
                                         const CancellationToken& token = {});
     std::optional<ArtworkReference> thumbnail(const ArtworkCandidate& image, unsigned pixels,
                                               const CancellationToken& token = {});
+    // Settings › Clear cover cache: deletes every generated thumbnail; later requests generate them again.
+    void clear();
 
 private:
     std::optional<ArtworkReference> generate(const ArtworkCandidate& image, unsigned pixels, const CancellationToken& token);
