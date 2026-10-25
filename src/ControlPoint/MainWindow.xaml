@@ -51,113 +51,216 @@
                     <TextBlock x:Uid="Placeholder_Text" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
 
-                <!-- Settings (docs/Plan.md §16.4) -->
+                <!-- Settings (docs/Plan.md §6, §8.2): one card per area; rarely changed timing values sit in expanders. -->
                 <ScrollViewer x:Name="SettingsPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="12" MaxWidth="680" HorizontalAlignment="Left" Padding="0,0,16,24">
+                    <StackPanel Spacing="16" MaxWidth="820" HorizontalAlignment="Left" Padding="0,0,16,24">
+                        <StackPanel.Resources>
+                            <Style x:Key="SettingsCardStyle" TargetType="Border">
+                                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="CornerRadius" Value="8" />
+                                <Setter Property="Padding" Value="20,16" />
+                            </Style>
+                            <Style x:Key="CardHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <Style x:Key="GroupHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+                                <Setter Property="Margin" Value="0,4,0,0" />
+                            </Style>
+                            <Style x:Key="StatusLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+                                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Style>
+                            <Style x:Key="StatusValueStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+                                <Setter Property="IsTextSelectionEnabled" Value="True" />
+                                <Setter Property="TextWrapping" Value="Wrap" />
+                            </Style>
+                        </StackPanel.Resources>
                         <TextBlock x:Uid="Settings_Title" Style="{StaticResource TitleTextBlockStyle}" />
 
-                        <TextBlock x:Uid="Settings_Library" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                        <ListView x:Name="RootList" SelectionMode="Single" MaxHeight="200" Width="520" HorizontalAlignment="Left"
-                                  BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
-                        <TextBlock x:Name="ScanText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
-                                   Visibility="Collapsed" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button x:Uid="Settings_AddFolder" Click="OnAddFolderClick" />
-                            <Button x:Uid="Settings_RemoveFolder" Click="OnRemoveFolderClick" />
-                        </StackPanel>
-
-                        <TextBlock x:Uid="Settings_Playback" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                        <ComboBox x:Name="BackendCombo" x:Uid="Settings_Backend" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="DecoderCombo" x:Uid="Settings_Decoder" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="AlacDecoderCombo" x:Uid="Settings_AlacDecoder" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="WavDecoderCombo" x:Uid="Settings_WavDecoder" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="AiffDecoderCombo" x:Uid="Settings_AiffDecoder" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="AacDecoderCombo" x:Uid="Settings_AacDecoder" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="AacBitsCombo" x:Uid="Settings_AacBits" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="Mp3DecoderCombo" x:Uid="Settings_Mp3Decoder" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="Mp3BitsCombo" x:Uid="Settings_Mp3Bits" Width="360" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
-                        <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
-
-                        <StackPanel x:Name="WasapiGroup" Spacing="12">
-                            <TextBlock Text="WASAPI" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                            <ComboBox x:Name="WasapiDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="WasapiShareCombo" x:Uid="Settings_WasapiShare" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="WasapiSharedQualityCombo" x:Uid="Settings_WasapiSharedQuality" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="WasapiModeCombo" x:Uid="Settings_WasapiMode" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="WasapiPeriodCombo" x:Uid="Settings_Period" Width="360" SelectionChanged="OnSettingChanged" />
-                            <NumberBox x:Name="WasapiPeriodBox" x:Uid="Settings_PeriodMs" Width="200" HorizontalAlignment="Left" Minimum="1" Maximum="500"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <ComboBox x:Name="WasapiFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="WasapiRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
-                            <NumberBox x:Name="WasapiPollBufferBox" x:Uid="Settings_PollBuffer" Width="200" HorizontalAlignment="Left" Minimum="20" Maximum="2000"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <ComboBox x:Name="WasapiMmcssTaskCombo" x:Uid="Settings_MmcssTask" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="WasapiMmcssPriorityCombo" x:Uid="Settings_MmcssPriority" Width="360" SelectionChanged="OnSettingChanged" />
-                            <NumberBox x:Name="WasapiPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <NumberBox x:Name="WasapiSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <NumberBox x:Name="WasapiReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                        </StackPanel>
-
-                        <StackPanel x:Name="AsioGroup" Spacing="12">
-                            <TextBlock Text="ASIO" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                            <ComboBox x:Name="AsioDriverCombo" x:Uid="Settings_AsioDriver" Width="520" SelectionChanged="OnSettingChanged" />
-                            <Button x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" />
-                            <NumberBox x:Name="AsioBufferBox" x:Uid="Settings_AsioBuffer" Width="200" HorizontalAlignment="Left" Minimum="0" Maximum="65536"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <StackPanel Orientation="Horizontal" Spacing="12">
-                                <NumberBox x:Name="AsioLeftBox" x:Uid="Settings_AsioLeft" Width="160" Minimum="1" Maximum="64"
-                                           SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                                <NumberBox x:Name="AsioRightBox" x:Uid="Settings_AsioRight" Width="160" Minimum="1" Maximum="64"
-                                           SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE8F1;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Library" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <ListView x:Name="RootList" SelectionMode="Single" MaxHeight="240" CornerRadius="4"
+                                          BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                <TextBlock x:Name="ScanText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
+                                           Visibility="Collapsed" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Uid="Settings_AddFolder" Click="OnAddFolderClick" Style="{StaticResource AccentButtonStyle}" />
+                                    <Button x:Uid="Settings_RemoveFolder" Click="OnRemoveFolderClick" />
+                                </StackPanel>
                             </StackPanel>
-                            <ComboBox x:Name="AsioRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
-                            <NumberBox x:Name="AsioPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <NumberBox x:Name="AsioSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <NumberBox x:Name="AsioReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                        </StackPanel>
+                        </Border>
 
-                        <StackPanel x:Name="KsGroup" Spacing="12">
-                            <TextBlock Text="Kernel Streaming" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                            <ComboBox x:Name="KsDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="KsModeCombo" x:Uid="Settings_KsMode" Width="360" SelectionChanged="OnSettingChanged" />
-                            <NumberBox x:Name="KsBufferBox" x:Uid="Settings_KsBuffer" Width="200" HorizontalAlignment="Left" Minimum="2" Maximum="1000"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <StackPanel Orientation="Horizontal" Spacing="12">
-                                <NumberBox x:Name="KsPacketCountBox" x:Uid="Settings_KsPacketCount" Width="160" Minimum="2" Maximum="16"
-                                           SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                                <NumberBox x:Name="KsPacketMsBox" x:Uid="Settings_KsPacketMs" Width="160" Minimum="1" Maximum="200"
-                                           SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE7F5;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Playback" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <ComboBox x:Name="BackendCombo" x:Uid="Settings_Backend" Width="360" SelectionChanged="OnSettingChanged" />
+                                <InfoBar x:Name="BackendNotice" Severity="Warning" IsOpen="False" IsClosable="True" />
+                                <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
+
+                                <StackPanel x:Name="WasapiGroup" Spacing="12">
+                                    <TextBlock Text="WASAPI" Style="{StaticResource GroupHeaderStyle}" />
+                                    <ComboBox x:Name="WasapiDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiShareCombo" x:Uid="Settings_WasapiShare" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiSharedQualityCombo" x:Uid="Settings_WasapiSharedQuality" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiModeCombo" x:Uid="Settings_WasapiMode" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
+                                        <StackPanel Spacing="12">
+                                            <ComboBox x:Name="WasapiPeriodCombo" x:Uid="Settings_Period" Width="360" SelectionChanged="OnSettingChanged" />
+                                            <NumberBox x:Name="WasapiPeriodBox" x:Uid="Settings_PeriodMs" Width="200" HorizontalAlignment="Left" Minimum="1" Maximum="500"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="WasapiPollBufferBox" x:Uid="Settings_PollBuffer" Width="200" HorizontalAlignment="Left" Minimum="20" Maximum="2000"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <ComboBox x:Name="WasapiMmcssTaskCombo" x:Uid="Settings_MmcssTask" Width="360" SelectionChanged="OnSettingChanged" />
+                                            <ComboBox x:Name="WasapiMmcssPriorityCombo" x:Uid="Settings_MmcssPriority" Width="360" SelectionChanged="OnSettingChanged" />
+                                            <NumberBox x:Name="WasapiPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="WasapiSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="WasapiReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+
+                                <StackPanel x:Name="AsioGroup" Spacing="12">
+                                    <TextBlock Text="ASIO" Style="{StaticResource GroupHeaderStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <ComboBox x:Name="AsioDriverCombo" x:Uid="Settings_AsioDriver" Width="520" SelectionChanged="OnSettingChanged" />
+                                        <Button x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" VerticalAlignment="Bottom" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <NumberBox x:Name="AsioLeftBox" x:Uid="Settings_AsioLeft" Width="160" Minimum="1" Maximum="64"
+                                                   SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                        <NumberBox x:Name="AsioRightBox" x:Uid="Settings_AsioRight" Width="160" Minimum="1" Maximum="64"
+                                                   SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="AsioRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
+                                        <StackPanel Spacing="12">
+                                            <NumberBox x:Name="AsioBufferBox" x:Uid="Settings_AsioBuffer" Width="200" HorizontalAlignment="Left" Minimum="0" Maximum="65536"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="AsioPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="AsioSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="AsioReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+
+                                <StackPanel x:Name="KsGroup" Spacing="12">
+                                    <TextBlock Text="Kernel Streaming" Style="{StaticResource GroupHeaderStyle}" />
+                                    <ComboBox x:Name="KsDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsModeCombo" x:Uid="Settings_KsMode" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
+                                        <StackPanel Spacing="12">
+                                            <NumberBox x:Name="KsBufferBox" x:Uid="Settings_KsBuffer" Width="200" HorizontalAlignment="Left" Minimum="2" Maximum="1000"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                                <NumberBox x:Name="KsPacketCountBox" x:Uid="Settings_KsPacketCount" Width="160" Minimum="2" Maximum="16"
+                                                           SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                                <NumberBox x:Name="KsPacketMsBox" x:Uid="Settings_KsPacketMs" Width="160" Minimum="1" Maximum="200"
+                                                           SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            </StackPanel>
+                                            <ComboBox x:Name="KsMmcssTaskCombo" x:Uid="Settings_MmcssTask" Width="360" SelectionChanged="OnSettingChanged" />
+                                            <ComboBox x:Name="KsMmcssPriorityCombo" x:Uid="Settings_MmcssPriority" Width="360" SelectionChanged="OnSettingChanged" />
+                                            <NumberBox x:Name="KsPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="KsSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="KsReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                        </StackPanel>
+                                    </Expander>
+                                    <TextBlock x:Uid="Settings_KsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+
+                                <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
                             </StackPanel>
-                            <ComboBox x:Name="KsFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="KsRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="KsMmcssTaskCombo" x:Uid="Settings_MmcssTask" Width="360" SelectionChanged="OnSettingChanged" />
-                            <ComboBox x:Name="KsMmcssPriorityCombo" x:Uid="Settings_MmcssPriority" Width="360" SelectionChanged="OnSettingChanged" />
-                            <NumberBox x:Name="KsPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <NumberBox x:Name="KsSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <NumberBox x:Name="KsReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
-                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
-                            <TextBlock x:Uid="Settings_KsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        </StackPanel>
+                        </Border>
 
-                        <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
+                        <!-- Status area (read-only, docs/Plan.md §6) -->
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE9D9;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Status" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <StackPanel x:Name="StatusNotices" Spacing="8" />
+                                <TextBlock x:Name="StatusIdleText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                <Grid x:Name="StatusGrid" ColumnSpacing="24" RowSpacing="8" Visibility="Collapsed">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock x:Uid="Status_Output" Style="{StaticResource StatusLabelStyle}" />
+                                    <TextBlock x:Name="StatusOutputText" Grid.Column="1" Style="{StaticResource StatusValueStyle}" />
+                                    <TextBlock x:Uid="Status_Mode" Grid.Row="1" Style="{StaticResource StatusLabelStyle}" />
+                                    <TextBlock x:Name="StatusModeText" Grid.Row="1" Grid.Column="1" Style="{StaticResource StatusValueStyle}" />
+                                    <TextBlock x:Uid="Status_Buffer" Grid.Row="2" Style="{StaticResource StatusLabelStyle}" />
+                                    <TextBlock x:Name="StatusBufferText" Grid.Row="2" Grid.Column="1" Style="{StaticResource StatusValueStyle}" />
+                                    <TextBlock x:Uid="Status_Underruns" Grid.Row="3" Style="{StaticResource StatusLabelStyle}" />
+                                    <TextBlock x:Name="StatusUnderrunText" Grid.Row="3" Grid.Column="1" Style="{StaticResource StatusValueStyle}" />
+                                    <TextBlock x:Uid="Status_Details" Grid.Row="4" Style="{StaticResource StatusLabelStyle}" />
+                                    <TextBlock x:Name="StatusDetailText" Grid.Row="4" Grid.Column="1" Style="{StaticResource StatusValueStyle}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock x:Uid="Settings_Status" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                        <TextBlock x:Name="StatusText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE9E9;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Decoders" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <ComboBox x:Name="DecoderCombo" x:Uid="Settings_Decoder" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="AlacDecoderCombo" x:Uid="Settings_AlacDecoder" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="WavDecoderCombo" x:Uid="Settings_WavDecoder" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="AiffDecoderCombo" x:Uid="Settings_AiffDecoder" Width="360" SelectionChanged="OnSettingChanged" />
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <ComboBox x:Name="AacDecoderCombo" x:Uid="Settings_AacDecoder" Width="240" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AacBitsCombo" x:Uid="Settings_AacBits" Width="240" SelectionChanged="OnSettingChanged" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <ComboBox x:Name="Mp3DecoderCombo" x:Uid="Settings_Mp3Decoder" Width="240" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="Mp3BitsCombo" x:Uid="Settings_Mp3Bits" Width="240" SelectionChanged="OnSettingChanged" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock x:Uid="Settings_Interface" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0" />
-                        <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
-                        <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
-                                   Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE771;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Interface" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
+                                <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
@@ -210,7 +313,18 @@
         <!-- Full-width playback bar (docs/Plan.md §8.1) -->
         <Grid Grid.Row="1" Padding="24,8,24,12" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+            <Grid.Resources>
+                <Style x:Key="BadgeStyle" TargetType="Border">
+                    <Setter Property="Padding" Value="8,2" />
+                    <Setter Property="CornerRadius" Value="10" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+                    <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                </Style>
+            </Grid.Resources>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -316,12 +430,50 @@
                     </ToggleButton>
                 </Grid>
             </Grid>
-            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
-                <Ellipse x:Name="Lamp" Width="10" Height="10" VerticalAlignment="Center" Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
-                <TextBlock x:Name="LampText" VerticalAlignment="Center" FontWeight="SemiBold" />
-                <TextBlock x:Name="FormatText" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock x:Name="SourceText" Visibility="Collapsed" />
-                <TextBlock x:Name="SignalPathText" Visibility="Collapsed" />
+            <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) -->
+            <Grid Grid.Row="3" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon x:Name="StateIcon" Glyph="&#xE71A;" FontSize="10" VerticalAlignment="Center" />
+                            <TextBlock x:Name="StateText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                                       AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="LampBadge" Style="{StaticResource BadgeStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse x:Name="Lamp" Width="8" Height="8" VerticalAlignment="Center"
+                                     Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
+                            <TextBlock x:Name="LampText" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="SourceBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
+                        <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </Border>
+                    <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
+                        <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </Border>
+                </StackPanel>
+                <HyperlinkButton x:Name="FormatButton" x:Uid="SignalPath_Toggle" Grid.Column="1" Click="OnFormatClick"
+                                 Padding="4,2" HorizontalAlignment="Left" MinWidth="0">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="FormatText" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                        <FontIcon x:Name="FormatChevron" Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
+                    </StackPanel>
+                </HyperlinkButton>
+            </Grid>
+            <StackPanel x:Name="SignalPathPanel" Grid.Row="4" Spacing="2" Padding="4,2,0,0" Visibility="Collapsed">
+                <TextBlock x:Name="SourceText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SignalPathText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
+                           TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SignalNoteText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
+                           TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
         </Grid>
     </Grid>

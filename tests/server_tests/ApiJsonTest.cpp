@@ -72,6 +72,7 @@ Snapshot fullSnapshot() {
     plan.dsd = DsdPath::Dop;
     plan.state = PipelineState::LossySource;
     p.plan = plan;
+    p.md5 = Md5State::Verified;
     p.backend = Backend::Ks;
     p.decoder = DecoderKind::DsdNexus;
     p.activeBackend = Backend::Ks;
@@ -119,6 +120,7 @@ TEST(ApiJson, SnapshotAndEventSurviveTheRoundTrip) {
     EXPECT_EQ(j["playback"]["output"]["type"], "24in32");
     EXPECT_EQ(j["playback"]["error"], "deviceLost");
     EXPECT_EQ(j["playback"]["format"], "dsd");
+    EXPECT_EQ(j["playback"]["md5"], "verified");
     EXPECT_EQ(throughText(CommandStamp{1, 2, 3}, commandStampFromJson), (CommandStamp{1, 2, 3}));
 }
 

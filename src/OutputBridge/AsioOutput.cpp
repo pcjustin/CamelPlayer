@@ -325,7 +325,10 @@ private:
         asio::IoFormat format{};
         format.type = type;
         const bool ok = drv_->future(asio::future::kSetIoFormat, &format) == asio::kSuccess;
-        if (ok) dsdMode_ = type == asio::IoFormatType::Dsd;
+        if (ok) {
+            dsdMode_ = type == asio::IoFormatType::Dsd;
+            driverType_ = outputType(); // the channels report the sample type of the mode just set
+        }
         return ok;
     }
 

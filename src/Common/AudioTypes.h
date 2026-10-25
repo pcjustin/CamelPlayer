@@ -70,6 +70,9 @@ struct SourceInfo {
     bool operator==(const SourceInfo&) const = default;
 };
 
+// What decoding has established about the FLAC STREAMINFO MD5 of the track being heard (docs/Plan.md §5.2).
+enum class Md5State : uint8_t { Unavailable, Incomplete, Verified, Failed };
+
 inline double framesToSeconds(uint64_t frames, uint32_t rate) {
     return rate ? double(frames) / rate : 0.0;
 }

@@ -32,6 +32,7 @@ struct EngineSnapshot {
     std::optional<AudioFormat> format;  // probed from the current file
     std::optional<DeviceFormat> output; // set while a stream is open
     std::optional<OutputPlan> plan;     // how the source reaches `output`, and what that means for the indicator
+    std::optional<Md5State> md5;        // FLAC only; kept after the track ends until another file starts
     Backend backend = Backend::Wasapi;
     DecoderKind decoder = DecoderKind::Sndfile; // for the current file; FLAC's choice before a file is known
     OutputStatus outputStatus;

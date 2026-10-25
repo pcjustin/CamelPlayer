@@ -203,6 +203,21 @@ bool RustSession::clearNext() {
     return camel_engine_clear_next_v1(engine_, &command) == CAMEL_ENGINE_OK;
 }
 
+Md5State RustSession::md5State() const noexcept {
+    CamelFlacIntegrityV1 integrity{sizeof(CamelFlacIntegrityV1), CAMEL_ENGINE_ABI_VERSION};
+    if (camel_engine_get_flac_integrity_v1(engine_, &integrity) != CAMEL_ENGINE_OK) return Md5State::Unavailable;
+    switch (integrity.status) {
+    case CAMEL_FLAC_INTEGRITY_INCOMPLETE:
+        return Md5State::Incomplete;
+    case CAMEL_FLAC_INTEGRITY_VERIFIED:
+        return Md5State::Verified;
+    case CAMEL_FLAC_INTEGRITY_FAILED:
+        return Md5State::Failed;
+    default:
+        return Md5State::Unavailable;
+    }
+}
+
 RustSession::Transitions RustSession::transitions() const noexcept {
     Transitions result;
     uint32_t queued = 0;

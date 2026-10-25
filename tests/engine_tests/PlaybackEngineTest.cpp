@@ -185,6 +185,42 @@ TEST_F(EngineStateTest, QueuedFileFollowsWithoutReopeningTheDevice) {
     EXPECT_EQ(probe.opens, 1);
 }
 
+std::optional<Md5State> awaitMd5(PlaybackEngine& engine, Md5State expected) {
+    for (int i = 0; i < 200 && engine.snapshot().md5 != expected; ++i) std::this_thread::sleep_for(5ms);
+    return engine.snapshot().md5;
+}
+
+TEST_F(EngineStateTest, Md5IsVerifiedOnlyForAWholeDecodeAndUnavailableWithoutAReference) {
+    open();
+    EXPECT_EQ(awaitMd5(*engine, Md5State::Verified), Md5State::Verified);
+    engine->seek(96000);
+    engine->waitIdle();
+    EXPECT_EQ(awaitMd5(*engine, Md5State::Incomplete), Md5State::Incomplete);
+    engine->openAndPlay(testutil::generatedFile({"md5-missing-24-96k", 96000, 24, 2, 0.5, false}));
+    engine->waitIdle();
+    EXPECT_EQ(awaitMd5(*engine, Md5State::Unavailable), Md5State::Unavailable);
+}
+
+TEST_F(EngineStateTest, Md5StaysWithTheAudibleTrackWhileTheDecoderReadsTheQueuedOne) {
+    const testaudio::GenSpec spec{"md5-next-24-96k-wav", 96000, 24, 2, 0.5};
+    const auto next = testutil::tempDir() / "md5-next-24-96k.wav";
+    testaudio::writeWav(next, testaudio::makeSignal(spec), spec.sampleRate, spec.bits, spec.channels);
+    open();
+    ASSERT_TRUE(engine->queueNext(next));
+    for (int i = 0; i < 200 && !engine->snapshot().nextSlotFree; ++i) std::this_thread::sleep_for(5ms);
+    ASSERT_TRUE(engine->snapshot().nextSlotFree);
+    EXPECT_EQ(awaitMd5(*engine, Md5State::Verified), Md5State::Verified);
+    EXPECT_EQ(engine->snapshot().transitions, 0u);
+
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (engine->snapshot().transitions == 0 && std::chrono::steady_clock::now() < deadline) {
+        pull(4096);
+        engine->waitIdle();
+    }
+    ASSERT_EQ(engine->snapshot().transitions, 1u);
+    EXPECT_FALSE(engine->snapshot().md5);
+}
+
 TEST_F(EngineStateTest, QueuedFileOfAnotherContainerFollowsWithoutReopeningTheDevice) {
     const testaudio::GenSpec spec{"gapless-next-24-96k-wav", 96000, 24, 2, 0.5};
     const auto next = testutil::tempDir() / "gapless-next-24-96k.wav";
@@ -487,13 +523,16 @@ TEST_F(EngineStateTest, ListenerMayReadSnapshotAndCanBeRemoved) {
         ++notifications;
     });
     open();
+    ASSERT_EQ(awaitMd5(*engine, Md5State::Verified), Md5State::Verified); // the MD5 result is published too
+    const int beforePause = notifications.load();
+    EXPECT_GE(beforePause, 2);
     engine->pause();
     engine->waitIdle();
-    EXPECT_EQ(notifications.load(), 2);
+    EXPECT_EQ(notifications.load(), beforePause + 1);
     engine->setListener({});
     engine->stop();
     engine->waitIdle();
-    EXPECT_EQ(notifications.load(), 2);
+    EXPECT_EQ(notifications.load(), beforePause + 1);
 }
 
 TEST_F(EngineStateTest, DestructionClosesActiveSession) {

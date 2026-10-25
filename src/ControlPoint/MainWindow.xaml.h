@@ -22,6 +22,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnNextClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnShuffleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRepeatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnFormatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueClearClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnQueueSaveClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -88,6 +89,10 @@ private:
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueEntryId_ = UINT64_MAX;
     void updateQueuePanel();
+    // Switching backend keeps the same hardware; false when the new backend lists no matching device.
+    bool followDevice(camel::Backend previous);
+    void showStatusNotices(const camel::server::PlaybackSnapshot& s);
+    std::wstring shownNotices_;
     // Collapses the navigation pane to icons while the queue panel would leave too little content width.
     void fitNavigationPane();
     winrt::hstring shownScan_;

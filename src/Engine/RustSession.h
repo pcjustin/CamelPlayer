@@ -69,6 +69,9 @@ public:
     // Safe on the output callback thread.
     Transitions transitions() const noexcept;
 
+    // For the audible track, even while the decoder already reads the queued one.
+    Md5State md5State() const noexcept;
+
 private:
     CamelCommandStampV1 nextCommand();
 

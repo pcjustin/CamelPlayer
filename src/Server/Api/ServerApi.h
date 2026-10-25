@@ -131,6 +131,7 @@ struct PlaybackSnapshot {
     std::optional<audio::AudioFormat> format;
     std::optional<audio::DeviceFormat> output;
     std::optional<audio::OutputPlan> plan;
+    std::optional<audio::Md5State> md5; // FLAC only
     Backend backend = Backend::Wasapi;
     audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
     std::optional<Backend> activeBackend;

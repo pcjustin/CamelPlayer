@@ -94,7 +94,7 @@
   <data name="Device_Default" xml:space="preserve"><value>跟隨 Windows 預設</value></data>
   <data name="Device_None" xml:space="preserve"><value>（找不到）</value></data>
   <data name="Device_NotConnected" xml:space="preserve"><value>已儲存的裝置（未連接）</value></data>
-  <data name="Status_Adjusted" xml:space="preserve"><value>設定值 ≠ 實際值：</value></data>
+  <data name="Status_Adjusted" xml:space="preserve"><value>設定值 ≠ 實際值</value></data>
   <data name="Lang_System" xml:space="preserve"><value>跟隨系統</value></data>
   <data name="NoFile" xml:space="preserve"><value>尚未開啟檔案</value></data>
   <data name="Lamp_Idle" xml:space="preserve"><value>未輸出</value></data>
@@ -156,4 +156,24 @@
   <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>關閉播放佇列</value></data>
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>關閉播放佇列</value></data>
   <data name="Queue_Empty.Text" xml:space="preserve"><value>播放佇列是空的。在曲目或資料夾上按右鍵，選擇「接著播放」或「加到佇列尾端」。</value></data>
+  <data name="State_Playing" xml:space="preserve"><value>播放中</value></data>
+  <data name="State_Paused" xml:space="preserve"><value>已暫停</value></data>
+  <data name="State_Stopped" xml:space="preserve"><value>已停止</value></data>
+  <data name="State_Error" xml:space="preserve"><value>錯誤</value></data>
+  <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
+  <data name="Badge_Lossy.Text" xml:space="preserve"><value>有損來源</value></data>
+  <data name="Badge_DspBypassedTip" xml:space="preserve"><value>原始 DSD 不經修改送往裝置；音量、ReplayGain 等所有 PCM 處理都已略過。</value></data>
+  <data name="SignalPath_Toggle.ToolTipService.ToolTip" xml:space="preserve"><value>顯示或隱藏訊號路徑</value></data>
+  <data name="SignalPath_Toggle.AutomationProperties.Name" xml:space="preserve"><value>顯示或隱藏訊號路徑</value></data>
+  <data name="Settings_Advanced.Header" xml:space="preserve"><value>緩衝與時序</value></data>
+  <data name="Settings_Decoders.Text" xml:space="preserve"><value>解碼器</value></data>
+  <data name="Status_Output.Text" xml:space="preserve"><value>輸出格式</value></data>
+  <data name="Status_Mode.Text" xml:space="preserve"><value>輸出模式</value></data>
+  <data name="Status_Buffer.Text" xml:space="preserve"><value>裝置緩衝</value></data>
+  <data name="Status_Underruns.Text" xml:space="preserve"><value>緩衝不足次數</value></data>
+  <data name="Status_Details.Text" xml:space="preserve"><value>裝置細節</value></data>
+  <data name="Status_BufferValue" xml:space="preserve"><value>{0} 個取樣框 · {1} 毫秒</value></data>
+  <data name="Status_NotConnected" xml:space="preserve"><value>輸出裝置未連接</value></data>
+  <data name="Backend_NoMatchTitle" xml:space="preserve"><value>已暫停播放</value></data>
+  <data name="Backend_NoMatch" xml:space="preserve"><value>{1} 沒有與「{0}」對應的裝置，因此沒有改用其他裝置。請在下方選擇輸出裝置後再按播放。</value></data>
 </root>

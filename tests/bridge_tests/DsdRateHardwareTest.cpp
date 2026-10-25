@@ -115,3 +115,29 @@ TEST_P(DsdRateHardware, DISABLED_PlaysWhatTheDeviceOffers) {
 }
 
 INSTANTIATE_TEST_SUITE_P(M2, DsdRateHardware, ::testing::ValuesIn(rateCases()), dsdRateName);
+
+// Closing a native DSD stream returns the driver to PCM; its PCM sample type must be offered again.
+TEST(DsdRateHardwareSwitch, DISABLED_AsioPlaysPcmAfterNativeDsd) {
+    Settings settings;
+    ASSERT_TRUE(selectChord(settings, Backend::Asio));
+    settings.asio.dsdOutput = DsdOutput::Native;
+    PlaybackEngine engine(settings);
+    engine.openAndPlay(toneFile(1));
+    engine.waitIdle();
+    auto snap = engine.snapshot();
+    ASSERT_FALSE(snap.error) << snap.errorDetail;
+    ASSERT_TRUE(snap.plan);
+    EXPECT_EQ(snap.plan->dsd, DsdPath::Native);
+    engine.stop();
+    engine.waitIdle();
+
+    engine.openAndPlay(testutil::generatedFile({"asio-pcm-after-dsd-44.1k", 44100, 24, 2, 1.0, true, -40}));
+    engine.waitIdle();
+    snap = engine.snapshot();
+    ASSERT_FALSE(snap.error) << snap.errorDetail;
+    ASSERT_TRUE(snap.plan && snap.output);
+    EXPECT_EQ(snap.plan->dsd, DsdPath::None);
+    EXPECT_EQ(snap.output->sampleRate, 44100u);
+    engine.stop();
+    engine.waitIdle();
+}

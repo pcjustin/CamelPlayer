@@ -94,7 +94,7 @@
   <data name="Device_Default" xml:space="preserve"><value>Follow Windows default</value></data>
   <data name="Device_None" xml:space="preserve"><value>(none found)</value></data>
   <data name="Device_NotConnected" xml:space="preserve"><value>Saved device (not connected)</value></data>
-  <data name="Status_Adjusted" xml:space="preserve"><value>Requested ≠ active:</value></data>
+  <data name="Status_Adjusted" xml:space="preserve"><value>Requested ≠ active</value></data>
   <data name="Lang_System" xml:space="preserve"><value>Follow Windows</value></data>
   <data name="NoFile" xml:space="preserve"><value>No file open</value></data>
   <data name="Lamp_Idle" xml:space="preserve"><value>No output</value></data>
@@ -156,4 +156,24 @@
   <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>Close queue</value></data>
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>Close queue</value></data>
   <data name="Queue_Empty.Text" xml:space="preserve"><value>The queue is empty. Right-click a track or folder and choose Play next or Add to end of queue.</value></data>
+  <data name="State_Playing" xml:space="preserve"><value>Playing</value></data>
+  <data name="State_Paused" xml:space="preserve"><value>Paused</value></data>
+  <data name="State_Stopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="State_Error" xml:space="preserve"><value>Error</value></data>
+  <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
+  <data name="Badge_Lossy.Text" xml:space="preserve"><value>Lossy source</value></data>
+  <data name="Badge_DspBypassedTip" xml:space="preserve"><value>Raw DSD goes to the device unchanged; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>
+  <data name="SignalPath_Toggle.ToolTipService.ToolTip" xml:space="preserve"><value>Show or hide the signal path</value></data>
+  <data name="SignalPath_Toggle.AutomationProperties.Name" xml:space="preserve"><value>Show or hide the signal path</value></data>
+  <data name="Settings_Advanced.Header" xml:space="preserve"><value>Buffers and timing</value></data>
+  <data name="Settings_Decoders.Text" xml:space="preserve"><value>Decoders</value></data>
+  <data name="Status_Output.Text" xml:space="preserve"><value>Output format</value></data>
+  <data name="Status_Mode.Text" xml:space="preserve"><value>Output mode</value></data>
+  <data name="Status_Buffer.Text" xml:space="preserve"><value>Device buffer</value></data>
+  <data name="Status_Underruns.Text" xml:space="preserve"><value>Underruns</value></data>
+  <data name="Status_Details.Text" xml:space="preserve"><value>Device details</value></data>
+  <data name="Status_BufferValue" xml:space="preserve"><value>{0} frames · {1} ms</value></data>
+  <data name="Status_NotConnected" xml:space="preserve"><value>Output device not connected</value></data>
+  <data name="Backend_NoMatchTitle" xml:space="preserve"><value>Playback paused</value></data>
+  <data name="Backend_NoMatch" xml:space="preserve"><value>{1} lists no device matching {0}, so nothing was switched to another device. Choose the output device below, then press Play.</value></data>
 </root>

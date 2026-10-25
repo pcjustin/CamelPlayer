@@ -101,6 +101,7 @@ PlaybackSnapshot playback(const audio::EngineSnapshot& s) {
     p.format = s.format;
     p.output = s.output;
     p.plan = s.plan;
+    p.md5 = s.md5;
     p.backend = s.backend;
     p.decoder = s.decoder;
     if (s.output) {

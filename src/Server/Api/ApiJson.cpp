@@ -112,6 +112,10 @@ constexpr Names<PipelineState, 4> kPipelineStates = {{PipelineState::BitPerfect,
                                                      {PipelineState::LosslessConversion, "losslessConversion"},
                                                      {PipelineState::Processed, "processed"},
                                                      {PipelineState::LossySource, "lossySource"}};
+constexpr Names<Md5State, 4> kMd5States = {{Md5State::Unavailable, "unavailable"},
+                                           {Md5State::Incomplete, "incomplete"},
+                                           {Md5State::Verified, "verified"},
+                                           {Md5State::Failed, "failed"}};
 constexpr Names<DsdPath, 4> kDsdPaths = {
     {DsdPath::None, "none"}, {DsdPath::Native, "native"}, {DsdPath::Dop, "dop"}, {DsdPath::Pcm, "pcm"}};
 
@@ -244,6 +248,7 @@ json toJson(const PlaybackSnapshot& p) {
             {"format", p.format ? json(formatId(*p.format)) : json(nullptr)},
             {"output", optionalJson(p.output)},
             {"plan", optionalJson(p.plan)},
+            {"md5", p.md5 ? json(nameOf(*p.md5, kMd5States)) : json(nullptr)},
             {"backend", backendId(p.backend)},
             {"decoder", decoderId(p.decoder)},
             {"activeBackend", p.activeBackend ? json(backendId(*p.activeBackend)) : json(nullptr)},
@@ -268,6 +273,7 @@ PlaybackSnapshot playbackFrom(const json& j) {
     p.format = optional<AudioFormat>(j, "format", formatFrom);
     p.output = optional<DeviceFormat>(j, "output", deviceFormatFrom);
     p.plan = optional<OutputPlan>(j, "plan", planFrom);
+    p.md5 = optional<Md5State>(j, "md5", [](const json& v) { return enumFrom(v, kMd5States, "MD5 state"); });
     p.backend = backendFrom(field(j, "backend"));
     p.decoder = decoderFrom(field(j, "decoder"));
     p.activeBackend = optional<Backend>(j, "activeBackend", backendFrom);

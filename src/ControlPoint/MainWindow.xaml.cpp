@@ -13,11 +13,13 @@
 #include <filesystem>
 #include <fstream>
 #include <winrt/Microsoft.UI.Interop.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
 #include "UiText.h"
 #include "ArtworkLoader.h"
 #include "Common/settings/Settings.h"
 #include "Common/util/Text.h"
+#include "Server/Playback/DeviceMatch.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -51,8 +53,31 @@ double numberOr(NumberBox const& box, double fallback) {
     return std::isnan(v) ? fallback : v;
 }
 
-Media::SolidColorBrush brush(uint8_t r, uint8_t g, uint8_t b) {
-    return Media::SolidColorBrush(Windows::UI::Color{255, r, g, b});
+// Theme brushes follow light, dark and high-contrast themes.
+Media::Brush themeBrush(const wchar_t* key) {
+    return Application::Current().Resources().TryLookup(box_value(key)).try_as<Media::Brush>();
+}
+
+// Output details arrive as one line of ", " and "; " separated clauses; the status area shows one per line.
+hstring clauseLines(const std::string& detail) {
+    std::wstring text(ui::utf8(detail));
+    for (const wchar_t* separator : {L"; ", L", "})
+        for (size_t at = text.find(separator); at != std::wstring::npos; at = text.find(separator, at + 1))
+            text.replace(at, 2, L"\n");
+    return hstring(text);
+}
+
+// LiveSetting alone announces nothing; Narrator hears a change only when the live region raises it.
+void setAnnounced(TextBlock const& block, hstring const& value) {
+    if (block.Text() == value) return;
+    block.Text(value);
+    if (const auto peer = Automation::Peers::FrameworkElementAutomationPeer::FromElement(block))
+        peer.RaiseAutomationEvent(Automation::Peers::AutomationEvents::LiveRegionChanged);
+}
+
+void setBadgeTip(FrameworkElement const& badge, hstring const& name, hstring const& tip) {
+    Automation::AutomationProperties::SetName(badge, name);
+    ToolTipService::SetToolTip(badge, tip.empty() ? nullptr : box_value(tip));
 }
 
 std::vector<hstring> rateItems() {
@@ -330,12 +355,56 @@ void MainWindow::readSettingsFromUi() {
 
 void MainWindow::settingsChanged() {
     if (populating_ || !server_) return;
+    const Backend previous = settings_.backend;
     readSettingsFromUi();
+    if (settings_.backend != previous && !followDevice(previous) &&
+        server_->snapshot().playback.state == PlaybackState::Playing) {
+        // Never move sound to another device unannounced; its level may differ a lot.
+        Command pause;
+        pause.kind = CommandKind::Pause;
+        submitCommand(std::move(pause));
+    }
     Command command;
     command.kind = CommandKind::ApplySettings;
     command.settings = settings_;
     submitCommand(std::move(command));
     updateBackendGroups();
+}
+
+bool MainWindow::followDevice(Backend previous) {
+    BackendNotice().IsOpen(false);
+    const auto list = [&](Backend backend) -> const std::vector<DeviceInfo>& {
+        return backend == Backend::Wasapi ? wasapiDevices_ : backend == Backend::Asio ? asioDrivers_ : ksPins_;
+    };
+    const auto savedId = [&](Backend backend) -> std::string& {
+        return backend == Backend::Wasapi ? settings_.wasapi.deviceId
+               : backend == Backend::Asio ? settings_.asio.driverClsid
+                                          : settings_.ks.deviceId;
+    };
+    // An empty WASAPI choice follows the Windows default, whose name the catalog does not give; ASIO and KS open
+    // their first entry.
+    const auto& from = list(previous);
+    const auto current = std::find_if(from.begin(), from.end(), [&](const DeviceInfo& d) { return d.id == savedId(previous); });
+    const DeviceInfo* device = current != from.end() ? &*current : nullptr;
+    if (!device && previous != Backend::Wasapi && savedId(previous).empty() && !from.empty()) device = &from.front();
+    if (!device) return true;
+    if (const auto match = matchDevice(previous, *device, settings_.backend, list(settings_.backend))) {
+        savedId(settings_.backend) = *match;
+        populateDeviceLists(server_->snapshot().devices);
+        return true;
+    }
+    std::wstring message(tr(L"Backend_NoMatch"));
+    const std::array<std::wstring, 2> values{
+        std::wstring(ui::utf8(device->name)),
+        std::wstring(BackendCombo().SelectedItem() ? unbox_value<hstring>(BackendCombo().SelectedItem()) : hstring{})};
+    for (size_t i = 0; i < values.size(); ++i) {
+        const std::wstring marker = L"{" + std::to_wstring(i) + L"}";
+        if (const auto at = message.find(marker); at != std::wstring::npos) message.replace(at, marker.size(), values[i]);
+    }
+    BackendNotice().Title(tr(L"Backend_NoMatchTitle"));
+    BackendNotice().Message(message);
+    BackendNotice().IsOpen(true);
+    return false;
 }
 
 void MainWindow::updateBackendGroups() {
@@ -442,8 +511,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             ToolTipService::SetToolTip(title, box_value(ui::utf8(entry.source.pathUtf8())));
             Grid::SetColumn(title, 1);
             if (current) {
-                const auto accent =
-                    Application::Current().Resources().TryLookup(box_value(L"AccentTextFillColorPrimaryBrush")).try_as<Media::Brush>();
+                const auto accent = themeBrush(L"AccentTextFillColorPrimaryBrush");
                 FontIcon playing;
                 playing.Glyph(L"\xE767");
                 playing.FontSize(14);
@@ -507,9 +575,32 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             hstring text = buf;
             if (s.format != AudioFormat::Dsd && (!s.format || !isLossy(*s.format)))
                 text = text + L" · " + to_hstring(s.source->bitsPerSample) + L"-bit";
-            if (s.format == AudioFormat::Flac) text = text + L" · STREAMINFO MD5 " + (s.source->md5 ? L"✓" : L"—");
             SourceText().Text(text);
         }
+    }
+
+    // Playing, paused, stopped or failed, never only implied by the play button's icon
+    {
+        const wchar_t* glyph = L"\xE71A";
+        const wchar_t* key = L"State_Stopped";
+        const wchar_t* color = L"TextFillColorSecondaryBrush";
+        if (s.error) {
+            glyph = L"\xE783";
+            key = L"State_Error";
+            color = L"SystemFillColorCriticalBrush";
+        } else if (s.state == PlaybackState::Playing) {
+            glyph = L"\xE768";
+            key = L"State_Playing";
+            color = L"AccentTextFillColorPrimaryBrush";
+        } else if (s.state == PlaybackState::Paused) {
+            glyph = L"\xE769";
+            key = L"State_Paused";
+            color = L"TextFillColorPrimaryBrush";
+        }
+        StateIcon().Glyph(glyph);
+        StateIcon().Foreground(themeBrush(color));
+        setAnnounced(StateText(), tr(key));
+        setBadgeTip(StateBadge(), tr(key), s.error ? ui::utf8(s.errorDetail) : hstring{});
     }
 
     // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
@@ -521,22 +612,29 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const OutputPlan plan = s.plan.value_or(OutputPlan{*s.output});
         switch (plan.state) {
         case PipelineState::BitPerfect:
-            Lamp().Fill(brush(0x10, 0xB9, 0x10));
-            LampText().Text(L"Bit-perfect");
+            Lamp().Fill(themeBrush(L"SystemFillColorSuccessBrush"));
+            setAnnounced(LampText(), tr(L"Lamp_BitPerfect"));
             break;
         case PipelineState::LosslessConversion:
-            Lamp().Fill(brush(0xE0, 0xB0, 0x00));
-            LampText().Text(tr(L"Lamp_Lossless"));
+            Lamp().Fill(themeBrush(L"SystemFillColorCautionBrush"));
+            setAnnounced(LampText(), tr(L"Lamp_Lossless"));
             break;
         case PipelineState::Processed:
-            Lamp().Fill(brush(0xD0, 0x30, 0x30));
-            LampText().Text(lossy ? tr(L"Lamp_Processed") + L" · " + tr(L"Lamp_Lossy") : tr(L"Lamp_Processed"));
+            Lamp().Fill(themeBrush(L"SystemFillColorCriticalBrush"));
+            setAnnounced(LampText(), tr(L"Lamp_Processed"));
             break;
         case PipelineState::LossySource:
-            Lamp().Fill(brush(0xD0, 0xD0, 0xD0));
-            LampText().Text(tr(L"Lamp_Lossy"));
+            Lamp().Fill(themeBrush(L"SystemFillColorNeutralBrush"));
+            setAnnounced(LampText(), tr(L"Lamp_Lossy"));
             break;
         }
+        // Source lossiness is its own field; a processed lossy file shows both (docs/Plan.md §5.2).
+        SourceBadge().Visibility(lossy && plan.state != PipelineState::LossySource ? Visibility::Visible : Visibility::Collapsed);
+        BypassBadge().Visibility(plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native ? Visibility::Visible
+                                                                                         : Visibility::Collapsed);
+        BypassText().Text((plan.dsd == DsdPath::Dop ? hstring(L"DoP") : hstring(L"DSD")) + L" · " +
+                          tr(L"SignalPath_DspBypassed"));
+        setBadgeTip(BypassBadge(), BypassText().Text(), tr(L"Badge_DspBypassedTip"));
         const hstring source = ui::utf8(s.format ? formatName(*s.format) : "") +
                                (plan.dsd != DsdPath::None ? L""
                                 : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
@@ -573,11 +671,15 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             path = path + L" → " + tr(L"SignalPath_Pad") + L" " + to_hstring(s.source->bitsPerSample);
         SignalPathText().Text(path + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " + ui::utf8(s.outputMode));
     } else {
-        Lamp().Fill(brush(0x80, 0x80, 0x80));
-        LampText().Text(tr(L"Lamp_Idle"));
+        Lamp().Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
+        setAnnounced(LampText(), tr(L"Lamp_Idle"));
+        SourceBadge().Visibility(Visibility::Collapsed);
+        BypassBadge().Visibility(Visibility::Collapsed);
         FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
         SignalPathText().Text(L"");
     }
+    // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch.
+    SignalNoteText().Text(BypassBadge().Visibility() == Visibility::Visible ? tr(L"Badge_DspBypassedTip") : hstring{});
 
     // Errors: open the bar once per new problem so a dismissed bar stays closed
     if (s.revision != shownRevision_) {
@@ -602,17 +704,50 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         }
     }
 
-    // Status area on the settings page
+    // Status area on the settings page (docs/Plan.md §6)
+    StatusGrid().Visibility(s.output ? Visibility::Visible : Visibility::Collapsed);
+    StatusIdleText().Visibility(s.output ? Visibility::Collapsed : Visibility::Visible);
+    StatusIdleText().Text(tr(L"Status_Idle"));
     if (s.output) {
-        wchar_t buf[512];
-        swprintf(buf, 512, L"%s\n%s\n%s\nunderrun: %llu", ui::utf8(describe(*s.output)).c_str(), ui::utf8(s.outputMode).c_str(),
-                 ui::utf8(s.outputDetail).c_str(), static_cast<unsigned long long>(s.underruns));
-        hstring status = buf;
-        for (const auto& adjustment : s.outputAdjustments)
-            status = status + L"\n" + tr(L"Status_Adjusted") + L" " + ui::utf8(adjustment);
-        StatusText().Text(status);
-    } else {
-        StatusText().Text(tr(L"Status_Idle"));
+        StatusOutputText().Text(ui::utf8(describe(*s.output)));
+        StatusModeText().Text(ui::utf8(s.outputMode));
+        std::wstring buffer(tr(L"Status_BufferValue"));
+        wchar_t ms[32];
+        swprintf(ms, 32, L"%.1f", s.output->sampleRate ? 1000.0 * s.bufferFrames / s.output->sampleRate : 0.0);
+        for (const auto& [marker, value] : {std::pair<const wchar_t*, std::wstring>{L"{0}", std::to_wstring(s.bufferFrames)},
+                                            std::pair<const wchar_t*, std::wstring>{L"{1}", ms}})
+            if (const auto at = buffer.find(marker); at != std::wstring::npos) buffer.replace(at, 3, value);
+        StatusBufferText().Text(buffer);
+        StatusUnderrunText().Text(to_hstring(s.underruns));
+        StatusDetailText().Text(clauseLines(s.outputDetail));
+    }
+    showStatusNotices(s);
+}
+
+// Requested ≠ active values and a missing saved device stay visible for as long as they apply.
+void MainWindow::showStatusNotices(const PlaybackSnapshot& s) {
+    struct Notice {
+        InfoBarSeverity severity;
+        hstring title, message;
+    };
+    std::vector<Notice> notices;
+    if (s.error == ErrorCode::DeviceNotFound)
+        notices.push_back({InfoBarSeverity::Error, tr(L"Status_NotConnected"), ui::utf8(s.errorDetail)});
+    for (const auto& adjustment : s.outputAdjustments)
+        notices.push_back({InfoBarSeverity::Warning, tr(L"Status_Adjusted"), ui::utf8(adjustment)});
+    std::wstring key;
+    for (const auto& notice : notices) key += std::wstring(notice.title) + L"\n" + std::wstring(notice.message) + L"\n";
+    if (key == shownNotices_) return;
+    shownNotices_ = key;
+    StatusNotices().Children().Clear();
+    for (const auto& notice : notices) {
+        InfoBar bar;
+        bar.Severity(notice.severity);
+        bar.Title(notice.title);
+        bar.Message(notice.message);
+        bar.IsClosable(false);
+        bar.IsOpen(true);
+        StatusNotices().Children().Append(bar);
     }
 }
 
@@ -753,6 +888,12 @@ void MainWindow::updateQueuePanel() {
     fitNavigationPane();
     std::ofstream queueState(camel::dataDirectory() / L"queue-panel-open", std::ios::trunc);
     queueState << queueOpen_;
+}
+
+void MainWindow::OnFormatClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    const bool open = SignalPathPanel().Visibility() == Visibility::Collapsed;
+    SignalPathPanel().Visibility(open ? Visibility::Visible : Visibility::Collapsed);
+    FormatChevron().Glyph(open ? L"\xE70E" : L"\xE70D");
 }
 
 void MainWindow::OnQueueToggleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

@@ -233,6 +233,7 @@ public:
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
             snap_.source = source;
+            snap_.md5.reset();
             snap_.total = source ? source->totalFrames : 0;
             snap_.format = format_;
             snap_.decoder = displayedDecoder(settings_);
@@ -441,6 +442,7 @@ private:
             if (active_) {
                 reportAudible();
                 refreshNextSlot();
+                refreshMd5();
             }
             if (active_ && state_ == PlayState::Paused) releaseAfterPause();
         }
@@ -453,6 +455,16 @@ private:
         const bool free = !rust_->transitions().nextQueued;
         std::lock_guard lock(snapMutex_);
         snap_.nextSlotFree = free;
+    }
+
+    void refreshMd5() {
+        const std::optional<Md5State> md5 = format_ == AudioFormat::Flac ? std::optional(rust_->md5State()) : std::nullopt;
+        {
+            std::lock_guard lock(snapMutex_);
+            if (snap_.md5 == md5) return;
+            snap_.md5 = md5;
+        }
+        publish();
     }
 
     // Frames handed to the device minus what its buffer still holds; refined once drivers report latency.
@@ -539,6 +551,7 @@ private:
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
             snap_.source.reset();
+            snap_.md5.reset();
             snap_.total = 0;
             snap_.outputStatus = {};
         }
@@ -777,6 +790,7 @@ private:
             snap_.decoder = next.decoder;
             snap_.plan = next.plan;
             snap_.source = source;
+            snap_.md5.reset();
             snap_.total = source.totalFrames;
             snap_.transitions++;
         }
