@@ -239,3 +239,37 @@ TEST(FormatDecoderPolicy, RealSamplesAgreeAcrossDecoders) {
         }
     }
 }
+
+TEST(FormatDecoderPolicy, LibsndfileOpensAFlacWithoutReadingItsCover) {
+    const testaudio::GenSpec spec{"cover", 96000, 24, 2, 1.0};
+    const auto plain = testutil::tempDir() / "cover-plain.flac", covered = testutil::tempDir() / "cover-3mb.flac";
+    testaudio::writeFlac(plain, spec);
+    std::ifstream in(plain, std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), {});
+    in.close();
+    ASSERT_EQ(bytes[4] & 0x7f, 0); // STREAMINFO, then more blocks or the frames
+    const uint32_t length = 3 << 20;
+    std::vector<uint8_t> picture{6, uint8_t((length >> 16) & 0xff), uint8_t((length >> 8) & 0xff), uint8_t(length & 0xff)};
+    picture.resize(4 + length, 'p');
+    if (bytes[4] & 0x80) {
+        bytes[4] &= 0x7f;
+        picture[0] |= 0x80;
+    }
+    bytes.insert(bytes.begin() + 8 + 34, picture.begin(), picture.end());
+    std::ofstream(covered, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+
+    IO_COUNTERS before{}, after{};
+    GetProcessIoCounters(GetCurrentProcess(), &before);
+    auto decoder = openDecoder(DecoderKind::Sndfile, covered);
+    GetProcessIoCounters(GetCurrentProcess(), &after);
+    EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, 512u * 1024);
+    const auto expected = testaudio::makeSignal(spec);
+    EXPECT_EQ(decoder->info().totalFrames, expected.size() / spec.channels);
+    const auto got = readAll(*decoder);
+    EXPECT_TRUE(got == expected);
+    const uint64_t target = 30000;
+    decoder->seek(target);
+    std::vector<int32_t> buffer(size_t(1000) * spec.channels);
+    ASSERT_EQ(decoder->read(buffer.data(), 1000), 1000u);
+    EXPECT_TRUE(std::equal(buffer.begin(), buffer.end(), expected.begin() + std::ptrdiff_t(target * spec.channels)));
+}
