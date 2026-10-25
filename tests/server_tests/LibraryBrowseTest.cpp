@@ -121,6 +121,23 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     };
     const double oneCharacterP95 = fallbackP95("a");
     const double twoCharacterP95 = fallbackP95("ab");
+    // Every track matches "Orchestra": the first page walks the sort order instead of ordering 100k matches.
+    const auto broad = searchLibrary(store, "Orchestra", 50, 3);
+    ASSERT_EQ(broad.tracks.total, 100000);
+    ASSERT_EQ(broad.tracks.tracks.size(), 3u);
+    EXPECT_EQ(broad.tracks.tracks.front().id, 51);
+    const auto suggestion = searchLibrary(store, "Orchestra", 0, 3, std::nullopt, {}, false);
+    ASSERT_EQ(suggestion.tracks.tracks.size(), 3u);
+    EXPECT_EQ(suggestion.tracks.tracks.front().id, 1);
+    EXPECT_EQ(suggestion.tracks.total, 0);
+    std::vector<double> broadTimings;
+    for (int i = 0; i < 30; ++i) {
+        const auto start = Clock::now();
+        searchLibrary(store, "Orchestra", 0, 3, std::nullopt, {}, false);
+        broadTimings.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
+    }
+    std::sort(broadTimings.begin(), broadTimings.end());
+    const double broadSuggestionP95 = broadTimings[size_t(broadTimings.size() * 0.95)];
     GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelEnd, &userEnd);
     std::sort(samples.begin(), samples.end());
     const double p95 = samples[size_t(samples.size() * 0.95)];
@@ -146,11 +163,35 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     RecordProperty("warm_search_first_page_p95_ms", p95);
     RecordProperty("one_character_fallback_p95_ms", oneCharacterP95);
     RecordProperty("two_character_fallback_p95_ms", twoCharacterP95);
+    RecordProperty("broad_suggestions_p95_ms", broadSuggestionP95);
     RecordProperty("normalization_average_ms", normalizeAverageMs);
     RecordProperty("database_bytes", databaseBytes);
     RecordProperty("processor_count", system.dwNumberOfProcessors);
     RecordProperty("physical_memory_bytes", memory.ullTotalPhys);
     RecordProperty("query_cpu_delta_100ns", cpu100ns);
     EXPECT_LT(p95, 100.0);
+    EXPECT_LT(broadSuggestionP95, 100.0);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM library_tracks"), 100000);
+}
+
+// Opt-in: CAMEL_SEARCH_INDEX names a folder holding an existing library.db (docs/Plan.md §12.1 UI measurements).
+TEST(LibraryBrowse, DISABLED_SearchTimingsOnAnExistingLibrary) {
+    wchar_t folder[MAX_PATH]{};
+    if (!GetEnvironmentVariableW(L"CAMEL_SEARCH_INDEX", folder, DWORD(std::size(folder)))) GTEST_SKIP();
+    LibraryStore store{std::filesystem::path(folder)};
+    for (const char* query : {"nig", "nigh", "night", "blue", "echo", "echo 4", "garden", "silver garden", "zzzq"}) {
+        for (const bool totals : {false, true}) {
+            const int64_t limit = totals ? 50 : 3;
+            for (int i = 0; i < 3; ++i) searchLibrary(store, query, 0, limit, std::nullopt, {}, totals);
+            std::vector<double> timings;
+            for (int i = 0; i < 20; ++i) {
+                const auto start = Clock::now();
+                searchLibrary(store, query, 0, limit, std::nullopt, {}, totals);
+                timings.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
+            }
+            std::sort(timings.begin(), timings.end());
+            std::printf("%-14s %-11s p50 %6.1f ms  p95 %6.1f ms\n", query, totals ? "results" : "suggestions",
+                        timings[timings.size() / 2], timings[timings.size() * 95 / 100]);
+        }
+    }
 }

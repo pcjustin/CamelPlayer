@@ -479,6 +479,28 @@ TEST_F(ServerTest, RejectsInvalidQueuePayloads) {
     EXPECT_EQ(server->snapshot().command.id, 0u);
 }
 
+TEST_F(ServerTest, PlayNextListsTracksRightAfterTheCurrentOne) {
+    auto s = send(queueReplace({source("16-44.1k"), source("24-96k"), source("no-md5")}));
+    const auto first = entryIds(s);
+    Command next = command(CommandKind::QueuePlayNext);
+    next.sources = {source("24-96k"), source("16-44.1k")};
+    s = send(next);
+    const auto ids = entryIds(s);
+    ASSERT_EQ(ids.size(), 5u);
+    EXPECT_EQ(ids[0], first[0]);
+    EXPECT_EQ(ids[3], first[1]);
+    EXPECT_EQ(ids[4], first[2]);
+    EXPECT_EQ(s.queue.upcomingEntryId, ids[1]);
+    EXPECT_EQ(send(command(CommandKind::Next)).queueEntryId, ids[1]);
+    EXPECT_EQ(send(command(CommandKind::Next)).queueEntryId, ids[2]);
+    EXPECT_EQ(send(command(CommandKind::Next)).queueEntryId, ids[3]);
+    Command add = command(CommandKind::QueueAdd);
+    add.sources = {source("no-md5")};
+    const auto all = entryIds(send(add));
+    ASSERT_EQ(all.size(), 6u);
+    EXPECT_EQ(std::vector<uint64_t>(all.begin(), all.end() - 1), ids); // Add to queue still goes to the end
+}
+
 TEST_F(ServerTest, QueueNavigationReorderAndUpcomingEntry) {
     auto s = send(queueReplace({source("16-44.1k"), source("24-96k"), source("no-md5")}));
     const auto ids = entryIds(s);

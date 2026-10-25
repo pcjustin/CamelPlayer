@@ -44,8 +44,9 @@ LibraryTrackPage browseTracks(const LibraryStore& store, int64_t offset, int64_t
 LibraryTrackPage searchTracks(const LibraryStore& store, std::string query, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision = std::nullopt,
                               const CancellationToken& token = {});
+// Without totals (the search box's suggestions), the total fields stay 0 and broad queries skip counting every match.
 LibrarySearchResults searchLibrary(const LibraryStore& store, std::string query, int64_t offset, int64_t limit,
                                    std::optional<uint64_t> expectedRevision = std::nullopt,
-                                   const CancellationToken& token = {});
+                                   const CancellationToken& token = {}, bool totals = true);
 
 } // namespace camel::server

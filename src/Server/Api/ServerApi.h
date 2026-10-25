@@ -225,9 +225,10 @@ public:
                                           const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                           const CancellationToken& token = {}) const = 0;
+    // totals=false leaves the totals 0 (see LibraryBrowse.h).
     virtual LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
-                                               std::optional<uint64_t> revision,
-                                               const CancellationToken& token = {}) const = 0;
+                                               std::optional<uint64_t> revision, const CancellationToken& token = {},
+                                               bool totals = true) const = 0;
     virtual PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const = 0;
     // Playlists (docs/Plan.md §7.9) run on the caller's thread and write through the library writer, so large
     // selections never hold up playback commands.

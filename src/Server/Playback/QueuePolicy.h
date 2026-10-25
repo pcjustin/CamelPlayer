@@ -44,10 +44,12 @@ public:
         validateUnique(entryIds);
         if (std::any_of(entryIds.begin(), entryIds.end(), [&](uint64_t id) { return contains(id); }))
             throw std::invalid_argument("appended queue entry IDs must be new");
-        const auto at = playNext && current_ ? std::find(order_.begin(), order_.end(), *current_) : order_.end();
-        const auto index = at == order_.end() ? order_.size() : size_t(std::distance(order_.begin(), at)) + 1;
-        entries_.insert(entries_.end(), entryIds.begin(), entryIds.end());
-        order_.insert(order_.begin() + std::ptrdiff_t(index), entryIds.begin(), entryIds.end());
+        const auto after = [&](const std::vector<uint64_t>& list) {
+            const auto at = playNext && current_ ? std::find(list.begin(), list.end(), *current_) : list.end();
+            return list.begin() + (at == list.end() ? std::ptrdiff_t(list.size()) : std::distance(list.begin(), at) + 1);
+        };
+        entries_.insert(after(entries_), entryIds.begin(), entryIds.end());
+        order_.insert(after(order_), entryIds.begin(), entryIds.end());
         ++revision_;
         return revision_;
     }

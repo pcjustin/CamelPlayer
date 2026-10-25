@@ -166,6 +166,10 @@ public:
             library_ = std::make_unique<LibraryStore>(directory);
             libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
+            // Covers being shown take the storage first: scans drop to one worker and fingerprints wait meanwhile.
+            options.playbackActive = [this] {
+                return std::chrono::steady_clock::now().time_since_epoch().count() < artworkUntil_.load(std::memory_order_relaxed);
+            };
             options.playingSource = [this] {
                 const auto snapshot = engine_->snapshot();
                 return snapshot.state == audio::PlayState::Playing ? std::filesystem::path(snapshot.file)
@@ -238,9 +242,10 @@ public:
     }
 
     LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
-                                       std::optional<uint64_t> revision, const CancellationToken& token) const {
+                                       std::optional<uint64_t> revision, const CancellationToken& token,
+                                       bool totals) const {
         if (!library_) throw std::runtime_error("library is not configured");
-        return camel::server::searchLibrary(*library_, std::move(query), offset, limit, revision, token);
+        return camel::server::searchLibrary(*library_, std::move(query), offset, limit, revision, token, totals);
     }
 
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
@@ -257,6 +262,8 @@ public:
     }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+        artworkUntil_.store(until.time_since_epoch().count(), std::memory_order_relaxed);
         return artwork_ ? artwork_->get(library_.get(), request, token) : std::nullopt;
     }
 
@@ -495,7 +502,13 @@ private:
         ids.reserve(entries.size());
         for (const auto& e : entries) ids.push_back(e.id);
         policy_.append(ids, playNext);
-        entries_.insert(entries_.end(), std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
+        auto at = entries_.end();
+        if (playNext)
+            if (const auto current = std::find_if(entries_.begin(), entries_.end(),
+                                                   [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
+                current != entries_.end())
+                at = current + 1;
+        entries_.insert(at, std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
         libraryVersion_ = 0;
         refreshLibraryAvailability();
     }
@@ -822,6 +835,7 @@ private:
     Settings settings_;
     std::filesystem::path settingsFile_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
+    mutable std::atomic<int64_t> artworkUntil_{0}; // steady_clock ticks; read by scan workers, so declared before them
     std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
     std::unique_ptr<LibraryTextIndex> libraryText_;
@@ -891,9 +905,9 @@ LibraryTrackPage LocalServer::searchTracks(std::string query, int64_t offset, in
     return impl_->searchTracks(std::move(query), offset, limit, revision, token);
 }
 LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offset, int64_t limit,
-                                                std::optional<uint64_t> revision,
-                                                const CancellationToken& token) const {
-    return impl_->searchLibrary(std::move(query), offset, limit, revision, token);
+                                                std::optional<uint64_t> revision, const CancellationToken& token,
+                                                bool totals) const {
+    return impl_->searchLibrary(std::move(query), offset, limit, revision, token, totals);
 }
 PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
     return impl_->playStatistics(query, token);
