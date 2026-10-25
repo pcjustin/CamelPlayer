@@ -813,6 +813,7 @@ void MainWindow::showStatusNotices(const PlaybackSnapshot& s) {
 }
 
 void MainWindow::showPage(hstring const& tag) {
+    shownTag_ = tag;
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
                          tag == L"years" || tag == L"tracks" || tag == L"folders";
@@ -949,6 +950,121 @@ void MainWindow::updateQueuePanel() {
     fitNavigationPane();
     std::ofstream queueState(camel::dataDirectory() / L"queue-panel-open", std::ios::trunc);
     queueState << queueOpen_;
+}
+
+// Each keystroke cancels the previous query; results that arrive late for older text are dropped.
+winrt::fire_and_forget MainWindow::OnSearchTextChanged(AutoSuggestBox const& box, AutoSuggestBoxTextChangedEventArgs const& e) {
+    if (e.Reason() != AutoSuggestionBoxTextChangeReason::UserInput) co_return;
+    searchToken_.cancel();
+    searchToken_ = {};
+    const uint64_t generation = ++searchGeneration_;
+    const hstring text = box.Text();
+    const std::string query = camel::toUtf8(std::wstring_view(text.c_str(), text.size()));
+    if (query.find_first_not_of(" \t") == std::string::npos || !server_) {
+        suggestions_.clear();
+        box.ItemsSource(nullptr);
+        co_return;
+    }
+    auto weak = get_weak();
+    auto server = server_;
+    auto token = searchToken_;
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    auto results = std::make_shared<LibrarySearchResults>();
+    try {
+        *results = server->searchLibrary(query, 0, 3, std::nullopt, token);
+    } catch (const std::exception&) {
+        co_return; // cancelled by the next keystroke, or the library changed meanwhile
+    }
+    queue.TryEnqueue([weak, generation, results, text] {
+        if (auto self = weak.get(); self && generation == self->searchGeneration_) self->showSuggestions(*results, text);
+    });
+}
+
+void MainWindow::showSuggestions(const LibrarySearchResults& results, hstring const& text) {
+    const hstring tracksLabel = tr(L"Search_Tracks"), albumsLabel = tr(L"Search_Albums"), artistsLabel = tr(L"Search_Artists");
+    suggestions_.clear();
+    auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
+    const auto add = [&](Suggestion suggestion, hstring subtitle, hstring group) {
+        auto item = make<BrowseItem>();
+        get_self<BrowseItem>(item)->fill({0, {}, suggestion.title, subtitle, {}, group});
+        items.Append(item);
+        suggestions_.push_back(std::move(suggestion));
+    };
+    for (const auto& t : results.tracks.tracks)
+        add({Suggestion::Kind::Track, t.id, t.path, ui::utf8(t.title)}, ui::utf8(t.artist) + L" · " + ui::utf8(t.album),
+            tracksLabel);
+    for (const auto& a : results.albums)
+        add({Suggestion::Kind::Album, a.id, {}, ui::utf8(a.title)}, ui::utf8(a.artist), albumsLabel);
+    for (const auto& name : results.artists) add({Suggestion::Kind::Artist, 0, name, ui::utf8(name)}, {}, artistsLabel);
+    std::wstring all(tr(L"Search_All"));
+    if (const auto at = all.find(L"{0}"); at != std::wstring::npos) all.replace(at, 3, text.c_str());
+    add({Suggestion::Kind::All, 0, {}, hstring(all)}, {}, {});
+    suggestionItems_ = items;
+    SearchBox().ItemsSource(items);
+}
+
+void MainWindow::OnSearchQuerySubmitted(AutoSuggestBox const& box, AutoSuggestBoxQuerySubmittedEventArgs const& e) {
+    searchToken_.cancel();
+    uint32_t index = 0;
+    if (const auto chosen = e.ChosenSuggestion();
+        chosen && suggestionItems_ && suggestionItems_.IndexOf(chosen, index) && index < suggestions_.size()) {
+        const Suggestion suggestion = suggestions_[index];
+        auto view = get_self<LibraryView>(Library());
+        switch (suggestion.kind) {
+        case Suggestion::Kind::Track: {
+            Command play;
+            play.kind = CommandKind::QueueReplace;
+            play.sources.emplace_back(suggestion.value);
+            play.index = 0;
+            submitCommand(std::move(play));
+            return;
+        }
+        case Suggestion::Kind::Album:
+            Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+            view->showAlbum(suggestion.id, suggestion.title);
+            return;
+        case Suggestion::Kind::Artist:
+            Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+            view->showArtist(suggestion.title);
+            return;
+        case Suggestion::Kind::All:
+            break;
+        }
+    }
+    showSearchResults(box.Text());
+}
+
+void MainWindow::showSearchResults(hstring const& query) {
+    if (std::wstring_view(query).find_first_not_of(L" \t") == std::wstring_view::npos) return;
+    const bool fromLibrary = Library().Visibility() == Visibility::Visible;
+    std::function<void()> leave;
+    if (!fromLibrary) {
+        // Back returns to the page the search started from, such as Settings.
+        leave = [this, tag = shownTag_] {
+            if (tag == L"settings") {
+                Nav().SelectedItem(Nav().SettingsItem());
+                return;
+            }
+            for (const auto& entry : Nav().MenuItems())
+                if (const auto item = entry.try_as<NavigationViewItem>();
+                    item && unbox_value_or<hstring>(item.Tag(), L"") == tag) {
+                    Nav().SelectedItem(item);
+                    return;
+                }
+        };
+    }
+    Nav().SelectedItem(nullptr);
+    SettingsPanel().Visibility(Visibility::Collapsed);
+    PlaceholderPanel().Visibility(Visibility::Collapsed);
+    Library().Visibility(Visibility::Visible);
+    get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
+}
+
+void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {
+    if (Nav().IsPaneOpen() == false) Nav().IsPaneOpen(true); // the box is hidden behind its icon in the compact pane
+    SearchBox().Focus(FocusState::Keyboard);
+    e.Handled(true);
 }
 
 void MainWindow::OnFormatClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

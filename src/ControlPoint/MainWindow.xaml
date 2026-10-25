@@ -16,6 +16,9 @@
     </Window.SystemBackdrop>
 
     <Grid>
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
+        </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -23,6 +26,31 @@
 
         <NavigationView x:Name="Nav" PaneDisplayMode="Left" OpenPaneLength="200" IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="True" SelectionChanged="OnNavSelectionChanged">
+            <!-- Search on every page (docs/Plan.md §8.2): grouped suggestions while typing, Enter opens all results. -->
+            <NavigationView.AutoSuggestBox>
+                <AutoSuggestBox x:Name="SearchBox" x:Uid="Search_Box" QueryIcon="Find" UpdateTextOnSelect="False"
+                                TextChanged="OnSearchTextChanged" QuerySubmitted="OnSearchQuerySubmitted">
+                    <AutoSuggestBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:BrowseItem">
+                            <Grid ColumnSpacing="12" Padding="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </DataTemplate>
+                    </AutoSuggestBox.ItemTemplate>
+                </AutoSuggestBox>
+            </NavigationView.AutoSuggestBox>
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Uid="Nav_Albums" Tag="albums" Icon="Library" />
                 <NavigationViewItem x:Uid="Nav_Artists" Tag="artists" Icon="People" />

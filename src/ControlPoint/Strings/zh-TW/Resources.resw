@@ -183,4 +183,17 @@
   <data name="Settings_CloseAction.Header" xml:space="preserve"><value>關閉視窗時</value></data>
   <data name="Close_Tray" xml:space="preserve"><value>縮到系統列</value></data>
   <data name="Close_Exit" xml:space="preserve"><value>結束 CamelPlayer</value></data>
+  <data name="Search_Box.PlaceholderText" xml:space="preserve"><value>搜尋媒體庫</value></data>
+  <data name="Search_Box.AutomationProperties.Name" xml:space="preserve"><value>搜尋媒體庫</value></data>
+  <data name="Search_Tracks" xml:space="preserve"><value>曲目</value></data>
+  <data name="Search_Albums" xml:space="preserve"><value>專輯</value></data>
+  <data name="Search_Artists" xml:space="preserve"><value>演出者</value></data>
+  <data name="Search_ArtistCount" xml:space="preserve"><value>{0} 位演出者</value></data>
+  <data name="Search_All" xml:space="preserve"><value>顯示所有「{0}」的結果</value></data>
+  <data name="Search_Title" xml:space="preserve"><value>搜尋「{0}」</value></data>
+  <data name="Search_None" xml:space="preserve"><value>媒體庫中沒有符合的結果。</value></data>
+  <data name="Search_ScrollBack.ToolTipService.ToolTip" xml:space="preserve"><value>上一組</value></data>
+  <data name="Search_ScrollBack.AutomationProperties.Name" xml:space="preserve"><value>上一組</value></data>
+  <data name="Search_ScrollForward.ToolTipService.ToolTip" xml:space="preserve"><value>下一組</value></data>
+  <data name="Search_ScrollForward.AutomationProperties.Name" xml:space="preserve"><value>下一組</value></data>
 </root>

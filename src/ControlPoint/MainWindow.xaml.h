@@ -23,6 +23,12 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnNextClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnShuffleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRepeatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnSearchTextChanged(Microsoft::UI::Xaml::Controls::AutoSuggestBox const&,
+                                               Microsoft::UI::Xaml::Controls::AutoSuggestBoxTextChangedEventArgs const&);
+    void OnSearchQuerySubmitted(Microsoft::UI::Xaml::Controls::AutoSuggestBox const&,
+                                Microsoft::UI::Xaml::Controls::AutoSuggestBoxQuerySubmittedEventArgs const&);
+    void OnSearchAccelerator(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&,
+                             Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const&);
     void OnFormatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueClearClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -65,6 +71,20 @@ private:
     void applySnapshot(const camel::server::Snapshot& snapshot);
     void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
+    void showSearchResults(winrt::hstring const& query);
+    void showSuggestions(const camel::server::LibrarySearchResults& results, winrt::hstring const& text);
+    // What a suggestion opens; the list holds them in display order next to their items.
+    struct Suggestion {
+        enum class Kind : uint8_t { Track, Album, Artist, All } kind;
+        int64_t id = 0;
+        std::string value; // track path or artist name
+        winrt::hstring title;
+    };
+    std::vector<Suggestion> suggestions_;
+    winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable> suggestionItems_{nullptr};
+    camel::server::CancellationToken searchToken_;
+    uint64_t searchGeneration_ = 0;
+    winrt::hstring shownTag_ = L"albums";
     void removeSelectedQueueEntries();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
     winrt::fire_and_forget refreshRoots();

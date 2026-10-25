@@ -26,7 +26,7 @@ namespace {
 // Localized texts are read on the UI thread and handed to background fetches.
 struct Texts {
     hstring unknown = tr(L"Library_Unknown"), albums = tr(L"Library_Albums"), tracks = tr(L"Library_Tracks"),
-            folder = tr(L"Library_Folder");
+            folder = tr(L"Library_Folder"), artists = tr(L"Search_ArtistCount");
 };
 
 hstring counted(const hstring& format, int64_t n) {
@@ -94,6 +94,7 @@ void LibraryView::show(hstring const& tag, hstring const& title) {
                                          : LibraryGroupField::Artist;
     }
     back_.clear();
+    leave_ = nullptr;
     open(std::move(view), false);
     refreshTimer_.Start();
     EmptyText().Visibility(Visibility::Collapsed);
@@ -113,6 +114,7 @@ void LibraryView::showAlbum(int64_t album, hstring const& title) {
     view.album = album;
     view.title = title;
     back_.clear();
+    leave_ = nullptr;
     open(std::move(view), false);
     refreshTimer_.Start();
 }
@@ -124,11 +126,61 @@ void LibraryView::showArtist(hstring const& artist) {
     view.filter = LibraryGroupFilter{LibraryGroupField::Artist, camel::toUtf8(std::wstring_view(artist.c_str(), artist.size()))};
     view.title = artist;
     back_.clear();
+    leave_ = nullptr;
     open(std::move(view), false);
     refreshTimer_.Start();
 }
 
+void LibraryView::showSearch(hstring const& query, std::function<void()> leave) {
+    if (!server_ || query.empty()) return;
+    View view;
+    view.mode = Mode::Search;
+    view.query = camel::toUtf8(std::wstring_view(query.c_str(), query.size()));
+    std::wstring title(tr(L"Search_Title"));
+    if (const auto at = title.find(L"{0}"); at != std::wstring::npos) title.replace(at, 3, query.c_str());
+    view.title = hstring(title);
+    const bool keepHistory = !leave && (collection_ || current_.mode == Mode::AlbumDetail || current_.mode == Mode::Folders);
+    if (!keepHistory) back_.clear();
+    if (leave) leave_ = std::move(leave);
+    open(std::move(view), keepHistory);
+    refreshTimer_.Start();
+}
+
+// Albums and artists of a search; the matching tracks page through the list below them.
+void LibraryView::loadSearchGroups() {
+    constexpr int64_t kShown = 50;
+    background([this, server = server_, query = current_.query, texts = Texts{}] {
+        auto results = std::make_shared<LibrarySearchResults>(server->searchLibrary(query, 0, kShown, std::nullopt));
+        return std::function<void()>([this, results, texts] {
+            auto albums = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
+            for (const auto& a : results->albums)
+                albums.Append(item({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, {}}));
+            auto artists = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
+            for (const auto& name : results->artists) artists.Append(item({0, name, orUnknown(name, texts), {}, {}, {}}));
+            SearchAlbums().ItemsSource(albums);
+            SearchArtists().ItemsSource(artists);
+            const auto header = [](const wchar_t* key, int64_t total) { return tr(key) + L" · " + to_hstring(total); };
+            SearchAlbumsHeader().Text(header(L"Search_Albums", results->totalAlbums));
+            SearchArtistsHeader().Text(header(L"Search_Artists", results->totalArtists));
+            SearchTracksHeader().Text(header(L"Search_Tracks", results->tracks.total));
+            const auto shown = [](int64_t total) { return total ? Visibility::Visible : Visibility::Collapsed; };
+            SearchAlbumsHeader().Visibility(shown(results->totalAlbums));
+            SearchAlbums().Visibility(shown(results->totalAlbums));
+            SearchArtistsHeader().Visibility(shown(results->totalArtists));
+            SearchArtists().Visibility(shown(results->totalArtists));
+            SearchTracksHeader().Visibility(shown(results->tracks.total));
+            HeaderDetail().Text(counted(texts.tracks, results->tracks.total) + L" · " +
+                                counted(texts.albums, results->totalAlbums) + L" · " +
+                                counted(texts.artists, results->totalArtists));
+            const bool none = !results->tracks.total && !results->totalAlbums && !results->totalArtists;
+            EmptyText().Text(tr(L"Search_None"));
+            EmptyText().Visibility(none ? Visibility::Visible : Visibility::Collapsed);
+        });
+    });
+}
+
 void LibraryView::showEmpty(int64_t total) {
+    if (current_.mode == Mode::Search) return; // the search groups explain an empty result
     const bool noRoots = hasRoots_ && !*hasRoots_;
     const bool pending = total == 0 && current_.mode == Mode::Albums && !current_.filter;
     if (total > 0 || (!noRoots && !pending)) {
@@ -168,7 +220,10 @@ void LibraryView::open(View view, bool push) {
     ++generation_;
     HeaderTitle().Text(current_.title);
     HeaderDetail().Text(current_.detail);
-    BackButton().Visibility(back_.empty() ? Visibility::Collapsed : Visibility::Visible);
+    BackButton().Visibility(back_.empty() && !leave_ ? Visibility::Collapsed : Visibility::Visible);
+    SearchGroups().Visibility(current_.mode == Mode::Search ? Visibility::Visible : Visibility::Collapsed);
+    SearchAlbums().ItemsSource(nullptr);
+    SearchArtists().ItemsSource(nullptr);
     fillSortChoices();
     collection_ = nullptr;
     AlbumGrid().ItemsSource(nullptr);
@@ -181,6 +236,10 @@ void LibraryView::open(View view, bool push) {
     case Mode::Folders:
         loadFolder();
         break;
+    case Mode::Search:
+        loadSearchGroups();
+        startCollection();
+        break;
     default:
         startCollection();
         break;
@@ -189,8 +248,9 @@ void LibraryView::open(View view, bool push) {
 
 void LibraryView::showList(Mode mode) {
     AlbumGrid().Visibility(mode == Mode::Albums ? Visibility::Visible : Visibility::Collapsed);
-    RowList().Visibility(mode == Mode::Groups || mode == Mode::Tracks || mode == Mode::AlbumDetail ? Visibility::Visible
-                                                                                                  : Visibility::Collapsed);
+    RowList().Visibility(mode == Mode::Groups || mode == Mode::Tracks || mode == Mode::AlbumDetail || mode == Mode::Search
+                             ? Visibility::Visible
+                             : Visibility::Collapsed);
     FolderList().Visibility(mode == Mode::Folders ? Visibility::Visible : Visibility::Collapsed);
     FolderTrail().Visibility(mode == Mode::Folders && current_.folder ? Visibility::Visible : Visibility::Collapsed);
 }
@@ -237,6 +297,14 @@ void LibraryView::startCollection() {
             for (const auto& g : page.groups)
                 out.rows.push_back({0, g.name, ui::utf8(g.name), g.albums ? counted(texts.albums, g.albums) : hstring{}, {},
                                     counted(texts.tracks, g.tracks)});
+            return out;
+        };
+    } else if (current_.mode == Mode::Search) {
+        fetch = [server, texts, query = current_.query](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
+            const auto page = server->searchTracks(query, offset, limit, revision);
+            ui::BrowsePage out{page.revision, page.total, {}};
+            for (const auto& t : page.tracks)
+                out.rows.push_back({t.id, t.path, orUnknown(t.title, texts), ui::utf8(t.artist), ui::utf8(t.album), {}});
             return out;
         };
     } else {
@@ -341,7 +409,8 @@ void LibraryView::queueItem(const ui::BrowseRow& row, bool playNext) {
     } else if (current_.mode == Mode::AlbumDetail) {
         const auto track = std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
         if (track != detailTracks_.end()) queueTracks({*track}, playNext);
-    } else if ((current_.mode == Mode::Tracks || current_.mode == Mode::Folders) && !row.value.empty()) {
+    } else if ((current_.mode == Mode::Tracks || current_.mode == Mode::Folders || current_.mode == Mode::Search) &&
+               !row.value.empty()) {
         Command command;
         command.kind = playNext ? CommandKind::QueuePlayNext : CommandKind::QueueAdd;
         command.sources.emplace_back(row.value);
@@ -473,6 +542,11 @@ void LibraryView::OnArtworkContextChanged(FrameworkElement const& sender, DataCo
 }
 
 void LibraryView::OnBackClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (back_.empty() && leave_) {
+        const auto leave = std::exchange(leave_, nullptr);
+        leave();
+        return;
+    }
     if (back_.empty()) return;
     auto previous = std::move(back_.back());
     back_.pop_back();
@@ -515,11 +589,38 @@ void LibraryView::OnRowClick(Windows::Foundation::IInspectable const&, ItemClick
     } else if (current_.mode == Mode::AlbumDetail) {
         const auto found = std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
         if (found != detailTracks_.end()) playTracks(detailTracks_, size_t(found - detailTracks_.begin()));
-    } else if (current_.mode == Mode::Tracks && !row.value.empty()) {
+    } else if ((current_.mode == Mode::Tracks || current_.mode == Mode::Search) && !row.value.empty()) {
         LibraryTrackRow track;
         track.path = row.value;
         playTracks({track}, 0);
     }
+}
+
+void LibraryView::OnSearchRowScroll(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    const auto button = sender.as<Button>();
+    const std::wstring tag(unbox_value_or<hstring>(button.Tag(), L""));
+    const auto list = tag.starts_with(L"albums") ? SearchAlbums().as<DependencyObject>() : SearchArtists().as<DependencyObject>();
+    std::vector<DependencyObject> pending{list};
+    for (size_t i = 0; i < pending.size(); ++i) {
+        if (const auto viewer = pending[i].try_as<ScrollViewer>()) {
+            const bool forward = tag.ends_with(L"-forward");
+            const double step = viewer.ViewportWidth() * 0.8;
+            viewer.ChangeView(std::max(0.0, viewer.HorizontalOffset() + (forward ? step : -step)), nullptr, nullptr);
+            return;
+        }
+        for (int32_t child = 0; child < Media::VisualTreeHelper::GetChildrenCount(pending[i]); ++child)
+            pending.push_back(Media::VisualTreeHelper::GetChild(pending[i], child));
+    }
+}
+
+void LibraryView::OnSearchArtistClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
+    const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
+    if (row.value.empty()) return;
+    View view;
+    view.mode = Mode::Albums;
+    view.filter = LibraryGroupFilter{LibraryGroupField::Artist, row.value};
+    view.title = row.title;
+    open(std::move(view), true);
 }
 
 void LibraryView::OnTrailClicked(BreadcrumbBar const&, BreadcrumbBarItemClickedEventArgs const& e) {

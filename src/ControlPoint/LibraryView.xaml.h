@@ -22,6 +22,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void show(hstring const& tag, hstring const& title);
     void showAlbum(int64_t album, hstring const& title);
     void showArtist(hstring const& artist);
+    // Full results for `query`. `leave` returns to the page the search started from when it was not a library page.
+    void showSearch(hstring const& query, std::function<void()> leave);
     void hide();
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
@@ -37,6 +39,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnAddAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnSearchRowScroll(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnSearchArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -53,13 +57,14 @@ private:
     void cancelArtwork();
     std::unordered_map<void*, ArtworkSlot> artworkSlots_;
     camel::server::CancellationToken detailArtwork_;
-    enum class Mode { Albums, Groups, Tracks, AlbumDetail, Folders };
+    enum class Mode { Albums, Groups, Tracks, AlbumDetail, Folders, Search };
     struct View {
         Mode mode = Mode::Albums;
         camel::server::LibraryGroupField field = camel::server::LibraryGroupField::Artist;
         std::optional<camel::server::LibraryGroupFilter> filter;
         int64_t album = 0;
         std::optional<int64_t> folder; // absent: the library roots
+        std::string query;             // search text
         hstring title, detail;
     };
 
@@ -71,6 +76,7 @@ private:
     void showEmpty(int64_t total);
     void loadAlbumDetail();
     void loadFolder();
+    void loadSearchGroups();
     void playTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, size_t index);
     void queueItem(const ui::BrowseRow& row, bool playNext);
     void queueAlbum(int64_t album, bool playNext);
@@ -84,6 +90,7 @@ private:
     std::function<void(camel::server::Command)> submit_;
     View current_;
     std::vector<View> back_;
+    std::function<void()> leave_; // Back from a search that began outside the library pages
     uint64_t generation_ = 0; // changes whenever another view opens
     camel::server::AlbumSort albumSort_ = camel::server::AlbumSort::Title;
     camel::server::TrackSort trackSort_ = camel::server::TrackSort::Title;
