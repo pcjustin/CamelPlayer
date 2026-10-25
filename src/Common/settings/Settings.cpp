@@ -197,6 +197,8 @@ std::string toJson(const Settings& s) {
     j["resampleQuality"] = resampleQualityId(s.resampleQuality);
     j["convertDsdWhenUnsupported"] = s.convertDsdWhenUnsupported;
     j["language"] = s.language;
+    j["closeAction"] = s.closeAction == CloseAction::Exit ? "exit" : "tray";
+    j["trayNoticeShown"] = s.trayNoticeShown;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
@@ -287,6 +289,8 @@ Settings fromJson(const std::string& text) {
     s.resampleQuality = resampleQualityFromId(str(j, "resampleQuality", "high"));
     s.convertDsdWhenUnsupported = boolean(j, "convertDsdWhenUnsupported", false);
     s.language = str(j, "language", "");
+    s.closeAction = str(j, "closeAction", "tray") == "exit" ? CloseAction::Exit : CloseAction::Tray;
+    s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
         const json& w = j["wasapi"];

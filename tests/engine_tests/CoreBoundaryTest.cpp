@@ -278,6 +278,20 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
     std::filesystem::remove(file);
 }
 
+TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {
+    EXPECT_EQ(Settings{}.closeAction, CloseAction::Tray);
+    EXPECT_FALSE(Settings{}.trayNoticeShown);
+    Settings settings;
+    settings.closeAction = CloseAction::Exit;
+    settings.trayNoticeShown = true;
+    const auto back = fromJson(toJson(settings));
+    EXPECT_EQ(back.closeAction, CloseAction::Exit);
+    EXPECT_TRUE(back.trayNoticeShown);
+    const auto invalid = fromJson(R"({"closeAction":"hide","trayNoticeShown":"yes"})");
+    EXPECT_EQ(invalid.closeAction, CloseAction::Tray);
+    EXPECT_FALSE(invalid.trayNoticeShown);
+}
+
 TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
     const auto file = caseFile(".json");
     for (auto mode : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard}) {

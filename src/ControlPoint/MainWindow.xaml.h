@@ -7,6 +7,7 @@
 #include "MainWindow.g.h"
 #include "LibraryView.xaml.h"
 #include "Server/Api/ServerApi.h"
+#include "TrayIcon.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -89,6 +90,12 @@ private:
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueEntryId_ = UINT64_MAX;
     void updateQueuePanel();
+    // Notification-area residency (docs/Plan.md §8.4).
+    void hideToTray();
+    void showFromTray();
+    std::unique_ptr<ui::TrayIcon> tray_;
+    bool exiting_ = false;
+    bool inTray_ = false;
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
     bool followDevice(camel::Backend previous);
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);

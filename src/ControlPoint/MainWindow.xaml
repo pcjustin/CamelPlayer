@@ -257,6 +257,7 @@
                                     <TextBlock x:Uid="Settings_Interface" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
                                 <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
+                                <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
                                 <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
                                            Foreground="{ThemeResource SystemFillColorCautionBrush}" />
                             </StackPanel>

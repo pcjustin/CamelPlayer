@@ -54,6 +54,8 @@ struct SettingsDto {
     AsioSettings asio;
     KsSettings ks;
     std::string language;
+    CloseAction closeAction = CloseAction::Tray;
+    bool trayNoticeShown = false;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };

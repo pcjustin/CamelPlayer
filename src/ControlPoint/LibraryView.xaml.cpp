@@ -139,6 +139,16 @@ void LibraryView::showEmpty(int64_t total) {
     EmptyText().Visibility(Visibility::Visible);
 }
 
+void LibraryView::setActive(bool active) {
+    if (!refreshTimer_ || !collection_) return;
+    if (active) {
+        refreshTimer_.Start();
+        collection_->refresh();
+    } else {
+        refreshTimer_.Stop();
+    }
+}
+
 void LibraryView::hide() {
     cancelArtwork();
     if (refreshTimer_) refreshTimer_.Stop();

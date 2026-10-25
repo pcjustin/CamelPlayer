@@ -6,6 +6,7 @@
 #include "pch.h"
 
 #include "App.xaml.h"
+#include "TrayIcon.h"
 #include "Server/Api/ServerApi.h"
 #include "Common/util/CrashDump.h"
 #include "Common/util/Log.h"
@@ -15,6 +16,25 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     camel::installCrashDumps(logs);
     camel::log::init(logs, L"CamelPlayer");
     camel::log::info("CamelPlayer starting");
+
+    // One instance per Windows user (docs/Plan.md §8.4), decided before the Server opens the library: a second launch
+    // shows the running instance's window, even from the notification area, and exits.
+    const HANDLE instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
+    if (instance && GetLastError() == ERROR_ALREADY_EXISTS) {
+        for (int attempt = 0; attempt < 50; ++attempt) { // the first instance may still be starting
+            if (const HWND tray = FindWindowW(ui::TrayIcon::kWindowClass, nullptr)) {
+                DWORD process = 0;
+                GetWindowThreadProcessId(tray, &process);
+                AllowSetForegroundWindow(process);
+                PostMessageW(tray, ui::TrayIcon::kShowMessage, 0, 0);
+                break;
+            }
+            Sleep(100);
+        }
+        camel::log::info("CamelPlayer already running; showed its window");
+        CloseHandle(instance);
+        return 0;
+    }
 
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     auto server = camel::server::createLocalServer();

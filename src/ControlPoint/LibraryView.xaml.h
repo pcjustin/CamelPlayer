@@ -23,6 +23,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void showAlbum(int64_t album, hstring const& title);
     void showArtist(hstring const& artist);
     void hide();
+    // Stops refreshing while the window sits in the notification area; the view keeps its place.
+    void setActive(bool active);
 
     void OnBackClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSortChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);

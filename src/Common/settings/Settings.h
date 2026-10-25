@@ -116,6 +116,9 @@ audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat
 // The PCM depth a lossy format is decoded to; 24 unless set (docs/Plan.md §2).
 uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format);
 
+// What closing the main window does (docs/Plan.md §8.4).
+enum class CloseAction : uint8_t { Tray, Exit };
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -132,6 +135,8 @@ struct Settings {
     AsioSettings asio;
     KsSettings ks;
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
+    CloseAction closeAction = CloseAction::Tray;
+    bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     std::wstring lastFile;
 };
 

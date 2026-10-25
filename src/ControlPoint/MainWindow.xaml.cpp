@@ -20,6 +20,7 @@
 #include "Common/settings/Settings.h"
 #include "Common/util/Text.h"
 #include "Server/Playback/DeviceMatch.h"
+#include "TrayIcon.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -182,7 +183,30 @@ void MainWindow::InitializeComponent() {
     refresh.kind = CommandKind::RefreshDevices;
     submitCommand(std::move(refresh));
 
+    // Handlers run after the tray window's message, since Exit destroys the tray icon.
+    const auto open = [this] {
+        DispatcherQueue().TryEnqueue([weak = get_weak()] {
+            if (auto self = weak.get()) self->showFromTray();
+        });
+    };
+    const auto exit = [this] {
+        DispatcherQueue().TryEnqueue([weak = get_weak()] {
+            if (auto self = weak.get()) {
+                self->exiting_ = true;
+                self->Close();
+            }
+        });
+    };
+    tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit}, std::wstring(tr(L"Tray_Open")),
+                                           std::wstring(tr(L"Tray_Exit")));
+    AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& e) {
+        if (exiting_ || settings_.closeAction == CloseAction::Exit) return;
+        e.Cancel(true);
+        hideToTray();
+    });
+
     Closed([this](auto&&, auto&&) {
+        tray_.reset();
         artworkToken_.cancel();
         uiTimer_.Stop();
         seekTimer_.Stop();
@@ -190,6 +214,41 @@ void MainWindow::InitializeComponent() {
         submitCommand(Command{});
         server_.reset();
     });
+    refreshFromServer();
+}
+
+void MainWindow::hideToTray() {
+    inTray_ = true;
+    AppWindow().Hide();
+    uiTimer_.Stop();
+    get_self<LibraryView>(Library())->setActive(false);
+    if (server_ && server_->snapshot().playback.state == PlaybackState::Playing) {
+        Command pause;
+        pause.kind = CommandKind::Pause;
+        submitCommand(std::move(pause));
+    }
+    if (!settings_.trayNoticeShown && server_) {
+        tray_->notify(std::wstring(tr(L"Tray_NoticeTitle")), std::wstring(tr(L"Tray_NoticeText")));
+        settings_.trayNoticeShown = true;
+        Command command;
+        command.kind = CommandKind::ApplySettings;
+        command.settings = settings_;
+        submitCommand(std::move(command));
+    }
+}
+
+void MainWindow::showFromTray() {
+    const bool wasInTray = inTray_;
+    inTray_ = false;
+    AppWindow().Show();
+    if (const auto presenter = AppWindow().Presenter().try_as<Microsoft::UI::Windowing::OverlappedPresenter>();
+        presenter && presenter.State() == Microsoft::UI::Windowing::OverlappedPresenterState::Minimized)
+        presenter.Restore();
+    Activate();
+    SetForegroundWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()));
+    if (!wasInTray) return;
+    uiTimer_.Start();
+    get_self<LibraryView>(Library())->setActive(true);
     refreshFromServer();
 }
 
@@ -245,6 +304,7 @@ void MainWindow::populateSettings() {
 
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
+    fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
     populateDeviceLists(server_->snapshot().devices);
     populating_ = false;
     updateBackendGroups();
@@ -351,6 +411,7 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
     settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
+    settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
 }
 
 void MainWindow::settingsChanged() {

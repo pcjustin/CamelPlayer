@@ -90,6 +90,7 @@ Snapshot fullSnapshot() {
     s.controlPanelOpened = false;
     s.settings.backend = Backend::Wasapi;
     s.settings.wasapi.shared = true;
+    s.settings.closeAction = CloseAction::Exit;
     return s;
 }
 
@@ -121,6 +122,7 @@ TEST(ApiJson, SnapshotAndEventSurviveTheRoundTrip) {
     EXPECT_EQ(j["playback"]["error"], "deviceLost");
     EXPECT_EQ(j["playback"]["format"], "dsd");
     EXPECT_EQ(j["playback"]["md5"], "verified");
+    EXPECT_EQ(j["settings"]["closeAction"], "exit");
     EXPECT_EQ(throughText(CommandStamp{1, 2, 3}, commandStampFromJson), (CommandStamp{1, 2, 3}));
 }
 

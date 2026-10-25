@@ -176,4 +176,11 @@
   <data name="Status_NotConnected" xml:space="preserve"><value>Output device not connected</value></data>
   <data name="Backend_NoMatchTitle" xml:space="preserve"><value>Playback paused</value></data>
   <data name="Backend_NoMatch" xml:space="preserve"><value>{1} lists no device matching {0}, so nothing was switched to another device. Choose the output device below, then press Play.</value></data>
+  <data name="Tray_Open" xml:space="preserve"><value>Open CamelPlayer</value></data>
+  <data name="Tray_Exit" xml:space="preserve"><value>Exit</value></data>
+  <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer is still running</value></data>
+  <data name="Tray_NoticeText" xml:space="preserve"><value>Playback is paused and the library keeps updating. Click the icon to open CamelPlayer, or right-click it and choose Exit.</value></data>
+  <data name="Settings_CloseAction.Header" xml:space="preserve"><value>When closing the window</value></data>
+  <data name="Close_Tray" xml:space="preserve"><value>Minimize to the notification area</value></data>
+  <data name="Close_Exit" xml:space="preserve"><value>Exit CamelPlayer</value></data>
 </root>
