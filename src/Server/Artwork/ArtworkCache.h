@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #pragma once
+#include <functional>
 #include <mutex>
 #include <map>
 #include "Server/Library/LibraryStore.h"
@@ -27,9 +28,17 @@ public:
                                               const CancellationToken& token = {});
     // Settings › Clear cover cache: deletes every generated thumbnail; later requests generate them again.
     void clear();
+    // Makes the album-wall thumbnails the library lacks, until `yield` asks for the storage; returns how many it made.
+    size_t prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token = {});
 
 private:
-    std::optional<ArtworkReference> generate(const ArtworkCandidate& image, unsigned pixels, const CancellationToken& token);
+    // A cover the scan chose for an album or folder; its key comes from the stored file version, so an existing thumbnail
+    // is found without touching the music storage. nullopt when the library records no such cover.
+    std::optional<ArtworkReference> stored(const LibraryStore& store, const ArtworkRequest& request,
+                                           const CancellationToken& token);
+    // A non-empty `key` names the thumbnail instead of a digest of the source.
+    std::optional<ArtworkReference> generate(const ArtworkCandidate& image, unsigned pixels, const CancellationToken& token,
+                                             const std::string& key = {});
     void trim();
     std::filesystem::path directory_;
     uintmax_t maxBytes_;

@@ -54,6 +54,7 @@ struct LibraryTrackRow {
     LibraryTrackKey track;
     std::string title, artist, album, path, format;
     int64_t year = 0, disc = 0, number = 0, durationMs = 0;
+    std::string name; // the file's on-disk name, empty until a scan records it
 };
 
 struct LibraryTrackRowPage {
@@ -104,12 +105,10 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
                                     std::optional<uint64_t> expectedRevision = std::nullopt,
                                     const CancellationToken& token = {});
 LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t album, const CancellationToken& token = {});
-// Reads each folder's on-disk spelling, since stored paths are lowercase keys; call it off the UI thread.
+// Shows the names and root locations scans recorded, without reading the music storage.
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token = {});
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store);
 
-// The on-disk spelling of a stored lowercase path's last component, or the stored component when unreadable.
-std::string libraryDisplayName(const std::string& key);
 // A stored root key as people write it: the volume or share's own spelling without the extended-length prefix.
 std::string libraryDisplayPath(const std::string& key);
 // Where a library folder is, as Roon shows it: a share as \\server\share\folder, a local folder as

@@ -276,6 +276,18 @@ const std::vector<Migration>& libraryMigrations() {
             db.exec("UPDATE tracks SET year=CAST(substr(year,1,4) AS INTEGER) WHERE year>9999;"
                     "UPDATE albums SET year=CAST(substr(year,1,4) AS INTEGER) WHERE year>9999;");
         },
+        [](sqlite::Database& db) {
+            // Paths are lowercase keys; the on-disk names and a root's display path and location are kept so browsing
+            // never reads the music storage (docs/Plan.md §7). Scans fill them in.
+            db.exec("ALTER TABLE folders ADD COLUMN name TEXT;"
+                    "ALTER TABLE files ADD COLUMN name TEXT;"
+                    "ALTER TABLE roots ADD COLUMN display TEXT;"
+                    "ALTER TABLE roots ADD COLUMN location TEXT;");
+        },
+        [](sqlite::Database& db) {
+            // Whether an audio file carries a CUESHEET block, so rebuilding CUE tracks reads only the files that do.
+            db.exec("ALTER TABLE files ADD COLUMN embedded_cue INTEGER;");
+        },
     };
     return migrations;
 }

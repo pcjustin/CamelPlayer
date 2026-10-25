@@ -128,6 +128,7 @@ void MainWindow::InitializeComponent() {
         const double scale = ::GetDpiForWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id())) / 96.0;
         presenter.PreferredMinimumWidth(static_cast<int32_t>(800 * scale));
         presenter.PreferredMinimumHeight(static_cast<int32_t>(600 * scale));
+        presenter.Maximize(); // starts maximized; restoring returns to the size above
     }
     std::wstring executablePath(32768, L'\0');
     const DWORD executablePathLength =

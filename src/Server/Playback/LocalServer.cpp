@@ -176,6 +176,24 @@ public:
                                                                   : std::filesystem::path{};
             };
             libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
+            // Album-wall thumbnails are made ahead of display, only while nothing plays, scans or shows covers.
+            coverWarmer_ = std::jthread([this](std::stop_token stop) {
+                const auto busy = [this, &stop] {
+                    return stop.stop_requested() || library_->scanProgress().scans > 0 ||
+                           engine_->snapshot().state == audio::PlayState::Playing ||
+                           std::chrono::steady_clock::now().time_since_epoch().count() <
+                               artworkUntil_.load(std::memory_order_relaxed);
+                };
+                while (!stop.stop_requested()) {
+                    for (int i = 0; i < 300 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    if (busy()) continue;
+                    try {
+                        if (const auto made = artwork_->prepare(*library_, busy)) log::info("artwork: prepared %zu album covers", made);
+                    } catch (const std::exception& e) {
+                        log::warn("artwork: %s", e.what());
+                    }
+                }
+            });
         }
         if (!settings_.lastFile.empty()) {
             Command restore;
@@ -840,6 +858,7 @@ private:
     std::unique_ptr<LibraryStore> library_;
     std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
+    std::jthread coverWarmer_; // uses artwork_, library_ and engine_, so it stops before they go
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
     struct LibraryEntry {

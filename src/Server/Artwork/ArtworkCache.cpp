@@ -59,14 +59,93 @@ std::string sourceKey(const ArtworkCandidate& image) {
 std::optional<ArtworkCandidate> folderImage(const Path& path, const CancellationToken& token) {
     return findFolderArtworkFile(path, token);
 }
+
+struct StoredCover {
+    std::string key;
+    bool embedded = false;
+    Path file;
+};
+
+// Columns: source, path, size, mtime, volume_serial, file_index, created, volume_key.
+StoredCover storedCover(const sqlite::Statement& row) {
+    const auto source = row.text(0), path = row.text(1);
+    const auto version = library::storedVersion(row, 2);
+    Md5 md5;
+    md5.update(source.data(), source.size());
+    md5.update(path.data(), path.size());
+    md5.update(&version.size, sizeof(version.size));
+    md5.update(&version.mtime, sizeof(version.mtime));
+    md5.update(&version.created, sizeof(version.created));
+    md5.update(version.volumeKey.data(), version.volumeKey.size());
+    md5.update(version.index.data(), version.index.size());
+    return {"s" + toHex(md5.finish()), source == "embedded", Path(toWide(path))};
+}
+
+// The library's key for a playback path, worked out without opening it: lowercase, extended-length, a share as UNC.
+std::string libraryKey(const Path& path) {
+    std::wstring text = path.wstring();
+    if (!text.empty()) // as the scanner lowercases its keys
+        LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, text.data(), int(text.size()), text.data(), int(text.size()),
+                      nullptr, nullptr, 0);
+    if (text.starts_with(LR"(\\)") && !text.starts_with(LR"(\\?\)")) text = LR"(\\?\unc\)" + text.substr(2);
+    else if (text.size() > 1 && text[1] == L':') text = LR"(\\?\)" + text;
+    return toUtf8(text);
+}
+
+std::optional<StoredCover> albumCover(sqlite::Database& db, int64_t album) {
+    auto row = db.prepare("SELECT c.source,f.path,f.size,f.mtime,f.volume_serial,f.file_index,f.created,f.volume_key "
+                          "FROM albums a JOIN covers c ON c.id=a.cover_id JOIN files f ON f.id=c.file_id "
+                          "JOIN roots r ON r.id=f.root_id WHERE a.id=? AND f.available=1 AND r.online=1 AND r.removed IS NULL");
+    row.bind(1, album);
+    if (!row.step()) return std::nullopt;
+    return storedCover(row);
+}
+
+// The folder's own image, chosen like the scan chooses album covers, or else its first album's cover.
+std::optional<StoredCover> folderCover(sqlite::Database& db, int64_t folder) {
+    auto images = db.prepare("SELECT 'folder',f.path,f.size,f.mtime,f.volume_serial,f.file_index,f.created,f.volume_key "
+                             "FROM files f JOIN roots r ON r.id=f.root_id WHERE f.folder_id=? AND f.kind='image' "
+                             "AND f.available=1 AND r.online=1 AND r.removed IS NULL");
+    images.bind(1, folder);
+    std::optional<StoredCover> best;
+    size_t bestRank = SIZE_MAX;
+    while (images.step()) {
+        const auto rank = folderArtworkRank(Path(toWide(images.text(1))));
+        if (rank && rank->first < bestRank && images.integer(2) > 0 && uintmax_t(images.integer(2)) <= kMaxArtworkBytes) {
+            bestRank = rank->first;
+            best = storedCover(images);
+        }
+    }
+    if (best) return best;
+    auto child = db.prepare(
+        "WITH RECURSIVE below(id) AS (SELECT ? UNION ALL SELECT d.id FROM folders d JOIN below b ON d.parent_id=b.id) "
+        "SELECT a.id FROM albums a JOIN below b ON b.id=a.folder_id WHERE a.cover_id IS NOT NULL ORDER BY a.sort_key,a.id LIMIT 1");
+    child.bind(1, folder);
+    return child.step() ? albumCover(db, child.integer(0)) : std::nullopt;
+}
 } // namespace
 
 ArtworkCache::ArtworkCache(Path directory, uintmax_t maxBytes) : directory_(std::move(directory)), maxBytes_(maxBytes) {}
 
 std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, const ArtworkRequest& request,
                                                   const CancellationToken& token) {
-    std::lock_guard lock(mutex_);
     if (token.cancelled() || (request.pixels != 256 && request.pixels != 600)) return {};
+    if (store) {
+        try {
+            if (request.kind != ArtworkKind::Track) {
+                if (auto ref = stored(*store, request, token)) return ref;
+            } else {
+                // A library track shows its album's cover, so the playback bar reads nothing from the storage either.
+                auto db = store->openReader();
+                auto row = db.prepare("SELECT t.album_id FROM tracks t JOIN files f ON f.id=t.file_id "
+                                      "WHERE f.path=? AND f.available=1 AND t.album_id IS NOT NULL LIMIT 1");
+                if (row.bind(1, libraryKey(Path(toWide(request.path)))).step())
+                    if (auto ref = stored(*store, {ArtworkKind::Album, row.integer(0), {}, request.pixels}, token)) return ref;
+            }
+        } catch (const std::exception&) {
+        }
+    }
+    std::lock_guard lock(mutex_);
     BackgroundPriority priority;
     auto use = [&](const std::optional<ArtworkCandidate>& candidate) -> std::optional<ArtworkReference> {
         if (!candidate || token.cancelled()) return {};
@@ -156,6 +235,58 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
     return {};
 }
 
+// Album and folder covers on a NAS were looked up again on every request: the folder listed, the image file opened and
+// embedded art read from the track, one request at a time behind the cache lock (docs/Plan.md §12.1).
+std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, const ArtworkRequest& request,
+                                                     const CancellationToken& token) {
+    auto db = store.openReader();
+    const auto cover = request.kind == ArtworkKind::Album ? albumCover(db, request.id) : folderCover(db, request.id);
+    if (!cover) return std::nullopt;
+    const auto key = cover->key + "-" + std::to_string(request.pixels);
+    const auto target = directory_ / (key + ".jpg");
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(target, ec) && std::filesystem::file_size(target, ec) > 0) {
+        std::filesystem::last_write_time(target, std::filesystem::file_time_type::clock::now(), ec);
+        return ArtworkReference{key, target};
+    }
+    std::lock_guard lock(mutex_);
+    BackgroundPriority priority;
+    if (token.cancelled()) return std::nullopt;
+    ArtworkCandidate image;
+    if (cover->embedded) {
+        ArtworkQuery query;
+        query.firstTrack = cover->file;
+        auto images = makeEmbeddedArtworkProvider()->find(query, token);
+        if (images.empty()) return std::nullopt;
+        image = std::move(images.front());
+    } else {
+        image.file = cover->file;
+    }
+    return generate(image, request.pixels, token, cover->key);
+}
+
+size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token) {
+    std::vector<int64_t> albums;
+    {
+        auto db = store.openReader();
+        auto rows = db.prepare("SELECT id FROM albums WHERE cover_id IS NOT NULL ORDER BY sort_key,id");
+        while (rows.step()) albums.push_back(rows.integer(0));
+    }
+    size_t made = 0;
+    for (const auto album : albums) {
+        if (token.cancelled() || (yield && yield())) break;
+        auto db = store.openReader();
+        const auto cover = albumCover(db, album);
+        std::error_code ec;
+        if (!cover || std::filesystem::exists(directory_ / (cover->key + "-256.jpg"), ec)) continue;
+        try {
+            if (stored(store, {ArtworkKind::Album, album, {}, 256}, token)) ++made;
+        } catch (const std::exception&) {
+        }
+    }
+    return made;
+}
+
 std::optional<ArtworkReference> ArtworkCache::thumbnail(const ArtworkCandidate& image, unsigned pixels,
                                                         const CancellationToken& token) {
     std::lock_guard lock(mutex_);
@@ -167,9 +298,9 @@ std::optional<ArtworkReference> ArtworkCache::thumbnail(const ArtworkCandidate& 
 }
 
 std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& image, unsigned pixels,
-                                                       const CancellationToken& token) {
+                                                       const CancellationToken& token, const std::string& stableKey) {
     if (token.cancelled() || (pixels != 256 && pixels != 600) || image.bytes.size() > kMaxArtworkBytes) return {};
-    const auto key = sourceKey(image) + "-" + std::to_string(pixels);
+    const auto key = (stableKey.empty() ? sourceKey(image) : stableKey) + "-" + std::to_string(pixels);
     const auto target = directory_ / (key + ".jpg");
     std::filesystem::create_directories(directory_);
     if (!diskBytes_) trim();
@@ -190,7 +321,7 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
             if (!input.read(reinterpret_cast<char*>(bytes.data() + offset), std::streamsize(count))) return {};
             offset += count;
         }
-        if (sourceKey(image) + "-" + std::to_string(pixels) != key) return {};
+        if (stableKey.empty() && sourceKey(image) + "-" + std::to_string(pixels) != key) return {};
     }
     if (bytes.empty() || token.cancelled()) return {};
     Apartment apartment;

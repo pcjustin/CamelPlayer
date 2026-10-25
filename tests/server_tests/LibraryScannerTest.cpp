@@ -20,6 +20,7 @@
 #include "Engine/decode/FormatProbe.h"
 #include "DsdFixture.h"
 #include "LameFixture.h"
+#include "Common/util/Text.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -619,6 +620,34 @@ TEST_F(LibraryScannerTest, ValidExternalCueOverridesEmbeddedSheetAndRemovalResto
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=2"), 1);
 }
 
+TEST_F(LibraryScannerTest, RebuildingCueTracksReadsOnlyFilesRecordedWithAnEmbeddedSheet) {
+    embedCueSheet(audio());
+    audio("plain.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE embedded_cue=1 AND path LIKE '%one.flac'"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE embedded_cue=0 AND path LIKE '%plain.flac'"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=1"), 1);
+    // A file recorded without a sheet is not read again, so its sheet stays unread while the flag says so.
+    store.write([root](sqlite::Database& db) {
+             db.exec("UPDATE files SET embedded_cue=0 WHERE path LIKE '%one.flac'");
+             db.exec("INSERT OR REPLACE INTO app_state(key,value) VALUES('library_derived_dirty:" + std::to_string(root) + "',1)");
+         })
+        .get();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=1"), 0);
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET embedded_cue=NULL"); }).get();
+    store.write([root](sqlite::Database& db) {
+             db.exec("INSERT OR REPLACE INTO app_state(key,value) VALUES('library_derived_dirty:" + std::to_string(root) + "',1)");
+         })
+        .get();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=1"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE embedded_cue IS NULL AND kind='audio'"), 0);
+}
+
 TEST_F(LibraryScannerTest, MultiFileCueUsesFileOrderAndRejectsEscapes) {
     audio("first.flac");
     audio("second.flac");
@@ -1136,3 +1165,60 @@ TEST_F(LibraryScannerTest, AttributeNotificationTriggersAnIncrementalScan) {
 }
 
 } // namespace
+
+TEST_F(LibraryScannerTest, AFolderScanReconcilesOnlyThatSubtree) {
+    audio();
+    fs::create_directories(dir / "music" / "other");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "other" / "x.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto scanned = count(store, "SELECT last_scan FROM roots");
+    auto row = store.openReader().prepare("SELECT path FROM roots");
+    ASSERT_TRUE(row.step());
+    const fs::path stored(camel::toWide(row.text(0)));
+
+    audio("two.flac");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "other" / "y.flac");
+    fs::remove(dir / "music" / "other" / "x.flac");
+    ASSERT_TRUE(scanner.scan(root, {}, {stored / "album"}).complete);
+    EXPECT_EQ(count(store), 3); // one, two, and x still listed: "other" was not scanned
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE path LIKE '%y.flac'"), 0);
+    EXPECT_EQ(count(store, "SELECT last_scan FROM roots"), scanned);
+
+    ASSERT_TRUE(scanner.scan(root, {}, {stored / "other"}).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE '%x.flac'"), 0);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE '%y.flac'"), 1);
+
+    fs::remove_all(dir / "music" / "album");
+    ASSERT_TRUE(scanner.scan(root, {}, {stored / "album"}).complete);
+    EXPECT_EQ(count(store), 1);
+}
+
+TEST_F(LibraryScannerTest, ANotifiedFolderIsScannedWithoutTheWholeRoot) {
+    audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::milliseconds(0);
+    options.offlineInterval = std::chrono::milliseconds(100);
+    options.coalesce = std::chrono::milliseconds(100);
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; }));
+    const auto scanned = count(store, "SELECT last_scan FROM roots");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100)); // a full scan would record a later time
+    fs::create_directories(dir / "music" / "new album");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "new album" / "a.flac");
+    ASSERT_TRUE(waitFor([&] { return count(store) == 2; }));
+    EXPECT_EQ(count(store, "SELECT last_scan FROM roots"), scanned);
+    fs::remove(dir / "music" / "new album" / "a.flac");
+    ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
+    EXPECT_EQ(count(store, "SELECT last_scan FROM roots"), scanned);
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "new album" / "b.flac");
+    ASSERT_TRUE(waitFor([&] { return count(store) == 2; }));
+    fs::remove_all(dir / "music" / "new album");
+    ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
+    EXPECT_EQ(count(store, "SELECT last_scan FROM roots"), scanned);
+}

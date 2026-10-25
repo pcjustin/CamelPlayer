@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryViews.h"
 
 #include <windows.h>
 #include <wil/resource.h>
@@ -388,6 +389,9 @@ struct CuePlan {
     std::set<int64_t> replaceEmbeddedFiles;
     std::set<std::pair<int64_t, int>> tracks;
     std::vector<CueProjection> projections;
+    // Files read for an embedded CUESHEET and whether they have one; saved even when the plan is not finished.
+    std::vector<std::pair<int64_t, bool>> embeddedFound;
+    bool complete = false;
 };
 
 std::optional<uint32_t> cueEncoding(sqlite::Database& db, int64_t fileId) {
@@ -406,9 +410,23 @@ uint64_t cueSamples(uint64_t frames75, uint64_t sampleRate) {
     return frames75 * sampleRate / 75;
 }
 
+// Runs work(0..count-1) on several threads: opening a file on a share mostly waits for the network. False when stopped
+// before every item was started.
+bool forEachConcurrently(size_t count, const Path& root, const std::function<bool()>& stopped,
+                         const std::function<void(size_t)>& work) {
+    std::atomic<size_t> next = 0;
+    std::vector<std::future<void>> workers;
+    for (unsigned i = 0; i < (isNetworkPath(root) ? 16u : 4u); ++i)
+        workers.push_back(std::async(std::launch::async, [&] {
+            for (size_t at; !stopped() && (at = next++) < count;) work(at);
+        }));
+    for (auto& worker : workers) worker.get();
+    return next >= count;
+}
+
 CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, const std::vector<std::string>& changedAudio,
                     const std::map<std::string, bool>& embeddedHints, bool retryDerived,
-                    std::vector<std::string>& diagnostics) {
+                    const std::function<bool()>& stopped, std::vector<std::string>& diagnostics) {
     struct Audio {
         int64_t id;
         std::string path;
@@ -416,6 +434,7 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
         uint64_t frames;
         std::string title, album, albumArtist, artist;
         int year, trackTotal;
+        std::optional<bool> embeddedCue;
     };
     struct Source {
         int64_t id;
@@ -428,8 +447,8 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
     std::map<std::string, Audio> audioByPath;
     std::map<int64_t, Audio> audioById;
     auto audioRows =
-        db.prepare("SELECT f.id,f.path,t.sample_rate,t.total_frames,t.title,t.album,t.album_artist,t.artist,t.year,t.track_total "
-                   "FROM files f JOIN tracks t ON t.file_id=f.id AND t.cue_index=0 "
+        db.prepare("SELECT f.id,f.path,t.sample_rate,t.total_frames,t.title,t.album,t.album_artist,t.artist,t.year,t.track_total,"
+                   "f.embedded_cue FROM files f JOIN tracks t ON t.file_id=f.id AND t.cue_index=0 "
                    "WHERE f.root_id=? AND f.available=1 AND f.kind='audio'");
     audioRows.bind(1, root);
     while (audioRows.step()) {
@@ -442,19 +461,26 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
                 audioRows.text(6),
                 audioRows.text(7),
                 int(audioRows.integer(8)),
-                int(audioRows.integer(9))};
+                int(audioRows.integer(9)),
+                audioRows.isNull(10) ? std::nullopt : std::optional<bool>(audioRows.integer(10) != 0)};
         audioByPath.emplace(a.path, a);
         audioById.emplace(a.id, std::move(a));
     }
     std::vector<Source> sources;
+    std::vector<std::optional<uint32_t>> encodings;
     auto cueRows = db.prepare("SELECT id,path FROM files WHERE root_id=? AND available=1 AND kind='cue'");
     cueRows.bind(1, root);
     while (cueRows.step()) {
-        Source source{cueRows.integer(0), cueRows.text(1)};
+        sources.push_back({cueRows.integer(0), cueRows.text(1)});
+        encodings.push_back(cueEncoding(db, sources.back().id));
+    }
+    std::vector<std::string> cueErrors(sources.size());
+    if (!forEachConcurrently(sources.size(), rootPath, stopped, [&](size_t at) {
+        auto& source = sources[at];
         try {
             const Path cuePath(toWide(source.path));
             const auto before = fileVersion(cuePath);
-            source.sheet = library::parseCue(cuePath, cueEncoding(db, source.id));
+            source.sheet = library::parseCue(cuePath, encodings[at]);
             if (fileVersion(cuePath) != before) throw std::runtime_error("CUE changed during read");
             std::set<std::string> usedPaths;
             for (const auto& cueFile : source.sheet.files) {
@@ -504,10 +530,12 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
             }
             source.valid = true;
         } catch (const std::exception& e) {
-            diagnostics.push_back(source.path + ": " + e.what());
+            cueErrors[at] = source.path + ": " + e.what();
         }
-        sources.push_back(std::move(source));
-    }
+    }))
+        return plan;
+    for (const auto& error : cueErrors)
+        if (!error.empty()) diagnostics.push_back(error);
 
     std::map<int64_t, std::set<int64_t>> sourcesByAudio;
     for (const auto& source : sources)
@@ -545,13 +573,38 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
         const int64_t cue = oldCueTracks.integer(2);
         if (!oldCueTracks.integer(3) || !plan.validCueFiles.contains(cue)) embeddedCandidates.insert(file);
     }
+    struct EmbeddedRead {
+        const Audio* audio;
+        std::optional<library::CueSheet> sheet;
+        std::string error;
+    };
+    std::vector<EmbeddedRead> reads;
     for (const auto id : embeddedCandidates) {
         const auto& audio = audioById.at(id);
         if (plan.replaceEmbeddedFiles.contains(id)) continue;
         plan.replaceEmbeddedFiles.insert(id);
         if (const auto hint = embeddedHints.find(audio.path); hint != embeddedHints.end() && !hint->second) continue;
+        if (audio.embeddedCue != false) reads.push_back({&audio});
+    }
+    const bool allRead = forEachConcurrently(reads.size(), rootPath, stopped, [&](size_t at) {
         try {
-            auto embedded = library::parseEmbeddedFlacCue(Path(toWide(audio.path)));
+            reads[at].sheet = library::parseEmbeddedFlacCue(Path(toWide(reads[at].audio->path)));
+        } catch (const std::exception& e) {
+            reads[at].error = e.what();
+        }
+    });
+    for (const auto& entry : reads)
+        if (entry.sheet && !entry.audio->embeddedCue) plan.embeddedFound.emplace_back(entry.audio->id, !entry.sheet->files.empty());
+    if (!allRead) return plan;
+    for (auto& read : reads) {
+        const auto& audio = *read.audio;
+        const auto id = audio.id;
+        if (!read.error.empty()) {
+            diagnostics.push_back(audio.path + ": embedded CUESHEET: " + read.error);
+            continue;
+        }
+        try {
+            auto& embedded = *read.sheet;
             if (embedded.files.empty()) continue;
             std::vector<uint64_t> starts;
             for (const auto& track : embedded.files.front().tracks) starts.push_back(*track.index01);
@@ -596,6 +649,7 @@ CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, co
             diagnostics.push_back(audio.path + ": embedded CUESHEET: " + e.what());
         }
     }
+    plan.complete = true;
     return plan;
 }
 
@@ -1105,7 +1159,7 @@ void LibraryScanner::removeRoot(int64_t root) {
     }).get();
 }
 
-ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) {
+ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, const std::vector<Path>& folders) {
     ++store_.activeScans_;
     auto finishScan = wil::scope_exit([this] { --store_.activeScans_; });
     std::lock_guard lock(rootLock(root));
@@ -1139,6 +1193,23 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     const unsigned idleWorkers = network ? 16u : 4u;
     std::atomic<ListedIds> listedIds = ListedIds::Unknown;
     const auto playbackActive = playbackGate(path);
+    std::vector<Path> subtrees;
+    for (const auto& folder : folders)
+        if (contains(path, folder) && folder != path) subtrees.push_back(folder);
+    const bool partial = !subtrees.empty();
+    // How the root reads on disk, for the folder pages and Settings; the scan is reading this storage anyway.
+    const auto display = partial ? std::string{} : libraryDisplayPath(key(path));
+    const auto rootName = toUtf8(Path(toWide(display)).filename().wstring());
+    if (!partial)
+        store_
+            .write([&](sqlite::Database& db) {
+                db.prepare("UPDATE roots SET display=?,location=? WHERE id=?")
+                    .bind(1, display)
+                    .bind(2, libraryLocation(key(path)))
+                    .bind(3, root)
+                    .run();
+            })
+            .get();
     if (token.cancelled()) return report;
     if (!openPath(path, FILE_LIST_DIRECTORY)) {
         report.rootError = GetLastError();
@@ -1170,7 +1241,12 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
     auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
     while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
     const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
-    std::deque<Listing> pending{Listing{path}};
+    std::deque<Listing> pending;
+    if (!partial) pending.push_back(Listing{path});
+    for (const auto& folder : subtrees)
+        if (const DWORD attributes = GetFileAttributesW(folder.c_str());
+            attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+            pending.push_back(Listing{folder});
     std::deque<std::future<Listing>> active;
     bool complete = true;
     std::vector<Entry> batch;
@@ -1205,7 +1281,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         batch.clear();
         submit([&, entries](sqlite::Database& db) {
             if (token.cancelled()) return;
-            auto seen = db.prepare("UPDATE files SET last_seen=? WHERE id=?");
+            auto seen = db.prepare("UPDATE files SET last_seen=?,name=coalesce(name,?) WHERE id=?");
             auto old = db.prepare("SELECT id,size,mtime,volume_serial,file_index,created,volume_key,root_id FROM files WHERE "
                                   "path=? AND available=1");
             auto folders = db.prepare("SELECT id FROM folders WHERE path=?");
@@ -1225,7 +1301,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                 }
                 if (file && old.integer(7) == root && library::storedVersion(old, 1) == entry.version &&
                     entry.error.empty() && !entry.digest && !entry.metadata) {
-                    seen.bind(1, generation).bind(2, file).run();
+                    seen.bind(1, generation).bind(2, toUtf8(entry.path.filename().wstring())).bind(3, file).run();
                     seen.reset();
                     // Tracks indexed by an interrupted first scan have no album yet.
                     ungrouped.reset();
@@ -1243,8 +1319,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                 if (!file) {
                     db.prepare("INSERT INTO "
                                "files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen,created,"
-                               "volume_key,identity_state) "
-                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,1)")
+                               "volume_key,identity_state,name) "
+                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)")
                         .bind(1, folderId)
                         .bind(2, root)
                         .bind(3, p)
@@ -1256,13 +1332,14 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                         .bind(9, generation)
                         .bind(10, entry.version.created)
                         .bind(11, entry.version.volumeKey)
+                        .bind(12, toUtf8(entry.path.filename().wstring()))
                         .run();
                     file = db.lastInsertId();
                 } else {
                     if (library::storedVersion(old, 1) != entry.version)
                         db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
                     db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
-                               "volume_serial=?,file_index=?,created=?,volume_key=? WHERE id=?")
+                               "volume_serial=?,file_index=?,created=?,volume_key=?,name=? WHERE id=?")
                         .bind(1, entry.version.size)
                         .bind(2, entry.version.mtime)
                         .bind(3, generation)
@@ -1272,7 +1349,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                         .bind(7, entry.version.index)
                         .bind(8, entry.version.created)
                         .bind(9, entry.version.volumeKey)
-                        .bind(10, file)
+                        .bind(10, toUtf8(entry.path.filename().wstring()))
+                        .bind(11, file)
                         .run();
                 }
                 if (entry.digest)
@@ -1281,6 +1359,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                 if (entry.rejected || entry.metadata) trackFolders.insert(folderId);
                 if (entry.metadata) {
                     writeMetadata(db, file, *entry.metadata, locale);
+                    if (entry.metadata->embeddedCue)
+                        db.prepare("UPDATE files SET embedded_cue=? WHERE id=?")
+                            .bind(1, int64_t(*entry.metadata->embeddedCue))
+                            .bind(2, file)
+                            .run();
                     report.updated++;
                     changedAudioPaths.push_back(p);
                     if (entry.metadata->embeddedCue) embeddedHints[p] = *entry.metadata->embeddedCue;
@@ -1315,12 +1398,15 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         if (!listing.error.empty()) report.diagnostics.push_back(listing.error);
         if (!listing.fileWork) {
             submit([root, folder = key(listing.path),
-                    parent = listing.path == path ? std::string{} : key(listing.path.parent_path())](sqlite::Database& db) {
-                db.prepare("INSERT INTO folders(root_id,path,parent_id) VALUES(?,?,(SELECT id FROM folders WHERE path=?)) "
-                           "ON CONFLICT(path) DO UPDATE SET root_id=excluded.root_id,parent_id=excluded.parent_id")
+                    parent = listing.path == path ? std::string{} : key(listing.path.parent_path()),
+                    name = listing.path == path ? rootName : toUtf8(listing.path.filename().wstring())](sqlite::Database& db) {
+                db.prepare("INSERT INTO folders(root_id,path,parent_id,name) VALUES(?,?,(SELECT id FROM folders WHERE path=?),?) "
+                           "ON CONFLICT(path) DO UPDATE SET root_id=excluded.root_id,parent_id=excluded.parent_id,"
+                           "name=excluded.name")
                     .bind(1, root)
                     .bind(2, folder)
                     .bind(3, parent)
+                    .bind(4, name)
                     .run();
             });
             for (auto& child : listing.children) pending.push_back(Listing{std::move(child)});
@@ -1366,13 +1452,27 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
                 .bind(3, int64_t(report.online))
                 .run();
             if (report.complete) {
-                db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
-                db.prepare("DELETE FROM app_state WHERE key=?").bind(1, rereadKey).run();
-                db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
-                    .bind(1, root)
-                    .bind(2, generation)
-                    .run();
-                derivedChanged = derivedChanged || db.scalar("SELECT changes()").value_or(0) != 0;
+                if (!partial) {
+                    db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
+                    db.prepare("DELETE FROM app_state WHERE key=?").bind(1, rereadKey).run();
+                    db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
+                        .bind(1, root)
+                        .bind(2, generation)
+                        .run();
+                    derivedChanged = derivedChanged || db.scalar("SELECT changes()").value_or(0) != 0;
+                }
+                // A path range over the unique files.path index selects a subtree without a LIKE pattern.
+                for (const auto& folder : subtrees) {
+                    const auto below = key(folder);
+                    db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND "
+                               "(last_seen IS NULL OR last_seen<>?) AND path>?||'\\' AND path<?||']'")
+                        .bind(1, root)
+                        .bind(2, generation)
+                        .bind(3, below)
+                        .bind(4, below)
+                        .run();
+                    derivedChanged = derivedChanged || db.scalar("SELECT changes()").value_or(0) != 0;
+                }
                 std::vector<int64_t> added;
                 auto pending = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1 AND identity_state=1");
                 pending.bind(1, root);
@@ -1387,9 +1487,18 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         .get();
     if (report.complete && derivedChanged) {
         auto cueReader = store_.openReader();
-        CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, embeddedHints, retryDerived, report.diagnostics);
+        // Reading CUE sheets and embedded CUESHEETs touches the storage, so it yields to exit and to playback.
+        const auto stopped = [&] { return token.cancelled() || playbackActive(); };
+        CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, embeddedHints, retryDerived, stopped,
+                                      report.diagnostics);
+        report.deferred = report.deferred || (!cuePlan.complete && !token.cancelled());
         store_.write([&](sqlite::Database& db) {
-            if (token.cancelled()) return;
+            auto found = db.prepare("UPDATE files SET embedded_cue=? WHERE id=?");
+            for (const auto& [file, embedded] : cuePlan.embeddedFound) {
+                found.bind(1, int64_t(embedded)).bind(2, file).run();
+                found.reset();
+            }
+            if (token.cancelled() || !cuePlan.complete) return;
             applyCuePlan(db, cuePlan, root);
             rebuildAlbums(db, root);
             db.prepare("DELETE FROM app_state WHERE key=?").bind(1, derivedKey).run();
@@ -1599,6 +1708,43 @@ private:
         bool pending = false;
         bool deferred = false;
         std::function<bool()> playbackActive;
+        Path root;
+        // Folders the notifications named since the last scan; a full scan when they cannot say (overflow, failure,
+        // a change at the root itself, startup, polling).
+        std::set<Path> changed;
+        bool full = true;
+
+        // A folder that is there (new, moved in, or changed because its contents did) is listed itself; a file lists the
+        // folder holding it. What went away may have been a folder, so its own path is reconciled too.
+        void collect(DWORD bytes) {
+            for (size_t offset = 0; offset < bytes;) {
+                const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buffer.data() + offset);
+                const Path item = root / std::wstring(info->FileName, info->FileNameLength / sizeof(wchar_t));
+                const DWORD attributes = info->Action == FILE_ACTION_REMOVED || info->Action == FILE_ACTION_RENAMED_OLD_NAME
+                                             ? INVALID_FILE_ATTRIBUTES
+                                             : GetFileAttributesW(item.c_str());
+                const bool gone = attributes == INVALID_FILE_ATTRIBUTES;
+                const Path folder = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)
+                                        ? item
+                                        : item.parent_path();
+                if (gone) changed.insert(item);
+                if (folder != root) changed.insert(folder);
+                else if (!gone || !kind(item).empty()) full = true;
+                if (!info->NextEntryOffset) break;
+                offset += info->NextEntryOffset;
+            }
+        }
+
+        // The changed folders without those inside another; empty for a full scan.
+        std::vector<Path> take() {
+            std::vector<Path> folders;
+            if (!full)
+                for (const auto& folder : changed)
+                    if (folders.empty() || !contains(folders.back(), folder)) folders.push_back(folder);
+            changed.clear();
+            full = false;
+            return folders;
+        }
         ~Watch() {
             if (pending) {
                 CancelIoEx(directory.get(), &io);
@@ -1662,15 +1808,18 @@ private:
                                 openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
                             watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
                             if (watch->directory && watch->event) watch->arm();
+                            watch->root = path;
                             watch->due = time;
                             watch->lastPoll = time;
                             watches.emplace(id, std::move(watch));
                         }
                         auto& watch = *watches.at(id);
-                        const auto interval = options_.pollInterval.count() || !isNetworkPath(path) ? options_.pollInterval
-                                                                                                    : std::chrono::minutes(30);
+                        // A share's change notifications are unreliable, so it is also walked periodically, like Roon's
+                        // rescan interval (4 hours by default there).
+                        const auto interval = isNetworkPath(path) ? options_.networkPollInterval : options_.pollInterval;
                         if (interval.count() && time - watch.lastPoll >= interval) {
                             watch.due = time;
+                            watch.full = true;
                             watch.lastPoll = time;
                         }
                     }
@@ -1679,26 +1828,29 @@ private:
                 const bool rescan = rescan_.exchange(false);
                 for (auto& [id, ptr] : watches) {
                     auto& watch = *ptr;
-                    if (rescan) watch.due = Clock::now();
+                    if (rescan) watch.due = Clock::now(), watch.full = true;
                     if (watch.deferred && !watch.playbackActive()) {
                         watch.deferred = false;
                         watch.due = Clock::now();
+                        watch.full = true;
                     }
                     if (watch.pending && WaitForSingleObject(watch.event.get(), 0) == WAIT_OBJECT_0) {
                         DWORD bytes = 0;
                         const bool ok = bool(GetOverlappedResult(watch.directory.get(), &watch.io, &bytes, FALSE));
                         watch.pending = false;
                         // Empty/overflowed buffers and failed notifications both require a full incremental scan.
+                        if (ok && bytes) watch.collect(bytes);
+                        else watch.full = true;
                         if (watch.due == Clock::time_point{} || (ok && bytes)) watch.due = Clock::now() + options_.coalesce;
                         watch.arm();
                     }
                     if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested() &&
                         !scans.contains(id)) {
                         watch.due = {};
-                        scans.emplace(id, std::async(std::launch::async, [this, id] {
+                        scans.emplace(id, std::async(std::launch::async, [this, id, folders = watch.take()] {
                             SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
                             auto normal = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
-                            return scanner_.scan(id, token_);
+                            return scanner_.scan(id, token_, folders);
                         }));
                     }
                 }

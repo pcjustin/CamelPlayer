@@ -55,9 +55,13 @@ hstring orUnknown(const std::string& text, const Texts& texts) {
 }
 
 // A track without a title tag shows its file name.
-hstring titleOf(const std::string& title, const std::string& path, const Texts& texts) {
-    if (!trimmed(title).empty() || path.empty()) return orUnknown(title, texts);
-    return hstring(std::filesystem::path(camel::toWide(path)).stem().wstring());
+hstring titleOf(const std::string& title, const std::string& file, const Texts& texts) {
+    if (!trimmed(title).empty() || file.empty()) return orUnknown(title, texts);
+    return hstring(std::filesystem::path(camel::toWide(file)).stem().wstring());
+}
+
+hstring titleOf(const LibraryTrackRow& t, const Texts& texts) {
+    return titleOf(t.title, t.name.empty() ? t.path : t.name, texts);
 }
 
 hstring duration(int64_t ms) {
@@ -65,13 +69,13 @@ hstring duration(int64_t ms) {
 }
 
 ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
-    return {t.id, t.path, titleOf(t.title, t.path, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
+    return {t.id, t.path, titleOf(t, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
 }
 
 ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, const Texts& texts) {
     std::wstring number;
     if (t.number) number = (discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L". ";
-    return {t.id, t.path, hstring(number + std::wstring(titleOf(t.title, t.path, texts))), ui::utf8(t.artist), {},
+    return {t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {},
             duration(t.durationMs)};
 }
 

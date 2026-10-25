@@ -44,7 +44,9 @@ public:
     void setCueEncoding(const std::filesystem::path& cuePath, std::optional<uint32_t> codePage);
     // Queues replacing a scan-time length estimate with the exact length playback measured; exact rows are unchanged.
     void recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames);
-    ScanReport scan(int64_t root, const CancellationToken& token = {});
+    // With `folders` (inside the root), only those subtrees are listed and reconciled: what a change notification named.
+    // A folder that no longer exists just loses its files. The root's last complete scan time is left as it was.
+    ScanReport scan(int64_t root, const CancellationToken& token = {}, const std::vector<std::filesystem::path>& folders = {});
     // Records sampled fingerprints of present files that have none or only a full one.
     FingerprintReport fingerprint(int64_t root, const CancellationToken& token = {});
 
@@ -64,7 +66,8 @@ void requestMetadataReread(LibraryStore& store);
 class LibraryMonitor {
 public:
     struct Options {
-        std::chrono::milliseconds pollInterval{std::chrono::minutes(30)}; // zero disables local polling only
+        std::chrono::milliseconds pollInterval{std::chrono::minutes(30)}; // local roots; zero disables polling
+        std::chrono::milliseconds networkPollInterval{std::chrono::hours(6)}; // shares; zero disables polling
         std::chrono::milliseconds offlineInterval{std::chrono::seconds(60)};
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
         std::function<bool()> playbackActive;

@@ -735,7 +735,7 @@ TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {
     scanner.addRoot(root);
     LibraryMonitor::Options options;
     options.offlineInterval = std::chrono::milliseconds(200);
-    options.pollInterval = std::chrono::seconds(2);
+    options.networkPollInterval = std::chrono::seconds(2);
     LibraryMonitor monitor(store, options);
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; }));
     fs::copy_file(testutil::testFile("16-44.1k"), root / "one.flac");

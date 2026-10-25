@@ -25,7 +25,7 @@ constexpr const char* kDuration =
     "CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate ELSE 0 END";
 constexpr const char* kTrackColumns =
     "t.id,t.file_id,t.cue_index,coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,''),f.path,coalesce(t.format,''),"
-    "coalesce(t.year,0),coalesce(t.disc_number,0),coalesce(t.track_number,0),";
+    "coalesce(t.year,0),coalesce(t.disc_number,0),coalesce(t.track_number,0),coalesce(f.name,''),";
 
 // A reader transaction with cancellation; the revision check makes every page of one listing come from one library state.
 struct Query {
@@ -83,7 +83,7 @@ std::string groupCondition(const LibraryGroupFilter& filter) {
 
 LibraryTrackRow trackRow(sqlite::Statement& rows) {
     return {rows.integer(0), {rows.integer(1), rows.integer(2)}, rows.text(3), rows.text(4), rows.text(5), rows.text(6),
-            rows.text(7), rows.integer(8), rows.integer(9), rows.integer(10), rows.integer(11)};
+            rows.text(7), rows.integer(8), rows.integer(9), rows.integer(10), rows.integer(12), rows.text(11)};
 }
 
 LibraryAlbum album(sqlite::Statement& rows) {
@@ -149,14 +149,6 @@ constexpr const char* kAlbumColumns =
 
 } // namespace
 
-std::string libraryDisplayName(const std::string& key) {
-    const std::filesystem::path path(toWide(key));
-    if (path.filename().empty()) return key;
-    WIN32_FIND_DATAW data{};
-    wil::unique_hfind find(FindFirstFileExW(path.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0));
-    return toUtf8(find ? data.cFileName : path.filename().wstring());
-}
-
 std::string libraryDisplayPath(const std::string& key) {
     std::wstring text = toWide(key);
     wil::unique_handle handle(CreateFileW(text.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -188,6 +180,25 @@ std::string libraryLocation(const std::string& key) {
     for (const auto& part : std::filesystem::path(text).relative_path()) out += L" › " + part.wstring();
     return toUtf8(out);
 }
+
+namespace {
+// A stored key as text, for rows a scan has not named yet: no access to the music storage.
+std::string keyText(const std::string& key) {
+    if (_strnicmp(key.c_str(), R"(\\?\UNC\)", 8) == 0) return R"(\\)" + key.substr(8);
+    return key.starts_with(R"(\\?\)") ? key.substr(4) : key;
+}
+std::string lastPart(const std::string& text) {
+    return toUtf8(std::filesystem::path(toWide(text)).filename().wstring());
+}
+// A root's display path and location as its scan recorded them; before that, a local root asks its own disk and a
+// share shows its key, so listing roots never waits for the network.
+std::pair<std::string, std::string> rootText(const std::string& key, const std::string& display, const std::string& location) {
+    if (!display.empty()) return {display, location.empty() ? display : location};
+    const auto text = keyText(key);
+    if (text.starts_with(R"(\)")) return {text, text};
+    return {libraryDisplayPath(key), libraryLocation(key)};
+}
+} // namespace
 
 LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
                               int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision,
@@ -318,33 +329,37 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
     LibraryFolderListing listing;
     listing.revision = q.revision;
     listing.folder = folder;
-    const auto root = [](int64_t id, const std::string& path) {
-        const auto name = toUtf8(std::filesystem::path(toWide(libraryDisplayPath(path))).filename().wstring());
-        return LibraryFolderEntry{id, name, path, libraryLocation(path)};
+    // Columns: id, path, name, root display, root location.
+    const auto entry = [](sqlite::Statement& row, bool isRoot) {
+        const auto path = row.text(1);
+        if (isRoot) {
+            const auto [shown, location] = rootText(path, row.text(3), row.text(4));
+            return LibraryFolderEntry{row.integer(0), lastPart(shown), path, location};
+        }
+        return LibraryFolderEntry{row.integer(0), row.text(2).empty() ? lastPart(path) : row.text(2), path};
     };
     // A path range over the unique files.path index finds the first track below a folder without a LIKE pattern.
-    auto folders = folder ? q.db.prepare("SELECT d.id,d.path FROM folders d JOIN roots r ON r.id=d.root_id "
+    auto folders = folder ? q.db.prepare("SELECT d.id,d.path,coalesce(d.name,''),coalesce(r.display,''),"
+                                         "coalesce(r.location,'') FROM folders d JOIN roots r ON r.id=d.root_id "
                                          "WHERE d.parent_id=? AND r.removed IS NULL AND r.online=1 AND EXISTS("
                                          "SELECT 1 FROM files f JOIN tracks t ON t.file_id=f.id WHERE f.available=1 "
                                          "AND f.path>d.path||'\\' AND f.path<d.path||']') ORDER BY d.path")
-                          : q.db.prepare("SELECT d.id,d.path FROM folders d JOIN roots r ON r.id=d.root_id "
+                          : q.db.prepare("SELECT d.id,d.path,coalesce(d.name,''),coalesce(r.display,''),"
+                                         "coalesce(r.location,'') FROM folders d JOIN roots r ON r.id=d.root_id "
                                          "WHERE d.parent_id IS NULL AND r.removed IS NULL AND r.online=1 ORDER BY d.path");
     if (folder) folders.bind(1, *folder);
     while (folders.step()) {
         if (token.cancelled()) throw std::runtime_error("library query cancelled");
-        const auto path = folders.text(1);
-        listing.folders.push_back(folder ? LibraryFolderEntry{folders.integer(0), libraryDisplayName(path), path}
-                                         : root(folders.integer(0), path));
+        listing.folders.push_back(entry(folders, !folder));
     }
     if (folder) {
-        auto up = q.db.prepare("SELECT parent_id,path FROM folders WHERE id=?");
+        auto up = q.db.prepare("SELECT d.id,d.path,coalesce(d.name,''),coalesce(r.display,''),coalesce(r.location,''),"
+                               "d.parent_id FROM folders d JOIN roots r ON r.id=d.root_id WHERE d.id=?");
         for (std::optional<int64_t> id = *folder; id;) {
             up.reset();
             if (!up.bind(1, *id).step()) throw std::invalid_argument("unknown library folder");
-            const auto path = up.text(1);
-            const std::optional<int64_t> parent = up.isNull(0) ? std::nullopt : std::optional(up.integer(0));
-            listing.trail.insert(listing.trail.begin(), parent ? LibraryFolderEntry{*id, libraryDisplayName(path), path}
-                                                               : root(*id, path));
+            const std::optional<int64_t> parent = up.isNull(5) ? std::nullopt : std::optional(up.integer(5));
+            listing.trail.insert(listing.trail.begin(), entry(up, !parent));
             id = parent;
         }
         auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM library_tracks t" + kJoins +
@@ -358,12 +373,13 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
 
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store) {
     auto db = store.openReader();
-    auto rows = db.prepare("SELECT id,path,online,coalesce(last_scan,0) FROM roots WHERE removed IS NULL ORDER BY path");
+    auto rows = db.prepare("SELECT id,path,online,coalesce(last_scan,0),coalesce(display,''),coalesce(location,'') FROM roots "
+                           "WHERE removed IS NULL ORDER BY path");
     std::vector<LibraryRootInfo> out;
-    while (rows.step())
-        out.push_back({rows.integer(0), rows.text(1),
-                       toUtf8(std::filesystem::path(toWide(libraryDisplayPath(rows.text(1)))).filename().wstring()),
-                       libraryLocation(rows.text(1)), rows.integer(2) != 0, rows.integer(3)});
+    while (rows.step()) {
+        const auto [shown, location] = rootText(rows.text(1), rows.text(4), rows.text(5));
+        out.push_back({rows.integer(0), rows.text(1), lastPart(shown), location, rows.integer(2) != 0, rows.integer(3)});
+    }
     return out;
 }
 

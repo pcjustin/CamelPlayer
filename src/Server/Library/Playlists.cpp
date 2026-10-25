@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 
 #include "Server/Library/LibraryViews.h"
+#include "Common/util/Text.h"
 
 namespace camel::server {
 namespace {
@@ -43,8 +44,9 @@ struct Expansion {
 std::string sourceName(sqlite::Database& db, const PlaylistSource& source) {
     switch (source.kind) {
     case PlaylistSource::Kind::Folder: {
-        auto row = db.prepare("SELECT path FROM folders WHERE id=?");
-        return row.bind(1, source.id).step() ? libraryDisplayName(row.text(0)) : std::string{};
+        auto row = db.prepare("SELECT path,coalesce(name,'') FROM folders WHERE id=?");
+        if (!row.bind(1, source.id).step()) return {};
+        return row.text(1).empty() ? toUtf8(std::filesystem::path(toWide(row.text(0))).filename().wstring()) : row.text(1);
     }
     case PlaylistSource::Kind::Album: {
         auto row = db.prepare("SELECT title FROM albums WHERE id=?");

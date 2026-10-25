@@ -6,9 +6,11 @@
 #include <wrl/client.h>
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
+#include <taglib/tpropertymap.h>
 #include <webp/encode.h>
 #include <fstream>
 #include "Server/Artwork/ArtworkCache.h"
+#include "Server/Library/LibraryScanner.h"
 #include "Common/util/Text.h"
 #include "TestUtil.h"
 
@@ -219,4 +221,51 @@ TEST_F(ArtworkCacheTest, AlbumAndFolderUseOwnImagesThenTheFirstAlbumAndHideOffli
     store.write([](camel::server::sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
     EXPECT_FALSE(cache.get(&store, {ArtworkKind::Album, 1}));
     EXPECT_FALSE(cache.get(&store, {ArtworkKind::Folder, 1}));
+}
+TEST_F(ArtworkCacheTest, ScannedCoversAreServedWithoutReadingTheirSourceAgain) {
+    const auto folder = dir / "music" / "Folder album", embedded = dir / "music" / "Embedded album";
+    std::filesystem::create_directories(folder);
+    std::filesystem::create_directories(embedded);
+    save(folder / "cover.jpg", bitmap(80, 40));
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), folder / "song.flac");
+    const auto song = embedded / "song.flac";
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), song);
+    {
+        TagLib::FLAC::File tags(song.c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList("Embedded"));
+        tags.setProperties(values);
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::FrontCover);
+        picture->setMimeType("image/bmp");
+        const auto bytes = bitmap(40, 80).bytes;
+        picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(bytes.data()), unsigned(bytes.size())));
+        tags.addPicture(picture);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    ASSERT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM albums WHERE cover_id IS NOT NULL").value(), 2);
+
+    std::vector<int64_t> albums;
+    for (auto rows = store.openReader().prepare("SELECT id FROM albums ORDER BY id"); rows.step();) albums.push_back(rows.integer(0));
+    ArtworkCache cache(dir / "thumbs");
+    EXPECT_EQ(cache.prepare(store, {}), 2u);
+    EXPECT_EQ(cache.prepare(store, {}), 0u);
+    std::vector<ArtworkReference> covers;
+    for (const auto album : albums) {
+        auto cover = cache.get(&store, {ArtworkKind::Album, album});
+        ASSERT_TRUE(cover);
+        covers.push_back(*cover);
+    }
+    // With the sources unreadable, the thumbnails still come from the cache: nothing is read from them again.
+    std::filesystem::rename(folder / "cover.jpg", dir / "moved.jpg");
+    std::filesystem::rename(song, dir / "moved.flac");
+    for (size_t i = 0; i < albums.size(); ++i) {
+        const auto again = cache.get(&store, {ArtworkKind::Album, albums[i]});
+        ASSERT_TRUE(again);
+        EXPECT_EQ(again->key, covers[i].key);
+    }
+    EXPECT_EQ(cache.prepare(store, [] { return true; }), 0u);
 }
