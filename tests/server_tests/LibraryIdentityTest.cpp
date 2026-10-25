@@ -364,7 +364,7 @@ TEST_F(LibraryIdentityTest, FingerprintsYieldCancelValidateVersionsAndInvalidate
     cancelled.cancel();
     EXPECT_FALSE(scanner.fingerprint(root, cancelled).complete);
     const auto expected = library::fileVersion(source);
-    const auto digest = library::fileDigest(source, expected, {}, {});
+    const auto digest = library::fileDigest(source, expected, {}, {}, library::Fingerprint::Full);
     ASSERT_TRUE(digest);
     const std::vector<uint8_t> sha256{0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40,
                                       0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17,
@@ -399,21 +399,89 @@ TEST_F(LibraryIdentityTest, HashingStopsBetweenChunksWithoutCommittingAPartialDi
     const auto expected = library::fileVersion(source);
     CancellationToken token;
     int checks = 0;
-    EXPECT_FALSE(library::fileDigest(source, expected, token, [&] { return ++checks >= 3; }));
+    constexpr auto full = library::Fingerprint::Full;
+    EXPECT_FALSE(library::fileDigest(source, expected, token, [&] { return ++checks >= 3; }, full));
     checks = 0;
-    EXPECT_FALSE(library::fileDigest(source, expected, token, [&] {
-        if (++checks == 3) token.cancel();
-        return false;
-    }));
-    EXPECT_THROW(library::fileDigest(source, expected, {},
-                                     [&] {
-                                         if (++checks == 5) {
-                                             file("large.lrc", "changed");
-                                             fs::last_write_time(source, fs::last_write_time(source) + std::chrono::seconds(2));
-                                         }
-                                         return false;
-                                     }),
+    EXPECT_FALSE(library::fileDigest(
+        source, expected, token,
+        [&] {
+            if (++checks == 3) token.cancel();
+            return false;
+        },
+        full));
+    EXPECT_THROW(library::fileDigest(
+                     source, expected, {},
+                     [&] {
+                         if (++checks == 5) {
+                             file("large.lrc", "changed");
+                             fs::last_write_time(source, fs::last_write_time(source) + std::chrono::seconds(2));
+                         }
+                         return false;
+                     },
+                     full),
                  std::runtime_error);
+}
+
+TEST_F(LibraryIdentityTest, SampledFingerprintReadsOnlyTheHeadAndTail) {
+    std::string bytes(3 << 20, 'x');
+    const auto source = file("large.lrc", bytes);
+    const auto sampled = [&] {
+        IO_COUNTERS before{}, after{};
+        GetProcessIoCounters(GetCurrentProcess(), &before);
+        auto digest = library::fileDigest(source, library::fileVersion(source), {}, {});
+        GetProcessIoCounters(GetCurrentProcess(), &after);
+        EXPECT_LE(after.ReadTransferCount - before.ReadTransferCount, 192u * 1024);
+        return digest.value();
+    };
+    const auto original = sampled();
+    ASSERT_EQ(original.size(), 33u);
+    EXPECT_EQ(original[0], 1);
+    bytes[bytes.size() / 2] = 'y';
+    file("large.lrc", bytes);
+    EXPECT_EQ(sampled(), original); // the unread middle
+    bytes[bytes.size() / 2] = 'x';
+    bytes.front() = 'y';
+    file("large.lrc", bytes);
+    EXPECT_NE(sampled(), original);
+    bytes.front() = 'x';
+    bytes.back() = 'y';
+    file("large.lrc", bytes);
+    EXPECT_NE(sampled(), original);
+    bytes.back() = 'x';
+    bytes.push_back('x');
+    file("large.lrc", bytes);
+    EXPECT_NE(sampled(), original);
+}
+
+TEST_F(LibraryIdentityTest, AFullFingerprintRecordedEarlierStillMatchesAMove) {
+    const auto source = file("old.lrc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto original = id(store, "old.lrc");
+    rate(store, original);
+    const auto full = library::fileDigest(source, library::fileVersion(source), {}, {}, library::Fingerprint::Full).value();
+    store.write([&](sqlite::Database& db) { db.prepare("UPDATE files SET content_hash=?").bind(1, full).run(); }).get();
+    distrustIds(store);
+    fs::copy_file(source, music / "new.lrc");
+    fs::remove(source);
+    EXPECT_EQ(scanner.scan(root).moved, 1);
+    EXPECT_EQ(id(store, "new.lrc"), original);
+    EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
+}
+
+TEST_F(LibraryIdentityTest, PresentFilesTradeAFullFingerprintForASampledOne) {
+    const auto source = file("old.lrc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto full = library::fileDigest(source, library::fileVersion(source), {}, {}, library::Fingerprint::Full).value();
+    store.write([&](sqlite::Database& db) { db.prepare("UPDATE files SET content_hash=?").bind(1, full).run(); }).get();
+    EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
+    EXPECT_EQ(scalar(store, "SELECT length(content_hash) FROM files"), 33);
+    EXPECT_EQ(scanner.fingerprint(root).hashed, 0);
 }
 
 TEST_F(LibraryIdentityTest, PartialScanDefersMoveResolutionUntilACompleteRetry) {

@@ -31,8 +31,13 @@ std::optional<std::vector<DirectoryEntry>> directoryEntries(void* directory, con
 std::wstring storageKey(const std::filesystem::path& path);
 // Columns: size, mtime, volume_serial, file_index, created, volume_key.
 FileVersion storedVersion(const sqlite::Statement& row, int column);
+// Move matching compares fingerprints of one kind. Sampled: a kind byte, then SHA-256 over the size and the first and last
+// 64 KiB (a FLAC's STREAMINFO, with the MD5 of its audio, is in the first block), so a NAS file costs at most 128 KiB to
+// read. Full: SHA-256 of the whole file, 32 bytes, recorded before sampled fingerprints existed.
+enum class Fingerprint { Sampled, Full };
 std::optional<std::vector<uint8_t>> fileDigest(const std::filesystem::path& path, const FileVersion& expected,
-                                               const CancellationToken& token, const std::function<bool()>& playbackActive);
+                                               const CancellationToken& token, const std::function<bool()>& playbackActive,
+                                               Fingerprint kind = Fingerprint::Sampled);
 
 // Reconciles only newly published files after a complete scan; retains the original identity and its references.
 size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added);

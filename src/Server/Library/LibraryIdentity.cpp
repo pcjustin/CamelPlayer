@@ -9,7 +9,9 @@
 #include <winnetwk.h>
 #include <wil/resource.h>
 
+#include <algorithm>
 #include <iterator>
+#include <limits>
 #include <cstring>
 #include <set>
 #include <array>
@@ -229,31 +231,54 @@ FileVersion storedVersion(const sqlite::Statement& row, int column) {
 }
 
 std::optional<std::vector<uint8_t>> fileDigest(const std::filesystem::path& path, const FileVersion& expected,
-                                               const CancellationToken& token, const std::function<bool()>& playbackActive) {
+                                               const CancellationToken& token, const std::function<bool()>& playbackActive,
+                                               Fingerprint kind) {
+    constexpr int64_t kSample = 64 * 1024;
+    constexpr uint8_t kSampledKind = 1;
     if (token.cancelled() || (playbackActive && playbackActive())) return std::nullopt;
-    auto handle = open(path, GENERIC_READ, FILE_FLAG_SEQUENTIAL_SCAN);
+    const bool full = kind == Fingerprint::Full;
+    auto handle = open(path, GENERIC_READ, full ? FILE_FLAG_SEQUENTIAL_SCAN : FILE_FLAG_RANDOM_ACCESS);
     if (!handle || version(handle.get(), path) != expected) throw std::runtime_error("file changed before fingerprinting");
     wil::unique_bcrypt_algorithm algorithm;
     wil::unique_bcrypt_hash hash;
     if (BCryptOpenAlgorithmProvider(algorithm.put(), BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0 ||
         BCryptCreateHash(algorithm.get(), hash.put(), nullptr, 0, nullptr, 0, 0) != 0)
         throw std::runtime_error("cannot initialize SHA-256");
-    std::vector<uint8_t> buffer(1 << 20);
+    std::vector<uint8_t> buffer(full ? 1 << 20 : kSample);
     int64_t total = 0;
-    for (;;) {
-        if (token.cancelled() || (playbackActive && playbackActive())) return std::nullopt;
-        DWORD bytes = 0;
-        if (!ReadFile(handle.get(), buffer.data(), DWORD(buffer.size()), &bytes, nullptr))
-            throw std::runtime_error("cannot read fingerprint source");
-        if (!bytes) break;
-        if (BCryptHashData(hash.get(), buffer.data(), bytes, 0) != 0) throw std::runtime_error("SHA-256 update failed");
-        total += bytes;
+    // False when cancelled or when playback needs the storage.
+    const auto hashRange = [&](int64_t offset, int64_t length) {
+        if (!SetFilePointerEx(handle.get(), LARGE_INTEGER{.QuadPart = offset}, nullptr, FILE_BEGIN))
+            throw std::runtime_error("cannot seek fingerprint source");
+        for (int64_t left = length; left > 0;) {
+            if (token.cancelled() || (playbackActive && playbackActive())) return false;
+            DWORD bytes = 0;
+            const auto request = DWORD(std::min<int64_t>(left, int64_t(buffer.size())));
+            if (!ReadFile(handle.get(), buffer.data(), request, &bytes, nullptr))
+                throw std::runtime_error("cannot read fingerprint source");
+            if (!bytes) break;
+            if (BCryptHashData(hash.get(), buffer.data(), bytes, 0) != 0) throw std::runtime_error("SHA-256 update failed");
+            total += bytes;
+            left -= bytes;
+        }
+        return true;
+    };
+    if (full) {
+        if (!hashRange(0, std::numeric_limits<int64_t>::max())) return std::nullopt;
+    } else {
+        int64_t size = expected.size;
+        if (BCryptHashData(hash.get(), reinterpret_cast<PUCHAR>(&size), sizeof size, 0) != 0)
+            throw std::runtime_error("SHA-256 update failed");
+        const int64_t head = std::min(expected.size, kSample), tail = std::max(head, expected.size - kSample);
+        if (!hashRange(0, head) || !hashRange(tail, expected.size - tail)) return std::nullopt;
+        total += tail - head; // the unread middle
     }
     if (total != expected.size || version(handle.get(), path) != expected || fileVersion(path) != expected)
         throw std::runtime_error("file changed during fingerprinting");
     if (token.cancelled() || (playbackActive && playbackActive())) return std::nullopt;
-    std::vector<uint8_t> digest(32);
-    if (BCryptFinishHash(hash.get(), digest.data(), DWORD(digest.size()), 0) != 0)
+    std::vector<uint8_t> digest(full ? 32 : 33);
+    if (!full) digest[0] = kSampledKind;
+    if (BCryptFinishHash(hash.get(), digest.data() + (full ? 0 : 1), 32, 0) != 0)
         throw std::runtime_error("SHA-256 finish failed");
     return digest;
 }
@@ -283,7 +308,7 @@ size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added) {
             }
             if (arrivals != 1) candidates.clear();
         }
-        if (candidates.empty() && next.blob(8).size() == 32) {
+        if (candidates.empty() && !next.blob(8).empty()) {
             auto matches = db.prepare("SELECT id FROM files WHERE content_hash=? AND kind=? AND size=?");
             matches.bind(1, next.blob(8)).bind(2, kind).bind(3, currentVersion.size);
             size_t arrivals = 0;

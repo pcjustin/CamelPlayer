@@ -831,7 +831,8 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             "UPDATE library_revision SET value=value+1 WHERE id=1");
 }
 
-Listing readEntries(Listing out, const std::map<std::string, Version>& known, const std::set<int64_t>& hashSizes,
+Listing readEntries(Listing out, const std::map<std::string, Version>& known,
+                    const std::map<int64_t, library::Fingerprint>& hashSizes,
                     const std::set<std::string>& pendingIdentity, const std::set<std::string>& knownHashes,
                     const std::set<TrustedIdentity>& trusted, bool reread,
                     const CancellationToken& token, const std::function<bool()>& playbackActive) {
@@ -877,7 +878,8 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known, co
                 hashSizes.contains(entry.version.size) &&
                 !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
                 if (!directoryValid()) break;
-                entry.digest = library::fileDigest(child, entry.version, token, playbackActive);
+                entry.digest =
+                    library::fileDigest(child, entry.version, token, playbackActive, hashSizes.at(entry.version.size));
                 if (!entry.digest) {
                     out.deferred = true;
                     throw std::runtime_error("fingerprint deferred while cancelled or playing");
@@ -1132,7 +1134,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         return report;
     }
     std::map<std::string, Version> known;
-    auto files = reader.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state,length(content_hash)=32 "
+    auto files = reader.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state,content_hash IS NOT NULL "
                                 "FROM files WHERE root_id=? AND available=1");
     files.bind(1, root);
     std::set<std::string> pendingIdentity;
@@ -1142,9 +1144,13 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request) 
         if (files.integer(7)) pendingIdentity.insert(files.text(0));
         if (files.integer(8)) knownHashes.insert(files.text(0));
     }
-    std::set<int64_t> hashSizes;
-    auto fingerprints = reader.prepare("SELECT DISTINCT size FROM files WHERE length(content_hash)=32");
-    while (fingerprints.step()) hashSizes.insert(fingerprints.integer(0));
+    // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist.
+    std::map<int64_t, library::Fingerprint> hashSizes;
+    auto fingerprints =
+        reader.prepare("SELECT size,MAX(length(content_hash)) FROM files WHERE content_hash IS NOT NULL GROUP BY size");
+    while (fingerprints.step())
+        hashSizes.emplace(fingerprints.integer(0),
+                          fingerprints.integer(1) == 32 ? library::Fingerprint::Full : library::Fingerprint::Sampled);
     std::set<TrustedIdentity> trusted;
     auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
     while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
@@ -1452,7 +1458,8 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         auto reader = store_.openReader();
         auto rows = reader.prepare("SELECT files.id,files.path,size,mtime,volume_serial,file_index,created,volume_key "
                                    "FROM files JOIN roots ON roots.id=files.root_id WHERE root_id=? AND available=1 "
-                                   "AND content_hash IS NULL AND identity_state<>2 AND roots.online=1 AND roots.removed IS NULL");
+                                   "AND (content_hash IS NULL OR length(content_hash)=32) AND identity_state<>2 "
+                                   "AND roots.online=1 AND roots.removed IS NULL");
         rows.bind(1, root);
         while (rows.step()) {
             if (token.cancelled() || backgroundBlocked()) return report;
@@ -1468,7 +1475,8 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
                 .write([&](sqlite::Database& db) {
                     if (token.cancelled() || backgroundBlocked()) return;
                     auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
-                                              "WHERE id=? AND available=1 AND identity_state<>2 AND content_hash IS NULL");
+                                              "WHERE id=? AND available=1 AND identity_state<>2 "
+                                              "AND (content_hash IS NULL OR length(content_hash)=32)");
                     if (!current.bind(1, id).step() || current.text(0) != path ||
                         library::storedVersion(current, 1) != expected || library::fileVersion(Path(toWide(path))) != expected)
                         return;
