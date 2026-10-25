@@ -93,6 +93,11 @@ struct LibraryRootInfo {
 LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
                               int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision = std::nullopt,
                               const CancellationToken& token = {});
+// Visible albums by their latest play, newest first (docs/Plan.md §8.2 Home). Plays do not change the library
+// revision, so these pages are read fresh rather than from a cached order.
+LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset, int64_t limit,
+                                      const CancellationToken& token = {});
+
 LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,

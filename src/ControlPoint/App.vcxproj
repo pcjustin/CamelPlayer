@@ -93,11 +93,15 @@
     <ClInclude Include="LibraryView.xaml.h">
       <DependentUpon>LibraryView.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="HomeView.xaml.h">
+      <DependentUpon>HomeView.xaml</DependentUpon>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="MainWindow.xaml" />
     <Page Include="LibraryView.xaml" />
+    <Page Include="HomeView.xaml" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -118,6 +122,9 @@
     <ClCompile Include="LibraryView.xaml.cpp">
       <DependentUpon>LibraryView.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="HomeView.xaml.cpp">
+      <DependentUpon>HomeView.xaml</DependentUpon>
+    </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -129,6 +136,10 @@
     <Midl Include="LibraryView.idl">
       <SubType>Code</SubType>
       <DependentUpon>LibraryView.xaml</DependentUpon>
+    </Midl>
+    <Midl Include="HomeView.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>HomeView.xaml</DependentUpon>
     </Midl>
   </ItemGroup>
   <ItemGroup>

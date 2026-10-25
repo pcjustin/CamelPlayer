@@ -889,6 +889,10 @@ LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offse
 PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
     return impl_->playStatistics(query, token);
 }
+LibraryAlbumPage LocalServer::recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token) const {
+    return camel::server::recentlyPlayedAlbums(impl_->library(), offset, limit, token);
+}
+
 LibraryAlbumPage LocalServer::browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
                                            int64_t limit, std::optional<uint64_t> revision, const CancellationToken& token) const {
     return camel::server::browseAlbums(impl_->library(), sort, filter, offset, limit, revision, token);

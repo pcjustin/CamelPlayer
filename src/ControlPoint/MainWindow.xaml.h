@@ -71,6 +71,9 @@ private:
     void applySnapshot(const camel::server::Snapshot& snapshot);
     void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
+    // Selects the navigation item with this tag; its page opens through the selection handler.
+    void selectPage(winrt::hstring const& tag);
+    void viewAll(winrt::hstring const& list);
     void showSearchResults(winrt::hstring const& query);
     void showSuggestions(const camel::server::LibrarySearchResults& results, winrt::hstring const& text);
     // What a suggestion opens; the list holds them in display order next to their items.

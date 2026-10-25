@@ -27,6 +27,7 @@ public:
                                        std::optional<uint64_t> revision,
                                        const CancellationToken& token = {}) const override;
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const override;
+    LibraryAlbumPage recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token = {}) const override;
     LibraryAlbumPage browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset, int64_t limit,
                                   std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
     LibraryGroupPage browseGroups(LibraryGroupField field, int64_t offset, int64_t limit, std::optional<uint64_t> revision,

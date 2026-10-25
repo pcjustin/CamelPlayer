@@ -231,6 +231,8 @@ public:
     // Playlists (docs/Plan.md §7.9) run on the caller's thread and write through the library writer, so large
     // selections never hold up playback commands.
     // Browse views (docs/Plan.md §8.2); call them off the UI thread.
+    // Home (docs/Plan.md §8.2): albums by their latest play, newest first.
+    virtual LibraryAlbumPage recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token = {}) const = 0;
     virtual LibraryAlbumPage browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
                                           int64_t limit, std::optional<uint64_t> revision,
                                           const CancellationToken& token = {}) const = 0;

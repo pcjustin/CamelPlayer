@@ -131,6 +131,29 @@ void LibraryView::showArtist(hstring const& artist) {
     refreshTimer_.Start();
 }
 
+void LibraryView::showAlbumList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave) {
+    View view;
+    view.mode = Mode::Albums;
+    view.title = title;
+    view.fetch = std::move(fetch);
+    back_.clear();
+    leave_ = std::move(leave);
+    open(std::move(view), false);
+    refreshTimer_.Start();
+}
+
+void LibraryView::showArtistList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave) {
+    View view;
+    view.mode = Mode::Groups;
+    view.field = LibraryGroupField::Artist;
+    view.title = title;
+    view.fetch = std::move(fetch);
+    back_.clear();
+    leave_ = std::move(leave);
+    open(std::move(view), false);
+    refreshTimer_.Start();
+}
+
 void LibraryView::showSearch(hstring const& query, std::function<void()> leave) {
     if (!server_ || query.empty()) return;
     View view;
@@ -180,7 +203,7 @@ void LibraryView::loadSearchGroups() {
 }
 
 void LibraryView::showEmpty(int64_t total) {
-    if (current_.mode == Mode::Search) return; // the search groups explain an empty result
+    if (current_.mode == Mode::Search || current_.fetch) return; // the search groups or Home explain an empty list
     const bool noRoots = hasRoots_ && !*hasRoots_;
     const bool pending = total == 0 && current_.mode == Mode::Albums && !current_.filter;
     if (total > 0 || (!noRoots && !pending)) {
@@ -268,6 +291,7 @@ void LibraryView::fillSortChoices() {
                 L"Library_SortYear",  L"Library_SortDuration", L"Library_SortAdded"};
         selected = int(trackSort_);
     }
+    if (current_.fetch) keys.clear(); // Home's lists keep their own order
     for (const auto* key : keys) SortCombo().Items().Append(box_value(tr(key)));
     SortCombo().Visibility(keys.empty() ? Visibility::Collapsed : Visibility::Visible);
     if (!keys.empty()) SortCombo().SelectedIndex(selected);
@@ -280,7 +304,9 @@ void LibraryView::startCollection() {
     const Texts texts;
     auto server = server_;
     ui::BrowseFetch fetch;
-    if (current_.mode == Mode::Albums) {
+    if (current_.fetch) {
+        fetch = current_.fetch;
+    } else if (current_.mode == Mode::Albums) {
         fetch = [server, texts, sort = albumSort_, filter = current_.filter](int64_t offset, int64_t limit,
                                                                               std::optional<uint64_t> revision) {
             const auto page = server->browseAlbums(sort, filter, offset, limit, revision);

@@ -24,6 +24,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void showArtist(hstring const& artist);
     // Full results for `query`. `leave` returns to the page the search started from when it was not a library page.
     void showSearch(hstring const& query, std::function<void()> leave);
+    // Home's "View all": an album wall or artist list read through `fetch`; Back runs `leave`.
+    void showAlbumList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
+    void showArtistList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void hide();
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
@@ -65,6 +68,7 @@ private:
         int64_t album = 0;
         std::optional<int64_t> folder; // absent: the library roots
         std::string query;             // search text
+        ui::BrowseFetch fetch;         // replaces the browse query for Home's lists
         hstring title, detail;
     };
 

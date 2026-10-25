@@ -67,6 +67,22 @@ INSERT INTO track_values(track_id,field,position,value,sort_key) VALUES
     }
 };
 
+TEST_F(LibraryViewsTest, RecentlyPlayedAlbumsFollowTheLatestPlayAndHideUnavailableOnes) {
+    EXPECT_EQ(recentlyPlayedAlbums(*store, 0, 10).total, 0);
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES"
+                    "(1,0,100,480,1000,1),(4,0,200,480,1000,1),(2,0,300,480,1000,1)," // Beta, Alpha, then Beta again
+                    "(5,0,400,480,1000,1),(6,0,500,480,1000,1)");                     // unavailable and offline
+        })
+        .get();
+    const auto page = recentlyPlayedAlbums(*store, 0, 10);
+    EXPECT_EQ(page.total, 2);
+    EXPECT_EQ(titles(page), (std::vector<std::string>{"Beta", "Alpha"}));
+    EXPECT_EQ(page.albums[0].tracks, 3);
+    EXPECT_EQ(titles(recentlyPlayedAlbums(*store, 1, 10)), (std::vector<std::string>{"Alpha"}));
+}
+
 TEST_F(LibraryViewsTest, TheAlbumWallListsVisibleAlbumsInEachSortOrder) {
     const auto byTitle = browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 50);
     EXPECT_EQ(byTitle.total, 2); // Gamma has no available track and Offline sits on an offline root

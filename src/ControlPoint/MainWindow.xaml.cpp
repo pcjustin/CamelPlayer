@@ -21,6 +21,7 @@
 #include "Common/util/Text.h"
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
+#include "HomeView.xaml.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -174,6 +175,15 @@ void MainWindow::InitializeComponent() {
 
     populateSettings();
     get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); });
+    get_self<HomeView>(Home())->attach(server_, {[this](int64_t album, hstring const& title) {
+                                                     selectPage(L"albums");
+                                                     get_self<LibraryView>(Library())->showAlbum(album, title);
+                                                 },
+                                                 [this](hstring const& artist) {
+                                                     selectPage(L"albums");
+                                                     get_self<LibraryView>(Library())->showArtist(artist);
+                                                 },
+                                                 [this](hstring const& list) { viewAll(list); }});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     updateQueuePanel();
@@ -812,8 +822,92 @@ void MainWindow::showStatusNotices(const PlaybackSnapshot& s) {
     }
 }
 
+void MainWindow::selectPage(hstring const& tag) {
+    for (const auto& entry : Nav().MenuItems())
+        if (const auto item = entry.try_as<NavigationViewItem>(); item && unbox_value_or<hstring>(item.Tag(), L"") == tag) {
+            Nav().SelectedItem(item);
+            return;
+        }
+}
+
+// Home's "View all" opens the full list in the library pages; Back returns to Home.
+void MainWindow::viewAll(hstring const& list) {
+    auto server = server_;
+    const auto back = [this] { selectPage(L"home"); };
+    const hstring unknown = tr(L"Library_Unknown"), playsFormat = tr(L"Home_Plays");
+    const auto plays = [playsFormat](int64_t n) {
+        std::wstring text(playsFormat);
+        if (const auto at = text.find(L"{0}"); at != std::wstring::npos) text.replace(at, 3, std::to_wstring(n));
+        return hstring(text);
+    };
+    const auto ranked = [server](int64_t offset, int64_t limit) {
+        PlayStatisticsQuery query;
+        query.topLimit = std::clamp<int64_t>(offset + limit, 1, 500);
+        query.historyLimit = 0;
+        auto stats = server->playStatistics(query);
+        std::erase_if(stats.albums, [](const auto& a) { return a.plays == 0; }); // heard, but never counted as a play
+        std::erase_if(stats.artists, [](const auto& a) { return a.plays == 0; });
+        return stats;
+    };
+    Nav().SelectedItem(nullptr);
+    Home().Visibility(Visibility::Collapsed);
+    Library().Visibility(Visibility::Visible);
+    auto view = get_self<LibraryView>(Library());
+    const auto albums = [unknown](const LibraryAlbumPage& page) {
+        ui::BrowsePage out{page.revision, page.total, {}};
+        for (const auto& a : page.albums)
+            out.rows.push_back({a.id, {}, a.title.empty() ? unknown : ui::utf8(a.title), ui::utf8(a.artist), {}, {}});
+        return out;
+    };
+    if (list == L"added") {
+        view->showAlbumList(
+            tr(L"Home_RecentlyAdded/Text"),
+            [server, albums](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
+                return albums(server->browseAlbums(AlbumSort::Added, std::nullopt, offset, limit, revision));
+            },
+            back);
+    } else if (list == L"played") {
+        view->showAlbumList(
+            tr(L"Home_RecentlyPlayed/Text"),
+            [server, albums](int64_t offset, int64_t limit, std::optional<uint64_t>) {
+                return albums(server->recentlyPlayedAlbums(offset, limit));
+            },
+            back);
+    } else if (list == L"topAlbums") {
+        view->showAlbumList(
+            tr(L"Home_TopAlbums/Text"),
+            [ranked, plays](int64_t offset, int64_t limit, std::optional<uint64_t>) {
+                const auto stats = ranked(offset, limit);
+                ui::BrowsePage out{0, int64_t(stats.albums.size()), {}};
+                for (size_t i = size_t(offset); i < stats.albums.size() && i < size_t(offset + limit); ++i)
+                    out.rows.push_back({stats.albums[i].album,
+                                        {},
+                                        ui::utf8(stats.albums[i].name),
+                                        ui::utf8(stats.albums[i].artist),
+                                        {},
+                                        plays(stats.albums[i].plays)});
+                return out;
+            },
+            back);
+    } else if (list == L"topArtists") {
+        view->showArtistList(
+            tr(L"Home_TopArtists/Text"),
+            [ranked, plays](int64_t offset, int64_t limit, std::optional<uint64_t>) {
+                const auto stats = ranked(offset, limit);
+                ui::BrowsePage out{0, int64_t(stats.artists.size()), {}};
+                for (size_t i = size_t(offset); i < stats.artists.size() && i < size_t(offset + limit); ++i)
+                    out.rows.push_back(
+                        {0, stats.artists[i].name, ui::utf8(stats.artists[i].name), {}, {}, plays(stats.artists[i].plays)});
+                return out;
+            },
+            back);
+    }
+}
+
 void MainWindow::showPage(hstring const& tag) {
     shownTag_ = tag;
+    Home().Visibility(tag == L"home" ? Visibility::Visible : Visibility::Collapsed);
+    if (tag == L"home") get_self<HomeView>(Home())->refresh();
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
                          tag == L"years" || tag == L"tracks" || tag == L"folders";
@@ -821,7 +915,7 @@ void MainWindow::showPage(hstring const& tag) {
     auto view = get_self<LibraryView>(Library());
     if (library) view->show(tag, PlaceholderTitle().Text());
     else view->hide();
-    const bool placeholder = !library && tag != L"settings";
+    const bool placeholder = !library && tag != L"settings" && tag != L"home";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") refreshRoots();
 }
@@ -1021,11 +1115,11 @@ void MainWindow::OnSearchQuerySubmitted(AutoSuggestBox const& box, AutoSuggestBo
             return;
         }
         case Suggestion::Kind::Album:
-            Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+            selectPage(L"albums");
             view->showAlbum(suggestion.id, suggestion.title);
             return;
         case Suggestion::Kind::Artist:
-            Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+            selectPage(L"albums");
             view->showArtist(suggestion.title);
             return;
         case Suggestion::Kind::All:
@@ -1057,6 +1151,7 @@ void MainWindow::showSearchResults(hstring const& query) {
     Nav().SelectedItem(nullptr);
     SettingsPanel().Visibility(Visibility::Collapsed);
     PlaceholderPanel().Visibility(Visibility::Collapsed);
+    Home().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
 }
@@ -1165,7 +1260,7 @@ void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsComplet
 
 void MainWindow::OnCoverClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (!server_ || server_->snapshot().playback.pathUtf8.empty()) return;
-    Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+    selectPage(L"albums");
     const auto snapshot = server_->snapshot();
     const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                       [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
@@ -1183,7 +1278,7 @@ void MainWindow::OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Rout
     const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                       [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (current == snapshot.queue.entries.end() || current->albumId <= 0) return;
-    Nav().SelectedItem(Nav().MenuItems().GetAt(0));
+    selectPage(L"albums");
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album));
 }

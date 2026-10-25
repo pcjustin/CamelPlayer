@@ -215,6 +215,31 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
     return page;
 }
 
+LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset, int64_t limit, const CancellationToken& token) {
+    checkRange(offset, limit);
+    Query q(store, std::nullopt, token);
+    const std::string played =
+        std::string(" FROM play_events e JOIN library_tracks t ON t.file_id=e.file_id AND t.cue_index=e.cue_index") + kJoins +
+        "WHERE" + kVisible + " AND t.album_id IS NOT NULL";
+    LibraryAlbumPage page;
+    page.revision = q.revision;
+    page.total = q.db.scalar("SELECT COUNT(DISTINCT t.album_id)" + played).value_or(0);
+    std::vector<int64_t> order;
+    auto recent = q.db.prepare("SELECT t.album_id" + played +
+                               " GROUP BY t.album_id ORDER BY MAX(e.started) DESC,t.album_id LIMIT ? OFFSET ?");
+    recent.bind(1, limit).bind(2, offset);
+    while (recent.step()) order.push_back(recent.integer(0));
+    if (order.empty()) return page;
+    const int64_t count = int64_t(order.size());
+    std::vector<LibraryAlbum> rows;
+    auto statement = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration +
+                                  ") FROM albums a JOIN library_tracks t ON t.album_id=a.id" + kJoins + "WHERE" + kVisible +
+                                  " AND a.id IN (" + idList(order, 0, count) + ") GROUP BY a.id");
+    while (statement.step()) rows.push_back(album(statement));
+    page.albums = inOrder(order, 0, count, std::move(rows), [](const LibraryAlbum& a) { return a.id; });
+    return page;
+}
+
 LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     checkRange(offset, limit);
