@@ -20,6 +20,7 @@
 #include <map>
 #include <set>
 #include <stop_token>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -225,9 +226,22 @@ Metadata metadata(const Path& path, int64_t fileSize) {
     return out;
 }
 
+// Without surrounding spaces, tabs, line breaks or ideographic spaces, which some taggers leave in names.
+std::string trimmedTag(std::string text) {
+    static constexpr std::string_view kIdeographicSpace = "\xE3\x80\x80", kBlank = " \t\r\n";
+    for (bool changed = true; changed;) {
+        changed = false;
+        while (!text.empty() && kBlank.find(text.back()) != std::string_view::npos) text.pop_back(), changed = true;
+        while (!text.empty() && kBlank.find(text.front()) != std::string_view::npos) text.erase(0, 1), changed = true;
+        if (text.ends_with(kIdeographicSpace)) text.resize(text.size() - kIdeographicSpace.size()), changed = true;
+        if (text.starts_with(kIdeographicSpace)) text.erase(0, kIdeographicSpace.size()), changed = true;
+    }
+    return text;
+}
+
 std::string tag(const Metadata& m, const char* name) {
     const auto values = m.tags.value(name);
-    return values.isEmpty() ? std::string{} : values.front().to8Bit(true);
+    return values.isEmpty() ? std::string{} : trimmedTag(values.front().to8Bit(true));
 }
 
 int number(const Metadata& m, const char* name, bool total = false) {
@@ -314,8 +328,9 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
         const auto sorts = m.tags.value((std::string(field) + "SORT").c_str());
         auto sort = sorts.begin();
         for (const auto& item : m.tags.value(field)) {
-            const auto text = item.to8Bit(true);
-            const auto source = sort == sorts.end() ? std::string{} : (sort++)->to8Bit(true);
+            const auto text = trimmedTag(item.to8Bit(true));
+            const auto source = sort == sorts.end() ? std::string{} : trimmedTag((sort++)->to8Bit(true));
+            if (text.empty()) continue;
             value.bind(1, track)
                 .bind(2, toUtf8(lower(toWide(field))))
                 .bind(3, position++)
@@ -1466,29 +1481,74 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
             pending.push_back({rows.integer(0), rows.text(1), library::storedVersion(rows, 2)});
         }
     }
-    for (const auto& [id, path, expected] : pending) {
-        if (token.cancelled() || backgroundBlocked()) return report;
-        try {
-            const auto digest = library::fileDigest(Path(toWide(path)), expected, token, backgroundBlocked);
-            if (!digest) return report;
-            store_
-                .write([&](sqlite::Database& db) {
-                    if (token.cancelled() || backgroundBlocked()) return;
-                    auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
-                                              "WHERE id=? AND available=1 AND identity_state<>2 "
-                                              "AND (content_hash IS NULL OR length(content_hash)=32)");
-                    if (!current.bind(1, id).step() || current.text(0) != path ||
-                        library::storedVersion(current, 1) != expected || library::fileVersion(Path(toWide(path))) != expected)
-                        return;
-                    db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *digest).bind(2, id).run();
-                    report.hashed++;
-                })
-                .get();
-        } catch (const std::exception& e) {
-            report.diagnostics.push_back(path + ": " + e.what());
+    // Fingerprints are saved 64 at a time: a write transaction per file made each one wait for a commit to disk,
+    // about 7 files a second on a local disk.
+    std::vector<std::pair<const PendingHash*, std::vector<uint8_t>>> digests;
+    const auto save = [&] {
+        if (digests.empty()) return;
+        store_
+            .write([&](sqlite::Database& db) {
+                if (token.cancelled() || backgroundBlocked()) return;
+                auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
+                                          "WHERE id=? AND available=1 AND identity_state<>2 "
+                                          "AND (content_hash IS NULL OR length(content_hash)=32)");
+                auto update = db.prepare("UPDATE files SET content_hash=? WHERE id=?");
+                for (const auto& [file, digest] : digests) {
+                    try {
+                        const bool unchanged = current.bind(1, file->id).step() && current.text(0) == file->path &&
+                                               library::storedVersion(current, 1) == file->version &&
+                                               library::fileVersion(Path(toWide(file->path))) == file->version;
+                        current.reset();
+                        if (!unchanged) continue;
+                        update.bind(1, digest).bind(2, file->id).run();
+                        update.reset();
+                        report.hashed++;
+                    } catch (const std::exception& e) {
+                        current.reset();
+                        report.diagnostics.push_back(file->path + ": " + e.what());
+                    }
+                }
+            })
+            .get();
+        digests.clear();
+    };
+    // Four files at a time: on a NAS each one mostly waits for network round trips (7.5 files a second one by one).
+    struct Result {
+        std::optional<std::vector<uint8_t>> digest;
+        std::string error;
+    };
+    bool stopped = false;
+    for (size_t first = 0; first < pending.size() && !stopped; first += 64) {
+        if ((stopped = token.cancelled() || backgroundBlocked())) break;
+        const size_t count = std::min<size_t>(64, pending.size() - first);
+        std::vector<Result> results(count);
+        std::atomic<size_t> next = 0;
+        std::vector<std::future<void>> workers;
+        for (int i = 0; i < 4; ++i)
+            workers.push_back(std::async(std::launch::async, [&] {
+                const bool background = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
+                for (size_t at; (at = next++) < count;) {
+                    const auto& file = pending[first + at];
+                    try {
+                        results[at].digest = library::fileDigest(Path(toWide(file.path)), file.version, token, backgroundBlocked);
+                    } catch (const std::exception& e) {
+                        results[at].error = e.what();
+                    }
+                }
+                if (background) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+            }));
+        for (auto& worker : workers) worker.get();
+        for (size_t at = 0; at < count; ++at) {
+            if (!results[at].error.empty())
+                report.diagnostics.push_back(pending[first + at].path + ": " + results[at].error);
+            else if (results[at].digest)
+                digests.emplace_back(&pending[first + at], std::move(*results[at].digest));
+            else
+                stopped = true; // cancelled, or playback or covers need the storage
         }
+        save();
     }
-    report.complete = !token.cancelled() && !backgroundBlocked() && report.diagnostics.empty();
+    report.complete = !stopped && !token.cancelled() && !backgroundBlocked() && report.diagnostics.empty();
     return report;
 }
 

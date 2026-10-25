@@ -132,6 +132,34 @@ TEST_F(LibraryScannerTest, ACompactDateYieldsItsYear) {
     EXPECT_EQ(count(store, "SELECT year FROM tracks"), 2020);
 }
 
+TEST_F(LibraryScannerTest, TagValuesLoseSurroundingBlanksAndBlankValuesAreSkipped) {
+    const auto file = audio();
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("TITLE", TagLib::StringList(TagLib::String("\t Title \r\n", TagLib::String::UTF8)));
+        TagLib::StringList artists(TagLib::String(" Dragon Ash", TagLib::String::UTF8));
+        artists.append(TagLib::String("\xE3\x80\x80", TagLib::String::UTF8));
+        artists.append(TagLib::String("\tステファニー\xE3\x80\x80", TagLib::String::UTF8));
+        values.insert("ARTIST", artists);
+        values.insert("COMPOSER", TagLib::StringList(TagLib::String("   ", TagLib::String::UTF8)));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    auto db = store.openReader();
+    auto title = db.prepare("SELECT title FROM tracks");
+    ASSERT_TRUE(title.step());
+    EXPECT_EQ(title.text(0), "Title");
+    auto artists = db.prepare("SELECT value FROM track_values WHERE field='artist' ORDER BY position");
+    std::vector<std::string> names;
+    while (artists.step()) names.push_back(artists.text(0));
+    EXPECT_EQ(names, (std::vector<std::string>{"Dragon Ash", "ステファニー"}));
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM track_values WHERE field='composer'"), 0);
+}
+
 TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchangedMetadata) {
     const auto file = audio();
     {
