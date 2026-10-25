@@ -29,6 +29,8 @@ void usage() {
         "      run the engine into a file and compare it bit for bit with the libFLAC reference\n"
         "  gen-test-audio [dir] [--seconds N]\n"
         "      write the FLAC test matrix (docs/Plan.md §16.6), default build\\testaudio\n"
+        "  gen-library <dir> [--tracks N] [--per-album N]\n"
+        "      write a synthetic tagged library with covers for UI measurements (docs/Plan.md §12.1)\n"
         "  split-flac <file.flac> <parts> <dir>\n"
         "      cut one track into consecutive FLAC files, to listen to gapless seams with play-queue\n"
         "  bench-decoders <dir|files...> [--runs N] [--out results.json]\n"
@@ -54,6 +56,7 @@ int wmain(int argc, wchar_t** argv) {
         if (cmd == L"capture") return camelcli::cmdCapture(args);
         if (cmd == L"gen-test-audio") return camelcli::cmdGenTestAudio(args);
         if (cmd == L"split-flac") return camelcli::cmdSplitFlac(args);
+        if (cmd == L"gen-library") return camelcli::cmdGenLibrary(args);
         if (cmd == L"bench-one") return camelcli::cmdBenchOne(args);
         if (cmd == L"bench-decoders") return camelcli::cmdBenchDecoders(args);
     } catch (const std::exception& e) {

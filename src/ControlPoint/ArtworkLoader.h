@@ -4,13 +4,17 @@
 #pragma once
 #include <list>
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include "Server/Api/ServerApi.h"
 
 namespace ui {
-// Called on the UI thread; only generated cache files reach XAML.
+// Called on the UI thread; only generated cache files reach XAML. The file is read into memory off the UI thread:
+// opening each thumbnail through StorageFile on the UI thread stalled fast album-wall scrolling for up to 1 s, mostly
+// in the kernel's file-system path (docs/Plan.md §12.1).
 inline winrt::fire_and_forget loadArtwork(winrt::Microsoft::UI::Xaml::Controls::Image image,
                                           std::shared_ptr<camel::server::IServer> server, camel::server::ArtworkRequest request,
                                           camel::server::CancellationToken token) {
@@ -23,6 +27,18 @@ inline winrt::fire_and_forget loadArtwork(winrt::Microsoft::UI::Xaml::Controls::
     try {
         co_await resume_background();
         const auto ref = server->artwork(request, token);
+        if (!ref || token.cancelled()) co_return;
+        Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+        {
+            std::ifstream in(ref->path, std::ios::binary);
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), {});
+            if (bytes.empty()) co_return;
+            Windows::Storage::Streams::DataWriter writer(stream);
+            writer.WriteBytes(bytes);
+            co_await writer.StoreAsync();
+            writer.DetachStream();
+            stream.Seek(0);
+        }
         co_await context;
         if (!ref || token.cancelled() || !weak.get()) co_return;
         struct Entry {
@@ -38,8 +54,6 @@ inline winrt::fire_and_forget loadArtwork(winrt::Microsoft::UI::Xaml::Controls::
             if (auto target = weak.get()) target.Source(bitmap);
             co_return;
         }
-        auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(ref->path.wstring());
-        auto stream = co_await file.OpenReadAsync();
         BitmapImage bitmap;
         co_await bitmap.SetSourceAsync(stream);
         if (token.cancelled()) co_return;

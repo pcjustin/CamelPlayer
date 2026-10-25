@@ -22,6 +22,7 @@
 #include "ArtworkLoader.h"
 #include "Common/settings/Settings.h"
 #include "Common/util/Log.h"
+#include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
@@ -175,7 +176,7 @@ void MainWindow::InitializeComponent() {
     setButtonTip(NextButton(), L"Tip_Next");
     setButtonTip(ShuffleButton(), L"Tip_Shuffle");
     setButtonTip(RepeatButton(), L"Tip_Repeat");
-    setButtonTip(QueueToggleButton(), L"Queue_Title");
+    setButtonTip(QueueToggleButton(), L"Tip_Queue");
 
     populateSettings();
     get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); });
@@ -192,6 +193,7 @@ void MainWindow::InitializeComponent() {
     queueState >> queueOpen_;
     updateQueuePanel();
     Nav().SizeChanged([this](auto&&, auto&&) { fitNavigationPane(); });
+    if (camel::measure::measuring()) Media::CompositionTarget::Rendering([this](auto&&, auto&&) { recordFrame(); });
     ContentLayout().Loaded([this](auto&&, auto&&) { showFirstRunGuideIfDue(); }); // a dialog needs a XamlRoot
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
@@ -581,7 +583,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             }
             item.Tag(box_value(entry.id));
             TextBlock title;
-            title.Text(path.stem().wstring());
+            title.Text(entry.title.empty() ? hstring(path.stem().wstring())
+                       : entry.artist.empty() ? ui::utf8(entry.title)
+                                              : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist));
             title.TextTrimming(TextTrimming::CharacterEllipsis);
             title.VerticalAlignment(VerticalAlignment::Center);
             ToolTipService::SetToolTip(title, box_value(ui::utf8(entry.source.pathUtf8())));
@@ -1106,6 +1110,7 @@ winrt::fire_and_forget MainWindow::OnSearchTextChanged(AutoSuggestBox const& box
     searchToken_.cancel();
     searchToken_ = {};
     const uint64_t generation = ++searchGeneration_;
+    const int64_t typed = camel::measure::now();
     const hstring text = box.Text();
     const std::string query = camel::toUtf8(std::wstring_view(text.c_str(), text.size()));
     if (query.find_first_not_of(" \t") == std::string::npos || !server_) {
@@ -1120,12 +1125,18 @@ winrt::fire_and_forget MainWindow::OnSearchTextChanged(AutoSuggestBox const& box
     co_await winrt::resume_background();
     auto results = std::make_shared<LibrarySearchResults>();
     try {
-        *results = server->searchLibrary(query, 0, 3, std::nullopt, token);
+        *results = server->searchLibrary(query, 0, 3, std::nullopt, token, false);
     } catch (const std::exception&) {
         co_return; // cancelled by the next keystroke, or the library changed meanwhile
     }
-    queue.TryEnqueue([weak, generation, results, text] {
-        if (auto self = weak.get(); self && generation == self->searchGeneration_) self->showSuggestions(*results, text);
+    const int64_t found = camel::measure::now();
+    queue.TryEnqueue([weak, generation, results, text, typed, found] {
+        auto self = weak.get();
+        if (!self || generation != self->searchGeneration_) return;
+        self->showSuggestions(*results, text);
+        if (camel::measure::measuring())
+            camel::log::info("measure: suggestions for %u characters in %.1f ms (server %.1f ms)", text.size(),
+                             camel::measure::milliseconds(typed, camel::measure::now()), camel::measure::milliseconds(typed, found));
     });
 }
 
@@ -1165,6 +1176,7 @@ void MainWindow::OnSearchQuerySubmitted(AutoSuggestBox const& box, AutoSuggestBo
             play.kind = CommandKind::QueueReplace;
             play.sources.emplace_back(suggestion.value);
             play.index = 0;
+            camel::measure::markPlayRequested();
             submitCommand(std::move(play));
             return;
         }
@@ -1214,6 +1226,22 @@ void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::K
     if (Nav().IsPaneOpen() == false) Nav().IsPaneOpen(true); // the box is hidden behind its icon in the compact pane
     SearchBox().Focus(FocusState::Keyboard);
     e.Handled(true);
+}
+
+// Frame intervals while CAMELPLAYER_MEASURE is set, summarized every two seconds (docs/Plan.md §12.1 album-wall scrolling).
+void MainWindow::recordFrame() {
+    const int64_t now = camel::measure::now();
+    if (frameLast_) frameIntervals_.push_back(camel::measure::milliseconds(frameLast_, now));
+    frameLast_ = now;
+    if (!frameWindow_) frameWindow_ = now;
+    if (camel::measure::milliseconds(frameWindow_, now) < 2000 || frameIntervals_.empty()) return;
+    std::sort(frameIntervals_.begin(), frameIntervals_.end());
+    const auto late = std::count_if(frameIntervals_.begin(), frameIntervals_.end(), [](double ms) { return ms > 25.0; });
+    camel::log::info("measure: %zu frames, p50 %.1f ms, p99 %.1f ms, max %.1f ms, %lld over 25 ms", frameIntervals_.size(),
+                     frameIntervals_[frameIntervals_.size() / 2], frameIntervals_[frameIntervals_.size() * 99 / 100],
+                     frameIntervals_.back(), (long long)late);
+    frameIntervals_.clear();
+    frameWindow_ = now;
 }
 
 void MainWindow::applySettingsNow() {
@@ -1548,6 +1576,7 @@ void MainWindow::OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, I
     Command command;
     command.kind = CommandKind::QueueSelect;
     command.entryId = unbox_value<uint64_t>(item.Tag());
+    camel::measure::markPlayRequested();
     submitCommand(std::move(command));
 }
 

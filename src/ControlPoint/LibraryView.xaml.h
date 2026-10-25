@@ -85,7 +85,7 @@ private:
     void queueItem(const ui::BrowseRow& row, bool playNext);
     void queueAlbum(int64_t album, bool playNext);
     void playAlbum(int64_t album);
-    void queueFolder(int64_t folder, bool playNext);
+    void queueFolder(int64_t folder, bool playNext, bool playNow = false);
     void queueTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, bool playNext);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.
     winrt::fire_and_forget background(std::function<std::function<void()>()> work);

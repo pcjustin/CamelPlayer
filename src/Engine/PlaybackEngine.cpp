@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <objbase.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -23,6 +24,7 @@
 #include "OutputBridge/OutputBridge.h"
 #include "OutputBridge/OutputChoices.h"
 #include "Common/util/Log.h"
+#include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 
 namespace camel::audio {
@@ -193,6 +195,7 @@ public:
         } else {
             consumed_.fetch_add(n, std::memory_order_relaxed);
         }
+        if (n && !firstAudio_.load(std::memory_order_relaxed)) firstAudio_.store(measure::now(), std::memory_order_release);
         if (n < frames) {
             if (drained) {
                 if (!ended_.exchange(true)) qCv_.notify_all();
@@ -440,6 +443,8 @@ private:
             if (active_ && transitionPending_.exchange(false)) onTransition();
             if (active_ && ended_.load()) onEnded();
             if (active_) {
+                logFirstAudio();
+                logUnderruns();
                 reportAudible();
                 refreshNextSlot();
                 refreshMd5();
@@ -465,6 +470,34 @@ private:
             snap_.md5 = md5;
         }
         publish();
+    }
+
+    // Dropouts are otherwise only a counter in the status page, which a new track resets.
+    void logUnderruns() {
+        const uint64_t count = underruns_.load(std::memory_order_relaxed);
+        if (count <= loggedUnderruns_) return;
+        log::info("engine: %llu underrun(s) at %.1f s of %s", (unsigned long long)(count - loggedUnderruns_),
+                  framesToSeconds(currentPosition(), sourceRate_.load(std::memory_order_relaxed)), toUtf8(file_).c_str());
+        loggedUnderruns_ = count;
+    }
+
+    void logFirstAudio() {
+        const int64_t at = firstAudio_.load(std::memory_order_acquire);
+        if (firstAudioLogged_ || !at) return;
+        firstAudioLogged_ = true;
+        const int64_t requested = measure::playRequested.exchange(0, std::memory_order_relaxed);
+        if (requested && requested <= openedAt_)
+            log::info("engine: first audio %.0f ms after the play request (%.0f ms after opening)",
+                      measure::milliseconds(requested, at), measure::milliseconds(openedAt_, at));
+        else
+            log::info("engine: first audio %.0f ms after opening", measure::milliseconds(openedAt_, at));
+        if (measure::measuring()) {
+            const auto step = [&](int from, int to) { return measure::milliseconds(stages_[from], stages_[to]); };
+            log::info("measure: start stages: probe %.0f, decoder %.0f, output plan %.0f, Rust decoder %.0f, buffer %.0f, "
+                      "device open %.0f, first pull %.0f ms",
+                      measure::milliseconds(openedAt_, stages_[0]), step(0, 1), step(1, 3), step(3, 4), step(4, 5), step(5, 6),
+                      measure::milliseconds(stages_[6], at));
+        }
     }
 
     // Frames handed to the device minus what its buffer still holds; refined once drivers report latency.
@@ -547,6 +580,10 @@ private:
         const PlayState onDeviceFailure = deviceChange ? PlayState::Paused : PlayState::Stopped;
         teardown();
         const uint64_t session = ++session_;
+        openedAt_ = measure::now();
+        firstAudio_ = 0;
+        firstAudioLogged_ = false;
+        loggedUnderruns_ = 0;
         {
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
@@ -560,8 +597,10 @@ private:
         try {
             format_.reset();
             format_ = probeFormat(file_);
+            stages_[0] = measure::now();
             decoder = chooseDecoder(*format_, fileDecoder_, settings_);
             dec = openDecoder(decoder, file_, settings_.pcmBitsByFormat);
+            stages_[1] = measure::now();
         } catch (const Error& e) {
             {
                 std::lock_guard lock(snapMutex_);
@@ -587,6 +626,7 @@ private:
         try {
             ensureOutput();
             plan = negotiate(src, lossy, &planAdjustment_);
+            stages_[2] = measure::now();
         } catch (const Error& e) {
             position_ = startFrame;
             return fail(e, onDeviceFailure);
@@ -622,6 +662,7 @@ private:
         sourceRate_ = src.sampleRate;
         outputRate_ = fmt_.sampleRate;
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
+        stages_[3] = measure::now();
         try {
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
                                                   plan_.dsd, timing(settings_).predecodeSeconds);
@@ -629,6 +670,7 @@ private:
             position_ = waitingForSource_ ? startFrame : 0;
             return fail(e, waitingForSource_ ? PlayState::Paused : PlayState::Stopped);
         }
+        stages_[4] = measure::now();
 
         base_ = startFrame;
         consumed_ = 0;
@@ -649,6 +691,7 @@ private:
         // Let the decoder get ahead before the device starts pulling.
         const auto startFrames = uint64_t(fmt_.sampleRate * kStartFillSeconds);
         for (int i = 0; i < 600 && bufferedFrames() < startFrames && !decodeDone_; i++) Sleep(5);
+        stages_[5] = measure::now();
 
         output_->setErrorHandler([this, session](const Error& e) {
             post([this, session, e] {
@@ -663,6 +706,7 @@ private:
         rawDsd_.store(plan_.dsd == DsdPath::Native || plan_.dsd == DsdPath::Dop, std::memory_order_release);
         try {
             output_->open(fmt_, this);
+            stages_[6] = measure::now();
         } catch (const Error& e) {
             rawDsd_ = false;
             stopDecoder();
@@ -942,6 +986,11 @@ private:
     PlayState state_ = PlayState::Stopped;
     uint64_t position_ = 0;
     uint64_t session_ = 0;
+    int64_t openedAt_ = 0;
+    std::atomic<int64_t> firstAudio_{0};
+    std::array<int64_t, 7> stages_{};
+    bool firstAudioLogged_ = true;
+    uint64_t loggedUnderruns_ = 0;
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;
     OutputPlan plan_;

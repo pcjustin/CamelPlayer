@@ -90,6 +90,9 @@ private:
     winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable> suggestionItems_{nullptr};
     camel::server::CancellationToken searchToken_;
     uint64_t searchGeneration_ = 0;
+    int64_t frameLast_ = 0, frameWindow_ = 0;
+    std::vector<double> frameIntervals_;
+    void recordFrame();
     winrt::hstring shownTag_ = L"albums";
     void removeSelectedQueueEntries();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.

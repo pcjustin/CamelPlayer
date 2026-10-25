@@ -345,7 +345,12 @@ Settings fromJson(const std::string& text) {
 std::filesystem::path dataDirectory() {
     PWSTR base = nullptr;
     std::filesystem::path dir;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base)))
+    // Measurements (docs/Plan.md §12.1) run against a separate data folder so the user's library stays untouched.
+    std::wstring measured(MAX_PATH, L'\0');
+    measured.resize(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", measured.data(), DWORD(measured.size())));
+    if (!measured.empty() && measured.size() < MAX_PATH)
+        dir = measured;
+    else if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base)))
         dir = std::filesystem::path(base) / L"CamelPlayer";
     CoTaskMemFree(base);
     std::error_code ec;

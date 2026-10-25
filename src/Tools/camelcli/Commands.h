@@ -23,6 +23,7 @@ int cmdPlayQueue(const Args& args);
 int cmdCapture(const Args& args);
 int cmdGenTestAudio(const Args& args);
 int cmdSplitFlac(const Args& args);
+int cmdGenLibrary(const Args& args);
 int cmdBenchOne(const Args& args);
 int cmdBenchDecoders(const Args& args);
 

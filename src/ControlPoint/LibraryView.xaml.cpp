@@ -10,6 +10,7 @@
 #endif
 
 #include "Common/util/Log.h"
+#include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
@@ -35,8 +36,28 @@ hstring counted(const hstring& format, int64_t n) {
     return hstring(text);
 }
 
+// Tags written with surrounding spaces, tabs or ideographic spaces show without them; a blank one is unknown.
+std::string trimmed(std::string text) {
+    static constexpr std::string_view kIdeographicSpace = "\xE3\x80\x80", kBlank = " \t\r\n";
+    for (bool changed = true; changed;) {
+        changed = false;
+        while (!text.empty() && kBlank.find(text.back()) != std::string_view::npos) text.pop_back(), changed = true;
+        while (!text.empty() && kBlank.find(text.front()) != std::string_view::npos) text.erase(0, 1), changed = true;
+        if (text.ends_with(kIdeographicSpace)) text.resize(text.size() - kIdeographicSpace.size()), changed = true;
+        if (text.starts_with(kIdeographicSpace)) text.erase(0, kIdeographicSpace.size()), changed = true;
+    }
+    return text;
+}
+
 hstring orUnknown(const std::string& text, const Texts& texts) {
-    return text.empty() ? texts.unknown : ui::utf8(text);
+    const auto name = trimmed(text);
+    return name.empty() ? texts.unknown : ui::utf8(name);
+}
+
+// A track without a title tag shows its file name.
+hstring titleOf(const std::string& title, const std::string& path, const Texts& texts) {
+    if (!trimmed(title).empty() || path.empty()) return orUnknown(title, texts);
+    return hstring(std::filesystem::path(camel::toWide(path)).stem().wstring());
 }
 
 hstring duration(int64_t ms) {
@@ -44,13 +65,14 @@ hstring duration(int64_t ms) {
 }
 
 ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
-    return {t.id, t.path, orUnknown(t.title, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
+    return {t.id, t.path, titleOf(t.title, t.path, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
 }
 
 ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, const Texts& texts) {
     std::wstring number;
     if (t.number) number = (discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L". ";
-    return {t.id, t.path, hstring(number + std::wstring(orUnknown(t.title, texts))), ui::utf8(t.artist), {}, duration(t.durationMs)};
+    return {t.id, t.path, hstring(number + std::wstring(titleOf(t.title, t.path, texts))), ui::utf8(t.artist), {},
+            duration(t.durationMs)};
 }
 
 Windows::Foundation::IInspectable item(const ui::BrowseRow& row) {
@@ -172,9 +194,10 @@ void LibraryView::showSearch(hstring const& query, std::function<void()> leave) 
 // Albums and artists of a search; the matching tracks page through the list below them.
 void LibraryView::loadSearchGroups() {
     constexpr int64_t kShown = 50;
-    background([this, server = server_, query = current_.query, texts = Texts{}] {
+    const int64_t requested = camel::measure::now();
+    background([this, server = server_, query = current_.query, texts = Texts{}, requested] {
         auto results = std::make_shared<LibrarySearchResults>(server->searchLibrary(query, 0, kShown, std::nullopt));
-        return std::function<void()>([this, results, texts] {
+        return std::function<void()>([this, results, texts, requested] {
             auto albums = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
             for (const auto& a : results->albums)
                 albums.Append(item({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, {}}));
@@ -198,6 +221,9 @@ void LibraryView::loadSearchGroups() {
             const bool none = !results->tracks.total && !results->totalAlbums && !results->totalArtists;
             EmptyText().Text(tr(L"Search_None"));
             EmptyText().Visibility(none ? Visibility::Visible : Visibility::Collapsed);
+            if (camel::measure::measuring())
+                camel::log::info("measure: search results page in %.1f ms",
+                                 camel::measure::milliseconds(requested, camel::measure::now()));
         });
     });
 }
@@ -321,7 +347,7 @@ void LibraryView::startCollection() {
             ui::BrowsePage out{page.revision, page.total, {}};
             // Tracks not yet grouped into albums would make a zero count misleading.
             for (const auto& g : page.groups)
-                out.rows.push_back({0, g.name, ui::utf8(g.name), g.albums ? counted(texts.albums, g.albums) : hstring{}, {},
+                out.rows.push_back({0, g.name, orUnknown(g.name, texts), g.albums ? counted(texts.albums, g.albums) : hstring{}, {},
                                     counted(texts.tracks, g.tracks)});
             return out;
         };
@@ -330,7 +356,7 @@ void LibraryView::startCollection() {
             const auto page = server->searchTracks(query, offset, limit, revision);
             ui::BrowsePage out{page.revision, page.total, {}};
             for (const auto& t : page.tracks)
-                out.rows.push_back({t.id, t.path, orUnknown(t.title, texts), ui::utf8(t.artist), ui::utf8(t.album), {}});
+                out.rows.push_back({t.id, t.path, titleOf(t.title, t.path, texts), ui::utf8(t.artist), ui::utf8(t.album), {}});
             return out;
         };
     } else {
@@ -402,6 +428,7 @@ void LibraryView::playTracks(const std::vector<LibraryTrackRow>& tracks, size_t 
     command.kind = CommandKind::QueueReplace;
     for (const auto& t : tracks) command.sources.emplace_back(t.path);
     command.index = index;
+    camel::measure::markPlayRequested();
     submit_(std::move(command));
 }
 
@@ -444,9 +471,9 @@ void LibraryView::queueItem(const ui::BrowseRow& row, bool playNext) {
     }
 }
 
-void LibraryView::queueFolder(int64_t folder, bool playNext) {
+void LibraryView::queueFolder(int64_t folder, bool playNext, bool playNow) {
     if (!server_ || folder <= 0) return;
-    background([this, server = server_, folder, playNext] {
+    background([this, server = server_, folder, playNext, playNow] {
         std::vector<int64_t> pending{folder};
         std::vector<LibraryTrackRow> tracks;
         for (size_t i = 0; i < pending.size(); ++i) {
@@ -454,7 +481,10 @@ void LibraryView::queueFolder(int64_t folder, bool playNext) {
             tracks.insert(tracks.end(), listing.tracks.begin(), listing.tracks.end());
             for (const auto& child : listing.folders) pending.push_back(child.id);
         }
-        return std::function<void()>([this, tracks = std::move(tracks), playNext] { queueTracks(tracks, playNext); });
+        return std::function<void()>([this, tracks = std::move(tracks), playNext, playNow] {
+            if (playNow) playTracks(tracks, 0);
+            else queueTracks(tracks, playNext);
+        });
     });
 }
 
@@ -465,6 +495,13 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
     menuRow_ = ui::LibraryCollection::rowOf(item);
     if (!rowMenu_) {
         rowMenu_ = MenuFlyout();
+        MenuFlyoutItem playNow;
+        playNow.Text(tr(L"Library_MenuPlayNow"));
+        FontIcon playIcon;
+        playIcon.Glyph(L"\xE768");
+        playNow.Icon(playIcon);
+        playNow.Click([this](auto&&, auto&&) { queueFolder(menuRow_.id, false, true); });
+        rowMenu_.Items().Append(playNow);
         for (const auto& [key, glyph, playNext] : {std::tuple{L"Library_MenuPlayNext", L"\xE893", true},
                                                    std::tuple{L"Library_MenuAddQueue", L"\xE710", false}}) {
             MenuFlyoutItem entry;
@@ -476,6 +513,7 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
             rowMenu_.Items().Append(entry);
         }
     }
+    rowMenu_.Items().GetAt(0).Visibility(menuRow_.folder ? Visibility::Visible : Visibility::Collapsed);
     Primitives::FlyoutShowOptions options;
     if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
     rowMenu_.ShowAt(element, options);

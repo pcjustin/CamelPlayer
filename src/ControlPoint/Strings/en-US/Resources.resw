@@ -16,7 +16,7 @@
   <data name="Nav_Folders.Content" xml:space="preserve"><value>Folders</value></data>
   <data name="Nav_Playlists.Content" xml:space="preserve"><value>Playlists</value></data>
   <data name="Nav_SmartPlaylists.Content" xml:space="preserve"><value>Smart Playlists</value></data>
-  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later milestone. The player opens one file at a time (FLAC, ALAC, WAV or AIFF): use the open button below.</value></data>
+  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later version. Meanwhile, the queue panel can save the queue as a playlist.</value></data>
   <data name="Settings_Title.Text" xml:space="preserve"><value>Settings</value></data>
   <data name="Settings_Playback.Text" xml:space="preserve"><value>Playback</value></data>
   <data name="Settings_Backend.Header" xml:space="preserve"><value>Output backend</value></data>
@@ -150,7 +150,9 @@
   <data name="Tip_Previous" xml:space="preserve"><value>Previous</value></data>
   <data name="Tip_Next" xml:space="preserve"><value>Next</value></data>
   <data name="Tip_Shuffle" xml:space="preserve"><value>Shuffle</value></data>
+  <data name="Tip_Queue" xml:space="preserve"><value>Queue</value></data>
   <data name="Tip_Repeat" xml:space="preserve"><value>Repeat: off, one, or queue</value></data>
+  <data name="Library_MenuPlayNow" xml:space="preserve"><value>Play now</value></data>
   <data name="Library_MenuPlayNext" xml:space="preserve"><value>Play next</value></data>
   <data name="Library_MenuAddQueue" xml:space="preserve"><value>Add to end of queue</value></data>
   <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>Close queue</value></data>
