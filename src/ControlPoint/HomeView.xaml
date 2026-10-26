@@ -52,7 +52,11 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel x:Name="Sections" Spacing="12" Padding="0,0,16,24">
-            <TextBlock x:Uid="Home_Title" Style="{StaticResource TitleTextBlockStyle}" />
+            <!-- The library's size, not a listening statistic, so it sits under the title rather than among the cards. -->
+            <StackPanel>
+                <TextBlock x:Uid="Home_Title" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock x:Name="LibraryCounts" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
 
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -118,8 +122,7 @@
                       ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                       ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
 
-            <TextBlock x:Uid="Home_Library" Style="{StaticResource SectionHeaderStyle}" Margin="0,12,0,0" />
-            <TextBlock x:Name="LibraryCounts" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Uid="Home_MostPlayed" Style="{StaticResource SectionHeaderStyle}" Margin="0,12,0,0" />
 
             <Grid>
                 <TextBlock x:Uid="Home_TopAlbums" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />

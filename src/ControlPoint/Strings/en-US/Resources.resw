@@ -210,7 +210,7 @@
   <data name="Home_RecentlyAdded.Text" xml:space="preserve"><value>Recently added</value></data>
   <data name="Home_ViewAll.Content" xml:space="preserve"><value>View all</value></data>
   <data name="Home_NoPlays.Text" xml:space="preserve"><value>Albums you play appear here.</value></data>
-  <data name="Home_Library.Text" xml:space="preserve"><value>Library</value></data>
+  <data name="Home_MostPlayed.Text" xml:space="preserve"><value>Most played</value></data>
   <data name="Home_TopAlbums.Text" xml:space="preserve"><value>Most played albums</value></data>
   <data name="Home_TopArtists.Text" xml:space="preserve"><value>Most played artists</value></data>
   <data name="Home_Year.Text" xml:space="preserve"><value>This year</value></data>
