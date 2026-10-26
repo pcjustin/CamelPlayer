@@ -6,6 +6,7 @@
 
 #include "MainWindow.g.h"
 #include "LibraryView.xaml.h"
+#include "PlaylistView.xaml.h"
 #include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
 #include "TrayIcon.h"
@@ -40,6 +41,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
     void OnQueueRemoveEntryClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
+    void OnQueueContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
     void OnQueueDragItemsCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                    Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
     void OnCoverClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -138,6 +140,30 @@ private:
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
     bool followDevice(camel::Backend previous);
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);
+
+    // Playlists (docs/Plan.md §7.9, §8.3).
+    void extendPlaylistMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, std::function<ui::SourceFetch()> selection);
+    // Creates a playlist from, or adds to `playlist`, what `fetch` collects; over 1,000 tracks are confirmed first.
+    void runPlaylistAction(ui::SourceFetch fetch, std::optional<int64_t> playlist, std::string name);
+    winrt::fire_and_forget applyPlaylistAction(std::vector<camel::server::PlaylistSource> sources,
+                                               camel::server::SelectionPreview preview, std::optional<int64_t> playlist,
+                                               std::string name);
+    winrt::fire_and_forget askNewPlaylist(ui::SourceFetch fetch);
+    void showPlaylistChange(const camel::server::PlaylistChange& change, bool created);
+    void showPlaylistNotice(winrt::hstring const& title, winrt::hstring const& message, bool error,
+                            std::optional<camel::server::PlaylistUndo> undo = std::nullopt, int64_t playlist = 0);
+    void undoPlaylistNotice();
+    // Lists the playlists under Playlists in the navigation pane; `then` runs once they are shown.
+    winrt::fire_and_forget refreshPlaylists(std::function<void()> then = {});
+    void showPlaylistsInNavigation();
+    // Puts a new playlist's name in an edit box beside its navigation item, without leaving the current page.
+    void renameInNavigation(int64_t playlist);
+    std::vector<camel::server::PlaylistSummary> playlists_;
+    std::optional<camel::server::PlaylistUndo> noticeUndo_;
+    Microsoft::UI::Dispatching::DispatcherQueueTimer noticeTimer_{nullptr};
+    bool navUpdating_ = false;
+    Microsoft::UI::Xaml::Controls::MenuFlyout queueMenu_{nullptr};
+    Windows::Foundation::IInspectable queueMenuItem_{nullptr};
     std::wstring shownNotices_;
     // Collapses the navigation pane to icons while the queue panel would leave too little content width.
     void fitNavigationPane();

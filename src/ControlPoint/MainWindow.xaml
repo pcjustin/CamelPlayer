@@ -61,7 +61,7 @@
                 <NavigationViewItem x:Uid="Nav_Tracks" Tag="tracks" Icon="List" />
                 <NavigationViewItem x:Uid="Nav_Folders" Tag="folders" Icon="Folder" />
                 <NavigationViewItemSeparator />
-                <NavigationViewItem x:Uid="Nav_Playlists" Tag="playlists" Icon="MusicInfo" />
+                <NavigationViewItem x:Name="PlaylistsNav" x:Uid="Nav_Playlists" Tag="playlists" Icon="MusicInfo" />
                 <NavigationViewItem x:Uid="Nav_SmartPlaylists" Tag="smart" Icon="Favorite" />
             </NavigationView.MenuItems>
 
@@ -74,8 +74,9 @@
 
                 <local:HomeView x:Name="Home" Visibility="Collapsed" />
                 <local:LibraryView x:Name="Library" Visibility="Collapsed" />
+                <local:PlaylistView x:Name="Playlists" Visibility="Collapsed" />
 
-                <!-- Playlist pages arrive in M5 -->
+                <!-- Pages of later versions (smart playlists) -->
                 <StackPanel x:Name="PlaceholderPanel" Spacing="8" Visibility="Collapsed">
                     <TextBlock x:Name="PlaceholderTitle" Style="{StaticResource TitleTextBlockStyle}" />
                     <TextBlock x:Uid="Placeholder_Text" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
@@ -346,6 +347,10 @@
                         </Border>
                     </StackPanel>
                 </ScrollViewer>
+
+                <!-- Quick playlist actions (docs/Plan.md §8.3): name, count, a link and Undo while it is shown. -->
+                <InfoBar x:Name="PlaylistNotice" IsOpen="False" IsClosable="True" VerticalAlignment="Bottom"
+                         HorizontalAlignment="Right" MaxWidth="560" />
             </Grid>
                 <Grid x:Name="QueuePanel" Grid.Column="1" Visibility="Collapsed" Padding="16,16,8,16"
                       Background="{ThemeResource LayerFillColorDefaultBrush}"
@@ -373,7 +378,7 @@
                             <FontIcon Glyph="&#xE711;" FontSize="14" />
                         </Button>
                     </Grid>
-                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="Single" CanDragItems="True" CanReorderItems="True" AllowDrop="True"
+                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="Extended" CanDragItems="True" CanReorderItems="True" AllowDrop="True"
                               DragItemsCompleted="OnQueueDragItemsCompleted" DoubleTapped="OnQueueDoubleTapped"
                               KeyDown="OnQueueKeyDown">
                         <ListView.Resources>
@@ -384,7 +389,8 @@
                         </ListView.Resources>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="local:QueueItem">
-                                <Grid ColumnSpacing="8" AutomationProperties.Name="{x:Bind Title, Mode=OneWay}">
+                                <Grid ColumnSpacing="8" AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" Background="Transparent"
+                                      ContextRequested="OnQueueContextRequested">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="20" />
                                         <ColumnDefinition Width="*" />

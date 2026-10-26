@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+<!-- Playlists (docs/Plan.md §7.9, §8.3): the list of playlists with M3U8 import, and one playlist's entries. -->
+<UserControl
+    x:Class="CamelPlayer.PlaylistView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CamelPlayer">
+    <UserControl.Resources>
+        <Style x:Key="ColumnHeaderStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0,4" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Style>
+        <DataTemplate x:Key="EntryTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnEntryContextRequested">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" MinWidth="56" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Uid="Playlist_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
+                          Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="PlaylistTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,8" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE90B;" FontSize="20" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <StackPanel x:Name="PlaylistActions" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Style="{StaticResource AccentButtonStyle}" Click="OnPlayClick">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE768;" FontSize="14" />
+                        <TextBlock x:Uid="Playlist_Play" />
+                    </StackPanel>
+                </Button>
+                <Button Click="OnRenameClick">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8AC;" FontSize="14" />
+                        <TextBlock x:Uid="Playlist_Rename" />
+                    </StackPanel>
+                </Button>
+                <Button Click="OnExportClick">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xEDE1;" FontSize="14" />
+                        <TextBlock x:Uid="Playlist_Export" />
+                    </StackPanel>
+                </Button>
+                <Button Click="OnDeleteClick">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                        <TextBlock x:Uid="Playlist_Delete" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <Button x:Name="ImportButton" Grid.Column="1" Click="OnImportClick" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE8B5;" FontSize="14" />
+                    <TextBlock x:Uid="Playlist_Import" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Clicking a column reorders the stored playlist by it after a confirmation; again for descending. -->
+        <Grid x:Name="ColumnHeaders" Grid.Row="1" Padding="16,0,28,0" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="Auto" MinWidth="56" />
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="1" Style="{StaticResource ColumnHeaderStyle}" Tag="0" Click="OnColumnClick">
+                <TextBlock x:Uid="Playlist_ColumnTitle" />
+            </Button>
+            <Button Grid.Column="2" Style="{StaticResource ColumnHeaderStyle}" Tag="1" Click="OnColumnClick">
+                <TextBlock x:Uid="Playlist_ColumnArtist" />
+            </Button>
+            <Button Grid.Column="3" Style="{StaticResource ColumnHeaderStyle}" Tag="2" Click="OnColumnClick">
+                <TextBlock x:Uid="Playlist_ColumnAlbum" />
+            </Button>
+            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                <Button Style="{StaticResource ColumnHeaderStyle}" Tag="6" Click="OnColumnClick">
+                    <TextBlock x:Uid="Playlist_ColumnDuration" />
+                </Button>
+                <Button x:Name="MoreSortButton" Style="{StaticResource ColumnHeaderStyle}" Padding="4">
+                    <FontIcon Glyph="&#xE8CB;" FontSize="14" />
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem x:Uid="Playlist_SortAlbumArtist" Tag="3" Click="OnColumnClick" />
+                            <MenuFlyoutItem x:Uid="Playlist_SortYear" Tag="4" Click="OnColumnClick" />
+                            <MenuFlyoutItem x:Uid="Playlist_SortTrackNumber" Tag="5" Click="OnColumnClick" />
+                            <MenuFlyoutItem x:Uid="Playlist_SortAdded" Tag="7" Click="OnColumnClick" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <ListView x:Name="EntryList" Grid.Row="2" ItemTemplate="{StaticResource EntryTemplate}" SelectionMode="Extended"
+                  CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsCompleted="OnEntryDragCompleted"
+                  DoubleTapped="OnEntryDoubleTapped" KeyDown="OnEntryKeyDown" />
+        <ListView x:Name="PlaylistList" Grid.Row="1" Grid.RowSpan="2" ItemTemplate="{StaticResource PlaylistTemplate}"
+                  SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnPlaylistClick" />
+        <TextBlock x:Name="EmptyText" Grid.Row="2" TextWrapping="Wrap" Visibility="Collapsed"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    </Grid>
+</UserControl>

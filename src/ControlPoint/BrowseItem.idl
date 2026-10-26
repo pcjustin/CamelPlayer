@@ -11,5 +11,6 @@ namespace CamelPlayer {
     String Trailing { get; }; // right-aligned: a duration or a count
     Boolean IsFolder { get; };
     Boolean IsTrack { get; };
+    Boolean IsUnavailable { get; };
 }
 } // namespace CamelPlayer

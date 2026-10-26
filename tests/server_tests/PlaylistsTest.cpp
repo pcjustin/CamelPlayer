@@ -8,7 +8,9 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 
+#include "Common/util/Text.h"
 #include "Server/Library/Playlists.h"
 #include "TestUtil.h"
 
@@ -226,6 +228,136 @@ TEST_F(PlaylistsTest, EntriesSurviveRootRemovalAsUnavailableAndReturnWithIt) {
     EXPECT_EQ(createPlaylist(*store, "Nothing", {album(1)}).added, 0);
     store->write([](sqlite::Database& db) { db.exec("UPDATE roots SET removed=NULL"); }).get();
     for (const auto& item : playlistItems(*store, created.playlist, 0, 500).items) EXPECT_TRUE(item.available);
+}
+
+TEST_F(PlaylistsTest, AYearAndAvailableFilePathsBecomeTracks) {
+    const auto year = createPlaylist(*store, "", {{Kind::Year, 2021, {}, {}}});
+    EXPECT_EQ(year.name, "2021");
+    EXPECT_EQ(tracks(year.playlist), (std::vector<LibraryTrackKey>{{1, 0}, {2, 0}, {4, 0}, {3, 0}}));
+    EXPECT_EQ(year.skippedUnavailable, 1);
+    const auto paths = createPlaylist(*store, "", {{Kind::Path, 0, {}, "c:\\m\\album\\02.flac"},
+                                                    {Kind::Path, 0, {}, "d:\\outside.flac"},
+                                                    {Kind::Path, 0, {}, "c:\\m\\album\\cd2\\gone.flac"},
+                                                    {Kind::Path, 0, {}, "c:\\m\\album\\01.flac"}});
+    EXPECT_EQ(paths.name, "Bluerose +3");
+    EXPECT_EQ(tracks(paths.playlist), (std::vector<LibraryTrackKey>{{2, 0}, {1, 0}}));
+    EXPECT_EQ(paths.skippedUnavailable, 2);
+}
+
+TEST_F(PlaylistsTest, ItemsPageByPositionAndListTheFilesCurrentPath) {
+    const auto created = createPlaylist(*store, "Album", {album(1)});
+    store->write([](sqlite::Database& db) { db.exec(R"(UPDATE files SET path='c:\m\moved\01.flac' WHERE id=1)"); }).get();
+    const auto first = playlistItems(*store, created.playlist, 0, 2);
+    const auto rest = playlistItems(*store, created.playlist, 2, 2);
+    ASSERT_EQ(first.items.size(), 2u);
+    ASSERT_EQ(rest.items.size(), 2u);
+    EXPECT_EQ(first.items[0].path, "c:\\m\\moved\\01.flac");
+    EXPECT_EQ(first.items[0].source, "c:\\m\\album\\01.flac");
+    EXPECT_EQ(rest.items[0].position, 2);
+}
+
+TEST_F(PlaylistsTest, AnM3u8ImportResolvesPathsAndKeepsOrderDuplicatesAndOutsideEntries) {
+    const auto music = dir / L"音樂";
+    std::filesystem::create_directories(music);
+    const auto local = (music / L"夜に駆ける.flac").wstring();
+    store
+        ->write([&](sqlite::Database& db) {
+            db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,2,1,?,'audio',1,1,1)")
+                .bind(1, camel::toUtf8(local))
+                .run();
+            db.exec("INSERT INTO tracks(id,file_id,cue_index,album_id,title,sample_rate,total_frames,start_frame) "
+                    "VALUES(10,7,0,1,'Yoru',1000,1000,0)");
+        })
+        .get();
+    const auto file = dir / L"Mix 一.m3u8";
+    std::ofstream(file, std::ios::binary) << "\xEF\xBB\xBF#EXTM3U\r\n#EXTINF:60,Suisei - Comet\r\nC:\\M\\ALBUM\\01.flac\r\n"
+                                             "\xE9\x9F\xB3\xE6\xA8\x82/\xE5\xA4\x9C\xE3\x81\xAB\xE9\xA7\x86\xE3\x81\x91\xE3\x82\x8B.flac\n"
+                                             "  c:\\m\\album\\01.flac  \n\nhttp://radio.example/stream\n"
+                                             "c:\\m\\album\\cd2\\gone.flac\nd:\\elsewhere\\x.flac\n";
+    const auto change = importPlaylistFile(*store, file);
+    EXPECT_EQ(change.name, "Mix \xE4\xB8\x80");
+    EXPECT_EQ(change.added, 5);
+    EXPECT_EQ(change.skippedUnavailable, 1);
+    const auto page = playlistItems(*store, change.playlist, 0, 500);
+    ASSERT_EQ(page.items.size(), 5u);
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{1, 0}));
+    EXPECT_EQ(page.items[1].track, (LibraryTrackKey{7, 0}));
+    EXPECT_TRUE(page.items[1].available);
+    EXPECT_EQ(page.items[2].track, (LibraryTrackKey{1, 0}));
+    EXPECT_EQ(page.items[3].track, (LibraryTrackKey{5, 0})); // known but unavailable: returns with its file
+    EXPECT_FALSE(page.items[3].available);
+    EXPECT_FALSE(page.items[4].track);
+    EXPECT_EQ(page.items[4].path, "d:\\elsewhere\\x.flac");
+}
+
+TEST_F(PlaylistsTest, AnM3uWithoutUtf8IsReadInTheSystemCodePage) {
+    const auto file = dir / "legacy.m3u";
+    std::ofstream(file, std::ios::binary) << "c:\\m\\album\\02.flac\nd:\\caf\xE9.flac\n";
+    const auto page = playlistItems(*store, importPlaylistFile(*store, file).playlist, 0, 500);
+    ASSERT_EQ(page.items.size(), 2u);
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{2, 0}));
+    wchar_t expected[16] = {};
+    MultiByteToWideChar(CP_ACP, 0, "d:\\caf\xE9.flac", -1, expected, 16);
+    EXPECT_EQ(page.items[1].path, camel::toUtf8(expected));
+}
+
+TEST_F(PlaylistsTest, AnM3u8ExportWritesRelativePathsOnTheSameDriveAndRoundTrips) {
+    const auto music = dir / L"音樂";
+    std::filesystem::create_directories(music);
+    const auto inside = (music / L"a.flac").wstring();
+    store
+        ->write([&](sqlite::Database& db) {
+            db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,2,1,?,'audio',1,1,1)")
+                .bind(1, camel::toUtf8(inside))
+                .run();
+            db.exec("INSERT INTO tracks(id,file_id,cue_index,album_id,title,artist,sample_rate,total_frames,start_frame) "
+                    "VALUES(10,7,0,1,'A','B',1000,2400,0)");
+        })
+        .get();
+    const auto saved = savePlaylist(*store, "Out",
+                                    {{LibraryTrackKey{7, 0}, camel::toUtf8(inside)},
+                                     {LibraryTrackKey{7, 0}, camel::toUtf8(inside)},
+                                     {std::nullopt, "\\\\nas\\share\\x.flac"}});
+    const auto file = dir / "lists" / "out.m3u8";
+    std::filesystem::create_directories(file.parent_path());
+    exportPlaylistFile(*store, saved.playlist, file);
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(text, "#EXTM3U\r\n#EXTINF:2,B - A\r\n..\\\xE9\x9F\xB3\xE6\xA8\x82\\a.flac\r\n#EXTINF:2,B - A\r\n"
+                    "..\\\xE9\x9F\xB3\xE6\xA8\x82\\a.flac\r\n#EXTINF:-1,x\r\n\\\\nas\\share\\x.flac\r\n");
+    EXPECT_FALSE(std::filesystem::exists(file.wstring() + L".tmp"));
+    const auto again = playlistItems(*store, importPlaylistFile(*store, file).playlist, 0, 500);
+    ASSERT_EQ(again.items.size(), 3u);
+    EXPECT_EQ(again.items[0].track, (LibraryTrackKey{7, 0}));
+    EXPECT_EQ(again.items[1].track, (LibraryTrackKey{7, 0}));
+    EXPECT_EQ(again.items[2].path, "\\\\nas\\share\\x.flac");
+}
+
+TEST_F(PlaylistsTest, PlaylistFilesUseTheUsualPathFormAndTheOnDiskNameOfExtendedLibraryPaths) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec(R"(INSERT INTO files(id,folder_id,root_id,path,name,kind,size,mtime,available) VALUES
+ (7,2,1,'\\?\unc\nas\music\a\track 1.flac','Track 1.flac','audio',1,1,1),
+ (8,2,1,'\\?\d:\local\b.flac','B.flac','audio',1,1,1);
+INSERT INTO tracks(id,file_id,cue_index,album_id,sample_rate,total_frames,start_frame) VALUES
+ (10,7,0,1,1000,1000,0),(11,8,0,1,1000,1000,0);)");
+        })
+        .get();
+    const auto saved = savePlaylist(*store, "Nas", {{LibraryTrackKey{7, 0}, ""}, {LibraryTrackKey{8, 0}, ""}});
+    const auto file = dir / "nas.m3u8";
+    exportPlaylistFile(*store, saved.playlist, file);
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(text, "#EXTM3U\r\n#EXTINF:1,Track 1\r\n\\\\nas\\music\\a\\Track 1.flac\r\n#EXTINF:1,B\r\nd:\\local\\B.flac\r\n");
+    const auto page = playlistItems(*store, importPlaylistFile(*store, file).playlist, 0, 500);
+    ASSERT_EQ(page.items.size(), 2u);
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{7, 0}));
+    EXPECT_EQ(page.items[1].track, (LibraryTrackKey{8, 0}));
+    const auto queued = createPlaylist(*store, "Queue", {{Kind::Path, 0, {}, "\\\\NAS\\Music\\a\\Track 1.flac"},
+                                                         {Kind::Path, 0, {}, "D:\\Local\\B.flac"}});
+    EXPECT_EQ(tracks(queued.playlist), (std::vector<LibraryTrackKey>{{7, 0}, {8, 0}}));
+    EXPECT_EQ(createPlaylist(*store, "", {{Kind::Path, 0, {}, "\\\\NAS\\Music\\a\\Track 1.flac"}}).name, "Track 1");
+    EXPECT_EQ(createPlaylist(*store, "", {track(8)}).name, "B");
 }
 
 TEST_F(PlaylistsTest, AHundredThousandTrackFolderBecomesAPlaylistQuicklyAndWithBoundedMemory) {

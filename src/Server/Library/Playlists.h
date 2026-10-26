@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,12 +16,13 @@
 namespace camel::server {
 
 // One selected source (docs/Plan.md §7.9). Folders include all subfolders; groups match a multivalued field value.
+// A path names an available library file, such as a queue entry.
 struct PlaylistSource {
-    enum class Kind : uint8_t { Folder, Album, Track, Artist, Composer, Genre };
+    enum class Kind : uint8_t { Folder, Album, Track, Artist, Composer, Genre, Year, Path };
     Kind kind = Kind::Track;
-    int64_t id = 0;        // folder or album id
+    int64_t id = 0;        // folder or album id, or the year
     LibraryTrackKey track; // Track
-    std::string value;     // Artist, Composer, Genre
+    std::string value;     // Artist, Composer, Genre, or the file path
     bool operator==(const PlaylistSource&) const = default;
 };
 
@@ -57,6 +59,8 @@ struct PlaylistItem {
     int64_t id = 0, position = 0, added = 0, durationMs = 0;
     std::optional<LibraryTrackKey> track;
     std::string source, title, artist, album;
+    std::string path; // the file's current path, or the saved source for an entry outside the library
+    std::string name; // the file's on-disk name, empty outside the library or before a scan records it
     bool available = false;
 };
 
@@ -91,6 +95,13 @@ PlaylistChange savePlaylist(LibraryStore& store, std::string name, const std::ve
 PlaylistChange editPlaylist(LibraryStore& store, const PlaylistEdit& edit);
 // False when the playlist changed after the undoable action, which then stays as it is.
 bool undoPlaylistChange(LibraryStore& store, const PlaylistUndo& undo);
+
+// M3U8 files (docs/Plan.md §7.9). Import keeps the file's order and duplicates, resolves relative paths against its
+// folder, keeps entries outside the library with their path only and skips URLs (counted as unavailable); a .m3u file
+// that is not UTF-8 is read in the system code page. Export writes UTF-8 with #EXTINF lines, and paths relative to the
+// file when they are on its drive or share.
+PlaylistChange importPlaylistFile(LibraryStore& store, const std::filesystem::path& file);
+void exportPlaylistFile(const LibraryStore& store, int64_t playlist, const std::filesystem::path& file);
 
 std::vector<PlaylistSummary> listPlaylists(const LibraryStore& store);
 PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t offset, int64_t limit);

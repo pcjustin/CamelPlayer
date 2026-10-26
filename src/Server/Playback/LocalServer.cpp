@@ -1260,6 +1260,12 @@ PlaylistChange LocalServer::editPlaylist(const PlaylistEdit& edit) {
 bool LocalServer::undoPlaylistChange(const PlaylistUndo& undo) {
     return camel::server::undoPlaylistChange(impl_->library(), undo);
 }
+PlaylistChange LocalServer::importPlaylist(const std::filesystem::path& file) {
+    return importPlaylistFile(impl_->library(), file);
+}
+void LocalServer::exportPlaylist(int64_t playlist, const std::filesystem::path& file) const {
+    exportPlaylistFile(impl_->library(), playlist, file);
+}
 
 std::shared_ptr<IServer> createLocalServer() {
     const auto path = settingsPath();

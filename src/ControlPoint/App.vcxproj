@@ -100,12 +100,18 @@
     <ClInclude Include="HomeView.xaml.h">
       <DependentUpon>HomeView.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="PlaylistMenu.h" />
+    <ClInclude Include="PlaylistCollection.h" />
+    <ClInclude Include="PlaylistView.xaml.h">
+      <DependentUpon>PlaylistView.xaml</DependentUpon>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="MainWindow.xaml" />
     <Page Include="LibraryView.xaml" />
     <Page Include="HomeView.xaml" />
+    <Page Include="PlaylistView.xaml" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -132,6 +138,9 @@
     <ClCompile Include="HomeView.xaml.cpp">
       <DependentUpon>HomeView.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="PlaylistView.xaml.cpp">
+      <DependentUpon>PlaylistView.xaml</DependentUpon>
+    </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -148,6 +157,10 @@
     <Midl Include="HomeView.idl">
       <SubType>Code</SubType>
       <DependentUpon>HomeView.xaml</DependentUpon>
+    </Midl>
+    <Midl Include="PlaylistView.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>PlaylistView.xaml</DependentUpon>
     </Midl>
   </ItemGroup>
   <ItemGroup>

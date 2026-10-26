@@ -16,7 +16,7 @@
   <data name="Nav_Folders.Content" xml:space="preserve"><value>Folders</value></data>
   <data name="Nav_Playlists.Content" xml:space="preserve"><value>Playlists</value></data>
   <data name="Nav_SmartPlaylists.Content" xml:space="preserve"><value>Smart Playlists</value></data>
-  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later version. Meanwhile, the queue panel can save the queue as a playlist.</value></data>
+  <data name="Placeholder_Text.Text" xml:space="preserve"><value>This page arrives in a later version.</value></data>
   <data name="Settings_Title.Text" xml:space="preserve"><value>Settings</value></data>
   <data name="Settings_Playback.Text" xml:space="preserve"><value>Playback</value></data>
   <data name="Settings_Backend.Header" xml:space="preserve"><value>Output backend</value></data>
@@ -258,4 +258,62 @@
   <data name="Reset_AllPrimary" xml:space="preserve"><value>Reset and restart</value></data>
   <data name="Reset_Confirm" xml:space="preserve"><value>Reset</value></data>
   <data name="Reset_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Library_MenuCreatePlaylist" xml:space="preserve"><value>Create playlist</value></data>
+  <data name="Library_MenuAddToPlaylist" xml:space="preserve"><value>Add to playlist</value></data>
+  <data name="Library_MenuNewPlaylist" xml:space="preserve"><value>New playlist…</value></data>
+  <data name="Playlist_Failed" xml:space="preserve"><value>The playlist could not be changed</value></data>
+  <data name="Playlist_NothingAdded" xml:space="preserve"><value>Nothing to add</value></data>
+  <data name="Playlist_NothingAddedText" xml:space="preserve"><value>The selection has no available tracks in the library.</value></data>
+  <data name="Playlist_NothingAddedTo" xml:space="preserve"><value>Nothing added to “{0}”</value></data>
+  <data name="Playlist_ConfirmTitle" xml:space="preserve"><value>Large selection</value></data>
+  <data name="Playlist_ConfirmText" xml:space="preserve"><value>This selection has {0} tracks ({1}).</value></data>
+  <data name="Playlist_ConfirmCreate" xml:space="preserve"><value>Create</value></data>
+  <data name="Playlist_ConfirmAdd" xml:space="preserve"><value>Add</value></data>
+  <data name="Playlist_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Playlist_NewTitle" xml:space="preserve"><value>New playlist</value></data>
+  <data name="Playlist_NamePlaceholder" xml:space="preserve"><value>Name (optional)</value></data>
+  <data name="Playlist_Skipped" xml:space="preserve"><value>{0} skipped: unavailable, duplicate or already in the playlist</value></data>
+  <data name="Playlist_Created" xml:space="preserve"><value>Created playlist “{0}”</value></data>
+  <data name="Playlist_Added" xml:space="preserve"><value>Added to “{0}”</value></data>
+  <data name="Playlist_Open" xml:space="preserve"><value>Open playlist</value></data>
+  <data name="Playlist_Undo" xml:space="preserve"><value>Undo</value></data>
+  <data name="Playlist_Undone" xml:space="preserve"><value>Undone</value></data>
+  <data name="Playlist_UndoFailed" xml:space="preserve"><value>The playlist changed since, so nothing was undone</value></data>
+  <data name="Playlist_SortMore" xml:space="preserve"><value>More sorting</value></data>
+  <data name="Playlist_PageTitle" xml:space="preserve"><value>Playlists</value></data>
+  <data name="Playlist_Count" xml:space="preserve"><value>{0} playlists</value></data>
+  <data name="Playlist_None" xml:space="preserve"><value>No playlists yet. Right-click albums, folders, tracks or artists and choose Create playlist, or import an M3U8 file.</value></data>
+  <data name="Playlist_UnavailableCount" xml:space="preserve"><value>{0} unavailable</value></data>
+  <data name="Playlist_Listed" xml:space="preserve"><value>the first {0} are listed</value></data>
+  <data name="Playlist_EmptyPlaylist" xml:space="preserve"><value>This playlist is empty. Right-click music in the library and choose Add to playlist.</value></data>
+  <data name="Playlist_EditFailed" xml:space="preserve"><value>The playlist could not be changed; it is shown as saved</value></data>
+  <data name="Playlist_RenameTitle" xml:space="preserve"><value>Rename playlist</value></data>
+  <data name="Playlist_RenamePrimary" xml:space="preserve"><value>Rename</value></data>
+  <data name="Playlist_DeleteTitle" xml:space="preserve"><value>Delete “{0}”?</value></data>
+  <data name="Playlist_DeleteText" xml:space="preserve"><value>The playlist is deleted; the music files stay.</value></data>
+  <data name="Playlist_DeletePrimary" xml:space="preserve"><value>Delete</value></data>
+  <data name="Playlist_SortTitle" xml:space="preserve"><value>Reorder this playlist?</value></data>
+  <data name="Playlist_SortText" xml:space="preserve"><value>The entries are sorted by {0} and saved in that order. This cannot be undone.</value></data>
+  <data name="Playlist_SortTextDescending" xml:space="preserve"><value>The entries are sorted by {0}, descending, and saved in that order. This cannot be undone.</value></data>
+  <data name="Playlist_SortPrimary" xml:space="preserve"><value>Reorder</value></data>
+  <data name="Playlist_Exported" xml:space="preserve"><value>Playlist exported</value></data>
+  <data name="Playlist_ExportFailed" xml:space="preserve"><value>Could not export the playlist</value></data>
+  <data name="Playlist_Imported" xml:space="preserve"><value>Imported “{0}”</value></data>
+  <data name="Playlist_ImportFailed" xml:space="preserve"><value>Could not import the playlist file</value></data>
+  <data name="Playlist_SkippedUrls" xml:space="preserve"><value>{0} web addresses skipped</value></data>
+  <data name="Playlist_Remove" xml:space="preserve"><value>Remove from playlist</value></data>
+  <data name="Playlist_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>Unavailable: the file is missing or its library folder is offline</value></data>
+  <data name="Playlist_Play.Text" xml:space="preserve"><value>Play</value></data>
+  <data name="Playlist_Rename.Text" xml:space="preserve"><value>Rename</value></data>
+  <data name="Playlist_Export.Text" xml:space="preserve"><value>Export M3U8</value></data>
+  <data name="Playlist_Delete.Text" xml:space="preserve"><value>Delete</value></data>
+  <data name="Playlist_Import.Text" xml:space="preserve"><value>Import M3U8</value></data>
+  <data name="Playlist_ColumnTitle.Text" xml:space="preserve"><value>Title</value></data>
+  <data name="Playlist_ColumnArtist.Text" xml:space="preserve"><value>Artist</value></data>
+  <data name="Playlist_ColumnAlbum.Text" xml:space="preserve"><value>Album</value></data>
+  <data name="Playlist_ColumnDuration.Text" xml:space="preserve"><value>Duration</value></data>
+  <data name="Playlist_SortAlbumArtist.Text" xml:space="preserve"><value>Album artist</value></data>
+  <data name="Playlist_SortYear.Text" xml:space="preserve"><value>Year</value></data>
+  <data name="Playlist_SortTrackNumber.Text" xml:space="preserve"><value>Track number</value></data>
+  <data name="Playlist_SortAdded.Text" xml:space="preserve"><value>Date added</value></data>
 </root>

@@ -16,7 +16,7 @@
   <data name="Nav_Folders.Content" xml:space="preserve"><value>資料夾</value></data>
   <data name="Nav_Playlists.Content" xml:space="preserve"><value>清單</value></data>
   <data name="Nav_SmartPlaylists.Content" xml:space="preserve"><value>智慧清單</value></data>
-  <data name="Placeholder_Text.Text" xml:space="preserve"><value>這個頁面會在之後的版本加入。目前可以在播放佇列面板按「將佇列儲存為播放清單」。</value></data>
+  <data name="Placeholder_Text.Text" xml:space="preserve"><value>這個頁面會在之後的版本加入。</value></data>
   <data name="Settings_Title.Text" xml:space="preserve"><value>設定</value></data>
   <data name="Settings_Playback.Text" xml:space="preserve"><value>播放</value></data>
   <data name="Settings_Backend.Header" xml:space="preserve"><value>輸出後端</value></data>
@@ -258,4 +258,62 @@
   <data name="Reset_AllPrimary" xml:space="preserve"><value>重置並重新啟動</value></data>
   <data name="Reset_Confirm" xml:space="preserve"><value>重置</value></data>
   <data name="Reset_Cancel" xml:space="preserve"><value>取消</value></data>
+  <data name="Library_MenuCreatePlaylist" xml:space="preserve"><value>建立播放清單</value></data>
+  <data name="Library_MenuAddToPlaylist" xml:space="preserve"><value>加入播放清單</value></data>
+  <data name="Library_MenuNewPlaylist" xml:space="preserve"><value>新增播放清單…</value></data>
+  <data name="Playlist_Failed" xml:space="preserve"><value>無法變更播放清單</value></data>
+  <data name="Playlist_NothingAdded" xml:space="preserve"><value>沒有可加入的曲目</value></data>
+  <data name="Playlist_NothingAddedText" xml:space="preserve"><value>選取的項目在音樂庫中沒有可用的曲目。</value></data>
+  <data name="Playlist_NothingAddedTo" xml:space="preserve"><value>沒有加入「{0}」的曲目</value></data>
+  <data name="Playlist_ConfirmTitle" xml:space="preserve"><value>大量曲目</value></data>
+  <data name="Playlist_ConfirmText" xml:space="preserve"><value>此選取共有 {0} 首曲目（{1}）。</value></data>
+  <data name="Playlist_ConfirmCreate" xml:space="preserve"><value>建立</value></data>
+  <data name="Playlist_ConfirmAdd" xml:space="preserve"><value>加入</value></data>
+  <data name="Playlist_Cancel" xml:space="preserve"><value>取消</value></data>
+  <data name="Playlist_NewTitle" xml:space="preserve"><value>新增播放清單</value></data>
+  <data name="Playlist_NamePlaceholder" xml:space="preserve"><value>名稱（可留空）</value></data>
+  <data name="Playlist_Skipped" xml:space="preserve"><value>略過 {0} 首：無法使用、重複或已在清單中</value></data>
+  <data name="Playlist_Created" xml:space="preserve"><value>已建立播放清單「{0}」</value></data>
+  <data name="Playlist_Added" xml:space="preserve"><value>已加入「{0}」</value></data>
+  <data name="Playlist_Open" xml:space="preserve"><value>開啟播放清單</value></data>
+  <data name="Playlist_Undo" xml:space="preserve"><value>復原</value></data>
+  <data name="Playlist_Undone" xml:space="preserve"><value>已復原</value></data>
+  <data name="Playlist_UndoFailed" xml:space="preserve"><value>播放清單已變更，無法復原</value></data>
+  <data name="Playlist_SortMore" xml:space="preserve"><value>更多排序方式</value></data>
+  <data name="Playlist_PageTitle" xml:space="preserve"><value>播放清單</value></data>
+  <data name="Playlist_Count" xml:space="preserve"><value>{0} 個播放清單</value></data>
+  <data name="Playlist_None" xml:space="preserve"><value>還沒有播放清單。在專輯、資料夾、曲目或演出者上按右鍵選擇「建立播放清單」，或匯入 M3U8 檔案。</value></data>
+  <data name="Playlist_UnavailableCount" xml:space="preserve"><value>{0} 首無法使用</value></data>
+  <data name="Playlist_Listed" xml:space="preserve"><value>列出前 {0} 首</value></data>
+  <data name="Playlist_EmptyPlaylist" xml:space="preserve"><value>這個播放清單是空的。在音樂庫的音樂上按右鍵，選擇「加入播放清單」。</value></data>
+  <data name="Playlist_EditFailed" xml:space="preserve"><value>無法變更播放清單，顯示的是已儲存的內容</value></data>
+  <data name="Playlist_RenameTitle" xml:space="preserve"><value>重新命名播放清單</value></data>
+  <data name="Playlist_RenamePrimary" xml:space="preserve"><value>重新命名</value></data>
+  <data name="Playlist_DeleteTitle" xml:space="preserve"><value>刪除「{0}」？</value></data>
+  <data name="Playlist_DeleteText" xml:space="preserve"><value>只刪除播放清單，音樂檔案不受影響。</value></data>
+  <data name="Playlist_DeletePrimary" xml:space="preserve"><value>刪除</value></data>
+  <data name="Playlist_SortTitle" xml:space="preserve"><value>重新排列這個播放清單？</value></data>
+  <data name="Playlist_SortText" xml:space="preserve"><value>曲目會依{0}排序並以此順序儲存，無法復原。</value></data>
+  <data name="Playlist_SortTextDescending" xml:space="preserve"><value>曲目會依{0}遞減排序並以此順序儲存，無法復原。</value></data>
+  <data name="Playlist_SortPrimary" xml:space="preserve"><value>重新排列</value></data>
+  <data name="Playlist_Exported" xml:space="preserve"><value>播放清單已匯出</value></data>
+  <data name="Playlist_ExportFailed" xml:space="preserve"><value>無法匯出播放清單</value></data>
+  <data name="Playlist_Imported" xml:space="preserve"><value>已匯入「{0}」</value></data>
+  <data name="Playlist_ImportFailed" xml:space="preserve"><value>無法匯入播放清單檔案</value></data>
+  <data name="Playlist_SkippedUrls" xml:space="preserve"><value>略過 {0} 個網址</value></data>
+  <data name="Playlist_Remove" xml:space="preserve"><value>從播放清單移除</value></data>
+  <data name="Playlist_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>無法使用：檔案不存在或所在的音樂庫資料夾離線</value></data>
+  <data name="Playlist_Play.Text" xml:space="preserve"><value>播放</value></data>
+  <data name="Playlist_Rename.Text" xml:space="preserve"><value>重新命名</value></data>
+  <data name="Playlist_Export.Text" xml:space="preserve"><value>匯出 M3U8</value></data>
+  <data name="Playlist_Delete.Text" xml:space="preserve"><value>刪除</value></data>
+  <data name="Playlist_Import.Text" xml:space="preserve"><value>匯入 M3U8</value></data>
+  <data name="Playlist_ColumnTitle.Text" xml:space="preserve"><value>標題</value></data>
+  <data name="Playlist_ColumnArtist.Text" xml:space="preserve"><value>演出者</value></data>
+  <data name="Playlist_ColumnAlbum.Text" xml:space="preserve"><value>專輯</value></data>
+  <data name="Playlist_ColumnDuration.Text" xml:space="preserve"><value>長度</value></data>
+  <data name="Playlist_SortAlbumArtist.Text" xml:space="preserve"><value>專輯演出者</value></data>
+  <data name="Playlist_SortYear.Text" xml:space="preserve"><value>年份</value></data>
+  <data name="Playlist_SortTrackNumber.Text" xml:space="preserve"><value>曲目編號</value></data>
+  <data name="Playlist_SortAdded.Text" xml:space="preserve"><value>加入日期</value></data>
 </root>

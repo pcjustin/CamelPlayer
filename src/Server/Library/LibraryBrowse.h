@@ -16,6 +16,7 @@ namespace camel::server {
 struct LibraryTrack {
     int64_t id = 0;
     std::string title, artist, album, path;
+    int64_t file = 0;
 };
 
 struct LibraryTrackPage {

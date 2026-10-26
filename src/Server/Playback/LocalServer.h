@@ -53,6 +53,8 @@ public:
     PlaylistChange saveQueueAsPlaylist(std::string name) override;
     PlaylistChange editPlaylist(const PlaylistEdit& edit) override;
     bool undoPlaylistChange(const PlaylistUndo& undo) override;
+    PlaylistChange importPlaylist(const std::filesystem::path& file) override;
+    void exportPlaylist(int64_t playlist, const std::filesystem::path& file) const override;
 
 private:
     class Impl;

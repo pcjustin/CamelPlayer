@@ -14,6 +14,8 @@ struct BrowseRow {
     std::string value; // group name, or the file path of a track
     winrt::hstring title, subtitle, detail, trailing;
     bool folder = false;
+    int64_t file = 0;         // a track's file, which playlists refer to
+    bool unavailable = false; // a playlist entry whose file is missing or offline
 };
 
 } // namespace ui
@@ -29,6 +31,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring Trailing() const { return row_.trailing; }
     bool IsFolder() const { return row_.folder; }
     bool IsTrack() const { return !row_.folder && row_.id != 0 && !row_.value.empty(); }
+    bool IsUnavailable() const { return row_.unavailable; }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
     }

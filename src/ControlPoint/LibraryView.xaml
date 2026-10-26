@@ -75,7 +75,7 @@
             </Grid>
         </DataTemplate>
         <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">
-            <StackPanel Width="176" Spacing="2" Padding="8">
+            <StackPanel Width="176" Spacing="2" Padding="8" Background="Transparent" ContextRequested="OnCardContextRequested">
                 <Border Width="160" Height="160" CornerRadius="8" Margin="0,0,0,6"
                         Background="{ThemeResource ControlFillColorSecondaryBrush}">
                     <Grid>
@@ -126,7 +126,7 @@
                                 <FontIcon Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                             <Button.Flyout>
-                                <MenuFlyout>
+                                <MenuFlyout x:Name="AlbumMenu">
                                     <MenuFlyoutItem x:Uid="Library_PlayAlbum" Click="OnPlayAlbumClick">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
@@ -149,9 +149,9 @@
             </ToggleButton>
         </Grid>
 
-        <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+        <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" />
-        <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="None"
+        <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed">
             <ListView.Header>
                 <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
@@ -204,7 +204,8 @@
                         </ListView.ItemsPanel>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="local:BrowseItem">
-                                <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                                <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                        Tag="artist" ContextRequested="OnCardContextRequested">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE77B;" FontSize="14" />
                                         <TextBlock Text="{x:Bind Title, Mode=OneWay}" />
@@ -217,7 +218,7 @@
                 </StackPanel>
             </ListView.Header>
         </ListView>
-        <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="None"
+        <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />
         <TextBlock x:Name="EmptyText" Grid.Row="1" TextWrapping="Wrap" Visibility="Collapsed"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

@@ -6,6 +6,7 @@
 
 #include "LibraryView.g.h"
 #include "LibraryCollection.h"
+#include "PlaylistMenu.h"
 #include <unordered_map>
 #include "Server/Api/ServerApi.h"
 
@@ -16,8 +17,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
     ~LibraryView() { cancelArtwork(); }
     void InitializeComponent();
 
-    // The window supplies the Server and the command path its player bar follows.
-    void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit);
+    // The window supplies the Server, the command path its player bar follows and the playlist menu entries.
+    void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit,
+                ui::PlaylistMenu playlistMenu);
     // albums, artists, composers, genres, years, tracks or folders; starts a fresh navigation history.
     void show(hstring const& tag, hstring const& title);
     void showAlbum(int64_t album, hstring const& title);
@@ -45,6 +47,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnSearchRowScroll(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSearchArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
+    void OnCardContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -87,11 +90,25 @@ private:
     void playAlbum(int64_t album);
     void queueFolder(int64_t folder, bool playNext, bool playNow = false);
     void queueTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, bool playNext);
+    // What a context menu acts on: rows of the current view, album cards or artist chips.
+    enum class Target { Rows, Albums, Artists };
+    static std::optional<camel::server::PlaylistSource> sourceOf(Target target, Mode mode, camel::server::LibraryGroupField field,
+                                                                 const ui::BrowseRow& row);
+    // The selected rows in list order, read off the UI thread; just `clicked` when it is not part of the selection.
+    // A paged list reads the selected rows it has not loaded through the current listing.
+    std::function<std::vector<ui::BrowseRow>()> selectionRows(Microsoft::UI::Xaml::Controls::ListViewBase const& list,
+                                                              Windows::Foundation::IInspectable const& clicked, bool paged) const;
+    ui::SourceFetch menuSources() const;
+    void queueSelection(bool playNext);
+    void showMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, Microsoft::UI::Xaml::FrameworkElement const& element,
+                  Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const& e);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.
     winrt::fire_and_forget background(std::function<std::function<void()>()> work);
 
     std::shared_ptr<camel::server::IServer> server_;
     std::function<void(camel::server::Command)> submit_;
+    ui::PlaylistMenu playlistMenu_;
+    ui::BrowseFetch fetch_; // the current collection's listing
     View current_;
     std::vector<View> back_;
     std::function<void()> leave_; // Back from a search that began outside the library pages
@@ -105,8 +122,12 @@ private:
     std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
-    Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr};
+    Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};
     ui::BrowseRow menuRow_;
+    Windows::Foundation::IInspectable menuItem_{nullptr};
+    Microsoft::UI::Xaml::Controls::ListViewBase menuList_{nullptr};
+    Target menuTarget_ = Target::Rows;
+    bool menuPaged_ = false;
 };
 
 } // namespace winrt::CamelPlayer::implementation

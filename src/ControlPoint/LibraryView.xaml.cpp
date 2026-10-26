@@ -69,14 +69,23 @@ hstring duration(int64_t ms) {
 }
 
 ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
-    return {t.id, t.path, titleOf(t, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
+    ui::BrowseRow row{t.id, t.path, titleOf(t, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
+    row.file = t.track.file;
+    return row;
 }
 
 ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, const Texts& texts) {
     std::wstring number;
     if (t.number) number = (discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L". ";
-    return {t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {},
-            duration(t.durationMs)};
+    ui::BrowseRow row{t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {},
+                      duration(t.durationMs)};
+    row.file = t.track.file;
+    return row;
+}
+
+// Ctrl- and Shift-clicks change the selection; they do not open or play.
+bool selecting() {
+    return GetKeyState(VK_CONTROL) < 0 || GetKeyState(VK_SHIFT) < 0;
 }
 
 Windows::Foundation::IInspectable item(const ui::BrowseRow& row) {
@@ -94,9 +103,14 @@ void LibraryView::InitializeComponent() {
     Automation::AutomationProperties::SetName(BackButton(), tr(L"Library_Back"));
 }
 
-void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit) {
+void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu) {
     server_ = std::move(server);
     submit_ = std::move(submit);
+    playlistMenu_ = std::move(playlistMenu);
+    if (playlistMenu_)
+        playlistMenu_(AlbumMenu(), [this]() -> ui::SourceFetch {
+            return [album = current_.album] { return std::vector<PlaylistSource>{{PlaylistSource::Kind::Album, album, {}, {}}}; };
+        });
     using namespace std::chrono_literals;
     refreshTimer_ = DispatcherQueue().CreateTimer();
     refreshTimer_.Interval(3s); // scans change the library continuously; refresh at a pace that keeps scrolling smooth
@@ -359,8 +373,10 @@ void LibraryView::startCollection() {
         fetch = [server, texts, query = current_.query](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
             const auto page = server->searchTracks(query, offset, limit, revision);
             ui::BrowsePage out{page.revision, page.total, {}};
-            for (const auto& t : page.tracks)
+            for (const auto& t : page.tracks) {
                 out.rows.push_back({t.id, t.path, titleOf(t.title, t.path, texts), ui::utf8(t.artist), ui::utf8(t.album), {}});
+                out.rows.back().file = t.file;
+            }
             return out;
         };
     } else {
@@ -372,6 +388,7 @@ void LibraryView::startCollection() {
             return out;
         };
     }
+    fetch_ = fetch;
     collection_ = make_self<ui::LibraryCollection>(DispatcherQueue(), std::move(fetch));
     const auto source = collection_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>();
     (current_.mode == Mode::Albums ? AlbumGrid().as<ItemsControl>() : RowList().as<ItemsControl>()).ItemsSource(source);
@@ -493,11 +510,113 @@ void LibraryView::queueFolder(int64_t folder, bool playNext, bool playNow) {
     });
 }
 
+std::optional<PlaylistSource> LibraryView::sourceOf(Target target, Mode mode, LibraryGroupField field, const ui::BrowseRow& row) {
+    using Kind = PlaylistSource::Kind;
+    if (target == Target::Albums) {
+        if (row.id) return PlaylistSource{Kind::Album, row.id, {}, {}};
+    } else if (target == Target::Artists || mode == Mode::Groups) {
+        if (row.value.empty()) return std::nullopt;
+        if (target == Target::Artists || field == LibraryGroupField::Artist) return PlaylistSource{Kind::Artist, 0, {}, row.value};
+        if (field == LibraryGroupField::Composer) return PlaylistSource{Kind::Composer, 0, {}, row.value};
+        if (field == LibraryGroupField::Genre) return PlaylistSource{Kind::Genre, 0, {}, row.value};
+        size_t used = 0;
+        try {
+            const auto year = std::stoll(row.value, &used);
+            if (used == row.value.size() && year) return PlaylistSource{Kind::Year, year, {}, {}};
+        } catch (const std::exception&) {
+        }
+    } else if (mode == Mode::Folders && row.folder) {
+        if (row.id) return PlaylistSource{Kind::Folder, row.id, {}, {}};
+    } else if (row.file) {
+        return PlaylistSource{Kind::Track, 0, {row.file, 0}, {}};
+    }
+    return std::nullopt;
+}
+
+std::function<std::vector<ui::BrowseRow>()> LibraryView::selectionRows(ListViewBase const& list,
+                                                                         Windows::Foundation::IInspectable const& clicked,
+                                                                         bool paged) const {
+    std::vector<std::pair<int64_t, int64_t>> ranges; // first index, count
+    bool clickedSelected = false;
+    uint32_t clickedIndex = 0;
+    const bool found = list.Items().IndexOf(clicked, clickedIndex);
+    for (const auto& range : list.SelectedRanges()) {
+        ranges.emplace_back(range.FirstIndex(), int64_t(range.Length()));
+        if (found && clickedIndex >= uint32_t(range.FirstIndex()) && clickedIndex <= uint32_t(range.LastIndex()))
+            clickedSelected = true;
+    }
+    if (!clickedSelected) return [row = ui::LibraryCollection::rowOf(clicked)] { return std::vector<ui::BrowseRow>{row}; };
+    if (paged && fetch_) {
+        return [ranges, fetch = fetch_] {
+            std::vector<ui::BrowseRow> rows;
+            for (const auto& [first, count] : ranges)
+                for (int64_t offset = first; offset < first + count; offset += 500) {
+                    auto page = fetch(offset, std::min<int64_t>(500, first + count - offset), std::nullopt);
+                    rows.insert(rows.end(), page.rows.begin(), page.rows.end());
+                    if (page.rows.empty()) break;
+                }
+            return rows;
+        };
+    }
+    std::vector<ui::BrowseRow> rows;
+    const auto items = list.Items();
+    for (const auto& [first, count] : ranges)
+        for (int64_t i = first; i < first + count && i < int64_t(items.Size()); ++i)
+            rows.push_back(ui::LibraryCollection::rowOf(items.GetAt(uint32_t(i))));
+    return [rows] { return rows; };
+}
+
+ui::SourceFetch LibraryView::menuSources() const {
+    if (!menuItem_ || !menuList_) return {};
+    return [rows = selectionRows(menuList_, menuItem_, menuPaged_), target = menuTarget_, mode = current_.mode, field = current_.field] {
+        std::vector<PlaylistSource> sources;
+        for (const auto& row : rows())
+            if (auto source = sourceOf(target, mode, field, row)) sources.push_back(std::move(*source));
+        return sources;
+    };
+}
+
+void LibraryView::queueSelection(bool playNext) {
+    if (!menuItem_ || !menuList_ || !server_) return;
+    background([this, server = server_, rows = selectionRows(menuList_, menuItem_, menuPaged_), folders = current_.mode == Mode::Folders, playNext] {
+        std::vector<LibraryTrackRow> tracks;
+        for (const auto& row : rows()) {
+            if (folders && row.folder) {
+                std::vector<int64_t> pending{row.id};
+                for (size_t i = 0; i < pending.size(); ++i) {
+                    const auto listing = server->browseFolder(pending[i]);
+                    tracks.insert(tracks.end(), listing.tracks.begin(), listing.tracks.end());
+                    for (const auto& child : listing.folders) pending.push_back(child.id);
+                }
+            } else if (!row.value.empty()) {
+                LibraryTrackRow track;
+                track.path = row.value;
+                tracks.push_back(std::move(track));
+            }
+        }
+        return std::function<void()>([this, tracks = std::move(tracks), playNext] { queueTracks(tracks, playNext); });
+    });
+}
+
+void LibraryView::showMenu(MenuFlyout const& menu, FrameworkElement const& element, Input::ContextRequestedEventArgs const& e) {
+    Primitives::FlyoutShowOptions options;
+    if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
+    menu.ShowAt(element, options);
+    e.Handled(true);
+}
+
 void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
     const auto element = sender.as<FrameworkElement>();
     const auto item = element.DataContext().try_as<CamelPlayer::BrowseItem>();
-    if (!item || !(item.IsTrack() || (current_.mode == Mode::Folders && item.IsFolder()))) return;
-    menuRow_ = ui::LibraryCollection::rowOf(item);
+    if (!item) return;
+    const auto& row = ui::LibraryCollection::rowOf(item);
+    const bool group = current_.mode == Mode::Groups && !row.value.empty();
+    if (!(group || item.IsTrack() || (current_.mode == Mode::Folders && item.IsFolder()))) return;
+    menuRow_ = row;
+    menuItem_ = item;
+    menuList_ = current_.mode == Mode::Folders ? FolderList().as<ListViewBase>() : RowList().as<ListViewBase>();
+    menuTarget_ = Target::Rows;
+    menuPaged_ = current_.mode == Mode::Groups || current_.mode == Mode::Tracks || current_.mode == Mode::Search;
     if (!rowMenu_) {
         rowMenu_ = MenuFlyout();
         MenuFlyoutItem playNow;
@@ -514,15 +633,38 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
             FontIcon icon;
             icon.Glyph(glyph);
             entry.Icon(icon);
-            entry.Click([this, playNext](auto&&, auto&&) { queueItem(menuRow_, playNext); });
+            entry.Click([this, playNext](auto&&, auto&&) { queueSelection(playNext); });
             rowMenu_.Items().Append(entry);
         }
+        if (playlistMenu_) playlistMenu_(rowMenu_, [this] { return menuSources(); });
     }
+    // Groups have no queue actions; their first playlist entry follows a separator that is hidden with them.
+    const auto queueVisibility = group ? Visibility::Collapsed : Visibility::Visible;
     rowMenu_.Items().GetAt(0).Visibility(menuRow_.folder ? Visibility::Visible : Visibility::Collapsed);
-    Primitives::FlyoutShowOptions options;
-    if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
-    rowMenu_.ShowAt(element, options);
-    e.Handled(true);
+    for (uint32_t i = 1; i < 4 && i < rowMenu_.Items().Size(); ++i) rowMenu_.Items().GetAt(i).Visibility(queueVisibility);
+    if (group && current_.field == LibraryGroupField::Year && !sourceOf(Target::Rows, Mode::Groups, LibraryGroupField::Year, row)) return;
+    showMenu(rowMenu_, element, e);
+}
+
+void LibraryView::OnCardContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
+    const auto element = sender.as<FrameworkElement>();
+    const auto item = element.DataContext().try_as<CamelPlayer::BrowseItem>();
+    if (!item || !playlistMenu_) return;
+    const bool artist = unbox_value_or<hstring>(element.Tag(), L"") == L"artist";
+    if (!sourceOf(artist ? Target::Artists : Target::Albums, current_.mode, current_.field, ui::LibraryCollection::rowOf(item)))
+        return;
+    menuItem_ = item;
+    menuTarget_ = artist ? Target::Artists : Target::Albums;
+    menuPaged_ = !artist && current_.mode == Mode::Albums;
+    menuList_ = artist                           ? SearchArtists().as<ListViewBase>()
+                : current_.mode == Mode::Search ? SearchAlbums().as<ListViewBase>()
+                                                 : AlbumGrid().as<ListViewBase>();
+    if (!cardMenu_) {
+        cardMenu_ = MenuFlyout();
+        playlistMenu_(cardMenu_, [this] { return menuSources(); });
+        cardMenu_.Items().RemoveAt(0); // the separator before the playlist entries
+    }
+    showMenu(cardMenu_, element, e);
 }
 
 void LibraryView::OnAddAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -636,6 +778,7 @@ void LibraryView::OnDescendingClick(Windows::Foundation::IInspectable const&, Ro
 }
 
 void LibraryView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
+    if (selecting()) return;
     const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
     if (!row.id) return; // still a placeholder
     View view;
@@ -646,6 +789,7 @@ void LibraryView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemCli
 }
 
 void LibraryView::OnRowClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
+    if (selecting()) return;
     const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
     if (current_.mode == Mode::Groups) {
         if (row.value.empty()) return;
@@ -703,6 +847,7 @@ void LibraryView::OnTrailClicked(BreadcrumbBar const&, BreadcrumbBarItemClickedE
 }
 
 void LibraryView::OnFolderItemClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
+    if (selecting()) return;
     const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
     if (row.folder) {
         View view;

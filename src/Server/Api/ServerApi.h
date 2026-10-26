@@ -290,6 +290,8 @@ public:
     virtual PlaylistChange saveQueueAsPlaylist(std::string name) = 0;
     virtual PlaylistChange editPlaylist(const PlaylistEdit& edit) = 0;
     virtual bool undoPlaylistChange(const PlaylistUndo& undo) = 0;
+    virtual PlaylistChange importPlaylist(const std::filesystem::path& file) = 0;
+    virtual void exportPlaylist(int64_t playlist, const std::filesystem::path& file) const = 0;
 };
 
 std::shared_ptr<IServer> createLocalServer();

@@ -1,0 +1,12 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+import "BrowseItem.idl";
+
+namespace CamelPlayer {
+// The Playlists page and one stored playlist (docs/Plan.md §7.9, §8.3).
+[default_interface] runtimeclass PlaylistView : Microsoft.UI.Xaml.Controls.UserControl {
+    PlaylistView();
+}
+} // namespace CamelPlayer

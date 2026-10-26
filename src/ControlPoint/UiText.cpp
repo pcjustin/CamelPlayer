@@ -18,6 +18,16 @@ winrt::hstring tr(const wchar_t* key) {
     }
 }
 
+winrt::hstring format(const wchar_t* key, std::initializer_list<std::wstring> values) {
+    std::wstring text(tr(key));
+    int n = 0;
+    for (const auto& value : values) {
+        const auto marker = L"{" + std::to_wstring(n++) + L"}";
+        if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, marker.size(), value);
+    }
+    return winrt::hstring(text);
+}
+
 winrt::hstring errorTitle(camel::audio::ErrorCode code) {
     using camel::audio::ErrorCode;
     switch (code) {

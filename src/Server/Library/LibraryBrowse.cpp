@@ -118,7 +118,7 @@ LibraryTrackPage tracks(sqlite::Database& db, const Search& search, int64_t offs
     // A search counts its matches while ordering them; browsing and walking count separately.
     const bool windowTotal = totals && !walk && search.plan != Search::Plan::Browse;
     const std::string columns = std::string("SELECT t.id,coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,''),"
-                                            "f.path") + (windowTotal ? ",count(*) OVER()" : "");
+                                            "f.path,t.file_id") + (windowTotal ? ",count(*) OVER()" : "");
     const std::string select =
         walk ? columns + " FROM tracks t INDEXED BY tracks_title_sort JOIN files f ON f.id=t.file_id "
                          "JOIN roots r ON r.id=f.root_id WHERE" + kTextMatch + "AND" + kVisibleTrack
@@ -127,7 +127,7 @@ LibraryTrackPage tracks(sqlite::Database& db, const Search& search, int64_t offs
     search.bind(rows);
     rows.bind(2, limit).bind(3, offset);
     bool hasRow = rows.step();
-    if (hasRow && windowTotal) result.total = rows.integer(5);
+    if (hasRow && windowTotal) result.total = rows.integer(6);
     if (totals && !(hasRow && windowTotal)) {
         const auto all = search.counting();
         auto count = db.prepare(std::string("SELECT count(*)") + all.from() + " WHERE" + kVisible + all.filter());
@@ -136,7 +136,7 @@ LibraryTrackPage tracks(sqlite::Database& db, const Search& search, int64_t offs
     }
     for (; hasRow; hasRow = rows.step()) {
         if (token.cancelled()) throw std::runtime_error("library query cancelled");
-        result.tracks.push_back({rows.integer(0), rows.text(1), rows.text(2), rows.text(3), rows.text(4)});
+        result.tracks.push_back({rows.integer(0), rows.text(1), rows.text(2), rows.text(3), rows.text(4), rows.integer(5)});
     }
     return result;
 }

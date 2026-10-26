@@ -3,12 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "Server/Library/Playlists.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <set>
+#include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <sqlite3.h>
 
+#include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryViews.h"
 #include "Common/util/Text.h"
 
@@ -41,6 +47,22 @@ struct Expansion {
     std::string firstName;
 };
 
+std::wstring folded(std::wstring text);
+std::wstring libraryKey(const std::filesystem::path& path);
+
+// A path source (a queue entry) uses the usual path form and case; the library stores the extended, case-folded form.
+void bindPathKeys(sqlite::Statement& statement, const std::string& path) {
+    const auto wide = toWide(path);
+    statement.bind(1, toUtf8(libraryKey(wide))).bind(2, toUtf8(folded(wide)));
+}
+
+// A track without a title tag is named after its file.
+std::string trackName(sqlite::Statement& row) {
+    if (!row.step()) return {};
+    if (!row.text(0).empty()) return row.text(0);
+    return toUtf8(std::filesystem::path(toWide(row.text(1))).stem().wstring());
+}
+
 std::string sourceName(sqlite::Database& db, const PlaylistSource& source) {
     switch (source.kind) {
     case PlaylistSource::Kind::Folder: {
@@ -53,8 +75,18 @@ std::string sourceName(sqlite::Database& db, const PlaylistSource& source) {
         return row.bind(1, source.id).step() ? row.text(0) : std::string{};
     }
     case PlaylistSource::Kind::Track: {
-        auto row = db.prepare("SELECT coalesce(title,'') FROM tracks WHERE file_id=? AND cue_index=?");
-        return row.bind(1, source.track.file).bind(2, source.track.cueIndex).step() ? row.text(0) : std::string{};
+        auto row = db.prepare("SELECT coalesce(t.title,''),coalesce(f.name,'') FROM tracks t JOIN files f ON f.id=t.file_id "
+                              "WHERE t.file_id=? AND t.cue_index=?");
+        row.bind(1, source.track.file).bind(2, source.track.cueIndex);
+        return trackName(row);
+    }
+    case PlaylistSource::Kind::Year:
+        return std::to_string(source.id);
+    case PlaylistSource::Kind::Path: {
+        auto row = db.prepare("SELECT coalesce(t.title,''),coalesce(f.name,'') FROM tracks t JOIN files f ON f.id=t.file_id "
+                              "WHERE f.path IN (?1,?2) AND f.available=1 AND t.cue_index=0");
+        bindPathKeys(row, source.value);
+        return trackName(row);
     }
     default:
         return source.value;
@@ -89,6 +121,17 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
                 s.bind(1, source.track.file).bind(2, source.track.cueIndex);
                 return s;
             }
+            case PlaylistSource::Kind::Year: {
+                auto s = db.prepare(select + "FROM library_tracks t" + kTrackJoins + "WHERE t.year=?" + kNaturalOrder);
+                s.bind(1, source.id);
+                return s;
+            }
+            case PlaylistSource::Kind::Path: {
+                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins +
+                                    "WHERE f.path IN (?1,?2) AND f.available=1 AND t.cue_index=0");
+                bindPathKeys(s, source.value);
+                return s;
+            }
             default: {
                 const char* field = source.kind == PlaylistSource::Kind::Artist     ? "artist"
                                     : source.kind == PlaylistSource::Kind::Composer ? "composer"
@@ -104,7 +147,9 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
             }
         }();
         if (out.firstName.empty()) out.firstName = sourceName(db, source);
+        bool found = false;
         while (rows.step()) {
+            found = true;
             const LibraryTrackKey track{rows.integer(0), rows.integer(1)};
             if (!rows.integer(2)) {
                 ++out.unavailable;
@@ -114,6 +159,7 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
                 out.tracks.push_back({track, rows.text(4), rows.integer(3)});
             }
         }
+        if (!found && source.kind == PlaylistSource::Kind::Path) ++out.unavailable; // a file outside the library
     }
     return out;
 }
@@ -198,6 +244,52 @@ std::vector<PlaylistEntry> entries(const std::vector<Resolved>& tracks) {
 std::string defaultName(const Expansion& expansion, size_t sources) {
     if (sources <= 1) return expansion.firstName;
     return expansion.firstName + " +" + std::to_string(sources - 1);
+}
+
+std::wstring folded(std::wstring text) {
+    if (!text.empty()) CharLowerBuffW(text.data(), DWORD(text.size()));
+    return text;
+}
+
+std::optional<std::wstring> decoded(const std::string& bytes, UINT codePage, DWORD flags) {
+    if (bytes.empty()) return std::wstring{};
+    const int n = MultiByteToWideChar(codePage, flags, bytes.data(), int(bytes.size()), nullptr, 0);
+    if (n <= 0) return std::nullopt;
+    std::wstring text(size_t(n), L'\0');
+    MultiByteToWideChar(codePage, flags, bytes.data(), int(bytes.size()), text.data(), n);
+    return text;
+}
+
+std::wstring playlistText(std::string bytes, bool utf8) {
+    if (bytes.starts_with("\xEF\xBB\xBF")) bytes.erase(0, 3);
+    if (auto text = decoded(bytes, CP_UTF8, MB_ERR_INVALID_CHARS)) return *text;
+    return (utf8 ? decoded(bytes, CP_UTF8, 0) : decoded(bytes, CP_ACP, 0)).value_or(std::wstring{});
+}
+
+// Library paths are stored in their extended form (\\?\c:\…, \\?\unc\server\share\…); playlist files use the usual one.
+std::filesystem::path usualPath(std::wstring path) {
+    if (folded(path.substr(0, 8)) == L"\\\\?\\unc\\") return L"\\\\" + path.substr(8);
+    if (path.starts_with(L"\\\\?\\")) return path.substr(4);
+    return path;
+}
+
+std::wstring libraryKey(const std::filesystem::path& path) {
+    const auto text = path.wstring();
+    if (text.starts_with(L"\\\\?\\")) return folded(text);
+    if (text.starts_with(L"\\\\")) return folded(L"\\\\?\\unc\\" + text.substr(2));
+    return folded(L"\\\\?\\" + text);
+}
+
+// `path` relative to `folder` when both are on one drive or share; Windows compares the parts without case.
+std::filesystem::path relativeTo(const std::filesystem::path& path, const std::filesystem::path& folder) {
+    if (folded(path.root_name().wstring()) != folded(folder.root_name().wstring())) return path;
+    auto p = path.begin(), f = folder.begin();
+    while (p != path.end() && f != folder.end() && folded(p->wstring()) == folded(f->wstring())) ++p, ++f;
+    std::filesystem::path relative;
+    for (; f != folder.end(); ++f)
+        if (!f->empty()) relative /= L"..";
+    for (; p != path.end(); ++p) relative /= *p;
+    return relative.empty() ? path : relative;
 }
 
 } // namespace
@@ -369,6 +461,80 @@ bool undoPlaylistChange(LibraryStore& store, const PlaylistUndo& undo) {
     return undone;
 }
 
+PlaylistChange importPlaylistFile(LibraryStore& store, const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot open playlist file: " + toUtf8(file.wstring()));
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto text = playlistText(bytes, folded(file.extension().wstring()) == L".m3u8");
+
+    // Unavailable files keep their identity, so their entries return with their root.
+    std::unordered_map<std::wstring, int64_t> files;
+    {
+        auto db = store.openReader();
+        auto rows = db.prepare("SELECT id,path FROM files WHERE kind='audio' ORDER BY available");
+        while (rows.step()) files[folded(toWide(rows.text(1)))] = rows.integer(0);
+    }
+    const auto folder = std::filesystem::absolute(file).parent_path();
+    std::vector<PlaylistEntry> entries;
+    int64_t urls = 0;
+    std::wistringstream lines(text);
+    for (std::wstring line; std::getline(lines, line);) {
+        const auto first = line.find_first_not_of(L" \t\r\uFEFF");
+        if (first == std::wstring::npos || line[first] == L'#') continue;
+        line = line.substr(first, line.find_last_not_of(L" \t\r") + 1 - first);
+        if (line.find(L"://") != std::wstring::npos) {
+            ++urls;
+            continue;
+        }
+        std::filesystem::path path(line);
+        if (path.is_relative()) path = folder / path;
+        path = path.make_preferred().lexically_normal();
+        auto found = files.find(libraryKey(path));
+        if (found == files.end()) found = files.find(folded(path.wstring()));
+        if (std::error_code error; found == files.end() && std::filesystem::exists(path, error)) {
+            try {
+                found = files.find(folded(canonicalLibraryPath(path).wstring())); // a mapped drive for a share, a link
+            } catch (const std::exception&) {
+            }
+        }
+        entries.push_back({found == files.end() ? std::nullopt : std::optional(LibraryTrackKey{found->second, 0}),
+                           toUtf8(path.wstring())});
+    }
+    auto change = savePlaylist(store, toUtf8(file.stem().wstring()), entries);
+    change.skippedUnavailable = urls;
+    return change;
+}
+
+void exportPlaylistFile(const LibraryStore& store, int64_t playlist, const std::filesystem::path& file) {
+    const auto target = std::filesystem::absolute(file);
+    std::string out = "#EXTM3U\r\n";
+    for (int64_t offset = 0;;) {
+        const auto page = playlistItems(store, playlist, offset, 500);
+        for (const auto& item : page.items) {
+            auto path = usualPath(toWide(item.path));
+            if (!item.name.empty()) path.replace_filename(toWide(item.name)); // the stored path is case-folded
+            auto title = item.title.empty() ? toUtf8(path.stem().wstring()) : item.title;
+            if (!item.artist.empty()) title = item.artist + " - " + title;
+            std::replace_if(title.begin(), title.end(), [](char c) { return c == '\r' || c == '\n'; }, ' ');
+            out += "#EXTINF:" + std::to_string(item.durationMs > 0 ? (item.durationMs + 500) / 1000 : -1) + "," + title + "\r\n";
+            out += toUtf8(relativeTo(path, target.parent_path()).wstring()) + "\r\n";
+        }
+        offset += int64_t(page.items.size());
+        if (page.items.empty() || offset >= page.total) break;
+    }
+    auto temporary = target;
+    temporary += L".tmp";
+    {
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        if (!stream.write(out.data(), std::streamsize(out.size())))
+            throw std::runtime_error("cannot write playlist file: " + toUtf8(target.wstring()));
+    }
+    if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::filesystem::remove(temporary);
+        throw std::runtime_error("cannot write playlist file: " + toUtf8(target.wstring()));
+    }
+}
+
 std::vector<PlaylistSummary> listPlaylists(const LibraryStore& store) {
     auto db = store.openReader();
     auto rows = db.prepare("SELECT p.id,p.revision,(SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id),"
@@ -393,11 +559,12 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
         "SELECT i.id,i.position,i.added,i.file_id,i.cue_index,i.source_description,coalesce(t.title,''),"
         "coalesce(t.artist,''),coalesce(t.album,''),"
         "CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate ELSE 0 END,"
-        "coalesce(t.id IS NOT NULL AND f.available=1 AND r.online=1 AND r.removed IS NULL,0) "
+        "coalesce(t.id IS NOT NULL AND f.available=1 AND r.online=1 AND r.removed IS NULL,0),"
+        "coalesce(f.path,i.source_description),coalesce(f.name,'') "
         "FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id AND t.cue_index=i.cue_index "
         "LEFT JOIN files f ON f.id=i.file_id LEFT JOIN roots r ON r.id=f.root_id "
-        "WHERE i.playlist_id=? ORDER BY i.position LIMIT ? OFFSET ?");
-    rows.bind(1, playlist).bind(2, limit).bind(3, offset);
+        "WHERE i.playlist_id=? AND i.position>=? ORDER BY i.position LIMIT ?"); // positions run 0..n-1
+    rows.bind(1, playlist).bind(2, offset).bind(3, limit);
     while (rows.step()) {
         PlaylistItem item;
         item.id = rows.integer(0);
@@ -410,6 +577,8 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
         item.album = rows.text(8);
         item.durationMs = rows.integer(9);
         item.available = rows.integer(10) != 0;
+        item.path = rows.text(11);
+        item.name = rows.text(12);
         page.items.push_back(std::move(item));
     }
     db.exec("COMMIT");

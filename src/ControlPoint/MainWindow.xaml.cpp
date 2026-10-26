@@ -15,6 +15,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <thread>
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
@@ -180,7 +181,29 @@ void MainWindow::InitializeComponent() {
     setButtonTip(QueueToggleButton(), L"Tip_Queue");
 
     populateSettings();
-    get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); });
+    const ui::PlaylistMenu playlistMenu = [this](MenuFlyout const& menu, std::function<ui::SourceFetch()> selection) {
+        extendPlaylistMenu(menu, std::move(selection));
+    };
+    get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); }, playlistMenu);
+    get_self<PlaylistView>(Playlists())
+        ->attach(server_, {[this](Command command) { submitCommand(std::move(command)); }, [this] { refreshPlaylists(); },
+                           [this](int64_t playlist) {
+                               // A playlist just imported is listed in the navigation once it is refreshed.
+                               const auto tag = playlist ? L"playlist:" + to_hstring(playlist) : hstring(L"playlists");
+                               refreshPlaylists([this, tag] { selectPage(tag); });
+                           },
+                           [this](hstring const& title, hstring const& message, bool error) {
+                               showPlaylistNotice(title, message, error);
+                           },
+                           [this] { return Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()); }, playlistMenu});
+    noticeTimer_ = DispatcherQueue().CreateTimer();
+    noticeTimer_.Interval(std::chrono::seconds(10));
+    noticeTimer_.Tick([this](auto&&, auto&&) {
+        noticeTimer_.Stop();
+        PlaylistNotice().IsOpen(false);
+    });
+    PlaylistNotice().Closed([this](auto&&, auto&&) { noticeUndo_.reset(); });
+    refreshPlaylists();
     get_self<HomeView>(Home())->attach(server_, {[this](int64_t album, hstring const& title) {
                                                      selectPage(L"albums");
                                                      get_self<LibraryView>(Library())->showAlbum(album, title);
@@ -809,11 +832,20 @@ void MainWindow::showStatusNotices(const PlaybackSnapshot& s) {
 }
 
 void MainWindow::selectPage(hstring const& tag) {
-    for (const auto& entry : Nav().MenuItems())
-        if (const auto item = entry.try_as<NavigationViewItem>(); item && unbox_value_or<hstring>(item.Tag(), L"") == tag) {
+    for (const auto& entry : Nav().MenuItems()) {
+        const auto item = entry.try_as<NavigationViewItem>();
+        if (!item) continue;
+        if (unbox_value_or<hstring>(item.Tag(), L"") == tag) {
             Nav().SelectedItem(item);
             return;
         }
+        for (const auto& child : item.MenuItems())
+            if (unbox_value_or<hstring>(child.as<NavigationViewItem>().Tag(), L"") == tag) {
+                item.IsExpanded(true);
+                Nav().SelectedItem(child);
+                return;
+            }
+    }
 }
 
 // Home's "View all" opens the full list in the library pages; Back returns to Home.
@@ -901,7 +933,14 @@ void MainWindow::showPage(hstring const& tag) {
     auto view = get_self<LibraryView>(Library());
     if (library) view->show(tag, PlaceholderTitle().Text());
     else view->hide();
-    const bool placeholder = !library && tag != L"settings" && tag != L"home";
+    const std::wstring_view page(tag);
+    const bool playlists = page == L"playlists" || page.starts_with(L"playlist:");
+    Playlists().Visibility(playlists ? Visibility::Visible : Visibility::Collapsed);
+    auto playlistView = get_self<PlaylistView>(Playlists());
+    if (page == L"playlists") playlistView->showAll();
+    else if (playlists) playlistView->showPlaylist(std::stoll(std::wstring(page.substr(9))));
+    else playlistView->hide();
+    const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") {
         refreshRoots();
@@ -1509,41 +1548,28 @@ void MainWindow::OnQueueClearClick(Windows::Foundation::IInspectable const&, Rou
 
 winrt::fire_and_forget MainWindow::OnQueueSaveClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
-    ContentDialog dialog;
-    dialog.XamlRoot(ContentLayout().XamlRoot());
-    dialog.Title(box_value(tr(L"Queue_SaveTitle")));
-    TextBox name;
-    name.Text(tr(L"Queue_DefaultName"));
-    dialog.Content(name);
-    dialog.PrimaryButtonText(tr(L"Queue_SavePrimary"));
-    dialog.CloseButtonText(tr(L"Queue_Close"));
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || !server_) co_return;
-    const auto text = name.Text();
-    const auto value = toUtf8(std::wstring_view(text.c_str(), text.size()));
+    if (!server_) co_return;
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    wchar_t date[32] = {};
+    swprintf_s(date, L"%04u-%02u-%02u %02u:%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute);
+    const auto name = toUtf8(std::wstring(tr(L"Queue_DefaultName")) + L" " + date);
     auto server = server_;
     auto weak = get_weak();
     auto dispatcher = DispatcherQueue();
     co_await resume_background();
+    std::optional<PlaylistChange> change;
     try {
-        server->saveQueueAsPlaylist(value);
-        dispatcher.TryEnqueue([weak] {
-            if (auto self = weak.get()) {
-                self->ErrorBar().Title(tr(L"Queue_Saved"));
-                self->ErrorBar().Message(L"");
-                self->ErrorBar().Severity(InfoBarSeverity::Success);
-                self->ErrorBar().IsOpen(true);
-            }
-        });
-    } catch (const std::exception&) {
-        dispatcher.TryEnqueue([weak] {
-            if (auto self = weak.get()) {
-                self->ErrorBar().Title(tr(L"Queue_SaveFailed"));
-                self->ErrorBar().Message(L"");
-                self->ErrorBar().Severity(InfoBarSeverity::Error);
-                self->ErrorBar().IsOpen(true);
-            }
-        });
+        change = server->saveQueueAsPlaylist(name);
+    } catch (const std::exception& e) {
+        camel::log::warn("save queue as playlist: %s", e.what());
     }
+    dispatcher.TryEnqueue([weak, change] {
+        auto self = weak.get();
+        if (!self) return;
+        if (change) self->showPlaylistChange(*change, true);
+        else self->showPlaylistNotice(tr(L"Queue_SaveFailed"), {}, true);
+    });
 }
 
 void MainWindow::OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, Input::DoubleTappedRoutedEventArgs const&) {
@@ -1566,6 +1592,347 @@ void MainWindow::OnQueueKeyDown(Windows::Foundation::IInspectable const&, Input:
     if (e.Key() != Windows::System::VirtualKey::Delete || QueueList().SelectedItems().Size() == 0) return;
     e.Handled(true);
     removeSelectedQueueEntries();
+}
+
+void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
+    const auto element = sender.as<FrameworkElement>();
+    queueMenuItem_ = element.DataContext();
+    if (!queueMenuItem_) return;
+    if (!queueMenu_) {
+        queueMenu_ = MenuFlyout();
+        extendPlaylistMenu(queueMenu_, [this]() -> ui::SourceFetch {
+            // The selected entries in queue order, or the right-clicked one when it is not selected.
+            std::vector<PlaylistSource> sources;
+            const auto add = [&](Windows::Foundation::IInspectable const& item) {
+                const auto path = item.as<CamelPlayer::QueueItem>().Path();
+                sources.push_back({PlaylistSource::Kind::Path, 0, {}, toUtf8(std::wstring_view(path.c_str(), path.size()))});
+            };
+            uint32_t clicked = 0;
+            bool selected = false;
+            if (queueItems_->IndexOf(queueMenuItem_, clicked))
+                for (const auto& range : QueueList().SelectedRanges())
+                    selected = selected || (clicked >= uint32_t(range.FirstIndex()) && clicked <= uint32_t(range.LastIndex()));
+            if (!selected) {
+                add(queueMenuItem_);
+            } else {
+                for (const auto& range : QueueList().SelectedRanges())
+                    for (auto i = range.FirstIndex(); i <= range.LastIndex(); ++i) add(queueItems_->GetAt(uint32_t(i)));
+            }
+            return [sources] { return sources; };
+        });
+        queueMenu_.Items().RemoveAt(0); // the separator before the playlist entries
+    }
+    Primitives::FlyoutShowOptions options;
+    if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
+    queueMenu_.ShowAt(element, options);
+    e.Handled(true);
+}
+
+void MainWindow::extendPlaylistMenu(MenuFlyout const& menu, std::function<ui::SourceFetch()> selection) {
+    menu.Items().Append(MenuFlyoutSeparator());
+    MenuFlyoutItem create;
+    create.Text(tr(L"Library_MenuCreatePlaylist"));
+    FontIcon createIcon;
+    createIcon.Glyph(L"\xE8F4");
+    create.Icon(createIcon);
+    create.Click([this, selection](auto&&, auto&&) { runPlaylistAction(selection(), std::nullopt, {}); });
+    menu.Items().Append(create);
+    MenuFlyoutSubItem add;
+    add.Text(tr(L"Library_MenuAddToPlaylist"));
+    FontIcon addIcon;
+    addIcon.Glyph(L"\xE90B");
+    add.Icon(addIcon);
+    menu.Items().Append(add);
+    menu.Opening([this, weakAdd = make_weak(add), selection](auto&&, auto&&) {
+        const auto add = weakAdd.get();
+        if (!add) return;
+        add.Items().Clear();
+        for (const auto& playlist : playlists_) {
+            MenuFlyoutItem entry;
+            entry.Text(ui::utf8(playlist.name));
+            entry.Click([this, selection, id = playlist.id](auto&&, auto&&) { runPlaylistAction(selection(), id, {}); });
+            add.Items().Append(entry);
+        }
+        if (!playlists_.empty()) add.Items().Append(MenuFlyoutSeparator());
+        MenuFlyoutItem create;
+        create.Text(tr(L"Library_MenuNewPlaylist"));
+        create.Click([this, selection](auto&&, auto&&) { askNewPlaylist(selection()); });
+        add.Items().Append(create);
+    });
+}
+
+void MainWindow::runPlaylistAction(ui::SourceFetch fetch, std::optional<int64_t> playlist, std::string name) {
+    if (!server_ || !fetch) return;
+    auto weak = get_weak();
+    auto dispatcher = DispatcherQueue();
+    std::thread([weak, dispatcher, server = server_, fetch = std::move(fetch), playlist, name = std::move(name)] {
+        std::vector<PlaylistSource> sources;
+        std::optional<SelectionPreview> preview;
+        try {
+            sources = fetch();
+            preview = sources.empty() ? SelectionPreview{} : server->previewSelection(sources);
+        } catch (const std::exception& e) {
+            camel::log::warn("playlist selection: %s", e.what());
+        }
+        dispatcher.TryEnqueue([weak, sources = std::move(sources), preview, playlist, name] {
+            auto self = weak.get();
+            if (!self) return;
+            if (!preview) self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
+            else if (preview->tracks == 0) self->showPlaylistNotice(tr(L"Playlist_NothingAdded"), tr(L"Playlist_NothingAddedText"), false);
+            else self->applyPlaylistAction(sources, *preview, playlist, name);
+        });
+    }).detach();
+}
+
+winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSource> sources, SelectionPreview preview,
+                                                       std::optional<int64_t> playlist, std::string name) {
+    auto strong = get_strong();
+    if (preview.tracks > 1000) {
+        ContentDialog dialog;
+        dialog.XamlRoot(ContentLayout().XamlRoot());
+        dialog.Title(box_value(tr(L"Playlist_ConfirmTitle")));
+        std::wstring count = std::to_wstring(preview.tracks);
+        for (auto at = int64_t(count.size()) - 3; at > 0; at -= 3) count.insert(size_t(at), L",");
+        const int64_t minutes = preview.durationMs / 60'000;
+        const std::wstring length =
+            minutes < 24 * 60 ? ui::formatTime(double(preview.durationMs) / 1000.0)
+                              : std::wstring(ui::format(L"Home_DaysHours", {std::to_wstring(minutes / (24 * 60)),
+                                                                            std::to_wstring(minutes / 60 % 24)}));
+        dialog.Content(box_value(ui::format(L"Playlist_ConfirmText", {count, length})));
+        dialog.PrimaryButtonText(tr(playlist ? L"Playlist_ConfirmAdd" : L"Playlist_ConfirmCreate"));
+        dialog.CloseButtonText(tr(L"Playlist_Cancel"));
+        dialog.DefaultButton(ContentDialogButton::Primary);
+        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    }
+    auto server = server_;
+    auto weak = get_weak();
+    auto dispatcher = DispatcherQueue();
+    co_await resume_background();
+    std::optional<PlaylistChange> change;
+    try {
+        change = playlist ? server->addToPlaylist(*playlist, std::nullopt, sources) : server->createPlaylist(name, sources);
+    } catch (const std::exception& e) {
+        camel::log::warn("playlist change: %s", e.what());
+    }
+    dispatcher.TryEnqueue([weak, change, created = !playlist] {
+        auto self = weak.get();
+        if (!self) return;
+        if (change) self->showPlaylistChange(*change, created);
+        else self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
+    });
+}
+
+winrt::fire_and_forget MainWindow::askNewPlaylist(ui::SourceFetch fetch) {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    dialog.XamlRoot(ContentLayout().XamlRoot());
+    dialog.Title(box_value(tr(L"Playlist_NewTitle")));
+    TextBox name;
+    name.PlaceholderText(tr(L"Playlist_NamePlaceholder"));
+    dialog.Content(name);
+    dialog.PrimaryButtonText(tr(L"Playlist_ConfirmCreate"));
+    dialog.CloseButtonText(tr(L"Playlist_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    const auto text = name.Text();
+    runPlaylistAction(std::move(fetch), std::nullopt, toUtf8(std::wstring_view(text.c_str(), text.size())));
+}
+
+void MainWindow::showPlaylistChange(const PlaylistChange& change, bool created) {
+    std::wstring message(ui::format(L"Library_Tracks", {std::to_wstring(change.added)}));
+    if (const auto skipped = change.skippedUnavailable + change.skippedDuplicates + change.skippedExisting)
+        message += L" · " + std::wstring(ui::format(L"Playlist_Skipped", {std::to_wstring(skipped)}));
+    const std::wstring name(ui::utf8(change.name));
+    if (!created && change.added == 0)
+        showPlaylistNotice(ui::format(L"Playlist_NothingAddedTo", {name}), hstring(message), false, std::nullopt, change.playlist);
+    else
+        showPlaylistNotice(ui::format(created ? L"Playlist_Created" : L"Playlist_Added", {name}), hstring(message), false,
+                           change.undo, change.playlist);
+    get_self<PlaylistView>(Playlists())->reload(change.playlist);
+    if (created) refreshPlaylists([this, id = change.playlist] { renameInNavigation(id); });
+    else refreshPlaylists();
+}
+
+void MainWindow::showPlaylistNotice(hstring const& title, hstring const& message, bool error, std::optional<PlaylistUndo> undo,
+                                    int64_t playlist) {
+    auto bar = PlaylistNotice();
+    bar.IsOpen(false);
+    bar.Title(title);
+    bar.Message(message);
+    bar.Severity(error ? InfoBarSeverity::Error : InfoBarSeverity::Success);
+    StackPanel actions;
+    actions.Orientation(Orientation::Horizontal);
+    actions.Spacing(8);
+    actions.Margin({0, 0, 0, 12});
+    if (playlist) {
+        HyperlinkButton open;
+        open.Content(box_value(tr(L"Playlist_Open")));
+        open.Click([this, playlist](auto&&, auto&&) {
+            PlaylistNotice().IsOpen(false);
+            selectPage(L"playlist:" + to_hstring(playlist));
+        });
+        actions.Children().Append(open);
+    }
+    if (undo && (undo->created || !undo->items.empty())) {
+        Button button;
+        button.Content(box_value(tr(L"Playlist_Undo")));
+        button.Click([this](auto&&, auto&&) { undoPlaylistNotice(); });
+        actions.Children().Append(button);
+    }
+    if (actions.Children().Size()) bar.Content(actions);
+    else bar.Content(nullptr);
+    bar.IsOpen(true);
+    noticeUndo_ = undo; // after IsOpen: reopening a closed notice raises Closed for the previous one
+    noticeTimer_.Stop();
+    noticeTimer_.Start();
+}
+
+void MainWindow::undoPlaylistNotice() {
+    if (!noticeUndo_ || !server_) return;
+    const auto undo = *noticeUndo_;
+    noticeUndo_.reset();
+    PlaylistNotice().IsOpen(false);
+    auto weak = get_weak();
+    auto dispatcher = DispatcherQueue();
+    std::thread([weak, dispatcher, server = server_, undo] {
+        bool undone = false;
+        try {
+            undone = server->undoPlaylistChange(undo);
+        } catch (const std::exception& e) {
+            camel::log::warn("playlist undo: %s", e.what());
+        }
+        dispatcher.TryEnqueue([weak, undo, undone] {
+            auto self = weak.get();
+            if (!self) return;
+            self->showPlaylistNotice(tr(undone ? L"Playlist_Undone" : L"Playlist_UndoFailed"), {}, !undone);
+            self->refreshPlaylists();
+            auto view = get_self<PlaylistView>(self->Playlists());
+            if (undone && undo.created && view->shown() == undo.playlist) self->selectPage(L"playlists");
+            else view->reload(undo.playlist);
+        });
+    }).detach();
+}
+
+winrt::fire_and_forget MainWindow::refreshPlaylists(std::function<void()> then) {
+    auto strong = get_strong();
+    if (!server_) co_return;
+    auto server = server_;
+    auto weak = get_weak();
+    auto dispatcher = DispatcherQueue();
+    co_await resume_background();
+    std::vector<PlaylistSummary> list;
+    try {
+        list = server->playlists();
+    } catch (const std::exception& e) {
+        camel::log::warn("playlists: %s", e.what());
+        co_return;
+    }
+    dispatcher.TryEnqueue([weak, list = std::move(list), then] {
+        auto self = weak.get();
+        if (!self) return;
+        self->playlists_ = list;
+        self->showPlaylistsInNavigation();
+        if (then) then();
+    });
+}
+
+void MainWindow::showPlaylistsInNavigation() {
+    const auto children = PlaylistsNav().MenuItems();
+    const auto tagOf = [](const PlaylistSummary& p) { return L"playlist:" + to_hstring(p.id); };
+    bool same = children.Size() == playlists_.size();
+    for (uint32_t i = 0; same && i < children.Size(); ++i)
+        same = unbox_value_or<hstring>(children.GetAt(i).as<NavigationViewItem>().Tag(), L"") == tagOf(playlists_[i]);
+    if (same) {
+        for (uint32_t i = 0; i < children.Size(); ++i)
+            children.GetAt(i).as<NavigationViewItem>().Content(box_value(ui::utf8(playlists_[i].name)));
+        return;
+    }
+    navUpdating_ = true;
+    children.Clear();
+    for (const auto& playlist : playlists_) {
+        NavigationViewItem item;
+        item.Content(box_value(ui::utf8(playlist.name)));
+        item.Tag(box_value(tagOf(playlist)));
+        FontIcon icon;
+        icon.Glyph(L"\xE90B");
+        item.Icon(icon);
+        children.Append(item);
+        if (shownTag_ == tagOf(playlist)) Nav().SelectedItem(item);
+    }
+    navUpdating_ = false;
+}
+
+void MainWindow::renameInNavigation(int64_t playlist) {
+    if (!Nav().IsPaneOpen() || Nav().DisplayMode() != NavigationViewDisplayMode::Expanded) return;
+    NavigationViewItem item{nullptr};
+    for (const auto& child : PlaylistsNav().MenuItems())
+        if (unbox_value_or<hstring>(child.as<NavigationViewItem>().Tag(), L"") == L"playlist:" + to_hstring(playlist))
+            item = child.as<NavigationViewItem>();
+    if (!item) return;
+    PlaylistsNav().IsExpanded(true);
+    // The box sits in a flyout beside the item: inside the item, Enter would also open the playlist.
+    const auto name = unbox_value_or<hstring>(item.Content(), L"");
+    TextBox box;
+    box.Text(name);
+    box.MinWidth(240);
+    Flyout flyout;
+    flyout.Content(box);
+    flyout.Placement(Primitives::FlyoutPlacementMode::RightEdgeAlignedTop);
+    auto cancelled = std::make_shared<bool>(false);
+    box.KeyDown([cancelled, weakFlyout = make_weak(flyout)](auto&&, Input::KeyRoutedEventArgs const& e) {
+        if (e.Key() != Windows::System::VirtualKey::Enter && e.Key() != Windows::System::VirtualKey::Escape) return;
+        e.Handled(true);
+        *cancelled = e.Key() == Windows::System::VirtualKey::Escape;
+        if (const auto flyout = weakFlyout.get()) flyout.Hide();
+    });
+    flyout.Opened([weakBox = make_weak(box)](auto&&, auto&&) {
+        if (const auto box = weakBox.get()) {
+            box.Focus(FocusState::Programmatic);
+            box.SelectAll();
+        }
+    });
+    flyout.Closed([this, playlist, name, cancelled, weakBox = make_weak(box)](auto&&, auto&&) {
+        const auto box = weakBox.get();
+        const hstring text = box ? box.Text() : name;
+        if (*cancelled || text.empty() || text == name || !server_) return;
+        PlaylistEdit edit;
+        edit.kind = PlaylistEdit::Kind::Rename;
+        edit.playlist = playlist;
+        edit.name = toUtf8(std::wstring_view(text.c_str(), text.size()));
+        auto weak = get_weak();
+        auto dispatcher = DispatcherQueue();
+        std::thread([weak, dispatcher, server = server_, edit] {
+            try {
+                server->editPlaylist(edit);
+            } catch (const std::exception& e) {
+                camel::log::warn("playlist rename: %s", e.what());
+            }
+            dispatcher.TryEnqueue([weak, playlist = edit.playlist] {
+                if (auto self = weak.get()) {
+                    self->refreshPlaylists();
+                    get_self<PlaylistView>(self->Playlists())->reload(playlist);
+                }
+            });
+        }).detach();
+    });
+    // An item under a collapsed Playlists entry is created by expanding it; a flyout needs it loaded.
+    const auto show = [flyout, weakItem = make_weak(item)] {
+        const auto item = weakItem.get();
+        if (!item || !item.IsLoaded()) return;
+        try {
+            flyout.ShowAt(item);
+        } catch (const hresult_error& e) {
+            camel::log::warn("playlist rename box: 0x%08x", uint32_t(e.code()));
+        }
+    };
+    if (item.IsLoaded()) show();
+    else {
+        auto token = std::make_shared<event_token>();
+        *token = item.Loaded([show, token, weakItem = make_weak(item)](auto&&, auto&&) {
+            if (const auto item = weakItem.get()) item.Loaded(*token);
+            show();
+        });
+    }
 }
 
 void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsCompletedEventArgs const&) {
@@ -1621,6 +1988,7 @@ void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,
 }
 
 void MainWindow::OnNavSelectionChanged(NavigationView const&, NavigationViewSelectionChangedEventArgs const& e) {
+    if (navUpdating_) return;
     if (e.IsSettingsSelected()) {
         showPage(L"settings");
         return;
