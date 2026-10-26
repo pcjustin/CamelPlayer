@@ -151,14 +151,14 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
     out.overview.artists = db.scalar(artists + "SELECT COUNT(DISTINCT name) FROM a").value_or(0);
 
     auto tracks = db.prepare(totals + "SELECT e.file_id,coalesce(t.title,''),coalesce(t.artist,''),"
-                             "coalesce(t.album,''),e.plays,e.ms," + available + " FROM e "
+                             "coalesce(t.album,''),e.plays,e.ms," + available + ",f.path,coalesce(f.name,'') FROM e "
                              "LEFT JOIN tracks t ON t.file_id=e.file_id "
                              "JOIN files f ON f.id=e.file_id JOIN roots r ON r.id=f.root_id" + order +
                              ",e.file_id LIMIT ?");
     tracks.bind(1, query.topLimit);
     while (tracks.step())
         out.tracks.push_back({{tracks.integer(0)}, tracks.text(1), tracks.text(2), tracks.text(3), tracks.integer(4),
-                              tracks.integer(5), tracks.integer(6) != 0});
+                              tracks.integer(5), tracks.integer(6) != 0, tracks.text(7), tracks.text(8)});
 
     auto albums = db.prepare(totals + "SELECT al.id,coalesce(al.title,''),coalesce(al.album_artist,''),SUM(e.plays) plays,"
                              "SUM(e.ms) ms FROM e JOIN tracks t ON t.file_id=e.file_id "
@@ -184,14 +184,14 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
     out.historyTotal = db.scalar("SELECT COUNT(*) FROM play_events e" + where).value_or(0);
     auto history = db.prepare("SELECT e.id,e.file_id,e.started,e.utc_offset,e.heard_ms,e.counted,"
                               "coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,'')," + available +
-                              " FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id "
+                              ",f.path,coalesce(f.name,'') FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id "
                               "JOIN files f ON f.id=e.file_id JOIN roots r ON r.id=f.root_id" + where +
                               " ORDER BY e.started DESC,e.id DESC LIMIT ? OFFSET ?");
     history.bind(1, query.historyLimit).bind(2, query.historyOffset);
     while (history.step())
         out.history.push_back({history.integer(0), {history.integer(1)}, history.integer(2), int32_t(history.integer(3)),
                                history.integer(4), history.integer(5) != 0, history.text(6), history.text(7),
-                               history.text(8), history.integer(9) != 0});
+                               history.text(8), history.integer(9) != 0, history.text(10), history.text(11)});
     db.exec("COMMIT");
     return out;
 }

@@ -66,35 +66,35 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Style="{StaticResource StatTileStyle}">
+                <Border Style="{StaticResource StatTileStyle}" Tag="today" Tapped="OnStatTileTapped">
                     <StackPanel>
                         <TextBlock x:Uid="Home_Today" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock x:Name="TodayTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
                         <TextBlock x:Name="TodayPlays" Style="{StaticResource CaptionTextBlockStyle}" />
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="1" Style="{StaticResource StatTileStyle}">
+                <Border Grid.Column="1" Style="{StaticResource StatTileStyle}" Tag="week" Tapped="OnStatTileTapped">
                     <StackPanel>
                         <TextBlock x:Uid="Home_Week" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock x:Name="WeekTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
                         <TextBlock x:Name="WeekPlays" Style="{StaticResource CaptionTextBlockStyle}" />
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="2" Style="{StaticResource StatTileStyle}">
+                <Border Grid.Column="2" Style="{StaticResource StatTileStyle}" Tag="month" Tapped="OnStatTileTapped">
                     <StackPanel>
                         <TextBlock x:Uid="Home_Month" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock x:Name="MonthTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
                         <TextBlock x:Name="MonthPlays" Style="{StaticResource CaptionTextBlockStyle}" />
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="3" Style="{StaticResource StatTileStyle}">
+                <Border Grid.Column="3" Style="{StaticResource StatTileStyle}" Tag="year" Tapped="OnStatTileTapped">
                     <StackPanel>
                         <TextBlock x:Uid="Home_Year" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock x:Name="YearTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
                         <TextBlock x:Name="YearPlays" Style="{StaticResource CaptionTextBlockStyle}" />
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="4" Style="{StaticResource StatTileStyle}">
+                <Border Grid.Column="4" Style="{StaticResource StatTileStyle}" Tag="all" Tapped="OnStatTileTapped">
                     <StackPanel>
                         <TextBlock x:Uid="Home_AllTime" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock x:Name="AllTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />

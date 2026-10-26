@@ -19,6 +19,7 @@ struct HomeView : HomeViewT<HomeView> {
         std::function<void(int64_t album, hstring const& title)> openAlbum;
         std::function<void(hstring const& artist)> openArtist;
         std::function<void(hstring const& list)> viewAll; // played, added, topAlbums or topArtists
+        std::function<void(hstring const& period)> openStats; // today, week, month, year or all
     };
     void attach(std::shared_ptr<camel::server::IServer> server, Handlers handlers);
     // Rereads totals and rows; called whenever Home is shown.
@@ -27,6 +28,7 @@ struct HomeView : HomeViewT<HomeView> {
     void OnAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnViewAllClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnStatTileTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const&);
     void OnRowSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnCoverLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCoverUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

@@ -32,6 +32,7 @@
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
+#include "StatisticsView.xaml.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -208,15 +209,18 @@ void MainWindow::InitializeComponent() {
     });
     PlaylistNotice().Closed([this](auto&&, auto&&) { noticeUndo_.reset(); });
     refreshPlaylists();
-    get_self<HomeView>(Home())->attach(server_, {[this](int64_t album, hstring const& title) {
-                                                     selectPage(L"albums");
-                                                     get_self<LibraryView>(Library())->showAlbum(album, title);
-                                                 },
-                                                 [this](hstring const& artist) {
-                                                     selectPage(L"albums");
-                                                     get_self<LibraryView>(Library())->showArtist(artist);
-                                                 },
-                                                 [this](hstring const& list) { viewAll(list); }});
+    const auto openAlbum = [this](int64_t album, hstring const& title) {
+        selectPage(L"albums");
+        get_self<LibraryView>(Library())->showAlbum(album, title);
+    };
+    const auto openArtist = [this](hstring const& artist) {
+        selectPage(L"albums");
+        get_self<LibraryView>(Library())->showArtist(artist);
+    };
+    get_self<HomeView>(Home())->attach(server_, {openAlbum, openArtist, [this](hstring const& list) { viewAll(list); },
+                                                 [this](hstring const& period) { openStats(period); }});
+    get_self<StatisticsView>(Stats())->attach(server_, {[this](Command command) { submitCommand(std::move(command)); },
+                                                        openAlbum, openArtist});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     QueueList().ItemsSource(*queueItems_);
@@ -926,6 +930,7 @@ void MainWindow::viewAll(hstring const& list) {
     };
     Nav().SelectedItem(nullptr);
     Home().Visibility(Visibility::Collapsed);
+    Stats().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     auto view = get_self<LibraryView>(Library());
     const auto albums = [unknown](const LibraryAlbumPage& page) {
@@ -979,10 +984,25 @@ void MainWindow::viewAll(hstring const& list) {
     }
 }
 
+// Home's listening tiles open the statistics page on their period.
+void MainWindow::openStats(hstring const& period) {
+    using Range = StatisticsView::Range;
+    const auto range = period == L"today" ? Range::Today
+                       : period == L"week" ? Range::ThisWeek
+                       : period == L"month" ? Range::ThisMonth
+                       : period == L"year" ? Range::ThisYear
+                                           : Range::AllTime;
+    selectPage(L"stats");
+    get_self<StatisticsView>(Stats())->show(range);
+}
+
 void MainWindow::showPage(hstring const& tag) {
     shownTag_ = tag;
     Home().Visibility(tag == L"home" ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"home") get_self<HomeView>(Home())->refresh();
+    Stats().Visibility(tag == L"stats" ? Visibility::Visible : Visibility::Collapsed);
+    if (tag == L"stats") get_self<StatisticsView>(Stats())->show(StatisticsView::Range::Last30Days);
+    else get_self<StatisticsView>(Stats())->hide();
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
                          tag == L"years" || tag == L"tracks" || tag == L"folders";
@@ -997,7 +1017,7 @@ void MainWindow::showPage(hstring const& tag) {
     if (page == L"playlists") playlistView->showAll();
     else if (playlists) playlistView->showPlaylist(std::stoll(std::wstring(page.substr(9))));
     else playlistView->hide();
-    const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home";
+    const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home" && tag != L"stats";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") {
         refreshRoots();
@@ -1430,6 +1450,7 @@ void MainWindow::showSearchResults(hstring const& query) {
     SettingsPanel().Visibility(Visibility::Collapsed);
     PlaceholderPanel().Visibility(Visibility::Collapsed);
     Home().Visibility(Visibility::Collapsed);
+    Stats().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
 }
@@ -2170,7 +2191,7 @@ void MainWindow::OnArtistLinkClick(Windows::Foundation::IInspectable const&, Rou
     const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                       [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (current == snapshot.queue.entries.end() || current->artist.empty()) return;
-    Nav().SelectedItem(Nav().MenuItems().GetAt(1));
+    selectPage(L"albums");
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showArtist(ui::utf8(current->artist));
 }

@@ -334,4 +334,35 @@
   <data name="Hotkey_Taken" xml:space="preserve"><value>Another program uses this combination; choose another one.</value></data>
   <data name="Settings_WindowKeys.Text" xml:space="preserve"><value>While CamelPlayer is in front</value></data>
   <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space play / pause · Ctrl+→ next track · Ctrl+← previous track · Ctrl+Shift+→ forward 10 s · Ctrl+Shift+← back 10 s. They do nothing while you type in a text box or a dialog or menu is open.</value></data>
+  <data name="Nav_Stats.Content" xml:space="preserve"><value>Statistics</value></data>
+  <data name="Stats_Title.Text" xml:space="preserve"><value>Statistics</value></data>
+  <data name="Stats_ResetAll.Content" xml:space="preserve"><value>Reset all statistics…</value></data>
+  <data name="Stats_ListeningTime.Text" xml:space="preserve"><value>Listening time</value></data>
+  <data name="Stats_Plays.Text" xml:space="preserve"><value>Plays</value></data>
+  <data name="Stats_Tracks.Text" xml:space="preserve"><value>Tracks</value></data>
+  <data name="Stats_Albums.Text" xml:space="preserve"><value>Albums</value></data>
+  <data name="Stats_Artists.Text" xml:space="preserve"><value>Artists</value></data>
+  <data name="Stats_Chart.Text" xml:space="preserve"><value>Listening time</value></data>
+  <data name="Stats_Top.Text" xml:space="preserve"><value>Most played</value></data>
+  <data name="Stats_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>The file is missing or offline</value></data>
+  <data name="Stats_Last7Days" xml:space="preserve"><value>Last 7 days</value></data>
+  <data name="Stats_Last30Days" xml:space="preserve"><value>Last 30 days</value></data>
+  <data name="Stats_ThisYear" xml:space="preserve"><value>This year</value></data>
+  <data name="Stats_AllTime" xml:space="preserve"><value>All time</value></data>
+  <data name="Stats_Custom" xml:space="preserve"><value>Custom range</value></data>
+  <data name="Stats_ByPlays" xml:space="preserve"><value>By plays</value></data>
+  <data name="Stats_ByTime" xml:space="preserve"><value>By listening time</value></data>
+  <data name="Stats_ByDay" xml:space="preserve"><value>By day</value></data>
+  <data name="Stats_ByWeek" xml:space="preserve"><value>By week</value></data>
+  <data name="Stats_ByMonth" xml:space="preserve"><value>By month</value></data>
+  <data name="Stats_TopTracks" xml:space="preserve"><value>Tracks</value></data>
+  <data name="Stats_TopAlbums" xml:space="preserve"><value>Albums</value></data>
+  <data name="Stats_TopArtists" xml:space="preserve"><value>Artists</value></data>
+  <data name="Stats_History" xml:space="preserve"><value>History ({0} plays)</value></data>
+  <data name="Stats_ResetSelected" xml:space="preserve"><value>Reset statistics of the selected tracks…</value></data>
+  <data name="Stats_ResetSelectedTitle" xml:space="preserve"><value>Reset statistics?</value></data>
+  <data name="Stats_ResetSelectedText" xml:space="preserve"><value>The plays of {0} tracks are deleted and their counts start from zero. This cannot be undone.</value></data>
+  <data name="Stats_ResetAllTitle" xml:space="preserve"><value>Reset all statistics?</value></data>
+  <data name="Stats_ResetAllText" xml:space="preserve"><value>Every recorded play is deleted and all counts start from zero. This cannot be undone.</value></data>
+  <data name="Stats_ResetPrimary" xml:space="preserve"><value>Reset</value></data>
 </root>

@@ -190,6 +190,10 @@ void HomeView::OnViewAllClick(Windows::Foundation::IInspectable const& sender, R
     if (handlers_.viewAll) handlers_.viewAll(unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L""));
 }
 
+void HomeView::OnStatTileTapped(Windows::Foundation::IInspectable const& sender, Input::TappedRoutedEventArgs const&) {
+    if (handlers_.openStats) handlers_.openStats(unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L""));
+}
+
 void HomeView::OnCoverLoaded(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
     const auto image = sender.as<Image>();
     const auto value = image.DataContext().try_as<CamelPlayer::BrowseItem>();

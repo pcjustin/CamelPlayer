@@ -175,6 +175,7 @@ TEST_F(PlayStatisticsTest, RankingsCreditEveryArtistAndFollowTheMetric) {
     EXPECT_EQ(byPlays.tracks[0].track, (LibraryTrackKey{1}));
     EXPECT_EQ(byPlays.tracks[0].plays, 2);
     EXPECT_TRUE(byPlays.tracks[0].available);
+    EXPECT_EQ(byPlays.tracks[0].path, "c:/music/a.flac"); // to play it again
     ASSERT_EQ(byPlays.albums.size(), 1u);
     EXPECT_EQ(byPlays.albums[0].plays, 3);
     EXPECT_EQ(byPlays.albums[0].listenedMs, 500'000);
@@ -233,6 +234,7 @@ TEST_F(PlayStatisticsTest, HistoryIsNewestFirstAndMarksUnavailableTracks) {
     ASSERT_EQ(first.history.size(), 2u);
     EXPECT_EQ(first.history[0].track, (LibraryTrackKey{3}));
     EXPECT_FALSE(first.history[0].available);
+    EXPECT_EQ(first.history[0].path, "c:/music/c.flac");
     EXPECT_EQ(first.history[0].utcOffsetMinutes, 480);
     EXPECT_EQ(first.history[1].title, "Two");
     EXPECT_FALSE(first.history[1].counted);

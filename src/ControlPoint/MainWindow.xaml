@@ -53,6 +53,11 @@
             </NavigationView.AutoSuggestBox>
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Uid="Nav_Home" Tag="home" Icon="Home" />
+                <NavigationViewItem x:Uid="Nav_Stats" Tag="stats">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE9D2;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem x:Uid="Nav_Albums" Tag="albums" Icon="Library" />
                 <NavigationViewItem x:Uid="Nav_Artists" Tag="artists" Icon="People" />
                 <NavigationViewItem x:Uid="Nav_Composers" Tag="composers" Icon="Edit" />
@@ -73,6 +78,7 @@
             <Grid Padding="32,24,32,16">
 
                 <local:HomeView x:Name="Home" Visibility="Collapsed" />
+                <local:StatisticsView x:Name="Stats" Visibility="Collapsed" />
                 <local:LibraryView x:Name="Library" Visibility="Collapsed" />
                 <local:PlaylistView x:Name="Playlists" Visibility="Collapsed" />
 

@@ -84,6 +84,7 @@ struct PlayRankedTrack {
     std::string title, artist, album;
     int64_t plays = 0, listenedMs = 0;
     bool available = false;
+    std::string path, name; // the file to play again and its on-disk name
 };
 
 struct PlayRankedGroup {
@@ -106,6 +107,7 @@ struct PlayHistoryEntry {
     bool counted = false;
     std::string title, artist, album;
     bool available = false;
+    std::string path, name; // the file to play again and its on-disk name
 };
 
 struct PlayStatistics {

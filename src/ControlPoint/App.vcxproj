@@ -102,6 +102,9 @@
     <ClInclude Include="HomeView.xaml.h">
       <DependentUpon>HomeView.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="StatisticsView.xaml.h">
+      <DependentUpon>StatisticsView.xaml</DependentUpon>
+    </ClInclude>
     <ClInclude Include="PlaylistMenu.h" />
     <ClInclude Include="PlaylistCollection.h" />
     <ClInclude Include="PlaylistView.xaml.h">
@@ -113,6 +116,7 @@
     <Page Include="MainWindow.xaml" />
     <Page Include="LibraryView.xaml" />
     <Page Include="HomeView.xaml" />
+    <Page Include="StatisticsView.xaml" />
     <Page Include="PlaylistView.xaml" />
   </ItemGroup>
   <ItemGroup>
@@ -142,6 +146,9 @@
     <ClCompile Include="HomeView.xaml.cpp">
       <DependentUpon>HomeView.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="StatisticsView.xaml.cpp">
+      <DependentUpon>StatisticsView.xaml</DependentUpon>
+    </ClCompile>
     <ClCompile Include="PlaylistView.xaml.cpp">
       <DependentUpon>PlaylistView.xaml</DependentUpon>
     </ClCompile>
@@ -161,6 +168,10 @@
     <Midl Include="HomeView.idl">
       <SubType>Code</SubType>
       <DependentUpon>HomeView.xaml</DependentUpon>
+    </Midl>
+    <Midl Include="StatisticsView.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>StatisticsView.xaml</DependentUpon>
     </Midl>
     <Midl Include="PlaylistView.idl">
       <SubType>Code</SubType>

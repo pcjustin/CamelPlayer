@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+<!-- Play statistics (docs/Plan.md §7.8, §8.2). Every figure comes from the Server's recorded plays for the period. -->
+<UserControl
+    x:Class="CamelPlayer.StatisticsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CamelPlayer">
+    <UserControl.Resources>
+        <Style x:Key="TileStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16,12" />
+        </Style>
+        <Style x:Key="SectionStyle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <DataTemplate x:Key="RowTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnRowContextRequested">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="Auto" MinWidth="0" />
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" MinWidth="72" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Uid="Stats_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
+                          Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="16" Padding="0,0,16,24">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Uid="Stats_Title" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center" />
+                <ComboBox x:Name="PeriodCombo" Grid.Column="1" MinWidth="150" VerticalAlignment="Center" SelectionChanged="OnPeriodChanged" />
+                <CalendarDatePicker x:Name="FromPicker" Grid.Column="2" VerticalAlignment="Center" Visibility="Collapsed" DateChanged="OnRangeChanged" />
+                <CalendarDatePicker x:Name="ToPicker" Grid.Column="3" VerticalAlignment="Center" Visibility="Collapsed" DateChanged="OnRangeChanged" />
+                <ComboBox x:Name="MetricCombo" Grid.Column="4" MinWidth="130" VerticalAlignment="Center" SelectionChanged="OnPeriodChanged" />
+                <Button x:Uid="Stats_ResetAll" Grid.Column="5" VerticalAlignment="Center" Click="OnResetAllClick" />
+            </Grid>
+
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Style="{StaticResource TileStyle}">
+                    <StackPanel>
+                        <TextBlock x:Uid="Stats_ListeningTime" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="TimeValue" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource TileStyle}">
+                    <StackPanel>
+                        <TextBlock x:Uid="Stats_Plays" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="PlaysValue" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="2" Style="{StaticResource TileStyle}">
+                    <StackPanel>
+                        <TextBlock x:Uid="Stats_Tracks" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="TracksValue" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="3" Style="{StaticResource TileStyle}">
+                    <StackPanel>
+                        <TextBlock x:Uid="Stats_Albums" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="AlbumsValue" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="4" Style="{StaticResource TileStyle}">
+                    <StackPanel>
+                        <TextBlock x:Uid="Stats_Artists" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="ArtistsValue" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Uid="Stats_Chart" Style="{StaticResource SectionStyle}" />
+                <ComboBox x:Name="BucketCombo" Grid.Column="1" MinWidth="110" SelectionChanged="OnPeriodChanged" />
+            </Grid>
+            <Border Style="{StaticResource TileStyle}" Height="190">
+                <Grid RowSpacing="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Canvas x:Name="Chart" SizeChanged="OnChartSizeChanged" Background="Transparent" />
+                    <Grid Grid.Row="1">
+                        <TextBlock x:Name="ChartFirst" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="ChartLast" Style="{StaticResource CaptionTextBlockStyle}" HorizontalAlignment="Right"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Uid="Stats_Top" Style="{StaticResource SectionStyle}" />
+                <ComboBox x:Name="RankCombo" Grid.Column="1" MinWidth="110" SelectionChanged="OnRankChanged" />
+            </Grid>
+            <ListView x:Name="RankList" Height="420" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
+                      DoubleTapped="OnRowDoubleTapped" />
+
+            <TextBlock x:Name="HistoryHeader" Style="{StaticResource SectionStyle}" />
+            <ListView x:Name="HistoryList" Height="420" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
+                      DoubleTapped="OnRowDoubleTapped" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
