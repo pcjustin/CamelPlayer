@@ -126,6 +126,7 @@ private:
     void markAlbums(bool favorite);
     void reloadWhenIdle();
     void showAlbumFavorite(bool favorite);
+    void showAlbumFormats(const std::vector<camel::server::LibraryAlbumFormat>& formats);
     void showMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, Microsoft::UI::Xaml::FrameworkElement const& element,
                   Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const& e);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.

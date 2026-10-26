@@ -68,10 +68,18 @@ struct LibraryTrackRowPage {
     std::vector<LibraryTrackRow> tracks;
 };
 
+// One combination of format, bit depth and sample rate among an album's tracks.
+struct LibraryAlbumFormat {
+    std::string format; // as tracks.format: flac, mp3, dsd and so on
+    int64_t bitsPerSample = 0, sampleRate = 0, tracks = 0;
+    bool operator==(const LibraryAlbumFormat&) const = default;
+};
+
 struct LibraryAlbumDetail {
     uint64_t revision = 0;
     LibraryAlbum album;
-    std::vector<LibraryTrackRow> tracks; // disc, then track order
+    std::vector<LibraryTrackRow> tracks;      // disc, then track order
+    std::vector<LibraryAlbumFormat> formats; // the most common first
 };
 
 struct LibraryFolderEntry {

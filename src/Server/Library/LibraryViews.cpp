@@ -394,6 +394,12 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const Canc
                              " ORDER BY t.disc_number,t.track_number,f.path");
     rows.bind(1, id);
     while (rows.step()) detail.tracks.push_back(trackRow(rows));
+    auto formats = q.db.prepare(std::string("SELECT coalesce(t.format,''),coalesce(t.bits_per_sample,0),coalesce(t.sample_rate,0),"
+                                            "COUNT(*) FROM tracks t") +
+                                kJoins + "WHERE t.album_id=? AND" + kVisible + " GROUP BY 1,2,3 ORDER BY 4 DESC,3,2,1");
+    formats.bind(1, id);
+    while (formats.step())
+        detail.formats.push_back({formats.text(0), formats.integer(1), formats.integer(2), formats.integer(3)});
     return detail;
 }
 

@@ -63,6 +63,23 @@ hstring titleOf(const std::string& title, const std::string& file, const Texts& 
     return hstring(std::filesystem::path(camel::toWide(file)).stem().wstring());
 }
 
+// "FLAC · 24-bit / 96 kHz", "MP3 · 44.1 kHz" (a lossy file's bit depth is only its decoder's) or "DSD64".
+hstring formatLabel(const LibraryAlbumFormat& f) {
+    std::wstring name(camel::toWide(f.format));
+    std::ranges::transform(name, name.begin(), towupper);
+    if (f.format == "dsd" && f.sampleRate > 0) return hstring(L"DSD" + std::to_wstring(f.sampleRate / 44100));
+    wchar_t rate[32]{};
+    if (f.sampleRate % 1000 == 0) swprintf_s(rate, L"%lld kHz", static_cast<long long>(f.sampleRate / 1000));
+    else swprintf_s(rate, L"%.1f kHz", double(f.sampleRate) / 1000.0);
+    static constexpr std::string_view kLossy[] = {"mp3", "aac", "m4a", "ogg", "vorbis", "opus", "wma"};
+    const bool lossy = std::ranges::find(kLossy, f.format) != std::end(kLossy);
+    std::wstring text = name;
+    if (f.sampleRate <= 0) return hstring(text);
+    if (!text.empty()) text += L" · ";
+    if (!lossy && f.bitsPerSample > 0) text += std::to_wstring(f.bitsPerSample) + L"-bit / ";
+    return hstring(text + rate);
+}
+
 ui::BrowsePage albumPage(const LibraryAlbumPage& page, const Texts& texts) {
     ui::BrowsePage out{page.revision, page.total, {}};
     for (const auto& a : page.albums) {
@@ -311,6 +328,8 @@ void LibraryView::open(View view, bool push) {
     DetailCover().Source(nullptr);
     DetailCover().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     AlbumActions().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
+    AlbumFormats().Children().Clear();
+    AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
     if (push) back_.push_back(current_);
     current_ = std::move(view);
@@ -453,6 +472,7 @@ void LibraryView::loadAlbumDetail() {
             HeaderTitle().Text(orUnknown(a.title, texts));
             HeaderDetail().Text(hstring(info));
             showAlbumFavorite(a.favorite);
+            showAlbumFormats(detail->formats);
             auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
             for (const auto& t : detail->tracks) items.Append(item(albumTrackRow(t, a.discs > 1, texts)));
             detailTracks_ = std::move(detail->tracks);
@@ -752,6 +772,28 @@ void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, Rout
             return sources;
         },
         camel::toUtf8(std::wstring_view(title.c_str(), title.size())));
+}
+
+void LibraryView::showAlbumFormats(const std::vector<LibraryAlbumFormat>& formats) {
+    AlbumFormats().Children().Clear();
+    for (const auto& f : formats) {
+        const auto label = formatLabel(f);
+        if (label.empty()) continue;
+        Border badge;
+        badge.Padding({8, 2, 8, 2});
+        badge.CornerRadius({10, 10, 10, 10});
+        badge.BorderThickness({1, 1, 1, 1});
+        const auto resources = Application::Current().Resources();
+        badge.Background(resources.Lookup(box_value(L"ControlFillColorSecondaryBrush")).as<Media::Brush>());
+        badge.BorderBrush(resources.Lookup(box_value(L"ControlStrokeColorDefaultBrush")).as<Media::Brush>());
+        TextBlock text;
+        text.Text(label);
+        text.Style(resources.Lookup(box_value(L"CaptionTextBlockStyle")).as<Microsoft::UI::Xaml::Style>());
+        badge.Child(text);
+        if (formats.size() > 1) ToolTipService::SetToolTip(badge, box_value(counted(tr(L"Library_Tracks"), f.tracks)));
+        AlbumFormats().Children().Append(badge);
+    }
+    AlbumFormats().Visibility(AlbumFormats().Children().Size() ? Visibility::Visible : Visibility::Collapsed);
 }
 
 void LibraryView::showAlbumFavorite(bool favorite) {

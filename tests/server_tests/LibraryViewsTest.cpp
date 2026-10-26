@@ -220,6 +220,17 @@ TEST_F(LibraryViewsTest, SmartListsFollowPlaysFavoritesAndTheDateAdded) {
     EXPECT_TRUE(albums.albums[0].favorite);
 }
 
+TEST_F(LibraryViewsTest, AlbumDetailListsEachFormatCombinationTheMostCommonFirst) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("UPDATE tracks SET bits_per_sample=16,sample_rate=44100 WHERE id IN (1,2);"
+                    "UPDATE tracks SET bits_per_sample=24,sample_rate=96000 WHERE id=3;");
+        })
+        .get();
+    EXPECT_EQ(albumDetail(*store, 1).formats,
+              (std::vector<LibraryAlbumFormat>{{"flac", 16, 44100, 2}, {"flac", 24, 96000, 1}}));
+}
+
 TEST_F(LibraryViewsTest, AFavoriteAlbumStaysAFavoriteWhenItsTracksMoveToAnotherAlbum) {
     setAlbumFavorite(*store, {2}, true);
     store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET album_id=1 WHERE id=4"); }).get();
@@ -243,6 +254,7 @@ TEST_F(LibraryViewsTest, AlbumDetailListsTracksByDiscAndNumber) {
     EXPECT_EQ(detail.tracks[1].id, 1);
     EXPECT_EQ(detail.tracks[2].id, 3);
     EXPECT_EQ(detail.tracks[2].disc, 2);
+    EXPECT_EQ(detail.formats, (std::vector<LibraryAlbumFormat>{{"flac", 0, 1000, 3}}));
     EXPECT_THROW(albumDetail(*store, 3), std::invalid_argument); // nothing available
     EXPECT_THROW(albumDetail(*store, 99), std::invalid_argument);
 }

@@ -130,6 +130,8 @@
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <!-- Each format, bit depth and sample rate among the album's tracks (docs/Plan.md §8.2) -->
+                    <StackPanel x:Name="AlbumFormats" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0" Visibility="Collapsed" />
                     <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
                         <Button Style="{StaticResource AccentButtonStyle}" Padding="16,6">
                             <StackPanel Orientation="Horizontal" Spacing="8">
