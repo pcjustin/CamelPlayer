@@ -1296,6 +1296,24 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     EXPECT_THROW(server->submit(all), std::invalid_argument);
     all.tracks.clear();
     EXPECT_FALSE(send(all).commandError);
+
+    Command favorite = command(CommandKind::SetFavorite);
+    EXPECT_THROW(server->submit(favorite), std::invalid_argument);
+    favorite.tracks = {{file}};
+    favorite.favorite = true;
+    const auto marks = server->snapshot().queue.marks;
+    const auto marked = send(favorite);
+    EXPECT_FALSE(marked.commandError);
+    ASSERT_EQ(marked.queue.entries.size(), 1u);
+    EXPECT_TRUE(marked.queue.entries.get()[0].favorite);
+    EXPECT_EQ(marked.queue.entries.get()[0].file, file);
+    EXPECT_GT(marked.queue.marks, marks);
+    Command album = command(CommandKind::SetAlbumFavorite);
+    album.favorite = true;
+    EXPECT_THROW(server->submit(album), std::invalid_argument);
+    album.albums = {store.openReader().scalar("SELECT album_id FROM tracks").value()};
+    EXPECT_FALSE(send(album).commandError);
+    EXPECT_EQ(store.openReader().scalar("SELECT album_favorite FROM stats WHERE file_id=" + std::to_string(file)), 1);
     server.reset();
 }
 

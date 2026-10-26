@@ -21,6 +21,7 @@
                     <ColumnDefinition Width="3*" />
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" MinWidth="56" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -28,7 +29,14 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="3" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
+                            PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
+                    <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Padding="6,4" VerticalAlignment="Center"
+                            Background="Transparent" BorderThickness="0">
+                        <FontIcon Glyph="{x:Bind FavoriteGlyph, Mode=OneWay}" FontSize="14" />
+                    </Button>
+                </StackPanel>
+                <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </Grid>
         </DataTemplate>
@@ -82,6 +90,10 @@
                         <FontIcon Glyph="&#xE93C;" FontSize="40" Opacity="0.4" />
                         <Image Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
                                DataContextChanged="OnArtworkContextChanged" />
+                        <Border Visibility="{x:Bind IsFavorite, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                Margin="6" Padding="5" CornerRadius="12" Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}">
+                            <FontIcon Glyph="&#xE00B;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        </Border>
                     </Grid>
                 </Border>
                 <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
@@ -139,6 +151,10 @@
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
+                        <ToggleButton x:Name="AlbumFavoriteButton" x:Uid="Marks_AlbumFavoriteButton" Click="OnAlbumFavoriteClick"
+                                      Padding="10,6">
+                            <FontIcon x:Name="AlbumFavoriteIcon" Glyph="&#xE006;" FontSize="16" />
+                        </ToggleButton>
                     </StackPanel>
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
                 </StackPanel>

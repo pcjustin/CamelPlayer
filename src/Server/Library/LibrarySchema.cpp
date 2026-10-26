@@ -383,6 +383,8 @@ ALTER TABLE queue DROP COLUMN cue_index;
             for (const auto& sql : tracksIndexesAndTriggers) db.exec(sql);
             if (db.prepare("PRAGMA foreign_key_check").step()) throw std::runtime_error("schema v12 left a dangling reference");
         },
+        // An album is a favorite while any of its tracks carries the mark, so it follows its files through moves and rescans.
+        [](sqlite::Database& db) { db.exec("ALTER TABLE stats ADD COLUMN album_favorite INTEGER NOT NULL DEFAULT 0;"); },
     };
     return migrations;
 }

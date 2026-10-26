@@ -62,6 +62,7 @@ struct PlaylistItem {
     std::string path; // the file's current path, or the saved source for an entry outside the library
     std::string name; // the file's on-disk name, empty outside the library or before a scan records it
     bool available = false;
+    bool favorite = false;
 };
 
 struct PlaylistPage {

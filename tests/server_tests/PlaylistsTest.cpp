@@ -11,6 +11,7 @@
 #include <fstream>
 
 #include "Common/util/Text.h"
+#include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
 #include "TestUtil.h"
 
@@ -236,6 +237,15 @@ TEST_F(PlaylistsTest, ItemsPageByPositionAndListTheFilesCurrentPath) {
     EXPECT_EQ(first.items[0].path, "c:\\m\\moved\\01.flac");
     EXPECT_EQ(first.items[0].source, "c:\\m\\album\\01.flac");
     EXPECT_EQ(rest.items[0].position, 2);
+}
+
+TEST_F(PlaylistsTest, ItemsCarryTheirTracksFavoriteMark) {
+    const auto created = createPlaylist(*store, "Album", {album(1)});
+    const auto first = playlistItems(*store, created.playlist, 0, 1).items.at(0).track.value();
+    setTrackFavorite(*store, {first}, true);
+    const auto page = playlistItems(*store, created.playlist, 0, 2);
+    EXPECT_TRUE(page.items[0].favorite);
+    EXPECT_FALSE(page.items[1].favorite);
 }
 
 TEST_F(PlaylistsTest, AnM3u8ImportResolvesPathsAndKeepsOrderDuplicatesAndOutsideEntries) {

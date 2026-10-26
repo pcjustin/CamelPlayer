@@ -47,6 +47,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnQueueDragItemsCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                    Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
     void OnCoverClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlaybackFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void showPlaybackFavorite(bool favorite);
     void OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtistLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSliderValueChanged(Windows::Foundation::IInspectable const&,
@@ -135,6 +137,10 @@ private:
     uint64_t shownRevision_ = 0;
     uint64_t shownCommandId_ = 0;
     uint64_t shownQueueRevision_ = UINT64_MAX;
+    uint64_t shownQueueMarks_ = UINT64_MAX;
+    // The playing track's library file and whether the playback bar shows it as a favorite.
+    int64_t playbackFile_ = 0;
+    bool playbackFavorite_ = false;
     uint64_t shownQueueEntryId_ = UINT64_MAX;
     bool queueShownMeasured_ = false;
     winrt::com_ptr<ui::QueueCollection> queueItems_ = winrt::make_self<ui::QueueCollection>();

@@ -18,6 +18,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "TrackMarks.h"
 #include "UiText.h"
 
 using namespace winrt;
@@ -172,6 +173,8 @@ void PlaylistView::load() {
                 if (item.durationMs > 0) row.trailing = hstring(ui::formatTime(double(item.durationMs) / 1000.0));
                 row.file = item.track ? item.track->file : 0;
                 row.unavailable = !item.available;
+                row.marks = row.file != 0;
+                row.favorite = item.favorite;
                 loaded->durationMs += item.durationMs;
                 loaded->unavailable += !item.available;
                 loaded->rows.push_back(std::move(row));
@@ -416,6 +419,18 @@ void PlaylistView::OnEntryDragCompleted(ListViewBase const&, DragItemsCompletedE
     edit(std::move(change), false);
 }
 
+// Every entry of the marked files shows the change, also when the list makes its item again.
+void PlaylistView::submitMarks(Command command) {
+    std::vector<int64_t> files;
+    for (const auto& track : command.tracks) files.push_back(track.file);
+    entries_->mark(files, command.favorite);
+    if (handlers_.submit) handlers_.submit(std::move(command));
+}
+
+void PlaylistView::OnFavoriteClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    ui::rowFavoriteClicked(sender, [this](Command command) { submitMarks(std::move(command)); });
+}
+
 void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
     const auto element = sender.as<FrameworkElement>();
     menuItem_ = element.DataContext();
@@ -441,6 +456,12 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
                     if (row.file) sources.push_back({PlaylistSource::Kind::Track, 0, {row.file}, {}});
                 return [sources] { return sources; };
             });
+        ui::appendFavoriteMenu(entryMenu_, [this](bool favorite) {
+            std::vector<LibraryTrackKey> tracks;
+            for (const auto& row : selectedRows(menuItem_))
+                if (row.file && std::ranges::find(tracks, LibraryTrackKey{row.file}) == tracks.end()) tracks.push_back({row.file});
+            if (!tracks.empty()) submitMarks(ui::favoriteCommand(tracks, favorite));
+        });
     }
     Primitives::FlyoutShowOptions options;
     if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);

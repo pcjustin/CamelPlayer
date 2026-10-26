@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 25> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 27> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -89,7 +89,9 @@ constexpr Names<CommandKind, 25> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::QueueAdd, "queueAdd"},
                                                   {CommandKind::QueuePlayNext, "queuePlayNext"},
                                                   {CommandKind::QueueRemove, "queueRemove"},
-                                                  {CommandKind::QueueClear, "queueClear"}};
+                                                  {CommandKind::QueueClear, "queueClear"},
+                                                  {CommandKind::SetFavorite, "setFavorite"},
+                                                  {CommandKind::SetAlbumFavorite, "setAlbumFavorite"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
 constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
@@ -308,8 +310,10 @@ json toJson(const QueueSnapshot& q) {
     json entries = json::array();
     for (const auto& e : q.entries)
         entries.push_back({{"id", e.id}, {"source", toJson(e.source)}, {"title", e.title}, {"artist", e.artist},
-                           {"album", e.album}, {"albumId", e.albumId}, {"automatic", e.automatic}});
+                           {"album", e.album}, {"albumId", e.albumId}, {"automatic", e.automatic},
+                           {"file", e.file}, {"favorite", e.favorite}});
     return {{"revision", q.revision},
+            {"marks", q.marks},
             {"entries", entries},
             {"upcomingEntryId", q.upcomingEntryId ? json(*q.upcomingEntryId) : json(nullptr)},
             {"shuffle", q.shuffle},
@@ -319,6 +323,7 @@ json toJson(const QueueSnapshot& q) {
 QueueSnapshot queueFrom(const json& j) {
     QueueSnapshot q;
     q.revision = value<uint64_t>(j, "revision");
+    if (j.contains("marks")) q.marks = value<uint64_t>(j, "marks");
     std::vector<QueueEntry> entries;
     for (const auto& e : array(j, "entries")) {
         QueueEntry entry{value<uint64_t>(e, "id"), trackSourceFrom(field(e, "source"))};
@@ -327,6 +332,8 @@ QueueSnapshot queueFrom(const json& j) {
         if (e.contains("album")) entry.album = value<std::string>(e, "album");
         if (e.contains("albumId")) entry.albumId = value<int64_t>(e, "albumId");
         if (e.contains("automatic")) entry.automatic = value<bool>(e, "automatic");
+        if (e.contains("file")) entry.file = value<int64_t>(e, "file");
+        if (e.contains("favorite")) entry.favorite = value<bool>(e, "favorite");
         entries.push_back(std::move(entry));
     }
     q.entries = std::move(entries);
@@ -384,7 +391,9 @@ json toJson(const Command& c) {
             {"shuffle", c.shuffle ? json(*c.shuffle) : json(nullptr)},
             {"repeat", c.repeat ? json(nameOf(*c.repeat, kRepeatModes)) : json(nullptr)},
             {"tracks", tracks},
-            {"path", c.path}};
+            {"path", c.path},
+            {"favorite", c.favorite},
+            {"albums", c.albums}};
 }
 
 Command commandFromJson(const json& j) {
@@ -404,8 +413,15 @@ Command commandFromJson(const json& j) {
         return v.get<bool>();
     });
     c.repeat = optional<RepeatMode>(j, "repeat", [](const json& v) { return enumFrom(v, kRepeatModes, "repeat mode"); });
-    if (j.contains("tracks") || c.kind == CommandKind::ResetPlayStatistics) c.tracks = trackKeysFrom(j, "tracks");
+    if (j.contains("tracks") || c.kind == CommandKind::ResetPlayStatistics || c.kind == CommandKind::SetFavorite)
+        c.tracks = trackKeysFrom(j, "tracks");
     if (j.contains("path") || c.kind == CommandKind::AddLibraryRoot) c.path = value<std::string>(j, "path");
+    if (j.contains("favorite")) c.favorite = value<bool>(j, "favorite");
+    if (j.contains("albums") || c.kind == CommandKind::SetAlbumFavorite)
+        for (const auto& v : array(j, "albums")) {
+            if (!v.is_number_integer()) invalid("albums holds a non-integer");
+            c.albums.push_back(v.get<int64_t>());
+        }
     return c;
 }
 

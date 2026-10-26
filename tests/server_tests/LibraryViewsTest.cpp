@@ -11,6 +11,7 @@
 #include <random>
 
 #include "Server/Library/LibraryViews.h"
+#include "Server/Library/PlayStatistics.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -153,6 +154,38 @@ TEST_F(LibraryViewsTest, TrackRowsSortByEachColumnInEitherDirection) {
     EXPECT_EQ(page.tracks[0].durationMs, 10000);
     EXPECT_EQ(page.tracks[0].track, (LibraryTrackKey{2}));
     EXPECT_EQ(page.tracks[0].format, "flac");
+}
+
+TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
+    const auto before = browseTrackRows(*store, TrackSort::Title, false, 0, 50).revision;
+    setTrackFavorite(*store, {{3}, {4}}, true);
+    setTrackFavorite(*store, {{4}}, false);
+    const auto rows = browseTrackRows(*store, TrackSort::Title, false, 0, 50);
+    EXPECT_NE(rows.revision, before);
+    ASSERT_EQ(rows.tracks.size(), 4u);
+    EXPECT_TRUE(rows.tracks[1].favorite); // Song B
+    EXPECT_FALSE(rows.tracks[3].favorite); // Song D, cleared again
+    const auto detail = albumDetail(*store, 1);
+    ASSERT_EQ(detail.tracks.size(), 3u);
+    EXPECT_TRUE(detail.tracks[2].favorite);
+    EXPECT_FALSE(detail.tracks[0].favorite);
+    EXPECT_FALSE(detail.album.favorite);
+
+    setAlbumFavorite(*store, {1}, true);
+    EXPECT_TRUE(albumDetail(*store, 1).album.favorite);
+    const auto wall = browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 10);
+    ASSERT_EQ(wall.albums.size(), 2u);
+    EXPECT_FALSE(wall.albums[0].favorite); // Alpha
+    EXPECT_TRUE(wall.albums[1].favorite);  // Beta
+    setAlbumFavorite(*store, {1}, false);
+    EXPECT_FALSE(albumDetail(*store, 1).album.favorite);
+    EXPECT_TRUE(albumDetail(*store, 1).tracks[2].favorite); // the album mark leaves track favorites alone
+}
+
+TEST_F(LibraryViewsTest, AFavoriteAlbumStaysAFavoriteWhenItsTracksMoveToAnotherAlbum) {
+    setAlbumFavorite(*store, {2}, true);
+    store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET album_id=1 WHERE id=4"); }).get();
+    EXPECT_TRUE(albumDetail(*store, 1).album.favorite);
 }
 
 TEST_F(LibraryViewsTest, PagingRefusesAChangedRevision) {

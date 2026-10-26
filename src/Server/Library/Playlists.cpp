@@ -560,8 +560,8 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
         "coalesce(t.artist,''),coalesce(t.album,''),"
         "CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate ELSE 0 END,"
         "coalesce(t.id IS NOT NULL AND f.available=1 AND r.online=1 AND r.removed IS NULL,0),"
-        "coalesce(f.path,i.source_description),coalesce(f.name,'') "
-        "FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id "
+        "coalesce(f.path,i.source_description),coalesce(f.name,''),coalesce(s.favorite,0) "
+        "FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id LEFT JOIN stats s ON s.file_id=i.file_id "
         "LEFT JOIN files f ON f.id=i.file_id LEFT JOIN roots r ON r.id=f.root_id "
         "WHERE i.playlist_id=? AND i.position>=? ORDER BY i.position LIMIT ?"); // positions run 0..n-1
     rows.bind(1, playlist).bind(2, offset).bind(3, limit);
@@ -579,6 +579,7 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
         item.available = rows.integer(9) != 0;
         item.path = rows.text(10);
         item.name = rows.text(11);
+        item.favorite = rows.integer(12) != 0;
         page.items.push_back(std::move(item));
     }
     db.exec("COMMIT");

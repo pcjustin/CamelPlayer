@@ -123,5 +123,9 @@ struct PlayStatistics {
 PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQuery& query, const CancellationToken& token = {});
 // Deletes the plays and zeroes the counters of these tracks (all tracks when `tracks` is empty); not undoable.
 void resetPlayStatistics(LibraryStore& store, const std::vector<LibraryTrackKey>& tracks);
+// Favorites change the library revision, so listings that show them are reread.
+void setTrackFavorite(LibraryStore& store, const std::vector<LibraryTrackKey>& tracks, bool favorite);
+// Marks or clears every track of these albums; an album is a favorite while any of its tracks is marked.
+void setAlbumFavorite(LibraryStore& store, const std::vector<int64_t>& albums, bool favorite);
 
 } // namespace camel::server

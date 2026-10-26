@@ -26,6 +26,7 @@
                     <ColumnDefinition Width="3*" />
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="40" />
                     <ColumnDefinition Width="Auto" MinWidth="56" />
                 </Grid.ColumnDefinitions>
                 <FontIcon x:Uid="Playlist_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
@@ -35,7 +36,14 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
+                            PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
+                    <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Padding="6,4" VerticalAlignment="Center"
+                            Background="Transparent" BorderThickness="0">
+                        <FontIcon Glyph="{x:Bind FavoriteGlyph, Mode=OneWay}" FontSize="14" />
+                    </Button>
+                </StackPanel>
+                <TextBlock Grid.Column="5" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </Grid>
         </DataTemplate>
@@ -110,6 +118,7 @@
                 <ColumnDefinition Width="3*" />
                 <ColumnDefinition Width="2*" />
                 <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="40" />
                 <ColumnDefinition Width="Auto" MinWidth="56" />
             </Grid.ColumnDefinitions>
             <Button Grid.Column="1" Style="{StaticResource ColumnHeaderStyle}" Tag="0" Click="OnColumnClick">
@@ -121,7 +130,7 @@
             <Button Grid.Column="3" Style="{StaticResource ColumnHeaderStyle}" Tag="2" Click="OnColumnClick">
                 <TextBlock x:Uid="Playlist_ColumnAlbum" />
             </Button>
-            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+            <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
                 <Button Style="{StaticResource ColumnHeaderStyle}" Tag="6" Click="OnColumnClick">
                     <TextBlock x:Uid="Playlist_ColumnDuration" />
                 </Button>

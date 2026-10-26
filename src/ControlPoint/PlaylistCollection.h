@@ -50,6 +50,16 @@ public:
         }
     }
 
+    // A favorite mark set on these files, in every entry that plays one of them.
+    void mark(const std::vector<int64_t>& files, bool favorite) {
+        for (size_t i = 0; i < rows_.size(); ++i) {
+            auto& row = rows_[i];
+            if (!row.file || std::ranges::find(files, row.file) == files.end()) continue;
+            row.favorite = favorite;
+            if (const auto found = items_.find(uint32_t(i)); found != items_.end()) self(found->second)->setFavorite(favorite);
+        }
+    }
+
     const std::vector<BrowseRow>& rows() const { return rows_; }
     static const BrowseRow& rowOf(IInspectable const& item) { return self(item)->row(); }
 

@@ -12,5 +12,8 @@ namespace CamelPlayer {
     Boolean IsFolder { get; };
     Boolean IsTrack { get; };
     Boolean IsUnavailable { get; };
+    Boolean HasMarks { get; }; // shows a track's heart
+    Boolean IsFavorite { get; };
+    String FavoriteGlyph { get; };
 }
 } // namespace CamelPlayer

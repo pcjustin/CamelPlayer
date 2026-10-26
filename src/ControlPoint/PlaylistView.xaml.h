@@ -38,6 +38,14 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
     winrt::fire_and_forget OnColumnClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlaylistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnEntryDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+    void OnFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // Clicks on a row's heart stay its own: they neither play nor select the row.
+    void OnMarksPointer(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& e) {
+        e.Handled(true);
+    }
+    void OnMarksDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& e) {
+        e.Handled(true);
+    }
     void OnEntryKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
     void OnEntryDragCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                               Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
@@ -48,6 +56,7 @@ private:
     void play(size_t index);
     // The selected entries in list order, or the right-clicked one when it is not selected.
     std::vector<ui::BrowseRow> selectedRows(Windows::Foundation::IInspectable const& clicked = nullptr);
+    void submitMarks(camel::server::Command command);
     void queue(const std::vector<ui::BrowseRow>& rows, bool playNext);
     void remove(const std::vector<ui::BrowseRow>& rows);
     // Runs `edit` off the UI thread; a playlist changed elsewhere meanwhile is read again.

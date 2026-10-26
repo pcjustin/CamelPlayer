@@ -7,6 +7,7 @@
 #include "LibraryView.g.h"
 #include "LibraryCollection.h"
 #include "PlaylistMenu.h"
+#include "TrackMarks.h"
 #include <unordered_map>
 #include "Server/Api/ServerApi.h"
 
@@ -52,6 +53,15 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&, Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
+    void OnFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // Clicks on a row's heart stay its own: they neither play nor select the row.
+    void OnMarksPointer(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& e) {
+        e.Handled(true);
+    }
+    void OnMarksDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& e) {
+        e.Handled(true);
+    }
+    void OnAlbumFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
     struct ArtworkSlot {
@@ -100,6 +110,11 @@ private:
                                                               Windows::Foundation::IInspectable const& clicked, bool paged) const;
     ui::SourceFetch menuSources() const;
     void queueSelection(bool playNext);
+    // Marks or clears the menu's tracks or albums as favorites; paged lists reread once the Server applied the change.
+    void markSelection(bool favorite);
+    void markAlbums(bool favorite);
+    void reloadWhenIdle();
+    void showAlbumFavorite(bool favorite);
     void showMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, Microsoft::UI::Xaml::FrameworkElement const& element,
                   Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const& e);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.
@@ -123,6 +138,8 @@ private:
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};
+    std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowMarks_; // shown for track rows only
+    uint32_t cardMarksFirst_ = 0;                                             // album entries, hidden for artists
     ui::BrowseRow menuRow_;
     Windows::Foundation::IInspectable menuItem_{nullptr};
     Microsoft::UI::Xaml::Controls::ListViewBase menuList_{nullptr};

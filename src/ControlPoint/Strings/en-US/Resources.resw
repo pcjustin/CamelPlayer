@@ -365,4 +365,12 @@
   <data name="Stats_ResetAllTitle" xml:space="preserve"><value>Reset all statistics?</value></data>
   <data name="Stats_ResetAllText" xml:space="preserve"><value>Every recorded play is deleted and all counts start from zero. This cannot be undone.</value></data>
   <data name="Stats_ResetPrimary" xml:space="preserve"><value>Reset</value></data>
+  <data name="Marks_AddFavorite" xml:space="preserve"><value>Add to favorites</value></data>
+  <data name="Marks_RemoveFavorite" xml:space="preserve"><value>Remove from favorites</value></data>
+  <data name="Marks_AddFavoriteAlbum" xml:space="preserve"><value>Add to favorite albums</value></data>
+  <data name="Marks_RemoveFavoriteAlbum" xml:space="preserve"><value>Remove from favorite albums</value></data>
+  <data name="Marks_FavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>Favorite</value></data>
+  <data name="Marks_FavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>Favorite</value></data>
+  <data name="Marks_AlbumFavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>Favorite album</value></data>
+  <data name="Marks_AlbumFavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>Favorite album</value></data>
 </root>

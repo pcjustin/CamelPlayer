@@ -16,6 +16,8 @@ struct BrowseRow {
     bool folder = false;
     int64_t file = 0;         // a track's file, which playlists refer to
     bool unavailable = false; // a playlist entry whose file is missing or offline
+    bool marks = false;       // shows the track's favorite heart
+    bool favorite = false;
 };
 
 } // namespace ui
@@ -32,6 +34,9 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     bool IsFolder() const { return row_.folder; }
     bool IsTrack() const { return !row_.folder && row_.id != 0 && !row_.value.empty(); }
     bool IsUnavailable() const { return row_.unavailable; }
+    bool HasMarks() const { return row_.marks; }
+    bool IsFavorite() const { return row_.favorite; }
+    hstring FavoriteGlyph() const { return row_.favorite ? L"\xE00B" : L"\xE006"; }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
     }
@@ -40,6 +45,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     const ui::BrowseRow& row() const { return row_; }
     bool loaded() const { return loaded_; }
     void fill(const ui::BrowseRow& row);
+    void setFavorite(bool favorite);
 
 private:
     ui::BrowseRow row_;

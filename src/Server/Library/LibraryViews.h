@@ -30,6 +30,7 @@ struct LibraryAlbum {
     int64_t id = 0, folder = 0;
     std::string title, artist;
     int64_t year = 0, tracks = 0, discs = 0, added = 0, durationMs = 0;
+    bool favorite = false;
 };
 
 struct LibraryAlbumPage {
@@ -55,6 +56,7 @@ struct LibraryTrackRow {
     std::string title, artist, album, path, format;
     int64_t year = 0, disc = 0, number = 0, durationMs = 0;
     std::string name; // the file's on-disk name, empty until a scan records it
+    bool favorite = false;
 };
 
 struct LibraryTrackRowPage {

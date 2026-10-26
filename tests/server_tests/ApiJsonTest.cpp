@@ -168,6 +168,25 @@ TEST(ApiJson, PlayStatisticsResetRoundTripsTrackKeys) {
     EXPECT_EQ(commandFromJson(j), all);
 }
 
+TEST(ApiJson, FavoriteCommandsRoundTrip) {
+    Command track;
+    track.kind = CommandKind::SetFavorite;
+    track.tracks = {{7}};
+    track.favorite = true;
+    EXPECT_EQ(throughText(track, commandFromJson), track);
+    auto j = toJson(track);
+    j.erase("tracks");
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    Command album;
+    album.kind = CommandKind::SetAlbumFavorite;
+    album.albums = {3, 5};
+    album.favorite = true;
+    EXPECT_EQ(throughText(album, commandFromJson), album);
+    j = toJson(album);
+    j["albums"] = json::array({"3"});
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+}
+
 TEST(ApiJson, AddingALibraryRootRoundTripsItsPath) {
     Command c;
     c.kind = CommandKind::AddLibraryRoot;

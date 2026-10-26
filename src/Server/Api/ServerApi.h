@@ -98,7 +98,9 @@ enum class CommandKind : uint8_t {
     QueueAdd,       // sources: append entries without changing the current track
     QueuePlayNext,  // sources: insert entries after the current entry
     QueueRemove,    // entryIds: remove entries without stopping the current track
-    QueueClear      // keep the current queue entry, if any
+    QueueClear,     // keep the current queue entry, if any
+    SetFavorite,     // tracks + favorite
+    SetAlbumFavorite // albums + favorite: marks or clears every track of the albums
 };
 
 struct Command {
@@ -116,6 +118,8 @@ struct Command {
     std::optional<RepeatMode> repeat;
     std::vector<LibraryTrackKey> tracks;
     std::string path;
+    bool favorite = false;
+    std::vector<int64_t> albums;
     bool operator==(const Command&) const = default;
 };
 
@@ -170,6 +174,8 @@ struct QueueEntry {
     std::string title, artist, album;
     int64_t albumId = 0;
     bool automatic = false; // added by autoplay when the queue ended (docs/Plan.md §8.1)
+    int64_t file = 0;       // the library file, 0 outside the library
+    bool favorite = false;
     bool operator==(const QueueEntry&) const = default;
 };
 
@@ -200,6 +206,7 @@ private:
 
 struct QueueSnapshot {
     uint64_t revision = 0; // QueuePolicy revision; prepared work for an older revision is stale
+    uint64_t marks = 0;    // changes when the entries' favorite marks change
     QueueEntries entries;
     std::optional<uint64_t> upcomingEntryId; // what a natural completion of the current entry plays next
     bool shuffle = false;

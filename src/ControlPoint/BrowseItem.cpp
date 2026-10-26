@@ -17,4 +17,10 @@ void BrowseItem::fill(const ui::BrowseRow& row) {
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"")); // every property changed
 }
 
+void BrowseItem::setFavorite(bool favorite) {
+    row_.favorite = favorite;
+    changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"IsFavorite"));
+    changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"FavoriteGlyph"));
+}
+
 } // namespace winrt::CamelPlayer::implementation

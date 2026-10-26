@@ -68,11 +68,12 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::QueueClear)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetAlbumFavorite)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
     const bool queueIds = c.kind == CommandKind::QueueReorder || c.kind == CommandKind::QueueRemove;
+    const bool trackKeys = c.kind == CommandKind::ResetPlayStatistics || c.kind == CommandKind::SetFavorite;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
         (c.frame != 0 && c.kind != CommandKind::Seek) || c.sources.empty() == queueSources ||
         (queueReplace ? c.index >= c.sources.size() : c.index != 0) ||
@@ -80,7 +81,9 @@ void validate(const Command& c) {
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) ||
-        c.tracks.empty() == (c.kind == CommandKind::ResetPlayStatistics) || c.path.empty() == (c.kind == CommandKind::AddLibraryRoot))
+        c.tracks.empty() == trackKeys || c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
+        c.albums.empty() == (c.kind == CommandKind::SetAlbumFavorite) ||
+        (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite))
         throw std::invalid_argument("invalid Server command payload");
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
@@ -437,6 +440,7 @@ private:
         state.shuffle = saved->shuffle;
         state.repeat = saved->repeat;
         policy_.restore(std::move(state));
+        applyMarks(entries);
         entries_ = std::move(entries);
         if (const auto current = policy_.current()) {
             state_.queueEntryId = current->entryId;
@@ -633,6 +637,15 @@ private:
                     session_->discard();
                 resetPlayStatistics(*library_, c.tracks);
                 break;
+            case CommandKind::SetFavorite:
+            case CommandKind::SetAlbumFavorite:
+                if (!library_) throw std::logic_error("Server library is not configured");
+                if (c.kind == CommandKind::SetFavorite) setTrackFavorite(*library_, c.tracks, c.favorite);
+                else setAlbumFavorite(*library_, c.albums, c.favorite);
+                applyMarks(entries_);
+                ++marks_;
+                queueChanged_ = true;
+                break;
             case CommandKind::ApplySettings: {
                 if (c.settings) {
                     const auto lastFile = settings_.lastFile;
@@ -714,7 +727,27 @@ private:
                 }
             }
         }
+        applyMarks(entries);
         return entries;
+    }
+
+    // The entries' library files and their favorite marks.
+    void applyMarks(std::vector<QueueEntry>& entries) {
+        if (!library_) return;
+        std::unordered_set<int64_t> favorites;
+        try {
+            if (!libraryReader_) libraryReader_.emplace(library_->openReader());
+            auto rows = libraryReader_->prepare("SELECT file_id FROM stats WHERE favorite<>0");
+            while (rows.step()) favorites.insert(rows.integer(0));
+        } catch (const std::exception& e) {
+            log::warn("queue marks: %s", e.what());
+            return;
+        }
+        for (auto& entry : entries) {
+            const auto binding = libraryEntries_.find(entry.id);
+            entry.file = binding == libraryEntries_.end() ? 0 : binding->second.file;
+            entry.favorite = entry.file && favorites.contains(entry.file);
+        }
     }
 
     void appendQueue(const std::vector<TrackSource>& sources, bool playNext) {
@@ -1069,6 +1102,7 @@ private:
     QueueSnapshot queueSnapshot() const {
         QueueSnapshot queue;
         queue.revision = policy_.revision();
+        queue.marks = marks_;
         queue.entries = entries_;
         if (const auto upcoming = policy_.upcoming()) queue.upcomingEntryId = upcoming->entryId;
         queue.shuffle = policy_.shuffle();
@@ -1189,6 +1223,7 @@ private:
         bool spelled = false;
     };
     std::map<uint64_t, LibraryEntry> libraryEntries_;
+    uint64_t marks_ = 0;
     std::optional<PlaySession> session_;
     uint64_t sessionEntry_ = 0, sessionTransitions_ = 0, sessionTrackEnds_ = 0;
     std::wstring sessionFile_;

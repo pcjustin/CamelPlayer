@@ -25,7 +25,8 @@ constexpr const char* kDuration =
     "CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate ELSE 0 END";
 constexpr const char* kTrackColumns =
     "t.id,t.file_id,coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,''),f.path,coalesce(t.format,''),"
-    "coalesce(t.year,0),coalesce(t.disc_number,0),coalesce(t.track_number,0),coalesce(f.name,''),";
+    "coalesce(t.year,0),coalesce(t.disc_number,0),coalesce(t.track_number,0),coalesce(f.name,''),coalesce(s.favorite,0),";
+constexpr const char* kStats = " LEFT JOIN stats s ON s.file_id=t.file_id ";
 
 // A reader transaction with cancellation; the revision check makes every page of one listing come from one library state.
 struct Query {
@@ -83,12 +84,13 @@ std::string groupCondition(const LibraryGroupFilter& filter) {
 
 LibraryTrackRow trackRow(sqlite::Statement& rows) {
     return {rows.integer(0), {rows.integer(1)}, rows.text(2), rows.text(3), rows.text(4), rows.text(5),
-            rows.text(6), rows.integer(7), rows.integer(8), rows.integer(9), rows.integer(11), rows.text(10)};
+            rows.text(6), rows.integer(7), rows.integer(8), rows.integer(9), rows.integer(12), rows.text(10),
+            rows.integer(11) != 0};
 }
 
 LibraryAlbum album(sqlite::Statement& rows) {
     return {rows.integer(0), rows.integer(1), rows.text(2), rows.text(3), rows.integer(4), rows.integer(5),
-            rows.integer(6), rows.integer(7), rows.integer(8)};
+            rows.integer(6), rows.integer(7), rows.integer(8), rows.integer(9) != 0};
 }
 
 // Each listing's full order for one library revision, so a deep page is a slice instead of an OFFSET walk over the
@@ -146,6 +148,7 @@ std::vector<T> inOrder(const std::vector<int64_t>& order, int64_t offset, int64_
 constexpr const char* kAlbumColumns =
     "a.id,coalesce(a.folder_id,0),coalesce(a.title,''),coalesce(a.album_artist,''),coalesce(a.year,0),COUNT(*),"
     "coalesce(MAX(t.disc_number),1),a.added,SUM(";
+constexpr const char* kAlbumFavorite = "),MAX(coalesce(s.album_favorite,0))";
 
 } // namespace
 
@@ -208,7 +211,7 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
     static constexpr const char* orders[] = {"a.sort_key", "lower(coalesce(a.album_artist,'')),a.sort_key",
                                              "coalesce(a.year,0) DESC,a.sort_key", "a.added DESC,a.sort_key"};
     const std::string condition = filter ? groupCondition(*filter) : std::string{};
-    const std::string from = std::string(" FROM albums a JOIN tracks t ON t.album_id=a.id") + kJoins + "WHERE" +
+    const std::string from = std::string(" FROM albums a JOIN tracks t ON t.album_id=a.id") + kJoins + kStats + "WHERE" +
                              kVisible + condition;
     const auto order = ordered<int64_t>(store, q.revision, "albums|" + std::to_string(int(sort)) + "|" + condition, [&] {
         return ids(q.db, "SELECT a.id" + from + " GROUP BY a.id ORDER BY " + orders[size_t(sort)] + ",a.id");
@@ -219,7 +222,7 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
     const auto slice = idList(*order, offset, limit);
     if (slice.empty()) return page;
     std::vector<LibraryAlbum> rows;
-    auto statement = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration + ")" + from + " AND a.id IN (" + slice +
+    auto statement = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration + kAlbumFavorite + from + " AND a.id IN (" + slice +
                                   ") GROUP BY a.id");
     while (statement.step()) rows.push_back(album(statement));
     page.albums = inOrder(*order, offset, limit, std::move(rows), [](const LibraryAlbum& a) { return a.id; });
@@ -243,8 +246,8 @@ LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset,
     if (order.empty()) return page;
     const int64_t count = int64_t(order.size());
     std::vector<LibraryAlbum> rows;
-    auto statement = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration +
-                                  ") FROM albums a JOIN tracks t ON t.album_id=a.id" + kJoins + "WHERE" + kVisible +
+    auto statement = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration + kAlbumFavorite +
+                                  " FROM albums a JOIN tracks t ON t.album_id=a.id" + kJoins + kStats + "WHERE" + kVisible +
                                   " AND a.id IN (" + idList(order, 0, count) + ") GROUP BY a.id");
     while (statement.step()) rows.push_back(album(statement));
     page.albums = inOrder(order, 0, count, std::move(rows), [](const LibraryAlbum& a) { return a.id; });
@@ -301,7 +304,7 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
     const auto slice = idList(*order, offset, limit);
     if (slice.empty()) return page;
     std::vector<LibraryTrackRow> rows;
-    auto statement = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins +
+    auto statement = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
                                   "WHERE t.id IN (" + slice + ")");
     while (statement.step()) rows.push_back(trackRow(statement));
     page.tracks = inOrder(*order, offset, limit, std::move(rows), [](const LibraryTrackRow& t) { return t.id; });
@@ -312,11 +315,11 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const Canc
     Query q(store, std::nullopt, token);
     LibraryAlbumDetail detail;
     detail.revision = q.revision;
-    auto header = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration + ") FROM albums a JOIN tracks t ON "
-                               "t.album_id=a.id" + kJoins + "WHERE a.id=? AND" + kVisible + " GROUP BY a.id");
+    auto header = q.db.prepare(std::string("SELECT ") + kAlbumColumns + kDuration + kAlbumFavorite + " FROM albums a JOIN tracks t ON "
+                               "t.album_id=a.id" + kJoins + kStats + "WHERE a.id=? AND" + kVisible + " GROUP BY a.id");
     if (!header.bind(1, id).step()) throw std::invalid_argument("unknown or unavailable album");
     detail.album = album(header);
-    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins +
+    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
                              "WHERE t.album_id=? AND" + kVisible +
                              " ORDER BY t.disc_number,t.track_number,f.path");
     rows.bind(1, id);
@@ -362,7 +365,7 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
             listing.trail.insert(listing.trail.begin(), entry(up, !parent));
             id = parent;
         }
-        auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins +
+        auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
                                  "WHERE f.folder_id=? AND" + kVisible +
                                  " ORDER BY t.disc_number,t.track_number,f.path");
         rows.bind(1, *folder);

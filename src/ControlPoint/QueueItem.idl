@@ -10,6 +10,7 @@ namespace CamelPlayer {
     Boolean IsCurrent { get; };
     Boolean IsNotCurrent { get; };
     Boolean ShowsAutomatic { get; }; // an entry autoplay added, marked while it is not playing
+    Boolean IsFavorite { get; };
     String RemoveLabel { get; };
 }
 } // namespace CamelPlayer

@@ -417,6 +417,7 @@
                                         <ColumnDefinition Width="20" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <FontIcon Glyph="&#xE767;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                               Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
@@ -430,7 +431,9 @@
                                                VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
                                                FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                                Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
-                                    <Button Grid.Column="2" Width="32" Height="32" Padding="0" CornerRadius="16"
+                                    <FontIcon Grid.Column="2" Glyph="&#xE00B;" FontSize="12" Visibility="{x:Bind IsFavorite, Mode=OneWay}"
+                                              Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                    <Button Grid.Column="3" Width="32" Height="32" Padding="0" CornerRadius="16"
                                             Click="OnQueueRemoveEntryClick" ToolTipService.ToolTip="{x:Bind RemoveLabel}"
                                             AutomationProperties.Name="{x:Bind RemoveLabel}">
                                         <FontIcon Glyph="&#xE711;" FontSize="12" />
@@ -564,10 +567,16 @@
                             <SymbolIcon x:Name="RepeatIcon" Symbol="RepeatAll" />
                         </Button>
                     </StackPanel>
-                    <ToggleButton x:Name="QueueToggleButton" Grid.Column="2" Click="OnQueueToggleClick"
-                                  Style="{StaticResource TransportToggleStyle}" VerticalAlignment="Center">
-                        <SymbolIcon Symbol="Bullets" />
-                    </ToggleButton>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <Button x:Name="PlaybackFavoriteButton" x:Uid="Marks_FavoriteButton" Click="OnPlaybackFavoriteClick" IsEnabled="False"
+                                Width="48" Height="48" Padding="0" CornerRadius="24" VerticalAlignment="Center">
+                            <FontIcon x:Name="PlaybackFavoriteIcon" Glyph="&#xE006;" FontSize="20" />
+                        </Button>
+                        <ToggleButton x:Name="QueueToggleButton" Click="OnQueueToggleClick"
+                                      Style="{StaticResource TransportToggleStyle}" VerticalAlignment="Center">
+                            <SymbolIcon Symbol="Bullets" />
+                        </ToggleButton>
+                    </StackPanel>
                 </Grid>
             </Grid>
             <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) -->

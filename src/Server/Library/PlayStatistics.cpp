@@ -215,4 +215,32 @@ void resetPlayStatistics(LibraryStore& store, const std::vector<LibraryTrackKey>
         .get();
 }
 
+void setTrackFavorite(LibraryStore& store, const std::vector<LibraryTrackKey>& tracks, bool favorite) {
+    store
+        .write([&](sqlite::Database& db) {
+            auto mark = db.prepare("INSERT INTO stats(file_id,favorite) VALUES(?1,?2) ON CONFLICT(file_id) DO UPDATE SET favorite=?2");
+            for (const auto& track : tracks) {
+                mark.bind(1, track.file).bind(2, int64_t(favorite)).run();
+                mark.reset();
+            }
+            db.exec("UPDATE library_revision SET value=value+1 WHERE id=1");
+        })
+        .get();
+}
+
+void setAlbumFavorite(LibraryStore& store, const std::vector<int64_t>& albums, bool favorite) {
+    store
+        .write([&](sqlite::Database& db) {
+            auto mark = db.prepare(favorite ? "INSERT INTO stats(file_id,album_favorite) SELECT file_id,1 FROM tracks WHERE album_id=? "
+                                              "ON CONFLICT(file_id) DO UPDATE SET album_favorite=1"
+                                            : "UPDATE stats SET album_favorite=0 WHERE file_id IN (SELECT file_id FROM tracks WHERE album_id=?)");
+            for (const auto album : albums) {
+                mark.bind(1, album).run();
+                mark.reset();
+            }
+            db.exec("UPDATE library_revision SET value=value+1 WHERE id=1");
+        })
+        .get();
+}
+
 } // namespace camel::server

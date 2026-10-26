@@ -71,6 +71,7 @@ hstring duration(int64_t ms) {
 ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
     ui::BrowseRow row{t.id, t.path, titleOf(t, texts), ui::utf8(t.artist), ui::utf8(t.album), duration(t.durationMs)};
     row.file = t.track.file;
+    row.favorite = t.favorite;
     return row;
 }
 
@@ -80,6 +81,8 @@ ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, const Texts& t
     ui::BrowseRow row{t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {},
                       duration(t.durationMs)};
     row.file = t.track.file;
+    row.marks = true;
+    row.favorite = t.favorite;
     return row;
 }
 
@@ -355,8 +358,10 @@ void LibraryView::startCollection() {
                                                                               std::optional<uint64_t> revision) {
             const auto page = server->browseAlbums(sort, filter, offset, limit, revision);
             ui::BrowsePage out{page.revision, page.total, {}};
-            for (const auto& a : page.albums)
+            for (const auto& a : page.albums) {
                 out.rows.push_back({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, counted(texts.tracks, a.tracks)});
+                out.rows.back().favorite = a.favorite;
+            }
             return out;
         };
     } else if (current_.mode == Mode::Groups) {
@@ -384,7 +389,10 @@ void LibraryView::startCollection() {
                                                                               std::optional<uint64_t> revision) {
             const auto page = server->browseTrackRows(sort, descending, offset, limit, revision);
             ui::BrowsePage out{page.revision, page.total, {}};
-            for (const auto& t : page.tracks) out.rows.push_back(trackRow(t, texts));
+            for (const auto& t : page.tracks) {
+                out.rows.push_back(trackRow(t, texts));
+                out.rows.back().marks = true;
+            }
             return out;
         };
     }
@@ -409,6 +417,7 @@ void LibraryView::loadAlbumDetail() {
                     std::wstring(duration(a.durationMs));
             HeaderTitle().Text(orUnknown(a.title, texts));
             HeaderDetail().Text(hstring(info));
+            showAlbumFavorite(a.favorite);
             auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
             for (const auto& t : detail->tracks) items.Append(item(albumTrackRow(t, a.discs > 1, texts)));
             detailTracks_ = std::move(detail->tracks);
@@ -598,6 +607,72 @@ void LibraryView::queueSelection(bool playNext) {
     });
 }
 
+void LibraryView::markSelection(bool favorite) {
+    if (!menuItem_ || !menuList_ || !submit_) return;
+    background([this, rows = selectionRows(menuList_, menuItem_, menuPaged_), favorite, paged = menuPaged_] {
+        std::vector<LibraryTrackKey> tracks;
+        for (const auto& row : rows())
+            if (row.file && !row.folder) tracks.push_back({row.file});
+        return std::function<void()>([this, tracks = std::move(tracks), favorite, paged] {
+            if (tracks.empty()) return;
+            submit_(ui::favoriteCommand(tracks, favorite));
+            if (paged) {
+                reloadWhenIdle();
+                return;
+            }
+            for (const auto& value : menuList_.Items()) {
+                auto* item = get_self<BrowseItem>(value.as<CamelPlayer::BrowseItem>());
+                if (std::ranges::find(tracks, LibraryTrackKey{item->row().file}) != tracks.end()) item->setFavorite(favorite);
+            }
+        });
+    });
+}
+
+void LibraryView::markAlbums(bool favorite) {
+    if (!menuItem_ || !menuList_ || !submit_) return;
+    background([this, rows = selectionRows(menuList_, menuItem_, menuPaged_), favorite, paged = menuPaged_] {
+        std::vector<int64_t> albums;
+        for (const auto& row : rows())
+            if (row.id) albums.push_back(row.id);
+        return std::function<void()>([this, albums = std::move(albums), favorite, paged] {
+            if (albums.empty()) return;
+            submit_(ui::albumFavoriteCommand(albums, favorite));
+            if (paged) {
+                reloadWhenIdle();
+                return;
+            }
+            for (const auto& value : menuList_.Items()) {
+                auto* item = get_self<BrowseItem>(value.as<CamelPlayer::BrowseItem>());
+                if (std::ranges::find(albums, item->row().id) != albums.end()) item->setFavorite(favorite);
+            }
+        });
+    });
+}
+
+void LibraryView::reloadWhenIdle() {
+    background([this, server = server_] {
+        server->waitIdle();
+        return std::function<void()>([this] {
+            if (collection_) collection_->refresh();
+        });
+    });
+}
+
+void LibraryView::showAlbumFavorite(bool favorite) {
+    AlbumFavoriteButton().IsChecked(favorite);
+    AlbumFavoriteIcon().Glyph(favorite ? L"\xE00B" : L"\xE006");
+}
+
+void LibraryView::OnFavoriteClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    ui::rowFavoriteClicked(sender, submit_);
+}
+
+void LibraryView::OnAlbumFavoriteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    const bool favorite = AlbumFavoriteButton().IsChecked() && AlbumFavoriteButton().IsChecked().Value();
+    showAlbumFavorite(favorite);
+    if (submit_ && current_.album) submit_(ui::albumFavoriteCommand({current_.album}, favorite));
+}
+
 void LibraryView::showMenu(MenuFlyout const& menu, FrameworkElement const& element, Input::ContextRequestedEventArgs const& e) {
     Primitives::FlyoutShowOptions options;
     if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
@@ -637,7 +712,9 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
             rowMenu_.Items().Append(entry);
         }
         if (playlistMenu_) playlistMenu_(rowMenu_, [this] { return menuSources(); });
+        rowMarks_ = ui::appendFavoriteMenu(rowMenu_, [this](bool favorite) { markSelection(favorite); });
     }
+    for (const auto& entry : rowMarks_) entry.Visibility(item.IsTrack() ? Visibility::Visible : Visibility::Collapsed);
     // Groups have no queue actions; their first playlist entry follows a separator that is hidden with them.
     const auto queueVisibility = group ? Visibility::Collapsed : Visibility::Visible;
     rowMenu_.Items().GetAt(0).Visibility(menuRow_.folder ? Visibility::Visible : Visibility::Collapsed);
@@ -663,7 +740,11 @@ void LibraryView::OnCardContextRequested(UIElement const& sender, Input::Context
         cardMenu_ = MenuFlyout();
         playlistMenu_(cardMenu_, [this] { return menuSources(); });
         cardMenu_.Items().RemoveAt(0); // the separator before the playlist entries
+        cardMarksFirst_ = cardMenu_.Items().Size();
+        ui::appendAlbumFavoriteMenu(cardMenu_, [this](bool favorite) { markAlbums(favorite); });
     }
+    for (uint32_t i = cardMarksFirst_; i < cardMenu_.Items().Size(); ++i)
+        cardMenu_.Items().GetAt(i).Visibility(artist ? Visibility::Collapsed : Visibility::Visible);
     showMenu(cardMenu_, element, e);
 }
 

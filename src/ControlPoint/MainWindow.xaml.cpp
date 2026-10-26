@@ -33,6 +33,7 @@
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
 #include "StatisticsView.xaml.h"
+#include "TrackMarks.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -649,8 +650,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         camel::log::info("measure: queue of %zu entries shown %.0f ms after process start", snapshot.queue.entries.size(),
                          camel::measure::sinceProcessStart());
     }
-    if (shownQueueRevision_ != snapshot.queue.revision) {
+    if (shownQueueRevision_ != snapshot.queue.revision || shownQueueMarks_ != snapshot.queue.marks) {
         shownQueueRevision_ = snapshot.queue.revision;
+        shownQueueMarks_ = snapshot.queue.marks;
         shownQueueEntryId_ = snapshot.queueEntryId;
         const bool windowed = snapshot.queue.entries.size() > ui::QueueCollection::kShown;
         std::wstring count(tr(windowed ? L"Queue_CountWindowed" : L"Library_Tracks"));
@@ -667,7 +669,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                             entry.title.empty()    ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
                             : entry.artist.empty() ? ui::utf8(entry.title)
                                                    : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist),
-                            ui::utf8(entry.source.pathUtf8()), entry.automatic});
+                            ui::utf8(entry.source.pathUtf8()), entry.automatic, entry.file, entry.favorite});
         queueItems_->update(std::move(rows), snapshot.queueEntryId);
     } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
         shownQueueEntryId_ = snapshot.queueEntryId;
@@ -710,6 +712,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             SourceText().Text(text);
         }
     }
+
+    const bool marked = !s.pathUtf8.empty() && currentEntry != snapshot.queue.entries.end() && currentEntry->file;
+    PlaybackFavoriteButton().IsEnabled(marked);
+    playbackFile_ = marked ? currentEntry->file : 0;
+    showPlaybackFavorite(marked && currentEntry->favorite);
 
     if (media_) {
         const bool known = currentEntry != snapshot.queue.entries.end();
@@ -935,8 +942,10 @@ void MainWindow::viewAll(hstring const& list) {
     auto view = get_self<LibraryView>(Library());
     const auto albums = [unknown](const LibraryAlbumPage& page) {
         ui::BrowsePage out{page.revision, page.total, {}};
-        for (const auto& a : page.albums)
+        for (const auto& a : page.albums) {
             out.rows.push_back({a.id, {}, a.title.empty() ? unknown : ui::utf8(a.title), ui::utf8(a.artist), {}, {}});
+            out.rows.back().favorite = a.favorite;
+        }
         return out;
     };
     if (list == L"added") {
@@ -1811,6 +1820,23 @@ void MainWindow::OnQueueKeyDown(Windows::Foundation::IInspectable const&, Input:
     removeSelectedQueueEntries();
 }
 
+void MainWindow::showPlaybackFavorite(bool favorite) {
+    if (playbackFavorite_ == favorite) return;
+    playbackFavorite_ = favorite;
+    PlaybackFavoriteIcon().Glyph(favorite ? L"\xE00B" : L"\xE006");
+    if (favorite)
+        PlaybackFavoriteIcon().Foreground(
+            Application::Current().Resources().Lookup(box_value(L"AccentTextFillColorPrimaryBrush")).as<Media::Brush>());
+    else
+        PlaybackFavoriteIcon().ClearValue(IconElement::ForegroundProperty());
+}
+
+void MainWindow::OnPlaybackFavoriteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!playbackFile_) return;
+    showPlaybackFavorite(!playbackFavorite_);
+    submitCommand(ui::favoriteCommand({{playbackFile_}}, playbackFavorite_));
+}
+
 void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
     const auto element = sender.as<FrameworkElement>();
     queueMenuItem_ = element.DataContext();
@@ -1838,6 +1864,25 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
             return [sources] { return sources; };
         });
         queueMenu_.Items().RemoveAt(0); // the separator before the playlist entries
+        ui::appendFavoriteMenu(queueMenu_, [this](bool favorite) {
+            std::vector<LibraryTrackKey> tracks;
+            const auto add = [&](Windows::Foundation::IInspectable const& item) {
+                const auto file = get_self<QueueItem>(item.as<CamelPlayer::QueueItem>())->row().file;
+                if (file && std::ranges::find(tracks, LibraryTrackKey{file}) == tracks.end()) tracks.push_back({file});
+            };
+            uint32_t clicked = 0;
+            bool selected = false;
+            if (queueItems_->IndexOf(queueMenuItem_, clicked))
+                for (const auto& range : QueueList().SelectedRanges())
+                    selected = selected || (clicked >= uint32_t(range.FirstIndex()) && clicked <= uint32_t(range.LastIndex()));
+            if (!selected) {
+                add(queueMenuItem_);
+            } else {
+                for (const auto& range : QueueList().SelectedRanges())
+                    for (auto i = range.FirstIndex(); i <= range.LastIndex(); ++i) add(queueItems_->GetAt(uint32_t(i)));
+            }
+            if (!tracks.empty()) submitCommand(ui::favoriteCommand(tracks, favorite));
+        });
     }
     Primitives::FlyoutShowOptions options;
     if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);

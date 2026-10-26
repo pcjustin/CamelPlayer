@@ -365,4 +365,12 @@
   <data name="Stats_ResetAllTitle" xml:space="preserve"><value>重置所有統計？</value></data>
   <data name="Stats_ResetAllText" xml:space="preserve"><value>將刪除所有播放紀錄，所有次數從零開始。此動作無法復原。</value></data>
   <data name="Stats_ResetPrimary" xml:space="preserve"><value>重置</value></data>
+  <data name="Marks_AddFavorite" xml:space="preserve"><value>加入最愛</value></data>
+  <data name="Marks_RemoveFavorite" xml:space="preserve"><value>從最愛移除</value></data>
+  <data name="Marks_AddFavoriteAlbum" xml:space="preserve"><value>加入最愛專輯</value></data>
+  <data name="Marks_RemoveFavoriteAlbum" xml:space="preserve"><value>從最愛專輯移除</value></data>
+  <data name="Marks_FavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>最愛</value></data>
+  <data name="Marks_FavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>最愛</value></data>
+  <data name="Marks_AlbumFavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>最愛專輯</value></data>
+  <data name="Marks_AlbumFavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>最愛專輯</value></data>
 </root>

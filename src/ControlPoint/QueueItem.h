@@ -12,6 +12,9 @@ struct QueueRow {
     uint64_t id = 0; // queue entry id
     winrt::hstring title, path;
     bool automatic = false; // added by autoplay
+    int64_t file = 0;       // the library file, 0 outside the library
+    bool favorite = false;
+    bool operator==(const QueueRow&) const = default;
 };
 
 } // namespace ui
@@ -26,6 +29,7 @@ struct QueueItem : QueueItemT<QueueItem> {
     bool IsCurrent() const { return current_; }
     bool IsNotCurrent() const { return !current_; }
     bool ShowsAutomatic() const { return row_.automatic && !current_; }
+    bool IsFavorite() const { return row_.favorite; }
     hstring RemoveLabel() const;
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
