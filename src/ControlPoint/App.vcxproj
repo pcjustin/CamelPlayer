@@ -164,6 +164,9 @@
     </Midl>
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="App.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <PRIResource Include="Strings\en-US\Resources.resw" />
     <PRIResource Include="Strings\zh-TW\Resources.resw" />
   </ItemGroup>
