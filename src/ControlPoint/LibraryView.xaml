@@ -126,7 +126,7 @@
                                 <FontIcon Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                             <Button.Flyout>
-                                <MenuFlyout x:Name="AlbumMenu">
+                                <MenuFlyout x:Name="AlbumMenu" Placement="BottomEdgeAlignedLeft">
                                     <MenuFlyoutItem x:Uid="Library_PlayAlbum" Click="OnPlayAlbumClick">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
