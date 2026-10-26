@@ -36,7 +36,7 @@ std::vector<std::wstring> applyPendingReset(const std::filesystem::path& data) {
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     // Data lives only in %LOCALAPPDATA%\CamelPlayer; an unzipped release must never write next to the program.
     if (camel::dataDirectory().empty()) {
-        MessageBoxW(nullptr, ui::tr(L"Error_NoDataFolder").c_str(), L"CamelPlayer v2", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, ui::tr(L"Error_NoDataFolder").c_str(), L"CamelPlayer", MB_ICONERROR | MB_OK);
         return 1;
     }
     // One instance per Windows user (docs/Plan.md §8.4), decided before the Server opens the library: a second launch

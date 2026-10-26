@@ -1,8 +1,8 @@
-# CamelPlayer v2
+# CamelPlayer
 
 ![CamelPlayer logo](assets/camelplayer-logo.jpg)
 
-CamelPlayer v2 is a new Windows-native music player built with C++20 and WinUI 3. It is the second-generation CamelPlayer project, distinct from the earlier CamelPlayer codebase.
+CamelPlayer is a Windows-native music player built with C++20 and WinUI 3. It is a separate project from the earlier macOS CamelPlayer, a controller for streaming from MinimServer to a network player, and shares only its name.
 
 The current implementation is an **MVP**: a stereo FLAC, ALAC, WAV, AIFF, AAC-LC, MP3 and DSD (DSF/DSDIFF) player with a bit-perfect output path for lossless sources, WASAPI exclusive and shared, ASIO, and Kernel Streaming backends. WASAPI shared mode always converts to the Windows mixer format and is shown as processed; WASAPI can follow the Windows default device, moving an open stream to a new default and resuming only active playback, while an explicitly selected device pauses when it disappears. Each backend has its own fixed sample rate (choosing one permits resampling PCM to it), predecode amount, silence after a format change and release of the device after a pause; WASAPI also sets the polling buffer, and WASAPI and KS the MMCSS task and priority. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Each format has its own decoder setting: FLAC can use FFmpeg, Symphonia, dr_flac or libsndfile; ALAC and AAC FFmpeg or Symphonia; WAV and AIFF FFmpeg, Symphonia, libsndfile or dr_wav; MP3 mpg123, FFmpeg, Symphonia or dr_mp3. AAC and MP3 decode to 24-bit PCM by default (16-bit per format), with declared encoder delay and padding trimmed. Mono files are duplicated to both channels bit for bit. With "convert when unsupported" (off by default) the player resamples with libsoxr, downmixes surround (ITU-R BS.775) or reduces depth with TPDF dither when a device does not take the file as it is; the indicator then shows the path as processed. Files are identified by content, not extension.
 
@@ -25,7 +25,7 @@ Run from the repository root:
 .\build.cmd -Package                 # Create a local binary package
 ```
 
-Executables are generated at `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe`, and `build/<Configuration>/tests/tests.exe`. Configuration and logs are stored under `%LOCALAPPDATA%/CamelPlayer`. The executable and data-directory names remain `CamelPlayer` for compatibility; the project is named CamelPlayer v2.
+Executables are generated at `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe`, and `build/<Configuration>/tests/tests.exe`. Configuration and logs are stored under `%LOCALAPPDATA%/CamelPlayer`.
 
 ## Command-line companion
 

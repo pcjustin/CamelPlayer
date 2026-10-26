@@ -34,7 +34,7 @@ TrayIcon::TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitTe
     windowClass.hInstance = instance;
     windowClass.lpszClassName = kWindowClass;
     RegisterClassExW(&windowClass);
-    window_ = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"CamelPlayer v2", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance,
+    window_ = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"CamelPlayer", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance,
                               this);
     taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
     // A second launch runs unelevated like this one; let its show request through UIPI either way.
@@ -61,7 +61,7 @@ void TrayIcon::add() {
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     data.uCallbackMessage = kCallbackMessage;
     data.hIcon = icon_;
-    wcscpy_s(data.szTip, L"CamelPlayer v2");
+    wcscpy_s(data.szTip, L"CamelPlayer");
     if (!Shell_NotifyIconW(NIM_ADD, &data)) camel::log::warn("tray: adding the notification icon failed");
     data.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &data);

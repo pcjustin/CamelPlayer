@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $destination = Join-Path $root 'third_party\licenses'
 New-Item -ItemType Directory -Force $destination | Out-Null
-$inventory = [ordered]@{ project = 'CamelPlayer v2'; native = @(); rust = @(); microsoft = @() }
+$inventory = [ordered]@{ project = 'CamelPlayer'; native = @(); rust = @(); microsoft = @() }
 
 $nativeLicenses = [ordered]@{
     ffmpeg = 'LGPL-2.1-or-later'; libsndfile = 'LGPL-2.1-or-later'; drlibs = 'Unlicense OR MIT-0'

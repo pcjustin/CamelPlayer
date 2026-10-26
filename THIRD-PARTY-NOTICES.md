@@ -1,4 +1,4 @@
-# CamelPlayer v2 third-party notices
+# CamelPlayer third-party notices
 
 The project license, MPL-2.0 ([LICENSE](LICENSE)), applies to CamelPlayer-covered code; versions published before the change remain under GPLv3. Each dependency retains its own applicable license. This guide does not replace the complete upstream terms preserved under [third_party/licenses](third_party/licenses).
 
