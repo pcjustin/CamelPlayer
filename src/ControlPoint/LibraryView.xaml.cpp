@@ -379,7 +379,8 @@ void LibraryView::startCollection() {
 }
 
 void LibraryView::loadAlbumDetail() {
-    ui::loadArtwork(DetailCover(), server_, {ArtworkKind::Album, current_.album, {}, 600}, detailArtwork_);
+    // The album wall's thumbnail, so the cover needs no reading of the music storage.
+    ui::loadArtwork(DetailCover(), server_, {ArtworkKind::Album, current_.album, {}}, detailArtwork_);
     detailTracks_.clear();
     background([this, server = server_, id = current_.album, texts = Texts{}] {
         auto detail = std::make_shared<LibraryAlbumDetail>(server->albumDetail(id));

@@ -129,7 +129,7 @@ ArtworkCache::ArtworkCache(Path directory, uintmax_t maxBytes) : directory_(std:
 
 std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, const ArtworkRequest& request,
                                                   const CancellationToken& token) {
-    if (token.cancelled() || (request.pixels != 256 && request.pixels != 600)) return {};
+    if (token.cancelled()) return {};
     if (store) {
         try {
             if (request.kind != ArtworkKind::Track) {
@@ -140,7 +140,7 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
                 auto row = db.prepare("SELECT t.album_id FROM tracks t JOIN files f ON f.id=t.file_id "
                                       "WHERE f.path=? AND f.available=1 AND t.album_id IS NOT NULL LIMIT 1");
                 if (row.bind(1, libraryKey(Path(toWide(request.path)))).step())
-                    if (auto ref = stored(*store, {ArtworkKind::Album, row.integer(0), {}, request.pixels}, token)) return ref;
+                    if (auto ref = stored(*store, {ArtworkKind::Album, row.integer(0), {}}, token)) return ref;
             }
         } catch (const std::exception&) {
         }
@@ -150,14 +150,14 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
     auto use = [&](const std::optional<ArtworkCandidate>& candidate) -> std::optional<ArtworkReference> {
         if (!candidate || token.cancelled()) return {};
         try {
-            return generate(*candidate, request.pixels, token);
+            return generate(*candidate, token);
         } catch (const std::exception&) {
             return {};
         }
     };
     auto track = [&](const Path& path) -> std::optional<ArtworkReference> {
         try {
-            const auto key = fileKey(path) + ":" + std::to_string(request.pixels);
+            const auto key = fileKey(path);
             const auto found = embedded_.find(key);
             if (found != embedded_.end()) {
                 if (!found->second) return {};
@@ -170,7 +170,7 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
             ArtworkQuery query;
             query.firstTrack = path;
             auto images = makeEmbeddedArtworkProvider()->find(query, token);
-            if (token.cancelled() || fileKey(path) + ":" + std::to_string(request.pixels) != key) return {};
+            if (token.cancelled() || fileKey(path) != key) return {};
             auto result = images.empty() ? std::nullopt : use(std::move(images.front()));
             if (embedded_.size() >= 256) embedded_.erase(embedded_.begin());
             if (!token.cancelled() && (images.empty() || result)) embedded_[key] = result;
@@ -242,7 +242,7 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
     auto db = store.openReader();
     const auto cover = request.kind == ArtworkKind::Album ? albumCover(db, request.id) : folderCover(db, request.id);
     if (!cover) return std::nullopt;
-    const auto key = cover->key + "-" + std::to_string(request.pixels);
+    const auto key = cover->key + "-" + std::to_string(kPixels);
     const auto target = directory_ / (key + ".jpg");
     std::error_code ec;
     if (std::filesystem::is_regular_file(target, ec) && std::filesystem::file_size(target, ec) > 0) {
@@ -262,7 +262,7 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
     } else {
         image.file = cover->file;
     }
-    return generate(image, request.pixels, token, cover->key);
+    return generate(image, token, cover->key);
 }
 
 size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token) {
@@ -278,29 +278,28 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
         auto db = store.openReader();
         const auto cover = albumCover(db, album);
         std::error_code ec;
-        if (!cover || std::filesystem::exists(directory_ / (cover->key + "-256.jpg"), ec)) continue;
+        if (!cover || std::filesystem::exists(directory_ / (cover->key + "-" + std::to_string(kPixels) + ".jpg"), ec)) continue;
         try {
-            if (stored(store, {ArtworkKind::Album, album, {}, 256}, token)) ++made;
+            if (stored(store, {ArtworkKind::Album, album, {}}, token)) ++made;
         } catch (const std::exception&) {
         }
     }
     return made;
 }
 
-std::optional<ArtworkReference> ArtworkCache::thumbnail(const ArtworkCandidate& image, unsigned pixels,
-                                                        const CancellationToken& token) {
+std::optional<ArtworkReference> ArtworkCache::thumbnail(const ArtworkCandidate& image, const CancellationToken& token) {
     std::lock_guard lock(mutex_);
     try {
-        return generate(image, pixels, token);
+        return generate(image, token);
     } catch (const std::exception&) {
         return {};
     }
 }
 
-std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& image, unsigned pixels,
-                                                       const CancellationToken& token, const std::string& stableKey) {
-    if (token.cancelled() || (pixels != 256 && pixels != 600) || image.bytes.size() > kMaxArtworkBytes) return {};
-    const auto key = (stableKey.empty() ? sourceKey(image) : stableKey) + "-" + std::to_string(pixels);
+std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& image, const CancellationToken& token,
+                                                       const std::string& stableKey) {
+    if (token.cancelled() || image.bytes.size() > kMaxArtworkBytes) return {};
+    const auto key = (stableKey.empty() ? sourceKey(image) : stableKey) + "-" + std::to_string(kPixels);
     const auto target = directory_ / (key + ".jpg");
     std::filesystem::create_directories(directory_);
     if (!diskBytes_) trim();
@@ -321,7 +320,7 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
             if (!input.read(reinterpret_cast<char*>(bytes.data() + offset), std::streamsize(count))) return {};
             offset += count;
         }
-        if (stableKey.empty() && sourceKey(image) + "-" + std::to_string(pixels) != key) return {};
+        if (stableKey.empty() && sourceKey(image) + "-" + std::to_string(kPixels) != key) return {};
     }
     if (bytes.empty() || token.cancelled()) return {};
     Apartment apartment;
@@ -353,7 +352,7 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
     check(source->GetSize(&width, &height));
     if (!width || !height || width > 16384 || height > 16384 || uint64_t(width) * height > 40000000 || token.cancelled())
         return {};
-    const double scale = std::min(1.0, double(pixels) / std::max(width, height));
+    const double scale = std::min(1.0, double(kPixels) / std::max(width, height));
     ComPtr<IWICBitmapScaler> scaler;
     check(factory->CreateBitmapScaler(&scaler));
     check(scaler->Initialize(source.Get(), std::max(1u, UINT(width * scale)), std::max(1u, UINT(height * scale)),

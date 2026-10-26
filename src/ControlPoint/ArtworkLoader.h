@@ -44,7 +44,6 @@ inline winrt::fire_and_forget loadArtwork(winrt::Microsoft::UI::Xaml::Controls::
         struct Entry {
             std::string key;
             BitmapImage bitmap;
-            unsigned pixels;
         };
         static std::list<Entry> cache;
         auto found = std::find_if(cache.begin(), cache.end(), [&](const auto& e) { return e.key == ref->key; });
@@ -59,10 +58,10 @@ inline winrt::fire_and_forget loadArtwork(winrt::Microsoft::UI::Xaml::Controls::
         if (token.cancelled()) co_return;
         if (auto target = weak.get()) target.Source(bitmap);
         cache.remove_if([&](const auto& entry) { return entry.key == ref->key; });
-        cache.push_front({ref->key, bitmap, request.pixels});
+        cache.push_front({ref->key, bitmap});
         size_t bytes = 0;
         for (auto it = cache.begin(); it != cache.end();) {
-            bytes += size_t(it->pixels) * it->pixels * 4;
+            bytes += size_t(camel::server::ArtworkCache::kPixels) * camel::server::ArtworkCache::kPixels * 4;
             if (bytes > (32ull << 20))
                 it = cache.erase(it);
             else

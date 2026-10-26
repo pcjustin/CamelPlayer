@@ -68,17 +68,13 @@ protected:
     }
 };
 } // namespace
-TEST_F(ArtworkCacheTest, GeneratesBothSizesPreservingAspectAndReusesTheCache) {
+TEST_F(ArtworkCacheTest, GeneratesTheThumbnailPreservingAspectAndReusesTheCache) {
     ArtworkCache cache(dir / "thumbs");
     const auto image = bitmap();
-    const auto smallRef = cache.thumbnail(image, 256);
-    const auto large = cache.thumbnail(image, 600);
+    const auto smallRef = cache.thumbnail(image);
     ASSERT_TRUE(smallRef);
-    ASSERT_TRUE(large);
     EXPECT_EQ(dimensions(smallRef->path), (std::pair<unsigned, unsigned>{256, 128}));
-    EXPECT_EQ(dimensions(large->path), (std::pair<unsigned, unsigned>{600, 300}));
-    EXPECT_NE(smallRef->key, large->key);
-    const auto reused = cache.thumbnail(image, 256);
+    const auto reused = cache.thumbnail(image);
     ASSERT_TRUE(reused);
     EXPECT_EQ(smallRef->key, reused->key);
     EXPECT_EQ(smallRef->path, reused->path);
@@ -88,19 +84,18 @@ TEST_F(ArtworkCacheTest, RejectsCorruptOversizedDimensionsAndCancellationWithout
     ArtworkCache cache(dir / "thumbs");
     ArtworkCandidate corrupt;
     corrupt.bytes = {1, 2, 3};
-    EXPECT_FALSE(cache.thumbnail(corrupt, 256));
+    EXPECT_FALSE(cache.thumbnail(corrupt));
     auto huge = bitmap(4, 4);
     huge.bytes[18] = 0xff;
     huge.bytes[19] = 0xff;
-    EXPECT_FALSE(cache.thumbnail(huge, 256));
+    EXPECT_FALSE(cache.thumbnail(huge));
     ArtworkCandidate oversized;
     oversized.bytes.resize(size_t(kMaxArtworkBytes) + 1);
-    EXPECT_FALSE(cache.thumbnail(oversized, 256));
+    EXPECT_FALSE(cache.thumbnail(oversized));
     auto image = bitmap();
-    EXPECT_FALSE(cache.thumbnail(image, 128));
     CancellationToken token;
     token.cancel();
-    EXPECT_FALSE(cache.thumbnail(image, 256, token));
+    EXPECT_FALSE(cache.thumbnail(image, token));
     for (const auto& entry : std::filesystem::directory_iterator(dir / "thumbs")) ADD_FAILURE() << entry.path();
 }
 TEST_F(ArtworkCacheTest, FileVersionChangesAndEmbeddedDigestsInvalidateTheKey) {
@@ -109,26 +104,26 @@ TEST_F(ArtworkCacheTest, FileVersionChangesAndEmbeddedDigestsInvalidateTheKey) {
     save(file, bitmap());
     ArtworkCandidate external;
     external.file = file;
-    const auto first = cache.thumbnail(external, 256);
+    const auto first = cache.thumbnail(external);
     ASSERT_TRUE(first);
     save(file, bitmap(100, 100, 200));
-    const auto changed = cache.thumbnail(external, 256);
+    const auto changed = cache.thumbnail(external);
     ASSERT_TRUE(changed);
     EXPECT_NE(first->key, changed->key);
-    const auto embedded1 = cache.thumbnail(bitmap(100, 100, 70), 256);
-    const auto embedded2 = cache.thumbnail(bitmap(100, 100, 80), 256);
+    const auto embedded1 = cache.thumbnail(bitmap(100, 100, 70));
+    const auto embedded2 = cache.thumbnail(bitmap(100, 100, 80));
     ASSERT_TRUE(embedded1);
     ASSERT_TRUE(embedded2);
     EXPECT_NE(embedded1->key, embedded2->key);
 }
 TEST_F(ArtworkCacheTest, DiskCacheEvictsOldThumbnailsToItsByteLimit) {
     ArtworkCache probe(dir / "probe");
-    const auto first = probe.thumbnail(bitmap(), 256);
+    const auto first = probe.thumbnail(bitmap());
     ASSERT_TRUE(first);
     const auto limit = std::filesystem::file_size(first->path) + 10;
     ArtworkCache cache(dir / "thumbs", limit);
-    ASSERT_TRUE(cache.thumbnail(bitmap(), 256));
-    ASSERT_TRUE(cache.thumbnail(bitmap(800, 400, 100), 256));
+    ASSERT_TRUE(cache.thumbnail(bitmap()));
+    ASSERT_TRUE(cache.thumbnail(bitmap(800, 400, 100)));
     uintmax_t total = 0;
     for (const auto& entry : std::filesystem::directory_iterator(dir / "thumbs")) total += entry.file_size();
     EXPECT_LE(total, limit);
@@ -142,7 +137,7 @@ TEST_F(ArtworkCacheTest, WebpWorksWithoutTheWindowsCodec) {
     ArtworkCandidate image;
     image.bytes.assign(output, output + size);
     WebPFree(output);
-    const auto ref = cache.thumbnail(image, 256);
+    const auto ref = cache.thumbnail(image);
     ASSERT_TRUE(ref);
     EXPECT_EQ(dimensions(ref->path), (std::pair<unsigned, unsigned>{32, 16}));
 }
