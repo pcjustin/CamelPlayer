@@ -10,9 +10,9 @@
 namespace camel::server {
 namespace {
 
-// Identities: files.id is the file identity (kept across verified moves, docs/Plan.md §7.2); a track is
-// (file_id, cue_index) with cue_index 0 for a whole file; queue entries have their own entry_id. Statistics and ratings
-// are keyed by the track identity, not by tracks.id, so they outlive a track row that a rescan replaces.
+// Identities: files.id is the file identity (kept across verified moves, docs/Plan.md §7.2); a track was
+// (file_id, cue_index) until schema v12 and is its file since; queue entries have their own entry_id. Statistics and
+// ratings are keyed by the track identity, not by tracks.id, so they outlive a track row that a rescan replaces.
 constexpr const char* kSchemaV1 = R"sql(
 CREATE TABLE roots (
     id INTEGER PRIMARY KEY,
@@ -298,6 +298,91 @@ const std::vector<Migration>& libraryMigrations() {
                     "INSERT OR REPLACE INTO app_state(key,value) SELECT 'library_derived_dirty:'||id,1 FROM roots;"
                     "ALTER TABLE files DROP COLUMN embedded_cue;");
         },
+        [](sqlite::Database& db) {
+            // A track is identified by its file: the CUE index, CUE file and gap columns and the view hiding CUE
+            // duplicates go. Tables keyed by the index are rebuilt with their rows, ids and full-text entries intact.
+            std::vector<std::string> tracksIndexesAndTriggers;
+            auto existing = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='tracks' AND type IN ('index','trigger') "
+                                       "AND sql IS NOT NULL");
+            while (existing.step()) tracksIndexesAndTriggers.push_back(existing.text(0));
+            constexpr const char* kColumns =
+                "id,file_id,start_frame,end_frame,album_id,title,album,album_artist,artist,composer,genre,year,track_number,"
+                "track_total,disc_number,disc_total,format,sample_rate,bits_per_sample,channels,total_frames,rg_track_gain,"
+                "rg_track_peak,rg_album_gain,rg_album_peak,rg_analysis_gain,rg_analysis_peak,embedded_cover,lyrics,title_norm,"
+                "album_norm,artist_norm,title_sort,album_sort,artist_sort,title_sort_tag,album_sort_tag,artist_sort_tag,"
+                "length_estimated";
+            db.exec(std::string(R"sql(
+DROP VIEW library_tracks;
+CREATE TABLE tracks_v12 (
+    id INTEGER PRIMARY KEY,
+    file_id INTEGER NOT NULL UNIQUE REFERENCES files(id),
+    start_frame INTEGER NOT NULL DEFAULT 0,
+    end_frame INTEGER,
+    album_id INTEGER REFERENCES albums(id),
+    title TEXT,
+    album TEXT,
+    album_artist TEXT,
+    artist TEXT,
+    composer TEXT,
+    genre TEXT,
+    year INTEGER,
+    track_number INTEGER,
+    track_total INTEGER,
+    disc_number INTEGER,
+    disc_total INTEGER,
+    format TEXT,
+    sample_rate INTEGER,
+    bits_per_sample INTEGER,
+    channels INTEGER,
+    total_frames INTEGER,
+    rg_track_gain REAL,
+    rg_track_peak REAL,
+    rg_album_gain REAL,
+    rg_album_peak REAL,
+    rg_analysis_gain REAL,
+    rg_analysis_peak REAL,
+    embedded_cover INTEGER NOT NULL DEFAULT 0,
+    lyrics TEXT NOT NULL DEFAULT 'none' CHECK (lyrics IN ('none', 'embedded', 'lrc')),
+    title_norm TEXT,
+    album_norm TEXT,
+    artist_norm TEXT,
+    title_sort BLOB,
+    album_sort BLOB,
+    artist_sort BLOB,
+    title_sort_tag TEXT,
+    album_sort_tag TEXT,
+    artist_sort_tag TEXT,
+    length_estimated INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO tracks_v12()sql") + kColumns + ") SELECT " + kColumns + R"sql( FROM tracks WHERE cue_index=0;
+DELETE FROM track_values WHERE track_id NOT IN (SELECT id FROM tracks_v12);
+DROP TABLE tracks;
+ALTER TABLE tracks_v12 RENAME TO tracks;
+CREATE TABLE stats_v12 (
+    file_id INTEGER PRIMARY KEY REFERENCES files(id),
+    play_count INTEGER NOT NULL DEFAULT 0,
+    last_played INTEGER,
+    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+    favorite INTEGER NOT NULL DEFAULT 0,
+    detached INTEGER,
+    listened_ms INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO stats_v12(file_id,play_count,last_played,rating,favorite,detached,listened_ms)
+    SELECT file_id,SUM(play_count),MAX(last_played),MAX(rating),MAX(favorite),MAX(detached),SUM(listened_ms)
+    FROM stats GROUP BY file_id;
+DROP TABLE stats;
+ALTER TABLE stats_v12 RENAME TO stats;
+DROP INDEX play_events_track;
+ALTER TABLE play_events DROP COLUMN cue_index;
+CREATE INDEX play_events_track ON play_events(file_id);
+DROP INDEX playlist_items_track;
+ALTER TABLE playlist_items DROP COLUMN cue_index;
+CREATE INDEX playlist_items_track ON playlist_items(file_id);
+ALTER TABLE queue DROP COLUMN cue_index;
+)sql");
+            for (const auto& sql : tracksIndexesAndTriggers) db.exec(sql);
+            if (db.prepare("PRAGMA foreign_key_check").step()) throw std::runtime_error("schema v12 left a dangling reference");
+        },
     };
     return migrations;
 }
@@ -307,12 +392,21 @@ void migrate(sqlite::Database& db, const std::vector<Migration>& migrations) {
     if (current > int(migrations.size()))
         throw std::runtime_error("library.db has schema version " + std::to_string(current) + ", newer than this program (" +
                                  std::to_string(migrations.size()) + ")");
-    for (int version = current; version < int(migrations.size()); version++) {
-        sqlite::Transaction t(db);
-        migrations[size_t(version)](db);
-        db.setUserVersion(version + 1);
-        t.commit();
+    // Rebuilt tables are copied, dropped and renamed (https://sqlite.org/lang_altertable.html#otheralter); with foreign
+    // keys enforced, dropping a parent table would delete its children. The pragma has no effect inside a transaction.
+    db.exec("PRAGMA foreign_keys = OFF");
+    try {
+        for (int version = current; version < int(migrations.size()); version++) {
+            sqlite::Transaction t(db);
+            migrations[size_t(version)](db);
+            db.setUserVersion(version + 1);
+            t.commit();
+        }
+    } catch (...) {
+        db.exec("PRAGMA foreign_keys = ON");
+        throw;
     }
+    db.exec("PRAGMA foreign_keys = ON");
 }
 
 } // namespace camel::server

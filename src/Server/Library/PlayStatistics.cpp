@@ -92,13 +92,12 @@ void PlaySession::persist(LibraryStore& store) {
     store.write([event = event_, track = track_, started = startedMs_, offset = utcOffsetMinutes_, heardMs,
                  counted = counted_, addMs, addCount](sqlite::Database& db) {
         if (!*event) {
-            db.prepare("INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES(?,?,?,?,?,?)")
+            db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,?,?,?,?)")
                 .bind(1, track.file)
-                .bind(2, track.cueIndex)
-                .bind(3, started)
-                .bind(4, int64_t(offset))
-                .bind(5, int64_t(heardMs))
-                .bind(6, int64_t(counted))
+                .bind(2, started)
+                .bind(3, int64_t(offset))
+                .bind(4, int64_t(heardMs))
+                .bind(5, int64_t(counted))
                 .run();
             *event = db.lastInsertId();
         } else {
@@ -108,15 +107,14 @@ void PlaySession::persist(LibraryStore& store) {
                 .bind(3, *event)
                 .run();
         }
-        db.prepare("INSERT INTO stats(file_id,cue_index,play_count,last_played,listened_ms) VALUES(?,?,?,?,?) "
-                   "ON CONFLICT(file_id,cue_index) DO UPDATE SET play_count=play_count+excluded.play_count,"
+        db.prepare("INSERT INTO stats(file_id,play_count,last_played,listened_ms) VALUES(?,?,?,?) "
+                   "ON CONFLICT(file_id) DO UPDATE SET play_count=play_count+excluded.play_count,"
                    "listened_ms=listened_ms+excluded.listened_ms,"
                    "last_played=coalesce(max(last_played,excluded.last_played),last_played,excluded.last_played)")
             .bind(1, track.file)
-            .bind(2, track.cueIndex)
-            .bind(3, int64_t(addCount))
-            .bind(4, started)
-            .bind(5, addMs)
+            .bind(2, int64_t(addCount))
+            .bind(3, started)
+            .bind(4, addMs)
             .run();
     });
 }
@@ -135,35 +133,35 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
     const std::string order = query.metric == PlayMetric::Plays ? " ORDER BY plays DESC,ms DESC" : " ORDER BY ms DESC,plays DESC";
     const std::string available = "(f.available=1 AND r.online=1 AND r.removed IS NULL)";
     // Per-track totals in the period; artist rows fall back to the track's ARTIST when no multivalue rows exist.
-    const std::string totals = "WITH e AS (SELECT e.file_id,e.cue_index,SUM(e.counted) plays,SUM(e.heard_ms) ms "
-                               "FROM play_events e" + where + " GROUP BY e.file_id,e.cue_index) ";
+    const std::string totals = "WITH e AS (SELECT e.file_id,SUM(e.counted) plays,SUM(e.heard_ms) ms "
+                               "FROM play_events e" + where + " GROUP BY e.file_id) ";
     const std::string artists = totals + ",a AS (SELECT e.plays,e.ms,v.value name FROM e JOIN tracks t ON t.file_id=e.file_id "
-                                "AND t.cue_index=e.cue_index JOIN track_values v ON v.track_id=t.id AND v.field='artist' "
+                                "JOIN track_values v ON v.track_id=t.id AND v.field='artist' "
                                 "UNION ALL SELECT e.plays,e.ms,t.artist FROM e JOIN tracks t ON t.file_id=e.file_id "
-                                "AND t.cue_index=e.cue_index WHERE coalesce(t.artist,'')<>'' AND NOT EXISTS("
+                                "WHERE coalesce(t.artist,'')<>'' AND NOT EXISTS("
                                 "SELECT 1 FROM track_values v WHERE v.track_id=t.id AND v.field='artist')) ";
 
     PlayStatistics out;
     auto overview = db.prepare("SELECT coalesce(SUM(e.heard_ms),0),coalesce(SUM(e.counted),0),"
-                               "COUNT(DISTINCT e.file_id||':'||e.cue_index),COUNT(DISTINCT t.album_id) "
-                               "FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id AND t.cue_index=e.cue_index" +
+                               "COUNT(DISTINCT e.file_id),COUNT(DISTINCT t.album_id) "
+                               "FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id" +
                                where);
     overview.step();
     out.overview = {overview.integer(0), overview.integer(1), overview.integer(2), overview.integer(3), 0};
     out.overview.artists = db.scalar(artists + "SELECT COUNT(DISTINCT name) FROM a").value_or(0);
 
-    auto tracks = db.prepare(totals + "SELECT e.file_id,e.cue_index,coalesce(t.title,''),coalesce(t.artist,''),"
+    auto tracks = db.prepare(totals + "SELECT e.file_id,coalesce(t.title,''),coalesce(t.artist,''),"
                              "coalesce(t.album,''),e.plays,e.ms," + available + " FROM e "
-                             "LEFT JOIN tracks t ON t.file_id=e.file_id AND t.cue_index=e.cue_index "
+                             "LEFT JOIN tracks t ON t.file_id=e.file_id "
                              "JOIN files f ON f.id=e.file_id JOIN roots r ON r.id=f.root_id" + order +
-                             ",e.file_id,e.cue_index LIMIT ?");
+                             ",e.file_id LIMIT ?");
     tracks.bind(1, query.topLimit);
     while (tracks.step())
-        out.tracks.push_back({{tracks.integer(0), tracks.integer(1)}, tracks.text(2), tracks.text(3), tracks.text(4),
-                              tracks.integer(5), tracks.integer(6), tracks.integer(7) != 0});
+        out.tracks.push_back({{tracks.integer(0)}, tracks.text(1), tracks.text(2), tracks.text(3), tracks.integer(4),
+                              tracks.integer(5), tracks.integer(6) != 0});
 
     auto albums = db.prepare(totals + "SELECT al.id,coalesce(al.title,''),coalesce(al.album_artist,''),SUM(e.plays) plays,"
-                             "SUM(e.ms) ms FROM e JOIN tracks t ON t.file_id=e.file_id AND t.cue_index=e.cue_index "
+                             "SUM(e.ms) ms FROM e JOIN tracks t ON t.file_id=e.file_id "
                              "JOIN albums al ON al.id=t.album_id GROUP BY al.id" + order + ",al.id LIMIT ?");
     albums.bind(1, query.topLimit);
     while (albums.step())
@@ -184,16 +182,16 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
     while (buckets.step()) out.buckets.push_back({buckets.text(0), buckets.integer(1), buckets.integer(2)});
 
     out.historyTotal = db.scalar("SELECT COUNT(*) FROM play_events e" + where).value_or(0);
-    auto history = db.prepare("SELECT e.id,e.file_id,e.cue_index,e.started,e.utc_offset,e.heard_ms,e.counted,"
+    auto history = db.prepare("SELECT e.id,e.file_id,e.started,e.utc_offset,e.heard_ms,e.counted,"
                               "coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,'')," + available +
-                              " FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id AND t.cue_index=e.cue_index "
+                              " FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id "
                               "JOIN files f ON f.id=e.file_id JOIN roots r ON r.id=f.root_id" + where +
                               " ORDER BY e.started DESC,e.id DESC LIMIT ? OFFSET ?");
     history.bind(1, query.historyLimit).bind(2, query.historyOffset);
     while (history.step())
-        out.history.push_back({history.integer(0), {history.integer(1), history.integer(2)}, history.integer(3),
-                               int32_t(history.integer(4)), history.integer(5), history.integer(6) != 0, history.text(7),
-                               history.text(8), history.text(9), history.integer(10) != 0});
+        out.history.push_back({history.integer(0), {history.integer(1)}, history.integer(2), int32_t(history.integer(3)),
+                               history.integer(4), history.integer(5) != 0, history.text(6), history.text(7),
+                               history.text(8), history.integer(9) != 0});
     db.exec("COMMIT");
     return out;
 }
@@ -205,12 +203,12 @@ void resetPlayStatistics(LibraryStore& store, const std::vector<LibraryTrackKey>
                 db.exec("DELETE FROM play_events; UPDATE stats SET play_count=0,listened_ms=0,last_played=NULL;");
                 return;
             }
-            auto events = db.prepare("DELETE FROM play_events WHERE file_id=? AND cue_index=?");
-            auto stats = db.prepare("UPDATE stats SET play_count=0,listened_ms=0,last_played=NULL WHERE file_id=? AND cue_index=?");
+            auto events = db.prepare("DELETE FROM play_events WHERE file_id=?");
+            auto stats = db.prepare("UPDATE stats SET play_count=0,listened_ms=0,last_played=NULL WHERE file_id=?");
             for (const auto& track : tracks) {
-                events.bind(1, track.file).bind(2, track.cueIndex).run();
+                events.bind(1, track.file).run();
                 events.reset();
-                stats.bind(1, track.file).bind(2, track.cueIndex).run();
+                stats.bind(1, track.file).run();
                 stats.reset();
             }
         })

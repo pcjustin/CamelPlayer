@@ -22,14 +22,14 @@ namespace camel::server {
 namespace {
 
 constexpr const char* kTrackColumns =
-    "t.file_id,t.cue_index,(f.available=1 AND r.online=1 AND r.removed IS NULL),"
+    "t.file_id,(f.available=1 AND r.online=1 AND r.removed IS NULL),"
     "CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate ELSE 0 END,"
     "f.path ";
 constexpr const char* kTrackJoins = " JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id "
                                     "LEFT JOIN albums al ON al.id=t.album_id ";
-// Album, then disc and track number; the file name orders tracks without numbers and CUE index orders virtual tracks.
+// Album, then disc and track number; the file name orders tracks without numbers.
 constexpr const char* kNaturalOrder =
-    " ORDER BY coalesce(al.sort_key,t.album_sort),t.album_id,t.disc_number,t.track_number,f.path,t.cue_index";
+    " ORDER BY coalesce(al.sort_key,t.album_sort),t.album_id,t.disc_number,t.track_number,f.path";
 
 int64_t nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -76,15 +76,15 @@ std::string sourceName(sqlite::Database& db, const PlaylistSource& source) {
     }
     case PlaylistSource::Kind::Track: {
         auto row = db.prepare("SELECT coalesce(t.title,''),coalesce(f.name,'') FROM tracks t JOIN files f ON f.id=t.file_id "
-                              "WHERE t.file_id=? AND t.cue_index=?");
-        row.bind(1, source.track.file).bind(2, source.track.cueIndex);
+                              "WHERE t.file_id=?");
+        row.bind(1, source.track.file);
         return trackName(row);
     }
     case PlaylistSource::Kind::Year:
         return std::to_string(source.id);
     case PlaylistSource::Kind::Path: {
         auto row = db.prepare("SELECT coalesce(t.title,''),coalesce(f.name,'') FROM tracks t JOIN files f ON f.id=t.file_id "
-                              "WHERE f.path IN (?1,?2) AND f.available=1 AND t.cue_index=0");
+                              "WHERE f.path IN (?1,?2) AND f.available=1");
         bindPathKeys(row, source.value);
         return trackName(row);
     }
@@ -98,7 +98,7 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
         return static_cast<const CancellationToken*>(context)->cancelled() ? 1 : 0;
     }, const_cast<CancellationToken*>(&token));
     Expansion out;
-    std::set<std::pair<int64_t, int64_t>> seen;
+    std::set<int64_t> seen;
     const std::string select = std::string("SELECT ") + kTrackColumns;
     for (const auto& source : sources) {
         if (token.cancelled()) throw std::runtime_error("playlist selection cancelled");
@@ -106,29 +106,29 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
             switch (source.kind) {
             case PlaylistSource::Kind::Folder: {
                 auto s = db.prepare("WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT d.id FROM folders d JOIN sub "
-                                    "ON d.parent_id=sub.id) " + select + "FROM library_tracks t" + kTrackJoins +
+                                    "ON d.parent_id=sub.id) " + select + "FROM tracks t" + kTrackJoins +
                                     "WHERE f.folder_id IN sub" + kNaturalOrder);
                 s.bind(1, source.id);
                 return s;
             }
             case PlaylistSource::Kind::Album: {
-                auto s = db.prepare(select + "FROM library_tracks t" + kTrackJoins + "WHERE t.album_id=?" + kNaturalOrder);
+                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins + "WHERE t.album_id=?" + kNaturalOrder);
                 s.bind(1, source.id);
                 return s;
             }
             case PlaylistSource::Kind::Track: {
-                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins + "WHERE t.file_id=? AND t.cue_index=?");
-                s.bind(1, source.track.file).bind(2, source.track.cueIndex);
+                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins + "WHERE t.file_id=?");
+                s.bind(1, source.track.file);
                 return s;
             }
             case PlaylistSource::Kind::Year: {
-                auto s = db.prepare(select + "FROM library_tracks t" + kTrackJoins + "WHERE t.year=?" + kNaturalOrder);
+                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins + "WHERE t.year=?" + kNaturalOrder);
                 s.bind(1, source.id);
                 return s;
             }
             case PlaylistSource::Kind::Path: {
                 auto s = db.prepare(select + "FROM tracks t" + kTrackJoins +
-                                    "WHERE f.path IN (?1,?2) AND f.available=1 AND t.cue_index=0");
+                                    "WHERE f.path IN (?1,?2) AND f.available=1");
                 bindPathKeys(s, source.value);
                 return s;
             }
@@ -137,7 +137,7 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
                                     : source.kind == PlaylistSource::Kind::Composer ? "composer"
                                                                                     : "genre";
                 // Tracks without multivalue rows match their single-valued column.
-                auto s = db.prepare(select + "FROM library_tracks t" + kTrackJoins +
+                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins +
                                     "WHERE EXISTS(SELECT 1 FROM track_values v WHERE v.track_id=t.id AND v.field=?1 AND "
                                     "v.value=?2) OR (NOT EXISTS(SELECT 1 FROM track_values v WHERE v.track_id=t.id AND "
                                     "v.field=?1) AND t." + field + "=?2)" + kNaturalOrder);
@@ -150,13 +150,13 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
         bool found = false;
         while (rows.step()) {
             found = true;
-            const LibraryTrackKey track{rows.integer(0), rows.integer(1)};
-            if (!rows.integer(2)) {
+            const LibraryTrackKey track{rows.integer(0)};
+            if (!rows.integer(1)) {
                 ++out.unavailable;
-            } else if (!seen.emplace(track.file, track.cueIndex).second) {
+            } else if (!seen.insert(track.file).second) {
                 ++out.duplicates;
             } else {
-                out.tracks.push_back({track, rows.text(4), rows.integer(3)});
+                out.tracks.push_back({track, rows.text(3), rows.integer(2)});
             }
         }
         if (!found && source.kind == PlaylistSource::Kind::Path) ++out.unavailable; // a file outside the library
@@ -187,17 +187,17 @@ int64_t insertPlaylist(sqlite::Database& db, const std::string& base) {
 std::vector<int64_t> appendItems(sqlite::Database& db, int64_t playlist, const std::vector<PlaylistEntry>& entries) {
     int64_t position = db.scalar("SELECT coalesce(MAX(position)+1,0) FROM playlist_items WHERE playlist_id=" +
                                  std::to_string(playlist)).value();
-    auto insert = db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,cue_index,source_description,added) "
-                             "VALUES(?,?,?,?,?,?)");
+    auto insert = db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description,added) "
+                             "VALUES(?,?,?,?,?)");
     const auto now = nowMs();
     std::vector<int64_t> ids;
     ids.reserve(entries.size());
     for (const auto& entry : entries) {
         insert.reset();
         insert.bind(1, playlist).bind(2, position++);
-        if (entry.track) insert.bind(3, entry.track->file).bind(4, entry.track->cueIndex);
-        else insert.bindNull(3).bind(4, int64_t(0));
-        insert.bind(5, entry.source).bind(6, now).run();
+        if (entry.track) insert.bind(3, entry.track->file);
+        else insert.bindNull(3);
+        insert.bind(4, entry.source).bind(5, now).run();
         ids.push_back(db.lastInsertId());
     }
     return ids;
@@ -343,13 +343,13 @@ PlaylistChange addToPlaylist(LibraryStore& store, int64_t playlist, std::optiona
     store
         .write([&](sqlite::Database& db) {
             change.revision = bump(db, playlist, revision);
-            std::set<std::pair<int64_t, int64_t>> present;
-            auto existing = db.prepare("SELECT file_id,cue_index FROM playlist_items WHERE playlist_id=? AND file_id IS NOT NULL");
+            std::set<int64_t> present;
+            auto existing = db.prepare("SELECT file_id FROM playlist_items WHERE playlist_id=? AND file_id IS NOT NULL");
             existing.bind(1, playlist);
-            while (existing.step()) present.emplace(existing.integer(0), existing.integer(1));
+            while (existing.step()) present.insert(existing.integer(0));
             std::vector<PlaylistEntry> added;
             for (const auto& t : expansion.tracks) {
-                if (present.contains({t.track.file, t.track.cueIndex})) ++change.skippedExisting;
+                if (present.contains(t.track.file)) ++change.skippedExisting;
                 else added.push_back({t.track, t.source});
             }
             change.undo.items = appendItems(db, playlist, added);
@@ -423,8 +423,8 @@ PlaylistChange editPlaylist(LibraryStore& store, const PlaylistEdit& edit) {
                 // Entries without library metadata sort last; equal keys keep their current order.
                 std::string order = "(t.id IS NULL)";
                 for (const auto* column : keys[size_t(edit.key)]) order += std::string(",") + column + (edit.descending ? " DESC" : "");
-                auto rows = db.prepare("SELECT i.id FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id AND "
-                                       "t.cue_index=i.cue_index WHERE i.playlist_id=? ORDER BY " + order + ",i.position");
+                auto rows = db.prepare("SELECT i.id FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id "
+                                       "WHERE i.playlist_id=? ORDER BY " + order + ",i.position");
                 rows.bind(1, edit.playlist);
                 std::vector<int64_t> ordered;
                 while (rows.step()) ordered.push_back(rows.integer(0));
@@ -497,7 +497,7 @@ PlaylistChange importPlaylistFile(LibraryStore& store, const std::filesystem::pa
             } catch (const std::exception&) {
             }
         }
-        entries.push_back({found == files.end() ? std::nullopt : std::optional(LibraryTrackKey{found->second, 0}),
+        entries.push_back({found == files.end() ? std::nullopt : std::optional(LibraryTrackKey{found->second}),
                            toUtf8(path.wstring())});
     }
     auto change = savePlaylist(store, toUtf8(file.stem().wstring()), entries);
@@ -556,12 +556,12 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
     page.revision = header.integer(0);
     page.total = header.integer(1);
     auto rows = db.prepare(
-        "SELECT i.id,i.position,i.added,i.file_id,i.cue_index,i.source_description,coalesce(t.title,''),"
+        "SELECT i.id,i.position,i.added,i.file_id,i.source_description,coalesce(t.title,''),"
         "coalesce(t.artist,''),coalesce(t.album,''),"
         "CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate ELSE 0 END,"
         "coalesce(t.id IS NOT NULL AND f.available=1 AND r.online=1 AND r.removed IS NULL,0),"
         "coalesce(f.path,i.source_description),coalesce(f.name,'') "
-        "FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id AND t.cue_index=i.cue_index "
+        "FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id "
         "LEFT JOIN files f ON f.id=i.file_id LEFT JOIN roots r ON r.id=f.root_id "
         "WHERE i.playlist_id=? AND i.position>=? ORDER BY i.position LIMIT ?"); // positions run 0..n-1
     rows.bind(1, playlist).bind(2, offset).bind(3, limit);
@@ -570,15 +570,15 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
         item.id = rows.integer(0);
         item.position = rows.integer(1);
         item.added = rows.integer(2);
-        if (!rows.isNull(3)) item.track = LibraryTrackKey{rows.integer(3), rows.integer(4)};
-        item.source = rows.text(5);
-        item.title = rows.text(6);
-        item.artist = rows.text(7);
-        item.album = rows.text(8);
-        item.durationMs = rows.integer(9);
-        item.available = rows.integer(10) != 0;
-        item.path = rows.text(11);
-        item.name = rows.text(12);
+        if (!rows.isNull(3)) item.track = LibraryTrackKey{rows.integer(3)};
+        item.source = rows.text(4);
+        item.title = rows.text(5);
+        item.artist = rows.text(6);
+        item.album = rows.text(7);
+        item.durationMs = rows.integer(8);
+        item.available = rows.integer(9) != 0;
+        item.path = rows.text(10);
+        item.name = rows.text(11);
         page.items.push_back(std::move(item));
     }
     db.exec("COMMIT");

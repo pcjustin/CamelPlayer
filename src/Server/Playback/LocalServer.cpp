@@ -327,7 +327,7 @@ public:
             try {
                 const auto key = toUtf8(canonicalLibraryPath(std::filesystem::path(toWide(entry.source.pathUtf8()))).wstring());
                 file.reset();
-                if (file.bind(1, key).step()) item.track = LibraryTrackKey{file.integer(0), 0};
+                if (file.bind(1, key).step()) item.track = LibraryTrackKey{file.integer(0)};
             } catch (const std::exception&) {
                 // An inaccessible path is saved without a library identity.
             }
@@ -395,12 +395,11 @@ private:
             // The library no longer describes a file that is gone, so the entry keeps what it showed.
             entries.back().title = item.description;
         }
-        // One query for the whole queue: a lookup per entry took 3.4 s for 100k entries. A file's first track is its
-        // first CUE track, else the whole file, as in library_tracks.
+        // One query for the whole queue: a lookup per entry took 3.4 s for 100k entries.
         auto files = reader.prepare(
             "SELECT q.position,q.file_id,f.path,coalesce(t.title,''),coalesce(t.artist,''),"
             "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0),t.id IS NOT NULL FROM queue q JOIN files f ON f.id=q.file_id "
-            "LEFT JOIN tracks t ON t.id=(SELECT v.id FROM tracks v WHERE v.file_id=f.id ORDER BY v.cue_index=0,v.cue_index LIMIT 1) "
+            "LEFT JOIN tracks t ON t.file_id=f.id "
             "LEFT JOIN albums a ON a.id=t.album_id");
         while (files.step()) {
             const auto at = size_t(files.integer(0));
@@ -692,8 +691,8 @@ private:
                     auto file = libraryReader_->prepare(
                         "SELECT f.id,coalesce(t.title,''),coalesce(t.artist,''),"
                         "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
-                        "LEFT JOIN library_tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
-                        "WHERE f.path=? AND f.available=1 ORDER BY t.cue_index LIMIT 1");
+                        "LEFT JOIN tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
+                        "WHERE f.path=? AND f.available=1");
                     if (file.bind(1, toUtf8(binding.path)).step()) {
                         binding.file = file.integer(0);
                         auto& entry = entries.back();
@@ -917,7 +916,7 @@ private:
             const auto binding = libraryEntries_.find(state_.queueEntryId);
             if (binding != libraryEntries_.end() && binding->second.file &&
                 playback.file == toWide(entry(state_.queueEntryId).source.pathUtf8())) {
-                session_.emplace(LibraryTrackKey{binding->second.file, 0}, playback.source->sampleRate, playback.total);
+                session_.emplace(LibraryTrackKey{binding->second.file}, playback.source->sampleRate, playback.total);
                 sessionEntry_ = state_.queueEntryId;
                 sessionFile_ = playback.file;
                 sessionTransitions_ = playback.transitions;

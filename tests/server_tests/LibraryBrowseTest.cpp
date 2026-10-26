@@ -171,7 +171,7 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     RecordProperty("query_cpu_delta_100ns", cpu100ns);
     EXPECT_LT(p95, 100.0);
     EXPECT_LT(broadSuggestionP95, 100.0);
-    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM library_tracks"), 100000);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks"), 100000);
 }
 
 // Opt-in: CAMEL_SEARCH_INDEX names a folder holding an existing library.db (docs/Plan.md §12.1 UI measurements).

@@ -56,7 +56,7 @@ TEST(LibraryText, RebuildsOnNlsVersionAndLocaleChangesWhileReadersRemainAvailabl
         const auto ready = entered.get_future().wait_for(std::chrono::seconds(10));
         EXPECT_EQ(ready, std::future_status::ready);
         auto reader = store.openReader();
-        EXPECT_EQ(reader.scalar("SELECT count(*) FROM library_tracks"), 201);
+        EXPECT_EQ(reader.scalar("SELECT count(*) FROM tracks"), 201);
         release.set_value();
         index.waitIdle();
         auto row = reader.prepare("SELECT title,title_norm,title_sort FROM tracks WHERE id=1");

@@ -21,7 +21,7 @@ namespace {
 
 PlaylistSource folder(int64_t id) { return {Kind::Folder, id, {}, {}}; }
 PlaylistSource album(int64_t id) { return {Kind::Album, id, {}, {}}; }
-PlaylistSource track(int64_t file, int64_t cue = 0) { return {Kind::Track, 0, {file, cue}, {}}; }
+PlaylistSource track(int64_t file) { return {Kind::Track, 0, {file}, {}}; }
 PlaylistSource artist(std::string name) { return {Kind::Artist, 0, {}, std::move(name)}; }
 
 class PlaylistsTest : public ::testing::Test {
@@ -31,7 +31,7 @@ protected:
 
     // c:\m (1) ─┬─ album (2, album 1: disc 2 track 1 = file 3, disc 1 track 2 = file 2, disc 1 track 1 = file 1)
     //           │   └─ cd2 (3: file 4 without a track number, file 5 unavailable)
-    //           └─ cue (4, album 2: file 6 with CUE virtual tracks 1, 2 and a hidden lead-in)
+    //           └─ live (4, album 2: file 6, track 2 by two artists)
     void SetUp() override {
         dir = testutil::tempDir() / "playlists" /
               (std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) + "-" +
@@ -42,23 +42,20 @@ protected:
             ->write([](sqlite::Database& db) {
                 db.exec(R"sql(
 INSERT INTO roots(id,path,added) VALUES(1,'c:\m',0);
-INSERT INTO folders(id,root_id,parent_id,path) VALUES(1,1,NULL,'c:\m'),(2,1,1,'c:\m\album'),(3,1,2,'c:\m\album\cd2'),(4,1,1,'c:\m\cue');
+INSERT INTO folders(id,root_id,parent_id,path) VALUES(1,1,NULL,'c:\m'),(2,1,1,'c:\m\album'),(3,1,2,'c:\m\album\cd2'),(4,1,1,'c:\m\live');
 INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES
  (1,2,1,'c:\m\album\01.flac','audio',1,1,1),(2,2,1,'c:\m\album\02.flac','audio',1,1,1),
  (3,3,1,'c:\m\album\cd2\01.flac','audio',1,1,1),(4,3,1,'c:\m\album\cd2\bonus.flac','audio',1,1,1),
- (5,3,1,'c:\m\album\cd2\gone.flac','audio',1,1,0),(6,4,1,'c:\m\cue\live.flac','audio',1,1,1);
+ (5,3,1,'c:\m\album\cd2\gone.flac','audio',1,1,0),(6,4,1,'c:\m\live\encore.flac','audio',1,1,1);
 INSERT INTO albums(id,folder_id,grouping_key,title,album_artist,added) VALUES(1,2,'a','Stellar','Suisei',0),(2,4,'b','Live','Pekora',0);
-INSERT INTO tracks(id,file_id,cue_index,album_id,title,artist,album,album_artist,year,disc_number,track_number,sample_rate,total_frames,start_frame,end_frame) VALUES
- (1,1,0,1,'Comet','Suisei','Stellar','Suisei',2021,1,1,1000,60000,0,NULL),
- (2,2,0,1,'Bluerose','Suisei','Stellar','Suisei',2021,1,2,1000,30000,0,NULL),
- (3,3,0,1,'Stellar','Suisei','Stellar','Suisei',2021,2,1,1000,90000,0,NULL),
- (4,4,0,1,'Bonus','Suisei','Stellar','Suisei',2021,2,0,1000,10000,0,NULL),
- (5,5,0,1,'Gone','Suisei','Stellar','Suisei',2021,2,2,1000,10000,0,NULL),
- (6,6,0,2,'Live','Pekora','Live','Pekora',2022,1,0,1000,100000,0,NULL),
- (7,6,-1,2,'','Pekora','Live','Pekora',2022,1,0,1000,100000,0,5000),
- (8,6,1,2,'Opening','Pekora','Live','Pekora',2022,1,1,1000,100000,5000,40000),
- (9,6,2,2,'Encore','Pekora & Miko','Live','Pekora',2022,1,2,1000,100000,40000,NULL);
-INSERT INTO track_values(track_id,field,position,value) VALUES(9,'artist',0,'Pekora'),(9,'artist',1,'Miko');
+INSERT INTO tracks(id,file_id,album_id,title,artist,album,album_artist,year,disc_number,track_number,sample_rate,total_frames,start_frame,end_frame) VALUES
+ (1,1,1,'Comet','Suisei','Stellar','Suisei',2021,1,1,1000,60000,0,NULL),
+ (2,2,1,'Bluerose','Suisei','Stellar','Suisei',2021,1,2,1000,30000,0,NULL),
+ (3,3,1,'Stellar','Suisei','Stellar','Suisei',2021,2,1,1000,90000,0,NULL),
+ (4,4,1,'Bonus','Suisei','Stellar','Suisei',2021,2,0,1000,10000,0,NULL),
+ (5,5,1,'Gone','Suisei','Stellar','Suisei',2021,2,2,1000,10000,0,NULL),
+ (6,6,2,'Encore','Pekora & Miko','Live','Pekora',2022,1,2,1000,60000,0,NULL);
+INSERT INTO track_values(track_id,field,position,value) VALUES(6,'artist',0,'Pekora'),(6,'artist',1,'Miko');
 )sql");
             })
             .get();
@@ -83,27 +80,12 @@ TEST_F(PlaylistsTest, AFolderIncludesSubfoldersInAlbumDiscAndTrackOrder) {
     EXPECT_EQ(change.added, 4);
     EXPECT_EQ(change.skippedUnavailable, 1);
     EXPECT_EQ(tracks(change.playlist),
-              (std::vector<LibraryTrackKey>{{1, 0}, {2, 0}, {4, 0}, {3, 0}})); // disc 2 lists the unnumbered bonus first
-}
-
-TEST_F(PlaylistsTest, CueVirtualTracksReplaceTheirFileAndTheLeadInIsHidden) {
-    const auto change = createPlaylist(*store, "Whole library", {folder(1)});
-    const auto keys = tracks(change.playlist);
-    EXPECT_EQ(keys.size(), 6u);
-    EXPECT_EQ(std::count(keys.begin(), keys.end(), LibraryTrackKey{6, 1}), 1);
-    EXPECT_EQ(std::count(keys.begin(), keys.end(), LibraryTrackKey{6, 2}), 1);
-    EXPECT_EQ(std::count(keys.begin(), keys.end(), LibraryTrackKey{6, 0}), 0);
-    EXPECT_EQ(std::count(keys.begin(), keys.end(), LibraryTrackKey{6, -1}), 0);
-    const auto page = playlistItems(*store, change.playlist, 0, 500);
-    const auto opening = std::find_if(page.items.begin(), page.items.end(), [](const auto& i) { return i.track == LibraryTrackKey{6, 1}; });
-    ASSERT_NE(opening, page.items.end());
-    EXPECT_EQ(opening->durationMs, 35000);
-    EXPECT_EQ(opening->title, "Opening");
+              (std::vector<LibraryTrackKey>{{1}, {2}, {4}, {3}})); // disc 2 lists the unnumbered bonus first
 }
 
 TEST_F(PlaylistsTest, OverlappingSourcesKeepTheFirstPositionAndExplicitTracksKeepTheirOrder) {
     const auto change = createPlaylist(*store, "Mix", {track(3), track(1), album(1), artist("Miko")});
-    EXPECT_EQ(tracks(change.playlist), (std::vector<LibraryTrackKey>{{3, 0}, {1, 0}, {2, 0}, {4, 0}, {6, 2}}));
+    EXPECT_EQ(tracks(change.playlist), (std::vector<LibraryTrackKey>{{3}, {1}, {2}, {4}, {6}}));
     EXPECT_EQ(change.skippedDuplicates, 2);
     EXPECT_EQ(change.skippedUnavailable, 1);
     const auto byColumn = createPlaylist(*store, "Suisei", {artist("Suisei")}); // no multivalue rows: the artist column
@@ -138,18 +120,18 @@ TEST_F(PlaylistsTest, AddingSkipsTracksAlreadyPresentAndRefusesAStaleRevision) {
     EXPECT_EQ(added.added, 3);
     EXPECT_EQ(added.skippedExisting, 1);
     EXPECT_EQ(added.name, "List");
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1, 0}, {2, 0}, {4, 0}, {3, 0}}));
-    EXPECT_THROW(addToPlaylist(*store, created.playlist, created.revision, {track(6, 1)}), std::runtime_error);
-    EXPECT_THROW(addToPlaylist(*store, 999, std::nullopt, {track(6, 1)}), std::invalid_argument);
-    EXPECT_EQ(addToPlaylist(*store, created.playlist, std::nullopt, {track(6, 1)}).added, 1);
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1}, {2}, {4}, {3}}));
+    EXPECT_THROW(addToPlaylist(*store, created.playlist, created.revision, {track(6)}), std::runtime_error);
+    EXPECT_THROW(addToPlaylist(*store, 999, std::nullopt, {track(6)}), std::invalid_argument);
+    EXPECT_EQ(addToPlaylist(*store, created.playlist, std::nullopt, {track(6)}).added, 1);
 }
 
 TEST_F(PlaylistsTest, SavedEntriesKeepOrderDuplicatesAndEntriesWithoutAnIdentity) {
     const auto saved = savePlaylist(*store, "Queue",
-                                    {{LibraryTrackKey{2, 0}, "c:\\m\\album\\02.flac"},
+                                    {{LibraryTrackKey{2}, "c:\\m\\album\\02.flac"},
                                      {std::nullopt, "d:\\elsewhere\\x.flac"},
-                                     {LibraryTrackKey{2, 0}, "c:\\m\\album\\02.flac"},
-                                     {LibraryTrackKey{5, 0}, "c:\\m\\album\\cd2\\gone.flac"}});
+                                     {LibraryTrackKey{2}, "c:\\m\\album\\02.flac"},
+                                     {LibraryTrackKey{5}, "c:\\m\\album\\cd2\\gone.flac"}});
     EXPECT_EQ(saved.added, 4);
     const auto page = playlistItems(*store, saved.playlist, 0, 500);
     ASSERT_EQ(page.items.size(), 4u);
@@ -166,31 +148,31 @@ TEST_F(PlaylistsTest, RemoveMoveSortAndDeleteRenumberPositions) {
     auto items = ids(created.playlist); // tracks 1, 2, 4, 3
     PlaylistEdit remove{PlaylistEdit::Kind::Remove, created.playlist, std::nullopt, {}, {items[1]}};
     editPlaylist(*store, remove);
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1, 0}, {4, 0}, {3, 0}}));
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1}, {4}, {3}}));
     PlaylistEdit move{PlaylistEdit::Kind::Move, created.playlist, std::nullopt, {}, {items[3], items[0]}, 0};
     editPlaylist(*store, move);
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1, 0}, {3, 0}, {4, 0}})); // moved keep their order
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1}, {3}, {4}})); // moved keep their order
     move.items = {items[0]};
     move.position = 99;
     editPlaylist(*store, move);
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{3, 0}, {4, 0}, {1, 0}}));
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{3}, {4}, {1}}));
     const auto page = playlistItems(*store, created.playlist, 0, 500);
     for (int64_t i = 0; i < int64_t(page.items.size()); ++i) EXPECT_EQ(page.items[size_t(i)].position, i);
 
-    addToPlaylist(*store, created.playlist, std::nullopt, {track(6, 2)});
+    addToPlaylist(*store, created.playlist, std::nullopt, {track(6)});
     savePlaylist(*store, "unused", {});
     PlaylistEdit sort{PlaylistEdit::Kind::Sort, created.playlist};
     sort.key = PlaylistSortKey::Title;
     editPlaylist(*store, sort);
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{4, 0}, {1, 0}, {6, 2}, {3, 0}}));
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{4}, {1}, {6}, {3}}));
     sort.key = PlaylistSortKey::Duration;
     sort.descending = true;
     editPlaylist(*store, sort);
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{3, 0}, {1, 0}, {6, 2}, {4, 0}})); // ties keep order
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{3}, {1}, {6}, {4}})); // ties keep order
     sort.key = PlaylistSortKey::TrackNumber;
     sort.descending = false;
     editPlaylist(*store, sort);
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1, 0}, {6, 2}, {4, 0}, {3, 0}}));
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1}, {6}, {4}, {3}}));
 
     PlaylistEdit erase{PlaylistEdit::Kind::Delete, created.playlist, revision(created.playlist)};
     editPlaylist(*store, erase);
@@ -206,7 +188,7 @@ TEST_F(PlaylistsTest, QuickUndoRevertsOnlyAnUnchangedPlaylist) {
     const auto added = addToPlaylist(*store, created.playlist, std::nullopt, {album(2)});
     EXPECT_FALSE(undoPlaylistChange(*store, created.undo)); // the add changed it since
     EXPECT_TRUE(undoPlaylistChange(*store, added.undo));
-    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1, 0}}));
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{1}}));
     EXPECT_FALSE(undoPlaylistChange(*store, added.undo));
 
     const auto fresh = createPlaylist(*store, "Fresh", {album(1)});
@@ -233,14 +215,14 @@ TEST_F(PlaylistsTest, EntriesSurviveRootRemovalAsUnavailableAndReturnWithIt) {
 TEST_F(PlaylistsTest, AYearAndAvailableFilePathsBecomeTracks) {
     const auto year = createPlaylist(*store, "", {{Kind::Year, 2021, {}, {}}});
     EXPECT_EQ(year.name, "2021");
-    EXPECT_EQ(tracks(year.playlist), (std::vector<LibraryTrackKey>{{1, 0}, {2, 0}, {4, 0}, {3, 0}}));
+    EXPECT_EQ(tracks(year.playlist), (std::vector<LibraryTrackKey>{{1}, {2}, {4}, {3}}));
     EXPECT_EQ(year.skippedUnavailable, 1);
     const auto paths = createPlaylist(*store, "", {{Kind::Path, 0, {}, "c:\\m\\album\\02.flac"},
                                                     {Kind::Path, 0, {}, "d:\\outside.flac"},
                                                     {Kind::Path, 0, {}, "c:\\m\\album\\cd2\\gone.flac"},
                                                     {Kind::Path, 0, {}, "c:\\m\\album\\01.flac"}});
     EXPECT_EQ(paths.name, "Bluerose +3");
-    EXPECT_EQ(tracks(paths.playlist), (std::vector<LibraryTrackKey>{{2, 0}, {1, 0}}));
+    EXPECT_EQ(tracks(paths.playlist), (std::vector<LibraryTrackKey>{{2}, {1}}));
     EXPECT_EQ(paths.skippedUnavailable, 2);
 }
 
@@ -265,8 +247,8 @@ TEST_F(PlaylistsTest, AnM3u8ImportResolvesPathsAndKeepsOrderDuplicatesAndOutside
             db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,2,1,?,'audio',1,1,1)")
                 .bind(1, camel::toUtf8(local))
                 .run();
-            db.exec("INSERT INTO tracks(id,file_id,cue_index,album_id,title,sample_rate,total_frames,start_frame) "
-                    "VALUES(10,7,0,1,'Yoru',1000,1000,0)");
+            db.exec("INSERT INTO tracks(id,file_id,album_id,title,sample_rate,total_frames,start_frame) "
+                    "VALUES(10,7,1,'Yoru',1000,1000,0)");
         })
         .get();
     const auto file = dir / L"Mix 一.m3u8";
@@ -280,11 +262,11 @@ TEST_F(PlaylistsTest, AnM3u8ImportResolvesPathsAndKeepsOrderDuplicatesAndOutside
     EXPECT_EQ(change.skippedUnavailable, 1);
     const auto page = playlistItems(*store, change.playlist, 0, 500);
     ASSERT_EQ(page.items.size(), 5u);
-    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{1, 0}));
-    EXPECT_EQ(page.items[1].track, (LibraryTrackKey{7, 0}));
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{1}));
+    EXPECT_EQ(page.items[1].track, (LibraryTrackKey{7}));
     EXPECT_TRUE(page.items[1].available);
-    EXPECT_EQ(page.items[2].track, (LibraryTrackKey{1, 0}));
-    EXPECT_EQ(page.items[3].track, (LibraryTrackKey{5, 0})); // known but unavailable: returns with its file
+    EXPECT_EQ(page.items[2].track, (LibraryTrackKey{1}));
+    EXPECT_EQ(page.items[3].track, (LibraryTrackKey{5})); // known but unavailable: returns with its file
     EXPECT_FALSE(page.items[3].available);
     EXPECT_FALSE(page.items[4].track);
     EXPECT_EQ(page.items[4].path, "d:\\elsewhere\\x.flac");
@@ -295,7 +277,7 @@ TEST_F(PlaylistsTest, AnM3uWithoutUtf8IsReadInTheSystemCodePage) {
     std::ofstream(file, std::ios::binary) << "c:\\m\\album\\02.flac\nd:\\caf\xE9.flac\n";
     const auto page = playlistItems(*store, importPlaylistFile(*store, file).playlist, 0, 500);
     ASSERT_EQ(page.items.size(), 2u);
-    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{2, 0}));
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{2}));
     wchar_t expected[16] = {};
     MultiByteToWideChar(CP_ACP, 0, "d:\\caf\xE9.flac", -1, expected, 16);
     EXPECT_EQ(page.items[1].path, camel::toUtf8(expected));
@@ -310,13 +292,13 @@ TEST_F(PlaylistsTest, AnM3u8ExportWritesRelativePathsOnTheSameDriveAndRoundTrips
             db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,2,1,?,'audio',1,1,1)")
                 .bind(1, camel::toUtf8(inside))
                 .run();
-            db.exec("INSERT INTO tracks(id,file_id,cue_index,album_id,title,artist,sample_rate,total_frames,start_frame) "
-                    "VALUES(10,7,0,1,'A','B',1000,2400,0)");
+            db.exec("INSERT INTO tracks(id,file_id,album_id,title,artist,sample_rate,total_frames,start_frame) "
+                    "VALUES(10,7,1,'A','B',1000,2400,0)");
         })
         .get();
     const auto saved = savePlaylist(*store, "Out",
-                                    {{LibraryTrackKey{7, 0}, camel::toUtf8(inside)},
-                                     {LibraryTrackKey{7, 0}, camel::toUtf8(inside)},
+                                    {{LibraryTrackKey{7}, camel::toUtf8(inside)},
+                                     {LibraryTrackKey{7}, camel::toUtf8(inside)},
                                      {std::nullopt, "\\\\nas\\share\\x.flac"}});
     const auto file = dir / "lists" / "out.m3u8";
     std::filesystem::create_directories(file.parent_path());
@@ -328,8 +310,8 @@ TEST_F(PlaylistsTest, AnM3u8ExportWritesRelativePathsOnTheSameDriveAndRoundTrips
     EXPECT_FALSE(std::filesystem::exists(file.wstring() + L".tmp"));
     const auto again = playlistItems(*store, importPlaylistFile(*store, file).playlist, 0, 500);
     ASSERT_EQ(again.items.size(), 3u);
-    EXPECT_EQ(again.items[0].track, (LibraryTrackKey{7, 0}));
-    EXPECT_EQ(again.items[1].track, (LibraryTrackKey{7, 0}));
+    EXPECT_EQ(again.items[0].track, (LibraryTrackKey{7}));
+    EXPECT_EQ(again.items[1].track, (LibraryTrackKey{7}));
     EXPECT_EQ(again.items[2].path, "\\\\nas\\share\\x.flac");
 }
 
@@ -339,11 +321,11 @@ TEST_F(PlaylistsTest, PlaylistFilesUseTheUsualPathFormAndTheOnDiskNameOfExtended
             db.exec(R"(INSERT INTO files(id,folder_id,root_id,path,name,kind,size,mtime,available) VALUES
  (7,2,1,'\\?\unc\nas\music\a\track 1.flac','Track 1.flac','audio',1,1,1),
  (8,2,1,'\\?\d:\local\b.flac','B.flac','audio',1,1,1);
-INSERT INTO tracks(id,file_id,cue_index,album_id,sample_rate,total_frames,start_frame) VALUES
- (10,7,0,1,1000,1000,0),(11,8,0,1,1000,1000,0);)");
+INSERT INTO tracks(id,file_id,album_id,sample_rate,total_frames,start_frame) VALUES
+ (10,7,1,1000,1000,0),(11,8,1,1000,1000,0);)");
         })
         .get();
-    const auto saved = savePlaylist(*store, "Nas", {{LibraryTrackKey{7, 0}, ""}, {LibraryTrackKey{8, 0}, ""}});
+    const auto saved = savePlaylist(*store, "Nas", {{LibraryTrackKey{7}, ""}, {LibraryTrackKey{8}, ""}});
     const auto file = dir / "nas.m3u8";
     exportPlaylistFile(*store, saved.playlist, file);
     std::ifstream in(file, std::ios::binary);
@@ -351,11 +333,11 @@ INSERT INTO tracks(id,file_id,cue_index,album_id,sample_rate,total_frames,start_
     EXPECT_EQ(text, "#EXTM3U\r\n#EXTINF:1,Track 1\r\n\\\\nas\\music\\a\\Track 1.flac\r\n#EXTINF:1,B\r\nd:\\local\\B.flac\r\n");
     const auto page = playlistItems(*store, importPlaylistFile(*store, file).playlist, 0, 500);
     ASSERT_EQ(page.items.size(), 2u);
-    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{7, 0}));
-    EXPECT_EQ(page.items[1].track, (LibraryTrackKey{8, 0}));
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{7}));
+    EXPECT_EQ(page.items[1].track, (LibraryTrackKey{8}));
     const auto queued = createPlaylist(*store, "Queue", {{Kind::Path, 0, {}, "\\\\NAS\\Music\\a\\Track 1.flac"},
                                                          {Kind::Path, 0, {}, "D:\\Local\\B.flac"}});
-    EXPECT_EQ(tracks(queued.playlist), (std::vector<LibraryTrackKey>{{7, 0}, {8, 0}}));
+    EXPECT_EQ(tracks(queued.playlist), (std::vector<LibraryTrackKey>{{7}, {8}}));
     EXPECT_EQ(createPlaylist(*store, "", {{Kind::Path, 0, {}, "\\\\NAS\\Music\\a\\Track 1.flac"}}).name, "Track 1");
     EXPECT_EQ(createPlaylist(*store, "", {track(8)}).name, "B");
 }

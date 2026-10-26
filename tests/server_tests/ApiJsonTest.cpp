@@ -153,12 +153,12 @@ TEST(ApiJson, RootRemovalRoundTripsAndRequiresAnIntegerRootId) {
 TEST(ApiJson, PlayStatisticsResetRoundTripsTrackKeys) {
     Command c;
     c.kind = CommandKind::ResetPlayStatistics;
-    c.tracks = {{7, 0}, {8, 3}};
+    c.tracks = {{7}, {8}};
     EXPECT_EQ(throughText(c, commandFromJson), c);
     auto j = toJson(c);
     j.erase("tracks");
     EXPECT_THROW(commandFromJson(j), std::invalid_argument);
-    j["tracks"] = json::array({{{"file", 7}}});
+    j["tracks"] = json::array({{{"track", 7}}});
     EXPECT_THROW(commandFromJson(j), std::invalid_argument);
     Command all;
     all.kind = CommandKind::ResetAllPlayStatistics;

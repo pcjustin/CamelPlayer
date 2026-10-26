@@ -53,7 +53,7 @@ protected:
     }
 };
 
-TEST_F(LibraryIdentityTest, LocalRenamePreservesTracksStatsPlaylistQueueAndCueReferences) {
+TEST_F(LibraryIdentityTest, LocalRenamePreservesTracksStatsPlaylistAndQueue) {
     const auto source = music / "old.flac";
     fs::copy_file(testutil::testFile("16-44.1k"), source);
     LibraryStore store(dir / "db");
@@ -66,11 +66,6 @@ TEST_F(LibraryIdentityTest, LocalRenamePreservesTracksStatsPlaylistQueueAndCueRe
     rate(store, original);
     store
         .write([=](sqlite::Database& db) {
-            db.prepare("INSERT INTO tracks(file_id,cue_index,cue_file_id,title) VALUES(?,1,?,'Virtual')")
-                .bind(1, original)
-                .bind(2, original)
-                .run();
-            db.prepare("INSERT INTO stats(file_id,cue_index,rating) VALUES(?,1,4)").bind(1, original).run();
             db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
             db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
                 .bind(1, original)
@@ -85,16 +80,14 @@ TEST_F(LibraryIdentityTest, LocalRenamePreservesTracksStatsPlaylistQueueAndCueRe
     ASSERT_TRUE(report.complete);
     EXPECT_EQ(report.moved, 1);
     EXPECT_EQ(id(store, "new.flac"), original);
-    EXPECT_EQ(scalar(store, "SELECT id FROM tracks WHERE cue_index=0"), track);
-    EXPECT_EQ(scalar(store, "SELECT play_count FROM stats WHERE cue_index=0"), 17);
-    EXPECT_EQ(scalar(store, "SELECT favorite FROM stats WHERE cue_index=0"), 1);
-    EXPECT_EQ(scalar(store, "SELECT last_played FROM stats WHERE cue_index=0"), 123);
-    EXPECT_EQ(scalar(store, "SELECT rating FROM stats WHERE cue_index=1"), 4);
+    EXPECT_EQ(scalar(store, "SELECT id FROM tracks"), track);
+    EXPECT_EQ(scalar(store, "SELECT play_count FROM stats"), 17);
+    EXPECT_EQ(scalar(store, "SELECT favorite FROM stats"), 1);
+    EXPECT_EQ(scalar(store, "SELECT last_played FROM stats"), 123);
     EXPECT_EQ(scalar(store, "SELECT file_id FROM playlist_items"), original);
     EXPECT_EQ(scalar(store, "SELECT file_id FROM queue WHERE entry_id=77"), original);
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM queue JOIN files ON files.id=queue.file_id WHERE queue.path=files.path"), 1);
-    EXPECT_EQ(scalar(store, "SELECT cue_file_id FROM tracks WHERE cue_index=1"), original);
-    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM tracks"), 2);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM tracks"), 1);
 }
 
 TEST_F(LibraryIdentityTest, MoveAcrossRegisteredRootsDoesNotNeedTheSourceRootToBeRescanned) {

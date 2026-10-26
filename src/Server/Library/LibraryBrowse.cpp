@@ -17,16 +17,13 @@ namespace {
 // With at least 2% of the rows matching, a walk to row kWalkRows reads about 10k rows; deeper pages order every match.
 constexpr int64_t kHits = 2000, kWalkRows = 200;
 
-// library_tracks spelled out over `t`, so the walk can name the tracks index the view hides.
-constexpr const char* kVisibleTrack =
-    " f.available=1 AND r.online=1 AND (t.cue_index>0 OR (t.cue_index=0 AND NOT EXISTS"
-    "(SELECT 1 FROM tracks v WHERE v.file_id=t.file_id AND v.cue_index<>0))) ";
+constexpr const char* kVisibleTrack = " f.available=1 AND r.online=1 ";
 // What tracks_fts indexes, matched as the trigram phrase matches it: a substring of the normalized text in ?1.
 constexpr const char* kTextMatch =
     " (instr(coalesce(t.title_norm,t.title,''),?1)>0 OR instr(coalesce(t.album_norm,t.album,''),?1)>0 "
     "OR instr(coalesce(t.artist_norm,t.artist,''),?1)>0) ";
-constexpr const char* kTracks = " FROM library_tracks t JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
-constexpr const char* kFtsTracks = " FROM tracks_fts JOIN library_tracks t ON t.id=tracks_fts.rowid "
+constexpr const char* kTracks = " FROM tracks t JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
+constexpr const char* kFtsTracks = " FROM tracks_fts JOIN tracks t ON t.id=tracks_fts.rowid "
                                    "JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
 constexpr const char* kVisible = " f.available=1 AND r.online=1 ";
 

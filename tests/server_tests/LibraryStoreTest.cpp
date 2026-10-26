@@ -72,7 +72,7 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_TRUE(store.report().created);
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 11);
+    EXPECT_EQ(db.userVersion(), 12);
     EXPECT_EQ(tables(db),
               (std::set<std::string>{"albums", "app_state", "change_log", "covers", "files", "folders", "library_revision", "play_events", "playlist_items",
                                      "playlists", "queue", "roots", "stats", "track_values", "tracks", "tracks_fts"}));
@@ -94,10 +94,10 @@ TEST(LibraryStore, IdentityRulesHold) {
     store
         .write([](Database& db) {
             const int64_t file = addTrack(db, "C:/music/album/01.flac", "One");
-            db.prepare("INSERT INTO stats (file_id, cue_index, play_count, rating) VALUES (?, 0, 3, 5)").bind(1, file).run();
+            db.prepare("INSERT INTO stats (file_id, play_count, rating) VALUES (?, 3, 5)").bind(1, file).run();
             // A rescan replaces the track row; statistics stay with the identity.
             db.exec("DELETE FROM tracks");
-            EXPECT_EQ(db.scalar("SELECT play_count FROM stats WHERE cue_index = 0"), 3);
+            EXPECT_EQ(db.scalar("SELECT play_count FROM stats WHERE file_id = " + std::to_string(file)), 3);
             // One available file per path; an unavailable identity may keep the old path.
             EXPECT_THROW(addTrack(db, "C:/music/album/01.flac", "Again"), sqlite::Error);
             db.prepare("UPDATE files SET available = 0 WHERE id = ?").bind(1, file).run();
@@ -126,24 +126,63 @@ TEST(LibraryStore, UpgradesV1WithoutInventingFingerprintsOrChangingHistory) {
     EXPECT_EQ(store.report().migratedFrom, 1);
     EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 11);
+    EXPECT_EQ(db.userVersion(), 12);
     EXPECT_EQ(db.scalar("SELECT rating FROM stats JOIN files ON files.id=stats.file_id WHERE files.path='C:/music/old.flac'"), 5);
     EXPECT_EQ(db.scalar("SELECT play_count FROM stats"), 17);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL AND created=0 AND volume_key IS NULL"), 1);
 }
 
-TEST(LibraryStore, UpgradesV2WithCueTimelineAndVisibleTrackView) {
-    const auto dir = freshDir("upgrade-v2");
+TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
+    const auto dir = freshDir("upgrade-v11");
     {
-        LibraryStore store(dir, {libraryMigrations()[0], libraryMigrations()[1]});
-        store.write([](Database& db) { addTrack(db, "C:/music/old.flac", "Kept"); }).get();
+        LibraryStore store(dir, std::vector<Migration>(libraryMigrations().begin(), libraryMigrations().begin() + 11));
+        store
+            .write([](Database& db) {
+                const auto file = addTrack(db, "C:/music/kept.flac", "Kept");
+                const auto other = addTrack(db, "C:/music/other.flac", "Other");
+                db.exec("INSERT INTO track_values(track_id,field,position,value) SELECT id,'artist',0,'Kept artist' FROM tracks "
+                        "WHERE title='Kept'");
+                db.prepare("INSERT INTO stats(file_id,cue_index,play_count,rating,listened_ms) VALUES(?,0,3,5,1000),(?,0,1,NULL,10)")
+                    .bind(1, file)
+                    .bind(2, other)
+                    .run();
+                db.prepare("INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES(?,0,1,0,1000,1)")
+                    .bind(1, file)
+                    .run();
+                db.exec("INSERT INTO playlists(id,name,created,modified,revision) VALUES(1,'Kept',0,0,1)");
+                db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,cue_index,source_description) VALUES(1,0,?,0,'k')")
+                    .bind(1, file)
+                    .run();
+                db.prepare("INSERT INTO queue(position,entry_id,file_id,cue_index,path,source_description) VALUES(0,1,?,0,'p','k')")
+                    .bind(1, file)
+                    .run();
+            })
+            .get();
     }
     LibraryStore store(dir);
-    EXPECT_EQ(store.report().migratedFrom, 2);
+    EXPECT_EQ(store.report().migratedFrom, 11);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 11);
-    EXPECT_EQ(db.scalar("SELECT cue_pregap_75ths + cue_postgap_75ths FROM tracks"), 0);
-    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM library_tracks"), 1);
+    EXPECT_EQ(db.userVersion(), 12);
+    for (const char* table : {"tracks", "stats", "play_events", "playlist_items", "queue"})
+        EXPECT_EQ(db.scalar(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name LIKE 'cue%'"), 0)
+            << table;
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='library_tracks'"), 0);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks"), 2);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM track_values"), 1); // a rebuilt parent table cascades into no child
+    EXPECT_EQ(db.scalar("SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH 'kept'"),
+              db.scalar("SELECT id FROM tracks WHERE title='Kept'"));
+    EXPECT_EQ(db.scalar("SELECT play_count FROM stats JOIN files f ON f.id=stats.file_id WHERE f.path='C:/music/kept.flac'"), 3);
+    EXPECT_EQ(db.scalar("SELECT SUM(listened_ms) FROM stats"), 1010);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM play_events"), 1);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM playlist_items"), 1);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM queue"), 1);
+    store.write([](Database& w) {
+             EXPECT_EQ(w.scalar("PRAGMA foreign_keys"), 1);
+             EXPECT_THROW(w.exec("INSERT INTO tracks(file_id) VALUES(1)"), sqlite::Error); // one track per file
+             w.exec("UPDATE tracks SET title='Renamed' WHERE title='Kept'");                // the triggers came back
+             EXPECT_EQ(w.scalar("SELECT COUNT(*) FROM tracks_fts WHERE tracks_fts MATCH 'renamed'"), 1);
+         })
+        .get();
 }
 
 TEST(LibraryStore, WriterRunsEachJobInOneTransaction) {
@@ -178,10 +217,10 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-        EXPECT_EQ(store.report().migratedFrom, 11);
+        EXPECT_EQ(store.report().migratedFrom, 12);
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 12);
-        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v11.bak"));
+        EXPECT_EQ(db.userVersion(), 13);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v12.bak"));
     }
     const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
                                        db.exec("CREATE TABLE half (x INTEGER)");
@@ -191,7 +230,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 12);
+        EXPECT_EQ(db.userVersion(), 13);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
@@ -204,12 +243,12 @@ TEST(LibraryStore, KeepsTheNewestThreeBackups) {
         LibraryStore store(dir);
     }
     std::vector<Migration> extra;
-    for (int v = 11; v <= 15; v++) {
+    for (int v = 12; v <= 16; v++) {
         extra.push_back(addTable("t" + std::to_string(v)));
         LibraryStore store(dir, withExtra(extra));
     }
     EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
-    for (int v : {13, 14, 15}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+    for (int v : {14, 15, 16}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
 }
 
 TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
@@ -220,7 +259,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-    } // writes library.db.v11.bak
+    } // writes library.db.v12.bak
     std::filesystem::remove(dir / "library.db-wal");
     std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'x');
     {
@@ -230,7 +269,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
         auto db = store.openReader();
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
-        EXPECT_EQ(db.userVersion(), 12); // the backup was migrated again
+        EXPECT_EQ(db.userVersion(), 13); // the backup was migrated again
     }
     for (const auto& e : std::filesystem::directory_iterator(dir))
         if (e.path().extension() == ".bak") std::filesystem::remove(e.path());

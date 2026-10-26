@@ -266,7 +266,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
                         "length_estimated,title_sort_tag,album_sort_tag,artist_sort_tag,rg_track_gain,rg_track_peak,"
                         "rg_album_gain,rg_album_peak,title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort) "
                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                        "ON CONFLICT(file_id,cue_index) DO UPDATE SET "
+                        "ON CONFLICT(file_id) DO UPDATE SET "
                         "title=excluded.title,album=excluded.album,album_artist=excluded.album_artist,artist=excluded.artist,"
                         "composer=excluded.composer,genre=excluded.genre,year=excluded.year,track_number=excluded.track_number,"
                         "track_total=excluded.track_total,disc_number=excluded.disc_number,disc_total=excluded.disc_total,"
@@ -313,7 +313,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
         s.bind(i++, librarySortKey(sortTag.empty() ? tag(m, field) : sortTag, locale));
     }
     s.run();
-    auto row = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
+    auto row = db.prepare("SELECT id FROM tracks WHERE file_id=?");
     row.bind(1, file).step();
     const int64_t track = row.integer(0);
     db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
@@ -392,8 +392,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
     };
     std::map<std::string, Album> albums;
     auto rows = db.prepare("SELECT t.id,t.album,t.album_artist,t.artist,t.year,f.folder_id,COALESCE(d.parent_id,0),d.path,"
-                           "t.file_id,COALESCE((SELECT embedded_cover FROM tracks e WHERE e.file_id=t.file_id AND e.cue_index=0),"
-                           "t.embedded_cover),t.disc_number,t.disc_total "
+                           "t.file_id,t.embedded_cover,t.disc_number,t.disc_total "
                            "FROM tracks t JOIN files f ON f.id=t.file_id JOIN folders d ON d.id=f.folder_id "
                            "WHERE f.root_id=? AND f.available=1" + scope + " ORDER BY t.disc_number,t.track_number,t.id");
     rows.bind(1, root);
@@ -989,7 +988,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 }
                 if (entry.digest)
                     db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *entry.digest).bind(2, file).run();
-                if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0").bind(1, file).run();
+                if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=?").bind(1, file).run();
                 if (entry.rejected || entry.metadata) trackFolders.insert(folderId);
                 if (entry.metadata) {
                     writeMetadata(db, file, *entry.metadata, locale);
@@ -1125,7 +1124,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
 void LibraryScanner::recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames) {
     store_.write([file, sampleRate, frames](sqlite::Database& db) {
         db.prepare("UPDATE tracks SET total_frames=?,length_estimated=0 "
-                   "WHERE file_id=? AND cue_index=0 AND length_estimated=1 AND sample_rate=?")
+                   "WHERE file_id=? AND length_estimated=1 AND sample_rate=?")
             .bind(1, int64_t(frames))
             .bind(2, file)
             .bind(3, int64_t(sampleRate))

@@ -528,7 +528,7 @@ std::optional<PlaylistSource> LibraryView::sourceOf(Target target, Mode mode, Li
     } else if (mode == Mode::Folders && row.folder) {
         if (row.id) return PlaylistSource{Kind::Folder, row.id, {}, {}};
     } else if (row.file) {
-        return PlaylistSource{Kind::Track, 0, {row.file, 0}, {}};
+        return PlaylistSource{Kind::Track, 0, {row.file}, {}};
     }
     return std::nullopt;
 }

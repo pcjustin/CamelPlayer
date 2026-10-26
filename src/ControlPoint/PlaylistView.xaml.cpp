@@ -438,7 +438,7 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
             handlers_.menu(entryMenu_, [this]() -> ui::SourceFetch {
                 std::vector<PlaylistSource> sources;
                 for (const auto& row : selectedRows(menuItem_))
-                    if (row.file) sources.push_back({PlaylistSource::Kind::Track, 0, {row.file, 0}, {}});
+                    if (row.file) sources.push_back({PlaylistSource::Kind::Track, 0, {row.file}, {}});
                 return [sources] { return sources; };
             });
     }

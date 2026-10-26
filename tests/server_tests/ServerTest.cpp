@@ -783,7 +783,7 @@ TEST_F(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLib
     EXPECT_EQ(saved.added, 3);
     const auto page = server->playlistItems(saved.playlist, 0, 10);
     ASSERT_EQ(page.items.size(), 3u);
-    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a), 0}));
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a)}));
     EXPECT_FALSE(page.items[1].track);
     EXPECT_EQ(page.items[1].source, toUtf8(outside.wstring()));
     EXPECT_EQ(page.items[2].track, page.items[0].track);
@@ -1187,7 +1187,7 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     server->waitIdle();
     const auto statistics = server->playStatistics({});
     ASSERT_EQ(statistics.history.size(), 1u);
-    EXPECT_EQ(statistics.history[0].track, (LibraryTrackKey{file, 0}));
+    EXPECT_EQ(statistics.history[0].track, (LibraryTrackKey{file}));
     EXPECT_TRUE(statistics.history[0].counted);
     EXPECT_NEAR(double(statistics.history[0].heardMs), 500.0, 50.0);
     EXPECT_EQ(statistics.overview.plays, 1);
@@ -1195,12 +1195,12 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
 
     Command reset = command(CommandKind::ResetPlayStatistics);
     EXPECT_THROW(server->submit(reset), std::invalid_argument);
-    reset.tracks = {{file, 0}};
+    reset.tracks = {{file}};
     ASSERT_FALSE(send(reset).commandError);
     EXPECT_EQ(server->playStatistics({}).historyTotal, 0);
     EXPECT_EQ(store.openReader().scalar("SELECT play_count+listened_ms FROM stats WHERE file_id=" + std::to_string(file)), 0);
     Command all = command(CommandKind::ResetAllPlayStatistics);
-    all.tracks = {{file, 0}};
+    all.tracks = {{file}};
     EXPECT_THROW(server->submit(all), std::invalid_argument);
     all.tracks.clear();
     EXPECT_FALSE(send(all).commandError);

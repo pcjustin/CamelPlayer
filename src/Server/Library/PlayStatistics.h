@@ -14,9 +14,9 @@
 
 namespace camel::server {
 
+// A library track is its file (one track per file since CUE sheets are not supported).
 struct LibraryTrackKey {
     int64_t file = 0;
-    int64_t cueIndex = 0; // 0 for a whole file
     bool operator==(const LibraryTrackKey&) const = default;
 };
 

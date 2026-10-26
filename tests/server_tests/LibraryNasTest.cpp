@@ -292,9 +292,7 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     std::ofstream(local / "report.json") << report.dump(2);
     report["files"] = count(store);
     report["tracks"] = count(store, "SELECT COUNT(*) FROM tracks");
-    report["whole_file_tracks"] = count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=0");
-    report["virtual_tracks"] = count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index>0");
-    report["visible_tracks"] = count(store, "SELECT COUNT(*) FROM library_tracks");
+    report["tracks"] = count(store, "SELECT COUNT(*) FROM tracks");
     report["albums"] = count(store, "SELECT COUNT(*) FROM albums");
     auto db = store.openReader();
     auto formats = db.prepare("SELECT format,COUNT(*) FROM tracks GROUP BY format");
@@ -394,7 +392,7 @@ TEST(LibraryNas, DISABLED_ProfileFlacMetadataStages) {
     LibraryStore store(nasIndex());
     auto db = store.openReader();
     auto rows = db.prepare("SELECT f.path FROM files f JOIN tracks t ON t.file_id=f.id "
-                           "WHERE t.format='flac' AND t.cue_index=0 AND f.available=1 LIMIT 48");
+                           "WHERE t.format='flac' AND f.available=1 LIMIT 48");
     Json timings = Json::object();
     size_t files = 0;
     while (rows.step()) {
@@ -452,7 +450,7 @@ TEST(LibraryNas, DISABLED_ProfileMp3MetadataLengthPaths) {
     LibraryStore store(nasIndex());
     auto db = store.openReader();
     auto rows = db.prepare("SELECT f.path FROM files f JOIN tracks t ON t.file_id=f.id "
-                           "WHERE t.format='mp3' AND t.cue_index=0 AND f.available=1 ORDER BY f.path");
+                           "WHERE t.format='mp3' AND f.available=1 ORDER BY f.path");
     size_t declaredCount = 0, scannedCount = 0;
     Json samples = Json::array();
     while (rows.step() && (declaredCount < 2 || scannedCount < 2)) {
@@ -519,7 +517,7 @@ TEST(LibraryNas, DISABLED_LocalSsdFirstFullScanOfOneHundredThousandTracks) {
         LibraryScanner scanner(store);
         const auto id = scanner.addRoot(music);
         report["full"] = scan(store, scanner, id, "local-full");
-        report["tracks"] = count(store, "SELECT COUNT(*) FROM library_tracks");
+        report["tracks"] = count(store, "SELECT COUNT(*) FROM tracks");
         report["database_bytes"] = fileBytes(store.path());
         std::ofstream(local / "report.json") << report.dump(2);
         EXPECT_TRUE(report["full"]["complete"].get<bool>());

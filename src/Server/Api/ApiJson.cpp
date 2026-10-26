@@ -351,7 +351,7 @@ std::vector<LibraryTrackKey> trackKeysFrom(const json& j, const char* key) {
     std::vector<LibraryTrackKey> out;
     for (const auto& v : array(j, key)) {
         if (!v.is_object()) invalid(std::string(key) + " holds a non-object");
-        out.push_back({value<int64_t>(v, "file"), value<int64_t>(v, "cueIndex")});
+        out.push_back({value<int64_t>(v, "file")});
     }
     return out;
 }
@@ -369,7 +369,7 @@ CommandStamp commandStampFromJson(const json& j) {
 json toJson(const Command& c) {
     json sources = json::array(), tracks = json::array();
     for (const auto& s : c.sources) sources.push_back(toJson(s));
-    for (const auto& t : c.tracks) tracks.push_back({{"file", t.file}, {"cueIndex", t.cueIndex}});
+    for (const auto& t : c.tracks) tracks.push_back({{"file", t.file}});
     return {{"apiVersion", c.apiVersion},
             {"kind", nameOf(c.kind, kCommandKinds)},
             {"source", optionalJson(c.source)},

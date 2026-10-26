@@ -490,7 +490,6 @@ TEST_F(LibraryScannerTest, CueSheetsAreIgnoredAndEachFileIsOneTrack) {
     EXPECT_TRUE(report.diagnostics.empty());
     EXPECT_EQ(count(store), 1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index<>0"), 0);
 }
 
 TEST_F(LibraryScannerTest, OfflineCancelledAndPartialScansRetainUnseenFiles) {

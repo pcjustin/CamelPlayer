@@ -89,20 +89,18 @@ constexpr const char* kMetadata =
     "title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort,title_sort_tag,album_sort_tag,artist_sort_tag";
 
 void merge(sqlite::Database& db, int64_t prior, int64_t current) {
-    db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=0 "
-               "AND NOT EXISTS(SELECT 1 FROM tracks WHERE file_id=? AND cue_index=0)")
+    db.prepare("DELETE FROM tracks WHERE file_id=? AND NOT EXISTS(SELECT 1 FROM tracks WHERE file_id=?)")
         .bind(1, prior)
         .bind(2, current)
         .run();
     db.prepare(std::string("UPDATE tracks SET (") + kMetadata + ")=(SELECT " + kMetadata +
-               " FROM tracks WHERE file_id=? AND cue_index=0) WHERE file_id=? AND cue_index=0 "
-               "AND EXISTS(SELECT 1 FROM tracks WHERE file_id=? AND cue_index=0)")
+               " FROM tracks WHERE file_id=?) WHERE file_id=? AND EXISTS(SELECT 1 FROM tracks WHERE file_id=?)")
         .bind(1, current)
         .bind(2, prior)
         .bind(3, current)
         .run();
-    auto oldTrack = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
-    auto newTrack = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=0");
+    auto oldTrack = db.prepare("SELECT id FROM tracks WHERE file_id=?");
+    auto newTrack = db.prepare("SELECT id FROM tracks WHERE file_id=?");
     if (oldTrack.bind(1, prior).step() && newTrack.bind(1, current).step()) {
         db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, oldTrack.integer(0)).run();
         db.prepare("INSERT INTO track_values(track_id,field,position,value,value_norm,sort_key,sort_source) "
@@ -111,8 +109,7 @@ void merge(sqlite::Database& db, int64_t prior, int64_t current) {
             .bind(2, newTrack.integer(0))
             .run();
     }
-    db.prepare("UPDATE tracks SET file_id=? WHERE file_id=? AND cue_index NOT IN "
-               "(SELECT cue_index FROM tracks WHERE file_id=?)")
+    db.prepare("UPDATE tracks SET file_id=? WHERE file_id=? AND NOT EXISTS(SELECT 1 FROM tracks WHERE file_id=?)")
         .bind(1, prior)
         .bind(2, current)
         .bind(3, prior)
@@ -120,7 +117,6 @@ void merge(sqlite::Database& db, int64_t prior, int64_t current) {
     db.prepare("DELETE FROM tracks WHERE file_id=?").bind(1, current).run();
     for (const auto* table : {"covers", "playlist_items", "queue"})
         db.prepare(std::string("UPDATE ") + table + " SET file_id=? WHERE file_id=?").bind(1, prior).bind(2, current).run();
-    db.prepare("UPDATE tracks SET cue_file_id=? WHERE cue_file_id=?").bind(1, prior).bind(2, current).run();
     db.prepare("UPDATE files SET available=0 WHERE id=?").bind(1, current).run();
     db.prepare("UPDATE files SET (folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,created,volume_key,last_seen)="
                "(SELECT folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,created,volume_key,last_seen "

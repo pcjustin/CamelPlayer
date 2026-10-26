@@ -17,7 +17,7 @@ constexpr uint32_t kRate = 1000; // one frame per millisecond keeps the arithmet
 constexpr uint64_t kAny = UINT64_MAX;
 
 PlaySession session(uint64_t length, uint64_t rangeFirst = 0, std::optional<uint64_t> rangeEnd = std::nullopt) {
-    return PlaySession({1, 0}, kRate, length, rangeFirst, rangeEnd);
+    return PlaySession({1}, kRate, length, rangeFirst, rangeEnd);
 }
 
 // Plays [from, to) in 500-frame steps, as a polling Server observes a running stream.
@@ -119,7 +119,7 @@ protected:
     void event(int64_t file, int64_t startedMs, int32_t offset, int64_t heardMs, bool counted) {
         store
             ->write([=](sqlite::Database& db) {
-                db.prepare("INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES(?,0,?,?,?,?)")
+                db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,?,?,?,?)")
                     .bind(1, file)
                     .bind(2, startedMs)
                     .bind(3, int64_t(offset))
@@ -137,7 +137,7 @@ constexpr int64_t kDay = 86'400'000;
 constexpr int64_t k20251024 = 1'761'264'000'000; // 2025-10-24T00:00:00Z
 
 TEST_F(PlayStatisticsTest, PersistCreatesOneEventAndCountsOnce) {
-    PlaySession s({1, 0}, kRate, 100'000);
+    PlaySession s({1}, kRate, 100'000);
     play(s, 0, 20'000);
     s.persist(*store);
     play(s, 20'000, 60'000);
@@ -153,7 +153,7 @@ TEST_F(PlayStatisticsTest, PersistCreatesOneEventAndCountsOnce) {
     EXPECT_EQ(scalar("SELECT listened_ms FROM stats WHERE file_id=1"), 70'000);
     EXPECT_GT(scalar("SELECT last_played FROM stats WHERE file_id=1"), 0);
 
-    PlaySession unheard({2, 0}, kRate, 100'000);
+    PlaySession unheard({2}, kRate, 100'000);
     unheard.persist(*store);
     store->write([](sqlite::Database&) {}).get();
     EXPECT_EQ(scalar("SELECT COUNT(*) FROM play_events"), 1);
@@ -172,7 +172,7 @@ TEST_F(PlayStatisticsTest, RankingsCreditEveryArtistAndFollowTheMetric) {
     EXPECT_EQ(byPlays.overview.albums, 1);
     EXPECT_EQ(byPlays.overview.artists, 3);
     ASSERT_EQ(byPlays.tracks.size(), 3u);
-    EXPECT_EQ(byPlays.tracks[0].track, (LibraryTrackKey{1, 0}));
+    EXPECT_EQ(byPlays.tracks[0].track, (LibraryTrackKey{1}));
     EXPECT_EQ(byPlays.tracks[0].plays, 2);
     EXPECT_TRUE(byPlays.tracks[0].available);
     ASSERT_EQ(byPlays.albums.size(), 1u);
@@ -185,7 +185,7 @@ TEST_F(PlayStatisticsTest, RankingsCreditEveryArtistAndFollowTheMetric) {
     EXPECT_EQ(byPlays.artists[1].plays, 2);
     query.metric = PlayMetric::ListeningTime;
     auto byTime = playStatistics(*store, query);
-    EXPECT_EQ(byTime.tracks[0].track, (LibraryTrackKey{2, 0}));
+    EXPECT_EQ(byTime.tracks[0].track, (LibraryTrackKey{2}));
     EXPECT_EQ(byTime.tracks[0].listenedMs, 400'000);
 }
 
@@ -231,7 +231,7 @@ TEST_F(PlayStatisticsTest, HistoryIsNewestFirstAndMarksUnavailableTracks) {
     const auto first = playStatistics(*store, query);
     EXPECT_EQ(first.historyTotal, 3);
     ASSERT_EQ(first.history.size(), 2u);
-    EXPECT_EQ(first.history[0].track, (LibraryTrackKey{3, 0}));
+    EXPECT_EQ(first.history[0].track, (LibraryTrackKey{3}));
     EXPECT_FALSE(first.history[0].available);
     EXPECT_EQ(first.history[0].utcOffsetMinutes, 480);
     EXPECT_EQ(first.history[1].title, "Two");
@@ -239,17 +239,17 @@ TEST_F(PlayStatisticsTest, HistoryIsNewestFirstAndMarksUnavailableTracks) {
     query.historyOffset = 2;
     const auto second = playStatistics(*store, query);
     ASSERT_EQ(second.history.size(), 1u);
-    EXPECT_EQ(second.history[0].track, (LibraryTrackKey{1, 0}));
+    EXPECT_EQ(second.history[0].track, (LibraryTrackKey{1}));
     EXPECT_TRUE(second.history[0].available);
 }
 
 TEST_F(PlayStatisticsTest, ResetSelectedOrAllDeletesEventsAndCounters) {
     for (const int64_t file : {1, 2, 3}) {
-        PlaySession s({file, 0}, kRate, 10'000);
+        PlaySession s({file}, kRate, 10'000);
         play(s, 0, 10'000);
         s.persist(*store);
     }
-    resetPlayStatistics(*store, {{1, 0}, {3, 0}});
+    resetPlayStatistics(*store, {{1}, {3}});
     EXPECT_EQ(scalar("SELECT COUNT(*) FROM play_events"), 1);
     EXPECT_EQ(scalar("SELECT file_id FROM play_events"), 2);
     EXPECT_EQ(scalar("SELECT SUM(play_count) FROM stats"), 1);
@@ -261,10 +261,10 @@ TEST_F(PlayStatisticsTest, ResetSelectedOrAllDeletesEventsAndCounters) {
 }
 
 TEST_F(PlayStatisticsTest, DiscardedSessionStartsANewEventFromZero) {
-    PlaySession s({1, 0}, kRate, 100'000);
+    PlaySession s({1}, kRate, 100'000);
     play(s, 0, 60'000);
     s.persist(*store);
-    resetPlayStatistics(*store, {{1, 0}});
+    resetPlayStatistics(*store, {{1}});
     s.discard();
     play(s, 60'000, 70'000);
     s.persist(*store);
@@ -279,7 +279,7 @@ TEST_F(PlayStatisticsTest, ANewFileWithPlaysIsNotMergedIntoAMovedIdentity) {
     store
         ->write([](sqlite::Database& db) {
             db.exec("UPDATE files SET identity_state=1 WHERE id=3;"
-                    "INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES(3,0,1,0,1000,0);");
+                    "INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(3,1,0,1000,0);");
             EXPECT_EQ(library::reconcileMoves(db, {3}), 0u);
         })
         .get();

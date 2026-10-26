@@ -71,9 +71,9 @@ TEST_F(LibraryViewsTest, RecentlyPlayedAlbumsFollowTheLatestPlayAndHideUnavailab
     EXPECT_EQ(recentlyPlayedAlbums(*store, 0, 10).total, 0);
     store
         ->write([](sqlite::Database& db) {
-            db.exec("INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES"
-                    "(1,0,100,480,1000,1),(4,0,200,480,1000,1),(2,0,300,480,1000,1)," // Beta, Alpha, then Beta again
-                    "(5,0,400,480,1000,1),(6,0,500,480,1000,1)");                     // unavailable and offline
+            db.exec("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES"
+                    "(1,100,480,1000,1),(4,200,480,1000,1),(2,300,480,1000,1)," // Beta, Alpha, then Beta again
+                    "(5,400,480,1000,1),(6,500,480,1000,1)");                   // unavailable and offline
         })
         .get();
     const auto page = recentlyPlayedAlbums(*store, 0, 10);
@@ -151,7 +151,7 @@ TEST_F(LibraryViewsTest, TrackRowsSortByEachColumnInEitherDirection) {
     EXPECT_EQ(page.total, 4);
     ASSERT_EQ(page.tracks.size(), 1u);
     EXPECT_EQ(page.tracks[0].durationMs, 10000);
-    EXPECT_EQ(page.tracks[0].track, (LibraryTrackKey{2, 0}));
+    EXPECT_EQ(page.tracks[0].track, (LibraryTrackKey{2}));
     EXPECT_EQ(page.tracks[0].format, "flac");
 }
 
