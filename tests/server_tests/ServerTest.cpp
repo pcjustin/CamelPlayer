@@ -872,6 +872,30 @@ TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
     send(command(CommandKind::Stop));
 }
 
+TEST_F(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
+    const auto a = testutil::generatedFile({"untitled-gone", 48000, 16, 2, 0.5});
+    const auto b = testutil::generatedFile({"untitled-kept", 48000, 16, 2, 0.5});
+    const auto music = setUp({a, b});
+    store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='',artist='Artist'"); }).get();
+    send(queueReplace({track(a), track(b)}));
+    send(command(CommandKind::Stop));
+    server.reset();
+    std::filesystem::remove(music / a.filename());
+    ASSERT_TRUE(scanner->scan(root).complete);
+    store->write([](sqlite::Database& db) {
+             db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%untitled-gone%')");
+         })
+        .get();
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    server->waitIdle();
+    const auto s = server->snapshot();
+    ASSERT_EQ(s.queue.entries.size(), 2u);
+    EXPECT_EQ(s.queue.entries[0].title, toUtf8(a.stem().wstring()) + " · Artist"); // the file is gone: what it showed
+    EXPECT_EQ(s.queue.entries[1].title, "");                                       // the control point shows the file name
+    EXPECT_EQ(s.queue.entries[1].artist, "Artist");
+}
+
 TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiveSeconds) {
     const auto a = testutil::generatedFile({"restore-playing", 48000, 16, 2, 9.0});
     setUp({a});

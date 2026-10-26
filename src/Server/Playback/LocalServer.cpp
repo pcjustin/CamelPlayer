@@ -399,7 +399,7 @@ private:
         // first CUE track, else the whole file, as in library_tracks.
         auto files = reader.prepare(
             "SELECT q.position,q.file_id,f.path,coalesce(t.title,''),coalesce(t.artist,''),"
-            "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM queue q JOIN files f ON f.id=q.file_id "
+            "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0),t.id IS NOT NULL FROM queue q JOIN files f ON f.id=q.file_id "
             "LEFT JOIN tracks t ON t.id=(SELECT v.id FROM tracks v WHERE v.file_id=f.id ORDER BY v.cue_index=0,v.cue_index LIMIT 1) "
             "LEFT JOIN albums a ON a.id=t.album_id");
         while (files.step()) {
@@ -416,7 +416,7 @@ private:
             const bool spelled = CompareStringOrdinal(savedPath.c_str(), int(savedPath.size()), keyText.c_str(),
                                                       int(keyText.size()), TRUE) == CSTR_EQUAL;
             if (!spelled) entry.source = TrackSource(files.text(2), item.source.range(), item.source.decoder());
-            if (!files.text(3).empty()) entry.title = files.text(3);
+            if (files.integer(7)) entry.title = files.text(3); // an untitled track shows its file name, as before the restart
             entry.artist = files.text(4);
             entry.album = files.text(5);
             entry.albumId = files.integer(6);
@@ -489,8 +489,11 @@ private:
         if (parts.entries)
             for (const auto& entry : entries_) {
                 const auto binding = libraryEntries_.find(entry.id);
+                const auto title = entry.title.empty()
+                                       ? toUtf8(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
+                                       : entry.title;
                 session.entries.push_back({entry.source, binding == libraryEntries_.end() ? 0 : binding->second.file,
-                                           entry.artist.empty() ? entry.title : entry.title + " · " + entry.artist});
+                                           entry.artist.empty() ? title : title + " · " + entry.artist});
             }
         if (parts.order) session.order = indexes(policy.order);
         session.history = indexes(policy.history);
