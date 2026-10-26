@@ -114,8 +114,7 @@ winrt::fire_and_forget HomeView::refresh() {
         const auto time = [](const PlayOverview& o) {
             const int64_t minutes = o.listenedMs / 60'000;
             if (minutes < 60) return formatted(L"Home_Minutes", {minutes});
-            if (minutes < 24 * 60) return formatted(L"Home_HoursMinutes", {minutes / 60, minutes % 60});
-            return formatted(L"Home_DaysHours", {minutes / (24 * 60), minutes / 60 % 24});
+            return formatted(L"Home_HoursMinutes", {minutes / 60, minutes % 60}); // hours, never days
         };
         const auto plays = [](const PlayOverview& o) { return formatted(L"Home_Plays", {o.plays}); };
         self->TodayTime().Text(time(data->today));
