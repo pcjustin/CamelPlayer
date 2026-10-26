@@ -101,9 +101,9 @@ public:
     uint64_t reorder(const std::vector<uint64_t>& entryIds) {
         if (entryIds.size() != entries_.size()) throw std::invalid_argument("reorder must contain every queue entry");
         validateUnique(entryIds);
+        const std::unordered_set<uint64_t> reordered(entryIds.begin(), entryIds.end());
         for (const auto id : entries_) {
-            if (std::find(entryIds.begin(), entryIds.end(), id) == entryIds.end())
-                throw std::invalid_argument("reorder contains an unknown queue entry");
+            if (!reordered.contains(id)) throw std::invalid_argument("reorder contains an unknown queue entry");
         }
         entries_ = entryIds;
         order_ = entries_;
@@ -240,8 +240,11 @@ private:
         if (current_ && order_.size() > 1 && order_.front() == *current_) std::swap(order_.front(), order_.back());
     }
 
+    // Every ID in entries_ is contained, so only failures and availability are checked; eligible() would search the
+    // queue again for each entry.
     size_t eligibleCount() const {
-        return size_t(std::count_if(entries_.begin(), entries_.end(), [&](uint64_t id) { return eligible(id); }));
+        return size_t(std::count_if(entries_.begin(), entries_.end(),
+                                    [&](uint64_t id) { return !failed_.contains(id) && !unavailable_.contains(id); }));
     }
 
     void remember(uint64_t id) {

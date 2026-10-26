@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <vector>
@@ -196,4 +197,21 @@ TEST(QueuePolicyTest, RestoringDropsUnknownIdsAndAppendsEntriesMissingFromTheOrd
     EXPECT_FALSE(queue.current());
     state.entries = {1, 1};
     EXPECT_THROW(queue.restore(state), std::invalid_argument);
+}
+
+TEST(QueuePolicyTest, AWholeLibraryQueueReordersRestoresAndAdvancesWithoutQuadraticWork) {
+    std::vector<uint64_t> ids(100'000);
+    for (size_t i = 0; i < ids.size(); ++i) ids[i] = i + 1;
+    const auto started = std::chrono::steady_clock::now();
+    QueuePolicy queue(1);
+    queue.replace(ids);
+    queue.select(ids[10]);
+    std::reverse(ids.begin(), ids.end());
+    queue.reorder(ids);
+    QueuePolicy restored(2);
+    restored.restore(queue.state());
+    EXPECT_EQ(id(restored.next(false)), id(queue.next(false)));
+    EXPECT_TRUE(restored.upcoming());
+    // Each step is linear; the quadratic versions took minutes for this size.
+    EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(2));
 }

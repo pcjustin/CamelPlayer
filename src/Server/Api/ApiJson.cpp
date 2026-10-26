@@ -319,14 +319,16 @@ json toJson(const QueueSnapshot& q) {
 QueueSnapshot queueFrom(const json& j) {
     QueueSnapshot q;
     q.revision = value<uint64_t>(j, "revision");
+    std::vector<QueueEntry> entries;
     for (const auto& e : array(j, "entries")) {
         QueueEntry entry{value<uint64_t>(e, "id"), trackSourceFrom(field(e, "source"))};
         if (e.contains("title")) entry.title = value<std::string>(e, "title");
         if (e.contains("artist")) entry.artist = value<std::string>(e, "artist");
         if (e.contains("album")) entry.album = value<std::string>(e, "album");
         if (e.contains("albumId")) entry.albumId = value<int64_t>(e, "albumId");
-        q.entries.push_back(std::move(entry));
+        entries.push_back(std::move(entry));
     }
+    q.entries = std::move(entries);
     q.upcomingEntryId = optional<uint64_t>(j, "upcomingEntryId", [](const json& v) {
         if (!v.is_number_unsigned()) invalid("upcomingEntryId is not an unsigned integer");
         return v.get<uint64_t>();

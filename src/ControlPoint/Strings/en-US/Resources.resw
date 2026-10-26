@@ -158,6 +158,7 @@
   <data name="Queue_ClosePanel.AutomationProperties.Name" xml:space="preserve"><value>Close queue</value></data>
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>Close queue</value></data>
   <data name="Queue_Empty.Text" xml:space="preserve"><value>The queue is empty. Right-click a track or folder and choose Play next or Add to end of queue.</value></data>
+  <data name="Queue_CountWindowed" xml:space="preserve"><value>{0} tracks; the {1} around the current track are listed</value></data>
   <data name="State_Playing" xml:space="preserve"><value>Playing</value></data>
   <data name="State_Paused" xml:space="preserve"><value>Paused</value></data>
   <data name="State_Stopped" xml:space="preserve"><value>Stopped</value></data>

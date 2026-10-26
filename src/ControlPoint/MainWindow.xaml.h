@@ -6,6 +6,7 @@
 
 #include "MainWindow.g.h"
 #include "LibraryView.xaml.h"
+#include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
 #include "TrayIcon.h"
 
@@ -126,6 +127,7 @@ private:
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueEntryId_ = UINT64_MAX;
     bool queueShownMeasured_ = false;
+    winrt::com_ptr<ui::QueueCollection> queueItems_ = winrt::make_self<ui::QueueCollection>();
     void updateQueuePanel();
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();

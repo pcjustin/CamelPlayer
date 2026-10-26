@@ -365,7 +365,7 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" />
-                            <TextBlock x:Name="QueueCountText" Style="{StaticResource CaptionTextBlockStyle}"
+                            <TextBlock x:Name="QueueCountText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                         <Button Grid.Column="1" x:Uid="Queue_ClosePanel" Click="OnQueueToggleClick" Width="36" Height="36"
@@ -373,7 +373,7 @@
                             <FontIcon Glyph="&#xE711;" FontSize="14" />
                         </Button>
                     </Grid>
-                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="Single" CanDragItems="True" CanReorderItems="True"
+                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="Single" CanDragItems="True" CanReorderItems="True" AllowDrop="True"
                               DragItemsCompleted="OnQueueDragItemsCompleted" DoubleTapped="OnQueueDoubleTapped"
                               KeyDown="OnQueueKeyDown">
                         <ListView.Resources>
@@ -382,6 +382,31 @@
                             <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
                             <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
                         </ListView.Resources>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:QueueItem">
+                                <Grid ColumnSpacing="8" AutomationProperties.Name="{x:Bind Title, Mode=OneWay}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="&#xE767;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                              Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
+                                               Visibility="{x:Bind IsNotCurrent, Mode=OneWay}" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
+                                               FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                               Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
+                                    <Button Grid.Column="2" Width="32" Height="32" Padding="0" CornerRadius="16"
+                                            Click="OnQueueRemoveEntryClick" ToolTipService.ToolTip="{x:Bind RemoveLabel}"
+                                            AutomationProperties.Name="{x:Bind RemoveLabel}">
+                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
                     </ListView>
                     <TextBlock x:Name="QueueEmptyText" x:Uid="Queue_Empty" Grid.Row="1" TextWrapping="Wrap" Margin="0,0,8,0"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />

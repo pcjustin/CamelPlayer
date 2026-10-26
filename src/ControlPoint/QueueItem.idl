@@ -1,0 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+namespace CamelPlayer {
+// One row of the queue panel; refilled in place when the current entry changes.
+[default_interface] runtimeclass QueueItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged {
+    String Title { get; };
+    String Path { get; };
+    Boolean IsCurrent { get; };
+    Boolean IsNotCurrent { get; };
+    String RemoveLabel { get; };
+}
+} // namespace CamelPlayer

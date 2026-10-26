@@ -192,6 +192,7 @@ void MainWindow::InitializeComponent() {
                                                  [this](hstring const& list) { viewAll(list); }});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
+    QueueList().ItemsSource(*queueItems_);
     updateQueuePanel();
     Nav().SizeChanged([this](auto&&, auto&&) { fitNavigationPane(); });
     if (camel::measure::measuring()) Media::CompositionTarget::Rendering([this](auto&&, auto&&) { recordFrame(); });
@@ -573,65 +574,29 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         camel::log::info("measure: queue of %zu entries shown %.0f ms after process start", snapshot.queue.entries.size(),
                          camel::measure::sinceProcessStart());
     }
-    if (shownQueueRevision_ != snapshot.queue.revision || shownQueueEntryId_ != snapshot.queueEntryId) {
+    if (shownQueueRevision_ != snapshot.queue.revision) {
         shownQueueRevision_ = snapshot.queue.revision;
         shownQueueEntryId_ = snapshot.queueEntryId;
-        QueueList().Items().Clear();
-        std::wstring count(tr(L"Library_Tracks"));
+        const bool windowed = snapshot.queue.entries.size() > ui::QueueCollection::kShown;
+        std::wstring count(tr(windowed ? L"Queue_CountWindowed" : L"Library_Tracks"));
         if (const auto at = count.find(L"{0}"); at != std::wstring::npos)
             count.replace(at, 3, std::to_wstring(snapshot.queue.entries.size()));
+        if (const auto at = count.find(L"{1}"); at != std::wstring::npos)
+            count.replace(at, 3, std::to_wstring(ui::QueueCollection::kShown));
         QueueCountText().Text(count);
         QueueEmptyText().Visibility(snapshot.queue.entries.empty() ? Visibility::Visible : Visibility::Collapsed);
-        for (const auto& entry : snapshot.queue.entries) {
-            const std::filesystem::path path(toWide(entry.source.pathUtf8()));
-            const bool current = entry.id == snapshot.queueEntryId;
-            Grid item;
-            item.ColumnSpacing(8);
-            for (const auto width : {GridLengthHelper::FromPixels(20), GridLengthHelper::FromValueAndType(1, GridUnitType::Star),
-                                     GridLengthHelper::Auto()}) {
-                ColumnDefinition column;
-                column.Width(width);
-                item.ColumnDefinitions().Append(column);
-            }
-            item.Tag(box_value(entry.id));
-            TextBlock title;
-            title.Text(entry.title.empty() ? hstring(path.stem().wstring())
-                       : entry.artist.empty() ? ui::utf8(entry.title)
-                                              : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist));
-            title.TextTrimming(TextTrimming::CharacterEllipsis);
-            title.VerticalAlignment(VerticalAlignment::Center);
-            ToolTipService::SetToolTip(title, box_value(ui::utf8(entry.source.pathUtf8())));
-            Grid::SetColumn(title, 1);
-            if (current) {
-                const auto accent = themeBrush(L"AccentTextFillColorPrimaryBrush");
-                FontIcon playing;
-                playing.Glyph(L"\xE767");
-                playing.FontSize(14);
-                if (accent) {
-                    playing.Foreground(accent);
-                    title.Foreground(accent);
-                }
-                item.Children().Append(playing);
-                title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
-            }
-            item.Children().Append(title);
-            Button remove;
-            remove.Width(32);
-            remove.Height(32);
-            remove.Padding(ThicknessHelper::FromUniformLength(0));
-            remove.CornerRadius(CornerRadiusHelper::FromUniformRadius(16));
-            FontIcon removeIcon;
-            removeIcon.Glyph(L"\xE711");
-            removeIcon.FontSize(12);
-            remove.Content(removeIcon);
-            remove.Tag(box_value(entry.id));
-            ToolTipService::SetToolTip(remove, box_value(tr(L"Queue_RemoveEntry")));
-            Automation::AutomationProperties::SetName(remove, tr(L"Queue_RemoveEntry"));
-            remove.Click({this, &MainWindow::OnQueueRemoveEntryClick});
-            Grid::SetColumn(remove, 2);
-            item.Children().Append(remove);
-            QueueList().Items().Append(item);
-        }
+        std::vector<ui::QueueRow> rows;
+        rows.reserve(snapshot.queue.entries.size());
+        for (const auto& entry : snapshot.queue.entries)
+            rows.push_back({entry.id,
+                            entry.title.empty()    ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
+                            : entry.artist.empty() ? ui::utf8(entry.title)
+                                                   : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist),
+                            ui::utf8(entry.source.pathUtf8())});
+        queueItems_->update(std::move(rows), snapshot.queueEntryId);
+    } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
+        shownQueueEntryId_ = snapshot.queueEntryId;
+        queueItems_->setCurrent(snapshot.queueEntryId);
     }
 
     const auto currentEntry = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
@@ -1532,8 +1497,7 @@ void MainWindow::removeSelectedQueueEntries() {
     if (QueueList().SelectedItems().Size() == 0) return;
     Command command;
     command.kind = CommandKind::QueueRemove;
-    for (const auto& item : QueueList().SelectedItems())
-        command.entryIds.push_back(unbox_value<uint64_t>(item.as<FrameworkElement>().Tag()));
+    for (const auto& item : QueueList().SelectedItems()) command.entryIds.push_back(ui::QueueCollection::idOf(item));
     submitCommand(std::move(command));
 }
 
@@ -1584,10 +1548,9 @@ winrt::fire_and_forget MainWindow::OnQueueSaveClick(Windows::Foundation::IInspec
 
 void MainWindow::OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, Input::DoubleTappedRoutedEventArgs const&) {
     if (!QueueList().SelectedItem()) return;
-    const auto item = QueueList().SelectedItem().as<FrameworkElement>();
     Command command;
     command.kind = CommandKind::QueueSelect;
-    command.entryId = unbox_value<uint64_t>(item.Tag());
+    command.entryId = ui::QueueCollection::idOf(QueueList().SelectedItem());
     camel::measure::markPlayRequested();
     submitCommand(std::move(command));
 }
@@ -1595,7 +1558,7 @@ void MainWindow::OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, I
 void MainWindow::OnQueueRemoveEntryClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
     Command command;
     command.kind = CommandKind::QueueRemove;
-    command.entryIds.push_back(unbox_value<uint64_t>(sender.as<FrameworkElement>().Tag()));
+    command.entryIds.push_back(ui::QueueCollection::idOf(sender.as<FrameworkElement>().DataContext()));
     submitCommand(std::move(command));
 }
 
@@ -1606,11 +1569,10 @@ void MainWindow::OnQueueKeyDown(Windows::Foundation::IInspectable const&, Input:
 }
 
 void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsCompletedEventArgs const&) {
-    if (QueueList().Items().Size() < 2) return;
+    if (queueItems_->Size() < 2) return;
     Command command;
     command.kind = CommandKind::QueueReorder;
-    for (const auto& item : QueueList().Items())
-        command.entryIds.push_back(unbox_value<uint64_t>(item.as<FrameworkElement>().Tag()));
+    command.entryIds = queueItems_->ids();
     submitCommand(std::move(command));
 }
 

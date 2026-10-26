@@ -170,9 +170,34 @@ struct QueueEntry {
     bool operator==(const QueueEntry&) const = default;
 };
 
+// The queue's entries, shared by the snapshots that show them: snapshots are copied several times a second and a queue
+// can hold a whole 100k-track library.
+class QueueEntries {
+public:
+    QueueEntries() = default;
+    QueueEntries(std::vector<QueueEntry> entries) // NOLINT
+        : entries_(std::make_shared<const std::vector<QueueEntry>>(std::move(entries))) {}
+    QueueEntries(std::initializer_list<QueueEntry> entries) : QueueEntries(std::vector<QueueEntry>(entries)) {}
+    const std::vector<QueueEntry>& get() const {
+        static const std::vector<QueueEntry> none;
+        return entries_ ? *entries_ : none;
+    }
+    auto begin() const { return get().begin(); }
+    auto end() const { return get().end(); }
+    size_t size() const { return get().size(); }
+    bool empty() const { return get().empty(); }
+    const QueueEntry& operator[](size_t index) const { return get()[index]; }
+    const QueueEntry& front() const { return get().front(); }
+    const QueueEntry& back() const { return get().back(); }
+    bool operator==(const QueueEntries& other) const { return entries_ == other.entries_ || get() == other.get(); }
+
+private:
+    std::shared_ptr<const std::vector<QueueEntry>> entries_;
+};
+
 struct QueueSnapshot {
     uint64_t revision = 0; // QueuePolicy revision; prepared work for an older revision is stale
-    std::vector<QueueEntry> entries;
+    QueueEntries entries;
     std::optional<uint64_t> upcomingEntryId; // what a natural completion of the current entry plays next
     bool shuffle = false;
     RepeatMode repeat = RepeatMode::Off;

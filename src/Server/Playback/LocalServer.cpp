@@ -13,6 +13,7 @@
 #include <future>
 #include <iterator>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <map>
 #include <thread>
@@ -387,20 +388,26 @@ private:
         auto reader = library_->openReader();
         const auto saved = loadSession(reader);
         if (!saved) return;
-        auto file = reader.prepare("SELECT f.path,coalesce(t.title,''),coalesce(t.artist,''),"
-                                   "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
-                                   "LEFT JOIN library_tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
-                                   "WHERE f.id=? ORDER BY t.cue_index LIMIT 1");
         std::vector<QueueEntry> entries;
         entries.reserve(saved->entries.size());
         for (const auto& item : saved->entries) {
             entries.push_back({++lastEntryId_, item.source});
             // The library no longer describes a file that is gone, so the entry keeps what it showed.
             entries.back().title = item.description;
-            file.reset();
-            if (!item.file || !file.bind(1, item.file).step()) continue;
-            auto& entry = entries.back();
-            const auto key = toWide(file.text(0));
+        }
+        // One query for the whole queue: a lookup per entry took 3.4 s for 100k entries. A file's first track is its
+        // first CUE track, else the whole file, as in library_tracks.
+        auto files = reader.prepare(
+            "SELECT q.position,q.file_id,f.path,coalesce(t.title,''),coalesce(t.artist,''),"
+            "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM queue q JOIN files f ON f.id=q.file_id "
+            "LEFT JOIN tracks t ON t.id=(SELECT v.id FROM tracks v WHERE v.file_id=f.id ORDER BY v.cue_index=0,v.cue_index LIMIT 1) "
+            "LEFT JOIN albums a ON a.id=t.album_id");
+        while (files.step()) {
+            const auto at = size_t(files.integer(0));
+            if (at >= entries.size() || saved->entries[at].file != files.integer(1)) continue;
+            auto& entry = entries[at];
+            const auto& item = saved->entries[at];
+            const auto key = toWide(files.text(2));
             // The saved on-disk spelling is kept while it still names this file; a moved file plays from its new key.
             std::wstring keyText = key;
             if (_wcsnicmp(keyText.c_str(), LR"(\\?\UNC\)", 8) == 0) keyText = LR"(\\)" + keyText.substr(8);
@@ -408,11 +415,11 @@ private:
             const auto savedPath = toWide(item.source.pathUtf8());
             const bool spelled = CompareStringOrdinal(savedPath.c_str(), int(savedPath.size()), keyText.c_str(),
                                                       int(keyText.size()), TRUE) == CSTR_EQUAL;
-            if (!spelled) entry.source = TrackSource(file.text(0), item.source.range(), item.source.decoder());
-            if (!file.text(1).empty()) entry.title = file.text(1);
-            entry.artist = file.text(2);
-            entry.album = file.text(3);
-            entry.albumId = file.integer(4);
+            if (!spelled) entry.source = TrackSource(files.text(2), item.source.range(), item.source.decoder());
+            if (!files.text(3).empty()) entry.title = files.text(3);
+            entry.artist = files.text(4);
+            entry.album = files.text(5);
+            entry.albumId = files.integer(6);
             libraryEntries_[entry.id] = {key, item.file, false, false, spelled};
         }
         if (!libraryReader_) libraryReader_.emplace(library_->openReader());
@@ -510,6 +517,7 @@ private:
         const auto& c = pending.command;
         state_.command = pending.stamp;
         attempted_ = {}; // a command may restart the stream, so the upcoming entry may be queued again
+        checked_ = {};
         state_.commandError.reset();
         state_.controlPanelOpened.reset();
         if (pending.restore && !c.source) {
@@ -739,10 +747,15 @@ private:
         std::erase_if(libraryEntries_, [&](const auto& item) { return item.first != current; });
     }
 
-    void refreshLibraryAvailability() {
+    // `idle` passes may skip a large queue for up to a second, since a scan changes the library many times a second.
+    void refreshLibraryAvailability(bool idle = false) {
         if (!libraryReader_ || libraryEntries_.empty()) return;
         const auto version = libraryReader_->scalar("PRAGMA data_version").value();
         if (version == libraryVersion_) return;
+        const bool large = libraryEntries_.size() > 2000;
+        const auto now = std::chrono::steady_clock::now();
+        if (idle && large && now - availabilityChecked_ < std::chrono::seconds(1)) return;
+        availabilityChecked_ = now;
         libraryVersion_ = version;
         std::vector<std::wstring> removed;
         auto roots = libraryReader_->prepare("SELECT path FROM roots WHERE removed IS NOT NULL");
@@ -751,11 +764,22 @@ private:
             if (!path.ends_with(L'\\')) path.push_back(L'\\');
             removed.push_back(std::move(path));
         }
+        // A large queue reads the unavailable files once instead of asking about each entry, which kept the worker busy
+        // for seconds on every change of a 100k-entry queue.
+        std::unordered_set<int64_t> gone;
+        if (large) {
+            auto files = libraryReader_->prepare("SELECT f.id FROM files f JOIN roots r ON r.id=f.root_id "
+                                                 "WHERE f.available=0 OR r.online=0 OR r.removed IS NOT NULL");
+            while (files.step()) gone.insert(files.integer(0));
+        }
+        auto file = libraryReader_->prepare("SELECT f.available,r.online,r.removed FROM files f "
+                                            "JOIN roots r ON r.id=f.root_id WHERE f.id=?");
         for (auto& [id, binding] : libraryEntries_) {
             bool unavailable = binding.detached;
-            if (binding.file) {
-                auto file = libraryReader_->prepare("SELECT f.available,r.online,r.removed FROM files f "
-                                                    "JOIN roots r ON r.id=f.root_id WHERE f.id=?");
+            if (binding.file && large) {
+                unavailable = gone.contains(binding.file);
+            } else if (binding.file) {
+                file.reset();
                 unavailable = !file.bind(1, binding.file).step() || !file.integer(0) || !file.integer(1) || !file.isNull(2);
             } else {
                 for (const auto& root : removed)
@@ -768,14 +792,18 @@ private:
             commitTransition();
             chain_.clear();
             attempted_ = {};
+            checked_ = {};
         }
     }
 
     void reorderQueue(const std::vector<uint64_t>& ids) {
         policy_.reorder(ids);
+        std::unordered_map<uint64_t, QueueEntry*> byId;
+        byId.reserve(entries_.size());
+        for (auto& entry : entries_) byId.emplace(entry.id, &entry);
         std::vector<QueueEntry> entries;
         entries.reserve(ids.size());
-        for (const auto id : ids) entries.push_back(entry(id));
+        for (const auto id : ids) entries.push_back(std::move(*byId.at(id)));
         entries_ = std::move(entries);
     }
 
@@ -791,6 +819,7 @@ private:
         if (binding != libraryEntries_.end() && binding->second.file && !binding->second.spelled) {
             binding->second.spelled = true;
             queued.source = TrackSource(libraryDisplayPath(queued.source.pathUtf8()), queued.source.range(), queued.source.decoder());
+            queueChanged_ = true;
         }
         return queued.source;
     }
@@ -916,6 +945,10 @@ private:
         if (playback.transitions != seenTransitions_) return; // committed on the next pass
         if (playback.queuedFiles == 0) chain_.clear();        // a restarted stream forgets queued files
         if (!playback.output || !state_.queueEntryId || !state_.track) return;
+        // Predicting copies the policy, which is costly for a large queue; it is redone only when its inputs changed.
+        const QueueCheck check{policy_.revision(), state_.queueEntryId, {chain_.begin(), chain_.end()}, playback.nextSlotFree};
+        if (check == checked_) return;
+        checked_ = check;
         auto copy = policy_;
         for (size_t i = 0; i < chain_.size(); ++i) {
             const auto predicted = copy.next(true);
@@ -978,7 +1011,11 @@ private:
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
-        state_.queue = queueSnapshot();
+        // Rebuilt only when it changed: a large queue is not copied on every position update.
+        if (queueChanged_ || state_.queue.revision != policy_.revision() || publishedEntry_ != state_.queueEntryId) {
+            state_.queue = queueSnapshot();
+            publishedEntry_ = state_.queueEntryId;
+        }
         queueChanged_ = false;
         Event event;
         std::function<void(const Event&)> listener;
@@ -1027,7 +1064,7 @@ private:
             }
             try {
                 commitTransition();
-                refreshLibraryAvailability();
+                refreshLibraryAvailability(true);
                 advanceAfterTrackEnd();
                 ensureNextQueued();
                 recordPlaybackLength();
@@ -1062,6 +1099,7 @@ private:
     std::jthread coverWarmer_; // uses artwork_, library_ and engine_, so it stops before they go
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
+    std::chrono::steady_clock::time_point availabilityChecked_;
     struct LibraryEntry {
         std::wstring path;
         int64_t file = 0;
@@ -1088,6 +1126,7 @@ private:
     uint64_t lastEntryId_ = 0;
     uint64_t seenTrackEnds_ = 0;
     bool queueChanged_ = false; // queue state changed without a command or playback change
+    uint64_t publishedEntry_ = UINT64_MAX; // the current entry state_.queue was built for
     // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
     struct QueueAttempt {
         uint64_t current = 0, upcoming = 0, revision = 0;
@@ -1097,6 +1136,13 @@ private:
     uint64_t seenTransitions_ = 0;
     std::deque<uint64_t> chain_; // entries queued in the engine, in playback order
     QueueAttempt attempted_;
+    struct QueueCheck {
+        uint64_t revision = 0, current = 0;
+        std::vector<uint64_t> chain;
+        bool slotFree = false;
+        bool operator==(const QueueCheck&) const = default;
+    };
+    QueueCheck checked_;
     // The saved session (M5-R01): the current entry restored but not opened yet, and what was last written.
     std::optional<SavedTrack> restored_;
     bool sessionRestored_ = false; // nothing is saved before the saved session is read back
