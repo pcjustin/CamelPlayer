@@ -278,11 +278,11 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
     std::filesystem::remove(file);
 }
 
-TEST(SettingsBoundary, HotkeysDefaultToCtrlAltAndRoundTripWithInvalidOnesIgnored) {
+TEST(SettingsBoundary, HotkeysDefaultToAltAndRoundTripWithInvalidOnesIgnored) {
     const HotkeySettings defaults;
-    EXPECT_EQ(defaults.playPause, (Hotkey{MOD_CONTROL | MOD_ALT, VK_SPACE}));
-    EXPECT_EQ(defaults.previous, (Hotkey{MOD_CONTROL | MOD_ALT, VK_LEFT}));
-    EXPECT_EQ(defaults.next, (Hotkey{MOD_CONTROL | MOD_ALT, VK_RIGHT}));
+    EXPECT_EQ(defaults.playPause, (Hotkey{MOD_ALT, VK_HOME}));
+    EXPECT_EQ(defaults.previous, (Hotkey{MOD_ALT, VK_PRIOR}));
+    EXPECT_EQ(defaults.next, (Hotkey{MOD_ALT, VK_NEXT}));
     Settings settings;
     settings.hotkeys.playPause = {MOD_WIN | MOD_SHIFT, 'P'};
     settings.hotkeys.next = {};

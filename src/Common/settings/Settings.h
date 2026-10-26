@@ -127,11 +127,12 @@ struct Hotkey {
     bool operator==(const Hotkey&) const = default;
 };
 
-// Global hotkeys (docs/Plan.md §8.4): Ctrl+Alt+Space, Ctrl+Alt+Left and Ctrl+Alt+Right by default.
+// Global hotkeys (docs/Plan.md §8.4): Alt+Home, Alt+Page Up and Alt+Page Down by default; Alt+Space and Alt+arrows
+// stay with every program (system menu, back and forward).
 struct HotkeySettings {
-    Hotkey playPause{2 | 1, 0x20};
-    Hotkey previous{2 | 1, 0x25};
-    Hotkey next{2 | 1, 0x27};
+    Hotkey playPause{1, 0x24};
+    Hotkey previous{1, 0x21};
+    Hotkey next{1, 0x22};
     bool operator==(const HotkeySettings&) const = default;
 };
 
