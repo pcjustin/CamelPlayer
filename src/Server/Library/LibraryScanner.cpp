@@ -54,6 +54,12 @@ int64_t now() {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+// A file's creation time on disk (a FILETIME) in Unix seconds; now when it reports none or one in the future.
+int64_t addedTime(int64_t created) {
+    constexpr int64_t kUnixEpoch = 116'444'736'000'000'000;
+    return created > kUnixEpoch ? std::min(now(), (created - kUnixEpoch) / 10'000'000) : now();
+}
+
 std::wstring lower(std::wstring s) {
     if (!s.empty() && !LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.data(), int(s.size()), s.data(), int(s.size()),
                                      nullptr, nullptr, 0))
@@ -952,8 +958,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 if (!file) {
                     db.prepare("INSERT INTO "
                                "files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen,created,"
-                               "volume_key,identity_state,name) "
-                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)")
+                               "volume_key,identity_state,name,added) "
+                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?)")
                         .bind(1, folderId)
                         .bind(2, root)
                         .bind(3, p)
@@ -966,6 +972,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(10, entry.version.created)
                         .bind(11, entry.version.volumeKey)
                         .bind(12, toUtf8(entry.path.filename().wstring()))
+                        .bind(13, addedTime(entry.version.created))
                         .run();
                     file = db.lastInsertId();
                 } else {

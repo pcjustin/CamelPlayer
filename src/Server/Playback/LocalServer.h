@@ -37,6 +37,10 @@ public:
                                   const CancellationToken& token = {}) const override;
     LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                         std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
+    LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                    const CancellationToken& token = {}) const override;
+    LibraryAlbumPage favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                    const CancellationToken& token = {}) const override;
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token = {}) const override;
     LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const override;
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;

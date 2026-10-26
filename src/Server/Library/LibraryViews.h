@@ -19,6 +19,9 @@ namespace camel::server {
 enum class LibraryGroupField : uint8_t { Artist, Composer, Genre, Year };
 enum class AlbumSort : uint8_t { Title, Artist, Year, Added };
 enum class TrackSort : uint8_t { Title, Artist, Album, Year, Duration, Added };
+// Fixed smart lists (docs/Plan.md §8.2): added in the last 30 days, the 100 most played, the 100 last played, favorites
+// (the latest first) and never counted as played (the latest added first).
+enum class SmartList : uint8_t { RecentlyAdded, MostPlayed, RecentlyPlayed, Favorites, NeverPlayed };
 
 struct LibraryGroupFilter {
     LibraryGroupField field = LibraryGroupField::Artist;
@@ -106,6 +109,11 @@ LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                     std::optional<uint64_t> expectedRevision = std::nullopt,
                                     const CancellationToken& token = {});
+LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64_t offset, int64_t limit,
+                                std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+// Favorite albums, the latest marked first.
+LibraryAlbumPage favoriteAlbums(const LibraryStore& store, int64_t offset, int64_t limit,
+                                std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t album, const CancellationToken& token = {});
 // Shows the names and root locations scans recorded, without reading the music storage.
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token = {});

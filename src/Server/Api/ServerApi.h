@@ -284,6 +284,10 @@ public:
                                           std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                                 std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
+    virtual LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                            const CancellationToken& token = {}) const = 0;
+    virtual LibraryAlbumPage favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                            const CancellationToken& token = {}) const = 0;
     virtual std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token = {}) const = 0;
     virtual LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const = 0;
     virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;

@@ -182,6 +182,44 @@ TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
     EXPECT_TRUE(albumDetail(*store, 1).tracks[2].favorite); // the album mark leaves track favorites alone
 }
 
+TEST_F(LibraryViewsTest, SmartListsFollowPlaysFavoritesAndTheDateAdded) {
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    store
+        ->write([now](sqlite::Database& db) {
+            db.exec("UPDATE files SET added=" + std::to_string(now - 40 * 86400) + " WHERE id IN (1,2);"
+                    "UPDATE files SET added=" + std::to_string(now - 86400) + " WHERE id=3;"
+                    "UPDATE files SET added=" + std::to_string(now) + " WHERE id IN (4,5);"
+                    "INSERT INTO stats(file_id,play_count,listened_ms) VALUES(1,3,1000),(2,3,2000),(5,9,9000);"
+                    "INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES"
+                    "(1,100,0,1000,1),(2,300,0,1000,1),(3,200,0,10,0),(5,400,0,1000,1);");
+        })
+        .get();
+    const auto list = [&](SmartList smart) { return ids(smartTracks(*store, smart, 0, 50)); };
+    EXPECT_EQ(list(SmartList::RecentlyAdded), (std::vector<int64_t>{4, 3})); // 5 is unavailable
+    EXPECT_EQ(list(SmartList::MostPlayed), (std::vector<int64_t>{2, 1}));    // equal counts: more listening first
+    EXPECT_EQ(list(SmartList::RecentlyPlayed), (std::vector<int64_t>{2, 3, 1}));
+    EXPECT_EQ(list(SmartList::NeverPlayed), (std::vector<int64_t>{4, 3})); // 3 was heard but never counted
+    store->write([](sqlite::Database& db) { db.exec("UPDATE stats SET play_count=4 WHERE file_id=1"); }).get();
+    EXPECT_EQ(list(SmartList::MostPlayed), (std::vector<int64_t>{1, 2})); // plays are read again without a library change
+
+    setTrackFavorite(*store, {{1}}, true);
+    Sleep(5);
+    setTrackFavorite(*store, {{4}}, true);
+    EXPECT_EQ(list(SmartList::Favorites), (std::vector<int64_t>{4, 1}));
+    setTrackFavorite(*store, {{1}}, true); // keeps the time it became a favorite
+    EXPECT_EQ(list(SmartList::Favorites), (std::vector<int64_t>{4, 1}));
+
+    EXPECT_EQ(favoriteAlbums(*store, 0, 10).total, 0);
+    setAlbumFavorite(*store, {1}, true);
+    Sleep(5);
+    setAlbumFavorite(*store, {2}, true);
+    const auto albums = favoriteAlbums(*store, 0, 10);
+    ASSERT_EQ(albums.albums.size(), 2u);
+    EXPECT_EQ(albums.albums[0].id, 2);
+    EXPECT_EQ(albums.albums[1].id, 1);
+    EXPECT_TRUE(albums.albums[0].favorite);
+}
+
 TEST_F(LibraryViewsTest, AFavoriteAlbumStaysAFavoriteWhenItsTracksMoveToAnotherAlbum) {
     setAlbumFavorite(*store, {2}, true);
     store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET album_id=1 WHERE id=4"); }).get();

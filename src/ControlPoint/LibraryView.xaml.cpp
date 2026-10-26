@@ -9,6 +9,9 @@
 #include "LibraryView.g.cpp"
 #endif
 
+#include <algorithm>
+#include <random>
+
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
@@ -60,6 +63,15 @@ hstring titleOf(const std::string& title, const std::string& file, const Texts& 
     return hstring(std::filesystem::path(camel::toWide(file)).stem().wstring());
 }
 
+ui::BrowsePage albumPage(const LibraryAlbumPage& page, const Texts& texts) {
+    ui::BrowsePage out{page.revision, page.total, {}};
+    for (const auto& a : page.albums) {
+        out.rows.push_back({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, counted(texts.tracks, a.tracks)});
+        out.rows.back().favorite = a.favorite;
+    }
+    return out;
+}
+
 hstring titleOf(const LibraryTrackRow& t, const Texts& texts) {
     return titleOf(t.title, t.name.empty() ? t.path : t.name, texts);
 }
@@ -106,10 +118,12 @@ void LibraryView::InitializeComponent() {
     Automation::AutomationProperties::SetName(BackButton(), tr(L"Library_Back"));
 }
 
-void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu) {
+void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu,
+                         std::function<void(ui::SourceFetch, std::string)> savePlaylist) {
     server_ = std::move(server);
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
+    savePlaylist_ = std::move(savePlaylist);
     if (playlistMenu_)
         playlistMenu_(AlbumMenu(), [this]() -> ui::SourceFetch {
             return [album = current_.album] { return std::vector<PlaylistSource>{{PlaylistSource::Kind::Album, album, {}, {}}}; };
@@ -126,8 +140,15 @@ void LibraryView::show(hstring const& tag, hstring const& title) {
     if (!server_) return;
     View view;
     view.title = title;
-    if (tag == L"albums") view.mode = Mode::Albums;
-    else if (tag == L"tracks") view.mode = Mode::Tracks;
+    static constexpr std::pair<std::wstring_view, SmartList> kSmart[] = {
+        {L"smart:added", SmartList::RecentlyAdded},       {L"smart:mostPlayed", SmartList::MostPlayed},
+        {L"smart:recentlyPlayed", SmartList::RecentlyPlayed}, {L"smart:favorites", SmartList::Favorites},
+        {L"smart:neverPlayed", SmartList::NeverPlayed}};
+    for (const auto& [name, list] : kSmart)
+        if (tag == name) view.smart = list;
+    view.favoriteAlbums = tag == L"smart:favoriteAlbums";
+    if (tag == L"albums" || view.favoriteAlbums) view.mode = Mode::Albums;
+    else if (tag == L"tracks" || view.smart) view.mode = Mode::Tracks;
     else if (tag == L"folders") view.mode = Mode::Folders;
     else {
         view.mode = Mode::Groups;
@@ -251,6 +272,11 @@ void LibraryView::loadSearchGroups() {
 
 void LibraryView::showEmpty(int64_t total) {
     if (current_.mode == Mode::Search || current_.fetch) return; // the search groups or Home explain an empty list
+    if (current_.smartList()) {
+        EmptyText().Text(tr(L"Smart_Empty"));
+        EmptyText().Visibility(total == 0 ? Visibility::Visible : Visibility::Collapsed);
+        return;
+    }
     const bool noRoots = hasRoots_ && !*hasRoots_;
     const bool pending = total == 0 && current_.mode == Mode::Albums && !current_.filter;
     if (total > 0 || (!noRoots && !pending)) {
@@ -285,6 +311,7 @@ void LibraryView::open(View view, bool push) {
     DetailCover().Source(nullptr);
     DetailCover().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     AlbumActions().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
+    ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
     if (push) back_.push_back(current_);
     current_ = std::move(view);
     ++generation_;
@@ -338,11 +365,11 @@ void LibraryView::fillSortChoices() {
                 L"Library_SortYear",  L"Library_SortDuration", L"Library_SortAdded"};
         selected = int(trackSort_);
     }
-    if (current_.fetch) keys.clear(); // Home's lists keep their own order
+    if (current_.fetch || current_.smartList()) keys.clear(); // Home's and smart lists keep their own order
     for (const auto* key : keys) SortCombo().Items().Append(box_value(tr(key)));
     SortCombo().Visibility(keys.empty() ? Visibility::Collapsed : Visibility::Visible);
     if (!keys.empty()) SortCombo().SelectedIndex(selected);
-    DescendingToggle().Visibility(current_.mode == Mode::Tracks ? Visibility::Visible : Visibility::Collapsed);
+    DescendingToggle().Visibility(current_.mode == Mode::Tracks && !current_.smart ? Visibility::Visible : Visibility::Collapsed);
     DescendingToggle().IsChecked(descending_);
     populating_ = false;
 }
@@ -353,16 +380,24 @@ void LibraryView::startCollection() {
     ui::BrowseFetch fetch;
     if (current_.fetch) {
         fetch = current_.fetch;
+    } else if (current_.smart) {
+        fetch = [server, texts, list = *current_.smart](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
+            const auto page = server->smartTracks(list, offset, limit, revision);
+            ui::BrowsePage out{page.revision, page.total, {}};
+            for (const auto& t : page.tracks) {
+                out.rows.push_back(trackRow(t, texts));
+                out.rows.back().marks = true;
+            }
+            return out;
+        };
+    } else if (current_.favoriteAlbums) {
+        fetch = [server, texts](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
+            return albumPage(server->favoriteAlbums(offset, limit, revision), texts);
+        };
     } else if (current_.mode == Mode::Albums) {
         fetch = [server, texts, sort = albumSort_, filter = current_.filter](int64_t offset, int64_t limit,
                                                                               std::optional<uint64_t> revision) {
-            const auto page = server->browseAlbums(sort, filter, offset, limit, revision);
-            ui::BrowsePage out{page.revision, page.total, {}};
-            for (const auto& a : page.albums) {
-                out.rows.push_back({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, counted(texts.tracks, a.tracks)});
-                out.rows.back().favorite = a.favorite;
-            }
-            return out;
+            return albumPage(server->browseAlbums(sort, filter, offset, limit, revision), texts);
         };
     } else if (current_.mode == Mode::Groups) {
         fetch = [server, texts, field = current_.field](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
@@ -656,6 +691,67 @@ void LibraryView::reloadWhenIdle() {
             if (collection_) collection_->refresh();
         });
     });
+}
+
+std::function<std::vector<ui::BrowseRow>()> LibraryView::listRows() const {
+    return [fetch = fetch_] {
+        std::vector<ui::BrowseRow> rows;
+        if (!fetch) return rows;
+        for (int64_t offset = 0;;) {
+            auto page = fetch(offset, 500, std::nullopt);
+            rows.insert(rows.end(), page.rows.begin(), page.rows.end());
+            offset += int64_t(page.rows.size());
+            if (page.rows.empty() || offset >= page.total) return rows;
+        }
+    };
+}
+
+// Replaces the queue with the whole list: its tracks, or the tracks of its albums in album order.
+void LibraryView::playList(bool shuffle) {
+    if (!submit_ || !server_) return;
+    background([server = server_, rows = listRows(), albums = current_.favoriteAlbums, shuffle, this] {
+        std::vector<std::string> paths;
+        for (const auto& row : rows()) {
+            if (!albums) {
+                if (!row.value.empty()) paths.push_back(row.value);
+                continue;
+            }
+            for (const auto& t : server->albumDetail(row.id).tracks) paths.push_back(t.path);
+        }
+        if (shuffle) std::ranges::shuffle(paths, std::mt19937{std::random_device{}()});
+        return std::function<void()>([this, paths = std::move(paths)] {
+            if (paths.empty()) return;
+            Command command;
+            command.kind = CommandKind::QueueReplace;
+            for (const auto& path : paths) command.sources.emplace_back(path);
+            camel::measure::markPlayRequested();
+            submit_(std::move(command));
+        });
+    });
+}
+
+void LibraryView::OnPlayListClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    playList(false);
+}
+
+void LibraryView::OnShuffleListClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    playList(true);
+}
+
+// A playlist named after the list, holding what it lists now.
+void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!savePlaylist_) return;
+    const auto title = current_.title;
+    savePlaylist_(
+        [rows = listRows(), albums = current_.favoriteAlbums] {
+            std::vector<PlaylistSource> sources;
+            for (const auto& row : rows()) {
+                if (albums) sources.push_back({PlaylistSource::Kind::Album, row.id, {}, {}});
+                else if (row.file) sources.push_back({PlaylistSource::Kind::Track, 0, {row.file}, {}});
+            }
+            return sources;
+        },
+        camel::toUtf8(std::wstring_view(title.c_str(), title.size())));
 }
 
 void LibraryView::showAlbumFavorite(bool favorite) {

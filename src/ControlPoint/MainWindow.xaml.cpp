@@ -190,7 +190,9 @@ void MainWindow::InitializeComponent() {
     const ui::PlaylistMenu playlistMenu = [this](MenuFlyout const& menu, std::function<ui::SourceFetch()> selection) {
         extendPlaylistMenu(menu, std::move(selection));
     };
-    get_self<LibraryView>(Library())->attach(server_, [this](Command command) { submitCommand(std::move(command)); }, playlistMenu);
+    get_self<LibraryView>(Library())->attach(
+        server_, [this](Command command) { submitCommand(std::move(command)); }, playlistMenu,
+        [this](ui::SourceFetch fetch, std::string name) { runPlaylistAction(std::move(fetch), std::nullopt, std::move(name)); });
     get_self<PlaylistView>(Playlists())
         ->attach(server_, {[this](Command command) { submitCommand(std::move(command)); }, [this] { refreshPlaylists(); },
                            [this](int64_t playlist) {
@@ -1014,7 +1016,7 @@ void MainWindow::showPage(hstring const& tag) {
     else get_self<StatisticsView>(Stats())->hide();
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
-                         tag == L"years" || tag == L"tracks" || tag == L"folders";
+                         tag == L"years" || tag == L"tracks" || tag == L"folders" || std::wstring_view(tag).starts_with(L"smart:");
     Library().Visibility(library ? Visibility::Visible : Visibility::Collapsed);
     auto view = get_self<LibraryView>(Library());
     if (library) view->show(tag, PlaceholderTitle().Text());

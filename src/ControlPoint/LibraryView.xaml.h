@@ -18,10 +18,12 @@ struct LibraryView : LibraryViewT<LibraryView> {
     ~LibraryView() { cancelArtwork(); }
     void InitializeComponent();
 
-    // The window supplies the Server, the command path its player bar follows and the playlist menu entries.
+    // The window supplies the Server, the command path its player bar follows, the playlist menu entries and how a
+    // smart list is saved as a playlist named after it.
     void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit,
-                ui::PlaylistMenu playlistMenu);
-    // albums, artists, composers, genres, years, tracks or folders; starts a fresh navigation history.
+                ui::PlaylistMenu playlistMenu, std::function<void(ui::SourceFetch, std::string name)> savePlaylist);
+    // albums, artists, composers, genres, years, tracks, folders or a smart list (smart:added, smart:mostPlayed,
+    // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:neverPlayed); starts a fresh navigation history.
     void show(hstring const& tag, hstring const& title);
     void showAlbum(int64_t album, hstring const& title);
     void showArtist(hstring const& artist);
@@ -62,6 +64,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
         e.Handled(true);
     }
     void OnAlbumFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnShuffleListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnSaveListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
     struct ArtworkSlot {
@@ -82,6 +87,9 @@ private:
         std::optional<int64_t> folder; // absent: the library roots
         std::string query;             // search text
         ui::BrowseFetch fetch;         // replaces the browse query for Home's lists
+        std::optional<camel::server::SmartList> smart;
+        bool favoriteAlbums = false;
+        bool smartList() const { return smart || favoriteAlbums; }
         hstring title, detail;
     };
 
@@ -110,6 +118,9 @@ private:
                                                               Windows::Foundation::IInspectable const& clicked, bool paged) const;
     ui::SourceFetch menuSources() const;
     void queueSelection(bool playNext);
+    // Every row of the current smart list, read off the UI thread.
+    std::function<std::vector<ui::BrowseRow>()> listRows() const;
+    void playList(bool shuffle);
     // Marks or clears the menu's tracks or albums as favorites; paged lists reread once the Server applied the change.
     void markSelection(bool favorite);
     void markAlbums(bool favorite);
@@ -127,6 +138,7 @@ private:
     View current_;
     std::vector<View> back_;
     std::function<void()> leave_; // Back from a search that began outside the library pages
+    std::function<void(ui::SourceFetch, std::string)> savePlaylist_;
     uint64_t generation_ = 0; // changes whenever another view opens
     camel::server::AlbumSort albumSort_ = camel::server::AlbumSort::Title;
     camel::server::TrackSort trackSort_ = camel::server::TrackSort::Title;

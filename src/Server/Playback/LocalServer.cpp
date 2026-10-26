@@ -1336,6 +1336,14 @@ LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending
                                                  std::optional<uint64_t> revision, const CancellationToken& token) const {
     return camel::server::browseTrackRows(impl_->library(), sort, descending, offset, limit, revision, token);
 }
+LibraryTrackRowPage LocalServer::smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                             const CancellationToken& token) const {
+    return camel::server::smartTracks(impl_->library(), list, offset, limit, revision, token);
+}
+LibraryAlbumPage LocalServer::favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                             const CancellationToken& token) const {
+    return camel::server::favoriteAlbums(impl_->library(), offset, limit, revision, token);
+}
 std::optional<ArtworkReference> LocalServer::artwork(const ArtworkRequest& request, const CancellationToken& token) const {
     return impl_->artwork(request, token);
 }

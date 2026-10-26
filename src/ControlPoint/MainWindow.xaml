@@ -67,7 +67,28 @@
                 <NavigationViewItem x:Uid="Nav_Folders" Tag="folders" Icon="Folder" />
                 <NavigationViewItemSeparator />
                 <NavigationViewItem x:Name="PlaylistsNav" x:Uid="Nav_Playlists" Tag="playlists" Icon="MusicInfo" />
-                <NavigationViewItem x:Uid="Nav_SmartPlaylists" Tag="smart" Icon="Favorite" />
+                <NavigationViewItem x:Uid="Nav_SmartPlaylists" Tag="smart" Icon="Favorite" SelectsOnInvoked="False">
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem x:Uid="Nav_SmartAdded" Tag="smart:added">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE710;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
+                        <NavigationViewItem x:Uid="Nav_SmartMostPlayed" Tag="smart:mostPlayed">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE8D6;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
+                        <NavigationViewItem x:Uid="Nav_SmartRecentlyPlayed" Tag="smart:recentlyPlayed">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE81C;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
+                        <NavigationViewItem x:Uid="Nav_SmartFavorites" Tag="smart:favorites">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE00B;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
+                        <NavigationViewItem x:Uid="Nav_SmartFavoriteAlbums" Tag="smart:favoriteAlbums">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE93C;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
+                        <NavigationViewItem x:Uid="Nav_SmartNeverPlayed" Tag="smart:neverPlayed">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE7C1;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <Grid x:Name="ContentLayout" ColumnSpacing="0">

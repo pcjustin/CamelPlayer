@@ -385,6 +385,15 @@ ALTER TABLE queue DROP COLUMN cue_index;
         },
         // An album is a favorite while any of its tracks carries the mark, so it follows its files through moves and rescans.
         [](sqlite::Database& db) { db.exec("ALTER TABLE stats ADD COLUMN album_favorite INTEGER NOT NULL DEFAULT 0;"); },
+        // When a file joined the library: its creation time on disk in Unix seconds, or the time it was indexed when the
+        // disk reports none or a future one; and when its track or album became a favorite (UTC milliseconds).
+        [](sqlite::Database& db) {
+            db.exec("ALTER TABLE files ADD COLUMN added INTEGER;"
+                    "UPDATE files SET added=MIN(CAST(strftime('%s','now') AS INTEGER),CASE WHEN created>116444736000000000 "
+                    "THEN (created-116444736000000000)/10000000 ELSE CAST(strftime('%s','now') AS INTEGER) END);"
+                    "ALTER TABLE stats ADD COLUMN favorite_at INTEGER;"
+                    "ALTER TABLE stats ADD COLUMN album_favorite_at INTEGER;");
+        },
     };
     return migrations;
 }

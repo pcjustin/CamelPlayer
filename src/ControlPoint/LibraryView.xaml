@@ -156,6 +156,26 @@
                             <FontIcon x:Name="AlbumFavoriteIcon" Glyph="&#xE006;" FontSize="16" />
                         </ToggleButton>
                     </StackPanel>
+                    <StackPanel x:Name="ListActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
+                        <Button Style="{StaticResource AccentButtonStyle}" Padding="16,6" Click="OnPlayListClick">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE768;" FontSize="14" />
+                                <TextBlock x:Uid="Smart_PlayAll" />
+                            </StackPanel>
+                        </Button>
+                        <Button Padding="16,6" Click="OnShuffleListClick">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8B1;" FontSize="14" />
+                                <TextBlock x:Uid="Smart_Shuffle" />
+                            </StackPanel>
+                        </Button>
+                        <Button Padding="16,6" Click="OnSaveListClick">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8F4;" FontSize="14" />
+                                <TextBlock x:Uid="Smart_Save" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
                 </StackPanel>
             </Grid>
