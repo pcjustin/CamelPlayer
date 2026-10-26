@@ -18,6 +18,7 @@ struct SavedQueueEntry {
     TrackSource source;
     int64_t file = 0;        // the library file, followed through identity moves; 0 outside the library
     std::string description; // title and artist, shown when the library no longer describes the file
+    bool automatic = false;
     bool operator==(const SavedQueueEntry&) const = default;
 };
 

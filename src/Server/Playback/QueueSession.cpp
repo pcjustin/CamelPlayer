@@ -14,6 +14,7 @@ namespace {
 
 constexpr const char* kStateKey = "session";
 constexpr const char* kOrderKey = "session_order";
+constexpr const char* kAutomaticKey = "session_automatic"; // positions of the entries autoplay added
 
 void setState(sqlite::Database& db, const char* key, const std::string& value) {
     db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
@@ -56,6 +57,10 @@ void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts
             insert.run();
             insert.reset();
         }
+        std::vector<size_t> automatic;
+        for (size_t i = 0; i < session.entries.size(); ++i)
+            if (session.entries[i].automatic) automatic.push_back(i);
+        setState(db, kAutomaticKey, nlohmann::json(automatic).dump());
     }
     if (parts.order) setState(db, kOrderKey, nlohmann::json(session.order).dump());
     nlohmann::json j;
@@ -93,6 +98,8 @@ std::optional<SavedSession> loadSession(sqlite::Database& db) {
         const auto count = session.entries.size();
         const auto j = nlohmann::json::parse(*text);
         if (const auto order = state(db, kOrderKey)) session.order = indexes(nlohmann::json::parse(*order), count);
+        if (const auto automatic = state(db, kAutomaticKey))
+            for (const auto at : indexes(nlohmann::json::parse(*automatic), count)) session.entries[at].automatic = true;
         session.history = indexes(j.value("history", nlohmann::json::array()), count);
         if (j.contains("current") && j["current"].get<size_t>() < count) session.current = j["current"].get<size_t>();
         session.shuffle = j.value("shuffle", false);

@@ -200,6 +200,7 @@ std::string toJson(const Settings& s) {
     j["closeAction"] = s.closeAction == CloseAction::Exit ? "exit" : "tray";
     j["trayNoticeShown"] = s.trayNoticeShown;
     j["firstRunDone"] = s.firstRunDone;
+    j["autoplay"] = s.autoplay;
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
@@ -293,6 +294,7 @@ Settings fromJson(const std::string& text) {
     s.closeAction = str(j, "closeAction", "tray") == "exit" ? CloseAction::Exit : CloseAction::Tray;
     s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
     s.firstRunDone = boolean(j, "firstRunDone", false);
+    s.autoplay = boolean(j, "autoplay", true);
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
         const json& w = j["wasapi"];

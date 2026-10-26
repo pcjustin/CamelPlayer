@@ -26,6 +26,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
+// Queues end where a test put their end; the autoplay tests turn it on.
+Settings withoutAutoplay() {
+    Settings s;
+    s.autoplay = false;
+    return s;
+}
+
 struct Probe {
     std::atomic<int> opens = 0, closes = 0;
     std::function<void()> onOpen;
@@ -78,7 +85,7 @@ protected:
     Probe probe;
     std::unique_ptr<LocalServer> server;
     void SetUp() override {
-        server = std::make_unique<LocalServer>(Settings{}, std::filesystem::path{}, [&](const Settings& settings) {
+        server = std::make_unique<LocalServer>(withoutAutoplay(), std::filesystem::path{}, [&](const Settings& settings) {
             if (probe.failBackend == settings.backend) throw std::runtime_error("injected output activation failure");
             return std::make_unique<ManualOutput>(probe);
         });
@@ -97,7 +104,7 @@ TEST_F(ServerTest, LibraryFingerprintingFollowsActualPlaybackState) {
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
     scanner.addRoot(dir / "music");
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
         return std::make_unique<ManualOutput>(probe);
     });
     const auto waitFor = [](const std::function<bool()>& check) {
@@ -580,7 +587,7 @@ TEST(ServerQueueCaptureTest, NaturalEndAdvancesAndSkipsTrackLocalFailures) {
     options.file = testutil::tempDir() / "server-queue.raw";
     options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
     {
-        LocalServer server(Settings{}, {}, [&](const Settings&) { return createCaptureOutput(options); });
+        LocalServer server(withoutAutoplay(), {}, [&](const Settings&) { return createCaptureOutput(options); });
         Command c = queueReplace({source("16-44.1k"), missingSource("queue-missing.flac"), source("24-96k")});
         server.submit(c);
         server.waitIdle();
@@ -626,7 +633,7 @@ Snapshot playQueueToEnd(std::vector<TrackSource> sources, const std::filesystem:
     options.file = capture;
     options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
     options.realtime = true; // queuing the following file takes polls; real playback leaves seconds for that
-    LocalServer server(Settings{}, {},
+    LocalServer server(withoutAutoplay(), {},
                        [&](const Settings&) { return std::make_unique<CountingOutput>(createCaptureOutput(options), opens); });
     server.submit(queueReplace(std::move(sources)));
     server.waitIdle();
@@ -697,7 +704,7 @@ protected:
         options.file = dir / "capture.raw";
         options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
         options.realtime = true;
-        server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+        server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                                [&](const Settings&) { return createCaptureOutput(options); });
         return dir / "music";
     }
@@ -812,7 +819,7 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
     server.reset();
     // The restore reads only the library database: the current file need not even be reachable.
     std::filesystem::rename(music / b.filename(), music / "away.flac");
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
     server->waitIdle();
     auto s = server->snapshot();
@@ -858,7 +865,7 @@ TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
              db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%restore-gone-a%')");
          })
         .get();
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
     server->waitIdle();
     auto s = server->snapshot();
@@ -886,7 +893,7 @@ TEST_F(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
              db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%untitled-gone%')");
          })
         .get();
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
     server->waitIdle();
     const auto s = server->snapshot();
@@ -894,6 +901,91 @@ TEST_F(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
     EXPECT_EQ(s.queue.entries[0].title, toUtf8(a.stem().wstring()) + " · Artist"); // the file is gone: what it showed
     EXPECT_EQ(s.queue.entries[1].title, "");                                       // the control point shows the file name
     EXPECT_EQ(s.queue.entries[1].artist, "Artist");
+}
+
+TEST_F(LibraryPlaybackTest, AutoplayFollowsTheLastEntryWithAnUnplayedLibraryTrack) {
+    const auto a = testutil::generatedFile({"auto-a", 48000, 16, 2, 0.6});
+    const auto b = testutil::generatedFile({"auto-b", 48000, 16, 2, 0.6});
+    const auto c = testutil::generatedFile({"auto-c", 48000, 16, 2, 0.6});
+    setUp({a, b, c});
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    store->write([&](sqlite::Database& db) {
+             db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,?,0,1000,1)")
+                 .bind(1, file(b))
+                 .bind(2, int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                      std::chrono::system_clock::now().time_since_epoch())
+                                      .count()))
+                 .run();
+         })
+        .get();
+    send(queueReplace({track(a)}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 2; }));
+    auto s = server->snapshot();
+    EXPECT_FALSE(s.queue.entries[0].automatic);
+    EXPECT_TRUE(s.queue.entries[1].automatic);
+    EXPECT_NE(s.queue.entries[1].source.pathUtf8().find("auto-c"), std::string::npos); // b was played this week
+    EXPECT_EQ(s.queue.upcomingEntryId, s.queue.entries[1].id);
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queueEntryId == s.queue.entries[1].id; }));
+    // Every track was played or queued: the one played longest ago follows.
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 3; }));
+    EXPECT_NE(server->snapshot().queue.entries[2].source.pathUtf8().find("auto-b"), std::string::npos);
+    send(command(CommandKind::Stop));
+}
+
+TEST_F(LibraryPlaybackTest, AutoplayYieldsToAddedTracksRepeatAndTheSwitch) {
+    const auto a = testutil::generatedFile({"yield-a", 48000, 16, 2, 3.0});
+    const auto b = testutil::generatedFile({"yield-b", 48000, 16, 2, 3.0});
+    const auto c = testutil::generatedFile({"yield-c", 48000, 16, 2, 3.0});
+    setUp({a, b, c});
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    send(queueReplace({track(a)}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 2; }));
+    Command add = command(CommandKind::QueueAdd);
+    add.sources = {track(b)};
+    auto s = send(add);
+    ASSERT_EQ(s.queue.entries.size(), 2u); // the automatic entry made way for the user's track
+    EXPECT_FALSE(s.queue.entries[1].automatic);
+    EXPECT_EQ(s.queue.entries[1].source, track(b));
+
+    Command repeat = command(CommandKind::SetRepeat);
+    repeat.repeat = RepeatMode::All;
+    send(repeat);
+    send(command(CommandKind::Next));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queueEntryId == server->snapshot().queue.entries[1].id; }));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(server->snapshot().queue.entries.size(), 2u); // repeat all never ends the queue
+
+    Command off = command(CommandKind::ApplySettings);
+    auto settings = server->snapshot().settings;
+    settings.autoplay = false;
+    off.settings = settings;
+    send(off);
+    repeat.repeat = RepeatMode::Off;
+    send(repeat);
+    send(command(CommandKind::Next));
+    EXPECT_EQ(server->snapshot().queue.entries.size(), 2u);
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
+}
+
+TEST_F(LibraryPlaybackTest, PlayOnAnEmptyQueueStartsAutoplayAndItsEntriesSurviveARestart) {
+    const auto a = testutil::generatedFile({"empty-a", 48000, 16, 2, 2.0});
+    setUp({a});
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    auto s = send(command(CommandKind::Play));
+    ASSERT_EQ(s.queue.entries.size(), 1u);
+    EXPECT_TRUE(s.queue.entries[0].automatic);
+    EXPECT_EQ(s.queueEntryId, s.queue.entries[0].id);
+    send(command(CommandKind::Pause));
+    server.reset();
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    server->waitIdle();
+    s = server->snapshot();
+    ASSERT_EQ(s.queue.entries.size(), 1u);
+    EXPECT_TRUE(s.queue.entries[0].automatic);
 }
 
 TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiveSeconds) {
@@ -938,7 +1030,7 @@ TEST_F(LibraryPlaybackTest, AClearedQueueStaysEmptyInsteadOfReopeningTheLastFile
     clear.entryIds = entryIds(server->snapshot());
     send(clear);
     server.reset();
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
     server->waitIdle();
     EXPECT_TRUE(server->snapshot().queue.entries.empty());
@@ -1074,7 +1166,7 @@ TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
         return std::make_unique<ManualOutput>(probe);
     });
     auto playing = send(queueReplace({TrackSource(toUtf8(a.wstring())), TrackSource(toUtf8(b.wstring()))}));
@@ -1143,7 +1235,7 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
     LibraryScanner scanner(store);
     ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
     store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET total_frames=1 WHERE length_estimated=1"); }).get();
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
         return std::make_unique<ManualOutput>(probe);
     });
     ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
@@ -1168,7 +1260,7 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     LibraryScanner scanner(store);
     ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
     const auto file = store.openReader().scalar("SELECT id FROM files WHERE kind='audio'").value();
-    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json", [&](const Settings&) {
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
         return std::make_unique<ManualOutput>(probe);
     });
     ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
@@ -1219,7 +1311,7 @@ TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
     options.realtime = true;
     std::atomic<int> opens = 0;
     {
-        LocalServer server(Settings{}, {}, [&](const Settings&) {
+        LocalServer server(withoutAutoplay(), {}, [&](const Settings&) {
             return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
         });
         std::vector<TrackSource> sources;
@@ -1256,7 +1348,7 @@ TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
     options.realtime = true;
     std::atomic<int> opens = 0;
     {
-        LocalServer server(Settings{}, {}, [&](const Settings&) {
+        LocalServer server(withoutAutoplay(), {}, [&](const Settings&) {
             return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
         });
         server.submit(queueReplace({TrackSource(toUtf8(files[0].wstring())), TrackSource(toUtf8(files[1].wstring()))}));

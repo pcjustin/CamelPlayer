@@ -51,6 +51,8 @@ struct MainWindow : MainWindowT<MainWindow> {
                               Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
     void OnNavSelectionChanged(Microsoft::UI::Xaml::Controls::NavigationView const&,
                                Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const&);
+    // Settings › Playback and the queue panel switch the same autoplay setting (docs/Plan.md §8.1).
+    void OnAutoplayToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSettingChanged(Windows::Foundation::IInspectable const&,
                           Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnNumberChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,

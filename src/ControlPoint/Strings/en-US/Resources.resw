@@ -316,4 +316,10 @@
   <data name="Playlist_SortYear.Text" xml:space="preserve"><value>Year</value></data>
   <data name="Playlist_SortTrackNumber.Text" xml:space="preserve"><value>Track number</value></data>
   <data name="Playlist_SortAdded.Text" xml:space="preserve"><value>Date added</value></data>
+  <data name="Settings_Autoplay.Header" xml:space="preserve"><value>When the queue ends</value></data>
+  <data name="Settings_Autoplay.OnContent" xml:space="preserve"><value>Keep playing random tracks from the library</value></data>
+  <data name="Settings_Autoplay.OffContent" xml:space="preserve"><value>Stop</value></data>
+  <data name="Queue_Autoplay.OnContent" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
+  <data name="Queue_Autoplay.OffContent" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
+  <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>Added automatically after the queue ended</value></data>
 </root>

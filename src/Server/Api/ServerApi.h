@@ -57,6 +57,7 @@ struct SettingsDto {
     CloseAction closeAction = CloseAction::Tray;
     bool trayNoticeShown = false;
     bool firstRunDone = false;
+    bool autoplay = true;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };
@@ -167,6 +168,7 @@ struct QueueEntry {
     TrackSource source;
     std::string title, artist, album;
     int64_t albumId = 0;
+    bool automatic = false; // added by autoplay when the queue ended (docs/Plan.md §8.1)
     bool operator==(const QueueEntry&) const = default;
 };
 

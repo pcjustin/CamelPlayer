@@ -136,6 +136,7 @@
                                 <InfoBar x:Name="BackendNotice" Severity="Warning" IsOpen="False" IsClosable="True" />
                                 <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ToggleSwitch x:Name="AutoplaySwitch" x:Uid="Settings_Autoplay" Toggled="OnAutoplayToggled" />
 
                                 <StackPanel x:Name="WasapiGroup" Spacing="12">
                                     <TextBlock Text="WASAPI" Style="{StaticResource GroupHeaderStyle}" />
@@ -398,6 +399,9 @@
                                     </Grid.ColumnDefinitions>
                                     <FontIcon Glyph="&#xE767;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                               Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
+                                    <FontIcon x:Uid="Queue_AutomaticIcon" Glyph="&#xE8B1;" FontSize="12"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                              Visibility="{x:Bind ShowsAutomatic, Mode=OneWay}" />
                                     <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
                                                VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
                                                Visibility="{x:Bind IsNotCurrent, Mode=OneWay}" />
@@ -417,6 +421,7 @@
                     <TextBlock x:Name="QueueEmptyText" x:Uid="Queue_Empty" Grid.Row="1" TextWrapping="Wrap" Margin="0,0,8,0"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
                     <StackPanel Grid.Row="2" Spacing="8" Padding="0,0,8,0">
+                        <ToggleSwitch x:Name="QueueAutoplaySwitch" x:Uid="Queue_Autoplay" Toggled="OnAutoplayToggled" />
                         <Button x:Uid="Queue_Clear" Click="OnQueueClearClick" HorizontalAlignment="Stretch" />
                         <Button x:Uid="Queue_Save" Click="OnQueueSaveClick" HorizontalAlignment="Stretch" />
                     </StackPanel>

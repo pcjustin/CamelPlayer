@@ -9,6 +9,7 @@ namespace CamelPlayer {
     String Path { get; };
     Boolean IsCurrent { get; };
     Boolean IsNotCurrent { get; };
+    Boolean ShowsAutomatic { get; }; // an entry autoplay added, marked while it is not playing
     String RemoveLabel { get; };
 }
 } // namespace CamelPlayer

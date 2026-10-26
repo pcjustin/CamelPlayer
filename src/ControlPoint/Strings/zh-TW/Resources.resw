@@ -316,4 +316,10 @@
   <data name="Playlist_SortYear.Text" xml:space="preserve"><value>年份</value></data>
   <data name="Playlist_SortTrackNumber.Text" xml:space="preserve"><value>曲目編號</value></data>
   <data name="Playlist_SortAdded.Text" xml:space="preserve"><value>加入日期</value></data>
+  <data name="Settings_Autoplay.Header" xml:space="preserve"><value>播完佇列後</value></data>
+  <data name="Settings_Autoplay.OnContent" xml:space="preserve"><value>繼續隨機播放音樂庫的歌曲</value></data>
+  <data name="Settings_Autoplay.OffContent" xml:space="preserve"><value>停止</value></data>
+  <data name="Queue_Autoplay.OnContent" xml:space="preserve"><value>播完後自動播放</value></data>
+  <data name="Queue_Autoplay.OffContent" xml:space="preserve"><value>播完後自動播放</value></data>
+  <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>佇列播完後自動加入</value></data>
 </root>

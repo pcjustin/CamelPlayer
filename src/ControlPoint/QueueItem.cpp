@@ -19,7 +19,9 @@ hstring QueueItem::RemoveLabel() const {
 }
 
 void QueueItem::fill(const ui::QueueRow& row, bool current) {
-    if (row_.id == row.id && row_.title == row.title && row_.path == row.path && current_ == current) return;
+    if (row_.id == row.id && row_.title == row.title && row_.path == row.path && row_.automatic == row.automatic &&
+        current_ == current)
+        return;
     row_ = row;
     current_ = current;
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"")); // every property changed

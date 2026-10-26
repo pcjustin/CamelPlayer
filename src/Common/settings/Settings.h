@@ -138,6 +138,7 @@ struct Settings {
     CloseAction closeAction = CloseAction::Tray;
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     bool firstRunDone = false;    // the first-run guide was finished or skipped
+    bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)
     std::wstring lastFile;
 };
 

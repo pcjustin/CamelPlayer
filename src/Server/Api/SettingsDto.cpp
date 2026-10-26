@@ -21,6 +21,7 @@ SettingsDto settingsDto(const Settings& s) {
             s.closeAction,
             s.trayNoticeShown,
             s.firstRunDone,
+            s.autoplay,
             toUtf8(s.lastFile)};
 }
 
@@ -38,6 +39,7 @@ Settings nativeSettings(const SettingsDto& s) {
             s.closeAction,
             s.trayNoticeShown,
             s.firstRunDone,
+            s.autoplay,
             toWide(s.lastFileUtf8)};
 }
 

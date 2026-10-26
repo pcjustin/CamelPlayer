@@ -18,6 +18,7 @@
 #include <map>
 #include <thread>
 
+#include <nlohmann/json.hpp>
 #include <wil/resource.h>
 
 #include "Common/util/Log.h"
@@ -353,6 +354,10 @@ private:
     }
 
     void resumePlayback() {
+        if (entries_.empty() && autoplayAllowed() && appendAutoplay()) {
+            startEntry(policy_.select(entries_.front().id), true);
+            return;
+        }
         const auto current = policy_.current();
         if (engine_->snapshot().state == audio::PlayState::Stopped && !entries_.empty() &&
             (!current || policy_.unavailable(current->entryId))) {
@@ -394,6 +399,7 @@ private:
             entries.push_back({++lastEntryId_, item.source});
             // The library no longer describes a file that is gone, so the entry keeps what it showed.
             entries.back().title = item.description;
+            entries.back().automatic = item.automatic;
         }
         // One query for the whole queue: a lookup per entry took 3.4 s for 100k entries.
         auto files = reader.prepare(
@@ -492,7 +498,7 @@ private:
                                        ? toUtf8(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
                                        : entry.title;
                 session.entries.push_back({entry.source, binding == libraryEntries_.end() ? 0 : binding->second.file,
-                                           entry.artist.empty() ? title : title + " · " + entry.artist});
+                                           entry.artist.empty() ? title : title + " · " + entry.artist, entry.automatic});
             }
         if (parts.order) session.order = indexes(policy.order);
         session.history = indexes(policy.history);
@@ -561,6 +567,8 @@ private:
             case CommandKind::Next:
                 if (const auto next = policy_.next(false))
                     startEntry(*next, true);
+                else if (const auto picked = autoplayAllowed() && appendAutoplay() ? policy_.next(false) : std::nullopt)
+                    startEntry(*picked, true);
                 else
                     engine_->stop();
                 break;
@@ -710,6 +718,13 @@ private:
     }
 
     void appendQueue(const std::vector<TrackSource>& sources, bool playNext) {
+        // The user's tracks play next, so automatic entries that have not started yet go (docs/Plan.md §8.1).
+        const auto playing = std::find_if(entries_.begin(), entries_.end(),
+                                          [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
+        std::vector<uint64_t> pending;
+        for (auto it = playing == entries_.end() ? entries_.begin() : playing + 1; it != entries_.end(); ++it)
+            if (it->automatic) pending.push_back(it->id);
+        if (!pending.empty()) removeQueue(pending);
         auto entries = buildQueueEntries(sources);
         std::vector<uint64_t> ids;
         ids.reserve(entries.size());
@@ -986,6 +1001,69 @@ private:
             queueChanged_ = true;
         }
         if (const auto next = policy_.next(true)) startEntry(*next, true);
+        else if (const auto picked = autoplayAllowed() && appendAutoplay() ? policy_.next(true) : std::nullopt)
+            startEntry(*picked, true);
+    }
+
+    // Autoplay (docs/Plan.md §8.1): once the last entry plays, a random library track follows it, so it preloads
+    // for gapless playback. Each entry gets one try; a repeat mode never ends the queue.
+    bool autoplayAllowed() const { return settings_.autoplay && library_ && policy_.repeat() == RepeatMode::Off; }
+
+    void extendWithAutoplay() {
+        if (!autoplayAllowed() || !state_.queueEntryId || autoplayTried_ == state_.queueEntryId) return;
+        if (engine_->snapshot().state != audio::PlayState::Playing) return;
+        autoplayTried_ = state_.queueEntryId;
+        if (policy_.upcoming()) return;
+        try {
+            appendAutoplay();
+        } catch (const std::exception& e) {
+            log::warn("autoplay: %s", e.what());
+        }
+    }
+
+    // A random available library track not played in the last 7 days and not in the queue; when every track was
+    // played that recently, the one played longest ago.
+    std::optional<TrackSource> pickAutoplayTrack() {
+        if (!libraryReader_) libraryReader_.emplace(library_->openReader());
+        nlohmann::json queued = nlohmann::json::array();
+        for (const auto& [id, binding] : libraryEntries_)
+            if (binding.file) queued.push_back(binding.file);
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        const std::string from = " FROM tracks t JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id "
+                                 "WHERE f.available=1 AND r.online=1 AND r.removed IS NULL "
+                                 "AND t.file_id NOT IN (SELECT value FROM json_each(?1))";
+        auto fresh = libraryReader_->prepare("SELECT f.path" + from + " AND NOT EXISTS(SELECT 1 FROM play_events e WHERE "
+                                             "e.file_id=t.file_id AND e.started>=?2) ORDER BY random() LIMIT 1");
+        fresh.bind(1, queued.dump()).bind(2, int64_t(now.count()) - int64_t(7) * 24 * 3600 * 1000);
+        if (fresh.step()) return TrackSource(fresh.text(0));
+        auto oldest = libraryReader_->prepare("SELECT f.path" + from +
+                                              " ORDER BY (SELECT MAX(e.started) FROM play_events e WHERE e.file_id=t.file_id) LIMIT 1");
+        oldest.bind(1, queued.dump());
+        if (oldest.step()) return TrackSource(oldest.text(0));
+        return std::nullopt;
+    }
+
+    bool appendAutoplay() {
+        const auto source = pickAutoplayTrack();
+        if (!source) return false;
+        auto entries = buildQueueEntries({*source});
+        entries.front().automatic = true;
+        policy_.append({entries.front().id}, false);
+        entries_.push_back(std::move(entries.front()));
+        libraryVersion_ = 0;
+        refreshLibraryAvailability();
+        queueChanged_ = true;
+        // Played automatic entries beyond the latest 100 go, oldest first; the user's entries stay.
+        std::vector<uint64_t> played;
+        for (const auto& entry : entries_) {
+            if (entry.id == state_.queueEntryId) break;
+            if (entry.automatic) played.push_back(entry.id);
+        }
+        if (played.size() > kAutoplayKept) {
+            played.resize(played.size() - kAutoplayKept);
+            removeQueue(played);
+        }
+        return true;
     }
 
     QueueSnapshot queueSnapshot() const {
@@ -1068,6 +1146,7 @@ private:
                 commitTransition();
                 refreshLibraryAvailability(true);
                 advanceAfterTrackEnd();
+                extendWithAutoplay();
                 ensureNextQueued();
                 recordPlaybackLength();
                 updatePlaySession();
@@ -1128,6 +1207,8 @@ private:
     uint64_t lastEntryId_ = 0;
     uint64_t seenTrackEnds_ = 0;
     bool queueChanged_ = false; // queue state changed without a command or playback change
+    uint64_t autoplayTried_ = 0; // the entry whose start autoplay already extended the queue for
+    static constexpr size_t kAutoplayKept = 100;
     uint64_t publishedEntry_ = UINT64_MAX; // the current entry state_.queue was built for
     // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
     struct QueueAttempt {

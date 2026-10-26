@@ -315,6 +315,8 @@ void MainWindow::populateSettings() {
     fill(ConvertCombo(), {tr(L"Convert_Off"), tr(L"Convert_On")}, settings_.convertWhenUnsupported ? 1 : 0);
     fill(ResampleQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
          int(settings_.resampleQuality));
+    AutoplaySwitch().IsOn(settings_.autoplay);
+    QueueAutoplaySwitch().IsOn(settings_.autoplay);
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
     fill(WasapiSharedQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
@@ -424,6 +426,7 @@ void MainWindow::readSettingsFromUi() {
     }
     settings_.convertWhenUnsupported = idx(ConvertCombo()) == 1;
     settings_.resampleQuality = ResampleQuality(std::min(idx(ResampleQualityCombo()), 2));
+    settings_.autoplay = AutoplaySwitch().IsOn();
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -460,6 +463,16 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
+}
+
+void MainWindow::OnAutoplayToggled(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    if (populating_) return;
+    const bool on = sender.as<ToggleSwitch>().IsOn();
+    populating_ = true;
+    AutoplaySwitch().IsOn(on);
+    QueueAutoplaySwitch().IsOn(on);
+    populating_ = false;
+    settingsChanged();
 }
 
 void MainWindow::settingsChanged() {
@@ -615,7 +628,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                             entry.title.empty()    ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
                             : entry.artist.empty() ? ui::utf8(entry.title)
                                                    : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist),
-                            ui::utf8(entry.source.pathUtf8())});
+                            ui::utf8(entry.source.pathUtf8()), entry.automatic});
         queueItems_->update(std::move(rows), snapshot.queueEntryId);
     } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
         shownQueueEntryId_ = snapshot.queueEntryId;

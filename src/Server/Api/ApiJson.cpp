@@ -308,7 +308,7 @@ json toJson(const QueueSnapshot& q) {
     json entries = json::array();
     for (const auto& e : q.entries)
         entries.push_back({{"id", e.id}, {"source", toJson(e.source)}, {"title", e.title}, {"artist", e.artist},
-                           {"album", e.album}, {"albumId", e.albumId}});
+                           {"album", e.album}, {"albumId", e.albumId}, {"automatic", e.automatic}});
     return {{"revision", q.revision},
             {"entries", entries},
             {"upcomingEntryId", q.upcomingEntryId ? json(*q.upcomingEntryId) : json(nullptr)},
@@ -326,6 +326,7 @@ QueueSnapshot queueFrom(const json& j) {
         if (e.contains("artist")) entry.artist = value<std::string>(e, "artist");
         if (e.contains("album")) entry.album = value<std::string>(e, "album");
         if (e.contains("albumId")) entry.albumId = value<int64_t>(e, "albumId");
+        if (e.contains("automatic")) entry.automatic = value<bool>(e, "automatic");
         entries.push_back(std::move(entry));
     }
     q.entries = std::move(entries);
