@@ -241,6 +241,21 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks"), 0);
 }
 
+TEST(LibraryStore, PagesAreCheckedOnlyAfterTheDatabaseWasNotClosed) {
+    const auto dir = freshDir("unclosed");
+    { LibraryStore store(dir); }
+    {
+        LibraryStore store(dir);
+        EXPECT_FALSE(store.report().checked);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.open"));
+    }
+    EXPECT_FALSE(std::filesystem::exists(dir / "library.db.open"));
+    std::ofstream(dir / "library.db.open"); // as a crash or a forced end leaves it
+    LibraryStore store(dir);
+    EXPECT_TRUE(store.report().checked);
+    EXPECT_FALSE(store.report().damaged);
+}
+
 TEST(LibraryStore, RefusesNetworkLocations) {
     EXPECT_TRUE(isNetworkPath(L"\\\\nas\\music\\camelplayer"));
     EXPECT_TRUE(isNetworkPath(L"\\\\?\\UNC\\nas\\music\\camelplayer"));

@@ -195,7 +195,11 @@ void MainWindow::InitializeComponent() {
     updateQueuePanel();
     Nav().SizeChanged([this](auto&&, auto&&) { fitNavigationPane(); });
     if (camel::measure::measuring()) Media::CompositionTarget::Rendering([this](auto&&, auto&&) { recordFrame(); });
-    ContentLayout().Loaded([this](auto&&, auto&&) { showFirstRunGuideIfDue(); }); // a dialog needs a XamlRoot
+    ContentLayout().Loaded([this](auto&&, auto&&) {
+        if (camel::measure::measuring())
+            camel::log::info("measure: main window loaded %.0f ms after process start", camel::measure::sinceProcessStart());
+        showFirstRunGuideIfDue(); // a dialog needs a XamlRoot
+    });
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
     refresh.kind = CommandKind::RefreshDevices;
@@ -229,7 +233,9 @@ void MainWindow::InitializeComponent() {
         uiTimer_.Stop();
         seekTimer_.Stop();
         server_->setListener({});
-        submitCommand(Command{});
+        Command pause; // silences the device first; a stop would also forget the position the next start restores
+        pause.kind = CommandKind::Pause;
+        submitCommand(std::move(pause));
         server_.reset();
     });
     refreshFromServer();
@@ -562,6 +568,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     ShuffleButton().IsChecked(snapshot.queue.shuffle);
     RepeatIcon().Symbol(snapshot.queue.repeat == RepeatMode::One ? Symbol::RepeatOne : Symbol::RepeatAll);
     RepeatIcon().Opacity(snapshot.queue.repeat == RepeatMode::Off ? 0.35 : 1.0);
+    if (camel::measure::measuring() && !queueShownMeasured_ && !snapshot.queue.entries.empty()) {
+        queueShownMeasured_ = true;
+        camel::log::info("measure: queue of %zu entries shown %.0f ms after process start", snapshot.queue.entries.size(),
+                         camel::measure::sinceProcessStart());
+    }
     if (shownQueueRevision_ != snapshot.queue.revision || shownQueueEntryId_ != snapshot.queueEntryId) {
         shownQueueRevision_ = snapshot.queue.revision;
         shownQueueEntryId_ = snapshot.queueEntryId;

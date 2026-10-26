@@ -23,6 +23,14 @@ struct QueuePosition {
     uint64_t revision = 0;
 };
 
+// What a restarted Server needs to continue the same queue; failures and availability are found again.
+struct QueuePolicyState {
+    std::vector<uint64_t> entries, order, history;
+    std::optional<uint64_t> current;
+    bool shuffle = false;
+    RepeatMode repeat = RepeatMode::Off;
+};
+
 class QueuePolicy {
 public:
     explicit QueuePolicy(uint32_t seed = std::random_device{}()) : random_(seed) {}
@@ -157,6 +165,31 @@ public:
     std::optional<QueuePosition> upcoming() const {
         QueuePolicy copy = *this;
         return copy.next(true);
+    }
+
+    QueuePolicyState state() const { return {entries_, order_, history_, current_, shuffle_, repeat_}; }
+
+    // Order and history drop unknown IDs, and entries missing from the order follow it.
+    void restore(QueuePolicyState state) {
+        validateUnique(state.entries);
+        const std::unordered_set<uint64_t> known(state.entries.begin(), state.entries.end());
+        std::unordered_set<uint64_t> ordered;
+        order_.clear();
+        for (const auto id : state.order)
+            if (known.contains(id) && ordered.insert(id).second) order_.push_back(id);
+        for (const auto id : state.entries)
+            if (ordered.insert(id).second) order_.push_back(id);
+        history_.clear();
+        for (const auto id : state.history)
+            if (known.contains(id)) history_.push_back(id);
+        if (history_.size() > kMaxHistory) history_.erase(history_.begin(), history_.end() - kMaxHistory);
+        entries_ = std::move(state.entries);
+        current_ = state.current && known.contains(*state.current) ? state.current : std::nullopt;
+        shuffle_ = state.shuffle;
+        repeat_ = state.repeat;
+        failed_.clear();
+        unavailable_.clear();
+        ++revision_;
     }
 
     void markFailed(uint64_t entryId) { failed_.insert(entryId); }

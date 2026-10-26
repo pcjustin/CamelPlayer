@@ -10,17 +10,23 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <future>
 #include <iterator>
+#include <unordered_map>
 #include <mutex>
 #include <map>
 #include <thread>
 
+#include <wil/resource.h>
+
 #include "Common/util/Log.h"
+#include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
+#include "Server/Playback/QueueSession.h"
 
 namespace camel::server {
 namespace {
@@ -195,24 +201,42 @@ public:
                 }
             });
         }
-        if (!settings_.lastFile.empty()) {
+        if (library_ && [&] {
+                auto reader = library_->openReader();
+                return hasSavedSession(reader);
+            }()) {
+            std::lock_guard lock(mutex_);
+            CommandStamp next = issued_;
+            ++next.id;
+            ++next.queueRevision;
+            queue_.push_back({Command{}, next, true});
+            issued_ = next;
+        } else if (!settings_.lastFile.empty()) {
+            sessionRestored_ = true;
             Command restore;
             restore.kind = CommandKind::Load;
             restore.source.emplace(toUtf8(settings_.lastFile));
             enqueue(std::move(restore), true);
+        } else {
+            sessionRestored_ = true;
         }
         worker_ = std::thread([this] { run(); });
     }
 
-    ~Impl() {
+    ~Impl() { shutdown(); }
+
+    // The cover warmer stops before the worker releases the engine it reads; the worker saves the queue on its way out.
+    void shutdown() {
         libraryMonitor_.reset();
+        coverWarmer_ = {};
         {
             std::lock_guard lock(mutex_);
             closing_ = true;
             listener_ = {};
         }
         cv_.notify_one();
-        worker_.join();
+        if (worker_.joinable()) worker_.join();
+        if (library_) library_->close();
     }
 
     CommandStamp enqueue(Command c, bool restore = false) {
@@ -337,12 +361,161 @@ private:
         } else engine_->play();
     }
 
+    // The restored current entry opens its file only now, at the position it was left at.
+    void resumeRestored() {
+        const auto position = restored_->position;
+        const auto current = policy_.current();
+        restored_.reset();
+        if (!current || policy_.unavailable(current->entryId)) {
+            resumePlayback();
+            return;
+        }
+        startEntry(*current, false);
+        if (position) engine_->seek(position);
+        engine_->play();
+    }
+
+    // Library entries are found by their file, wherever it moved, so restoring reads only the library database
+    // (docs/Plan.md §7); an unavailable file stays in the queue, marked unavailable.
+    void restoreQueueSession() {
+        sessionRestored_ = true;
+        const auto started = measure::now();
+        auto measured = wil::scope_exit([&] {
+            if (measure::measuring())
+                log::info("measure: queue of %zu entries restored in %.0f ms", entries_.size(), measure::milliseconds(started, measure::now()));
+        });
+        auto reader = library_->openReader();
+        const auto saved = loadSession(reader);
+        if (!saved) return;
+        auto file = reader.prepare("SELECT f.path,coalesce(t.title,''),coalesce(t.artist,''),"
+                                   "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
+                                   "LEFT JOIN library_tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
+                                   "WHERE f.id=? ORDER BY t.cue_index LIMIT 1");
+        std::vector<QueueEntry> entries;
+        entries.reserve(saved->entries.size());
+        for (const auto& item : saved->entries) {
+            entries.push_back({++lastEntryId_, item.source});
+            // The library no longer describes a file that is gone, so the entry keeps what it showed.
+            entries.back().title = item.description;
+            file.reset();
+            if (!item.file || !file.bind(1, item.file).step()) continue;
+            auto& entry = entries.back();
+            const auto key = toWide(file.text(0));
+            // The saved on-disk spelling is kept while it still names this file; a moved file plays from its new key.
+            std::wstring keyText = key;
+            if (_wcsnicmp(keyText.c_str(), LR"(\\?\UNC\)", 8) == 0) keyText = LR"(\\)" + keyText.substr(8);
+            else if (keyText.starts_with(LR"(\\?\)")) keyText = keyText.substr(4);
+            const auto savedPath = toWide(item.source.pathUtf8());
+            const bool spelled = CompareStringOrdinal(savedPath.c_str(), int(savedPath.size()), keyText.c_str(),
+                                                      int(keyText.size()), TRUE) == CSTR_EQUAL;
+            if (!spelled) entry.source = TrackSource(file.text(0), item.source.range(), item.source.decoder());
+            if (!file.text(1).empty()) entry.title = file.text(1);
+            entry.artist = file.text(2);
+            entry.album = file.text(3);
+            entry.albumId = file.integer(4);
+            libraryEntries_[entry.id] = {key, item.file, false, false, spelled};
+        }
+        if (!libraryReader_) libraryReader_.emplace(library_->openReader());
+        QueuePolicyState state;
+        state.entries.reserve(entries.size());
+        for (const auto& entry : entries) state.entries.push_back(entry.id);
+        for (const auto at : saved->order) state.order.push_back(entries[at].id);
+        for (const auto at : saved->history) state.history.push_back(entries[at].id);
+        if (saved->current) state.current = entries[*saved->current].id;
+        state.shuffle = saved->shuffle;
+        state.repeat = saved->repeat;
+        policy_.restore(std::move(state));
+        entries_ = std::move(entries);
+        if (const auto current = policy_.current()) {
+            state_.queueEntryId = current->entryId;
+            state_.track = entries_[current->index].source;
+            restored_ = saved->track;
+        }
+        libraryVersion_ = 0;
+        refreshLibraryAvailability();
+        queueChanged_ = true;
+        auto policy = policy_.state();
+        saved_ = {std::move(policy.entries), std::move(policy.order), std::move(policy.history), policy.current, policy.shuffle,
+                  policy.repeat, restored_.value_or(SavedTrack{}), engine_->snapshot().state, std::chrono::steady_clock::now()};
+    }
+
+    SavedTrack currentTrack(const audio::EngineSnapshot& playback) const {
+        if (restored_) return *restored_;
+        if (!state_.queueEntryId || !playback.source) return {};
+        SavedTrack track{playback.position, playback.total, playback.source, playback.format};
+        track.source->md5.reset();
+        return track;
+    }
+
+    // Written when the queue, its order or the current entry changes, on pause and stop, every 5 seconds while playing
+    // (what a crash can lose) and at exit. Large queues are rewritten only when their entries or order change.
+    void saveQueueSession(bool final) {
+        if (!library_ || !sessionRestored_) return;
+        if (sessionWrite_.valid()) {
+            if (!final && sessionWrite_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+            try {
+                sessionWrite_.get();
+            } catch (const std::exception& e) {
+                log::warn("session: %s", e.what());
+            }
+        }
+        const auto playback = engine_->snapshot();
+        const auto now = std::chrono::steady_clock::now();
+        auto policy = policy_.state();
+        const SessionParts parts{policy.entries != saved_.entries, policy.order != saved_.order};
+        const auto track = currentTrack(playback);
+        const bool changed =
+            parts.entries || parts.order || policy.current != saved_.current || policy.history != saved_.history ||
+            policy.shuffle != saved_.shuffle || policy.repeat != saved_.repeat || playback.state != saved_.playState ||
+            (playback.state == audio::PlayState::Playing ? now - saved_.at >= std::chrono::seconds(5) : track != saved_.track);
+        if (!changed && !final) return;
+        std::unordered_map<uint64_t, size_t> index;
+        index.reserve(entries_.size());
+        for (size_t i = 0; i < entries_.size(); ++i) index.emplace(entries_[i].id, i);
+        const auto indexes = [&](const std::vector<uint64_t>& ids) {
+            std::vector<size_t> result;
+            for (const auto id : ids)
+                if (const auto at = index.find(id); at != index.end()) result.push_back(at->second);
+            return result;
+        };
+        SavedSession session;
+        if (parts.entries)
+            for (const auto& entry : entries_) {
+                const auto binding = libraryEntries_.find(entry.id);
+                session.entries.push_back({entry.source, binding == libraryEntries_.end() ? 0 : binding->second.file,
+                                           entry.artist.empty() ? entry.title : entry.title + " · " + entry.artist});
+            }
+        if (parts.order) session.order = indexes(policy.order);
+        session.history = indexes(policy.history);
+        if (policy.current)
+            if (const auto at = index.find(*policy.current); at != index.end()) session.current = at->second;
+        session.shuffle = policy.shuffle;
+        session.repeat = policy.repeat;
+        session.track = track;
+        auto write = library_->write([session = std::move(session), parts](sqlite::Database& db) { saveSession(db, session, parts); });
+        saved_ = {std::move(policy.entries), std::move(policy.order), std::move(policy.history), policy.current, policy.shuffle,
+                  policy.repeat, track, playback.state, now};
+        if (!final) {
+            sessionWrite_ = std::move(write);
+            return;
+        }
+        try {
+            write.get();
+        } catch (const std::exception& e) {
+            log::warn("session: %s", e.what());
+        }
+    }
+
     void execute(const Pending& pending) {
         const auto& c = pending.command;
         state_.command = pending.stamp;
         attempted_ = {}; // a command may restart the stream, so the upcoming entry may be queued again
         state_.commandError.reset();
         state_.controlPanelOpened.reset();
+        if (pending.restore && !c.source) {
+            restoreQueueSession();
+            return;
+        }
         if (c.source) {
             if (pending.restore) {
                 std::error_code ec;
@@ -383,9 +556,13 @@ private:
                 break;
             case CommandKind::Previous: {
                 const auto playback = engine_->snapshot();
-                const auto previous = policy_.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
+                const auto previous = restored_
+                                          ? policy_.previous(restored_->position, restored_->source ? restored_->source->sampleRate : 0)
+                                          : policy_.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
                 if (!previous) break;
-                if (previous->entryId == state_.queueEntryId)
+                if (previous->entryId == state_.queueEntryId && restored_)
+                    restored_->position = 0;
+                else if (previous->entryId == state_.queueEntryId)
                     engine_->seek(0);
                 else
                     startEntry(*previous, true);
@@ -408,19 +585,26 @@ private:
                 refreshLibraryAvailability();
                 break;
             case CommandKind::Play:
-                resumePlayback();
+                if (restored_) resumeRestored();
+                else resumePlayback();
                 break;
             case CommandKind::Pause:
                 engine_->pause();
                 break;
             case CommandKind::TogglePause:
-                if (engine_->snapshot().state == audio::PlayState::Stopped) resumePlayback();
+                if (restored_) resumeRestored();
+                else if (engine_->snapshot().state == audio::PlayState::Stopped) resumePlayback();
                 else engine_->togglePause();
                 break;
             case CommandKind::Stop:
                 engine_->stop();
+                if (restored_) restored_->position = 0;
                 break;
             case CommandKind::Seek:
+                if (restored_) {
+                    restored_->position = restored_->total ? std::min(c.frame, restored_->total) : c.frame;
+                    break;
+                }
                 if (session_) session_->interrupt();
                 engine_->seek(c.frame);
                 break;
@@ -475,6 +659,7 @@ private:
             engine_->waitIdle();
             state_.queueEntryId = 0;
             state_.track.reset();
+            restored_.reset();
             chain_.clear();
             throw std::invalid_argument("queue entry is unavailable");
         }
@@ -533,6 +718,11 @@ private:
 
     void removeQueue(const std::vector<uint64_t>& ids) {
         policy_.remove(ids);
+        if (restored_ && std::find(ids.begin(), ids.end(), state_.queueEntryId) != ids.end()) {
+            restored_.reset();
+            state_.queueEntryId = 0;
+            state_.track.reset();
+        }
         std::erase_if(entries_, [&](const QueueEntry& e) { return std::find(ids.begin(), ids.end(), e.id) != ids.end(); });
         for (const auto id : ids) libraryEntries_.erase(id);
     }
@@ -608,6 +798,7 @@ private:
     // Ends of the previous entry that are still pending belong to playback this call supersedes.
     void startEntry(const QueuePosition& position, bool play) {
         if (policy_.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
+        restored_.reset();
         engine_->waitIdle();
         const auto before = engine_->snapshot();
         seenTrackEnds_ = before.trackEnds;
@@ -773,7 +964,15 @@ private:
     }
 
     void publish(bool completed) {
-        const auto p = playback(engine_->snapshot());
+        auto p = playback(engine_->snapshot());
+        if (restored_ && p.state == PlaybackState::Stopped && state_.track) {
+            p.state = PlaybackState::Paused;
+            p.pathUtf8 = state_.track->pathUtf8();
+            p.position = restored_->position;
+            p.total = restored_->total;
+            p.source = restored_->source;
+            p.format = restored_->format;
+        }
         if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
             p.underruns == state_.playback.underruns)
             return;
@@ -836,6 +1035,7 @@ private:
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
+            saveQueueSession(false);
             publish(pending.has_value());
             if (pending) {
                 {
@@ -846,6 +1046,7 @@ private:
             }
         }
         if (session_) session_->persist(*library_);
+        saveQueueSession(true);
         engine_.reset();
         if (SUCCEEDED(initialized)) CoUninitialize();
     }
@@ -896,6 +1097,19 @@ private:
     uint64_t seenTransitions_ = 0;
     std::deque<uint64_t> chain_; // entries queued in the engine, in playback order
     QueueAttempt attempted_;
+    // The saved session (M5-R01): the current entry restored but not opened yet, and what was last written.
+    std::optional<SavedTrack> restored_;
+    bool sessionRestored_ = false; // nothing is saved before the saved session is read back
+    struct SavedState {
+        std::vector<uint64_t> entries, order, history;
+        std::optional<uint64_t> current;
+        bool shuffle = false;
+        RepeatMode repeat = RepeatMode::Off;
+        SavedTrack track;
+        audio::PlayState playState = audio::PlayState::Stopped;
+        std::chrono::steady_clock::time_point at;
+    } saved_;
+    std::future<void> sessionWrite_;
     std::function<void(const Event&)> listener_;
     std::thread worker_;
 };
@@ -914,6 +1128,9 @@ void LocalServer::setListener(std::function<void(const Event&)> listener) {
 }
 void LocalServer::waitIdle() {
     impl_->waitIdle();
+}
+void LocalServer::shutdown() {
+    impl_->shutdown();
 }
 LibraryTrackPage LocalServer::browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                            const CancellationToken& token) const {

@@ -8,6 +8,7 @@
 #include <shlwapi.h>
 
 #include <algorithm>
+#include <fstream>
 #include <utility>
 
 #include "Common/util/Log.h"
@@ -37,6 +38,18 @@ std::optional<sqlite::Database> openIfHealthy(const std::filesystem::path& path)
     try {
         sqlite::Database db(path);
         if (healthy(db)) return db;
+    } catch (const sqlite::Error& e) {
+        log::warn("library: cannot open %s: %s", toUtf8(path.wstring()).c_str(), e.what());
+    }
+    return std::nullopt;
+}
+
+// After a clean close only the header is read: checking every page of a large library takes over a second.
+std::optional<sqlite::Database> openIfReadable(const std::filesystem::path& path) {
+    try {
+        sqlite::Database db(path);
+        db.userVersion();
+        return db;
     } catch (const sqlite::Error& e) {
         log::warn("library: cannot open %s: %s", toUtf8(path.wstring()).c_str(), e.what());
     }
@@ -83,10 +96,13 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
     std::filesystem::create_directories(directory);
 
     std::error_code ec;
+    // Present while a store has the database open, so finding it means the previous run crashed or was ended.
+    const auto marker = withSuffix(path_, L".open");
+    report_.checked = std::filesystem::exists(path_, ec) && std::filesystem::exists(marker, ec);
     if (!std::filesystem::exists(path_, ec)) {
         report_.created = true;
         db_.emplace(path_);
-    } else if (auto db = openIfHealthy(path_)) {
+    } else if (auto db = report_.checked ? openIfHealthy(path_) : openIfReadable(path_)) {
         db_.emplace(std::move(*db));
     } else {
         report_.damaged = true;
@@ -111,6 +127,7 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
         }
     }
     configure(*db_);
+    std::ofstream{marker};
 
     const int version = db_->userVersion();
     if (version > int(migrations.size()))
@@ -139,12 +156,19 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
 }
 
 LibraryStore::~LibraryStore() {
+    close();
+}
+
+void LibraryStore::close() {
     {
         std::lock_guard lock(mutex_);
         quit_ = true;
     }
     cv_.notify_all();
     if (writer_.joinable()) writer_.join();
+    db_.reset();
+    std::error_code ec;
+    std::filesystem::remove(withSuffix(path_, L".open"), ec);
 }
 
 std::future<void> LibraryStore::write(std::function<void(sqlite::Database&)> work) {
@@ -156,6 +180,7 @@ std::future<void> LibraryStore::write(std::function<void(sqlite::Database&)> wor
     auto done = task.get_future();
     {
         std::lock_guard lock(mutex_);
+        if (quit_) throw std::runtime_error("library.db is closed");
         queue_.push_back(std::move(task));
     }
     cv_.notify_all();

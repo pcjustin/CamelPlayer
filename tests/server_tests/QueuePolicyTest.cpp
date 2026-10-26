@@ -163,3 +163,37 @@ TEST(QueuePolicyTest, UnavailableEntriesRemainInOrderButCannotBeSelectedOrRepeat
     queue.replace({1, 2, 3});
     EXPECT_FALSE(queue.unavailable(1));
 }
+
+TEST(QueuePolicyTest, ARestoredQueueContinuesItsShuffleOrderHistoryAndModes) {
+    QueuePolicy saved(7);
+    saved.replace({1, 2, 3, 4, 5});
+    saved.setShuffle(true);
+    saved.setRepeat(RepeatMode::All);
+    saved.select(saved.state().order.front());
+    saved.next(false);
+    const auto state = saved.state();
+    QueuePolicy restored(99);
+    restored.restore(state);
+    EXPECT_EQ(restored.state().order, state.order);
+    EXPECT_EQ(restored.state().history, state.history);
+    EXPECT_EQ(id(restored.current()), *state.current);
+    EXPECT_TRUE(restored.shuffle());
+    EXPECT_EQ(restored.repeat(), RepeatMode::All);
+    EXPECT_EQ(id(restored.next(false)), id(saved.next(false)));
+    EXPECT_EQ(id(restored.previous(0, 1'000)), id(saved.previous(0, 1'000)));
+}
+
+TEST(QueuePolicyTest, RestoringDropsUnknownIdsAndAppendsEntriesMissingFromTheOrder) {
+    QueuePolicy queue(1);
+    QueuePolicyState state;
+    state.entries = {1, 2, 3};
+    state.order = {3, 9, 1};
+    state.history = {9, 2};
+    state.current = 9;
+    queue.restore(state);
+    EXPECT_EQ(queue.state().order, (std::vector<uint64_t>{3, 1, 2}));
+    EXPECT_EQ(queue.state().history, (std::vector<uint64_t>{2}));
+    EXPECT_FALSE(queue.current());
+    state.entries = {1, 1};
+    EXPECT_THROW(queue.restore(state), std::invalid_argument);
+}

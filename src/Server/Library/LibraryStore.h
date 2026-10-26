@@ -43,6 +43,7 @@ class LibraryStore {
 public:
     struct OpenReport {
         bool created = false;        // no database existed
+        bool checked = false;        // the previous run did not close it, so its pages were checked
         bool damaged = false;        // the existing file failed its check and was kept as library.db.bad
         bool restoredBackup = false; // ... and the newest backup replaced it
         std::optional<int> migratedFrom;
@@ -54,6 +55,9 @@ public:
     ~LibraryStore();
     LibraryStore(const LibraryStore&) = delete;
     LibraryStore& operator=(const LibraryStore&) = delete;
+
+    // Finishes the queued writes and closes the database as a clean exit; later writes throw, reads still open.
+    void close();
 
     const OpenReport& report() const { return report_; }
     const std::filesystem::path& path() const { return path_; }

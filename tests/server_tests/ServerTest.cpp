@@ -791,6 +791,136 @@ TEST_F(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLib
     EXPECT_TRUE(server->playlists().empty());
 }
 
+TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningTheFileUntilPlay) {
+    const auto a = testutil::generatedFile({"restore-a", 48000, 16, 2, 2.0});
+    const auto b = testutil::generatedFile({"restore-b", 48000, 16, 2, 2.0});
+    const auto c = testutil::generatedFile({"restore-c", 48000, 16, 2, 2.0});
+    const auto music = setUp({a, b, c});
+    send(queueReplace({track(a), track(b), track(c)}, 1));
+    send(command(CommandKind::Pause));
+    Command seek = command(CommandKind::Seek);
+    seek.frame = 48000;
+    send(seek);
+    Command repeat = command(CommandKind::SetRepeat);
+    repeat.repeat = RepeatMode::All;
+    const auto before = send(repeat);
+    // Saved while the Server runs, so a crash would keep it too.
+    ASSERT_TRUE(waitFor([&] {
+        auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
+        return row.step() && row.text(0).find("\"position\":48000") != std::string::npos;
+    }));
+    server.reset();
+    // The restore reads only the library database: the current file need not even be reachable.
+    std::filesystem::rename(music / b.filename(), music / "away.flac");
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    server->waitIdle();
+    auto s = server->snapshot();
+    ASSERT_EQ(s.queue.entries.size(), 3u);
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(s.queue.entries[i].source, before.queue.entries[i].source);
+        EXPECT_EQ(s.queue.entries[i].title, before.queue.entries[i].title);
+    }
+    EXPECT_EQ(s.queueEntryId, s.queue.entries[1].id);
+    EXPECT_EQ(s.queue.repeat, RepeatMode::All);
+    EXPECT_EQ(s.playback.state, PlaybackState::Paused);
+    EXPECT_EQ(s.playback.pathUtf8, before.playback.pathUtf8);
+    EXPECT_EQ(s.playback.position, 48000u);
+    EXPECT_EQ(s.playback.total, before.playback.total);
+    ASSERT_TRUE(s.playback.source);
+    EXPECT_EQ(s.playback.source->sampleRate, 48000u);
+    EXPECT_FALSE(s.playback.output);
+    EXPECT_FALSE(s.playback.error);
+    std::filesystem::rename(music / "away.flac", music / b.filename());
+    seek.frame = 24000;
+    EXPECT_EQ(send(seek).playback.position, 24000u);
+    send(command(CommandKind::Play));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
+    s = server->snapshot();
+    EXPECT_EQ(s.queueEntryId, s.queue.entries[1].id);
+    EXPECT_GE(s.playback.position, 24000u);
+    EXPECT_LT(s.playback.position, 72000u);
+    EXPECT_TRUE(s.playback.output);
+    send(command(CommandKind::Stop));
+}
+
+TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
+    const auto a = testutil::generatedFile({"restore-gone-a", 48000, 16, 2, 0.5});
+    const auto b = testutil::generatedFile({"restore-gone-b", 48000, 16, 2, 0.5});
+    const auto music = setUp({a, b});
+    store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Kept title',artist='Kept artist'"); }).get();
+    send(queueReplace({track(a), track(b)}));
+    send(command(CommandKind::Stop));
+    server.reset();
+    std::filesystem::remove(music / a.filename());
+    ASSERT_TRUE(scanner->scan(root).complete);
+    store->write([](sqlite::Database& db) {
+             db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%restore-gone-a%')");
+         })
+        .get();
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    server->waitIdle();
+    auto s = server->snapshot();
+    ASSERT_EQ(s.queue.entries.size(), 2u);
+    EXPECT_EQ(s.queueEntryId, s.queue.entries[0].id);
+    EXPECT_EQ(s.queue.entries[0].title, "Kept title · Kept artist"); // what it showed, although the file is gone
+    EXPECT_EQ(s.queue.entries[1].title, "Kept title");
+    send(command(CommandKind::Play));
+    s = server->snapshot();
+    EXPECT_EQ(s.queueEntryId, s.queue.entries[1].id);
+    send(command(CommandKind::Stop));
+}
+
+TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiveSeconds) {
+    const auto a = testutil::generatedFile({"restore-playing", 48000, 16, 2, 9.0});
+    setUp({a});
+    send(queueReplace({track(a)}));
+    const auto saved = [&] {
+        auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
+        if (!row.step()) return uint64_t(0);
+        const auto text = row.text(0);
+        const auto at = text.find("\"position\":");
+        return at == std::string::npos ? uint64_t(0) : std::stoull(text.substr(at + 11));
+    };
+    ASSERT_TRUE(waitFor([&] { return saved() >= 48000u * 3; }, 8s));
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
+    send(command(CommandKind::Stop));
+}
+
+TEST_F(LibraryPlaybackTest, ShutdownSavesTheQueueAndLeavesTheServerReadable) {
+    const auto a = testutil::generatedFile({"restore-shutdown", 48000, 16, 2, 2.0});
+    setUp({a});
+    send(queueReplace({track(a)}));
+    send(command(CommandKind::Pause));
+    Command seek = command(CommandKind::Seek);
+    seek.frame = 12000;
+    send(seek);
+    server->shutdown();
+    server->shutdown();
+    EXPECT_THROW(server->submit(command(CommandKind::Play)), std::runtime_error);
+    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, 0, 10, std::nullopt).total, 1);
+    auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
+    ASSERT_TRUE(row.step());
+    EXPECT_NE(row.text(0).find("\"position\":12000"), std::string::npos);
+}
+
+TEST_F(LibraryPlaybackTest, AClearedQueueStaysEmptyInsteadOfReopeningTheLastFile) {
+    const auto a = testutil::generatedFile({"restore-cleared", 48000, 16, 2, 0.3});
+    setUp({a});
+    send(queueReplace({track(a)}));
+    send(command(CommandKind::Stop));
+    Command clear = command(CommandKind::QueueRemove);
+    clear.entryIds = entryIds(server->snapshot());
+    send(clear);
+    server.reset();
+    server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    server->waitIdle();
+    EXPECT_TRUE(server->snapshot().queue.entries.empty());
+    EXPECT_TRUE(server->snapshot().playback.pathUtf8.empty());
+}
+
 TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLength) {
     const auto a = testutil::generatedFile({"play-gapless-a", 48000, 16, 2, 0.6});
     const auto b = testutil::generatedFile({"play-gapless-b", 48000, 16, 2, 0.4});

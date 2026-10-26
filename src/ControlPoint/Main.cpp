@@ -84,6 +84,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     }
     ::winrt::Microsoft::UI::Xaml::Application::Start(
         [server](auto&&) { ::winrt::make<::winrt::CamelPlayer::implementation::App>(server); });
-    server->waitIdle();
+    // Parts of the UI, such as artwork loads waiting for the stopped UI thread, may still hold the Server, so it is shut
+    // down explicitly: the queue is saved and the library closed cleanly.
+    server->shutdown();
+    camel::log::info("CamelPlayer stopped");
     return 0;
 }

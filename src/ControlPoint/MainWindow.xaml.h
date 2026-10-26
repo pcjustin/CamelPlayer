@@ -125,6 +125,7 @@ private:
     uint64_t shownCommandId_ = 0;
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueEntryId_ = UINT64_MAX;
+    bool queueShownMeasured_ = false;
     void updateQueuePanel();
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();

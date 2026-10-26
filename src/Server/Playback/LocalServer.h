@@ -19,6 +19,7 @@ public:
     Snapshot snapshot() const override;
     void setListener(std::function<void(const Event&)> listener) override;
     void waitIdle() override;
+    void shutdown() override;
     LibraryTrackPage browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                   const CancellationToken& token = {}) const override;
     LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,

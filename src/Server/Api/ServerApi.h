@@ -221,6 +221,9 @@ public:
     virtual void setListener(std::function<void(const Event&)> listener) = 0;
     // Host/test barrier; UI code only submits commands and consumes snapshots/events.
     virtual void waitIdle() = 0;
+    // Called by the host once its UI is gone: ends playback and background work, saves the queue and closes the
+    // library. The object stays usable for reads, since parts of the UI may still hold it.
+    virtual void shutdown() = 0;
     virtual LibraryTrackPage browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                           const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,

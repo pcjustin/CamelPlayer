@@ -27,6 +27,15 @@ inline double milliseconds(int64_t from, int64_t to) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::duration(to - from)).count();
 }
 
+// For the warm-start target: time since Windows created this process.
+inline double sinceProcessStart() {
+    FILETIME created{}, exited{}, kernel{}, user{}, current{};
+    GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+    GetSystemTimePreciseAsFileTime(&current);
+    const auto ticks = [](const FILETIME& t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+    return double(ticks(current) - ticks(created)) / 10'000.0;
+}
+
 inline bool measuring() {
     static const bool enabled = GetEnvironmentVariableW(L"CAMELPLAYER_MEASURE", nullptr, 0) > 1;
     return enabled;
