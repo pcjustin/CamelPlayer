@@ -7,7 +7,9 @@
 #include <windows.h>
 #include <dbghelp.h>
 
+#include <algorithm>
 #include <iterator>
+#include <vector>
 
 #pragma comment(lib, "dbghelp.lib")
 
@@ -34,9 +36,23 @@ LONG WINAPI onCrash(EXCEPTION_POINTERS* ep) {
 
 } // namespace
 
+void pruneCrashDumps(const std::filesystem::path& dir, size_t keep) {
+    std::error_code ec;
+    std::vector<std::filesystem::path> dumps;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        const auto name = entry.path().filename().wstring();
+        if (name.starts_with(L"crash-") && entry.path().extension() == L".dmp") dumps.push_back(entry.path());
+    }
+    if (dumps.size() <= keep) return;
+    // crash-YYYYMMDD-hhmmss.dmp sorts by time.
+    std::sort(dumps.begin(), dumps.end());
+    for (size_t i = 0; i + keep < dumps.size(); ++i) std::filesystem::remove(dumps[i], ec);
+}
+
 void installCrashDumps(const std::filesystem::path& dir) {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
+    pruneCrashDumps(dir, kKeptCrashDumps);
     wcsncpy_s(g_dir, dir.c_str(), _TRUNCATE);
     SetUnhandledExceptionFilter(onCrash);
 }

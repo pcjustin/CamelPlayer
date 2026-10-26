@@ -67,7 +67,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
 
     const auto notRemoved = applyPendingReset(camel::dataDirectory());
     const auto logs = camel::dataDirectory() / L"logs";
-    camel::installCrashDumps(logs);
+    camel::installCrashDumps(camel::dataDirectory() / L"crashdumps");
     camel::log::init(logs, L"CamelPlayer");
     camel::log::info("CamelPlayer starting");
     for (const auto& name : notRemoved) camel::log::warn("reset: could not remove %s", camel::toUtf8(name).c_str());

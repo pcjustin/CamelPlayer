@@ -4,8 +4,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <limits>
+#include <vector>
 
 #include "Engine/testing/TestAudio.h"
 #include "Common/util/CrashDump.h"
@@ -140,6 +142,36 @@ TEST(CrashDump, UnhandledChildExceptionCreatesDump) {
     EXPECT_EQ(dumps, 1u);
     for (const auto& entry : std::filesystem::directory_iterator(directory)) std::filesystem::remove(entry.path());
     std::filesystem::remove(directory);
+}
+
+TEST(CrashDump, StartupKeepsTheNewestFiveDumpsAndOtherFiles) {
+    const auto directory = testutil::tempDir() / "crashdump-retention";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    for (int day = 1; day <= 7; ++day)
+        std::ofstream(directory / ("crash-2026100" + std::to_string(day) + "-120000.dmp")) << "MDMP";
+    std::ofstream(directory / "notes.txt") << "kept";
+    installCrashDumps(directory);
+    std::vector<std::string> left;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) left.push_back(entry.path().filename().string());
+    std::sort(left.begin(), left.end());
+    EXPECT_EQ(left, (std::vector<std::string>{"crash-20261003-120000.dmp", "crash-20261004-120000.dmp",
+                                              "crash-20261005-120000.dmp", "crash-20261006-120000.dmp",
+                                              "crash-20261007-120000.dmp", "notes.txt"}));
+    std::filesystem::remove_all(directory);
+}
+
+TEST(CrashDump, NoDumpsOrAnUnusableDirectoryNeverBlockStartup) {
+    const auto directory = testutil::tempDir() / "crashdump-empty";
+    std::filesystem::remove_all(directory);
+    EXPECT_NO_THROW(installCrashDumps(directory)); // created empty
+    EXPECT_TRUE(std::filesystem::is_directory(directory));
+    std::filesystem::remove_all(directory);
+    const auto file = testutil::tempDir() / "crashdump-not-a-directory";
+    std::ofstream(file) << "x";
+    EXPECT_NO_THROW(installCrashDumps(file / "crashdumps")); // cannot be created under a file
+    EXPECT_NO_THROW(pruneCrashDumps(file, kKeptCrashDumps));
+    std::filesystem::remove(file);
 }
 
 } // namespace
