@@ -7,6 +7,8 @@
 
 #include "App.xaml.h"
 
+#include <shobjidl.h>
+
 #include <filesystem>
 
 #include "TrayIcon.h"
@@ -29,6 +31,18 @@ std::vector<std::wstring> applyPendingReset(const std::filesystem::path& data) {
         if (error) kept.push_back(entry.path().filename().wstring());
     }
     return kept;
+}
+
+// Windows names the media flyout, notifications and the taskbar group after the AUMID; an app without a Start menu
+// shortcut supplies the name and icon under the current user (docs/Plan.md §8.4).
+void registerAppUserModelId(const wchar_t* id) {
+    wchar_t executable[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return;
+    const auto icon = (std::filesystem::path(executable).parent_path() / L"assets" / L"CamelPlayer.ico").wstring();
+    const std::wstring key = std::wstring(L"Software\\Classes\\AppUserModelId\\") + id;
+    const std::wstring name = L"CamelPlayer";
+    RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"DisplayName", REG_SZ, name.c_str(), DWORD((name.size() + 1) * sizeof(wchar_t)));
+    RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"IconUri", REG_SZ, icon.c_str(), DWORD((icon.size() + 1) * sizeof(wchar_t)));
 }
 
 } // namespace
@@ -72,6 +86,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     camel::log::info("CamelPlayer starting");
     for (const auto& name : notRemoved) camel::log::warn("reset: could not remove %s", camel::toUtf8(name).c_str());
 
+    SetCurrentProcessExplicitAppUserModelID(L"CamelPlayer.CamelPlayer");
+    registerAppUserModelId(L"CamelPlayer.CamelPlayer");
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     auto server = camel::server::createLocalServer();
     try {

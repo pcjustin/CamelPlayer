@@ -201,6 +201,9 @@ std::string toJson(const Settings& s) {
     j["trayNoticeShown"] = s.trayNoticeShown;
     j["firstRunDone"] = s.firstRunDone;
     j["autoplay"] = s.autoplay;
+    j["hotkeys"] = {{"playPause", {s.hotkeys.playPause.modifiers, s.hotkeys.playPause.key}},
+                    {"previous", {s.hotkeys.previous.modifiers, s.hotkeys.previous.key}},
+                    {"next", {s.hotkeys.next.modifiers, s.hotkeys.next.key}}};
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
@@ -295,6 +298,21 @@ Settings fromJson(const std::string& text) {
     s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
     s.firstRunDone = boolean(j, "firstRunDone", false);
     s.autoplay = boolean(j, "autoplay", true);
+    if (j.contains("hotkeys") && j["hotkeys"].is_object()) {
+        const json& h = j["hotkeys"];
+        const auto hotkey = [&](const char* name, Hotkey fallback) {
+            if (!h.contains(name)) return fallback;
+            const json& v = h[name];
+            if (!v.is_array() || v.size() != 2 || !v[0].is_number_unsigned() || !v[1].is_number_unsigned() ||
+                v[0].get<uint32_t>() > 15 || v[1].get<uint32_t>() > 0xFE)
+                return fallback;
+            return Hotkey{v[0].get<uint32_t>(), v[1].get<uint32_t>()};
+        };
+        const HotkeySettings defaults;
+        s.hotkeys.playPause = hotkey("playPause", defaults.playPause);
+        s.hotkeys.previous = hotkey("previous", defaults.previous);
+        s.hotkeys.next = hotkey("next", defaults.next);
+    }
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
         const json& w = j["wasapi"];
@@ -367,6 +385,7 @@ Settings resetPlayback(const Settings& s) {
     reset.closeAction = s.closeAction;
     reset.trayNoticeShown = s.trayNoticeShown;
     reset.firstRunDone = s.firstRunDone;
+    reset.hotkeys = s.hotkeys;
     reset.lastFile = s.lastFile;
     return reset;
 }
@@ -378,6 +397,7 @@ Settings resetInterface(const Settings& s) {
     reset.closeAction = defaults.closeAction;
     reset.trayNoticeShown = defaults.trayNoticeShown;
     reset.firstRunDone = defaults.firstRunDone;
+    reset.hotkeys = defaults.hotkeys;
     return reset;
 }
 

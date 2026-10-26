@@ -278,6 +278,23 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
     std::filesystem::remove(file);
 }
 
+TEST(SettingsBoundary, HotkeysDefaultToCtrlAltAndRoundTripWithInvalidOnesIgnored) {
+    const HotkeySettings defaults;
+    EXPECT_EQ(defaults.playPause, (Hotkey{MOD_CONTROL | MOD_ALT, VK_SPACE}));
+    EXPECT_EQ(defaults.previous, (Hotkey{MOD_CONTROL | MOD_ALT, VK_LEFT}));
+    EXPECT_EQ(defaults.next, (Hotkey{MOD_CONTROL | MOD_ALT, VK_RIGHT}));
+    Settings settings;
+    settings.hotkeys.playPause = {MOD_WIN | MOD_SHIFT, 'P'};
+    settings.hotkeys.next = {};
+    const auto back = fromJson(toJson(settings));
+    EXPECT_EQ(back.hotkeys, settings.hotkeys);
+    const auto invalid = fromJson(R"({"hotkeys":{"playPause":[99,32],"previous":"Ctrl+Left","next":[2,300]}})");
+    EXPECT_EQ(invalid.hotkeys, defaults);
+    settings.closeAction = CloseAction::Exit;
+    EXPECT_EQ(resetPlayback(settings).hotkeys, settings.hotkeys);
+    EXPECT_EQ(resetInterface(settings).hotkeys, defaults);
+}
+
 TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     Settings settings;
     settings.backend = Backend::Asio;

@@ -58,6 +58,7 @@ struct SettingsDto {
     bool trayNoticeShown = false;
     bool firstRunDone = false;
     bool autoplay = true;
+    HotkeySettings hotkeys;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };

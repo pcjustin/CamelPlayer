@@ -119,6 +119,22 @@ uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format);
 // What closing the main window does (docs/Plan.md §8.4).
 enum class CloseAction : uint8_t { Tray, Exit };
 
+// A global hotkey as RegisterHotKey takes it: MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8 and a virtual-key code;
+// key 0 leaves the action without a hotkey.
+struct Hotkey {
+    uint32_t modifiers = 0;
+    uint32_t key = 0;
+    bool operator==(const Hotkey&) const = default;
+};
+
+// Global hotkeys (docs/Plan.md §8.4): Ctrl+Alt+Space, Ctrl+Alt+Left and Ctrl+Alt+Right by default.
+struct HotkeySettings {
+    Hotkey playPause{2 | 1, 0x20};
+    Hotkey previous{2 | 1, 0x25};
+    Hotkey next{2 | 1, 0x27};
+    bool operator==(const HotkeySettings&) const = default;
+};
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -139,11 +155,13 @@ struct Settings {
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     bool firstRunDone = false;    // the first-run guide was finished or skipped
     bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)
+    HotkeySettings hotkeys;
     std::wstring lastFile;
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion
-// and decoders. Interface: language, close action, the tray notice and the first-run guide. Each keeps the other group.
+// and decoders. Interface: language, close action, the tray notice, the first-run guide and the hotkeys. Each keeps the
+// other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

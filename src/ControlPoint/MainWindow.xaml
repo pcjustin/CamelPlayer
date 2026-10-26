@@ -15,7 +15,7 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid KeyboardAcceleratorPlacementMode="Hidden">
+    <Grid KeyboardAcceleratorPlacementMode="Hidden" PreviewKeyDown="OnWindowKeyDown">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
         </Grid.KeyboardAccelerators>
@@ -293,6 +293,21 @@
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
                                 <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
                                            Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Global hotkeys (docs/Plan.md §8.4): click a combination, then press the new one. -->
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE765;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Hotkeys" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <TextBlock x:Uid="Settings_HotkeysText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <StackPanel x:Name="HotkeyRows" Spacing="8" />
+                                <Button x:Uid="Settings_HotkeysDefaults" Click="OnHotkeyDefaultsClick" />
+                                <TextBlock x:Uid="Settings_WindowKeys" Style="{StaticResource GroupHeaderStyle}" />
+                                <TextBlock x:Uid="Settings_WindowKeysText" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 

@@ -15,6 +15,10 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <propkey.h>
+#include <propvarutil.h>
+
+#pragma comment(lib, "propsys.lib")
 #include <thread>
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
@@ -245,6 +249,36 @@ void MainWindow::InitializeComponent() {
     };
     tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit}, std::wstring(tr(L"Tray_Open")),
                                            std::wstring(tr(L"Tray_Exit")));
+    // The window carries the app's AUMID too: the media session takes its app from the window it was created for.
+    if (winrt::com_ptr<IPropertyStore> properties;
+        SUCCEEDED(SHGetPropertyStoreForWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), IID_PPV_ARGS(properties.put())))) {
+        PROPVARIANT id;
+        if (SUCCEEDED(InitPropVariantFromString(L"CamelPlayer.CamelPlayer", &id))) {
+            properties->SetValue(PKEY_AppUserModel_ID, id);
+            PropVariantClear(&id);
+        }
+    }
+    if (server_) {
+        media_ = std::make_unique<ui::MediaControls>(
+            Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), DispatcherQueue(),
+            ui::MediaControls::Handlers{[this](CommandKind kind) { submitKind(kind); },
+                                        [this](double seconds) {
+                                            const auto s = server_->snapshot().playback;
+                                            if (!s.source) return;
+                                            Command command;
+                                            command.kind = CommandKind::Seek;
+                                            command.frame = secondsToFrames(seconds, s.source->sampleRate);
+                                            submitCommand(std::move(command));
+                                        }},
+            server_);
+        hotkeys_ = std::make_unique<ui::GlobalHotkeys>([this](ui::GlobalHotkeys::Action action) {
+            using Action = ui::GlobalHotkeys::Action;
+            submitKind(action == Action::PlayPause ? CommandKind::TogglePause
+                       : action == Action::Previous ? CommandKind::Previous
+                                                    : CommandKind::Next);
+        });
+        applyHotkeys();
+    }
     AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& e) {
         if (exiting_ || settings_.closeAction == CloseAction::Exit) return;
         e.Cancel(true);
@@ -317,6 +351,7 @@ void MainWindow::populateSettings() {
          int(settings_.resampleQuality));
     AutoplaySwitch().IsOn(settings_.autoplay);
     QueueAutoplaySwitch().IsOn(settings_.autoplay);
+    applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
     fill(WasapiSharedQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
@@ -670,6 +705,15 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                 text = text + L" · " + to_hstring(s.source->bitsPerSample) + L"-bit";
             SourceText().Text(text);
         }
+    }
+
+    if (media_) {
+        const bool known = currentEntry != snapshot.queue.entries.end();
+        const std::string title = known && !currentEntry->title.empty()
+                                      ? currentEntry->title
+                                      : toUtf8(std::filesystem::path(toWide(s.pathUtf8)).stem().wstring());
+        media_->update(s, title, known ? currentEntry->artist : std::string{}, known ? currentEntry->album : std::string{},
+                       pos, total);
     }
 
     // Playing, paused, stopped or failed, never only implied by the play button's icon
@@ -1086,6 +1130,145 @@ void MainWindow::OnPlayPauseClick(Windows::Foundation::IInspectable const&, Rout
 
 void MainWindow::OnStopClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     submitCommand(Command{});
+}
+
+void MainWindow::submitKind(CommandKind kind) {
+    Command command;
+    command.kind = kind;
+    submitCommand(std::move(command));
+}
+
+void MainWindow::applyHotkeys() {
+    if (!hotkeys_) return;
+    hotkeysTaken_ = hotkeys_->apply(settings_.hotkeys);
+    showHotkeys();
+}
+
+// One row per action: its combination (click to record a new one), Clear, and whether another program holds it.
+void MainWindow::showHotkeys() {
+    using Action = ui::GlobalHotkeys::Action;
+    HotkeyRows().Children().Clear();
+    const std::array<const wchar_t*, ui::GlobalHotkeys::kActions> names{L"Hotkey_PlayPause", L"Hotkey_Previous", L"Hotkey_Next"};
+    for (size_t i = 0; i < names.size(); ++i) {
+        const auto action = Action(i);
+        Grid row;
+        row.ColumnSpacing(12);
+        for (const auto width : {GridLengthHelper::FromPixels(160), GridLengthHelper::FromPixels(220), GridLengthHelper::Auto(),
+                                 GridLengthHelper::FromValueAndType(1, GridUnitType::Star)}) {
+            ColumnDefinition column;
+            column.Width(width);
+            row.ColumnDefinitions().Append(column);
+        }
+        TextBlock label;
+        label.Text(tr(names[i]));
+        label.VerticalAlignment(VerticalAlignment::Center);
+        row.Children().Append(label);
+
+        Button combination;
+        const auto current = ui::GlobalHotkeys::describe(ui::GlobalHotkeys::of(settings_.hotkeys, action));
+        combination.Content(box_value(capturing_ == action ? tr(L"Hotkey_Press") : current.empty() ? tr(L"Hotkey_None") : hstring(current)));
+        combination.HorizontalAlignment(HorizontalAlignment::Stretch);
+        Grid::SetColumn(combination, 1);
+        combination.Click([this, action](auto&& sender, auto&&) {
+            capturing_ = action;
+            hotkeys_->suspend(); // pressing a current combination must reach the box, not play or skip
+            sender.template as<Button>().Content(box_value(tr(L"Hotkey_Press")));
+        });
+        combination.PreviewKeyDown([this, action](auto&&, Input::KeyRoutedEventArgs const& e) {
+            if (capturing_ != action) return;
+            using Windows::System::VirtualKey;
+            const auto key = e.Key();
+            e.Handled(true);
+            if (key == VirtualKey::Escape) {
+                capturing_.reset();
+                applyHotkeys();
+                return;
+            }
+            if (key == VirtualKey::Control || key == VirtualKey::Menu || key == VirtualKey::Shift ||
+                key == VirtualKey::LeftWindows || key == VirtualKey::RightWindows || key == VirtualKey::LeftControl ||
+                key == VirtualKey::RightControl || key == VirtualKey::LeftMenu || key == VirtualKey::RightMenu ||
+                key == VirtualKey::LeftShift || key == VirtualKey::RightShift)
+                return; // wait for the key that completes the combination
+            uint32_t modifiers = 0;
+            if (GetKeyState(VK_CONTROL) < 0) modifiers |= MOD_CONTROL;
+            if (GetKeyState(VK_MENU) < 0) modifiers |= MOD_ALT;
+            if (GetKeyState(VK_SHIFT) < 0) modifiers |= MOD_SHIFT;
+            if (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) modifiers |= MOD_WIN;
+            // Without Ctrl, Alt or Win the key would stop typing it in every other program.
+            if (!(modifiers & (MOD_CONTROL | MOD_ALT | MOD_WIN))) return;
+            ui::GlobalHotkeys::set(settings_.hotkeys, action, {modifiers, uint32_t(key)});
+            capturing_.reset();
+            settingsChanged();
+            applyHotkeys();
+        });
+        combination.LostFocus([this, action](auto&&, auto&&) {
+            if (capturing_ != action) return;
+            capturing_.reset();
+            applyHotkeys();
+        });
+        row.Children().Append(combination);
+
+        Button clear;
+        clear.Content(box_value(tr(L"Hotkey_Clear")));
+        clear.IsEnabled(!current.empty());
+        Grid::SetColumn(clear, 2);
+        clear.Click([this, action](auto&&, auto&&) {
+            ui::GlobalHotkeys::set(settings_.hotkeys, action, {});
+            capturing_.reset();
+            settingsChanged();
+            applyHotkeys();
+        });
+        row.Children().Append(clear);
+
+        TextBlock status;
+        status.Text(hotkeysTaken_[i] ? tr(L"Hotkey_Taken") : hstring{});
+        status.TextWrapping(TextWrapping::Wrap);
+        status.VerticalAlignment(VerticalAlignment::Center);
+        status.Foreground(Application::Current().Resources().Lookup(box_value(L"SystemFillColorCautionBrush")).as<Media::Brush>());
+        Grid::SetColumn(status, 3);
+        row.Children().Append(status);
+        HotkeyRows().Children().Append(row);
+    }
+}
+
+void MainWindow::OnWindowKeyDown(Windows::Foundation::IInspectable const&, Input::KeyRoutedEventArgs const& e) {
+    using Windows::System::VirtualKey;
+    const auto key = e.Key();
+    if (key != VirtualKey::Space && key != VirtualKey::Left && key != VirtualKey::Right) return;
+    if (capturing_ || !server_ || !Content().XamlRoot()) return;
+    if (Media::VisualTreeHelper::GetOpenPopupsForXamlRoot(Content().XamlRoot()).Size() > 0) return;
+    const auto focused = Input::FocusManager::GetFocusedElement(Content().XamlRoot());
+    if (focused && (focused.try_as<TextBox>() || focused.try_as<PasswordBox>() || focused.try_as<RichEditBox>() ||
+                    focused.try_as<NumberBox>() || focused.try_as<AutoSuggestBox>()))
+        return;
+    const bool control = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
+    if (GetKeyState(VK_MENU) < 0 || GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) return;
+    if (key == VirtualKey::Space && !control && !shift) {
+        if (!e.KeyStatus().WasKeyDown) submitKind(CommandKind::TogglePause);
+    } else if (control && !shift) {
+        if (e.KeyStatus().WasKeyDown) return;
+        submitKind(key == VirtualKey::Right ? CommandKind::Next : CommandKind::Previous);
+    } else if (control && shift) {
+        const auto s = server_->snapshot().playback;
+        if (!s.source || !s.source->sampleRate) return;
+        const int64_t step = int64_t(s.source->sampleRate) * 10;
+        int64_t target = int64_t(s.position) + (key == VirtualKey::Right ? step : -step);
+        target = std::clamp<int64_t>(target, 0, s.total ? int64_t(s.total) : target);
+        Command command;
+        command.kind = CommandKind::Seek;
+        command.frame = uint64_t(target);
+        submitCommand(std::move(command));
+    } else {
+        return;
+    }
+    e.Handled(true);
+}
+
+void MainWindow::OnHotkeyDefaultsClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settings_.hotkeys = {};
+    capturing_.reset();
+    settingsChanged();
+    applyHotkeys();
 }
 
 void MainWindow::OnPreviousClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

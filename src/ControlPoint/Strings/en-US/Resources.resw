@@ -243,7 +243,7 @@
   <data name="Reset_PlaybackText.Text" xml:space="preserve"><value>Backend, devices, every backend setting, conversion and decoders return to their defaults (WASAPI following the Windows default device).</value></data>
   <data name="Reset_PlaybackConfirm" xml:space="preserve"><value>Output goes back to WASAPI following the Windows default device, and every backend setting, conversion and decoder choice to its default. The library, statistics and interface settings stay.</value></data>
   <data name="Reset_InterfaceTitle.Text" xml:space="preserve"><value>Interface</value></data>
-  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>Language, what closing the window does, the queue panel, the tray notice and the first-run guide return to their defaults.</value></data>
+  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>Language, what closing the window does, the queue panel, the tray notice, the first-run guide and the hotkeys return to their defaults.</value></data>
   <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>The language follows Windows again after a restart; closing the window minimizes to the notification area; the queue panel closes; the tray notice and the first-run guide count as not shown.</value></data>
   <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>Rebuild the library</value></data>
   <data name="Reset_LibraryText.Text" xml:space="preserve"><value>Reads the tags and covers of every file again and rebuilds the albums. Play statistics and playlists stay.</value></data>
@@ -322,4 +322,16 @@
   <data name="Queue_Autoplay.OnContent" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
   <data name="Queue_Autoplay.OffContent" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
   <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>Added automatically after the queue ended</value></data>
+  <data name="Settings_Hotkeys.Text" xml:space="preserve"><value>Hotkeys</value></data>
+  <data name="Settings_HotkeysText.Text" xml:space="preserve"><value>System-wide: these work in every program. Click a combination and press the new one (with Ctrl, Alt or Win); Esc keeps the old one.</value></data>
+  <data name="Settings_HotkeysDefaults.Content" xml:space="preserve"><value>Restore default hotkeys</value></data>
+  <data name="Hotkey_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
+  <data name="Hotkey_Previous" xml:space="preserve"><value>Previous track</value></data>
+  <data name="Hotkey_Next" xml:space="preserve"><value>Next track</value></data>
+  <data name="Hotkey_Press" xml:space="preserve"><value>Press the new combination…</value></data>
+  <data name="Hotkey_None" xml:space="preserve"><value>None</value></data>
+  <data name="Hotkey_Clear" xml:space="preserve"><value>Clear</value></data>
+  <data name="Hotkey_Taken" xml:space="preserve"><value>Another program uses this combination; choose another one.</value></data>
+  <data name="Settings_WindowKeys.Text" xml:space="preserve"><value>While CamelPlayer is in front</value></data>
+  <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space play / pause · Ctrl+→ next track · Ctrl+← previous track · Ctrl+Shift+→ forward 10 s · Ctrl+Shift+← back 10 s. They do nothing while you type in a text box or a dialog or menu is open.</value></data>
 </root>

@@ -10,6 +10,8 @@
 #include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
 #include "TrayIcon.h"
+#include "GlobalHotkeys.h"
+#include "MediaControls.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -53,6 +55,9 @@ struct MainWindow : MainWindowT<MainWindow> {
                                Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const&);
     // Settings › Playback and the queue panel switch the same autoplay setting (docs/Plan.md §8.1).
     void OnAutoplayToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnHotkeyDefaultsClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // Shortcuts while the window is in front (docs/Plan.md §8.4); never while text is typed or a dialog or menu is open.
+    void OnWindowKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
     void OnSettingChanged(Windows::Foundation::IInspectable const&,
                           Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnNumberChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
@@ -137,6 +142,14 @@ private:
     void hideToTray();
     void showFromTray();
     std::unique_ptr<ui::TrayIcon> tray_;
+    // System integration (docs/Plan.md §8.4): media keys and the Windows media flyout, and global hotkeys.
+    std::unique_ptr<ui::MediaControls> media_;
+    std::unique_ptr<ui::GlobalHotkeys> hotkeys_;
+    std::array<bool, ui::GlobalHotkeys::kActions> hotkeysTaken_{};
+    std::optional<ui::GlobalHotkeys::Action> capturing_;
+    void applyHotkeys();
+    void showHotkeys();
+    void submitKind(camel::server::CommandKind kind);
     bool exiting_ = false;
     bool inTray_ = false;
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.

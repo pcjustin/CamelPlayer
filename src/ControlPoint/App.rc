@@ -2,5 +2,37 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include <winres.h>
+
 // The first icon resource is the executable's icon in File Explorer, shortcuts and taskbar pins.
 1 ICON "..\\..\\assets\\CamelPlayer.ico"
+
+// Windows names the app after FileDescription in the media flyout, the lock screen and the file's properties.
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Justin Lu"
+            VALUE "FileDescription", "CamelPlayer"
+            VALUE "FileVersion", "0.1.0"
+            VALUE "InternalName", "CamelPlayer"
+            VALUE "LegalCopyright", "Justin Lu. Mozilla Public License 2.0."
+            VALUE "OriginalFilename", "CamelPlayer.exe"
+            VALUE "ProductName", "CamelPlayer"
+            VALUE "ProductVersion", "0.1.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

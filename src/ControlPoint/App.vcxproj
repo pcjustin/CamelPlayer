@@ -94,6 +94,8 @@
     <ClInclude Include="QueueCollection.h" />
     <ClInclude Include="ArtworkLoader.h" />
     <ClInclude Include="TrayIcon.h" />
+    <ClInclude Include="GlobalHotkeys.h" />
+    <ClInclude Include="MediaControls.h" />
     <ClInclude Include="LibraryView.xaml.h">
       <DependentUpon>LibraryView.xaml</DependentUpon>
     </ClInclude>
@@ -126,6 +128,8 @@
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="UiText.cpp" />
     <ClCompile Include="TrayIcon.cpp" />
+    <ClCompile Include="GlobalHotkeys.cpp" />
+    <ClCompile Include="MediaControls.cpp" />
     <ClCompile Include="BrowseItem.cpp">
       <DependentUpon>BrowseItem.idl</DependentUpon>
     </ClCompile>
