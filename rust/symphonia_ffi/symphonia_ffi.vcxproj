@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
 <!-- Builds the Symphonia C ABI static library with cargo (docs/Plan.md §16.3).
      Always the release profile: it links against the release CRT, which Debug C++ builds tolerate via /NODEFAULTLIB:msvcrt. -->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">

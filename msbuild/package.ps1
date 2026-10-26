@@ -17,6 +17,7 @@ $dist = Join-Path $root 'dist'
 $stage = Join-Path $dist 'CamelPlayer'
 if (-not (Test-Path (Join-Path $app 'CamelPlayer.exe'))) { throw "build first: $app\CamelPlayer.exe not found" }
 & (Join-Path $PSScriptRoot 'collect-licenses.ps1')
+& (Join-Path $PSScriptRoot 'check-licenses.ps1')
 
 $distPath = [System.IO.Path]::GetFullPath($dist).TrimEnd('\')
 $stagePath = [System.IO.Path]::GetFullPath($stage)
@@ -65,6 +66,40 @@ Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
 $zip = Join-Path $dist 'CamelPlayer-win-x64.zip'
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+
+# The LGPL and MPL components linked into the release: their exact upstream sources, vcpkg port trees
+# (with patches) and crates, attached to the release beside the binaries (THIRD-PARTY-NOTICES.md).
+$inventory = Get-Content -Raw (Join-Path $root 'third_party\dependencies.json') | ConvertFrom-Json
+$sourceStage = Join-Path $dist 'third-party-source'
+if (Test-Path $sourceStage) { Remove-Item -LiteralPath $sourceStage -Recurse -Force }
+$downloads = Join-Path $env:LOCALAPPDATA 'vcpkg\downloads'
+$byHash = @{}
+Get-ChildItem $downloads -File | ForEach-Object { $byHash[(Get-FileHash $_.FullName -Algorithm SHA512).Hash.ToLowerInvariant()] = $_ }
+foreach ($entry in $inventory.native | Where-Object { $_.role -notin 'test', 'build' -and $_.license -match 'GPL|MPL' }) {
+    $out = Join-Path $sourceStage "native\$($entry.name)"
+    New-Item -ItemType Directory -Force $out | Out-Null
+    foreach ($source in $entry.sources) {
+        $archive = $byHash[($source.checksums | Where-Object algorithm -eq 'SHA512').checksumValue]
+        if (-not $archive) { throw "Upstream source of $($entry.name) not found in $downloads ($($source.location))" }
+        Copy-Item -LiteralPath $archive.FullName -Destination $out
+    }
+    $port = if ($entry.port_source -match '@([0-9a-f]{40})$') { Join-Path $env:LOCALAPPDATA "vcpkg\registries\git-trees\$($Matches[1])" }
+            else { Join-Path $root "third_party\vcpkg-ports\$($entry.name)" }
+    if (-not (Test-Path $port)) { throw "vcpkg port of $($entry.name) not found: $port" }
+    Copy-Item -LiteralPath $port -Destination (Join-Path $out 'port') -Recurse
+}
+$crateCache = Join-Path $env:USERPROFILE '.cargo\registry\cache'
+New-Item -ItemType Directory -Force (Join-Path $sourceStage 'rust') | Out-Null
+foreach ($crate in $inventory.rust | Where-Object { $_.license -match 'MPL' }) {
+    $file = Get-ChildItem $crateCache -Recurse -File -Filter "$($crate.name)-$($crate.version).crate" | Select-Object -First 1
+    if (-not $file) { throw "Crate $($crate.name) $($crate.version) not in $crateCache; run cargo fetch --locked" }
+    Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $sourceStage 'rust')
+}
+Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $sourceStage
+Copy-Item (Join-Path $root 'third_party\dependencies.json') $sourceStage
+$sourceZip = Join-Path $dist 'CamelPlayer-win-x64-third-party-source.zip'
+if (Test-Path $sourceZip) { Remove-Item $sourceZip }
+Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath $sourceZip -CompressionLevel Optimal
 
 # Symbols go in a separate archive
 $pdbZip = Join-Path $dist 'CamelPlayer-win-x64-pdb.zip'

@@ -1,3 +1,8 @@
+<!--
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
 <Project>
   <!-- Shared by every project in the repo. C++ compile/link settings live in msbuild\CamelPlayer.Cpp.props,
        which each vcxproj imports after Microsoft.Cpp.props so its defaults do not override them. -->

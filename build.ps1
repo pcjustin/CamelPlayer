@@ -39,6 +39,7 @@ $log = Join-Path $root "build\logs\build-$Configuration.log"
 & $msbuild (Join-Path $root 'CamelPlayer.slnx') -restore '-p:RestorePackagesConfig=true' -m -nologo -v:m `
     "-p:Configuration=$Configuration" '-p:Platform=x64' "-flp:logfile=$log;verbosity=normal"
 if ($LASTEXITCODE) { throw "build failed ($LASTEXITCODE), see $log" }
+& (Join-Path $root 'msbuild\check-licenses.ps1')
 
 if ($Test) {
     cargo test --locked --manifest-path (Join-Path $root 'rust\Cargo.toml') -p camel_audio_engine
