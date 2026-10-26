@@ -288,6 +288,16 @@ const std::vector<Migration>& libraryMigrations() {
             // Whether an audio file carries a CUESHEET block, so rebuilding CUE tracks reads only the files that do.
             db.exec("ALTER TABLE files ADD COLUMN embedded_cue INTEGER;");
         },
+        [](sqlite::Database& db) {
+            // CUE sheets are no longer supported: their tracks go, each file shows as one track again, and the next scan
+            // regroups the albums.
+            db.exec("DELETE FROM track_values WHERE track_id IN (SELECT id FROM tracks WHERE cue_index<>0);"
+                    "DELETE FROM tracks WHERE cue_index<>0;"
+                    "UPDATE files SET available=0 WHERE kind='cue';"
+                    "DELETE FROM app_state WHERE key LIKE 'cue_encoding:%';"
+                    "INSERT OR REPLACE INTO app_state(key,value) SELECT 'library_derived_dirty:'||id,1 FROM roots;"
+                    "ALTER TABLE files DROP COLUMN embedded_cue;");
+        },
     };
     return migrations;
 }

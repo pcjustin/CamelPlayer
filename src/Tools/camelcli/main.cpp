@@ -34,7 +34,9 @@ void usage() {
         "  split-flac <file.flac> <parts> <dir>\n"
         "      cut one track into consecutive FLAC files, to listen to gapless seams with play-queue\n"
         "  bench-decoders <dir|files...> [--runs N] [--out results.json]\n"
-        "      measure the four decoders (docs/Plan.md §16.5)\n");
+        "      measure the four decoders (docs/Plan.md §16.5)\n"
+        "  scan-bench <folder> [--data <dir>]\n"
+        "      build a fresh library of a folder as the player does (scan, fingerprints, covers, search text) and time it\n");
 }
 
 } // namespace
@@ -59,6 +61,7 @@ int wmain(int argc, wchar_t** argv) {
         if (cmd == L"gen-library") return camelcli::cmdGenLibrary(args);
         if (cmd == L"bench-one") return camelcli::cmdBenchOne(args);
         if (cmd == L"bench-decoders") return camelcli::cmdBenchDecoders(args);
+        if (cmd == L"scan-bench") return camelcli::cmdScanBench(args);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

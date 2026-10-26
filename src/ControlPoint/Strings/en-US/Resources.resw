@@ -132,7 +132,7 @@
   <data name="Settings_FolderOffline" xml:space="preserve"><value>offline</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>Albums appear here as the library folders are scanned.</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>Scanning the library: {0} of {1} files checked</value></data>
-  <data name="Library_Finishing" xml:space="preserve"><value>Scan checked every file; organizing albums and CUE sheets…</value></data>
+  <data name="Library_Finishing" xml:space="preserve"><value>Scan checked every file; organizing albums…</value></data>
   <data name="Queue_Title.Text" xml:space="preserve"><value>Queue</value></data>
   <data name="Queue_Close.Content" xml:space="preserve"><value>Close</value></data>
   <data name="Queue_RemoveEntry" xml:space="preserve"><value>Remove track from queue</value></data>
@@ -246,7 +246,7 @@
   <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>Language, what closing the window does, the queue panel, the tray notice and the first-run guide return to their defaults.</value></data>
   <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>The language follows Windows again after a restart; closing the window minimizes to the notification area; the queue panel closes; the tray notice and the first-run guide count as not shown.</value></data>
   <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>Rebuild the library</value></data>
-  <data name="Reset_LibraryText.Text" xml:space="preserve"><value>Reads the tags, CUE sheets and covers of every file again and rebuilds the albums. Play statistics and playlists stay.</value></data>
+  <data name="Reset_LibraryText.Text" xml:space="preserve"><value>Reads the tags and covers of every file again and rebuilds the albums. Play statistics and playlists stay.</value></data>
   <data name="Reset_LibraryConfirm" xml:space="preserve"><value>Every file in every library folder is read again in the background; a large NAS library can take an hour or more. Play statistics, playlists and the folder list stay.</value></data>
   <data name="Reset_CoversTitle.Text" xml:space="preserve"><value>Cover cache</value></data>
   <data name="Reset_CoversText.Text" xml:space="preserve"><value>Deletes the generated cover thumbnails; they are made again when shown.</value></data>

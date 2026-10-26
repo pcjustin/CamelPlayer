@@ -132,7 +132,7 @@
   <data name="Settings_FolderOffline" xml:space="preserve"><value>離線</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>專輯會在掃描資料夾時陸續出現。</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>正在掃描媒體庫：已檢查 {0} / {1} 個檔案</value></data>
-  <data name="Library_Finishing" xml:space="preserve"><value>已檢查所有檔案，正在整理專輯與 CUE…</value></data>
+  <data name="Library_Finishing" xml:space="preserve"><value>已檢查所有檔案，正在整理專輯…</value></data>
   <data name="Queue_Title.Text" xml:space="preserve"><value>播放佇列</value></data>
   <data name="Queue_Close.Content" xml:space="preserve"><value>關閉</value></data>
   <data name="Queue_RemoveEntry" xml:space="preserve"><value>從佇列移除此曲</value></data>
@@ -246,7 +246,7 @@
   <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>語言、關閉視窗時的行為、佇列面板、系統列提示與入門引導回到預設值。</value></data>
   <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>重新啟動後語言改回跟隨 Windows；關閉視窗會縮到系統列；佇列面板會關閉；系統列提示與入門引導視為尚未顯示。</value></data>
   <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>重建媒體庫</value></data>
-  <data name="Reset_LibraryText.Text" xml:space="preserve"><value>重新讀取每個檔案的標籤、CUE 與封面並重建專輯；播放統計與播放清單會保留。</value></data>
+  <data name="Reset_LibraryText.Text" xml:space="preserve"><value>重新讀取每個檔案的標籤與封面並重建專輯；播放統計與播放清單會保留。</value></data>
   <data name="Reset_LibraryConfirm" xml:space="preserve"><value>所有媒體庫資料夾中的檔案都會在背景重新讀取，NAS 上的大型媒體庫可能需要一小時以上。播放統計、播放清單與資料夾清單會保留。</value></data>
   <data name="Reset_CoversTitle.Text" xml:space="preserve"><value>封面快取</value></data>
   <data name="Reset_CoversText.Text" xml:space="preserve"><value>刪除產生的封面縮圖，顯示時會重新產生。</value></data>

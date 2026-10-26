@@ -8,7 +8,10 @@
 #include <wil/resource.h>
 #include <webp/decode.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <fstream>
+#include <future>
 #include <map>
 #include "Common/util/Md5.h"
 #include "Server/Library/LibraryIdentity.h"
@@ -55,6 +58,20 @@ std::string sourceKey(const ArtworkCandidate& image) {
     const auto size = std::filesystem::file_size(image.file);
     if (!size || size > kMaxArtworkBytes) throw std::runtime_error("artwork file size limit");
     return fileKey(image.file);
+}
+// Empty when cancelled, unreadable or over the size limit.
+std::vector<uint8_t> readImage(const Path& file, const CancellationToken& token) {
+    const auto size = std::filesystem::file_size(file);
+    if (!size || size > kMaxArtworkBytes) return {};
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    std::ifstream input(file, std::ios::binary);
+    for (size_t offset = 0; offset < bytes.size();) {
+        if (token.cancelled()) return {};
+        const auto count = std::min<size_t>(64 * 1024, bytes.size() - offset);
+        if (!input.read(reinterpret_cast<char*>(bytes.data() + offset), std::streamsize(count))) return {};
+        offset += count;
+    }
+    return bytes;
 }
 std::optional<ArtworkCandidate> folderImage(const Path& path, const CancellationToken& token) {
     return findFolderArtworkFile(path, token);
@@ -249,9 +266,9 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
         std::filesystem::last_write_time(target, std::filesystem::file_time_type::clock::now(), ec);
         return ArtworkReference{key, target};
     }
-    std::lock_guard lock(mutex_);
     BackgroundPriority priority;
     if (token.cancelled()) return std::nullopt;
+    // The source is read before taking the lock, so the covers of several albums are read from a NAS at once.
     ArtworkCandidate image;
     if (cover->embedded) {
         ArtworkQuery query;
@@ -261,7 +278,10 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
         image = std::move(images.front());
     } else {
         image.file = cover->file;
+        image.bytes = readImage(cover->file, token);
+        if (image.bytes.empty()) return std::nullopt;
     }
+    std::lock_guard lock(mutex_);
     return generate(image, token, cover->key);
 }
 
@@ -272,18 +292,29 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
         auto rows = db.prepare("SELECT id FROM albums WHERE cover_id IS NOT NULL ORDER BY sort_key,id");
         while (rows.step()) albums.push_back(rows.integer(0));
     }
-    size_t made = 0;
-    for (const auto album : albums) {
-        if (token.cancelled() || (yield && yield())) break;
-        auto db = store.openReader();
-        const auto cover = albumCover(db, album);
-        std::error_code ec;
-        if (!cover || std::filesystem::exists(directory_ / (cover->key + "-" + std::to_string(kPixels) + ".jpg"), ec)) continue;
-        try {
-            if (stored(store, {ArtworkKind::Album, album, {}}, token)) ++made;
-        } catch (const std::exception&) {
-        }
-    }
+    if (yield && yield()) return 0;
+    // Four covers at a time: on a NAS each mostly waits for the disk. When `yield` asks for the storage (playback, a
+    // scan, a cover being shown), the reads in flight stop at their next chunk.
+    auto reading = token.child();
+    std::atomic<size_t> next = 0, made = 0;
+    std::vector<std::future<void>> workers;
+    for (int i = 0; i < 4; ++i)
+        workers.push_back(std::async(std::launch::async, [&] {
+            for (size_t at; !reading.cancelled() && (at = next++) < albums.size();) {
+                auto db = store.openReader();
+                const auto cover = albumCover(db, albums[at]);
+                std::error_code ec;
+                if (!cover || std::filesystem::exists(directory_ / (cover->key + "-" + std::to_string(kPixels) + ".jpg"), ec))
+                    continue;
+                try {
+                    if (stored(store, {ArtworkKind::Album, albums[at], {}}, reading)) ++made;
+                } catch (const std::exception&) {
+                }
+            }
+        }));
+    for (auto& worker : workers)
+        while (worker.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready)
+            if (yield && yield()) reading.cancel();
     return made;
 }
 
@@ -310,16 +341,8 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
     }
     auto bytes = image.bytes;
     if (bytes.empty()) {
-        const auto size = std::filesystem::file_size(image.file);
-        if (!size || size > kMaxArtworkBytes) return {};
-        bytes.resize(size_t(size));
-        std::ifstream input(image.file, std::ios::binary);
-        for (size_t offset = 0; offset < bytes.size();) {
-            if (token.cancelled()) return {};
-            const auto count = std::min<size_t>(64 * 1024, bytes.size() - offset);
-            if (!input.read(reinterpret_cast<char*>(bytes.data() + offset), std::streamsize(count))) return {};
-            offset += count;
-        }
+        bytes = readImage(image.file, token);
+        if (bytes.empty()) return {};
         if (stableKey.empty() && sourceKey(image) + "-" + std::to_string(kPixels) != key) return {};
     }
     if (bytes.empty() || token.cancelled()) return {};

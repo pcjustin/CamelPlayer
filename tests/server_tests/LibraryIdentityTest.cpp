@@ -143,7 +143,7 @@ TEST_F(LibraryIdentityTest, ReplacementAndSizeTimeCollisionNeverInheritHistory) 
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     fs::rename(source, music / "moved.lrc");
     file("old.lrc", "xyz");
     fs::last_write_time(source, stamp);
@@ -162,7 +162,7 @@ TEST_F(LibraryIdentityTest, UniqueRecordedHashRecoversUntrustedOrCrossVolumeIden
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     distrustIds(store);
     fs::copy_file(source, music / "new.lrc");
     fs::remove(source);
@@ -183,11 +183,13 @@ TEST_F(LibraryIdentityTest, MissingPriorFingerprintCannotBeInventedAfterTheMove)
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
+    // As when the file was scanned during playback, which leaves its fingerprint to a later pass.
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET content_hash=NULL"); }).get();
     distrustIds(store);
     fs::rename(source, music / "new.lrc");
     EXPECT_EQ(scanner.scan(root).moved, 0);
     EXPECT_NE(id(store, "new.lrc"), original);
-    EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL AND available=1"), 1);
     EXPECT_EQ(scanner.scan(root).moved, 0);
     EXPECT_EQ(scalar(store, "SELECT available FROM files WHERE id=1"), 0);
     EXPECT_EQ(scalar(store, "SELECT file_id FROM stats"), original);
@@ -202,7 +204,7 @@ TEST_F(LibraryIdentityTest, EqualSizeAndTimeWithDifferentContentDoesNotMatch) {
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     distrustIds(store);
     fs::remove(source);
     fs::last_write_time(file("new.lrc", "xyz"), stamp);
@@ -218,7 +220,7 @@ TEST_F(LibraryIdentityTest, MultiplePriorHashesAreAmbiguous) {
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
     rate(store, id(store, "one.lrc"));
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 2);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 2);
     distrustIds(store);
     fs::remove(music / "two.lrc");
     fs::rename(source, music / "new.lrc");
@@ -233,7 +235,7 @@ TEST_F(LibraryIdentityTest, MultipleArrivalsNeverLetTheFirstCopyStealHistory) {
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
     rate(store, id(store, "old.lrc"));
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     distrustIds(store);
     fs::copy_file(source, music / "one.lrc");
     fs::copy_file(source, music / "two.lrc");
@@ -250,7 +252,7 @@ TEST_F(LibraryIdentityTest, LiveCopiesAndHardLinksDoNotStealIdentityEvenAfterThe
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     fs::copy_file(source, music / "copy.lrc");
     fs::create_hard_link(source, music / "link.lrc");
     EXPECT_EQ(scanner.scan(root).moved, 0);
@@ -273,9 +275,9 @@ TEST_F(LibraryIdentityTest, PlaybackSourceGatesOnlyTheSameStorage) {
     EXPECT_FALSE(scanner.fingerprint(root).complete);
     playing = L"\\\\TACHIKOMA\\Music\\track.flac";
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
+    playing = source;
     file("second.lrc", "second bytes");
     ASSERT_TRUE(scanner.scan(root).complete);
-    playing = source;
     EXPECT_FALSE(scanner.fingerprint(root).complete);
     playing.clear();
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
@@ -294,7 +296,7 @@ TEST_F(LibraryIdentityTest, RemovingRootRetainsHistoryAndReadditionRequiresVerif
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     store.write([=](sqlite::Database& db) {
         db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
         db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
@@ -374,8 +376,10 @@ TEST_F(LibraryIdentityTest, FingerprintsYieldCancelValidateVersionsAndInvalidate
     file("old.lrc", "xyz");
     fs::last_write_time(source, fs::last_write_time(source) + std::chrono::seconds(2));
     EXPECT_THROW(library::fileDigest(source, expected, {}, {}), std::runtime_error);
+    playing = true;
     EXPECT_TRUE(scanner.scan(root).complete);
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 0);
+    playing = false;
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
 }
 
@@ -385,7 +389,10 @@ TEST_F(LibraryIdentityTest, FingerprintsPendingFilesAfterAnIncompleteScan) {
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
-    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET identity_state=1 WHERE available=1"); }).get();
+    store.write([](sqlite::Database& db) {
+             db.exec("UPDATE files SET identity_state=1,content_hash=NULL WHERE available=1");
+         })
+        .get();
 
     const auto report = scanner.fingerprint(root);
     EXPECT_TRUE(report.complete);
@@ -609,7 +616,7 @@ TEST_F(LibraryIdentityTest, MonitorRetriesDeferredMoveMatchingAfterPlaybackWitho
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
     rate(store, original);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     distrustIds(store);
     fs::rename(source, music / "new.lrc");
     std::atomic<bool> playing = true;

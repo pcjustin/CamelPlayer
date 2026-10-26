@@ -39,7 +39,6 @@
 
 #include "Server/Library/LibraryIdentity.h"
 #include "Server/Library/LibraryText.h"
-#include "Server/Library/CueSheet.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Engine/decode/FormatProbe.h"
@@ -100,7 +99,6 @@ using TrustedIdentity = std::tuple<std::string, std::vector<uint8_t>, int64_t>;
 
 std::string kind(const Path& path) {
     const auto ext = lower(path.extension().wstring());
-    if (ext == L".cue") return "cue";
     if (ext == L".lrc") return "lrc";
     if (ext == L".jpg" || ext == L".jpeg" || ext == L".png" || ext == L".webp") return "image";
     for (const auto* e :
@@ -114,7 +112,6 @@ struct Metadata {
     audio::SourceInfo info;
     TagLib::PropertyMap tags;
     bool cover = false;
-    std::optional<bool> embeddedCue;
     bool lengthEstimated = false;
 };
 
@@ -131,7 +128,7 @@ Metadata metadata(const Path& path, int64_t fileSize) {
         uint64_t position = 4;
         TagLib::ByteVector blocks("fLaC", 4);
         unsigned int lastHeader = 4;
-        bool last = false, cover = false, embeddedCue = false;
+        bool last = false, cover = false;
         do {
             char header[4]{};
             input.read(header, sizeof(header));
@@ -153,7 +150,6 @@ Metadata metadata(const Path& path, int64_t fileSize) {
                 blocks.append(TagLib::ByteVector(data.data(), length));
             } else {
                 cover = cover || type == 6;
-                embeddedCue = embeddedCue || type == 5;
                 input.seekg(length, std::ios::cur);
             }
             position += length;
@@ -175,7 +171,6 @@ Metadata metadata(const Path& path, int64_t fileSize) {
         out.info.totalFrames = properties->sampleFrames();
         out.tags = file.properties();
         out.cover = cover;
-        out.embeddedCue = embeddedCue;
         return out;
     }
     const auto format = audio::probeFormat(path);
@@ -184,7 +179,7 @@ Metadata metadata(const Path& path, int64_t fileSize) {
     if (format == audio::AudioFormat::Mp3) info = audio::probeMp3Info(path, estimated);
     else if (format == audio::AudioFormat::Aac) info = audio::probeAacInfo(path);
     else info = audio::openDecoder(audio::defaultDecoder(format), path)->info();
-    Metadata out{audio::formatId(format), info, {}, false, false, estimated};
+    Metadata out{audio::formatId(format), info, {}, false, estimated};
     if (format == audio::AudioFormat::Dsd) {
         out.info.sampleRate *= 8;
         out.info.totalFrames *= 8;
@@ -367,372 +362,6 @@ struct Listing {
     std::string error;
     bool fileWork = false;
 };
-
-struct CueProjection {
-    int64_t file = 0;
-    int64_t cueFile = 0;
-    int index = 0;
-    int64_t start = 0;
-    int64_t end = 0;
-    int64_t pregap75 = 0;
-    int64_t postgap75 = 0;
-    int64_t year = 0;
-    int64_t trackTotal = 0;
-    std::string title;
-    std::string album;
-    std::string albumArtist;
-    std::string artist;
-};
-
-struct CuePlan {
-    std::set<int64_t> validCueFiles;
-    std::set<int64_t> replaceEmbeddedFiles;
-    std::set<std::pair<int64_t, int>> tracks;
-    std::vector<CueProjection> projections;
-    // Files read for an embedded CUESHEET and whether they have one; saved even when the plan is not finished.
-    std::vector<std::pair<int64_t, bool>> embeddedFound;
-    bool complete = false;
-};
-
-std::optional<uint32_t> cueEncoding(sqlite::Database& db, int64_t fileId) {
-    auto row = db.prepare("SELECT value FROM app_state WHERE key=?");
-    row.bind(1, "cue_encoding:" + std::to_string(fileId));
-    if (!row.step()) return std::nullopt;
-    uint32_t value = 0;
-    const auto text = row.text(0);
-    if (std::from_chars(text.data(), text.data() + text.size(), value).ec != std::errc{} || !value) return std::nullopt;
-    return value;
-}
-
-uint64_t cueSamples(uint64_t frames75, uint64_t sampleRate) {
-    if (!sampleRate || frames75 > UINT64_MAX / sampleRate || (frames75 * sampleRate) % 75)
-        throw std::runtime_error("CUE offset cannot be represented at this sample rate");
-    return frames75 * sampleRate / 75;
-}
-
-// Runs work(0..count-1) on several threads: opening a file on a share mostly waits for the network. False when stopped
-// before every item was started.
-bool forEachConcurrently(size_t count, const Path& root, const std::function<bool()>& stopped,
-                         const std::function<void(size_t)>& work) {
-    std::atomic<size_t> next = 0;
-    std::vector<std::future<void>> workers;
-    for (unsigned i = 0; i < (isNetworkPath(root) ? 16u : 4u); ++i)
-        workers.push_back(std::async(std::launch::async, [&] {
-            for (size_t at; !stopped() && (at = next++) < count;) work(at);
-        }));
-    for (auto& worker : workers) worker.get();
-    return next >= count;
-}
-
-CuePlan makeCuePlan(sqlite::Database& db, int64_t root, const Path& rootPath, const std::vector<std::string>& changedAudio,
-                    const std::map<std::string, bool>& embeddedHints, bool retryDerived,
-                    const std::function<bool()>& stopped, std::vector<std::string>& diagnostics) {
-    struct Audio {
-        int64_t id;
-        std::string path;
-        uint64_t rate;
-        uint64_t frames;
-        std::string title, album, albumArtist, artist;
-        int year, trackTotal;
-        std::optional<bool> embeddedCue;
-    };
-    struct Source {
-        int64_t id;
-        std::string path;
-        library::CueSheet sheet;
-        bool valid = false;
-        std::vector<CueProjection> tracks;
-    };
-    CuePlan plan;
-    std::map<std::string, Audio> audioByPath;
-    std::map<int64_t, Audio> audioById;
-    auto audioRows =
-        db.prepare("SELECT f.id,f.path,t.sample_rate,t.total_frames,t.title,t.album,t.album_artist,t.artist,t.year,t.track_total,"
-                   "f.embedded_cue FROM files f JOIN tracks t ON t.file_id=f.id AND t.cue_index=0 "
-                   "WHERE f.root_id=? AND f.available=1 AND f.kind='audio'");
-    audioRows.bind(1, root);
-    while (audioRows.step()) {
-        Audio a{audioRows.integer(0),
-                audioRows.text(1),
-                uint64_t(audioRows.integer(2)),
-                uint64_t(audioRows.integer(3)),
-                audioRows.text(4),
-                audioRows.text(5),
-                audioRows.text(6),
-                audioRows.text(7),
-                int(audioRows.integer(8)),
-                int(audioRows.integer(9)),
-                audioRows.isNull(10) ? std::nullopt : std::optional<bool>(audioRows.integer(10) != 0)};
-        audioByPath.emplace(a.path, a);
-        audioById.emplace(a.id, std::move(a));
-    }
-    std::vector<Source> sources;
-    std::vector<std::optional<uint32_t>> encodings;
-    auto cueRows = db.prepare("SELECT id,path FROM files WHERE root_id=? AND available=1 AND kind='cue'");
-    cueRows.bind(1, root);
-    while (cueRows.step()) {
-        sources.push_back({cueRows.integer(0), cueRows.text(1)});
-        encodings.push_back(cueEncoding(db, sources.back().id));
-    }
-    std::vector<std::string> cueErrors(sources.size());
-    if (!forEachConcurrently(sources.size(), rootPath, stopped, [&](size_t at) {
-        auto& source = sources[at];
-        try {
-            const Path cuePath(toWide(source.path));
-            const auto before = fileVersion(cuePath);
-            source.sheet = library::parseCue(cuePath, encodings[at]);
-            if (fileVersion(cuePath) != before) throw std::runtime_error("CUE changed during read");
-            std::set<std::string> usedPaths;
-            for (const auto& cueFile : source.sheet.files) {
-                const Path relative(toWide(cueFile.path));
-                if (relative.is_absolute() || relative.has_root_name() || relative.has_root_directory())
-                    throw std::runtime_error("CUE FILE path must be relative");
-                const Path resolved = (cuePath.parent_path() / relative).lexically_normal();
-                if (canonicalRoot(resolved) != Path(lower(resolved.wstring())) || !contains(rootPath, resolved))
-                    throw std::runtime_error("CUE FILE resolves outside the registered root or through an alias");
-                const std::string audioPath = key(resolved);
-                if (!usedPaths.insert(audioPath).second) throw std::runtime_error("CUE repeats a FILE path");
-                const auto found = audioByPath.find(audioPath);
-                if (found == audioByPath.end()) throw std::runtime_error("CUE FILE is not an available audio file in this root");
-                const auto& audio = found->second;
-                if (!audio.rate || !audio.frames) throw std::runtime_error("CUE source has no known sample range");
-                std::vector<uint64_t> starts;
-                for (const auto& track : cueFile.tracks)
-                    starts.push_back(source.sheet.offsetsAreSamples ? *track.index01 : cueSamples(*track.index01, audio.rate));
-                size_t totalTracks = 0;
-                for (const auto& file : source.sheet.files) totalTracks += file.tracks.size();
-                if (starts.front() > 0 && &cueFile == &source.sheet.files.front()) {
-                    source.tracks.push_back({audio.id, source.id, -1, 0, int64_t(starts.front()), 0, 0, source.sheet.year,
-                                             int64_t(source.sheet.files.front().tracks.size()), "", source.sheet.title,
-                                             source.sheet.performer.empty() ? audio.albumArtist : source.sheet.performer,
-                                             source.sheet.performer.empty() ? audio.artist : source.sheet.performer});
-                }
-                for (size_t i = 0; i < cueFile.tracks.size(); ++i) {
-                    const auto& track = cueFile.tracks[i];
-                    const uint64_t end = i + 1 < starts.size() ? starts[i + 1] : audio.frames;
-                    if (starts[i] >= end || end > audio.frames)
-                        throw std::runtime_error("CUE track range is empty, overlapping or beyond the source");
-                    if (i + 1 < cueFile.tracks.size() && cueFile.tracks[i + 1].index00) {
-                        const auto pregap = source.sheet.offsetsAreSamples
-                                                ? *cueFile.tracks[i + 1].index00
-                                                : cueSamples(*cueFile.tracks[i + 1].index00, audio.rate);
-                        if (pregap < starts[i]) throw std::runtime_error("CUE INDEX 00 overlaps the preceding track");
-                    }
-                    source.tracks.push_back(
-                        {audio.id, source.id, track.number, int64_t(starts[i]), int64_t(end), int64_t(track.pregap75),
-                         int64_t(track.postgap75), source.sheet.year ? source.sheet.year : audio.year, int64_t(totalTracks),
-                         track.title.empty() ? "Track " + std::to_string(track.number) : track.title,
-                         source.sheet.title.empty() ? audio.album : source.sheet.title,
-                         source.sheet.performer.empty() ? audio.albumArtist : source.sheet.performer,
-                         track.performer.empty() ? (source.sheet.performer.empty() ? audio.artist : source.sheet.performer)
-                                                 : track.performer});
-                }
-            }
-            source.valid = true;
-        } catch (const std::exception& e) {
-            cueErrors[at] = source.path + ": " + e.what();
-        }
-    }))
-        return plan;
-    for (const auto& error : cueErrors)
-        if (!error.empty()) diagnostics.push_back(error);
-
-    std::map<int64_t, std::set<int64_t>> sourcesByAudio;
-    for (const auto& source : sources)
-        if (source.valid)
-            for (const auto& track : source.tracks)
-                if (track.index > 0) sourcesByAudio[track.file].insert(source.id);
-    std::set<int64_t> ambiguous;
-    for (const auto& [audioId, sourceIds] : sourcesByAudio) {
-        if (sourceIds.size() > 1) {
-            ambiguous.insert(sourceIds.begin(), sourceIds.end());
-            diagnostics.push_back("ambiguous external CUE references for audio file " + std::to_string(audioId));
-        }
-    }
-    for (auto& source : sources) {
-        if (!source.valid || ambiguous.contains(source.id)) continue;
-        plan.validCueFiles.insert(source.id);
-        for (const auto& track : source.tracks) {
-            plan.replaceEmbeddedFiles.insert(track.file);
-            plan.tracks.emplace(track.file, track.index);
-            plan.projections.push_back(track);
-        }
-    }
-
-    std::set<std::string> changedPaths(changedAudio.begin(), changedAudio.end());
-    std::set<int64_t> embeddedCandidates;
-    for (const auto& [id, audio] : audioById)
-        if (retryDerived || changedPaths.contains(audio.path)) embeddedCandidates.insert(id);
-    auto oldCueTracks = db.prepare("SELECT DISTINCT t.file_id,f.path,cf.id,cf.available FROM tracks t "
-                                   "JOIN files f ON f.id=t.file_id LEFT JOIN files cf ON cf.id=t.cue_file_id "
-                                   "WHERE f.root_id=? AND f.available=1 AND f.kind='audio' AND t.cue_index<>0 "
-                                   "AND t.cue_file_id IS NOT NULL");
-    oldCueTracks.bind(1, root);
-    while (oldCueTracks.step()) {
-        const int64_t file = oldCueTracks.integer(0);
-        const int64_t cue = oldCueTracks.integer(2);
-        if (!oldCueTracks.integer(3) || !plan.validCueFiles.contains(cue)) embeddedCandidates.insert(file);
-    }
-    struct EmbeddedRead {
-        const Audio* audio;
-        std::optional<library::CueSheet> sheet;
-        std::string error;
-    };
-    std::vector<EmbeddedRead> reads;
-    for (const auto id : embeddedCandidates) {
-        const auto& audio = audioById.at(id);
-        if (plan.replaceEmbeddedFiles.contains(id)) continue;
-        plan.replaceEmbeddedFiles.insert(id);
-        if (const auto hint = embeddedHints.find(audio.path); hint != embeddedHints.end() && !hint->second) continue;
-        if (audio.embeddedCue != false) reads.push_back({&audio});
-    }
-    const bool allRead = forEachConcurrently(reads.size(), rootPath, stopped, [&](size_t at) {
-        try {
-            reads[at].sheet = library::parseEmbeddedFlacCue(Path(toWide(reads[at].audio->path)));
-        } catch (const std::exception& e) {
-            reads[at].error = e.what();
-        }
-    });
-    for (const auto& entry : reads)
-        if (entry.sheet && !entry.audio->embeddedCue) plan.embeddedFound.emplace_back(entry.audio->id, !entry.sheet->files.empty());
-    if (!allRead) return plan;
-    for (auto& read : reads) {
-        const auto& audio = *read.audio;
-        const auto id = audio.id;
-        if (!read.error.empty()) {
-            diagnostics.push_back(audio.path + ": embedded CUESHEET: " + read.error);
-            continue;
-        }
-        try {
-            auto& embedded = *read.sheet;
-            if (embedded.files.empty()) continue;
-            std::vector<uint64_t> starts;
-            for (const auto& track : embedded.files.front().tracks) starts.push_back(*track.index01);
-            if (!starts.empty() && starts.front() > 0) {
-                CueProjection leadIn{audio.id,
-                                     0,
-                                     -1,
-                                     0,
-                                     int64_t(starts.front()),
-                                     0,
-                                     0,
-                                     audio.year,
-                                     int64_t(starts.size()),
-                                     "",
-                                     audio.album,
-                                     audio.albumArtist,
-                                     audio.artist};
-                plan.tracks.emplace(leadIn.file, leadIn.index);
-                plan.projections.push_back(std::move(leadIn));
-            }
-            for (size_t i = 0; i < starts.size(); ++i) {
-                const uint64_t end = i + 1 < starts.size() ? starts[i + 1] : audio.frames;
-                if (starts[i] >= end || end > audio.frames) throw std::runtime_error("embedded CUESHEET range is invalid");
-                CueProjection p{audio.id,
-                                0,
-                                embedded.files.front().tracks[i].number,
-                                int64_t(starts[i]),
-                                int64_t(end),
-                                0,
-                                0,
-                                audio.year,
-                                int64_t(starts.size()),
-                                "Track " + std::to_string(embedded.files.front().tracks[i].number),
-                                audio.album,
-                                audio.albumArtist,
-                                audio.artist};
-                plan.tracks.emplace(p.file, p.index);
-                plan.projections.push_back(std::move(p));
-            }
-            plan.replaceEmbeddedFiles.insert(id);
-        } catch (const std::exception& e) {
-            diagnostics.push_back(audio.path + ": embedded CUESHEET: " + e.what());
-        }
-    }
-    plan.complete = true;
-    return plan;
-}
-
-void applyCuePlan(sqlite::Database& db, const CuePlan& plan, int64_t root) {
-    db.exec("DELETE FROM tracks WHERE cue_index<>0 AND cue_file_id IN "
-            "(SELECT id FROM files WHERE root_id=" +
-            std::to_string(root) + " AND kind='cue' AND available=0)");
-    auto oldCues = db.prepare("SELECT id FROM files WHERE root_id=? AND kind='cue' AND available=1");
-    oldCues.bind(1, root);
-    while (oldCues.step()) {
-        const auto id = oldCues.integer(0);
-        if (!plan.validCueFiles.contains(id)) db.prepare("DELETE FROM tracks WHERE cue_file_id=?").bind(1, id).run();
-    }
-    for (const auto file : plan.replaceEmbeddedFiles) {
-        auto existing = db.prepare("SELECT cue_index FROM tracks WHERE file_id=? AND cue_file_id IS NULL AND cue_index<>0");
-        existing.bind(1, file);
-        while (existing.step()) {
-            const auto index = int(existing.integer(0));
-            if (!plan.tracks.contains({file, index}))
-                db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=? AND cue_file_id IS NULL")
-                    .bind(1, file)
-                    .bind(2, int64_t(index))
-                    .run();
-        }
-    }
-    auto oldVirtual =
-        db.prepare("SELECT file_id,cue_index,cue_file_id FROM tracks WHERE cue_index<>0 AND cue_file_id IS NOT NULL");
-    while (oldVirtual.step()) {
-        const int64_t file = oldVirtual.integer(0);
-        const int index = int(oldVirtual.integer(1));
-        const int64_t cueFile = oldVirtual.integer(2);
-        if (plan.validCueFiles.contains(cueFile) && !plan.tracks.contains({file, index}))
-            db.prepare("DELETE FROM tracks WHERE file_id=? AND cue_index=?").bind(1, file).bind(2, int64_t(index)).run();
-    }
-    for (const auto& p : plan.projections) {
-        if (p.index == 0) continue;
-        auto s = db.prepare("INSERT INTO tracks(file_id,cue_index,cue_file_id,start_frame,end_frame,cue_pregap_75ths,"
-                            "cue_postgap_75ths,title,album,album_artist,artist,year,track_number,track_total,disc_number,"
-                            "disc_total,format,sample_rate,bits_per_sample,channels,total_frames,rg_track_gain,rg_track_peak,"
-                            "rg_album_gain,rg_album_peak,rg_analysis_gain,rg_analysis_peak,embedded_cover,lyrics) "
-                            "SELECT file_id,?,?,?,?,?,?,?,?,?,?,?,?,?,disc_number,disc_total,format,sample_rate,bits_per_sample,"
-                            "channels,total_frames,rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,rg_analysis_gain,"
-                            "rg_analysis_peak,embedded_cover,lyrics FROM tracks WHERE file_id=? AND cue_index=0 "
-                            "ON CONFLICT(file_id,cue_index) DO UPDATE SET cue_file_id=excluded.cue_file_id,"
-                            "start_frame=excluded.start_frame,end_frame=excluded.end_frame,"
-                            "cue_pregap_75ths=excluded.cue_pregap_75ths,cue_postgap_75ths=excluded.cue_postgap_75ths,"
-                            "title=excluded.title,album=excluded.album,album_artist=excluded.album_artist,artist=excluded.artist,"
-                            "year=excluded.year,track_number=excluded.track_number,track_total=excluded.track_total");
-        s.bind(1, int64_t(p.index));
-        if (p.cueFile)
-            s.bind(2, p.cueFile);
-        else
-            s.bindNull(2);
-        s.bind(3, p.start)
-            .bind(4, p.end)
-            .bind(5, p.pregap75)
-            .bind(6, p.postgap75)
-            .bind(7, p.title)
-            .bind(8, p.album)
-            .bind(9, p.albumArtist)
-            .bind(10, p.artist)
-            .bind(11, p.year)
-            .bind(12, int64_t(p.index < 0 ? 0 : p.index))
-            .bind(13, p.trackTotal)
-            .bind(14, p.file)
-            .run();
-        auto row = db.prepare("SELECT id FROM tracks WHERE file_id=? AND cue_index=?");
-        row.bind(1, p.file).bind(2, int64_t(p.index)).step();
-        const auto track = row.integer(0);
-        db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
-        db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source) SELECT ?,field,position,value,sort_source FROM track_values "
-                   "WHERE track_id=(SELECT id FROM tracks WHERE file_id=? AND cue_index=0) AND field<>'artist'")
-            .bind(1, track)
-            .bind(2, p.file)
-            .run();
-        if (!p.artist.empty())
-            db.prepare("INSERT INTO track_values(track_id,field,position,value) VALUES(?,'artist',0,?)")
-                .bind(1, track)
-                .bind(2, p.artist)
-                .run();
-        updateLibraryTrackText(db, track);
-    }
-}
 
 // Without `fileFolders` every album of the root is rebuilt; with them, only the albums of those folders, so a long
 // first scan fills the album wall batch by batch.
@@ -936,14 +565,22 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 entry.version = fileVersion(child);
             }
             if (reread || old == known.end() || old->second != entry.version) {
-                if (type == "audio") {
-                    if (!directoryValid()) break;
-                    entry.metadata = metadata(child, entry.version.size);
-                    if (fileVersion(child) != entry.version) throw std::runtime_error("file changed during metadata read");
+                if (!directoryValid()) break;
+                if (type == "audio") entry.metadata = metadata(child, entry.version.size);
+                // Fingerprinted now, while the start of the file the tags came from is still in the storage's cache: a
+                // later pass read each file from a NAS disk again, the slowest part of building a library. The
+                // fingerprint also confirms the version; during playback it is left to that pass. Images get none: a
+                // cover is chosen again by every scan, so following its moves keeps nothing.
+                if (type != "image" && (!playbackActive || !playbackActive())) {
+                    const auto kind = hashSizes.contains(entry.version.size) ? hashSizes.at(entry.version.size)
+                                                                              : library::Fingerprint::Sampled;
+                    entry.digest = library::fileDigest(child, entry.version, token, playbackActive, kind);
                 }
+                if (type == "audio" && !entry.digest && fileVersion(child) != entry.version)
+                    throw std::runtime_error("file changed during metadata read");
             }
             const bool hashed = old != known.end() && old->second == entry.version && knownHashes.contains(fileKey);
-            if (!hashed && (old == known.end() || !entry.version.sameFile(old->second) || pendingIdentity.contains(fileKey)) &&
+            if (!hashed && !entry.digest && type != "image" && (old == known.end() || !entry.version.sameFile(old->second) || pendingIdentity.contains(fileKey)) &&
                 hashSizes.contains(entry.version.size) &&
                 !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
                 if (!directoryValid()) break;
@@ -1250,8 +887,6 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     std::deque<std::future<Listing>> active;
     bool complete = true;
     std::vector<Entry> batch;
-    std::vector<std::string> changedAudioPaths;
-    std::map<std::string, bool> embeddedHints;
     const auto derivedKey = "library_derived_dirty:" + std::to_string(root);
     auto dirty = reader.prepare("SELECT 1 FROM app_state WHERE key=?");
     bool derivedChanged = dirty.bind(1, derivedKey).step();
@@ -1261,7 +896,6 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     const bool reread = dirty.step();
     dirty.reset();
     derivedChanged = derivedChanged || reread;
-    const bool retryDerived = derivedChanged || !pendingIdentity.empty();
     // Writes run in submission order on the store's writer; the dispatcher waits only when several are outstanding.
     std::deque<std::future<void>> writes;
     auto drainWrites = wil::scope_exit([&] {
@@ -1359,14 +993,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 if (entry.rejected || entry.metadata) trackFolders.insert(folderId);
                 if (entry.metadata) {
                     writeMetadata(db, file, *entry.metadata, locale);
-                    if (entry.metadata->embeddedCue)
-                        db.prepare("UPDATE files SET embedded_cue=? WHERE id=?")
-                            .bind(1, int64_t(*entry.metadata->embeddedCue))
-                            .bind(2, file)
-                            .run();
                     report.updated++;
-                    changedAudioPaths.push_back(p);
-                    if (entry.metadata->embeddedCue) embeddedHints[p] = *entry.metadata->embeddedCue;
                 }
             }
             if (!trackFolders.empty()) rebuildAlbums(db, root, trackFolders);
@@ -1485,25 +1112,12 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             }
         })
         .get();
-    if (report.complete && derivedChanged) {
-        auto cueReader = store_.openReader();
-        // Reading CUE sheets and embedded CUESHEETs touches the storage, so it yields to exit and to playback.
-        const auto stopped = [&] { return token.cancelled() || playbackActive(); };
-        CuePlan cuePlan = makeCuePlan(cueReader, root, path, changedAudioPaths, embeddedHints, retryDerived, stopped,
-                                      report.diagnostics);
-        report.deferred = report.deferred || (!cuePlan.complete && !token.cancelled());
+    if (report.complete && derivedChanged)
         store_.write([&](sqlite::Database& db) {
-            auto found = db.prepare("UPDATE files SET embedded_cue=? WHERE id=?");
-            for (const auto& [file, embedded] : cuePlan.embeddedFound) {
-                found.bind(1, int64_t(embedded)).bind(2, file).run();
-                found.reset();
-            }
-            if (token.cancelled() || !cuePlan.complete) return;
-            applyCuePlan(db, cuePlan, root);
+            if (token.cancelled()) return;
             rebuildAlbums(db, root);
             db.prepare("DELETE FROM app_state WHERE key=?").bind(1, derivedKey).run();
         }).get();
-    }
     report.complete = report.complete && !token.cancelled();
     return report;
 }
@@ -1516,37 +1130,7 @@ void LibraryScanner::recordExactLength(int64_t file, uint32_t sampleRate, uint64
             .bind(2, file)
             .bind(3, int64_t(sampleRate))
             .run();
-        // External CUE ranges ending at the old estimate are rebuilt by the next complete scan.
-        if (db.scalar("SELECT changes()").value_or(0))
-            db.prepare("INSERT OR REPLACE INTO app_state(key,value) SELECT 'library_derived_dirty:'||root_id,1 FROM files WHERE id=?")
-                .bind(1, file)
-                .run();
     });
-}
-
-void LibraryScanner::setCueEncoding(const Path& cuePath, std::optional<uint32_t> codePage) {
-    std::lock_guard lock(store_.scanMutex_);
-    const auto resolved = canonicalRoot(cuePath);
-    if (kind(resolved) != "cue") throw std::invalid_argument("encoding override requires a CUE file");
-    if (codePage && (!*codePage || !IsValidCodePage(*codePage))) throw std::invalid_argument("invalid CUE code page");
-    const auto cueKey = key(resolved);
-    store_
-        .write([&](sqlite::Database& db) {
-            auto file = db.prepare("SELECT id,root_id FROM files WHERE path=? AND kind='cue' AND available=1");
-            file.bind(1, cueKey);
-            if (!file.step()) throw std::invalid_argument("CUE file is not indexed");
-            const std::string stateKey = "cue_encoding:" + std::to_string(file.integer(0));
-            db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)")
-                .bind(1, "library_derived_dirty:" + std::to_string(file.integer(1))).run();
-            if (codePage)
-                db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-                    .bind(1, stateKey)
-                    .bind(2, std::to_string(*codePage))
-                    .run();
-            else
-                db.prepare("DELETE FROM app_state WHERE key=?").bind(1, stateKey).run();
-        })
-        .get();
 }
 
 FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationToken& request) {
@@ -1565,6 +1149,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
     auto rootRow = db.prepare("SELECT path FROM roots WHERE id=? AND removed IS NULL");
     if (!rootRow.bind(1, root).step()) return report;
     const auto playing = playbackGate(Path(toWide(rootRow.text(0))));
+    const bool network = isNetworkPath(Path(toWide(rootRow.text(0))));
     const auto backgroundBlocked = [this, playing] { return store_.activeScans_.load() != 0 || playing(); };
     rootRow.reset();
     if (token.cancelled() || backgroundBlocked()) return report;
@@ -1583,15 +1168,16 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         auto rows = reader.prepare("SELECT files.id,files.path,size,mtime,volume_serial,file_index,created,volume_key "
                                    "FROM files JOIN roots ON roots.id=files.root_id WHERE root_id=? AND available=1 "
                                    "AND (content_hash IS NULL OR length(content_hash)=32) AND identity_state<>2 "
-                                   "AND roots.online=1 AND roots.removed IS NULL");
+                                   "AND files.kind<>'image' AND roots.online=1 AND roots.removed IS NULL");
         rows.bind(1, root);
         while (rows.step()) {
             if (token.cancelled() || backgroundBlocked()) return report;
             pending.push_back({rows.integer(0), rows.text(1), library::storedVersion(rows, 2)});
         }
     }
-    // Fingerprints are saved 64 at a time: a write transaction per file made each one wait for a commit to disk,
-    // about 7 files a second on a local disk.
+    // Fingerprints are saved a batch at a time: a write transaction per file made each one wait for a commit to disk,
+    // about 7 files a second on a local disk. The files were already checked after hashing, so the write only compares
+    // with the database: checking them again on the storage held every other write for one NAS round trip per file.
     std::vector<std::pair<const PendingHash*, std::vector<uint8_t>>> digests;
     const auto save = [&] {
         if (digests.empty()) return;
@@ -1605,8 +1191,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
                 for (const auto& [file, digest] : digests) {
                     try {
                         const bool unchanged = current.bind(1, file->id).step() && current.text(0) == file->path &&
-                                               library::storedVersion(current, 1) == file->version &&
-                                               library::fileVersion(Path(toWide(file->path))) == file->version;
+                                               library::storedVersion(current, 1) == file->version;
                         current.reset();
                         if (!unchanged) continue;
                         update.bind(1, digest).bind(2, file->id).run();
@@ -1621,19 +1206,21 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
             .get();
         digests.clear();
     };
-    // Four files at a time: on a NAS each one mostly waits for network round trips (7.5 files a second one by one).
+    // On a NAS each file mostly waits for network round trips (7.5 files a second one by one), so sixteen are hashed at
+    // once there, as the scan reads them; four on a local disk.
     struct Result {
         std::optional<std::vector<uint8_t>> digest;
         std::string error;
     };
     bool stopped = false;
-    for (size_t first = 0; first < pending.size() && !stopped; first += 64) {
+    constexpr size_t kBatch = 256;
+    for (size_t first = 0; first < pending.size() && !stopped; first += kBatch) {
         if ((stopped = token.cancelled() || backgroundBlocked())) break;
-        const size_t count = std::min<size_t>(64, pending.size() - first);
+        const size_t count = std::min(kBatch, pending.size() - first);
         std::vector<Result> results(count);
         std::atomic<size_t> next = 0;
         std::vector<std::future<void>> workers;
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < (network ? 16 : 4); ++i)
             workers.push_back(std::async(std::launch::async, [&] {
                 const bool background = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
                 for (size_t at; (at = next++) < count;) {

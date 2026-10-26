@@ -54,51 +54,6 @@ protected:
     }
 };
 
-void embedCueSheet(const fs::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)), {});
-    ASSERT_GE(bytes.size(), 8u);
-    ASSERT_EQ(std::string(bytes.begin(), bytes.begin() + 4), "fLaC");
-    size_t audioOffset = 4;
-    while (true) {
-        ASSERT_LE(audioOffset + 4, bytes.size());
-        const bool last = (bytes[audioOffset] & 0x80) != 0;
-        const size_t length =
-            (size_t(bytes[audioOffset + 1]) << 16) | (size_t(bytes[audioOffset + 2]) << 8) | bytes[audioOffset + 3];
-        audioOffset += 4 + length;
-        ASSERT_LE(audioOffset, bytes.size());
-        if (last) {
-            bytes[audioOffset - length - 4] &= 0x7f;
-            break;
-        }
-    }
-    std::vector<uint8_t> cue(396, 0);
-    cue[395] = 3;
-    const auto track = [&cue](uint64_t offset, uint8_t number, uint8_t indices) {
-        for (int i = 7; i >= 0; --i) cue.push_back(uint8_t(offset >> (i * 8)));
-        cue.push_back(number);
-        cue.insert(cue.end(), 12, 0);
-        cue.push_back(0);
-        cue.insert(cue.end(), 13, 0);
-        cue.push_back(indices);
-    };
-    const auto index = [&cue](uint8_t number) {
-        cue.insert(cue.end(), 8, 0);
-        cue.push_back(number);
-        cue.insert(cue.end(), 3, 0);
-    };
-    track(0, 1, 1);
-    index(1);
-    track(44100, 2, 1);
-    index(1);
-    track(88200, 170, 0);
-    std::vector<uint8_t> block{0x85, uint8_t(cue.size() >> 16), uint8_t(cue.size() >> 8), uint8_t(cue.size())};
-    block.insert(block.end(), cue.begin(), cue.end());
-    bytes.insert(bytes.begin() + ptrdiff_t(audioOffset), block.begin(), block.end());
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    output.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
-}
-
 TEST_F(LibraryScannerTest, NormalizesAliasesAndOverlappingRootsInBothOrders) {
     audio();
     LibraryStore store(dir / "db");
@@ -305,8 +260,8 @@ TEST_F(LibraryScannerTest, IndexesSidecarsAndEnforcesContentAndDepthScope) {
     const auto report = scanner.scan(scanner.addRoot(dir / "music"));
     EXPECT_TRUE(report.complete);
     EXPECT_EQ(report.updated, 1);
-    EXPECT_EQ(report.diagnostics.size(), 3); // The malformed CUE is reported.
-    EXPECT_EQ(count(store), 6);
+    EXPECT_EQ(report.diagnostics.size(), 2);
+    EXPECT_EQ(count(store), 5); // CUE sheets are not indexed
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE format='flac'"), 1);
 }
 
@@ -407,8 +362,6 @@ TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWith
     const auto corrected = "SELECT total_frames FROM tracks WHERE length_estimated=0 AND file_id=" + std::to_string(plain);
     EXPECT_EQ(count(store, corrected.c_str()), 441000);
     EXPECT_GT(count(store, "SELECT value FROM library_revision WHERE id=1"), revision);
-    const auto dirty = "SELECT COUNT(*) FROM app_state WHERE key='library_derived_dirty:" + std::to_string(root) + "'";
-    EXPECT_EQ(count(store, dirty.c_str()), 1);
     scanner.recordExactLength(plain, 44100, 7);
     store.write([](sqlite::Database&) {}).get();
     EXPECT_EQ(count(store, corrected.c_str()), 441000);
@@ -523,213 +476,21 @@ TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
     EXPECT_EQ(count(store, "SELECT total_frames FROM tracks"), int64_t(expected.totalFrames));
 }
 
-TEST_F(LibraryScannerTest, ExternalCueBuildsVirtualRangesAndRestoresWholeFileWhenRemoved) {
+TEST_F(LibraryScannerTest, CueSheetsAreIgnoredAndEachFileIsOneTrack) {
     const auto source = audio();
-    const auto cue = source.parent_path() / "disc.cue";
-    std::ofstream(cue) << "TITLE \"Album from CUE\"\n"
-                          "PERFORMER \"Cue artist\"\n"
-                          "REM DATE 1998\n"
-                          "FILE \"one.flac\" WAVE\n"
-                          "  TRACK 01 AUDIO\n"
-                          "    TITLE \"First song\"\n"
-                          "    INDEX 01 00:00:10\n"
-                          "  TRACK 02 AUDIO\n"
-                          "    TITLE \"Second song\"\n"
-                          "    INDEX 00 00:01:00\n"
-                          "    INDEX 01 00:01:10\n"
-                          "    PREGAP 00:00:05\n"
-                          "    POSTGAP 00:00:03\n";
+    std::ofstream(source.parent_path() / "disc.cue") << "FILE \"one.flac\" WAVE\n"
+                                                       "  TRACK 01 AUDIO\n"
+                                                       "    INDEX 01 00:00:00\n"
+                                                       "  TRACK 02 AUDIO\n"
+                                                       "    INDEX 01 00:01:00\n";
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
-    const auto root = scanner.addRoot(dir / "music");
-    const auto first = scanner.scan(root);
-    ASSERT_TRUE(first.complete);
-    EXPECT_TRUE(first.diagnostics.empty());
-    auto db = store.openReader();
-    auto rows = db.prepare("SELECT cue_index,title,album,artist,year,start_frame,end_frame,cue_file_id,"
-                           "cue_pregap_75ths,cue_postgap_75ths FROM tracks WHERE cue_index<>0 ORDER BY cue_index");
-    ASSERT_TRUE(rows.step());
-    EXPECT_EQ(rows.integer(0), -1);
-    EXPECT_EQ(rows.integer(5), 0);
-    EXPECT_EQ(rows.integer(6), 5880);
-    EXPECT_EQ(rows.integer(7), count(store, "SELECT id FROM files WHERE kind='cue'"));
-    ASSERT_TRUE(rows.step());
-    EXPECT_EQ(rows.integer(0), 1);
-    EXPECT_EQ(rows.text(1), "First song");
-    EXPECT_EQ(rows.text(2), "Album from CUE");
-    EXPECT_EQ(rows.text(3), "Cue artist");
-    EXPECT_EQ(rows.integer(4), 1998);
-    EXPECT_EQ(rows.integer(5), 5880);
-    EXPECT_EQ(rows.integer(6), 49980); // The stored INDEX 00 pregap belongs to track 1.
-    const auto firstTrack = count(store, "SELECT id FROM tracks WHERE cue_index=1");
-    ASSERT_TRUE(rows.step());
-    EXPECT_EQ(rows.integer(0), 2);
-    EXPECT_EQ(rows.integer(5), 49980);
-    EXPECT_EQ(rows.integer(6), 88200);
-    EXPECT_EQ(rows.integer(8), 5);
-    EXPECT_EQ(rows.integer(9), 3);
-    EXPECT_FALSE(rows.step());
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=0"), 1); // retained as the metadata source
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM library_tracks"), 2);
-    store
-        .write([=](sqlite::Database& w) {
-            w.prepare("INSERT INTO stats(file_id,cue_index,rating) SELECT file_id,1,5 FROM tracks WHERE cue_index=0").run();
-        })
-        .get();
-    EXPECT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT id FROM tracks WHERE cue_index=1"), firstTrack);
-    EXPECT_EQ(count(store, "SELECT rating FROM stats WHERE cue_index=1"), 5);
-    fs::remove(cue);
-    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto report = scanner.scan(scanner.addRoot(dir / "music"));
+    ASSERT_TRUE(report.complete);
+    EXPECT_TRUE(report.diagnostics.empty());
+    EXPECT_EQ(count(store), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index<>0"), 0);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=0"), 1);
-}
-
-TEST_F(LibraryScannerTest, ValidExternalCueOverridesEmbeddedSheetAndRemovalRestoresIt) {
-    const auto source = audio();
-    embedCueSheet(source);
-    const auto cue = source.parent_path() / "disc.cue";
-    std::ofstream(cue) << "FILE \"one.flac\" WAVE\n"
-                          "  TRACK 01 AUDIO\n"
-                          "    TITLE \"External one\"\n"
-                          "    INDEX 01 00:00:10\n"
-                          "  TRACK 02 AUDIO\n"
-                          "    TITLE \"External two\"\n"
-                          "    INDEX 01 00:01:00\n";
-    LibraryStore store(dir / "db");
-    LibraryScanner scanner(store);
-    const auto root = scanner.addRoot(dir / "music");
-    ASSERT_TRUE(scanner.scan(root).complete);
-    {
-        auto db = store.openReader();
-        auto track = db.prepare("SELECT title,start_frame,cue_file_id FROM tracks WHERE cue_index=1");
-        ASSERT_TRUE(track.step());
-        EXPECT_EQ(track.text(0), "External one");
-        EXPECT_EQ(track.integer(1), 5880);
-        EXPECT_NE(track.integer(2), 0);
-    }
-    fs::remove(cue);
-    ASSERT_TRUE(scanner.scan(root).complete);
-    auto db = store.openReader();
-    auto track = db.prepare("SELECT title,start_frame,end_frame,cue_file_id FROM tracks WHERE cue_index=1");
-    ASSERT_TRUE(track.step());
-    EXPECT_EQ(track.text(0), "Track 1");
-    EXPECT_EQ(track.integer(1), 0);
-    EXPECT_EQ(track.integer(2), 44100);
-    EXPECT_TRUE(track.isNull(3));
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=2"), 1);
-}
-
-TEST_F(LibraryScannerTest, RebuildingCueTracksReadsOnlyFilesRecordedWithAnEmbeddedSheet) {
-    embedCueSheet(audio());
-    audio("plain.flac");
-    LibraryStore store(dir / "db");
-    LibraryScanner scanner(store);
-    const auto root = scanner.addRoot(dir / "music");
-    ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE embedded_cue=1 AND path LIKE '%one.flac'"), 1);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE embedded_cue=0 AND path LIKE '%plain.flac'"), 1);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=1"), 1);
-    // A file recorded without a sheet is not read again, so its sheet stays unread while the flag says so.
-    store.write([root](sqlite::Database& db) {
-             db.exec("UPDATE files SET embedded_cue=0 WHERE path LIKE '%one.flac'");
-             db.exec("INSERT OR REPLACE INTO app_state(key,value) VALUES('library_derived_dirty:" + std::to_string(root) + "',1)");
-         })
-        .get();
-    ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=1"), 0);
-    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET embedded_cue=NULL"); }).get();
-    store.write([root](sqlite::Database& db) {
-             db.exec("INSERT OR REPLACE INTO app_state(key,value) VALUES('library_derived_dirty:" + std::to_string(root) + "',1)");
-         })
-        .get();
-    ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=1"), 1);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE embedded_cue IS NULL AND kind='audio'"), 0);
-}
-
-TEST_F(LibraryScannerTest, MultiFileCueUsesFileOrderAndRejectsEscapes) {
-    audio("first.flac");
-    audio("second.flac");
-    const auto cue = dir / "music" / "album" / "disc.cue";
-    std::ofstream(cue) << "FILE \"first.flac\" WAVE\n"
-                          "  TRACK 01 AUDIO\n"
-                          "    TITLE \"One\"\n"
-                          "    INDEX 01 00:00:00\n"
-                          "FILE \"second.flac\" WAVE\n"
-                          "  TRACK 02 AUDIO\n"
-                          "    TITLE \"Two\"\n"
-                          "    INDEX 01 00:00:00\n";
-    LibraryStore store(dir / "db");
-    LibraryScanner scanner(store);
-    const auto root = scanner.addRoot(dir / "music");
-    ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index>0"), 2);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=0"), 2);
-    {
-        auto db = store.openReader();
-        auto rows = db.prepare("SELECT t.cue_index,f.path,t.start_frame,t.end_frame FROM tracks t JOIN files f ON f.id=t.file_id "
-                               "WHERE t.cue_index>0 ORDER BY t.cue_index");
-        ASSERT_TRUE(rows.step());
-        EXPECT_EQ(rows.integer(0), 1);
-        EXPECT_NE(rows.text(1).find("first.flac"), std::string::npos);
-        EXPECT_EQ(rows.integer(2), 0);
-        EXPECT_EQ(rows.integer(3), 88200);
-        ASSERT_TRUE(rows.step());
-        EXPECT_EQ(rows.integer(0), 2);
-        EXPECT_NE(rows.text(1).find("second.flac"), std::string::npos);
-        EXPECT_EQ(rows.integer(2), 0);
-        EXPECT_EQ(rows.integer(3), 88200);
-    }
-    std::ofstream(cue) << "FILE \"..\\..\\outside.flac\" WAVE\n"
-                          "  TRACK 01 AUDIO\n"
-                          "    INDEX 01 00:00:00\n";
-    fs::last_write_time(cue, fs::last_write_time(cue) + std::chrono::seconds(2));
-    const auto invalid = scanner.scan(root);
-    ASSERT_TRUE(invalid.complete);
-    EXPECT_FALSE(invalid.diagnostics.empty());
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index=0"), 2);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index>0"), 0);
-}
-
-TEST_F(LibraryScannerTest, LegacyCueEncodingCanBeSetAndCleared) {
-    const auto source = audio();
-    const auto cue = source.parent_path() / "legacy.cue";
-    const std::wstring title = L"歌名";
-    const int bytesNeeded = WideCharToMultiByte(950, 0, title.data(), int(title.size()), nullptr, 0, nullptr, nullptr);
-    ASSERT_GT(bytesNeeded, 0);
-    std::string encoded(size_t(bytesNeeded), '\0');
-    ASSERT_EQ(WideCharToMultiByte(950, 0, title.data(), int(title.size()), encoded.data(), bytesNeeded, nullptr, nullptr),
-              bytesNeeded);
-    std::ofstream output(cue, std::ios::binary);
-    output << "FILE \"one.flac\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"";
-    output.write(encoded.data(), std::streamsize(encoded.size()));
-    output << "\"\n    INDEX 01 00:00:00\n";
-    output.close();
-    LibraryStore store(dir / "db");
-    LibraryScanner scanner(store);
-    const auto root = scanner.addRoot(dir / "music");
-    ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE cue_index>0"), 0);
-    scanner.setCueEncoding(cue, 950);
-    ASSERT_TRUE(scanner.scan(root).complete);
-    auto db = store.openReader();
-    auto row = db.prepare("SELECT title FROM tracks WHERE cue_index=1");
-    ASSERT_TRUE(row.step());
-    EXPECT_EQ(row.text(0), "歌名");
-    const auto renamedCue = cue.parent_path() / "renamed.cue";
-    fs::rename(cue, renamedCue);
-    ASSERT_TRUE(scanner.scan(root).complete);
-    std::ofstream(renamedCue) << "FILE \"one.flac\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"UTF-8 優先\"\n"
-                                 "    INDEX 01 00:00:00\n";
-    fs::last_write_time(renamedCue, fs::last_write_time(renamedCue) + std::chrono::seconds(2));
-    ASSERT_TRUE(scanner.scan(root).complete);
-    auto utf8db = store.openReader();
-    auto utf8row = utf8db.prepare("SELECT title FROM tracks WHERE cue_index=1");
-    ASSERT_TRUE(utf8row.step());
-    EXPECT_EQ(utf8row.text(0), "UTF-8 優先");
-    scanner.setCueEncoding(renamedCue, std::nullopt);
-    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM app_state WHERE key LIKE 'cue_encoding:%'"), 0);
 }
 
 TEST_F(LibraryScannerTest, OfflineCancelledAndPartialScansRetainUnseenFiles) {
@@ -911,9 +672,8 @@ TEST_F(LibraryScannerTest, FingerprintsDeferDuringAScanAndResumeAfterItFinishes)
     release.set_value();
     released = true;
     ASSERT_TRUE(job.get().complete);
-    const auto finished = scanner.fingerprint(root);
-    EXPECT_TRUE(finished.complete);
-    EXPECT_EQ(finished.hashed, 2);
+    EXPECT_TRUE(scanner.fingerprint(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 2);
 }
 
 TEST_F(LibraryScannerTest, UnchangedPendingFilesReuseTheirRecordedFingerprint) {
@@ -923,7 +683,7 @@ TEST_F(LibraryScannerTest, UnchangedPendingFilesReuseTheirRecordedFingerprint) {
     LibraryScanner scanner(store, [&] { return playing; });
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
-    ASSERT_EQ(scanner.fingerprint(root).hashed, 1);
+    ASSERT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
     store.write([](sqlite::Database& db) { db.exec("UPDATE files SET identity_state=1"); }).get();
     playing = true;
     const auto report = scanner.scan(root);

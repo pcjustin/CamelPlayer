@@ -32,7 +32,7 @@ public:
 };
 
 // The scans in progress (none when idle), summed over roots: files their listings found so far, files they checked,
-// and how many have checked everything and are finishing (applying CUE sheets, regrouping albums).
+// and how many have checked everything and are finishing (regrouping albums).
 struct LibraryScanProgress {
     int64_t scans = 0;
     int64_t found = 0, checked = 0;
@@ -77,7 +77,7 @@ private:
     friend class LibraryScanner;
     std::atomic<unsigned> activeScans_{0};
     std::atomic<int64_t> scanning_{0}, scanFound_{0}, scanChecked_{0}, scanFinishing_{0};
-    // Different roots scan at the same time; scanMutex_ serializes what crosses roots (finishing a scan, CUE edits,
+    // Different roots scan at the same time; scanMutex_ serializes what crosses roots (finishing a scan,
     // absorbing roots), and each root's lock (under jobsMutex_) keeps one scan per root.
     std::mutex scanMutex_;
     std::map<int64_t, std::unique_ptr<std::mutex>> rootLocks_;

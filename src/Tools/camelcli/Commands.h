@@ -26,5 +26,6 @@ int cmdSplitFlac(const Args& args);
 int cmdGenLibrary(const Args& args);
 int cmdBenchOne(const Args& args);
 int cmdBenchDecoders(const Args& args);
+int cmdScanBench(const Args& args);
 
 } // namespace camelcli
