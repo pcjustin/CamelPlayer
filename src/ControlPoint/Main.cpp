@@ -16,6 +16,7 @@
 #include "Server/Api/ServerApi.h"
 #include "Common/util/CrashDump.h"
 #include "Common/util/Log.h"
+#include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 
 namespace {
@@ -89,7 +90,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     SetCurrentProcessExplicitAppUserModelID(L"CamelPlayer.CamelPlayer");
     registerAppUserModelId(L"CamelPlayer.CamelPlayer");
     winrt::init_apartment(winrt::apartment_type::single_threaded);
+    if (camel::measure::measuring())
+        camel::log::info("measure: opening the server %.0f ms after process start", camel::measure::sinceProcessStart());
     auto server = camel::server::createLocalServer();
+    if (camel::measure::measuring())
+        camel::log::info("measure: server opened %.0f ms after process start", camel::measure::sinceProcessStart());
     try {
         const auto s = server->snapshot().settings;
         if (!s.language.empty()) // "" = follow Windows (docs/Plan.md §8.5)

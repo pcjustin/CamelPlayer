@@ -230,7 +230,10 @@ void MainWindow::InitializeComponent() {
     QueueList().ItemsSource(*queueItems_);
     updateQueuePanel();
     Nav().SizeChanged([this](auto&&, auto&&) { fitNavigationPane(); });
-    if (camel::measure::measuring()) Media::CompositionTarget::Rendering([this](auto&&, auto&&) { recordFrame(); });
+    if (camel::measure::measuring()) {
+        camel::log::info("measure: main window built %.0f ms after process start", camel::measure::sinceProcessStart());
+        Media::CompositionTarget::Rendering([this](auto&&, auto&&) { recordFrame(); });
+    }
     ContentLayout().Loaded([this](auto&&, auto&&) {
         if (camel::measure::measuring())
             camel::log::info("measure: main window loaded %.0f ms after process start", camel::measure::sinceProcessStart());

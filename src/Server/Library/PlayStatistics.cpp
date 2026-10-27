@@ -133,10 +133,11 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
     const std::string order = query.metric == PlayMetric::Plays ? " ORDER BY plays DESC,ms DESC" : " ORDER BY ms DESC,plays DESC";
     const std::string available = "(f.available=1 AND r.online=1 AND r.removed IS NULL)";
     // Per-track totals in the period; artist rows fall back to the track's ARTIST when no multivalue rows exist.
+    // CROSS JOIN keeps the played tracks first: left to the planner, it walked every artist value of the library (250 ms).
     const std::string totals = "WITH e AS (SELECT e.file_id,SUM(e.counted) plays,SUM(e.heard_ms) ms "
                                "FROM play_events e" + where + " GROUP BY e.file_id) ";
-    const std::string artists = totals + ",a AS (SELECT e.plays,e.ms,v.value name FROM e JOIN tracks t ON t.file_id=e.file_id "
-                                "JOIN track_values v ON v.track_id=t.id AND v.field='artist' "
+    const std::string artists = totals + ",a AS (SELECT e.plays,e.ms,v.value name FROM e CROSS JOIN tracks t ON t.file_id=e.file_id "
+                                "CROSS JOIN track_values v ON v.track_id=t.id AND v.field='artist' "
                                 "UNION ALL SELECT e.plays,e.ms,t.artist FROM e JOIN tracks t ON t.file_id=e.file_id "
                                 "WHERE coalesce(t.artist,'')<>'' AND NOT EXISTS("
                                 "SELECT 1 FROM track_values v WHERE v.track_id=t.id AND v.field='artist')) ";

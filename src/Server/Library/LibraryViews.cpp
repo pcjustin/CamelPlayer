@@ -234,8 +234,9 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
 LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset, int64_t limit, const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, std::nullopt, token);
+    // CROSS JOIN starts from the play events; the planner otherwise walks every track of the library.
     const std::string played =
-        std::string(" FROM play_events e JOIN tracks t ON t.file_id=e.file_id") + kJoins +
+        std::string(" FROM play_events e CROSS JOIN tracks t ON t.file_id=e.file_id") + kJoins +
         "WHERE" + kVisible + " AND t.album_id IS NOT NULL";
     LibraryAlbumPage page;
     page.revision = q.revision;

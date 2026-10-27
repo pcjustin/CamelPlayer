@@ -9,9 +9,13 @@
 #include "HomeView.g.cpp"
 #endif
 
+#include <future>
+
 #include "ArtworkLoader.h"
 #include "BrowseItem.h"
 #include "UiText.h"
+#include "Common/util/Log.h"
+#include "Common/util/Measure.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -84,6 +88,7 @@ winrt::fire_and_forget HomeView::refresh() {
     auto server = server_;
     auto queue = DispatcherQueue();
     co_await winrt::resume_background();
+    const auto queryStart = camel::measure::now();
     auto data = std::make_shared<HomeData>();
     try {
         SYSTEMTIME now{};
@@ -95,18 +100,32 @@ winrt::fire_and_forget HomeView::refresh() {
             query.historyLimit = 0;
             return server->playStatistics(query);
         };
+        // Albums, tracks and artists each order the whole library first (a few hundred ms on a large one), so they run
+        // on their own readers and Home waits for the slowest instead of the sum.
+        auto added = std::async(std::launch::async, [&] {
+            return server->browseAlbums(AlbumSort::Added, std::nullopt, 0, kRowItems, std::nullopt);
+        });
+        auto tracks = std::async(std::launch::async, [&] {
+            return server->browseTrackRows(TrackSort::Title, false, 0, 1, std::nullopt).total;
+        });
+        auto artists = std::async(std::launch::async, [&] {
+            return server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total;
+        });
         data->today = overview(localStartMs(0), 1).overview;
         data->week = overview(localStartMs((now.wDayOfWeek + 6) % 7), 1).overview; // weeks start on Monday
         data->month = overview(localStartMs(0, Start::Month), 1).overview;
         data->year = overview(localStartMs(0, Start::Year), 1).overview;
         data->all = overview(std::nullopt, kRowItems);
         data->played = server->recentlyPlayedAlbums(0, kRowItems);
-        data->added = server->browseAlbums(AlbumSort::Added, std::nullopt, 0, kRowItems, std::nullopt);
-        data->tracks = server->browseTrackRows(TrackSort::Title, false, 0, 1, std::nullopt).total;
-        data->artists = server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total;
+        data->added = added.get();
+        data->tracks = tracks.get();
+        data->artists = artists.get();
     } catch (const std::exception&) {
         co_return; // no library yet, or it changed while reading; the next visit rereads
     }
+    if (camel::measure::measuring())
+        camel::log::info("measure: home data read in %.0f ms, %.0f ms after process start",
+                         camel::measure::milliseconds(queryStart, camel::measure::now()), camel::measure::sinceProcessStart());
     queue.TryEnqueue([weak, generation, data] {
         auto self = weak.get();
         if (!self || generation != self->generation_) return;
@@ -159,6 +178,8 @@ winrt::fire_and_forget HomeView::refresh() {
                          formatted(L"Library_Tracks", {data->tracks}) + L" · " +
                          formatted(L"Search_ArtistCount", {data->artists});
         self->LibraryCounts().Text(data->tracks ? counts : tr(L"Library_Empty/Text"));
+        if (camel::measure::measuring())
+            camel::log::info("measure: home shown %.0f ms after process start", camel::measure::sinceProcessStart());
     });
 }
 
@@ -199,6 +220,11 @@ void HomeView::OnCoverLoaded(Windows::Foundation::IInspectable const& sender, Ro
     const auto value = image.DataContext().try_as<CamelPlayer::BrowseItem>();
     if (!value || !server_) return;
     const auto& row = get_self<BrowseItem>(value)->row();
+    if (camel::measure::measuring() && !covers_.contains(winrt::get_abi(image)))
+        image.RegisterPropertyChangedCallback(Image::SourceProperty(), [](DependencyObject const& sender, DependencyProperty const&) {
+            if (sender.as<Image>().Source())
+                camel::log::info("measure: home cover shown %.0f ms after process start", camel::measure::sinceProcessStart());
+        });
     auto& token = covers_[winrt::get_abi(image)];
     token.cancel();
     token = {};
