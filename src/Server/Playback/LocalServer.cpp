@@ -29,6 +29,7 @@
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
 #include "Server/Playback/QueueSession.h"
+#include "Server/Support/DiagnosticBundle.h"
 
 namespace camel::server {
 namespace {
@@ -167,8 +168,8 @@ bool SnapshotCursor::accept(const Snapshot& s) {
 class LocalServer::Impl {
 public:
     Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
-        : settings_(settings), settingsFile_(std::move(settingsFile)),
-          engine_(std::make_unique<audio::PlaybackEngine>(settings, std::move(factory))) {
+        : settings_(settings), settingsFile_(std::move(settingsFile)), factory_(std::move(factory)),
+          engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)) {
         published_.settings = settingsDto(settings_);
         published_.playback = playback(engine_->snapshot());
         const auto directory =
@@ -267,6 +268,28 @@ public:
     Snapshot snapshot() const {
         std::lock_guard lock(mutex_);
         return published_;
+    }
+
+    void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths, const std::string& appVersion) const {
+        DiagnosticInput input;
+        input.dataDirectory = std::filesystem::absolute(settingsFile_).parent_path();
+        input.includePaths = includePaths;
+        input.appVersion = appVersion;
+        input.snapshot = snapshot();
+        if (library_) input.roots = server::libraryRoots(*library_);
+        if (input.snapshot.playback.state != PlaybackState::Stopped) {
+            input.capabilities = "Format support was not probed: the device was in use.\n";
+        } else {
+            const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            try {
+                const Settings settings = loadSettings(settingsFile_);
+                input.capabilities = probeCapabilities(*factory_(settings), settings);
+            } catch (const std::exception& e) {
+                input.capabilities = std::string("Format support could not be probed: ") + e.what() + "\n";
+            }
+            if (SUCCEEDED(initialized)) CoUninitialize();
+        }
+        server::writeDiagnosticBundle(file, input);
     }
 
     void setListener(std::function<void(const Event&)> listener) {
@@ -1238,6 +1261,7 @@ private:
 
     Settings settings_;
     std::filesystem::path settingsFile_;
+    audio::OutputFactory factory_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
     mutable std::atomic<int64_t> artworkUntil_{0}; // steady_clock ticks; read by scan workers, so declared before them
     std::unique_ptr<ArtworkCache> artwork_;
@@ -1425,6 +1449,10 @@ PlaylistChange LocalServer::importPlaylist(const std::filesystem::path& file) {
 }
 void LocalServer::exportPlaylist(int64_t playlist, const std::filesystem::path& file) const {
     exportPlaylistFile(impl_->library(), playlist, file);
+}
+void LocalServer::writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
+                                        const std::string& appVersion) const {
+    impl_->writeDiagnosticBundle(file, includePaths, appVersion);
 }
 
 std::shared_ptr<IServer> createLocalServer() {

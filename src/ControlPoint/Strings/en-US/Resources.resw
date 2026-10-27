@@ -39,6 +39,13 @@
   <data name="Settings_Convert.Header" xml:space="preserve"><value>When the device does not take a file as it is</value></data>
   <data name="Convert_Off" xml:space="preserve"><value>Skip it and tell me</value></data>
   <data name="Convert_On" xml:space="preserve"><value>Convert it (resample, downmix or reduce depth)</value></data>
+  <data name="Settings_ConvertDsd.Header" xml:space="preserve"><value>When the device takes neither native DSD nor DoP</value></data>
+  <data name="ConvertDsd_On" xml:space="preserve"><value>Convert it to PCM</value></data>
+  <data name="Settings_DsdOutput.Header" xml:space="preserve"><value>DSD output</value></data>
+  <data name="Dsd_Native" xml:space="preserve"><value>Native DSD</value></data>
+  <data name="Dsd_Dop" xml:space="preserve"><value>DoP (DSD over PCM)</value></data>
+  <data name="Dsd_Pcm" xml:space="preserve"><value>Convert to PCM</value></data>
+  <data name="Settings_DsdPcmRate.Header" xml:space="preserve"><value>DSD to PCM sample rate</value></data>
   <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>Resampling quality</value></data>
   <data name="Quality_Quick" xml:space="preserve"><value>Quick</value></data>
   <data name="Quality_High" xml:space="preserve"><value>High</value></data>
@@ -238,6 +245,12 @@
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer cannot find or create its data folder in %LOCALAPPDATA%, so it will not start. Check that the folder exists and that your account can write to it.</value></data>
   <data name="Settings_About.Text" xml:space="preserve"><value>About</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
+  <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>Diagnostics</value></data>
+  <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>Collects logs, settings, the output devices and the formats they accept, and the newest crash report into one zip file to attach to a GitHub issue.</value></data>
+  <data name="Settings_DiagnosticPaths.Content" xml:space="preserve"><value>Include file and folder paths</value></data>
+  <data name="Settings_DiagnosticButton.Content" xml:space="preserve"><value>Create diagnostic bundle…</value></data>
+  <data name="Diagnostic_Saved" xml:space="preserve"><value>Diagnostic bundle saved</value></data>
+  <data name="Diagnostic_Failed" xml:space="preserve"><value>Could not create the diagnostic bundle</value></data>
   <data name="Reset_Title.Text" xml:space="preserve"><value>Reset and data</value></data>
   <data name="Reset_DataHeader.Text" xml:space="preserve"><value>Data location</value></data>
   <data name="Reset_Sizes" xml:space="preserve"><value>Library {0} · Covers {1} · Settings {2} · Logs {3}</value></data>

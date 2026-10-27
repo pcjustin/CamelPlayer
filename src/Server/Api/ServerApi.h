@@ -305,6 +305,9 @@ public:
     virtual bool undoPlaylistChange(const PlaylistUndo& undo) = 0;
     virtual PlaylistChange importPlaylist(const std::filesystem::path& file) = 0;
     virtual void exportPlaylist(int64_t playlist, const std::filesystem::path& file) const = 0;
+    // The diagnostic bundle (docs/Plan.md §17.5); probes the selected output device only while playback is stopped.
+    virtual void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
+                                       const std::string& appVersion) const = 0;
 };
 
 std::shared_ptr<IServer> createLocalServer();

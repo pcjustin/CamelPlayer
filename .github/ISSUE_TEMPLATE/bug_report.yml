@@ -1,0 +1,56 @@
+name: Problem report
+description: Something in CamelPlayer does not work as expected.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please fill in every field; the diagnostic bundle usually tells more than a description.
+  - type: input
+    id: version
+    attributes:
+      label: CamelPlayer version
+      description: Shown in Settings > About.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Shown in the diagnostic bundle's system.txt, or run `winver`.
+      placeholder: "Windows 11 24H2, build 26100"
+    validations:
+      required: true
+  - type: input
+    id: dac
+    attributes:
+      label: DAC or audio device
+      placeholder: "Chord DAVE (USB)"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Output backend
+      options:
+        - WASAPI exclusive
+        - WASAPI shared
+        - ASIO
+        - Kernel Streaming
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead. Include the file format (for example FLAC 24/96 or DSD128) when playback is involved.
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Diagnostic bundle
+      description: |
+        In Settings > About, choose "Create diagnostic bundle…" and drag the zip file here. File and folder paths are left out unless you check "Include file and folder paths". It holds the logs, settings, output devices with the formats they accept, and the newest crash report.
+    validations:
+      required: true

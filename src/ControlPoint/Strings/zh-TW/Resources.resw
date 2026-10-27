@@ -39,6 +39,13 @@
   <data name="Settings_Convert.Header" xml:space="preserve"><value>裝置無法直接接受檔案格式時</value></data>
   <data name="Convert_Off" xml:space="preserve"><value>略過並通知我</value></data>
   <data name="Convert_On" xml:space="preserve"><value>轉換（重新取樣、降混或降低位元深度）</value></data>
+  <data name="Settings_ConvertDsd.Header" xml:space="preserve"><value>裝置不接受原生 DSD 也不接受 DoP 時</value></data>
+  <data name="ConvertDsd_On" xml:space="preserve"><value>轉換為 PCM</value></data>
+  <data name="Settings_DsdOutput.Header" xml:space="preserve"><value>DSD 輸出</value></data>
+  <data name="Dsd_Native" xml:space="preserve"><value>原生 DSD</value></data>
+  <data name="Dsd_Dop" xml:space="preserve"><value>DoP（DSD over PCM）</value></data>
+  <data name="Dsd_Pcm" xml:space="preserve"><value>轉換為 PCM</value></data>
+  <data name="Settings_DsdPcmRate.Header" xml:space="preserve"><value>DSD 轉 PCM 取樣率</value></data>
   <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>重新取樣品質</value></data>
   <data name="Quality_Quick" xml:space="preserve"><value>快速</value></data>
   <data name="Quality_High" xml:space="preserve"><value>高</value></data>
@@ -238,6 +245,12 @@
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer 找不到或無法建立 %LOCALAPPDATA% 中的資料夾，因此無法啟動。請確認該資料夾存在且你的帳號可以寫入。</value></data>
   <data name="Settings_About.Text" xml:space="preserve"><value>關於</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
+  <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>診斷資料</value></data>
+  <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>將紀錄檔、設定、輸出裝置與其支援的格式，以及最近一次的當機報告收集成一個 zip 檔，可附加在 GitHub issue 中。</value></data>
+  <data name="Settings_DiagnosticPaths.Content" xml:space="preserve"><value>包含檔案與資料夾路徑</value></data>
+  <data name="Settings_DiagnosticButton.Content" xml:space="preserve"><value>建立診斷資料…</value></data>
+  <data name="Diagnostic_Saved" xml:space="preserve"><value>診斷資料已儲存</value></data>
+  <data name="Diagnostic_Failed" xml:space="preserve"><value>無法建立診斷資料</value></data>
   <data name="Reset_Title.Text" xml:space="preserve"><value>重置與資料</value></data>
   <data name="Reset_DataHeader.Text" xml:space="preserve"><value>資料位置</value></data>
   <data name="Reset_Sizes" xml:space="preserve"><value>媒體庫 {0} · 封面 {1} · 設定 {2} · 紀錄檔 {3}</value></data>

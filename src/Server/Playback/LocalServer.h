@@ -58,6 +58,8 @@ public:
     bool undoPlaylistChange(const PlaylistUndo& undo) override;
     PlaylistChange importPlaylist(const std::filesystem::path& file) override;
     void exportPlaylist(int64_t playlist, const std::filesystem::path& file) const override;
+    void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
+                               const std::string& appVersion) const override;
 
 private:
     class Impl;

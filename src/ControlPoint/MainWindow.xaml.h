@@ -35,6 +35,8 @@ struct MainWindow : MainWindowT<MainWindow> {
                              Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const&);
     winrt::fire_and_forget OnResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnOpenDataFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnDiagnosticBundleClick(Windows::Foundation::IInspectable const&,
+                                                   Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnGuideClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnFormatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

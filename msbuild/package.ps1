@@ -56,6 +56,7 @@ New-Item -ItemType Directory -Force $lic | Out-Null
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
 Copy-Item (Join-Path $root 'third_party\licenses\*') $lic -Recurse -Force
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $stage
+Copy-Item (Join-Path $root 'guide\*.md') $stage
 Copy-Item (Join-Path $root 'third_party\dependencies.json') (Join-Path $stage 'dependencies.json')
 
 # Registry archives can contain timestamps outside ZIP's supported range.

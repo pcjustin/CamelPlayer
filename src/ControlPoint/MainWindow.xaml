@@ -163,6 +163,7 @@
                                 <InfoBar x:Name="BackendNotice" Severity="Warning" IsOpen="False" IsClosable="True" />
                                 <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="ConvertDsdCombo" x:Uid="Settings_ConvertDsd" Width="520" SelectionChanged="OnSettingChanged" />
                                 <ToggleSwitch x:Name="AutoplaySwitch" x:Uid="Settings_Autoplay" Toggled="OnAutoplayToggled" />
 
                                 <StackPanel x:Name="WasapiGroup" Spacing="12">
@@ -173,6 +174,8 @@
                                     <ComboBox x:Name="WasapiModeCombo" x:Uid="Settings_WasapiMode" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
                                         <StackPanel Spacing="12">
                                             <ComboBox x:Name="WasapiPeriodCombo" x:Uid="Settings_Period" Width="360" SelectionChanged="OnSettingChanged" />
@@ -205,6 +208,8 @@
                                                    SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
                                     </StackPanel>
                                     <ComboBox x:Name="AsioRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
                                         <StackPanel Spacing="12">
                                             <NumberBox x:Name="AsioBufferBox" x:Uid="Settings_AsioBuffer" Width="200" HorizontalAlignment="Left" Minimum="0" Maximum="65536"
@@ -225,6 +230,8 @@
                                     <ComboBox x:Name="KsModeCombo" x:Uid="Settings_KsMode" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
                                         <StackPanel Spacing="12">
                                             <NumberBox x:Name="KsBufferBox" x:Uid="Settings_KsBuffer" Width="200" HorizontalAlignment="Left" Minimum="2" Maximum="1000"
@@ -399,6 +406,10 @@
                                     <TextBlock x:Name="AboutVersionText" Style="{StaticResource BodyStrongTextBlockStyle}" IsTextSelectionEnabled="True" />
                                     <TextBlock x:Uid="Settings_AboutLicense" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
+                                <TextBlock x:Uid="Settings_Diagnostics" Style="{StaticResource GroupHeaderStyle}" />
+                                <TextBlock x:Uid="Settings_DiagnosticsText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <CheckBox x:Name="DiagnosticPathsCheck" x:Uid="Settings_DiagnosticPaths" />
+                                <Button x:Name="DiagnosticButton" x:Uid="Settings_DiagnosticButton" Click="OnDiagnosticBundleClick" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

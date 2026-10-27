@@ -116,6 +116,25 @@ uint32_t rateAt(int index) {
     return index > 0 && size_t(index) <= std::size(kFixedRates) ? kFixedRates[size_t(index) - 1] : 0;
 }
 
+std::vector<hstring> dsdRateItems() {
+    std::vector<hstring> items;
+    for (uint32_t rate : kDsdPcmRates) {
+        wchar_t text[32];
+        swprintf(text, 32, L"%.1f kHz", rate / 1000.0);
+        items.emplace_back(text);
+    }
+    return items;
+}
+
+int dsdRateIndex(uint32_t rate) {
+    const auto at = std::find(std::begin(kDsdPcmRates), std::end(kDsdPcmRates), rate);
+    return at == std::end(kDsdPcmRates) ? 1 : int(at - std::begin(kDsdPcmRates)); // 176.4 kHz by default
+}
+
+uint32_t dsdRateAt(int index) {
+    return kDsdPcmRates[std::clamp<size_t>(size_t(index), 0, std::size(kDsdPcmRates) - 1)];
+}
+
 void showTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, const PlaybackTiming& t) {
     predecode.Value(t.predecodeSeconds);
     silence.Value(t.formatChangeSilenceMs);
@@ -361,6 +380,7 @@ void MainWindow::populateSettings() {
     fill(ConvertCombo(), {tr(L"Convert_Off"), tr(L"Convert_On")}, settings_.convertWhenUnsupported ? 1 : 0);
     fill(ResampleQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
          int(settings_.resampleQuality));
+    fill(ConvertDsdCombo(), {tr(L"Convert_Off"), tr(L"ConvertDsd_On")}, settings_.convertDsdWhenUnsupported ? 1 : 0);
     AutoplaySwitch().IsOn(settings_.autoplay);
     QueueAutoplaySwitch().IsOn(settings_.autoplay);
     applyHotkeys();
@@ -377,6 +397,11 @@ void MainWindow::populateSettings() {
     const std::vector<hstring> tasks = {L"Pro Audio", L"Playback", tr(L"Mmcss_Disabled")};
     const std::vector<hstring> priorities = {tr(L"Priority_Normal"), tr(L"Priority_High"), tr(L"Priority_Critical")};
     fill(WasapiRateCombo(), rates, rateIndex(settings_.wasapi.fixedRate));
+    // WASAPI and KS have no native DSD; a stored Native plays as DoP.
+    const std::vector<hstring> dopOrPcm = {tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")};
+    const auto dsdRates = dsdRateItems();
+    fill(WasapiDsdCombo(), dopOrPcm, settings_.wasapi.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(WasapiDsdRateCombo(), dsdRates, dsdRateIndex(settings_.wasapi.dsdPcmRate));
     WasapiPollBufferBox().Value(settings_.wasapi.pollBufferMs);
     fill(WasapiMmcssTaskCombo(), tasks, int(settings_.wasapi.mmcssTask));
     fill(WasapiMmcssPriorityCombo(), priorities, int(settings_.wasapi.mmcssPriority));
@@ -386,6 +411,8 @@ void MainWindow::populateSettings() {
     AsioLeftBox().Value(settings_.asio.outLeft + 1);
     AsioRightBox().Value(settings_.asio.outRight + 1);
     fill(AsioRateCombo(), rates, rateIndex(settings_.asio.fixedRate));
+    fill(AsioDsdCombo(), {tr(L"Dsd_Native"), tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")}, int(settings_.asio.dsdOutput));
+    fill(AsioDsdRateCombo(), dsdRates, dsdRateIndex(settings_.asio.dsdPcmRate));
     showTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")},
@@ -395,6 +422,8 @@ void MainWindow::populateSettings() {
     KsPacketMsBox().Value(settings_.ks.packetMs);
     fill(KsFormatCombo(), formats, formatIndex(settings_.ks.sampleType));
     fill(KsRateCombo(), rates, rateIndex(settings_.ks.fixedRate));
+    fill(KsDsdCombo(), dopOrPcm, settings_.ks.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(KsDsdRateCombo(), dsdRates, dsdRateIndex(settings_.ks.dsdPcmRate));
     fill(KsMmcssTaskCombo(), tasks, int(settings_.ks.mmcssTask));
     fill(KsMmcssPriorityCombo(), priorities, int(settings_.ks.mmcssPriority));
     showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
@@ -473,6 +502,7 @@ void MainWindow::readSettingsFromUi() {
     }
     settings_.convertWhenUnsupported = idx(ConvertCombo()) == 1;
     settings_.resampleQuality = ResampleQuality(std::min(idx(ResampleQualityCombo()), 2));
+    settings_.convertDsdWhenUnsupported = idx(ConvertDsdCombo()) == 1;
     settings_.autoplay = AutoplaySwitch().IsOn();
 
     const int dev = idx(WasapiDeviceCombo());
@@ -486,6 +516,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), settings_.wasapi.customPeriodMs);
     settings_.wasapi.sampleType = kFormatChoices[std::min(idx(WasapiFormatCombo()), 4)];
     settings_.wasapi.fixedRate = rateAt(idx(WasapiRateCombo()));
+    settings_.wasapi.dsdOutput = idx(WasapiDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
+    settings_.wasapi.dsdPcmRate = dsdRateAt(idx(WasapiDsdRateCombo()));
     settings_.wasapi.pollBufferMs = std::clamp(numberOr(WasapiPollBufferBox(), settings_.wasapi.pollBufferMs), 20.0, 2000.0);
     settings_.wasapi.mmcssTask = MmcssTask(std::min(idx(WasapiMmcssTaskCombo()), 2));
     settings_.wasapi.mmcssPriority = MmcssPriority(std::min(idx(WasapiMmcssPriorityCombo()), 2));
@@ -497,6 +529,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.asio.outLeft = int(numberOr(AsioLeftBox(), settings_.asio.outLeft + 1)) - 1;
     settings_.asio.outRight = int(numberOr(AsioRightBox(), settings_.asio.outRight + 1)) - 1;
     settings_.asio.fixedRate = rateAt(idx(AsioRateCombo()));
+    settings_.asio.dsdOutput = DsdOutput(std::min(idx(AsioDsdCombo()), 2));
+    settings_.asio.dsdPcmRate = dsdRateAt(idx(AsioDsdRateCombo()));
     readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     const int pin = idx(KsDeviceCombo());
@@ -507,6 +541,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.packetMs = numberOr(KsPacketMsBox(), settings_.ks.packetMs);
     settings_.ks.sampleType = kFormatChoices[std::min(idx(KsFormatCombo()), 4)];
     settings_.ks.fixedRate = rateAt(idx(KsRateCombo()));
+    settings_.ks.dsdOutput = idx(KsDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
+    settings_.ks.dsdPcmRate = dsdRateAt(idx(KsDsdRateCombo()));
     settings_.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
     settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
@@ -1557,6 +1593,49 @@ winrt::fire_and_forget MainWindow::showDataLocation() {
 
 void MainWindow::OnOpenDataFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     ShellExecuteW(nullptr, L"open", camel::dataDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// Settings › About (docs/Plan.md §17.5): the diagnostic bundle for GitHub issues, saved where the user picks.
+winrt::fire_and_forget MainWindow::OnDiagnosticBundleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    if (!server_) co_return;
+    auto dialog = winrt::create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);
+    constexpr COMDLG_FILTERSPEC types[] = {{L"Zip", L"*.zip"}};
+    dialog->SetFileTypes(1, types);
+    dialog->SetDefaultExtension(L"zip");
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    std::array<wchar_t, 64> name{};
+    swprintf(name.data(), name.size(), L"CamelPlayer-diagnostics-%04u%02u%02u-%02u%02u%02u.zip", t.wYear, t.wMonth, t.wDay,
+             t.wHour, t.wMinute, t.wSecond);
+    dialog->SetFileName(name.data());
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
+        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        co_return;
+    const std::filesystem::path file(path);
+    CoTaskMemFree(path);
+    const auto checked = DiagnosticPathsCheck().IsChecked();
+    const bool includePaths = checked && checked.Value();
+    DiagnosticButton().IsEnabled(false);
+    auto server = server_;
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await resume_background();
+    bool done = true;
+    try {
+        server->writeDiagnosticBundle(file, includePaths, CAMEL_VERSION_STRING);
+    } catch (const std::exception& e) {
+        camel::log::warn("diagnostic bundle: %s", e.what());
+        done = false;
+    }
+    queue.TryEnqueue([weak, done, file] {
+        auto self = weak.get();
+        if (!self) return;
+        self->DiagnosticButton().IsEnabled(true);
+        self->showPlaylistNotice(tr(done ? L"Diagnostic_Saved" : L"Diagnostic_Failed"), hstring(file.wstring()), !done);
+    });
 }
 
 // Settings › Reset (docs/Plan.md §8.2): every reset says what it changes and asks first; resetting everything also
