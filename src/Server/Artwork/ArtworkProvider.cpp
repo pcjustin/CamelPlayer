@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <fstream>
 #include <iterator>
+#include <utility>
 #include <taglib/flacfile.h>
 #include <taglib/wavfile.h>
 #include <taglib/aifffile.h>
@@ -36,7 +37,7 @@ std::wstring lower(std::wstring s) {
 
 // The best-ranked cover image directly in `folder`.
 std::optional<ArtworkCandidate> folderImageFile(const std::filesystem::path& folder, const std::string& source,
-                                            const CancellationToken& token) {
+                                                const CancellationToken& token) {
     std::error_code ec;
     if (folder.empty() || !std::filesystem::is_directory(folder, ec)) return std::nullopt;
     std::optional<std::pair<size_t, std::filesystem::path>> best; // rank, path
@@ -58,8 +59,8 @@ std::optional<ArtworkCandidate> folderImageFile(const std::filesystem::path& fol
 
 class ImageStream : public TagLib::FileStream {
 public:
-    ImageStream(const std::filesystem::path& path, const CancellationToken& token)
-        : FileStream(path.c_str(), true), token_(token) {}
+    ImageStream(const std::filesystem::path& path, CancellationToken token)
+        : FileStream(path.c_str(), true), token_(std::move(token)) {}
     TagLib::ByteVector readBlock(size_t length) override {
         if (token_.cancelled() || length > budget_) throw std::runtime_error("artwork metadata read limit");
         budget_ -= length;

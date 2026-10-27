@@ -27,7 +27,7 @@ public:
     explicit FileView(const std::filesystem::path& path)
         : h_(CreateFileW(longPath(path).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                          OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr)),
-          buffer_(64 * 1024) {
+          buffer_(size_t{64} * 1024) {
         LARGE_INTEGER size{};
         if (h_ == INVALID_HANDLE_VALUE || !GetFileSizeEx(h_, &size)) {
             if (h_ != INVALID_HANDLE_VALUE) CloseHandle(h_);
@@ -92,7 +92,8 @@ private:
         bool dropped = false;
         for (bool last = false; !last;) {
             uint8_t block[4];
-            if (copy(at += 4, block, 4) != 4) return;
+            at += 4;
+            if (copy(at, block, 4) != 4) return;
             last = block[0] & 0x80;
             const sf_count_t length = sf_count_t(block[1]) << 16 | sf_count_t(block[2]) << 8 | block[3];
             const uint8_t type = block[0] & 0x7f;

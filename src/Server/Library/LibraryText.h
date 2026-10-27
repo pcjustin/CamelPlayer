@@ -12,7 +12,9 @@
 #include <thread>
 
 namespace camel::server {
-namespace sqlite { class Database; }
+namespace sqlite {
+class Database;
+}
 class LibraryStore;
 
 std::string normalizeLibrarySearch(std::string_view text);
@@ -24,10 +26,11 @@ void updateLibraryAlbumText(sqlite::Database& db, int64_t album, std::wstring_vi
 class LibraryTextIndex {
 public:
     explicit LibraryTextIndex(LibraryStore& store,
-                             std::function<std::vector<uint8_t>(std::wstring_view)> version = libraryNlsVersion);
+                              std::function<std::vector<uint8_t>(std::wstring_view)> version = libraryNlsVersion);
     ~LibraryTextIndex();
     void setLocale(std::wstring locale);
     void waitIdle();
+
 private:
     void run(std::stop_token stop);
     LibraryStore& store_;

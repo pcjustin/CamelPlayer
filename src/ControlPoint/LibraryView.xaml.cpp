@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <random>
+#include <utility>
 
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
@@ -69,8 +70,10 @@ hstring formatLabel(const LibraryAlbumFormat& f) {
     std::ranges::transform(name, name.begin(), towupper);
     if (f.format == "dsd" && f.sampleRate > 0) return hstring(L"DSD" + std::to_wstring(f.sampleRate / 44100));
     wchar_t rate[32]{};
-    if (f.sampleRate % 1000 == 0) swprintf_s(rate, L"%lld kHz", static_cast<long long>(f.sampleRate / 1000));
-    else swprintf_s(rate, L"%.1f kHz", double(f.sampleRate) / 1000.0);
+    if (f.sampleRate % 1000 == 0)
+        swprintf_s(rate, L"%lld kHz", static_cast<long long>(f.sampleRate / 1000));
+    else
+        swprintf_s(rate, L"%.1f kHz", double(f.sampleRate) / 1000.0);
     static constexpr std::string_view kLossy[] = {"mp3", "aac", "m4a", "ogg", "vorbis", "opus", "wma"};
     const bool lossy = std::ranges::find(kLossy, f.format) != std::end(kLossy);
     std::wstring text = name;
@@ -107,8 +110,8 @@ ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
 ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, const Texts& texts) {
     std::wstring number;
     if (t.number) number = (discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L". ";
-    ui::BrowseRow row{t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {},
-                      duration(t.durationMs)};
+    ui::BrowseRow row{
+        t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {}, duration(t.durationMs)};
     row.file = t.track.file;
     row.marks = true;
     row.favorite = t.favorite;
@@ -157,16 +160,20 @@ void LibraryView::show(hstring const& tag, hstring const& title) {
     if (!server_) return;
     View view;
     view.title = title;
-    static constexpr std::pair<std::wstring_view, SmartList> kSmart[] = {
-        {L"smart:added", SmartList::RecentlyAdded},       {L"smart:mostPlayed", SmartList::MostPlayed},
-        {L"smart:recentlyPlayed", SmartList::RecentlyPlayed}, {L"smart:favorites", SmartList::Favorites},
-        {L"smart:neverPlayed", SmartList::NeverPlayed}};
+    static constexpr std::pair<std::wstring_view, SmartList> kSmart[] = {{L"smart:added", SmartList::RecentlyAdded},
+                                                                         {L"smart:mostPlayed", SmartList::MostPlayed},
+                                                                         {L"smart:recentlyPlayed", SmartList::RecentlyPlayed},
+                                                                         {L"smart:favorites", SmartList::Favorites},
+                                                                         {L"smart:neverPlayed", SmartList::NeverPlayed}};
     for (const auto& [name, list] : kSmart)
         if (tag == name) view.smart = list;
     view.favoriteAlbums = tag == L"smart:favoriteAlbums";
-    if (tag == L"albums" || view.favoriteAlbums) view.mode = Mode::Albums;
-    else if (tag == L"tracks" || view.smart) view.mode = Mode::Tracks;
-    else if (tag == L"folders") view.mode = Mode::Folders;
+    if (tag == L"albums" || view.favoriteAlbums)
+        view.mode = Mode::Albums;
+    else if (tag == L"tracks" || view.smart)
+        view.mode = Mode::Tracks;
+    else if (tag == L"folders")
+        view.mode = Mode::Folders;
     else {
         view.mode = Mode::Groups;
         view.field = tag == L"composers" ? LibraryGroupField::Composer
@@ -380,7 +387,7 @@ void LibraryView::fillSortChoices() {
         keys = {L"Library_SortTitle", L"Library_SortArtist", L"Library_SortYear", L"Library_SortAdded"};
         selected = int(albumSort_);
     } else if (current_.mode == Mode::Tracks) {
-        keys = {L"Library_SortTitle", L"Library_SortArtist", L"Library_SortAlbum",
+        keys = {L"Library_SortTitle", L"Library_SortArtist",   L"Library_SortAlbum",
                 L"Library_SortYear",  L"Library_SortDuration", L"Library_SortAdded"};
         selected = int(trackSort_);
     }
@@ -415,7 +422,7 @@ void LibraryView::startCollection() {
         };
     } else if (current_.mode == Mode::Albums) {
         fetch = [server, texts, sort = albumSort_, filter = current_.filter](int64_t offset, int64_t limit,
-                                                                              std::optional<uint64_t> revision) {
+                                                                             std::optional<uint64_t> revision) {
             return albumPage(server->browseAlbums(sort, filter, offset, limit, revision), texts);
         };
     } else if (current_.mode == Mode::Groups) {
@@ -424,7 +431,11 @@ void LibraryView::startCollection() {
             ui::BrowsePage out{page.revision, page.total, {}};
             // Tracks not yet grouped into albums would make a zero count misleading.
             for (const auto& g : page.groups)
-                out.rows.push_back({0, g.name, orUnknown(g.name, texts), g.albums ? counted(texts.albums, g.albums) : hstring{}, {},
+                out.rows.push_back({0,
+                                    g.name,
+                                    orUnknown(g.name, texts),
+                                    g.albums ? counted(texts.albums, g.albums) : hstring{},
+                                    {},
                                     counted(texts.tracks, g.tracks)});
             return out;
         };
@@ -440,7 +451,7 @@ void LibraryView::startCollection() {
         };
     } else {
         fetch = [server, texts, sort = trackSort_, descending = descending_](int64_t offset, int64_t limit,
-                                                                              std::optional<uint64_t> revision) {
+                                                                             std::optional<uint64_t> revision) {
             const auto page = server->browseTrackRows(sort, descending, offset, limit, revision);
             ui::BrowsePage out{page.revision, page.total, {}};
             for (const auto& t : page.tracks) {
@@ -546,7 +557,8 @@ void LibraryView::queueItem(const ui::BrowseRow& row, bool playNext) {
     if (current_.mode == Mode::Folders && row.folder) {
         queueFolder(row.id, playNext);
     } else if (current_.mode == Mode::AlbumDetail) {
-        const auto track = std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
+        const auto track =
+            std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
         if (track != detailTracks_.end()) queueTracks({*track}, playNext);
     } else if ((current_.mode == Mode::Tracks || current_.mode == Mode::Folders || current_.mode == Mode::Search) &&
                !row.value.empty()) {
@@ -568,8 +580,10 @@ void LibraryView::queueFolder(int64_t folder, bool playNext, bool playNow) {
             for (const auto& child : listing.folders) pending.push_back(child.id);
         }
         return std::function<void()>([this, tracks = std::move(tracks), playNext, playNow] {
-            if (playNow) playTracks(tracks, 0);
-            else queueTracks(tracks, playNext);
+            if (playNow)
+                playTracks(tracks, 0);
+            else
+                queueTracks(tracks, playNext);
         });
     });
 }
@@ -580,7 +594,8 @@ std::optional<PlaylistSource> LibraryView::sourceOf(Target target, Mode mode, Li
         if (row.id) return PlaylistSource{Kind::Album, row.id, {}, {}};
     } else if (target == Target::Artists || mode == Mode::Groups) {
         if (row.value.empty()) return std::nullopt;
-        if (target == Target::Artists || field == LibraryGroupField::Artist) return PlaylistSource{Kind::Artist, 0, {}, row.value};
+        if (target == Target::Artists || field == LibraryGroupField::Artist)
+            return PlaylistSource{Kind::Artist, 0, {}, row.value};
         if (field == LibraryGroupField::Composer) return PlaylistSource{Kind::Composer, 0, {}, row.value};
         if (field == LibraryGroupField::Genre) return PlaylistSource{Kind::Genre, 0, {}, row.value};
         size_t used = 0;
@@ -597,16 +612,16 @@ std::optional<PlaylistSource> LibraryView::sourceOf(Target target, Mode mode, Li
     return std::nullopt;
 }
 
-std::function<std::vector<ui::BrowseRow>()> LibraryView::selectionRows(ListViewBase const& list,
-                                                                         Windows::Foundation::IInspectable const& clicked,
-                                                                         bool paged) const {
+std::function<std::vector<ui::BrowseRow>()>
+LibraryView::selectionRows(ListViewBase const& list, Windows::Foundation::IInspectable const& clicked, bool paged) const {
     std::vector<std::pair<int64_t, int64_t>> ranges; // first index, count
     bool clickedSelected = false;
     uint32_t clickedIndex = 0;
     const bool found = list.Items().IndexOf(clicked, clickedIndex);
     for (const auto& range : list.SelectedRanges()) {
         ranges.emplace_back(range.FirstIndex(), int64_t(range.Length()));
-        if (found && clickedIndex >= uint32_t(range.FirstIndex()) && clickedIndex <= uint32_t(range.LastIndex()))
+        if (found && std::cmp_greater_equal(clickedIndex, range.FirstIndex()) &&
+            std::cmp_less_equal(clickedIndex, range.LastIndex()))
             clickedSelected = true;
     }
     if (!clickedSelected) return [row = ui::LibraryCollection::rowOf(clicked)] { return std::vector<ui::BrowseRow>{row}; };
@@ -625,14 +640,15 @@ std::function<std::vector<ui::BrowseRow>()> LibraryView::selectionRows(ListViewB
     std::vector<ui::BrowseRow> rows;
     const auto items = list.Items();
     for (const auto& [first, count] : ranges)
-        for (int64_t i = first; i < first + count && i < int64_t(items.Size()); ++i)
+        for (int64_t i = first; i < first + count && std::cmp_less(i, items.Size()); ++i)
             rows.push_back(ui::LibraryCollection::rowOf(items.GetAt(uint32_t(i))));
     return [rows] { return rows; };
 }
 
 ui::SourceFetch LibraryView::menuSources() const {
     if (!menuItem_ || !menuList_) return {};
-    return [rows = selectionRows(menuList_, menuItem_, menuPaged_), target = menuTarget_, mode = current_.mode, field = current_.field] {
+    return [rows = selectionRows(menuList_, menuItem_, menuPaged_), target = menuTarget_, mode = current_.mode,
+            field = current_.field] {
         std::vector<PlaylistSource> sources;
         for (const auto& row : rows())
             if (auto source = sourceOf(target, mode, field, row)) sources.push_back(std::move(*source));
@@ -642,7 +658,8 @@ ui::SourceFetch LibraryView::menuSources() const {
 
 void LibraryView::queueSelection(bool playNext) {
     if (!menuItem_ || !menuList_ || !server_) return;
-    background([this, server = server_, rows = selectionRows(menuList_, menuItem_, menuPaged_), folders = current_.mode == Mode::Folders, playNext] {
+    background([this, server = server_, rows = selectionRows(menuList_, menuItem_, menuPaged_),
+                folders = current_.mode == Mode::Folders, playNext] {
         std::vector<LibraryTrackRow> tracks;
         for (const auto& row : rows()) {
             if (folders && row.folder) {
@@ -766,8 +783,10 @@ void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, Rout
         [rows = listRows(), albums = current_.favoriteAlbums] {
             std::vector<PlaylistSource> sources;
             for (const auto& row : rows()) {
-                if (albums) sources.push_back({PlaylistSource::Kind::Album, row.id, {}, {}});
-                else if (row.file) sources.push_back({PlaylistSource::Kind::Track, 0, {row.file}, {}});
+                if (albums)
+                    sources.push_back({PlaylistSource::Kind::Album, row.id, {}, {}});
+                else if (row.file)
+                    sources.push_back({PlaylistSource::Kind::Track, 0, {row.file}, {}});
             }
             return sources;
         },
@@ -824,7 +843,7 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
     if (!item) return;
     const auto& row = ui::LibraryCollection::rowOf(item);
     const bool group = current_.mode == Mode::Groups && !row.value.empty();
-    if (!(group || item.IsTrack() || (current_.mode == Mode::Folders && item.IsFolder()))) return;
+    if (!group && !item.IsTrack() && (current_.mode != Mode::Folders || !item.IsFolder())) return;
     menuRow_ = row;
     menuItem_ = item;
     menuList_ = current_.mode == Mode::Folders ? FolderList().as<ListViewBase>() : RowList().as<ListViewBase>();
@@ -839,8 +858,8 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
         playNow.Icon(playIcon);
         playNow.Click([this](auto&&, auto&&) { queueFolder(menuRow_.id, false, true); });
         rowMenu_.Items().Append(playNow);
-        for (const auto& [key, glyph, playNext] : {std::tuple{L"Library_MenuPlayNext", L"\xE893", true},
-                                                   std::tuple{L"Library_MenuAddQueue", L"\xE710", false}}) {
+        for (const auto& [key, glyph, playNext] :
+             {std::tuple{L"Library_MenuPlayNext", L"\xE893", true}, std::tuple{L"Library_MenuAddQueue", L"\xE710", false}}) {
             MenuFlyoutItem entry;
             entry.Text(tr(key));
             FontIcon icon;
@@ -857,7 +876,8 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
     const auto queueVisibility = group ? Visibility::Collapsed : Visibility::Visible;
     rowMenu_.Items().GetAt(0).Visibility(menuRow_.folder ? Visibility::Visible : Visibility::Collapsed);
     for (uint32_t i = 1; i < 4 && i < rowMenu_.Items().Size(); ++i) rowMenu_.Items().GetAt(i).Visibility(queueVisibility);
-    if (group && current_.field == LibraryGroupField::Year && !sourceOf(Target::Rows, Mode::Groups, LibraryGroupField::Year, row)) return;
+    if (group && current_.field == LibraryGroupField::Year && !sourceOf(Target::Rows, Mode::Groups, LibraryGroupField::Year, row))
+        return;
     showMenu(rowMenu_, element, e);
 }
 
@@ -871,9 +891,9 @@ void LibraryView::OnCardContextRequested(UIElement const& sender, Input::Context
     menuItem_ = item;
     menuTarget_ = artist ? Target::Artists : Target::Albums;
     menuPaged_ = !artist && current_.mode == Mode::Albums;
-    menuList_ = artist                           ? SearchArtists().as<ListViewBase>()
+    menuList_ = artist                          ? SearchArtists().as<ListViewBase>()
                 : current_.mode == Mode::Search ? SearchAlbums().as<ListViewBase>()
-                                                 : AlbumGrid().as<ListViewBase>();
+                                                : AlbumGrid().as<ListViewBase>();
     if (!cardMenu_) {
         cardMenu_ = MenuFlyout();
         playlistMenu_(cardMenu_, [this] { return menuSources(); });
@@ -949,7 +969,8 @@ void LibraryView::bindArtwork(Image const& image) {
     if (!value) return;
     auto& slot = artworkSlots_[get_abi(image)];
     slot.changed = value.PropertyChanged(auto_revoke, [weak = get_weak(), target = make_weak(image)](auto&&, auto&&) {
-        if (auto self = weak.get()) if (auto image = target.get()) self->loadRowArtwork(image);
+        if (auto self = weak.get())
+            if (auto image = target.get()) self->loadRowArtwork(image);
     });
     loadRowArtwork(image);
 }
@@ -986,8 +1007,10 @@ void LibraryView::OnBackClick(Windows::Foundation::IInspectable const&, RoutedEv
 void LibraryView::OnSortChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
     const int index = SortCombo().SelectedIndex();
     if (populating_ || index < 0) return;
-    if (current_.mode == Mode::Albums) albumSort_ = AlbumSort(index);
-    else if (current_.mode == Mode::Tracks) trackSort_ = TrackSort(index);
+    if (current_.mode == Mode::Albums)
+        albumSort_ = AlbumSort(index);
+    else if (current_.mode == Mode::Tracks)
+        trackSort_ = TrackSort(index);
     open(current_, false);
 }
 
@@ -1019,7 +1042,8 @@ void LibraryView::OnRowClick(Windows::Foundation::IInspectable const&, ItemClick
         view.detail = current_.title;
         open(std::move(view), true);
     } else if (current_.mode == Mode::AlbumDetail) {
-        const auto found = std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
+        const auto found =
+            std::find_if(detailTracks_.begin(), detailTracks_.end(), [&](const auto& t) { return t.id == row.id; });
         if (found != detailTracks_.end()) playTracks(detailTracks_, size_t(found - detailTracks_.begin()));
     } else if ((current_.mode == Mode::Tracks || current_.mode == Mode::Search) && !row.value.empty()) {
         LibraryTrackRow track;

@@ -67,8 +67,7 @@ std::optional<std::string> matchDevice(Backend from, const DeviceInfo& device, B
     bool tie = false;
     for (const auto& candidate : candidates) {
         const auto theirs = distinctiveWords(hardwareName(to, candidate.name));
-        const size_t shared =
-            size_t(std::count_if(words.begin(), words.end(), [&](const auto& w) { return theirs.contains(w); }));
+        const auto shared = size_t(std::count_if(words.begin(), words.end(), [&](const auto& w) { return theirs.contains(w); }));
         if (shared > best) {
             best = shared;
             chosen = &candidate;

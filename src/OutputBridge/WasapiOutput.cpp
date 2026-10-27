@@ -80,7 +80,7 @@ struct ComScope {
 
 class WasapiOutput final : public IOutput {
 public:
-    explicit WasapiOutput(const WasapiSettings& s) : cfg_(s) {}
+    explicit WasapiOutput(WasapiSettings s) : cfg_(std::move(s)) {}
     ~WasapiOutput() override { close(); }
 
     bool supports(const DeviceFormat& f) override {

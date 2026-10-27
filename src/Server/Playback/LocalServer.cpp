@@ -76,12 +76,12 @@ void validate(const Command& c) {
     const bool trackKeys = c.kind == CommandKind::ResetPlayStatistics || c.kind == CommandKind::SetFavorite;
     if (c.source.has_value() != replaces(c.kind) || c.settings.has_value() != (c.kind == CommandKind::ApplySettings) ||
         (c.frame != 0 && c.kind != CommandKind::Seek) || c.sources.empty() == queueSources ||
-        (queueReplace ? c.index >= c.sources.size() : c.index != 0) ||
-        c.entryIds.empty() == queueIds || (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
+        (queueReplace ? c.index >= c.sources.size() : c.index != 0) || c.entryIds.empty() == queueIds ||
+        (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
-        (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) ||
-        c.tracks.empty() == trackKeys || c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
+        (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) || c.tracks.empty() == trackKeys ||
+        c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
         c.albums.empty() == (c.kind == CommandKind::SetAlbumFavorite) ||
         (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite))
         throw std::invalid_argument("invalid Server command payload");
@@ -171,7 +171,8 @@ public:
           engine_(std::make_unique<audio::PlaybackEngine>(settings, std::move(factory))) {
         published_.settings = settingsDto(settings_);
         published_.playback = playback(engine_->snapshot());
-        const auto directory = settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
+        const auto directory =
+            settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
         if (!directory.empty() && std::filesystem::is_directory(directory)) {
             artwork_ = std::make_unique<ArtworkCache>(directory / "thumbs");
             library_ = std::make_unique<LibraryStore>(directory);
@@ -179,12 +180,13 @@ public:
             LibraryMonitor::Options options;
             // Covers being shown take the storage first: scans drop to one worker and fingerprints wait meanwhile.
             options.playbackActive = [this] {
-                return std::chrono::steady_clock::now().time_since_epoch().count() < artworkUntil_.load(std::memory_order_relaxed);
+                return std::chrono::steady_clock::now().time_since_epoch().count() <
+                       artworkUntil_.load(std::memory_order_relaxed);
             };
             options.playingSource = [this] {
                 const auto snapshot = engine_->snapshot();
                 return snapshot.state == audio::PlayState::Playing ? std::filesystem::path(snapshot.file)
-                                                                  : std::filesystem::path{};
+                                                                   : std::filesystem::path{};
             };
             libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
             // Album-wall thumbnails are made ahead of display, only while nothing plays, scans or shows covers.
@@ -196,10 +198,12 @@ public:
                                artworkUntil_.load(std::memory_order_relaxed);
                 };
                 while (!stop.stop_requested()) {
-                    for (int i = 0; i < 300 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    for (int i = 0; i < 300 && !stop.stop_requested(); ++i)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     if (busy()) continue;
                     try {
-                        if (const auto made = artwork_->prepare(*library_, busy)) log::info("artwork: prepared %zu album covers", made);
+                        if (const auto made = artwork_->prepare(*library_, busy))
+                            log::info("artwork: prepared %zu album covers", made);
                     } catch (const std::exception& e) {
                         log::warn("artwork: %s", e.what());
                     }
@@ -282,17 +286,16 @@ public:
         return camel::server::browseTracks(*library_, offset, limit, revision, token);
     }
 
-    LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+    LibraryTrackPage searchTracks(const std::string& query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                   const CancellationToken& token) const {
         if (!library_) throw std::runtime_error("library is not configured");
-        return camel::server::searchTracks(*library_, std::move(query), offset, limit, revision, token);
+        return camel::server::searchTracks(*library_, query, offset, limit, revision, token);
     }
 
-    LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
-                                       std::optional<uint64_t> revision, const CancellationToken& token,
-                                       bool totals) const {
+    LibrarySearchResults searchLibrary(const std::string& query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                       const CancellationToken& token, bool totals) const {
         if (!library_) throw std::runtime_error("library is not configured");
-        return camel::server::searchLibrary(*library_, std::move(query), offset, limit, revision, token, totals);
+        return camel::server::searchLibrary(*library_, query, offset, limit, revision, token, totals);
     }
 
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
@@ -367,12 +370,12 @@ private:
             const auto next = policy_.next(false);
             if (!next) throw std::invalid_argument("queue entries are unavailable");
             startEntry(*next, true);
-        } else engine_->play();
+        } else
+            engine_->play();
     }
 
     // The restored current entry opens its file only now, at the position it was left at.
-    void resumeRestored() {
-        const auto position = restored_->position;
+    void resumeRestored(uint64_t position) {
         const auto current = policy_.current();
         restored_.reset();
         if (!current || policy_.unavailable(current->entryId)) {
@@ -391,7 +394,8 @@ private:
         const auto started = measure::now();
         auto measured = wil::scope_exit([&] {
             if (measure::measuring())
-                log::info("measure: queue of %zu entries restored in %.0f ms", entries_.size(), measure::milliseconds(started, measure::now()));
+                log::info("measure: queue of %zu entries restored in %.0f ms", entries_.size(),
+                          measure::milliseconds(started, measure::now()));
         });
         auto reader = library_->openReader();
         const auto saved = loadSession(reader);
@@ -405,11 +409,11 @@ private:
             entries.back().automatic = item.automatic;
         }
         // One query for the whole queue: a lookup per entry took 3.4 s for 100k entries.
-        auto files = reader.prepare(
-            "SELECT q.position,q.file_id,f.path,coalesce(t.title,''),coalesce(t.artist,''),"
-            "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0),t.id IS NOT NULL FROM queue q JOIN files f ON f.id=q.file_id "
-            "LEFT JOIN tracks t ON t.file_id=f.id "
-            "LEFT JOIN albums a ON a.id=t.album_id");
+        auto files = reader.prepare("SELECT q.position,q.file_id,f.path,coalesce(t.title,''),coalesce(t.artist,''),"
+                                    "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0),t.id IS NOT NULL FROM "
+                                    "queue q JOIN files f ON f.id=q.file_id "
+                                    "LEFT JOIN tracks t ON t.file_id=f.id "
+                                    "LEFT JOIN albums a ON a.id=t.album_id");
         while (files.step()) {
             const auto at = size_t(files.integer(0));
             if (at >= entries.size() || saved->entries[at].file != files.integer(1)) continue;
@@ -418,8 +422,10 @@ private:
             const auto key = toWide(files.text(2));
             // The saved on-disk spelling is kept while it still names this file; a moved file plays from its new key.
             std::wstring keyText = key;
-            if (_wcsnicmp(keyText.c_str(), LR"(\\?\UNC\)", 8) == 0) keyText = LR"(\\)" + keyText.substr(8);
-            else if (keyText.starts_with(LR"(\\?\)")) keyText = keyText.substr(4);
+            if (_wcsnicmp(keyText.c_str(), LR"(\\?\UNC\)", 8) == 0)
+                keyText = LR"(\\)" + keyText.substr(8);
+            else if (keyText.starts_with(LR"(\\?\)"))
+                keyText = keyText.substr(4);
             const auto savedPath = toWide(item.source.pathUtf8());
             const bool spelled = CompareStringOrdinal(savedPath.c_str(), int(savedPath.size()), keyText.c_str(),
                                                       int(keyText.size()), TRUE) == CSTR_EQUAL;
@@ -451,8 +457,15 @@ private:
         refreshLibraryAvailability();
         queueChanged_ = true;
         auto policy = policy_.state();
-        saved_ = {std::move(policy.entries), std::move(policy.order), std::move(policy.history), policy.current, policy.shuffle,
-                  policy.repeat, restored_.value_or(SavedTrack{}), engine_->snapshot().state, std::chrono::steady_clock::now()};
+        saved_ = {std::move(policy.entries),
+                  std::move(policy.order),
+                  std::move(policy.history),
+                  policy.current,
+                  policy.shuffle,
+                  policy.repeat,
+                  restored_.value_or(SavedTrack{}),
+                  engine_->snapshot().state,
+                  std::chrono::steady_clock::now()};
     }
 
     SavedTrack currentTrack(const audio::EngineSnapshot& playback) const {
@@ -511,9 +524,17 @@ private:
         session.shuffle = policy.shuffle;
         session.repeat = policy.repeat;
         session.track = track;
-        auto write = library_->write([session = std::move(session), parts](sqlite::Database& db) { saveSession(db, session, parts); });
-        saved_ = {std::move(policy.entries), std::move(policy.order), std::move(policy.history), policy.current, policy.shuffle,
-                  policy.repeat, track, playback.state, now};
+        auto write =
+            library_->write([session = std::move(session), parts](sqlite::Database& db) { saveSession(db, session, parts); });
+        saved_ = {std::move(policy.entries),
+                  std::move(policy.order),
+                  std::move(policy.history),
+                  policy.current,
+                  policy.shuffle,
+                  policy.repeat,
+                  track,
+                  playback.state,
+                  now};
         if (!final) {
             sessionWrite_ = std::move(write);
             return;
@@ -578,9 +599,9 @@ private:
                 break;
             case CommandKind::Previous: {
                 const auto playback = engine_->snapshot();
-                const auto previous = restored_
-                                          ? policy_.previous(restored_->position, restored_->source ? restored_->source->sampleRate : 0)
-                                          : policy_.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
+                const auto previous =
+                    restored_ ? policy_.previous(restored_->position, restored_->source ? restored_->source->sampleRate : 0)
+                              : policy_.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
                 if (!previous) break;
                 if (previous->entryId == state_.queueEntryId && restored_)
                     restored_->position = 0;
@@ -607,16 +628,21 @@ private:
                 refreshLibraryAvailability();
                 break;
             case CommandKind::Play:
-                if (restored_) resumeRestored();
-                else resumePlayback();
+                if (restored_)
+                    resumeRestored(restored_->position);
+                else
+                    resumePlayback();
                 break;
             case CommandKind::Pause:
                 engine_->pause();
                 break;
             case CommandKind::TogglePause:
-                if (restored_) resumeRestored();
-                else if (engine_->snapshot().state == audio::PlayState::Stopped) resumePlayback();
-                else engine_->togglePause();
+                if (restored_)
+                    resumeRestored(restored_->position);
+                else if (engine_->snapshot().state == audio::PlayState::Stopped)
+                    resumePlayback();
+                else
+                    engine_->togglePause();
                 break;
             case CommandKind::Stop:
                 engine_->stop();
@@ -640,8 +666,10 @@ private:
             case CommandKind::SetFavorite:
             case CommandKind::SetAlbumFavorite:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                if (c.kind == CommandKind::SetFavorite) setTrackFavorite(*library_, c.tracks, c.favorite);
-                else setAlbumFavorite(*library_, c.albums, c.favorite);
+                if (c.kind == CommandKind::SetFavorite)
+                    setTrackFavorite(*library_, c.tracks, c.favorite);
+                else
+                    setAlbumFavorite(*library_, c.albums, c.favorite);
                 applyMarks(entries_);
                 ++marks_;
                 queueChanged_ = true;
@@ -752,8 +780,8 @@ private:
 
     void appendQueue(const std::vector<TrackSource>& sources, bool playNext) {
         // The user's tracks play next, so automatic entries that have not started yet go (docs/Plan.md §8.1).
-        const auto playing = std::find_if(entries_.begin(), entries_.end(),
-                                          [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
+        const auto playing =
+            std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
         std::vector<uint64_t> pending;
         for (auto it = playing == entries_.end() ? entries_.begin() : playing + 1; it != entries_.end(); ++it)
             if (it->automatic) pending.push_back(it->id);
@@ -766,7 +794,7 @@ private:
         auto at = entries_.end();
         if (playNext)
             if (const auto current = std::find_if(entries_.begin(), entries_.end(),
-                                                   [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
+                                                  [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
                 current != entries_.end())
                 at = current + 1;
         entries_.insert(at, std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
@@ -789,7 +817,8 @@ private:
         const uint64_t current = state_.queueEntryId;
         const auto keep = std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == current; });
         policy_.clearExcept(keep == entries_.end() ? std::nullopt : std::optional(current));
-        if (keep == entries_.end()) entries_.clear();
+        if (keep == entries_.end())
+            entries_.clear();
         else {
             QueueEntry currentEntry = *keep;
             entries_ = {std::move(currentEntry)};
@@ -868,7 +897,8 @@ private:
         const auto binding = libraryEntries_.find(id);
         if (binding != libraryEntries_.end() && binding->second.file && !binding->second.spelled) {
             binding->second.spelled = true;
-            queued.source = TrackSource(libraryDisplayPath(queued.source.pathUtf8()), queued.source.range(), queued.source.decoder());
+            queued.source =
+                TrackSource(libraryDisplayPath(queued.source.pathUtf8()), queued.source.range(), queued.source.decoder());
             queueChanged_ = true;
         }
         return queued.source;
@@ -952,8 +982,8 @@ private:
                 // Rendering can move into a queued file before the engine publishes the transition; a jump back
                 // to its start belongs to the next file, so this session waits for the transition instead.
                 const auto last = session_->position();
-                const bool nextFile = playback.queuedFiles > 0 && last && playback.position < *last &&
-                                      playback.position <= reachable(sessionRate_);
+                const bool nextFile =
+                    playback.queuedFiles > 0 && last && playback.position < *last && playback.position <= reachable(sessionRate_);
                 if (!nextFile) session_->observe(playback.position, reachable(sessionRate_));
             } else {
                 session_->interrupt();
@@ -1033,7 +1063,8 @@ private:
             policy_.markFailed(state_.queueEntryId);
             queueChanged_ = true;
         }
-        if (const auto next = policy_.next(true)) startEntry(*next, true);
+        if (const auto next = policy_.next(true))
+            startEntry(*next, true);
         else if (const auto picked = autoplayAllowed() && appendAutoplay() ? policy_.next(true) : std::nullopt)
             startEntry(*picked, true);
     }
@@ -1061,16 +1092,18 @@ private:
         nlohmann::json queued = nlohmann::json::array();
         for (const auto& [id, binding] : libraryEntries_)
             if (binding.file) queued.push_back(binding.file);
-        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        const auto now =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
         const std::string from = " FROM tracks t JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id "
                                  "WHERE f.available=1 AND r.online=1 AND r.removed IS NULL "
                                  "AND t.file_id NOT IN (SELECT value FROM json_each(?1))";
-        auto fresh = libraryReader_->prepare("SELECT f.path" + from + " AND NOT EXISTS(SELECT 1 FROM play_events e WHERE "
+        auto fresh = libraryReader_->prepare("SELECT f.path" + from +
+                                             " AND NOT EXISTS(SELECT 1 FROM play_events e WHERE "
                                              "e.file_id=t.file_id AND e.started>=?2) ORDER BY random() LIMIT 1");
         fresh.bind(1, queued.dump()).bind(2, int64_t(now.count()) - int64_t(7) * 24 * 3600 * 1000);
         if (fresh.step()) return TrackSource(fresh.text(0));
-        auto oldest = libraryReader_->prepare("SELECT f.path" + from +
-                                              " ORDER BY (SELECT MAX(e.started) FROM play_events e WHERE e.file_id=t.file_id) LIMIT 1");
+        auto oldest = libraryReader_->prepare(
+            "SELECT f.path" + from + " ORDER BY (SELECT MAX(e.started) FROM play_events e WHERE e.file_id=t.file_id) LIMIT 1");
         oldest.bind(1, queued.dump());
         if (oldest.step()) return TrackSource(oldest.text(0));
         return std::nullopt;
@@ -1241,7 +1274,7 @@ private:
     std::vector<QueueEntry> entries_;
     uint64_t lastEntryId_ = 0;
     uint64_t seenTrackEnds_ = 0;
-    bool queueChanged_ = false; // queue state changed without a command or playback change
+    bool queueChanged_ = false;  // queue state changed without a command or playback change
     uint64_t autoplayTried_ = 0; // the entry whose start autoplay already extended the queue for
     static constexpr size_t kAutoplayKept = 100;
     uint64_t publishedEntry_ = UINT64_MAX; // the current entry state_.queue was built for
@@ -1302,12 +1335,12 @@ LibraryTrackPage LocalServer::browseTracks(int64_t offset, int64_t limit, std::o
 }
 LibraryTrackPage LocalServer::searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                            const CancellationToken& token) const {
-    return impl_->searchTracks(std::move(query), offset, limit, revision, token);
+    return impl_->searchTracks(query, offset, limit, revision, token);
 }
 LibrarySearchResults LocalServer::searchLibrary(std::string query, int64_t offset, int64_t limit,
                                                 std::optional<uint64_t> revision, const CancellationToken& token,
                                                 bool totals) const {
-    return impl_->searchLibrary(std::move(query), offset, limit, revision, token, totals);
+    return impl_->searchLibrary(query, offset, limit, revision, token, totals);
 }
 PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
     return impl_->playStatistics(query, token);
@@ -1325,11 +1358,12 @@ LibraryAlbumPage LocalServer::recentlyPlayedAlbums(int64_t offset, int64_t limit
 }
 
 LibraryAlbumPage LocalServer::browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
-                                           int64_t limit, std::optional<uint64_t> revision, const CancellationToken& token) const {
+                                           int64_t limit, std::optional<uint64_t> revision,
+                                           const CancellationToken& token) const {
     return camel::server::browseAlbums(impl_->library(), sort, filter, offset, limit, revision, token);
 }
-LibraryGroupPage LocalServer::browseGroups(LibraryGroupField field, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
-                                           const CancellationToken& token) const {
+LibraryGroupPage LocalServer::browseGroups(LibraryGroupField field, int64_t offset, int64_t limit,
+                                           std::optional<uint64_t> revision, const CancellationToken& token) const {
     return camel::server::browseGroups(impl_->library(), field, offset, limit, revision, token);
 }
 LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,

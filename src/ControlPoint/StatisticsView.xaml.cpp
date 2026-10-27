@@ -231,8 +231,12 @@ void StatisticsView::load() {
         const auto result = server->playStatistics(page);
         ui::BrowsePage out{0, result.historyTotal, {}};
         for (const auto& h : result.history) {
-            ui::BrowseRow row{h.event, h.path, titleOf(h.title, h.name, h.path), ui::utf8(h.artist),
-                              startedText(h.startedMs, h.utcOffsetMinutes), hstring(ui::formatTime(double(h.heardMs) / 1000.0))};
+            ui::BrowseRow row{h.event,
+                              h.path,
+                              titleOf(h.title, h.name, h.path),
+                              ui::utf8(h.artist),
+                              startedText(h.startedMs, h.utcOffsetMinutes),
+                              hstring(ui::formatTime(double(h.heardMs) / 1000.0))};
             row.file = h.track.file;
             row.unavailable = !h.available;
             out.rows.push_back(std::move(row));
@@ -240,7 +244,8 @@ void StatisticsView::load() {
         return out;
     };
     history_ = make_self<ui::LibraryCollection>(DispatcherQueue(), std::move(fetch));
-    HistoryList().ItemsSource(history_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>());
+    HistoryList().ItemsSource(
+        history_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>());
     history_->start([this](int64_t total) { HistoryHeader().Text(ui::format(L"Stats_History", {std::to_wstring(total)})); });
     background([this, server = server_, query] {
         auto stats = std::make_shared<PlayStatistics>(server->playStatistics(query));
@@ -265,7 +270,11 @@ void StatisticsView::showRanking() {
     switch (Ranking(RankCombo().SelectedIndex())) {
     case Ranking::Tracks:
         for (const auto& t : stats_.tracks) {
-            ui::BrowseRow row{t.track.file, t.path, titleOf(t.title, t.name, t.path), ui::utf8(t.artist), to_hstring(++rank),
+            ui::BrowseRow row{t.track.file,
+                              t.path,
+                              titleOf(t.title, t.name, t.path),
+                              ui::utf8(t.artist),
+                              to_hstring(++rank),
                               value(t.plays, t.listenedMs)};
             row.file = t.track.file;
             row.unavailable = !t.available;
@@ -274,7 +283,8 @@ void StatisticsView::showRanking() {
         break;
     case Ranking::Albums:
         for (const auto& a : stats_.albums)
-            items.Append(item({a.album, {}, ui::utf8(a.name), ui::utf8(a.artist), to_hstring(++rank), value(a.plays, a.listenedMs)}));
+            items.Append(
+                item({a.album, {}, ui::utf8(a.name), ui::utf8(a.artist), to_hstring(++rank), value(a.plays, a.listenedMs)}));
         break;
     case Ranking::Artists:
         for (const auto& a : stats_.artists)
@@ -311,7 +321,9 @@ void StatisticsView::drawChart() {
     std::vector<std::pair<std::chrono::year_month_day, const PlayBucket*>> bars;
     size_t at = 0;
     for (auto d = first; std::chrono::sys_days(d) <= std::chrono::sys_days(last) && bars.size() < 2000; d = next(d)) {
-        while (at < stats_.buckets.size() && std::chrono::sys_days(parseDate(stats_.buckets[at].start)) < std::chrono::sys_days(d)) ++at;
+        while (at < stats_.buckets.size() &&
+               std::chrono::sys_days(parseDate(stats_.buckets[at].start)) < std::chrono::sys_days(d))
+            ++at;
         const PlayBucket* bucket = nullptr;
         if (at < stats_.buckets.size() && parseDate(stats_.buckets[at].start) == d) bucket = &stats_.buckets[at++];
         bars.emplace_back(d, bucket);
@@ -358,7 +370,8 @@ void StatisticsView::OnChartSizeChanged(Windows::Foundation::IInspectable const&
 }
 
 // Tracks play again; albums and artists open their pages.
-void StatisticsView::OnRowDoubleTapped(Windows::Foundation::IInspectable const& sender, Input::DoubleTappedRoutedEventArgs const& e) {
+void StatisticsView::OnRowDoubleTapped(Windows::Foundation::IInspectable const& sender,
+                                       Input::DoubleTappedRoutedEventArgs const& e) {
     const auto element = e.OriginalSource().try_as<FrameworkElement>();
     const auto value = element ? element.DataContext().try_as<CamelPlayer::BrowseItem>() : nullptr;
     if (!value) return;

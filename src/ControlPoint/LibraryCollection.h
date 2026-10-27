@@ -25,10 +25,11 @@ struct BrowsePage {
 using BrowseFetch = std::function<BrowsePage(int64_t offset, int64_t limit, std::optional<uint64_t> revision)>;
 
 class LibraryCollection
-    : public winrt::implements<LibraryCollection, winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable>,
-                               winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable>,
-                               winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable>,
-                               winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::IInspectable>> {
+    : public winrt::implements<
+          LibraryCollection, winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable>,
+          winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable>,
+          winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable>,
+          winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::IInspectable>> {
 public:
     using IInspectable = winrt::Windows::Foundation::IInspectable;
     using Item = winrt::CamelPlayer::BrowseItem;
@@ -88,7 +89,8 @@ public:
     void Clear() { throw winrt::hresult_illegal_method_call(); }
     void ReplaceAll(winrt::array_view<IInspectable const>) { throw winrt::hresult_illegal_method_call(); }
 
-    winrt::event_token VectorChanged(winrt::Windows::Foundation::Collections::VectorChangedEventHandler<IInspectable> const& handler) {
+    winrt::event_token
+    VectorChanged(winrt::Windows::Foundation::Collections::VectorChangedEventHandler<IInspectable> const& handler) {
         return changed_.add(handler);
     }
     void VectorChanged(winrt::event_token const& token) noexcept { changed_.remove(token); }

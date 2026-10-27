@@ -102,15 +102,12 @@ winrt::fire_and_forget HomeView::refresh() {
         };
         // Albums, tracks and artists each order the whole library first (a few hundred ms on a large one), so they run
         // on their own readers and Home waits for the slowest instead of the sum.
-        auto added = std::async(std::launch::async, [&] {
-            return server->browseAlbums(AlbumSort::Added, std::nullopt, 0, kRowItems, std::nullopt);
-        });
-        auto tracks = std::async(std::launch::async, [&] {
-            return server->browseTrackRows(TrackSort::Title, false, 0, 1, std::nullopt).total;
-        });
-        auto artists = std::async(std::launch::async, [&] {
-            return server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total;
-        });
+        auto added = std::async(std::launch::async,
+                                [&] { return server->browseAlbums(AlbumSort::Added, std::nullopt, 0, kRowItems, std::nullopt); });
+        auto tracks = std::async(std::launch::async,
+                                 [&] { return server->browseTrackRows(TrackSort::Title, false, 0, 1, std::nullopt).total; });
+        auto artists = std::async(std::launch::async,
+                                  [&] { return server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total; });
         data->today = overview(localStartMs(0), 1).overview;
         data->week = overview(localStartMs((now.wDayOfWeek + 6) % 7), 1).overview; // weeks start on Monday
         data->month = overview(localStartMs(0, Start::Month), 1).overview;
@@ -149,6 +146,7 @@ winrt::fire_and_forget HomeView::refresh() {
 
         const auto albums = [](const LibraryAlbumPage& page) {
             std::vector<Windows::Foundation::IInspectable> out;
+            out.reserve(page.albums.size());
             for (const auto& a : page.albums) out.push_back(item({a.id, {}, ui::utf8(a.title), ui::utf8(a.artist), {}, {}}));
             return out;
         };
@@ -221,7 +219,8 @@ void HomeView::OnCoverLoaded(Windows::Foundation::IInspectable const& sender, Ro
     if (!value || !server_) return;
     const auto& row = get_self<BrowseItem>(value)->row();
     if (camel::measure::measuring() && !covers_.contains(winrt::get_abi(image)))
-        image.RegisterPropertyChangedCallback(Image::SourceProperty(), [](DependencyObject const& sender, DependencyProperty const&) {
+        image.RegisterPropertyChangedCallback(Image::SourceProperty(), [](DependencyObject const& sender,
+                                                                          DependencyProperty const&) {
             if (sender.as<Image>().Source())
                 camel::log::info("measure: home cover shown %.0f ms after process start", camel::measure::sinceProcessStart());
         });

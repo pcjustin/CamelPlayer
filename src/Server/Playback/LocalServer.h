@@ -24,9 +24,8 @@ public:
                                   const CancellationToken& token = {}) const override;
     LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                   const CancellationToken& token = {}) const override;
-    LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
-                                       std::optional<uint64_t> revision, const CancellationToken& token = {},
-                                       bool totals = true) const override;
+    LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                       const CancellationToken& token = {}, bool totals = true) const override;
     PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const override;
     void rereadLibrary() override;
     void clearArtworkCache() override;

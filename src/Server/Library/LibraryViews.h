@@ -78,7 +78,7 @@ struct LibraryAlbumFormat {
 struct LibraryAlbumDetail {
     uint64_t revision = 0;
     LibraryAlbum album;
-    std::vector<LibraryTrackRow> tracks;      // disc, then track order
+    std::vector<LibraryTrackRow> tracks;     // disc, then track order
     std::vector<LibraryAlbumFormat> formats; // the most common first
 };
 
@@ -90,8 +90,8 @@ struct LibraryFolderEntry {
 
 struct LibraryFolderListing {
     uint64_t revision = 0;
-    std::optional<int64_t> folder; // absent: the online roots
-    std::vector<LibraryFolderEntry> trail; // the root down to `folder`
+    std::optional<int64_t> folder;           // absent: the online roots
+    std::vector<LibraryFolderEntry> trail;   // the root down to `folder`
     std::vector<LibraryFolderEntry> folders; // only folders with tracks somewhere below them
 
     std::vector<LibraryTrackRow> tracks;
@@ -115,8 +115,7 @@ LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset,
 LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,
-                                    std::optional<uint64_t> expectedRevision = std::nullopt,
-                                    const CancellationToken& token = {});
+                                    std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64_t offset, int64_t limit,
                                 std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 // Favorite albums, the latest marked first.

@@ -89,16 +89,16 @@ enum class CommandKind : uint8_t {
     QueueSelect,  // entryId: play that queue entry
     Next,
     Previous,
-    SetShuffle, // shuffle
-    SetRepeat,  // repeat
-    RemoveLibraryRoot, // rootId
+    SetShuffle,          // shuffle
+    SetRepeat,           // repeat
+    RemoveLibraryRoot,   // rootId
     ResetPlayStatistics, // tracks: delete their plays and zero their counters
     ResetAllPlayStatistics,
-    AddLibraryRoot, // path: a folder to index; overlapping and alias paths are normalized by the Server
-    QueueAdd,       // sources: append entries without changing the current track
-    QueuePlayNext,  // sources: insert entries after the current entry
-    QueueRemove,    // entryIds: remove entries without stopping the current track
-    QueueClear,     // keep the current queue entry, if any
+    AddLibraryRoot,  // path: a folder to index; overlapping and alias paths are normalized by the Server
+    QueueAdd,        // sources: append entries without changing the current track
+    QueuePlayNext,   // sources: insert entries after the current entry
+    QueueRemove,     // entryIds: remove entries without stopping the current track
+    QueueClear,      // keep the current queue entry, if any
     SetFavorite,     // tracks + favorite
     SetAlbumFavorite // albums + favorite: marks or clears every track of the albums
 };
@@ -184,7 +184,7 @@ struct QueueEntry {
 class QueueEntries {
 public:
     QueueEntries() = default;
-    QueueEntries(std::vector<QueueEntry> entries) // NOLINT
+    QueueEntries(std::vector<QueueEntry> entries)
         : entries_(std::make_shared<const std::vector<QueueEntry>>(std::move(entries))) {}
     QueueEntries(std::initializer_list<QueueEntry> entries) : QueueEntries(std::vector<QueueEntry>(entries)) {}
     const std::vector<QueueEntry>& get() const {
@@ -264,9 +264,8 @@ public:
     virtual LibraryTrackPage searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                           const CancellationToken& token = {}) const = 0;
     // totals=false leaves the totals 0 (see LibraryBrowse.h).
-    virtual LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit,
-                                               std::optional<uint64_t> revision, const CancellationToken& token = {},
-                                               bool totals = true) const = 0;
+    virtual LibrarySearchResults searchLibrary(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                               const CancellationToken& token = {}, bool totals = true) const = 0;
     virtual PlayStatistics playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token = {}) const = 0;
     // Playlists (docs/Plan.md §7.9) run on the caller's thread and write through the library writer, so large
     // selections never hold up playback commands.

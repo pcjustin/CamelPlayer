@@ -164,7 +164,7 @@ int cmdPlay(const Args& args) {
         snap = engine.snapshot();
         printSnapshot(snap);
         if (snap.state == PlayState::Stopped || (snap.state == PlayState::Paused && snap.error)) break;
-        if ((GetTickCount64() - t0) / 1000.0 >= limit) break;
+        if (double(GetTickCount64() - t0) / 1000.0 >= limit) break;
         if (_kbhit()) {
             int c = _getch();
             if (c == 'q') break;
@@ -176,7 +176,7 @@ int cmdPlay(const Args& args) {
     engine.stop();
     engine.waitIdle();
     std::puts("");
-    if (snap.outputStatus.detail.size()) std::printf("output: %s\n", snap.outputStatus.detail.c_str());
+    if (!snap.outputStatus.detail.empty()) std::printf("output: %s\n", snap.outputStatus.detail.c_str());
     return snap.error ? 1 : 0;
 }
 

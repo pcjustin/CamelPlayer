@@ -32,8 +32,8 @@ bool flag(const Args& args, const wchar_t* name) {
 std::vector<std::wstring> positional(const Args& args) {
     std::vector<std::wstring> out;
     for (size_t i = 0; i < args.size(); i++) {
-        if (args[i].rfind(L"--", 0) == 0) {
-            if (i + 1 < args.size() && args[i + 1].rfind(L"--", 0) != 0) i++;
+        if (args[i].starts_with(L"--")) {
+            if (i + 1 < args.size() && !args[i + 1].starts_with(L"--")) i++;
             continue;
         }
         out.push_back(args[i]);
@@ -68,7 +68,7 @@ int cmdDecode(const Args& args) {
                 auto dec = openDecoder(k, file);
                 const auto& in = dec->info();
                 FlacMd5 md5(in.bitsPerSample);
-                std::vector<int32_t> buf(4096 * in.channels);
+                std::vector<int32_t> buf(size_t{4096} * in.channels);
                 uint64_t frames = 0;
                 while (size_t n = dec->read(buf.data(), 4096)) {
                     md5.update(buf.data(), n * in.channels);

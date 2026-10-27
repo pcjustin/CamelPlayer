@@ -33,7 +33,7 @@ struct FlacTemplate {
 
 FlacTemplate flacTemplate(const std::filesystem::path& scratch) {
     const auto path = scratch / L"template.flac";
-    camel::audio::testaudio::writeFlacSamples(path, std::vector<int32_t>(44100 / 4 * 2, 0), 44100, 16, 2);
+    camel::audio::testaudio::writeFlacSamples(path, std::vector<int32_t>(size_t{44100} / 4 * 2, 0), 44100, 16, 2);
     std::ifstream in(path, std::ios::binary);
     const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), {});
     in.close();
@@ -75,11 +75,11 @@ void writeTagged(const std::filesystem::path& path, const FlacTemplate& flac, co
 
 void writeCover(IWICImagingFactory* factory, const std::filesystem::path& path, uint32_t seed) {
     constexpr UINT size = 600;
-    std::vector<uint8_t> pixels(size * size * 3);
-    const uint8_t r = uint8_t(seed * 73), g = uint8_t(seed * 151), b = uint8_t(seed * 199);
+    std::vector<uint8_t> pixels(size_t{size} * size * 3);
+    const auto r = uint8_t(seed * 73), g = uint8_t(seed * 151), b = uint8_t(seed * 199);
     for (UINT y = 0; y < size; ++y)
         for (UINT x = 0; x < size; ++x) {
-            uint8_t* p = &pixels[(y * size + x) * 3];
+            uint8_t* p = &pixels[(size_t{y} * size + x) * 3];
             p[0] = uint8_t(b + x / 3);
             p[1] = uint8_t(g + y / 3);
             p[2] = uint8_t(r + ((x ^ y) & 0x3F));
@@ -90,9 +90,8 @@ void writeCover(IWICImagingFactory* factory, const std::filesystem::path& path, 
     WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
     if (FAILED(factory->CreateStream(&stream)) || FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) ||
         FAILED(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder)) ||
-        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
-        FAILED(encoder->CreateNewFrame(&frame, nullptr)) || FAILED(frame->Initialize(nullptr)) ||
-        FAILED(frame->SetSize(size, size)) || FAILED(frame->SetPixelFormat(&format)) ||
+        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) || FAILED(encoder->CreateNewFrame(&frame, nullptr)) ||
+        FAILED(frame->Initialize(nullptr)) || FAILED(frame->SetSize(size, size)) || FAILED(frame->SetPixelFormat(&format)) ||
         FAILED(frame->WritePixels(size, size * 3, UINT(pixels.size()), pixels.data())) || FAILED(frame->Commit()) ||
         FAILED(encoder->Commit()))
         throw std::runtime_error("cannot write cover " + camel::toUtf8(path.wstring()));
@@ -101,8 +100,8 @@ void writeCover(IWICImagingFactory* factory, const std::filesystem::path& path, 
 // Deterministic names mixing Latin, Traditional Chinese and Japanese, so search and sorting see varied text.
 std::string word(uint32_t n) {
     static const std::array<const char*, 24> words{
-        "Blue", "Night", "River", "Echo", "Garden", "Silver", "Morning", "Song", "Light", "Winter", "Ocean", "Dream",
-        "月光", "海風", "夜曲", "春雨", "星空", "花園", "さくら", "ひかり", "そら", "Café", "Étude", "Nocturne"};
+        "Blue", "Night", "River", "Echo", "Garden", "Silver", "Morning", "Song",   "Light", "Winter", "Ocean", "Dream",
+        "月光", "海風",  "夜曲",  "春雨", "星空",   "花園",   "さくら",  "ひかり", "そら",  "Café",   "Étude", "Nocturne"};
     return words[n % words.size()];
 }
 
@@ -125,8 +124,8 @@ int cmdGenLibrary(const Args& args) {
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))))
         throw std::runtime_error("WIC unavailable");
     const auto flac = flacTemplate(music);
-    static const std::array<const char*, 12> genres{"Jazz", "Classical", "Rock", "Pop", "Soundtrack", "Electronic",
-                                                    "Folk", "Blues", "J-Pop", "Mandopop", "Ambient", "Soul"};
+    static const std::array<const char*, 12> genres{"Jazz", "Classical", "Rock",  "Pop",      "Soundtrack", "Electronic",
+                                                    "Folk", "Blues",     "J-Pop", "Mandopop", "Ambient",    "Soul"};
     const uint32_t albums = (tracks + perAlbum - 1) / perAlbum;
     const uint32_t artists = std::max(1u, albums / 5);
     uint32_t written = 0;
@@ -144,7 +143,8 @@ int cmdGenLibrary(const Args& args) {
             std::snprintf(number, sizeof number, "%02u", n);
             writeTagged(folder / camel::toWide(std::string(number) + " - " + title + ".flac"), flac,
                         {"TITLE=" + title, "ARTIST=" + artistName, "ALBUMARTIST=" + artistName, "ALBUM=" + albumName,
-                         "TRACKNUMBER=" + std::to_string(n), "DATE=" + year, std::string("GENRE=") + genres[album % genres.size()],
+                         "TRACKNUMBER=" + std::to_string(n), "DATE=" + year,
+                         std::string("GENRE=") + genres[album % genres.size()],
                          "COMPOSER=" + word(album % 40 + 1) + " Composer"});
         }
         if (album % 500 == 0) std::printf("\r%u / %u tracks", written, tracks);

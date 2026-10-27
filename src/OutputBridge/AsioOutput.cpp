@@ -16,6 +16,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
@@ -75,7 +76,7 @@ std::atomic<AsioOutput*> g_active{nullptr}; // ASIO callbacks carry no user poin
 
 class AsioOutput final : public IOutput {
 public:
-    explicit AsioOutput(const AsioSettings& s) : cfg_(s) {
+    explicit AsioOutput(AsioSettings s) : cfg_(std::move(s)) {
         thread_ = std::thread([this] { staMain(); });
         std::unique_lock lock(qMutex_);
         qCv_.wait(lock, [&] { return hwnd_ != nullptr || staFailed_; });

@@ -26,8 +26,8 @@ std::wstring toWide(std::string_view s) {
 
 std::wstring longPath(const std::filesystem::path& p) {
     std::wstring s = std::filesystem::absolute(p).lexically_normal().wstring();
-    if (s.rfind(L"\\\\?\\", 0) == 0) return s;
-    if (s.rfind(L"\\\\", 0) == 0) return L"\\\\?\\UNC\\" + s.substr(2);
+    if (s.starts_with(L"\\\\?\\")) return s;
+    if (s.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + s.substr(2);
     return L"\\\\?\\" + s;
 }
 

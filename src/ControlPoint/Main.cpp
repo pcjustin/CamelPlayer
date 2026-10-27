@@ -42,7 +42,8 @@ void registerAppUserModelId(const wchar_t* id) {
     const auto icon = (std::filesystem::path(executable).parent_path() / L"assets" / L"CamelPlayer.ico").wstring();
     const std::wstring key = std::wstring(L"Software\\Classes\\AppUserModelId\\") + id;
     const std::wstring name = L"CamelPlayer";
-    RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"DisplayName", REG_SZ, name.c_str(), DWORD((name.size() + 1) * sizeof(wchar_t)));
+    RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"DisplayName", REG_SZ, name.c_str(),
+                    DWORD((name.size() + 1) * sizeof(wchar_t)));
     RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"IconUri", REG_SZ, icon.c_str(), DWORD((icon.size() + 1) * sizeof(wchar_t)));
 }
 

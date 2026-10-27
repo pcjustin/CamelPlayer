@@ -61,7 +61,7 @@ winrt::hstring utf8(const std::string& s) {
 
 std::wstring formatTime(double seconds) {
     if (seconds < 0) seconds = 0;
-    const unsigned total = unsigned(seconds);
+    const auto total = unsigned(seconds);
     wchar_t buf[32];
     if (total >= 3600)
         swprintf(buf, 32, L"%u:%02u:%02u", total / 3600, total / 60 % 60, total % 60);

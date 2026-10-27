@@ -41,6 +41,7 @@ $log = Join-Path $root "build\logs\build-$Configuration.log"
     "-p:Configuration=$Configuration" '-p:Platform=x64' "-flp:logfile=$log;verbosity=normal"
 if ($LASTEXITCODE) { throw "build failed ($LASTEXITCODE), see $log" }
 & (Join-Path $root 'msbuild\check-licenses.ps1')
+& (Join-Path $root 'msbuild\compile-commands.ps1') -MSBuild $msbuild -Configuration $Configuration
 
 if ($Test) {
     cargo test --locked --manifest-path (Join-Path $root 'rust\Cargo.toml') -p camel_audio_engine

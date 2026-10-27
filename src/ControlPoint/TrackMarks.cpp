@@ -45,7 +45,7 @@ Command albumFavoriteCommand(std::vector<int64_t> albums, bool favorite) {
     return command;
 }
 
-std::vector<MenuFlyoutItemBase> appendFavoriteMenu(MenuFlyout const& menu, std::function<void(bool)> choose) {
+std::vector<MenuFlyoutItemBase> appendFavoriteMenu(MenuFlyout const& menu, const std::function<void(bool)>& choose) {
     std::vector<MenuFlyoutItemBase> added{MenuFlyoutSeparator(),
                                           entry(tr(L"Marks_AddFavorite"), L"\xE00B", [choose] { choose(true); }),
                                           entry(tr(L"Marks_RemoveFavorite"), L"\xE006", [choose] { choose(false); })};
@@ -53,7 +53,7 @@ std::vector<MenuFlyoutItemBase> appendFavoriteMenu(MenuFlyout const& menu, std::
     return added;
 }
 
-void appendAlbumFavoriteMenu(MenuFlyout const& menu, std::function<void(bool)> choose) {
+void appendAlbumFavoriteMenu(MenuFlyout const& menu, const std::function<void(bool)>& choose) {
     menu.Items().Append(MenuFlyoutSeparator());
     menu.Items().Append(entry(tr(L"Marks_AddFavoriteAlbum"), L"\xE00B", [choose] { choose(true); }));
     menu.Items().Append(entry(tr(L"Marks_RemoveFavoriteAlbum"), L"\xE006", [choose] { choose(false); }));

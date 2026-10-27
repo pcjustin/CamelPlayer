@@ -15,7 +15,7 @@ namespace camel::audio {
 
 class FlacMd5 {
 public:
-    explicit FlacMd5(uint32_t bitsPerSample) : bytes_(0) {
+    explicit FlacMd5(uint32_t bitsPerSample) {
         if (bitsPerSample != 16 && bitsPerSample != 24) throw std::invalid_argument("FLAC MD5 supports 16/24-bit PCM only");
         bytes_ = bitsPerSample / 8;
     }
@@ -25,7 +25,7 @@ public:
     std::array<uint8_t, 16> finish() { return md5_.finish(); }
 
 private:
-    uint32_t bytes_;
+    uint32_t bytes_{0};
     Md5 md5_;
     std::vector<uint8_t> buf_;
 };

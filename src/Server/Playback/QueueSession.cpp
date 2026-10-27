@@ -41,18 +41,25 @@ std::vector<size_t> indexes(const nlohmann::json& list, size_t count) {
 void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts parts) {
     if (parts.entries) {
         db.exec("DELETE FROM queue");
-        auto insert = db.prepare("INSERT INTO queue(position,entry_id,file_id,path,start_frame,end_frame,decoder,source_description) "
-                                 "VALUES(?,?,?,?,?,?,?,?)");
+        auto insert =
+            db.prepare("INSERT INTO queue(position,entry_id,file_id,path,start_frame,end_frame,decoder,source_description) "
+                       "VALUES(?,?,?,?,?,?,?,?)");
         for (size_t i = 0; i < session.entries.size(); ++i) {
             const auto& entry = session.entries[i];
             insert.bind(1, int64_t(i)).bind(2, int64_t(i) + 1);
-            if (entry.file) insert.bind(3, entry.file);
-            else insert.bindNull(3);
+            if (entry.file)
+                insert.bind(3, entry.file);
+            else
+                insert.bindNull(3);
             insert.bind(4, entry.source.pathUtf8()).bind(5, int64_t(entry.source.range().first));
-            if (const auto end = entry.source.range().endExclusive) insert.bind(6, int64_t(*end));
-            else insert.bindNull(6);
-            if (const auto decoder = entry.source.decoder()) insert.bind(7, int64_t(*decoder));
-            else insert.bindNull(7);
+            if (const auto end = entry.source.range().endExclusive)
+                insert.bind(6, int64_t(*end));
+            else
+                insert.bindNull(6);
+            if (const auto decoder = entry.source.decoder())
+                insert.bind(7, int64_t(*decoder));
+            else
+                insert.bindNull(7);
             insert.bind(8, entry.description);
             insert.run();
             insert.reset();

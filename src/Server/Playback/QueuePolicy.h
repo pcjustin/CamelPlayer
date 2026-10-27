@@ -66,13 +66,15 @@ public:
         validateUnique(entryIds);
         if (std::any_of(entryIds.begin(), entryIds.end(), [&](uint64_t id) { return !contains(id); }))
             throw std::invalid_argument("cannot remove an unknown queue entry");
-        entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [&](uint64_t id) {
-                           return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end();
-                       }),
-                       entries_.end());
-        order_.erase(std::remove_if(order_.begin(), order_.end(), [&](uint64_t id) {
-                         return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end() && current_ != id;
-                     }),
+        entries_.erase(
+            std::remove_if(entries_.begin(), entries_.end(),
+                           [&](uint64_t id) { return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end(); }),
+            entries_.end());
+        order_.erase(std::remove_if(order_.begin(), order_.end(),
+                                    [&](uint64_t id) {
+                                        return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end() &&
+                                               current_ != id;
+                                    }),
                      order_.end());
         for (const auto id : entryIds) {
             if (current_ != id) {
@@ -142,8 +144,7 @@ public:
     }
 
     std::optional<QueuePosition> next(bool naturalCompletion) {
-        if (naturalCompletion && repeat_ == RepeatMode::One && current_ && eligible(*current_))
-            return position(*current_);
+        if (naturalCompletion && repeat_ == RepeatMode::One && current_ && eligible(*current_)) return position(*current_);
         return advance();
     }
 

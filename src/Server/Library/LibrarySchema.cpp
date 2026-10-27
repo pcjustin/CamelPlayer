@@ -6,6 +6,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace camel::server {
 namespace {
@@ -225,22 +226,34 @@ const std::vector<Migration>& libraryMigrations() {
                     "artist_norm=coalesce(artist_norm,artist,'');"
                     "CREATE TABLE library_revision (id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL);"
                     "INSERT INTO library_revision VALUES(1,0);"
-                    "CREATE TRIGGER tracks_revision_insert AFTER INSERT ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
-                    "CREATE TRIGGER tracks_revision_update AFTER UPDATE ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
-                    "CREATE TRIGGER tracks_revision_delete AFTER DELETE ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
-                    "CREATE TRIGGER files_revision_update AFTER UPDATE OF available ON files BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
-                    "CREATE TRIGGER roots_revision_update AFTER UPDATE OF online ON roots BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;"
-                    "CREATE TRIGGER tracks_fts_insert AFTER INSERT ON tracks BEGIN INSERT INTO tracks_fts(rowid,title_norm,album_norm,artist_norm) "
-                    "VALUES(new.id,coalesce(new.title_norm,new.title,''),coalesce(new.album_norm,new.album,''),coalesce(new.artist_norm,new.artist,'')); END;"
+                    "CREATE TRIGGER tracks_revision_insert AFTER INSERT ON tracks BEGIN UPDATE library_revision SET "
+                    "value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER tracks_revision_update AFTER UPDATE ON tracks BEGIN UPDATE library_revision SET "
+                    "value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER tracks_revision_delete AFTER DELETE ON tracks BEGIN UPDATE library_revision SET "
+                    "value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER files_revision_update AFTER UPDATE OF available ON files BEGIN UPDATE library_revision SET "
+                    "value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER roots_revision_update AFTER UPDATE OF online ON roots BEGIN UPDATE library_revision SET "
+                    "value=value+1 WHERE id=1; END;"
+                    "CREATE TRIGGER tracks_fts_insert AFTER INSERT ON tracks BEGIN INSERT INTO "
+                    "tracks_fts(rowid,title_norm,album_norm,artist_norm) "
+                    "VALUES(new.id,coalesce(new.title_norm,new.title,''),coalesce(new.album_norm,new.album,''),coalesce(new."
+                    "artist_norm,new.artist,'')); END;"
                     "CREATE TRIGGER tracks_fts_update AFTER UPDATE ON tracks "
                     "WHEN old.title IS NOT new.title OR old.album IS NOT new.album OR old.artist IS NOT new.artist "
-                    "OR old.title_norm IS NOT new.title_norm OR old.album_norm IS NOT new.album_norm OR old.artist_norm IS NOT new.artist_norm "
+                    "OR old.title_norm IS NOT new.title_norm OR old.album_norm IS NOT new.album_norm OR old.artist_norm IS NOT "
+                    "new.artist_norm "
                     "BEGIN INSERT INTO tracks_fts(tracks_fts,rowid,title_norm,album_norm,artist_norm) "
-                    "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce(old.artist_norm,old.artist,''));"
-                    "INSERT INTO tracks_fts(rowid,title_norm,album_norm,artist_norm) VALUES(new.id,coalesce(new.title_norm,new.title,''),"
+                    "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce("
+                    "old.artist_norm,old.artist,''));"
+                    "INSERT INTO tracks_fts(rowid,title_norm,album_norm,artist_norm) "
+                    "VALUES(new.id,coalesce(new.title_norm,new.title,''),"
                     "coalesce(new.album_norm,new.album,''),coalesce(new.artist_norm,new.artist,'')); END;"
-                    "CREATE TRIGGER tracks_fts_delete AFTER DELETE ON tracks BEGIN INSERT INTO tracks_fts(tracks_fts,rowid,title_norm,album_norm,artist_norm) "
-                    "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce(old.artist_norm,old.artist,'')); END;"
+                    "CREATE TRIGGER tracks_fts_delete AFTER DELETE ON tracks BEGIN INSERT INTO "
+                    "tracks_fts(tracks_fts,rowid,title_norm,album_norm,artist_norm) "
+                    "VALUES('delete',old.id,coalesce(old.title_norm,old.title,''),coalesce(old.album_norm,old.album,''),coalesce("
+                    "old.artist_norm,old.artist,'')); END;"
                     "INSERT INTO tracks_fts(tracks_fts) VALUES('rebuild');");
         },
         [](sqlite::Database& db) {
@@ -354,7 +367,8 @@ CREATE TABLE tracks_v12 (
     artist_sort_tag TEXT,
     length_estimated INTEGER NOT NULL DEFAULT 0
 );
-INSERT INTO tracks_v12()sql") + kColumns + ") SELECT " + kColumns + R"sql( FROM tracks WHERE cue_index=0;
+INSERT INTO tracks_v12()sql") +
+                    kColumns + ") SELECT " + kColumns + R"sql( FROM tracks WHERE cue_index=0;
 DELETE FROM track_values WHERE track_id NOT IN (SELECT id FROM tracks_v12);
 DROP TABLE tracks;
 ALTER TABLE tracks_v12 RENAME TO tracks;
@@ -400,14 +414,14 @@ ALTER TABLE queue DROP COLUMN cue_index;
 
 void migrate(sqlite::Database& db, const std::vector<Migration>& migrations) {
     const int current = db.userVersion();
-    if (current > int(migrations.size()))
+    if (std::cmp_greater(current, migrations.size()))
         throw std::runtime_error("library.db has schema version " + std::to_string(current) + ", newer than this program (" +
                                  std::to_string(migrations.size()) + ")");
     // Rebuilt tables are copied, dropped and renamed (https://sqlite.org/lang_altertable.html#otheralter); with foreign
     // keys enforced, dropping a parent table would delete its children. The pragma has no effect inside a transaction.
     db.exec("PRAGMA foreign_keys = OFF");
     try {
-        for (int version = current; version < int(migrations.size()); version++) {
+        for (int version = current; std::cmp_less(version, migrations.size()); version++) {
             sqlite::Transaction t(db);
             migrations[size_t(version)](db);
             db.setUserVersion(version + 1);

@@ -39,11 +39,14 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnFormatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueClearClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    winrt::fire_and_forget OnQueueSaveClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnQueueDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+    winrt::fire_and_forget OnQueueSaveClick(Windows::Foundation::IInspectable const&,
+                                            Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueDoubleTapped(Windows::Foundation::IInspectable const&,
+                             Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
     void OnQueueRemoveEntryClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
-    void OnQueueContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
+    void OnQueueContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                                 Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
     void OnQueueDragItemsCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                    Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
     void OnCoverClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -69,7 +72,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     winrt::fire_and_forget OnAsioPanelClick(Windows::Foundation::IInspectable const&,
                                             Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    winrt::fire_and_forget OnAddFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnAddFolderClick(Windows::Foundation::IInspectable const&,
+                                            Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRemoveFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
@@ -164,7 +168,8 @@ private:
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);
 
     // Playlists (docs/Plan.md §7.9, §8.3).
-    void extendPlaylistMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, std::function<ui::SourceFetch()> selection);
+    void extendPlaylistMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu,
+                            const std::function<ui::SourceFetch()>& selection);
     // Creates a playlist from, or adds to `playlist`, what `fetch` collects; over 1,000 tracks are confirmed first.
     void runPlaylistAction(ui::SourceFetch fetch, std::optional<int64_t> playlist, std::string name);
     winrt::fire_and_forget applyPlaylistAction(std::vector<camel::server::PlaylistSource> sources,

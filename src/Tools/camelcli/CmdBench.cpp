@@ -46,13 +46,13 @@ double cpuMs() {
 double peakMB() {
     PROCESS_MEMORY_COUNTERS pmc{sizeof pmc};
     GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc);
-    return pmc.PeakWorkingSetSize / 1048576.0;
+    return double(pmc.PeakWorkingSetSize) / 1048576.0;
 }
 
 double workingMB() {
     PROCESS_MEMORY_COUNTERS pmc{sizeof pmc};
     GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc);
-    return pmc.WorkingSetSize / 1048576.0;
+    return double(pmc.WorkingSetSize) / 1048576.0;
 }
 
 // Every format the probe recognizes is benchmarked; other files are skipped.
@@ -165,7 +165,8 @@ int cmdBenchOne(const Args& args) {
                     sumMs += ms;
                     maxMs = std::max(maxMs, ms);
                     total++;
-                    if (got == 4096 && std::equal(buf.begin(), buf.begin() + 4096 * ch, ref.samples.begin() + target * ch))
+                    if (got == 4096 &&
+                        std::equal(buf.begin(), buf.begin() + ptrdiff_t(4096 * ch), ref.samples.begin() + ptrdiff_t(target * ch)))
                         exact++;
                     else {
                         // find how far off the decoder landed: compare against the reference around the target
@@ -173,7 +174,8 @@ int cmdBenchOne(const Args& args) {
                         for (long long d = -8192; d <= 8192 && got >= 16; d++) {
                             long long at = (long long)target + d;
                             if (at < 0 || uint64_t(at) + 16 > ref.samples.size() / ch) continue;
-                            if (std::equal(buf.begin(), buf.begin() + 16 * ch, ref.samples.begin() + at * ch)) {
+                            if (std::equal(buf.begin(), buf.begin() + ptrdiff_t(16 * ch),
+                                           ref.samples.begin() + ptrdiff_t(at * ch))) {
                                 offset = d;
                                 break;
                             }
@@ -202,7 +204,7 @@ int cmdBenchDecoders(const Args& args) {
             for (auto& e : std::filesystem::directory_iterator(p))
                 if (recognized(e.path())) files.push_back(e.path());
         } else {
-            files.push_back(p);
+            files.emplace_back(p);
         }
     }
     std::sort(files.begin(), files.end());

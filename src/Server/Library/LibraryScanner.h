@@ -65,7 +65,7 @@ void requestMetadataReread(LibraryStore& store);
 class LibraryMonitor {
 public:
     struct Options {
-        std::chrono::milliseconds pollInterval{std::chrono::minutes(30)}; // local roots; zero disables polling
+        std::chrono::milliseconds pollInterval{std::chrono::minutes(30)};     // local roots; zero disables polling
         std::chrono::milliseconds networkPollInterval{std::chrono::hours(6)}; // shares; zero disables polling
         std::chrono::milliseconds offlineInterval{std::chrono::seconds(60)};
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
@@ -73,7 +73,7 @@ public:
         std::function<std::filesystem::path()> playingSource;
     };
     explicit LibraryMonitor(LibraryStore& store);
-    LibraryMonitor(LibraryStore& store, Options options);
+    LibraryMonitor(LibraryStore& store, const Options& options);
     ~LibraryMonitor();
     LibraryMonitor(const LibraryMonitor&) = delete;
     LibraryMonitor& operator=(const LibraryMonitor&) = delete;

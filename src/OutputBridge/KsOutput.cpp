@@ -15,6 +15,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
@@ -31,7 +32,7 @@ namespace {
 // Not in the user-mode SDK headers (WDK only).
 const GUID kRtAudioSet = {0xa855a48c, 0x2f78, 0x4729, {0x90, 0x51, 0x19, 0x68, 0x74, 0x6b, 0x9e, 0xef}};
 
-typedef DWORD(WINAPI* KsCreatePinFn)(HANDLE, PKSPIN_CONNECT, ACCESS_MASK, PHANDLE);
+using KsCreatePinFn = DWORD(WINAPI*)(HANDLE, PKSPIN_CONNECT, ACCESS_MASK, PHANDLE);
 
 KsCreatePinFn ksCreatePinFn() {
     static KsCreatePinFn fn = [] {
@@ -170,7 +171,7 @@ PinInfo pinInfo(HANDLE f, ULONG pin) {
     KSPIN_DATAFLOW flow = KSPIN_DATAFLOW_IN;
     KSPIN_COMMUNICATION comm{};
     if (!pinProp(f, pin, KSPROPERTY_PIN_DATAFLOW, flow) || !pinProp(f, pin, KSPROPERTY_PIN_COMMUNICATION, comm)) return pi;
-    if (flow != KSPIN_DATAFLOW_IN || !(comm == KSPIN_COMMUNICATION_SINK || comm == KSPIN_COMMUNICATION_BOTH)) return pi;
+    if (flow != KSPIN_DATAFLOW_IN || (comm != KSPIN_COMMUNICATION_SINK && comm != KSPIN_COMMUNICATION_BOTH)) return pi;
     auto nm = pinPropVar(f, pin, KSPROPERTY_PIN_NAME);
     if (!nm.empty()) {
         nm.push_back(0);
@@ -282,7 +283,7 @@ enum class Mode : uint8_t { RtEvent, RtPoll, Standard };
 
 class KsOutput final : public IOutput {
 public:
-    explicit KsOutput(const KsSettings& s) : cfg_(s) {
+    explicit KsOutput(KsSettings s) : cfg_(std::move(s)) {
         if (!parseDeviceId(cfg_.deviceId, path_, pinId_)) { // default: first PCM render pin
             if (!cfg_.deviceId.empty()) throw Error(ErrorCode::DeviceNotFound, "invalid KS device id");
             auto pins = listKsPins();

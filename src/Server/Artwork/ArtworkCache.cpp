@@ -13,6 +13,7 @@
 #include <fstream>
 #include <future>
 #include <map>
+#include <utility>
 #include "Common/util/Md5.h"
 #include "Server/Library/LibraryIdentity.h"
 #include "Common/util/Text.h"
@@ -67,7 +68,7 @@ std::vector<uint8_t> readImage(const Path& file, const CancellationToken& token)
     std::ifstream input(file, std::ios::binary);
     for (size_t offset = 0; offset < bytes.size();) {
         if (token.cancelled()) return {};
-        const auto count = std::min<size_t>(64 * 1024, bytes.size() - offset);
+        const auto count = std::min(size_t{64} * 1024, bytes.size() - offset);
         if (!input.read(reinterpret_cast<char*>(bytes.data() + offset), std::streamsize(count))) return {};
         offset += count;
     }
@@ -104,8 +105,10 @@ std::string libraryKey(const Path& path) {
     if (!text.empty()) // as the scanner lowercases its keys
         LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, text.data(), int(text.size()), text.data(), int(text.size()),
                       nullptr, nullptr, 0);
-    if (text.starts_with(LR"(\\)") && !text.starts_with(LR"(\\?\)")) text = LR"(\\?\unc\)" + text.substr(2);
-    else if (text.size() > 1 && text[1] == L':') text = LR"(\\?\)" + text;
+    if (text.starts_with(LR"(\\)") && !text.starts_with(LR"(\\?\)"))
+        text = LR"(\\?\unc\)" + text.substr(2);
+    else if (text.size() > 1 && text[1] == L':')
+        text = LR"(\\?\)" + text;
     return toUtf8(text);
 }
 
@@ -128,15 +131,16 @@ std::optional<StoredCover> folderCover(sqlite::Database& db, int64_t folder) {
     size_t bestRank = SIZE_MAX;
     while (images.step()) {
         const auto rank = folderArtworkRank(Path(toWide(images.text(1))));
-        if (rank && rank->first < bestRank && images.integer(2) > 0 && uintmax_t(images.integer(2)) <= kMaxArtworkBytes) {
+        if (rank && rank->first < bestRank && images.integer(2) > 0 && std::cmp_less_equal(images.integer(2), kMaxArtworkBytes)) {
             bestRank = rank->first;
             best = storedCover(images);
         }
     }
     if (best) return best;
-    auto child = db.prepare(
-        "WITH RECURSIVE below(id) AS (SELECT ? UNION ALL SELECT d.id FROM folders d JOIN below b ON d.parent_id=b.id) "
-        "SELECT a.id FROM albums a JOIN below b ON b.id=a.folder_id WHERE a.cover_id IS NOT NULL ORDER BY a.sort_key,a.id LIMIT 1");
+    auto child =
+        db.prepare("WITH RECURSIVE below(id) AS (SELECT ? UNION ALL SELECT d.id FROM folders d JOIN below b ON d.parent_id=b.id) "
+                   "SELECT a.id FROM albums a JOIN below b ON b.id=a.folder_id WHERE a.cover_id IS NOT NULL ORDER BY "
+                   "a.sort_key,a.id LIMIT 1");
     child.bind(1, folder);
     return child.step() ? albumCover(db, child.integer(0)) : std::nullopt;
 }
@@ -297,8 +301,10 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
     // scan, a cover being shown), the reads in flight stop at their next chunk.
     auto reading = token.child();
     std::atomic<size_t> next = 0, made = 0;
+    constexpr int kWorkers = 4;
     std::vector<std::future<void>> workers;
-    for (int i = 0; i < 4; ++i)
+    workers.reserve(kWorkers);
+    for (int i = 0; i < kWorkers; ++i)
         workers.push_back(std::async(std::launch::async, [&] {
             for (size_t at; !reading.cancelled() && (at = next++) < albums.size();) {
                 auto db = store.openReader();

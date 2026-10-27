@@ -90,8 +90,10 @@ std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path, uint3
 SourceInfo probeAacInfo(const std::filesystem::path& path) {
     const SymphoniaDecoder decoder(path, 24);
     auto info = decoder.info();
-    if (const auto trim = mp4EncoderTrim(path, info.sampleRate)) info.totalFrames = trim->frames;
-    else if (!lossyLengthDeclared(path)) info.totalFrames = 0;
+    if (const auto trim = mp4EncoderTrim(path, info.sampleRate))
+        info.totalFrames = trim->frames;
+    else if (!lossyLengthDeclared(path))
+        info.totalFrames = 0;
     return info;
 }
 

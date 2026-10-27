@@ -29,6 +29,8 @@ The version comes from the `VERSION` file at the repository root; the build puts
 
 Executables are generated at `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe`, and `build/<Configuration>/tests/tests.exe`. Configuration and logs are stored under `%LOCALAPPDATA%/CamelPlayer`.
 
+Each build also writes `build/compile_commands.json` from the MSBuild projects, so clangd (for example in VS Code) applies the repository's `.clang-tidy` checks and `.clang-format` style to the C++ in `src/`. Diagnostics are fixed in the code or the check configuration, never suppressed with `NOLINT`. Rust code is kept clean with `cargo fmt` and `cargo clippy -- -D warnings`.
+
 ## Command-line companion
 
 `camelcli` is a development tool and is not included in the release zip.

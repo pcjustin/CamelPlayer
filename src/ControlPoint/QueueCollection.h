@@ -16,10 +16,11 @@
 namespace ui {
 
 class QueueCollection
-    : public winrt::implements<QueueCollection, winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable>,
-                               winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable>,
-                               winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable>,
-                               winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::IInspectable>> {
+    : public winrt::implements<
+          QueueCollection, winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable>,
+          winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable>,
+          winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable>,
+          winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::IInspectable>> {
 public:
     using IInspectable = winrt::Windows::Foundation::IInspectable;
     using Item = winrt::CamelPlayer::QueueItem;
@@ -103,7 +104,7 @@ public:
         using winrt::Windows::Foundation::Collections::CollectionChange;
         if (index >= Size()) throw winrt::hresult_out_of_bounds();
         const auto before = Size();
-        rows_.erase(rows_.begin() + first_ + index);
+        rows_.erase(rows_.begin() + ptrdiff_t(first_ + index));
         shift(index, -1);
         changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemRemoved, index));
         if (Size() == before) changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemInserted, before - 1));
@@ -113,7 +114,7 @@ public:
         using winrt::Windows::Foundation::Collections::CollectionChange;
         if (index > Size()) throw winrt::hresult_out_of_bounds();
         const auto before = Size();
-        rows_.insert(rows_.begin() + first_ + index, self(value)->row());
+        rows_.insert(rows_.begin() + ptrdiff_t(first_ + index), self(value)->row());
         shift(index, 1);
         items_[index] = value;
         changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemInserted, index));
@@ -129,7 +130,8 @@ public:
     void Clear() { throw winrt::hresult_illegal_method_call(); }
     void ReplaceAll(winrt::array_view<IInspectable const>) { throw winrt::hresult_illegal_method_call(); }
 
-    winrt::event_token VectorChanged(winrt::Windows::Foundation::Collections::VectorChangedEventHandler<IInspectable> const& handler) {
+    winrt::event_token
+    VectorChanged(winrt::Windows::Foundation::Collections::VectorChangedEventHandler<IInspectable> const& handler) {
         return changed_.add(handler);
     }
     void VectorChanged(winrt::event_token const& token) noexcept { changed_.remove(token); }
@@ -168,8 +170,10 @@ private:
     void shift(uint32_t from, int delta) {
         std::unordered_map<uint32_t, IInspectable> moved;
         for (auto& [index, item] : items_) {
-            if (index < from) moved.emplace(index, std::move(item));
-            else if (delta > 0 || index > from) moved.emplace(uint32_t(int64_t(index) + delta), std::move(item));
+            if (index < from)
+                moved.emplace(index, std::move(item));
+            else if (delta > 0 || index > from)
+                moved.emplace(uint32_t(int64_t(index) + delta), std::move(item));
         }
         items_ = std::move(moved);
     }

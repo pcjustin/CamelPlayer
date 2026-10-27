@@ -13,12 +13,12 @@ namespace winrt::CamelPlayer::implementation {
 
 struct HomeView : HomeViewT<HomeView> {
     HomeView() = default;
-    ~HomeView() { cancelCovers(); }
+    ~HomeView() override { cancelCovers(); }
 
     struct Handlers {
         std::function<void(int64_t album, hstring const& title)> openAlbum;
         std::function<void(hstring const& artist)> openArtist;
-        std::function<void(hstring const& list)> viewAll; // played, added, topAlbums or topArtists
+        std::function<void(hstring const& list)> viewAll;     // played, added, topAlbums or topArtists
         std::function<void(hstring const& period)> openStats; // today, week, month, year or all
     };
     void attach(std::shared_ptr<camel::server::IServer> server, Handlers handlers);

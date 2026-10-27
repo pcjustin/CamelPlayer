@@ -15,7 +15,7 @@ namespace winrt::CamelPlayer::implementation {
 
 struct LibraryView : LibraryViewT<LibraryView> {
     LibraryView() = default;
-    ~LibraryView() { cancelArtwork(); }
+    ~LibraryView() override { cancelArtwork(); }
     void InitializeComponent();
 
     // The window supplies the Server, the command path its player bar follows, the playlist menu entries and how a
@@ -49,18 +49,22 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnPlayAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSearchRowScroll(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSearchArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
-    void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
-    void OnCardContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
+    void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                               Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
+    void OnCardContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                                Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&, Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
+    void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&,
+                                 Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
     void OnFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     // Clicks on a row's heart stay its own: they neither play nor select the row.
     void OnMarksPointer(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& e) {
         e.Handled(true);
     }
-    void OnMarksDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& e) {
+    void OnMarksDoubleTapped(Windows::Foundation::IInspectable const&,
+                             Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& e) {
         e.Handled(true);
     }
     void OnAlbumFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

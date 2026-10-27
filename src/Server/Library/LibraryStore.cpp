@@ -63,9 +63,7 @@ std::vector<std::pair<int, std::filesystem::path>> backups(const std::filesystem
     const std::wstring prefix = db.filename().wstring() + L".v";
     for (const auto& entry : std::filesystem::directory_iterator(db.parent_path(), ec)) {
         const std::wstring name = entry.path().filename().wstring();
-        if (name.size() <= prefix.size() + 4 || name.compare(0, prefix.size(), prefix) != 0 ||
-            name.compare(name.size() - 4, 4, L".bak") != 0)
-            continue;
+        if (name.size() <= prefix.size() + 4 || !name.starts_with(prefix) || !name.ends_with(L".bak")) continue;
         const std::wstring number = name.substr(prefix.size(), name.size() - prefix.size() - 4);
         if (number.empty() || number.find_first_not_of(L"0123456789") != std::wstring::npos) continue;
         out.emplace_back(std::stoi(number), entry.path());
@@ -127,13 +125,13 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
         }
     }
     configure(*db_);
-    std::ofstream{marker};
+    std::ofstream{marker}.close();
 
     const int version = db_->userVersion();
-    if (version > int(migrations.size()))
+    if (std::cmp_greater(version, migrations.size()))
         throw MigrationError("library.db has schema version " + std::to_string(version) + ", newer than this program (" +
                              std::to_string(migrations.size()) + ")");
-    if (version < int(migrations.size())) {
+    if (std::cmp_less(version, migrations.size())) {
         std::optional<std::filesystem::path> backup;
         if (version > 0) {
             backup = withSuffix(path_, (L".v" + std::to_wstring(version) + L".bak").c_str());

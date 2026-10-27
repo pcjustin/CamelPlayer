@@ -34,8 +34,8 @@ TrayIcon::TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitTe
     windowClass.hInstance = instance;
     windowClass.lpszClassName = kWindowClass;
     RegisterClassExW(&windowClass);
-    window_ = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"CamelPlayer", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance,
-                              this);
+    window_ =
+        CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"CamelPlayer", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, this);
     taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
     // A second launch runs unelevated like this one; let its show request through UIPI either way.
     ChangeWindowMessageFilterEx(window_, kShowMessage, MSGFLT_ALLOW, nullptr);
@@ -104,6 +104,8 @@ LRESULT TrayIcon::handle(UINT message, WPARAM wParam, LPARAM lParam) {
             break;
         case WM_CONTEXTMENU:
             showMenu();
+            break;
+        default:
             break;
         }
         return 0;

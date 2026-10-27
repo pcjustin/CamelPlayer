@@ -37,24 +37,37 @@ struct Search {
     // The filter and its first bound parameter: ?1 for every plan.
     std::string filter() const {
         switch (plan) {
-        case Plan::Browse: return {};
+        case Plan::Browse:
+            return {};
         case Plan::Like:
             return " AND (t.title_norm LIKE ?1 ESCAPE '\\' OR t.artist_norm LIKE ?1 ESCAPE '\\' OR t.album_norm LIKE ?1 "
                    "ESCAPE '\\') ";
-        case Plan::Hits: return " AND t.id IN (SELECT value FROM json_each(?1)) ";
-        case Plan::Walk: return std::string(" AND") + kTextMatch;
-        case Plan::Fts: return " AND tracks_fts MATCH ?1 ";
+        case Plan::Hits:
+            return " AND t.id IN (SELECT value FROM json_each(?1)) ";
+        case Plan::Walk:
+            return std::string(" AND") + kTextMatch;
+        case Plan::Fts:
+            return " AND tracks_fts MATCH ?1 ";
         }
         return {};
     }
     const char* from() const { return plan == Plan::Fts ? kFtsTracks : kTracks; }
     void bind(sqlite::Statement& statement) const {
         switch (plan) {
-        case Plan::Browse: break;
-        case Plan::Like: statement.bind(1, pattern); break;
-        case Plan::Hits: statement.bind(1, hits); break;
-        case Plan::Walk: statement.bind(1, text); break;
-        case Plan::Fts: statement.bind(1, phrase); break;
+        case Plan::Browse:
+            break;
+        case Plan::Like:
+            statement.bind(1, pattern);
+            break;
+        case Plan::Hits:
+            statement.bind(1, hits);
+            break;
+        case Plan::Walk:
+            statement.bind(1, text);
+            break;
+        case Plan::Fts:
+            statement.bind(1, phrase);
+            break;
         }
     }
     // Exact totals of a walked query need every match, which only the full-text index lists cheaply.
@@ -69,8 +82,7 @@ Search plan(sqlite::Database& db, std::string_view filter, int64_t offset, int64
     Search search;
     if (filter.empty()) return search;
     search.text = filter;
-    const auto characters =
-        std::count_if(filter.begin(), filter.end(), [](unsigned char c) { return (c & 0xc0) != 0x80; });
+    const auto characters = std::count_if(filter.begin(), filter.end(), [](unsigned char c) { return (c & 0xc0) != 0x80; });
     if (characters < 3) {
         search.plan = Search::Plan::Like;
         search.pattern = "%";
@@ -96,16 +108,14 @@ Search plan(sqlite::Database& db, std::string_view filter, int64_t offset, int64
         search.hits += std::to_string(rows.integer(0));
     }
     search.hits.push_back(']');
-    search.plan = count <= kHits             ? Search::Plan::Hits
-                  : offset + limit <= kWalkRows ? Search::Plan::Walk
-                                                : Search::Plan::Fts;
+    search.plan = count <= kHits ? Search::Plan::Hits : offset + limit <= kWalkRows ? Search::Plan::Walk : Search::Plan::Fts;
     return search;
 }
 
 void cancellable(sqlite::Database& db, const CancellationToken& token) {
-    sqlite3_progress_handler(db.handle(), 1000, [](void* context) {
-        return static_cast<const CancellationToken*>(context)->cancelled() ? 1 : 0;
-    }, const_cast<CancellationToken*>(&token));
+    sqlite3_progress_handler(
+        db.handle(), 1000, [](void* context) { return static_cast<const CancellationToken*>(context)->cancelled() ? 1 : 0; },
+        const_cast<CancellationToken*>(&token));
 }
 
 LibraryTrackPage tracks(sqlite::Database& db, const Search& search, int64_t offset, int64_t limit, bool totals,
@@ -115,11 +125,13 @@ LibraryTrackPage tracks(sqlite::Database& db, const Search& search, int64_t offs
     // A search counts its matches while ordering them; browsing and walking count separately.
     const bool windowTotal = totals && !walk && search.plan != Search::Plan::Browse;
     const std::string columns = std::string("SELECT t.id,coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,''),"
-                                            "f.path,t.file_id") + (windowTotal ? ",count(*) OVER()" : "");
-    const std::string select =
-        walk ? columns + " FROM tracks t INDEXED BY tracks_title_sort JOIN files f ON f.id=t.file_id "
-                         "JOIN roots r ON r.id=f.root_id WHERE" + kTextMatch + "AND" + kVisibleTrack
-             : columns + search.from() + " WHERE" + kVisible + search.filter();
+                                            "f.path,t.file_id") +
+                                (windowTotal ? ",count(*) OVER()" : "");
+    const std::string select = walk ? columns +
+                                          " FROM tracks t INDEXED BY tracks_title_sort JOIN files f ON f.id=t.file_id "
+                                          "JOIN roots r ON r.id=f.root_id WHERE" +
+                                          kTextMatch + "AND" + kVisibleTrack
+                                    : columns + search.from() + " WHERE" + kVisible + search.filter();
     auto rows = db.prepare(select + " ORDER BY t.title_sort,t.id LIMIT ?2 OFFSET ?3");
     search.bind(rows);
     rows.bind(2, limit).bind(3, offset);
@@ -156,18 +168,17 @@ LibraryTrackPage page(const LibraryStore& store, std::string_view filter, int64_
 
 } // namespace
 
-LibraryTrackPage browseTracks(const LibraryStore& store, int64_t offset, int64_t limit,
-                              std::optional<uint64_t> expectedRevision,
+LibraryTrackPage browseTracks(const LibraryStore& store, int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision,
                               const CancellationToken& token) {
     return page(store, {}, offset, limit, expectedRevision, token);
 }
 
-LibraryTrackPage searchTracks(const LibraryStore& store, std::string query, int64_t offset, int64_t limit,
+LibraryTrackPage searchTracks(const LibraryStore& store, const std::string& query, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     return page(store, normalizeLibrarySearch(query), offset, limit, expectedRevision, token);
 }
 
-LibrarySearchResults searchLibrary(const LibraryStore& store, std::string query, int64_t offset, int64_t limit,
+LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string& query, int64_t offset, int64_t limit,
                                    std::optional<uint64_t> expectedRevision, const CancellationToken& token, bool totals) {
     if (offset < 0 || limit < 1 || limit > 500) throw std::invalid_argument("invalid library page range");
     if (token.cancelled()) throw std::runtime_error("library query cancelled");
@@ -177,8 +188,7 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, std::string query,
     cancellable(db, token);
     db.exec("BEGIN");
     result.revision = uint64_t(db.scalar("SELECT value FROM library_revision WHERE id=1").value_or(0));
-    if (expectedRevision && *expectedRevision != result.revision)
-        throw std::runtime_error("library query revision changed");
+    if (expectedRevision && *expectedRevision != result.revision) throw std::runtime_error("library query revision changed");
     const auto search = plan(db, normalized, offset, limit);
     result.tracks = tracks(db, search, offset, limit, totals, token);
     result.tracks.revision = result.revision;
@@ -197,8 +207,10 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, std::string query,
                               "JOIN roots r ON r.id=f.root_id WHERE t.album_id=a.id AND") +
                       kTextMatch + "AND" + kVisibleTrack + ") ORDER BY a.sort_key,a.id LIMIT ?2 OFFSET ?3"
                 : "SELECT id,title,artist FROM (SELECT a.id,coalesce(a.title,'') title,coalesce(a.album_artist,'') artist,"
-                  "a.sort_key" + albumFrom + "WHERE" + kVisible + albumFilter + " GROUP BY a.id) "
-                  "ORDER BY sort_key,id LIMIT ?2 OFFSET ?3");
+                  "a.sort_key" +
+                      albumFrom + "WHERE" + kVisible + albumFilter +
+                      " GROUP BY a.id) "
+                      "ORDER BY sort_key,id LIMIT ?2 OFFSET ?3");
         search.bind(rows);
         rows.bind(2, limit).bind(3, offset);
         while (rows.step()) result.albums.push_back({rows.integer(0), rows.text(1), rows.text(2)});
@@ -229,8 +241,8 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, std::string query,
             named.phrase = "artist_norm : " + search.phrase;
             artistFilter = named.filter();
         }
-        const std::string artistFrom = std::string(named.from()) +
-                                       "LEFT JOIN track_values v ON v.track_id=t.id AND v.field='artist' ";
+        const std::string artistFrom =
+            std::string(named.from()) + "LEFT JOIN track_values v ON v.track_id=t.id AND v.field='artist' ";
         auto rows = db.prepare("SELECT name FROM (SELECT " + artist + " name,min(coalesce(v.sort_key,t.artist_sort)) sort_key" +
                                artistFrom + "WHERE" + kVisible + artistFilter + " GROUP BY " + artist +
                                ") ORDER BY sort_key,name LIMIT ?2 OFFSET ?3");

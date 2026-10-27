@@ -20,6 +20,7 @@
 
 #pragma comment(lib, "propsys.lib")
 #include <thread>
+#include <utility>
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
@@ -100,7 +101,7 @@ std::vector<hstring> rateItems() {
     for (uint32_t rate : kFixedRates) {
         wchar_t text[32];
         swprintf(text, 32, L"%.1f kHz", rate / 1000.0);
-        items.push_back(text);
+        items.emplace_back(text);
     }
     return items;
 }
@@ -188,23 +189,22 @@ void MainWindow::InitializeComponent() {
     setButtonTip(QueueToggleButton(), L"Tip_Queue");
 
     populateSettings();
-    const ui::PlaylistMenu playlistMenu = [this](MenuFlyout const& menu, std::function<ui::SourceFetch()> selection) {
-        extendPlaylistMenu(menu, std::move(selection));
+    const ui::PlaylistMenu playlistMenu = [this](MenuFlyout const& menu, const std::function<ui::SourceFetch()>& selection) {
+        extendPlaylistMenu(menu, selection);
     };
     get_self<LibraryView>(Library())->attach(
         server_, [this](Command command) { submitCommand(std::move(command)); }, playlistMenu,
         [this](ui::SourceFetch fetch, std::string name) { runPlaylistAction(std::move(fetch), std::nullopt, std::move(name)); });
     get_self<PlaylistView>(Playlists())
-        ->attach(server_, {[this](Command command) { submitCommand(std::move(command)); }, [this] { refreshPlaylists(); },
-                           [this](int64_t playlist) {
-                               // A playlist just imported is listed in the navigation once it is refreshed.
-                               const auto tag = playlist ? L"playlist:" + to_hstring(playlist) : hstring(L"playlists");
-                               refreshPlaylists([this, tag] { selectPage(tag); });
-                           },
-                           [this](hstring const& title, hstring const& message, bool error) {
-                               showPlaylistNotice(title, message, error);
-                           },
-                           [this] { return Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()); }, playlistMenu});
+        ->attach(server_,
+                 {[this](Command command) { submitCommand(std::move(command)); }, [this] { refreshPlaylists(); },
+                  [this](int64_t playlist) {
+                      // A playlist just imported is listed in the navigation once it is refreshed.
+                      const auto tag = playlist ? L"playlist:" + to_hstring(playlist) : hstring(L"playlists");
+                      refreshPlaylists([this, tag] { selectPage(tag); });
+                  },
+                  [this](hstring const& title, hstring const& message, bool error) { showPlaylistNotice(title, message, error); },
+                  [this] { return Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()); }, playlistMenu});
     noticeTimer_ = DispatcherQueue().CreateTimer();
     noticeTimer_.Interval(std::chrono::seconds(10));
     noticeTimer_.Tick([this](auto&&, auto&&) {
@@ -223,8 +223,8 @@ void MainWindow::InitializeComponent() {
     };
     get_self<HomeView>(Home())->attach(server_, {openAlbum, openArtist, [this](hstring const& list) { viewAll(list); },
                                                  [this](hstring const& period) { openStats(period); }});
-    get_self<StatisticsView>(Stats())->attach(server_, {[this](Command command) { submitCommand(std::move(command)); },
-                                                        openAlbum, openArtist});
+    get_self<StatisticsView>(Stats())->attach(
+        server_, {[this](Command command) { submitCommand(std::move(command)); }, openAlbum, openArtist});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     QueueList().ItemsSource(*queueItems_);
@@ -261,8 +261,8 @@ void MainWindow::InitializeComponent() {
     tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit}, std::wstring(tr(L"Tray_Open")),
                                            std::wstring(tr(L"Tray_Exit")));
     // The window carries the app's AUMID too: the media session takes its app from the window it was created for.
-    if (winrt::com_ptr<IPropertyStore> properties;
-        SUCCEEDED(SHGetPropertyStoreForWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), IID_PPV_ARGS(properties.put())))) {
+    if (winrt::com_ptr<IPropertyStore> properties; SUCCEEDED(SHGetPropertyStoreForWindow(
+            Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), IID_PPV_ARGS(properties.put())))) {
         PROPVARIANT id;
         if (SUCCEEDED(InitPropVariantFromString(L"CamelPlayer.CamelPlayer", &id))) {
             properties->SetValue(PKEY_AppUserModel_ID, id);
@@ -270,21 +270,21 @@ void MainWindow::InitializeComponent() {
         }
     }
     if (server_) {
-        media_ = std::make_unique<ui::MediaControls>(
-            Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), DispatcherQueue(),
-            ui::MediaControls::Handlers{[this](CommandKind kind) { submitKind(kind); },
-                                        [this](double seconds) {
-                                            const auto s = server_->snapshot().playback;
-                                            if (!s.source) return;
-                                            Command command;
-                                            command.kind = CommandKind::Seek;
-                                            command.frame = secondsToFrames(seconds, s.source->sampleRate);
-                                            submitCommand(std::move(command));
-                                        }},
-            server_);
+        media_ = std::make_unique<ui::MediaControls>(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), DispatcherQueue(),
+                                                     ui::MediaControls::Handlers{[this](CommandKind kind) { submitKind(kind); },
+                                                                                 [this](double seconds) {
+                                                                                     const auto s = server_->snapshot().playback;
+                                                                                     if (!s.source) return;
+                                                                                     Command command;
+                                                                                     command.kind = CommandKind::Seek;
+                                                                                     command.frame = secondsToFrames(
+                                                                                         seconds, s.source->sampleRate);
+                                                                                     submitCommand(std::move(command));
+                                                                                 }},
+                                                     server_);
         hotkeys_ = std::make_unique<ui::GlobalHotkeys>([this](ui::GlobalHotkeys::Action action) {
             using Action = ui::GlobalHotkeys::Action;
-            submitKind(action == Action::PlayPause ? CommandKind::TogglePause
+            submitKind(action == Action::PlayPause  ? CommandKind::TogglePause
                        : action == Action::Previous ? CommandKind::Previous
                                                     : CommandKind::Next);
         });
@@ -351,6 +351,7 @@ void MainWindow::populateSettings() {
     for (const auto& [combo, format] : decoderCombos()) {
         const auto registered = decodersFor(format);
         std::vector<hstring> names;
+        names.reserve(registered.size());
         for (DecoderKind k : registered) names.push_back(ui::utf8(decoderName(k)));
         const auto chosen = std::find(registered.begin(), registered.end(), decoderFor(settings_.decoderByFormat, format));
         fill(combo, names, int(chosen - registered.begin()));
@@ -476,7 +477,8 @@ void MainWindow::readSettingsFromUi() {
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
-        settings_.wasapi.deviceId = dev == 0 || dev > int(wasapiDevices_.size()) ? "" : wasapiDevices_[size_t(dev - 1)].id;
+        settings_.wasapi.deviceId =
+            dev == 0 || std::cmp_greater(dev, wasapiDevices_.size()) ? "" : wasapiDevices_[size_t(dev - 1)].id;
     settings_.wasapi.shared = idx(WasapiShareCombo()) == 1;
     settings_.wasapi.sharedResampleQuality = ResampleQuality(std::min(idx(WasapiSharedQualityCombo()), 2));
     settings_.wasapi.eventDriven = idx(WasapiModeCombo()) == 0;
@@ -490,7 +492,7 @@ void MainWindow::readSettingsFromUi() {
     readTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), settings_.wasapi.timing);
 
     const int drv = idx(AsioDriverCombo());
-    if (drv < int(asioDrivers_.size())) settings_.asio.driverClsid = asioDrivers_[size_t(drv)].id;
+    if (std::cmp_less(drv, asioDrivers_.size())) settings_.asio.driverClsid = asioDrivers_[size_t(drv)].id;
     settings_.asio.bufferSize = long(numberOr(AsioBufferBox(), double(settings_.asio.bufferSize)));
     settings_.asio.outLeft = int(numberOr(AsioLeftBox(), settings_.asio.outLeft + 1)) - 1;
     settings_.asio.outRight = int(numberOr(AsioRightBox(), settings_.asio.outRight + 1)) - 1;
@@ -498,7 +500,7 @@ void MainWindow::readSettingsFromUi() {
     readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     const int pin = idx(KsDeviceCombo());
-    if (pin < int(ksPins_.size())) settings_.ks.deviceId = ksPins_[size_t(pin)].id;
+    if (std::cmp_less(pin, ksPins_.size())) settings_.ks.deviceId = ksPins_[size_t(pin)].id;
     settings_.ks.mode = KsMode(std::min(idx(KsModeCombo()), 3));
     settings_.ks.bufferMs = numberOr(KsBufferBox(), settings_.ks.bufferMs);
     settings_.ks.packetCount = int(numberOr(KsPacketCountBox(), settings_.ks.packetCount));
@@ -627,7 +629,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         artworkToken_.cancel();
         artworkToken_ = {};
         PlaybackCover().Source(nullptr);
-        if (!artworkPath_.empty()) ui::loadArtwork(PlaybackCover(), server_, {ArtworkKind::Track, 0, artworkPath_}, artworkToken_);
+        if (!artworkPath_.empty())
+            ui::loadArtwork(PlaybackCover(), server_, {ArtworkKind::Track, 0, artworkPath_}, artworkToken_);
     }
     const uint32_t rate = s.source ? s.source->sampleRate : 0;
     const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
@@ -672,7 +675,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         rows.reserve(snapshot.queue.entries.size());
         for (const auto& entry : snapshot.queue.entries)
             rows.push_back({entry.id,
-                            entry.title.empty()    ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
+                            entry.title.empty() ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
                             : entry.artist.empty() ? ui::utf8(entry.title)
                                                    : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist),
                             ui::utf8(entry.source.pathUtf8()), entry.automatic, entry.file, entry.favorite});
@@ -729,8 +732,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const std::string title = known && !currentEntry->title.empty()
                                       ? currentEntry->title
                                       : toUtf8(std::filesystem::path(toWide(s.pathUtf8)).stem().wstring());
-        media_->update(s, title, known ? currentEntry->artist : std::string{}, known ? currentEntry->album : std::string{},
-                       pos, total);
+        media_->update(s, title, known ? currentEntry->artist : std::string{}, known ? currentEntry->album : std::string{}, pos,
+                       total);
     }
 
     // Playing, paused, stopped or failed, never only implied by the play button's icon
@@ -974,7 +977,7 @@ void MainWindow::viewAll(hstring const& list) {
             [ranked, plays](int64_t offset, int64_t limit, std::optional<uint64_t>) {
                 const auto stats = ranked(offset, limit);
                 ui::BrowsePage out{0, int64_t(stats.albums.size()), {}};
-                for (size_t i = size_t(offset); i < stats.albums.size() && i < size_t(offset + limit); ++i)
+                for (auto i = size_t(offset); i < stats.albums.size() && std::cmp_less(i, offset + limit); ++i)
                     out.rows.push_back({stats.albums[i].album,
                                         {},
                                         ui::utf8(stats.albums[i].name),
@@ -990,7 +993,7 @@ void MainWindow::viewAll(hstring const& list) {
             [ranked, plays](int64_t offset, int64_t limit, std::optional<uint64_t>) {
                 const auto stats = ranked(offset, limit);
                 ui::BrowsePage out{0, int64_t(stats.artists.size()), {}};
-                for (size_t i = size_t(offset); i < stats.artists.size() && i < size_t(offset + limit); ++i)
+                for (auto i = size_t(offset); i < stats.artists.size() && std::cmp_less(i, offset + limit); ++i)
                     out.rows.push_back(
                         {0, stats.artists[i].name, ui::utf8(stats.artists[i].name), {}, {}, plays(stats.artists[i].plays)});
                 return out;
@@ -1002,11 +1005,11 @@ void MainWindow::viewAll(hstring const& list) {
 // Home's listening tiles open the statistics page on their period.
 void MainWindow::openStats(hstring const& period) {
     using Range = StatisticsView::Range;
-    const auto range = period == L"today" ? Range::Today
-                       : period == L"week" ? Range::ThisWeek
+    const auto range = period == L"today"   ? Range::Today
+                       : period == L"week"  ? Range::ThisWeek
                        : period == L"month" ? Range::ThisMonth
-                       : period == L"year" ? Range::ThisYear
-                                           : Range::AllTime;
+                       : period == L"year"  ? Range::ThisYear
+                                            : Range::AllTime;
     selectPage(L"stats");
     get_self<StatisticsView>(Stats())->show(range);
 }
@@ -1016,22 +1019,29 @@ void MainWindow::showPage(hstring const& tag) {
     Home().Visibility(tag == L"home" ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"home") get_self<HomeView>(Home())->refresh();
     Stats().Visibility(tag == L"stats" ? Visibility::Visible : Visibility::Collapsed);
-    if (tag == L"stats") get_self<StatisticsView>(Stats())->show(StatisticsView::Range::Last30Days);
-    else get_self<StatisticsView>(Stats())->hide();
+    if (tag == L"stats")
+        get_self<StatisticsView>(Stats())->show(StatisticsView::Range::Last30Days);
+    else
+        get_self<StatisticsView>(Stats())->hide();
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
-    const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" ||
-                         tag == L"years" || tag == L"tracks" || tag == L"folders" || std::wstring_view(tag).starts_with(L"smart:");
+    const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" || tag == L"years" ||
+                         tag == L"tracks" || tag == L"folders" || std::wstring_view(tag).starts_with(L"smart:");
     Library().Visibility(library ? Visibility::Visible : Visibility::Collapsed);
     auto view = get_self<LibraryView>(Library());
-    if (library) view->show(tag, PlaceholderTitle().Text());
-    else view->hide();
+    if (library)
+        view->show(tag, PlaceholderTitle().Text());
+    else
+        view->hide();
     const std::wstring_view page(tag);
     const bool playlists = page == L"playlists" || page.starts_with(L"playlist:");
     Playlists().Visibility(playlists ? Visibility::Visible : Visibility::Collapsed);
     auto playlistView = get_self<PlaylistView>(Playlists());
-    if (page == L"playlists") playlistView->showAll();
-    else if (playlists) playlistView->showPlaylist(std::stoll(std::wstring(page.substr(9))));
-    else playlistView->hide();
+    if (page == L"playlists")
+        playlistView->showAll();
+    else if (playlists)
+        playlistView->showPlaylist(std::stoll(std::wstring(page.substr(9))));
+    else
+        playlistView->hide();
     const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home" && tag != L"stats";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") {
@@ -1202,7 +1212,9 @@ void MainWindow::showHotkeys() {
 
         Button combination;
         const auto current = ui::GlobalHotkeys::describe(ui::GlobalHotkeys::of(settings_.hotkeys, action));
-        combination.Content(box_value(capturing_ == action ? tr(L"Hotkey_Press") : current.empty() ? tr(L"Hotkey_None") : hstring(current)));
+        combination.Content(box_value(capturing_ == action ? tr(L"Hotkey_Press")
+                                      : current.empty()    ? tr(L"Hotkey_None")
+                                                           : hstring(current)));
         combination.HorizontalAlignment(HorizontalAlignment::Stretch);
         Grid::SetColumn(combination, 1);
         combination.Click([this, action](auto&& sender, auto&&) {
@@ -1260,7 +1272,8 @@ void MainWindow::showHotkeys() {
         status.Text(hotkeysTaken_[i] ? tr(L"Hotkey_Taken") : hstring{});
         status.TextWrapping(TextWrapping::Wrap);
         status.VerticalAlignment(VerticalAlignment::Center);
-        status.Foreground(Application::Current().Resources().Lookup(box_value(L"SystemFillColorCautionBrush")).as<Media::Brush>());
+        status.Foreground(
+            Application::Current().Resources().Lookup(box_value(L"SystemFillColorCautionBrush")).as<Media::Brush>());
         Grid::SetColumn(status, 3);
         row.Children().Append(status);
         HotkeyRows().Children().Append(row);
@@ -1384,7 +1397,8 @@ winrt::fire_and_forget MainWindow::OnSearchTextChanged(AutoSuggestBox const& box
         self->showSuggestions(*results, text);
         if (camel::measure::measuring())
             camel::log::info("measure: suggestions for %u characters in %.1f ms (server %.1f ms)", text.size(),
-                             camel::measure::milliseconds(typed, camel::measure::now()), camel::measure::milliseconds(typed, found));
+                             camel::measure::milliseconds(typed, camel::measure::now()),
+                             camel::measure::milliseconds(typed, found));
     });
 }
 
@@ -1394,7 +1408,7 @@ void MainWindow::showSuggestions(const LibrarySearchResults& results, hstring co
     auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
     const auto add = [&](Suggestion suggestion, hstring subtitle, hstring group) {
         auto item = make<BrowseItem>();
-        get_self<BrowseItem>(item)->fill({0, {}, suggestion.title, subtitle, {}, group});
+        get_self<BrowseItem>(item)->fill({0, {}, suggestion.title, std::move(subtitle), {}, std::move(group)});
         items.Append(item);
         suggestions_.push_back(std::move(suggestion));
     };
@@ -1472,7 +1486,7 @@ void MainWindow::showSearchResults(hstring const& query) {
 }
 
 void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {
-    if (Nav().IsPaneOpen() == false) Nav().IsPaneOpen(true); // the box is hidden behind its icon in the compact pane
+    if (!Nav().IsPaneOpen()) Nav().IsPaneOpen(true); // the box is hidden behind its icon in the compact pane
     SearchBox().Focus(FocusState::Keyboard);
     e.Handled(true);
 }
@@ -1523,9 +1537,12 @@ winrt::fire_and_forget MainWindow::showDataLocation() {
         if (!self) return;
         const auto bytes = [](uintmax_t n) {
             wchar_t text[32];
-            if (n >= (1ull << 30)) swprintf(text, 32, L"%.1f GB", n / double(1ull << 30));
-            else if (n >= (1ull << 20)) swprintf(text, 32, L"%.1f MB", n / double(1ull << 20));
-            else swprintf(text, 32, L"%.1f KB", n / 1024.0);
+            if (n >= (1ull << 30))
+                swprintf(text, 32, L"%.1f GB", double(n) / double(1ull << 30));
+            else if (n >= (1ull << 20))
+                swprintf(text, 32, L"%.1f MB", double(n) / double(1ull << 20));
+            else
+                swprintf(text, 32, L"%.1f KB", double(n) / 1024.0);
             return std::wstring(text);
         };
         std::wstring text(tr(L"Reset_Sizes"));
@@ -1547,7 +1564,7 @@ void MainWindow::OnOpenDataFolderClick(Windows::Foundation::IInspectable const&,
 winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
     auto strong = get_strong();
     const hstring kind = unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L"");
-    const std::wstring key = kind == L"playback"  ? L"Playback"
+    const std::wstring key = kind == L"playback"    ? L"Playback"
                              : kind == L"interface" ? L"Interface"
                              : kind == L"library"   ? L"Library"
                              : kind == L"covers"    ? L"Covers"
@@ -1593,8 +1610,10 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
         const bool library = kind == L"library";
         co_await winrt::resume_background();
         try {
-            if (library) server->rereadLibrary();
-            else server->clearArtworkCache();
+            if (library)
+                server->rereadLibrary();
+            else
+                server->clearArtworkCache();
         } catch (const std::exception& e) {
             camel::log::warn("reset: %s", e.what());
         }
@@ -1683,7 +1702,7 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
         devices->clear();
         if (chosen == Backend::Wasapi) {
             device.Items().Append(box_value(tr(L"Device_Default")));
-            devices->push_back({});
+            devices->emplace_back();
         }
         for (const auto& entry : list) {
             device.Items().Append(box_value(ui::utf8(entry.name)));
@@ -1800,8 +1819,10 @@ winrt::fire_and_forget MainWindow::OnQueueSaveClick(Windows::Foundation::IInspec
     dispatcher.TryEnqueue([weak, change] {
         auto self = weak.get();
         if (!self) return;
-        if (change) self->showPlaylistChange(*change, true);
-        else self->showPlaylistNotice(tr(L"Queue_SaveFailed"), {}, true);
+        if (change)
+            self->showPlaylistChange(*change, true);
+        else
+            self->showPlaylistNotice(tr(L"Queue_SaveFailed"), {}, true);
     });
 }
 
@@ -1861,7 +1882,8 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
             bool selected = false;
             if (queueItems_->IndexOf(queueMenuItem_, clicked))
                 for (const auto& range : QueueList().SelectedRanges())
-                    selected = selected || (clicked >= uint32_t(range.FirstIndex()) && clicked <= uint32_t(range.LastIndex()));
+                    selected = selected || (std::cmp_greater_equal(clicked, range.FirstIndex()) &&
+                                            std::cmp_less_equal(clicked, range.LastIndex()));
             if (!selected) {
                 add(queueMenuItem_);
             } else {
@@ -1881,7 +1903,8 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
             bool selected = false;
             if (queueItems_->IndexOf(queueMenuItem_, clicked))
                 for (const auto& range : QueueList().SelectedRanges())
-                    selected = selected || (clicked >= uint32_t(range.FirstIndex()) && clicked <= uint32_t(range.LastIndex()));
+                    selected = selected || (std::cmp_greater_equal(clicked, range.FirstIndex()) &&
+                                            std::cmp_less_equal(clicked, range.LastIndex()));
             if (!selected) {
                 add(queueMenuItem_);
             } else {
@@ -1897,7 +1920,7 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
     e.Handled(true);
 }
 
-void MainWindow::extendPlaylistMenu(MenuFlyout const& menu, std::function<ui::SourceFetch()> selection) {
+void MainWindow::extendPlaylistMenu(MenuFlyout const& menu, const std::function<ui::SourceFetch()>& selection) {
     menu.Items().Append(MenuFlyoutSeparator());
     MenuFlyoutItem create;
     create.Text(tr(L"Library_MenuCreatePlaylist"));
@@ -1946,9 +1969,12 @@ void MainWindow::runPlaylistAction(ui::SourceFetch fetch, std::optional<int64_t>
         dispatcher.TryEnqueue([weak, sources = std::move(sources), preview, playlist, name] {
             auto self = weak.get();
             if (!self) return;
-            if (!preview) self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
-            else if (preview->tracks == 0) self->showPlaylistNotice(tr(L"Playlist_NothingAdded"), tr(L"Playlist_NothingAddedText"), false);
-            else self->applyPlaylistAction(sources, *preview, playlist, name);
+            if (!preview)
+                self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
+            else if (preview->tracks == 0)
+                self->showPlaylistNotice(tr(L"Playlist_NothingAdded"), tr(L"Playlist_NothingAddedText"), false);
+            else
+                self->applyPlaylistAction(sources, *preview, playlist, name);
         });
     }).detach();
 }
@@ -1964,9 +1990,10 @@ winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSourc
         for (auto at = int64_t(count.size()) - 3; at > 0; at -= 3) count.insert(size_t(at), L",");
         const int64_t minutes = preview.durationMs / 60'000;
         const std::wstring length =
-            minutes < 24 * 60 ? ui::formatTime(double(preview.durationMs) / 1000.0)
-                              : std::wstring(ui::format(L"Home_DaysHours", {std::to_wstring(minutes / (24 * 60)),
-                                                                            std::to_wstring(minutes / 60 % 24)}));
+            minutes < int64_t{24} * 60
+                ? ui::formatTime(double(preview.durationMs) / 1000.0)
+                : std::wstring(ui::format(L"Home_DaysHours",
+                                          {std::to_wstring(minutes / (int64_t{24} * 60)), std::to_wstring(minutes / 60 % 24)}));
         dialog.Content(box_value(ui::format(L"Playlist_ConfirmText", {count, length})));
         dialog.PrimaryButtonText(tr(playlist ? L"Playlist_ConfirmAdd" : L"Playlist_ConfirmCreate"));
         dialog.CloseButtonText(tr(L"Playlist_Cancel"));
@@ -1986,8 +2013,10 @@ winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSourc
     dispatcher.TryEnqueue([weak, change, created = !playlist] {
         auto self = weak.get();
         if (!self) return;
-        if (change) self->showPlaylistChange(*change, created);
-        else self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
+        if (change)
+            self->showPlaylistChange(*change, created);
+        else
+            self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
     });
 }
 
@@ -2013,13 +2042,16 @@ void MainWindow::showPlaylistChange(const PlaylistChange& change, bool created) 
         message += L" · " + std::wstring(ui::format(L"Playlist_Skipped", {std::to_wstring(skipped)}));
     const std::wstring name(ui::utf8(change.name));
     if (!created && change.added == 0)
-        showPlaylistNotice(ui::format(L"Playlist_NothingAddedTo", {name}), hstring(message), false, std::nullopt, change.playlist);
+        showPlaylistNotice(ui::format(L"Playlist_NothingAddedTo", {name}), hstring(message), false, std::nullopt,
+                           change.playlist);
     else
         showPlaylistNotice(ui::format(created ? L"Playlist_Created" : L"Playlist_Added", {name}), hstring(message), false,
                            change.undo, change.playlist);
     get_self<PlaylistView>(Playlists())->reload(change.playlist);
-    if (created) refreshPlaylists([this, id = change.playlist] { renameInNavigation(id); });
-    else refreshPlaylists();
+    if (created)
+        refreshPlaylists([this, id = change.playlist] { renameInNavigation(id); });
+    else
+        refreshPlaylists();
 }
 
 void MainWindow::showPlaylistNotice(hstring const& title, hstring const& message, bool error, std::optional<PlaylistUndo> undo,
@@ -2048,8 +2080,10 @@ void MainWindow::showPlaylistNotice(hstring const& title, hstring const& message
         button.Click([this](auto&&, auto&&) { undoPlaylistNotice(); });
         actions.Children().Append(button);
     }
-    if (actions.Children().Size()) bar.Content(actions);
-    else bar.Content(nullptr);
+    if (actions.Children().Size())
+        bar.Content(actions);
+    else
+        bar.Content(nullptr);
     bar.IsOpen(true);
     noticeUndo_ = undo; // after IsOpen: reopening a closed notice raises Closed for the previous one
     noticeTimer_.Stop();
@@ -2076,8 +2110,10 @@ void MainWindow::undoPlaylistNotice() {
             self->showPlaylistNotice(tr(undone ? L"Playlist_Undone" : L"Playlist_UndoFailed"), {}, !undone);
             self->refreshPlaylists();
             auto view = get_self<PlaylistView>(self->Playlists());
-            if (undone && undo.created && view->shown() == undo.playlist) self->selectPage(L"playlists");
-            else view->reload(undo.playlist);
+            if (undone && undo.created && view->shown() == undo.playlist)
+                self->selectPage(L"playlists");
+            else
+                view->reload(undo.playlist);
         });
     }).detach();
 }
@@ -2194,7 +2230,8 @@ void MainWindow::renameInNavigation(int64_t playlist) {
             camel::log::warn("playlist rename box: 0x%08x", uint32_t(e.code()));
         }
     };
-    if (item.IsLoaded()) show();
+    if (item.IsLoaded())
+        show();
     else {
         auto token = std::make_shared<event_token>();
         *token = item.Loaded([show, token, weakItem = make_weak(item)](auto&&, auto&&) {

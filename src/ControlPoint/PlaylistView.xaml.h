@@ -16,8 +16,8 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
 
     struct Handlers {
         std::function<void(camel::server::Command)> submit;
-        std::function<void()> changed;          // playlists were added, renamed or deleted
-        std::function<void(int64_t)> open;      // shows a playlist, or the Playlists page for 0
+        std::function<void()> changed;     // playlists were added, renamed or deleted
+        std::function<void(int64_t)> open; // shows a playlist, or the Playlists page for 0
         std::function<void(hstring const& title, hstring const& message, bool error)> notify;
         std::function<HWND()> window;
         ui::PlaylistMenu menu;
@@ -37,19 +37,22 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
     winrt::fire_and_forget OnImportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnColumnClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlaylistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
-    void OnEntryDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+    void OnEntryDoubleTapped(Windows::Foundation::IInspectable const&,
+                             Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
     void OnFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     // Clicks on a row's heart stay its own: they neither play nor select the row.
     void OnMarksPointer(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& e) {
         e.Handled(true);
     }
-    void OnMarksDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& e) {
+    void OnMarksDoubleTapped(Windows::Foundation::IInspectable const&,
+                             Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& e) {
         e.Handled(true);
     }
     void OnEntryKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
     void OnEntryDragCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                               Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
-    void OnEntryContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
+    void OnEntryContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                                 Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
 private:
     void load();

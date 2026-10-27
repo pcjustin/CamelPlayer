@@ -1,0 +1,46 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Disabled: style-only checks that would churn the whole code base (casts, arrays, [[nodiscard]], designated and
+# braced initializers, ranges, scoped_lock, enum sizes, trailing return types, the printf-style log API, swappable
+# parameters), and checks that misfire on the platform idioms: the XAML .g.cpp include and InitializeComponent of
+# C++/WinRT, window procedures and SQLITE_TRANSIENT casting integers to pointers, best-effort empty catches, and
+# exception-escape reporting allocation failures inside the STL and C++/WinRT.
+Checks: >
+  -*,
+  bugprone-*,
+  concurrency-*,
+  modernize-*,
+  performance-*,
+  readability-container-contains,
+  readability-container-size-empty,
+  readability-delete-null-pointer,
+  readability-duplicate-include,
+  readability-misleading-indentation,
+  readability-redundant-*,
+  readability-simplify-boolean-expr,
+  readability-static-definition-in-anonymous-namespace,
+  -bugprone-derived-method-shadowing-base-method,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-empty-catch,
+  -bugprone-exception-escape,
+  -bugprone-suspicious-include,
+  -modernize-avoid-c-arrays,
+  -modernize-avoid-c-style-cast,
+  -modernize-avoid-variadic-functions,
+  -modernize-return-braced-init-list,
+  -modernize-use-designated-initializers,
+  -modernize-use-nodiscard,
+  -modernize-use-ranges,
+  -modernize-use-scoped-lock,
+  -modernize-use-trailing-return-type,
+  -performance-enum-size,
+  -performance-no-int-to-ptr
+CheckOptions:
+  bugprone-reserved-identifier.AllowedIdentifiers: 'FLAC__NO_DLL'
+  # value() throws bad_optional_access, a checked access
+  bugprone-unchecked-optional-access.IgnoreValueCalls: true
+  modernize-use-using.IgnoreExternC: true
+HeaderFilterRegex: '.*[\\/]src[\\/].*'
+ExcludeHeaderFilterRegex: '.*(Generated Files|\.g\.h).*'

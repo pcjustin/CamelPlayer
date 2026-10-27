@@ -163,14 +163,14 @@ RustSession::Prefill RustSession::prefill(uint64_t& frames) {
 
 RustSession::Rendered RustSession::render(uint8_t* destination, size_t frames, size_t bytesPerFrame) noexcept {
     Rendered rendered;
-    const size_t maxChunk = size_t(CAMEL_ENGINE_MAX_RENDER_UNITS / unitsPerFrame_);
+    const auto maxChunk = size_t(CAMEL_ENGINE_MAX_RENDER_UNITS / unitsPerFrame_);
     for (size_t done = 0; done < frames;) {
         const size_t chunk = std::min(frames - done, maxChunk);
         const CamelRenderRequestV1 request{sizeof(CamelRenderRequestV1), CAMEL_ENGINE_ABI_VERSION, chunk * unitsPerFrame_,
                                            destination + done * bytesPerFrame, chunk * bytesPerFrame};
         CamelRenderResultV1 result{sizeof(CamelRenderResultV1), CAMEL_ENGINE_ABI_VERSION, 0, 0, 0, 0};
         const auto status = camel_engine_render_v1(engine_, &request, &result);
-        const size_t got = size_t(result.units_rendered / unitsPerFrame_);
+        const auto got = size_t(result.units_rendered / unitsPerFrame_);
         // Audio ends within this request; later chunks of a raw DSD stream still need the Engine's silence.
         if (!rendered.ended && !rendered.underrun && !rendered.fault) rendered.frames += got;
         done += chunk;

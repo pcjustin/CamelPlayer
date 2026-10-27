@@ -31,7 +31,7 @@ Windows::Foundation::TimeSpan span(double seconds) {
 
 } // namespace
 
-MediaControls::MediaControls(HWND window, Microsoft::UI::Dispatching::DispatcherQueue queue, Handlers handlers,
+MediaControls::MediaControls(HWND window, Microsoft::UI::Dispatching::DispatcherQueue queue, const Handlers& handlers,
                              std::shared_ptr<camel::server::IServer> server)
     : server_(std::move(server)) {
     try {
@@ -48,29 +48,30 @@ MediaControls::MediaControls(HWND window, Microsoft::UI::Dispatching::Dispatcher
     controls_.IsNextEnabled(true);
     controls_.IsPreviousEnabled(true);
     controls_.PlaybackStatus(MediaPlaybackStatus::Closed);
-    buttonToken_ = controls_.ButtonPressed([queue, command = handlers.command](auto&&, SystemMediaTransportControlsButtonPressedEventArgs const& e) {
-        CommandKind kind;
-        switch (e.Button()) {
-        case SystemMediaTransportControlsButton::Play:
-            kind = CommandKind::Play;
-            break;
-        case SystemMediaTransportControlsButton::Pause:
-            kind = CommandKind::Pause;
-            break;
-        case SystemMediaTransportControlsButton::Stop:
-            kind = CommandKind::Stop;
-            break;
-        case SystemMediaTransportControlsButton::Next:
-            kind = CommandKind::Next;
-            break;
-        case SystemMediaTransportControlsButton::Previous:
-            kind = CommandKind::Previous;
-            break;
-        default:
-            return;
-        }
-        queue.TryEnqueue([command, kind] { command(kind); });
-    });
+    buttonToken_ = controls_.ButtonPressed(
+        [queue, command = handlers.command](auto&&, SystemMediaTransportControlsButtonPressedEventArgs const& e) {
+            CommandKind kind;
+            switch (e.Button()) {
+            case SystemMediaTransportControlsButton::Play:
+                kind = CommandKind::Play;
+                break;
+            case SystemMediaTransportControlsButton::Pause:
+                kind = CommandKind::Pause;
+                break;
+            case SystemMediaTransportControlsButton::Stop:
+                kind = CommandKind::Stop;
+                break;
+            case SystemMediaTransportControlsButton::Next:
+                kind = CommandKind::Next;
+                break;
+            case SystemMediaTransportControlsButton::Previous:
+                kind = CommandKind::Previous;
+                break;
+            default:
+                return;
+            }
+            queue.TryEnqueue([command, kind] { command(kind); });
+        });
     seekToken_ = controls_.PlaybackPositionChangeRequested(
         [queue, seek = handlers.seek](auto&&, PlaybackPositionChangeRequestedEventArgs const& e) {
             const double seconds = std::chrono::duration<double>(e.RequestedPlaybackPosition()).count();
@@ -85,8 +86,8 @@ MediaControls::~MediaControls() {
     controls_.PlaybackPositionChangeRequested(seekToken_);
 }
 
-void MediaControls::update(const camel::server::PlaybackSnapshot& playback, const std::string& title,
-                           const std::string& artist, const std::string& album, double position, double length) {
+void MediaControls::update(const camel::server::PlaybackSnapshot& playback, const std::string& title, const std::string& artist,
+                           const std::string& album, double position, double length) {
     if (!controls_) return;
     if (playback.pathUtf8.empty()) {
         if (shownPath_.empty() && shownState_ == PlaybackState::Stopped) return;

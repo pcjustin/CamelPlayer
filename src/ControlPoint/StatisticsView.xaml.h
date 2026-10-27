@@ -25,13 +25,16 @@ struct StatisticsView : StatisticsViewT<StatisticsView> {
     void show(Range range);
     void hide();
 
-    void OnPeriodChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+    void OnPeriodChanged(Windows::Foundation::IInspectable const&,
+                         Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnRangeChanged(Microsoft::UI::Xaml::Controls::CalendarDatePicker const&,
                         Microsoft::UI::Xaml::Controls::CalendarDatePickerDateChangedEventArgs const&);
     void OnRankChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnChartSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
-    void OnRowDoubleTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
-    void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
+    void OnRowDoubleTapped(Windows::Foundation::IInspectable const&,
+                           Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+    void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                               Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
     winrt::fire_and_forget OnResetAllClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:

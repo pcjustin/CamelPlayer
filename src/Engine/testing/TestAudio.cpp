@@ -18,6 +18,7 @@ extern "C" {
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 
 #include "Common/util/Text.h"
@@ -39,7 +40,7 @@ std::vector<int32_t> makeSignal(const GenSpec& spec) {
     const double sampleCount = spec.seconds * spec.sampleRate * spec.channels;
     if (!std::isfinite(sampleCount) || sampleCount >= double(std::numeric_limits<size_t>::max()) / sizeof(int32_t))
         throw std::length_error("test signal is too large");
-    const uint64_t frames = uint64_t(spec.seconds * spec.sampleRate);
+    const auto frames = uint64_t(spec.seconds * spec.sampleRate);
     std::vector<int32_t> out(size_t(frames * spec.channels));
     const double full = std::ldexp(1.0, int(spec.bits) - 1) - 1.0;
     uint64_t lcg = 0x9E3779B97F4A7C15ull ^ (uint64_t(spec.sampleRate) << 8) ^ spec.bits;
@@ -52,10 +53,10 @@ std::vector<int32_t> makeSignal(const GenSpec& spec) {
                 const double ramp = std::min(1.0, double(i) / (0.05 * spec.sampleRate));
                 const double a = std::pow(10.0, spec.toneDb / 20.0) * ramp;
                 out[size_t(i * spec.channels + c)] =
-                    int32_t(std::llround(a * full * std::sin(2 * 3.14159265358979 * 440.0 * double(i) / spec.sampleRate)));
+                    int32_t(std::llround(a * full * std::sin(2 * std::numbers::pi * 440.0 * double(i) / spec.sampleRate)));
                 continue;
             }
-            double v = 0.6 * std::sin(2 * 3.14159265358979 * (997.0 + 110.0 * c) * t) + 0.3 * noise;
+            double v = 0.6 * std::sin(2 * std::numbers::pi * (997.0 + 110.0 * c) * t) + 0.3 * noise;
             if (i % 50000 == 7) v = (c ? -1.0 : 1.0); // touch both extremes now and then
             int64_t s = std::llround(v * full);
             const int64_t lo = -(int64_t(1) << (spec.bits - 1)), hi = (int64_t(1) << (spec.bits - 1)) - 1;
@@ -147,7 +148,7 @@ void writeWav(const std::filesystem::path& path, const std::vector<int32_t>& sam
     data.reserve(samples.size() * bytes);
     for (const int32_t s : samples) {
         if (float32) {
-            const float f = float(std::ldexp(double(s), -int(bits - 1)));
+            const auto f = float(std::ldexp(double(s), -int(bits - 1)));
             uint32_t raw = 0;
             std::memcpy(&raw, &f, sizeof raw);
             putLe(data, raw, 4);

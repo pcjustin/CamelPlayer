@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <set>
 #include <thread>
+#include <utility>
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
@@ -51,7 +52,9 @@ std::optional<std::filesystem::path> pickExportFile(HWND owner, const hstring& n
     dialog->SetFileTypes(1, types);
     dialog->SetDefaultExtension(L"m3u8");
     std::wstring file(name);
-    std::replace_if(file.begin(), file.end(), [](wchar_t c) { return std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos; }, L'_');
+    std::replace_if(
+        file.begin(), file.end(), [](wchar_t c) { return std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos; },
+        L'_');
     dialog->SetFileName(file.c_str());
     winrt::com_ptr<IShellItem> item;
     PWSTR path = nullptr;
@@ -78,7 +81,8 @@ ContentDialog dialog(XamlRoot const& root, hstring const& title, hstring const& 
 void PlaylistView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     server_ = std::move(server);
     handlers_ = std::move(handlers);
-    EntryList().ItemsSource(entries_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>());
+    EntryList().ItemsSource(
+        entries_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>());
     ToolTipService::SetToolTip(MoreSortButton(), box_value(tr(L"Playlist_SortMore")));
     Automation::AutomationProperties::SetName(MoreSortButton(), tr(L"Playlist_SortMore"));
 }
@@ -136,7 +140,8 @@ void PlaylistView::load() {
                 for (const auto& p : playlists_) {
                     ui::BrowseRow row{p.id, {}, ui::utf8(p.name)};
                     std::wstring count(tracks);
-                    if (const auto at = count.find(L"{0}"); at != std::wstring::npos) count.replace(at, 3, std::to_wstring(p.tracks));
+                    if (const auto at = count.find(L"{0}"); at != std::wstring::npos)
+                        count.replace(at, 3, std::to_wstring(p.tracks));
                     row.trailing = hstring(count);
                     auto item = make<BrowseItem>();
                     get_self<BrowseItem>(item)->fill(row);
@@ -189,9 +194,11 @@ void PlaylistView::load() {
             const auto total = loaded->rows.size();
             std::wstring detail(ui::format(L"Library_Tracks", {std::to_wstring(total)}));
             if (loaded->durationMs) detail += L" · " + ui::formatTime(double(loaded->durationMs) / 1000.0);
-            if (loaded->unavailable) detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {std::to_wstring(loaded->unavailable)}));
+            if (loaded->unavailable)
+                detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {std::to_wstring(loaded->unavailable)}));
             if (total > ui::PlaylistCollection::kShown)
-                detail += L" · " + std::wstring(ui::format(L"Playlist_Listed", {std::to_wstring(ui::PlaylistCollection::kShown)}));
+                detail +=
+                    L" · " + std::wstring(ui::format(L"Playlist_Listed", {std::to_wstring(ui::PlaylistCollection::kShown)}));
             HeaderDetail().Text(hstring(detail));
             entries_->reset(std::move(loaded->rows));
             EmptyText().Text(tr(L"Playlist_EmptyPlaylist"));
@@ -217,7 +224,8 @@ std::vector<ui::BrowseRow> PlaylistView::selectedRows(Windows::Foundation::IInsp
     uint32_t clickedIndex = 0;
     if (clicked && entries_->IndexOf(clicked, clickedIndex)) {
         for (const auto& range : EntryList().SelectedRanges())
-            if (clickedIndex >= uint32_t(range.FirstIndex()) && clickedIndex <= uint32_t(range.LastIndex())) clickedSelected = true;
+            if (std::cmp_greater_equal(clickedIndex, range.FirstIndex()) && std::cmp_less_equal(clickedIndex, range.LastIndex()))
+                clickedSelected = true;
     }
     if (!clickedSelected) return {ui::PlaylistCollection::rowOf(clicked)};
     for (const auto& range : EntryList().SelectedRanges())
@@ -316,10 +324,13 @@ winrt::fire_and_forget PlaylistView::OnColumnClick(Windows::Foundation::IInspect
     const auto key = PlaylistSortKey(std::stoi(std::wstring(unbox_value_or<hstring>(element.Tag(), L"0"))));
     const bool descending = sortKey_ == key && !sortDescending_;
     hstring column;
-    if (const auto item = sender.try_as<MenuFlyoutItem>()) column = item.Text();
-    else if (const auto text = sender.as<Button>().Content().try_as<TextBlock>()) column = text.Text();
+    if (const auto item = sender.try_as<MenuFlyoutItem>())
+        column = item.Text();
+    else if (const auto text = sender.as<Button>().Content().try_as<TextBlock>())
+        column = text.Text();
     auto box = dialog(XamlRoot(), tr(L"Playlist_SortTitle"), tr(L"Playlist_SortPrimary"));
-    box.Content(box_value(ui::format(descending ? L"Playlist_SortTextDescending" : L"Playlist_SortText", {std::wstring(column)})));
+    box.Content(
+        box_value(ui::format(descending ? L"Playlist_SortTextDescending" : L"Playlist_SortText", {std::wstring(column)})));
     if (co_await box.ShowAsync() != ContentDialogResult::Primary) co_return;
     sortKey_ = key;
     sortDescending_ = descending;
@@ -350,8 +361,10 @@ winrt::fire_and_forget PlaylistView::OnExportClick(Windows::Foundation::IInspect
     queue.TryEnqueue([weak, done, file = *file] {
         auto self = weak.get();
         if (!self || !self->handlers_.notify) return;
-        if (done) self->handlers_.notify(tr(L"Playlist_Exported"), hstring(file.wstring()), false);
-        else self->handlers_.notify(tr(L"Playlist_ExportFailed"), hstring(file.wstring()), true);
+        if (done)
+            self->handlers_.notify(tr(L"Playlist_Exported"), hstring(file.wstring()), false);
+        else
+            self->handlers_.notify(tr(L"Playlist_ExportFailed"), hstring(file.wstring()), true);
     });
 }
 
@@ -381,7 +394,8 @@ winrt::fire_and_forget PlaylistView::OnImportClick(Windows::Foundation::IInspect
             message += L" · " + std::wstring(ui::format(L"Playlist_SkippedUrls", {std::to_wstring(change->skippedUnavailable)}));
         if (self->handlers_.changed) self->handlers_.changed();
         if (self->handlers_.notify)
-            self->handlers_.notify(ui::format(L"Playlist_Imported", {std::wstring(ui::utf8(change->name))}), hstring(message), false);
+            self->handlers_.notify(ui::format(L"Playlist_Imported", {std::wstring(ui::utf8(change->name))}), hstring(message),
+                                   false);
         if (self->handlers_.open) self->handlers_.open(change->playlist);
     });
 }
@@ -422,6 +436,7 @@ void PlaylistView::OnEntryDragCompleted(ListViewBase const&, DragItemsCompletedE
 // Every entry of the marked files shows the change, also when the list makes its item again.
 void PlaylistView::submitMarks(Command command) {
     std::vector<int64_t> files;
+    files.reserve(command.tracks.size());
     for (const auto& track : command.tracks) files.push_back(track.file);
     entries_->mark(files, command.favorite);
     if (handlers_.submit) handlers_.submit(std::move(command));
@@ -437,7 +452,7 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
     if (!menuItem_) return;
     if (!entryMenu_) {
         entryMenu_ = MenuFlyout();
-        const auto add = [this](const wchar_t* key, const wchar_t* glyph, std::function<void()> action) {
+        const auto add = [this](const wchar_t* key, const wchar_t* glyph, const std::function<void()>& action) {
             MenuFlyoutItem entry;
             entry.Text(tr(key));
             FontIcon icon;
@@ -459,7 +474,8 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
         ui::appendFavoriteMenu(entryMenu_, [this](bool favorite) {
             std::vector<LibraryTrackKey> tracks;
             for (const auto& row : selectedRows(menuItem_))
-                if (row.file && std::ranges::find(tracks, LibraryTrackKey{row.file}) == tracks.end()) tracks.push_back({row.file});
+                if (row.file && std::ranges::find(tracks, LibraryTrackKey{row.file}) == tracks.end())
+                    tracks.push_back({row.file});
             if (!tracks.empty()) submitMarks(ui::favoriteCommand(tracks, favorite));
         });
     }

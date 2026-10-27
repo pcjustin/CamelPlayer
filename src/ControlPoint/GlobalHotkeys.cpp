@@ -99,14 +99,21 @@ std::wstring GlobalHotkeys::describe(camel::Hotkey hotkey) {
     // The key's name on the current keyboard layout; extended keys such as Page Up need the extended bit.
     UINT scan = MapVirtualKeyW(hotkey.key, MAPVK_VK_TO_VSC);
     switch (hotkey.key) {
-    case VK_PRIOR: case VK_NEXT: case VK_END: case VK_HOME: case VK_INSERT: case VK_DELETE: case VK_DIVIDE: case VK_NUMLOCK:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_END:
+    case VK_HOME:
+    case VK_INSERT:
+    case VK_DELETE:
+    case VK_DIVIDE:
+    case VK_NUMLOCK:
         scan |= 0x100;
         break;
     default:
         break;
     }
     wchar_t name[64] = {};
-    if (GetKeyNameTextW(LONG(scan << 16), name, int(std::size(name))) > 0) return text + name;
+    if (GetKeyNameTextW(LONG(scan) << 16, name, int(std::size(name))) > 0) return text + name;
     return text + L"0x" + std::to_wstring(hotkey.key);
 }
 

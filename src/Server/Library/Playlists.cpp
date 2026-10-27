@@ -94,9 +94,9 @@ std::string sourceName(sqlite::Database& db, const PlaylistSource& source) {
 }
 
 Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& sources, const CancellationToken& token) {
-    sqlite3_progress_handler(db.handle(), 1000, [](void* context) {
-        return static_cast<const CancellationToken*>(context)->cancelled() ? 1 : 0;
-    }, const_cast<CancellationToken*>(&token));
+    sqlite3_progress_handler(
+        db.handle(), 1000, [](void* context) { return static_cast<const CancellationToken*>(context)->cancelled() ? 1 : 0; },
+        const_cast<CancellationToken*>(&token));
     Expansion out;
     std::set<int64_t> seen;
     const std::string select = std::string("SELECT ") + kTrackColumns;
@@ -106,8 +106,8 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
             switch (source.kind) {
             case PlaylistSource::Kind::Folder: {
                 auto s = db.prepare("WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT d.id FROM folders d JOIN sub "
-                                    "ON d.parent_id=sub.id) " + select + "FROM tracks t" + kTrackJoins +
-                                    "WHERE f.folder_id IN sub" + kNaturalOrder);
+                                    "ON d.parent_id=sub.id) " +
+                                    select + "FROM tracks t" + kTrackJoins + "WHERE f.folder_id IN sub" + kNaturalOrder);
                 s.bind(1, source.id);
                 return s;
             }
@@ -127,8 +127,7 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
                 return s;
             }
             case PlaylistSource::Kind::Path: {
-                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins +
-                                    "WHERE f.path IN (?1,?2) AND f.available=1");
+                auto s = db.prepare(select + "FROM tracks t" + kTrackJoins + "WHERE f.path IN (?1,?2) AND f.available=1");
                 bindPathKeys(s, source.value);
                 return s;
             }
@@ -140,7 +139,8 @@ Expansion expand(sqlite::Database& db, const std::vector<PlaylistSource>& source
                 auto s = db.prepare(select + "FROM tracks t" + kTrackJoins +
                                     "WHERE EXISTS(SELECT 1 FROM track_values v WHERE v.track_id=t.id AND v.field=?1 AND "
                                     "v.value=?2) OR (NOT EXISTS(SELECT 1 FROM track_values v WHERE v.track_id=t.id AND "
-                                    "v.field=?1) AND t." + field + "=?2)" + kNaturalOrder);
+                                    "v.field=?1) AND t." +
+                                    field + "=?2)" + kNaturalOrder);
                 s.bind(1, std::string_view(field)).bind(2, source.value);
                 return s;
             }
@@ -185,8 +185,8 @@ int64_t insertPlaylist(sqlite::Database& db, const std::string& base) {
 
 // Appends after the last item and returns the new item ids.
 std::vector<int64_t> appendItems(sqlite::Database& db, int64_t playlist, const std::vector<PlaylistEntry>& entries) {
-    int64_t position = db.scalar("SELECT coalesce(MAX(position)+1,0) FROM playlist_items WHERE playlist_id=" +
-                                 std::to_string(playlist)).value();
+    int64_t position =
+        db.scalar("SELECT coalesce(MAX(position)+1,0) FROM playlist_items WHERE playlist_id=" + std::to_string(playlist)).value();
     auto insert = db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description,added) "
                              "VALUES(?,?,?,?,?)");
     const auto now = nowMs();
@@ -195,8 +195,10 @@ std::vector<int64_t> appendItems(sqlite::Database& db, int64_t playlist, const s
     for (const auto& entry : entries) {
         insert.reset();
         insert.bind(1, playlist).bind(2, position++);
-        if (entry.track) insert.bind(3, entry.track->file);
-        else insert.bindNull(3);
+        if (entry.track)
+            insert.bind(3, entry.track->file);
+        else
+            insert.bindNull(3);
         insert.bind(4, entry.source).bind(5, now).run();
         ids.push_back(db.lastInsertId());
     }
@@ -225,7 +227,11 @@ int64_t bump(sqlite::Database& db, int64_t playlist, std::optional<int64_t> expe
     if (!row.bind(1, playlist).step()) throw std::invalid_argument("unknown playlist");
     if (expected && *expected != row.integer(0)) throw std::runtime_error("playlist changed since it was read");
     const int64_t revision = row.integer(0) + 1;
-    db.prepare("UPDATE playlists SET revision=?,modified=? WHERE id=?").bind(1, revision).bind(2, nowMs()).bind(3, playlist).run();
+    db.prepare("UPDATE playlists SET revision=?,modified=? WHERE id=?")
+        .bind(1, revision)
+        .bind(2, nowMs())
+        .bind(3, playlist)
+        .run();
     return revision;
 }
 
@@ -349,8 +355,10 @@ PlaylistChange addToPlaylist(LibraryStore& store, int64_t playlist, std::optiona
             while (existing.step()) present.insert(existing.integer(0));
             std::vector<PlaylistEntry> added;
             for (const auto& t : expansion.tracks) {
-                if (present.contains(t.track.file)) ++change.skippedExisting;
-                else added.push_back({t.track, t.source});
+                if (present.contains(t.track.file))
+                    ++change.skippedExisting;
+                else
+                    added.push_back({t.track, t.source});
             }
             change.undo.items = appendItems(db, playlist, added);
             change.name = playlistName(db, playlist);
@@ -416,15 +424,22 @@ PlaylistChange editPlaylist(LibraryStore& store, const PlaylistEdit& edit) {
             }
             case PlaylistEdit::Kind::Sort: {
                 static const std::vector<std::vector<const char*>> keys = {
-                    {"lower(t.title)"}, {"lower(t.artist)"}, {"lower(t.album)"}, {"lower(t.album_artist)"}, {"t.year"},
+                    {"lower(t.title)"},
+                    {"lower(t.artist)"},
+                    {"lower(t.album)"},
+                    {"lower(t.album_artist)"},
+                    {"t.year"},
                     {"t.disc_number", "t.track_number"},
-                    {"CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate END"},
+                    {"CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate "
+                     "END"},
                     {"i.added"}};
                 // Entries without library metadata sort last; equal keys keep their current order.
                 std::string order = "(t.id IS NULL)";
-                for (const auto* column : keys[size_t(edit.key)]) order += std::string(",") + column + (edit.descending ? " DESC" : "");
+                for (const auto* column : keys[size_t(edit.key)])
+                    order += std::string(",") + column + (edit.descending ? " DESC" : "");
                 auto rows = db.prepare("SELECT i.id FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id "
-                                       "WHERE i.playlist_id=? ORDER BY " + order + ",i.position");
+                                       "WHERE i.playlist_id=? ORDER BY " +
+                                       order + ",i.position");
                 rows.bind(1, edit.playlist);
                 std::vector<int64_t> ordered;
                 while (rows.step()) ordered.push_back(rows.integer(0));
@@ -497,8 +512,8 @@ PlaylistChange importPlaylistFile(LibraryStore& store, const std::filesystem::pa
             } catch (const std::exception&) {
             }
         }
-        entries.push_back({found == files.end() ? std::nullopt : std::optional(LibraryTrackKey{found->second}),
-                           toUtf8(path.wstring())});
+        entries.push_back(
+            {found == files.end() ? std::nullopt : std::optional(LibraryTrackKey{found->second}), toUtf8(path.wstring())});
     }
     auto change = savePlaylist(store, toUtf8(file.stem().wstring()), entries);
     change.skippedUnavailable = urls;
@@ -514,7 +529,7 @@ void exportPlaylistFile(const LibraryStore& store, int64_t playlist, const std::
             auto path = usualPath(toWide(item.path));
             if (!item.name.empty()) path.replace_filename(toWide(item.name)); // the stored path is case-folded
             auto title = item.title.empty() ? toUtf8(path.stem().wstring()) : item.title;
-            if (!item.artist.empty()) title = item.artist + " - " + title;
+            if (!item.artist.empty()) title.insert(0, item.artist + " - ");
             std::replace_if(title.begin(), title.end(), [](char c) { return c == '\r' || c == '\n'; }, ' ');
             out += "#EXTINF:" + std::to_string(item.durationMs > 0 ? (item.durationMs + 500) / 1000 : -1) + "," + title + "\r\n";
             out += toUtf8(relativeTo(path, target.parent_path()).wstring()) + "\r\n";
@@ -551,7 +566,8 @@ PlaylistPage playlistItems(const LibraryStore& store, int64_t playlist, int64_t 
     db.exec("BEGIN");
     PlaylistPage page;
     page.playlist = playlist;
-    auto header = db.prepare("SELECT revision,(SELECT COUNT(*) FROM playlist_items WHERE playlist_id=?1) FROM playlists WHERE id=?1");
+    auto header =
+        db.prepare("SELECT revision,(SELECT COUNT(*) FROM playlist_items WHERE playlist_id=?1) FROM playlists WHERE id=?1");
     if (!header.bind(1, playlist).step()) throw std::invalid_argument("unknown playlist");
     page.revision = header.integer(0);
     page.total = header.integer(1);

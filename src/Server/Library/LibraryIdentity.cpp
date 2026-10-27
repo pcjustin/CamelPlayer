@@ -160,7 +160,7 @@ std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const 
     BY_HANDLE_FILE_INFORMATION directory{};
     if (!GetFileInformationByHandle(handle, &directory) || (directory.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
         return std::nullopt;
-    alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64 * 1024> buffer;
+    alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, size_t{64} * 1024> buffer;
     std::vector<DirectoryEntry> result;
     auto request = FileIdBothDirectoryRestartInfo;
     for (;;) {
@@ -179,8 +179,11 @@ std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const 
                 return std::nullopt;
             DirectoryEntry item{std::wstring(entry->FileName, entry->FileNameLength / sizeof(wchar_t)), entry->FileAttributes};
             if (!(entry->FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
-                item.version = {entry->EndOfFile.QuadPart, entry->LastWriteTime.QuadPart, directory.dwVolumeSerialNumber,
-                                {}, entry->CreationTime.QuadPart};
+                item.version = {entry->EndOfFile.QuadPart,
+                                entry->LastWriteTime.QuadPart,
+                                directory.dwVolumeSerialNumber,
+                                {},
+                                entry->CreationTime.QuadPart};
                 item.version.index.resize(sizeof(entry->FileId.QuadPart));
                 memcpy(item.version.index.data(), &entry->FileId.QuadPart, item.version.index.size());
                 item.version.legacyIndex = item.version.index;
@@ -188,7 +191,8 @@ std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const 
             result.push_back(std::move(item));
             if (!entry->NextEntryOffset) break;
             if (entry->NextEntryOffset < header || entry->NextEntryOffset % alignof(FILE_ID_BOTH_DIR_INFO) ||
-                entry->NextEntryOffset > buffer.size() - offset) return std::nullopt;
+                entry->NextEntryOffset > buffer.size() - offset)
+                return std::nullopt;
             offset += entry->NextEntryOffset;
         }
     }
@@ -201,7 +205,7 @@ std::wstring storageKey(const std::filesystem::path& path) {
     if (text.starts_with(L"\\\\?\\") && text.size() > 5 && text[5] == L':') text.erase(0, 4);
     if (text.size() > 2 && text[1] == L':' && GetDriveTypeW(text.substr(0, 3).c_str()) == DRIVE_REMOTE) {
         wchar_t remote[32768]{};
-        DWORD size = DWORD(std::size(remote));
+        auto size = DWORD(std::size(remote));
         if (WNetGetConnectionW(text.substr(0, 2).c_str(), remote, &size) != NO_ERROR) return {};
         text = remote + text.substr(2);
     }
@@ -214,7 +218,8 @@ std::wstring storageKey(const std::filesystem::path& path) {
     } else {
         wchar_t mount[32768]{}, guid[64]{};
         if (!GetVolumePathNameW(text.c_str(), mount, DWORD(std::size(mount))) ||
-            !GetVolumeNameForVolumeMountPointW(mount, guid, DWORD(std::size(guid)))) return {};
+            !GetVolumeNameForVolumeMountPointW(mount, guid, DWORD(std::size(guid))))
+            return {};
         text = guid;
     }
     CharLowerBuffW(text.data(), DWORD(text.size()));
@@ -229,7 +234,7 @@ FileVersion storedVersion(const sqlite::Statement& row, int column) {
 std::optional<std::vector<uint8_t>> fileDigest(const std::filesystem::path& path, const FileVersion& expected,
                                                const CancellationToken& token, const std::function<bool()>& playbackActive,
                                                Fingerprint kind) {
-    constexpr int64_t kSample = 64 * 1024;
+    constexpr int64_t kSample = int64_t{64} * 1024;
     constexpr uint8_t kSampledKind = 1;
     if (token.cancelled() || (playbackActive && playbackActive())) return std::nullopt;
     const bool full = kind == Fingerprint::Full;

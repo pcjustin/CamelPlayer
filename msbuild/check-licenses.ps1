@@ -16,7 +16,7 @@ $tracked = @(git -C $root ls-files)
 if ($LASTEXITCODE) { throw 'git ls-files failed' }
 $headerFiles = $tracked | Where-Object {
     ($_ -match '\.(cpp|h|c|idl|xaml|rs|ps1|cmd|rc|toml|props|targets|vcxproj|slnx|manifest|resw|config|cmake)$' -or
-     $_ -match '(^|/)(CMakeLists\.txt|\.clang-format|\.editorconfig|\.gitignore)$') -and $_ -notlike 'third_party/licenses/*'
+     $_ -match '(^|/)(CMakeLists\.txt|\.clang-format|\.clang-tidy|\.editorconfig|\.gitignore)$') -and $_ -notlike 'third_party/licenses/*'
 }
 foreach ($file in $headerFiles) {
     $head = [System.IO.File]::ReadAllText((Join-Path $root $file))

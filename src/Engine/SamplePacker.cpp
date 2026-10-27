@@ -17,7 +17,7 @@ void packSamples(const int32_t* src, size_t count, uint32_t bits, SampleType typ
     case SampleType::Int16: {
         const int shift = 16 - int(bits);
         for (size_t i = 0; i < count; i++) {
-            int16_t v = int16_t(uint32_t(src[i]) << shift);
+            auto v = int16_t(uint32_t(src[i]) << shift);
             std::memcpy(dst + 2 * i, &v, 2);
         }
         break;

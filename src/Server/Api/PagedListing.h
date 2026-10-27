@@ -16,8 +16,7 @@ namespace camel::server {
 // Client-side cache of one paged Server listing for virtualized views (docs/Plan.md §8.2). Views read any index;
 // missing pages are requested once and fetched off the UI thread. All pages come from one library revision: a page from
 // a newer revision replaces the cache, so a scan never mixes two orders. Not thread-safe; use it on the UI thread.
-template <class T>
-class PagedListing {
+template <class T> class PagedListing {
 public:
     explicit PagedListing(int64_t pageSize = 100, size_t maxPages = 64) : pageSize_(pageSize), maxPages_(maxPages) {}
 

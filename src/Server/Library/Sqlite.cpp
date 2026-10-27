@@ -44,12 +44,12 @@ Statement& Statement::bind(int index, double value) {
 }
 
 Statement& Statement::bind(int index, std::string_view text) {
-    check(db_, sqlite3_bind_text64(stmt_, index, text.data(), text.size(), SQLITE_TRANSIENT, SQLITE_UTF8), "bind"); // NOLINT
+    check(db_, sqlite3_bind_text64(stmt_, index, text.data(), text.size(), SQLITE_TRANSIENT, SQLITE_UTF8), "bind");
     return *this;
 }
 
 Statement& Statement::bind(int index, std::span<const uint8_t> blob) {
-    check(db_, sqlite3_bind_blob64(stmt_, index, blob.data(), blob.size(), SQLITE_TRANSIENT), "bind"); // NOLINT
+    check(db_, sqlite3_bind_blob64(stmt_, index, blob.data(), blob.size(), SQLITE_TRANSIENT), "bind");
     return *this;
 }
 

@@ -19,9 +19,10 @@ camel::server::Command albumFavoriteCommand(std::vector<int64_t> albums, bool fa
 // Appends a separator, "Add to favorites" and "Remove from favorites"; returns the entries so a caller can hide them for
 // rows that are not tracks.
 std::vector<winrt::Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase>
-appendFavoriteMenu(winrt::Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, std::function<void(bool)> choose);
+appendFavoriteMenu(winrt::Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, const std::function<void(bool)>& choose);
 // "Add to favorite albums" / "Remove from favorite albums".
-void appendAlbumFavoriteMenu(winrt::Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, std::function<void(bool)> choose);
+void appendAlbumFavoriteMenu(winrt::Microsoft::UI::Xaml::Controls::MenuFlyout const& menu,
+                             const std::function<void(bool)>& choose);
 
 // A row's heart was clicked: updates its BrowseItem and submits the change for its track.
 void rowFavoriteClicked(winrt::Windows::Foundation::IInspectable const& button, Submit const& submit);

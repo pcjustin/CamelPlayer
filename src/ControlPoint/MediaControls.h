@@ -24,7 +24,7 @@ public:
     };
 
     // Called on the UI thread; button presses arrive on the thread of `queue`.
-    MediaControls(HWND window, winrt::Microsoft::UI::Dispatching::DispatcherQueue queue, Handlers handlers,
+    MediaControls(HWND window, winrt::Microsoft::UI::Dispatching::DispatcherQueue queue, const Handlers& handlers,
                   std::shared_ptr<camel::server::IServer> server);
     ~MediaControls();
 

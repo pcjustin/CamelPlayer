@@ -28,7 +28,7 @@ template <class T> T value(const json& j, const char* key) {
     if constexpr (std::is_same_v<T, bool>) {
         if (!v.is_boolean()) invalid(std::string(key) + " is not a boolean");
     } else if constexpr (std::is_integral_v<T>) {
-        if (!v.is_number_unsigned() && !(v.is_number_integer() && v.get<int64_t>() >= 0))
+        if (!v.is_number_unsigned() && (!v.is_number_integer() || v.get<int64_t>() < 0))
             invalid(std::string(key) + " is not an unsigned integer");
     } else if constexpr (std::is_same_v<T, std::string>) {
         if (!v.is_string()) invalid(std::string(key) + " is not a string");
@@ -309,15 +309,18 @@ std::vector<DeviceInfo> devicesFrom(const json& j, const char* key) {
 json toJson(const QueueSnapshot& q) {
     json entries = json::array();
     for (const auto& e : q.entries)
-        entries.push_back({{"id", e.id}, {"source", toJson(e.source)}, {"title", e.title}, {"artist", e.artist},
-                           {"album", e.album}, {"albumId", e.albumId}, {"automatic", e.automatic},
-                           {"file", e.file}, {"favorite", e.favorite}});
-    return {{"revision", q.revision},
-            {"marks", q.marks},
-            {"entries", entries},
-            {"upcomingEntryId", q.upcomingEntryId ? json(*q.upcomingEntryId) : json(nullptr)},
-            {"shuffle", q.shuffle},
-            {"repeat", nameOf(q.repeat, kRepeatModes)}};
+        entries.push_back({{"id", e.id},
+                           {"source", toJson(e.source)},
+                           {"title", e.title},
+                           {"artist", e.artist},
+                           {"album", e.album},
+                           {"albumId", e.albumId},
+                           {"automatic", e.automatic},
+                           {"file", e.file},
+                           {"favorite", e.favorite}});
+    return {{"revision", q.revision}, {"marks", q.marks},
+            {"entries", entries},     {"upcomingEntryId", q.upcomingEntryId ? json(*q.upcomingEntryId) : json(nullptr)},
+            {"shuffle", q.shuffle},   {"repeat", nameOf(q.repeat, kRepeatModes)}};
 }
 
 QueueSnapshot queueFrom(const json& j) {
