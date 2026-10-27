@@ -236,6 +236,8 @@
   <data name="Guide_Skip" xml:space="preserve"><value>略過</value></data>
   <data name="Guide_Finish" xml:space="preserve"><value>完成</value></data>
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer 找不到或無法建立 %LOCALAPPDATA% 中的資料夾，因此無法啟動。請確認該資料夾存在且你的帳號可以寫入。</value></data>
+  <data name="Settings_About.Text" xml:space="preserve"><value>關於</value></data>
+  <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
   <data name="Reset_Title.Text" xml:space="preserve"><value>重置與資料</value></data>
   <data name="Reset_DataHeader.Text" xml:space="preserve"><value>資料位置</value></data>
   <data name="Reset_Sizes" xml:space="preserve"><value>媒體庫 {0} · 封面 {1} · 設定 {2} · 紀錄檔 {3}</value></data>

@@ -10,8 +10,8 @@ Every CamelPlayer file that can hold a comment starts with the MPL-2.0 header. F
 
 ## What a release contains
 
-- `CamelPlayer-win-x64.zip`: the program, `LICENSE.txt` (MPL-2.0), this guide, `dependencies.json` and the complete `licenses` folder.
-- `CamelPlayer-win-x64-third-party-source.zip`: the exact upstream source archives and vcpkg port trees (with their patches) of the LGPL and MPL libraries linked into the program, and the Symphonia crates. See [Source access and relinking](#source-access-and-relinking).
+- `CamelPlayer-<version>-win-x64.zip`: the program, `LICENSE.txt` (MPL-2.0), this guide, `dependencies.json` and the complete `licenses` folder.
+- `CamelPlayer-<version>-win-x64-third-party-source.zip`: the exact upstream source archives and vcpkg port trees (with their patches) of the LGPL and MPL libraries linked into the program, and the Symphonia crates. See [Source access and relinking](#source-access-and-relinking).
 - CamelPlayer's own source is the repository at the release tag; GitHub's archive of the tag supplies it.
 
 ## Native libraries
@@ -115,10 +115,10 @@ vcpkg host ports used while building the native libraries above. None is linked 
 
 The LGPL libraries (FFmpeg, libsndfile, mpg123, libsoxr, TagLib) are linked statically into CamelPlayer.exe; DSD Nexus is a separate DLL. Because CamelPlayer's complete source and build scripts are public, anyone can rebuild CamelPlayer against a modified version of any of them:
 
-1. Get CamelPlayer's source at the release tag and `CamelPlayer-win-x64-third-party-source.zip` from the same release.
+1. Get CamelPlayer's source at the release tag and `CamelPlayer-<version>-win-x64-third-party-source.zip` from the same release.
 2. Install Visual Studio 2026 with the C++ desktop workload and the Rust toolchain recorded in `third_party/licenses/rust-runtime/toolchain.txt`.
 3. Copy the library's `native/<name>/port` folder from the source zip into `third_party/vcpkg-ports/<name>`, which `vcpkg.json` already uses for overlay ports, and change its `portfile.cmake` to build your modified source (for example, point `SOURCE_PATH` at a local folder instead of the upstream download).
-4. Run `.\build.ps1 -Configuration Release -Package`. The new CamelPlayer.exe and package contain your version of the library.
+4. Run `.\build.ps1 -Configuration Release`. The new CamelPlayer.exe and package contain your version of the library.
 
 For Symphonia (MPL-2.0), the source zip holds the exact crates; a modified crate can replace the locked one with a `[patch.crates-io]` entry in `rust/Cargo.toml`. The vcpkg port trees are also identified by the `port_source` tree hashes in the inventory, and the upstream archives by their SHA-512 checksums.
 

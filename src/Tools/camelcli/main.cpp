@@ -10,12 +10,15 @@
 #include <vector>
 
 #include "Commands.h"
+#include "Common/Version.h"
 
 namespace {
 
 void usage() {
     std::puts(
         "camelcli <command> [options]\n"
+        "  --version\n"
+        "      print the CamelPlayer version\n"
         "  decode <file> [--decoder ffmpeg|symphonia|drflac|sndfile|drwav|all]\n"
         "      decode the whole file (FLAC, ALAC, WAV, AIFF); FLAC is compared with its STREAMINFO MD5\n"
         "  list-devices\n"
@@ -50,6 +53,10 @@ int wmain(int argc, wchar_t** argv) {
     }
     std::wstring cmd = args[0];
     args.erase(args.begin());
+    if (cmd == L"--version") {
+        std::puts("camelcli " CAMEL_VERSION_STRING);
+        return 0;
+    }
     try {
         if (cmd == L"decode") return camelcli::cmdDecode(args);
         if (cmd == L"list-devices") return camelcli::cmdListDevices(args);

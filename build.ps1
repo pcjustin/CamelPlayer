@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-  Builds CamelPlayer, optionally runs the tests and packages dist\CamelPlayer-win-x64.zip (docs/Plan.md §4, M0-08).
+  Builds CamelPlayer, optionally runs the tests and, for Release, packages dist\CamelPlayer-<VERSION>-win-x64.zip
+  (docs/Plan.md §4, M0-08).
 .EXAMPLE
-  .\build.ps1 -Configuration Release -Test -Package
+  .\build.ps1 -Configuration Release -Test
 #>
 
 # This Source Code Form is subject to the terms of the Mozilla Public
@@ -12,7 +13,7 @@
 param(
     [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release',
     [switch] $Test,
-    [switch] $Package
+    [switch] $NoPackage
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -48,7 +49,7 @@ if ($Test) {
     if ($LASTEXITCODE) { throw "tests failed ($LASTEXITCODE)" }
 }
 
-if ($Package) {
+if ($Configuration -eq 'Release' -and -not $NoPackage) {
     & (Join-Path $root 'msbuild\package.ps1') -Configuration $Configuration
     if ($LASTEXITCODE) { throw "packaging failed ($LASTEXITCODE)" }
 }

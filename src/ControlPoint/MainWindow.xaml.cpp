@@ -29,6 +29,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
+#include "Common/Version.h"
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
@@ -1033,6 +1034,7 @@ void MainWindow::showPage(hstring const& tag) {
     if (tag == L"settings") {
         refreshRoots();
         showDataLocation();
+        AboutVersionText().Text(L"CamelPlayer " CAMEL_VERSION_STRING);
     }
 }
 

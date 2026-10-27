@@ -19,15 +19,19 @@ Requirements:
 Run from the repository root:
 
 ```powershell
-.\build.cmd                          # Release build
-.\build.cmd -Configuration Debug     # Debug build
+.\build.cmd                          # Release build and binary package
+.\build.cmd -NoPackage               # Release build without the package
+.\build.cmd -Configuration Debug     # Debug build (never packaged)
 .\build.cmd -Test                    # Build and run ordinary tests
-.\build.cmd -Package                 # Create a local binary package
 ```
+
+The version comes from the `VERSION` file at the repository root; the build puts it in the executable's file properties, Settings › About and `camelcli --version`. Change it before tagging a release on GitHub (tag `v` + the version). A Release build packages `dist/CamelPlayer-<version>-win-x64.zip`, with the third-party source and symbol archives and `CamelPlayer-<version>-SHA256SUMS.txt` beside it.
 
 Executables are generated at `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe`, and `build/<Configuration>/tests/tests.exe`. Configuration and logs are stored under `%LOCALAPPDATA%/CamelPlayer`.
 
 ## Command-line companion
+
+`camelcli` is a development tool and is not included in the release zip.
 
 ```text
 camelcli list-devices
@@ -90,4 +94,4 @@ CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Version
 
 MPL-2.0 allows CamelPlayer code to be combined with Microsoft-licensed Windows App SDK/WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release. A review of the complete notice set is still a check before the first public release.
 
-For any future binary release, provide access to the exact corresponding source, dependency modifications and build information, and include all required notices. The packaging command also builds `CamelPlayer-win-x64-third-party-source.zip` with the exact sources of the LGPL and MPL libraries linked into the program, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) explains how to rebuild against a modified one. `msbuild/check-licenses.ps1`, run by the build and packaging scripts, fails on a file without the MPL-2.0 header or a dependency missing from the notices. The local packaging command prepares files; it does not establish redistribution permission or publish a release.
+For any future binary release, provide access to the exact corresponding source, dependency modifications and build information, and include all required notices. The packaging command also builds `CamelPlayer-<version>-win-x64-third-party-source.zip` with the exact sources of the LGPL and MPL libraries linked into the program, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) explains how to rebuild against a modified one. `msbuild/check-licenses.ps1`, run by the build and packaging scripts, fails on a file without the MPL-2.0 header or a dependency missing from the notices. The local packaging command prepares files; it does not establish redistribution permission or publish a release.

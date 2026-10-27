@@ -31,6 +31,9 @@
   <Import Project="$(CamelRoot)msbuild\CamelPlayer.Cpp.props" />
   <Import Project="$(CamelRoot)msbuild\CamelPlayer.CoreLink.props" />
   <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>CAMEL_VERSION=$(CamelVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
     </Link>

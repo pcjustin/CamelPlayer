@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-  Stages build\<Configuration>\App into dist\CamelPlayer and zips it (docs/Plan.md §4, M0-08).
-  Called by build.ps1 -Package.
+  Stages build\<Configuration>\App into dist\CamelPlayer and zips it as CamelPlayer-<VERSION>-win-x64.zip with the
+  third-party source, symbols and SHA-256 sums beside it (docs/Plan.md §4, M0-08). Called by build.ps1.
 #>
 
 # This Source Code Form is subject to the terms of the Mozilla Public
@@ -12,8 +12,8 @@ param([ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $app = Join-Path $root "build\$Configuration\App"
-$cli = Join-Path $root "build\$Configuration\camelcli\camelcli.exe"
 $dist = Join-Path $root 'dist'
+$name = "CamelPlayer-$((Get-Content (Join-Path $root 'VERSION') -TotalCount 1).Trim())"
 $stage = Join-Path $dist 'CamelPlayer'
 if (-not (Test-Path (Join-Path $app 'CamelPlayer.exe'))) { throw "build first: $app\CamelPlayer.exe not found" }
 & (Join-Path $PSScriptRoot 'collect-licenses.ps1')
@@ -29,16 +29,19 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 # CamelPlayer never loads (~45 MB). Leave them and build-only files out.
 $exclude = @('*.pdb', '*.lib', '*.exp', 'CamelPlayer.winmd', 'onnxruntime*.dll', 'DirectML.dll',
              'Microsoft.Windows.AI.*', 'Microsoft.Windows.Widgets.*')
+# The Windows App SDK ships XAML .mui translations for ~90 languages; keep only the UI languages CamelPlayer has.
+$keepCultures = @('en-us', 'zh-TW')
 Get-ChildItem $app -Recurse -File | Where-Object {
-    $name = $_.Name
-    -not ($exclude | Where-Object { $name -like $_ })
+    $fileName = $_.Name
+    $topDir = $_.FullName.Substring($app.Length + 1).Split('\')[0]
+    -not ($exclude | Where-Object { $fileName -like $_ }) -and
+        -not ($topDir -match '^[a-z]{2,3}(-[a-z]+)+$' -and $topDir -notin $keepCultures)
 } | ForEach-Object {
     $rel = $_.FullName.Substring($app.Length + 1)
     $dest = Join-Path $stage $rel
     New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
     Copy-Item $_.FullName $dest
 }
-Copy-Item $cli $stage
 
 # VC++ runtime, app-local (docs/Plan.md §15.1)
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -63,7 +66,7 @@ Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
     elseif ($_.LastWriteTime -gt $zipMaxDate) { $_.LastWriteTime = $zipMaxDate }
 }
 
-$zip = Join-Path $dist 'CamelPlayer-win-x64.zip'
+$zip = Join-Path $dist "$name-win-x64.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
 
@@ -97,14 +100,19 @@ foreach ($crate in $inventory.rust | Where-Object { $_.license -match 'MPL' }) {
 }
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $sourceStage
 Copy-Item (Join-Path $root 'third_party\dependencies.json') $sourceStage
-$sourceZip = Join-Path $dist 'CamelPlayer-win-x64-third-party-source.zip'
+$sourceZip = Join-Path $dist "$name-win-x64-third-party-source.zip"
 if (Test-Path $sourceZip) { Remove-Item $sourceZip }
 Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath $sourceZip -CompressionLevel Optimal
 
 # Symbols go in a separate archive
-$pdbZip = Join-Path $dist 'CamelPlayer-win-x64-pdb.zip'
+$pdbZip = Join-Path $dist "$name-win-x64-pdb.zip"
 if (Test-Path $pdbZip) { Remove-Item $pdbZip }
-Compress-Archive -Path (Join-Path $app 'CamelPlayer.pdb'), ($cli -replace '\.exe$', '.pdb') -DestinationPath $pdbZip -CompressionLevel Optimal
+Compress-Archive -Path (Join-Path $app 'CamelPlayer.pdb') -DestinationPath $pdbZip -CompressionLevel Optimal
+
+$sums = Join-Path $dist "$name-SHA256SUMS.txt"
+$zip, $sourceZip, $pdbZip | ForEach-Object {
+    "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path $_ -Leaf)"
+} | Set-Content -LiteralPath $sums -Encoding ascii
 
 $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host "packaged $zip ($mb MB)"

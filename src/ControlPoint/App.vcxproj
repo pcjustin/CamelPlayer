@@ -65,7 +65,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
       <!-- our own wWinMain (Main.cpp) sets the UI language before XAML starts -->
-      <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;CAMEL_VERSION=$(CamelVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!-- XAML-generated code trips some /W4 warnings -->
       <DisableSpecificWarnings>4100;4189;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>

@@ -4,13 +4,15 @@
 
 #include <winres.h>
 
+#include "../Common/Version.h"
+
 // The first icon resource is the executable's icon in File Explorer, shortcuts and taskbar pins.
 1 ICON "..\\..\\assets\\CamelPlayer.ico"
 
 // Windows names the app after FileDescription in the media flyout, the lock screen and the file's properties.
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION CAMEL_VERSION_COMMAS
+ PRODUCTVERSION CAMEL_VERSION_COMMAS
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
  FILEFLAGS 0
  FILEOS VOS_NT_WINDOWS32
@@ -23,12 +25,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Justin Lu"
             VALUE "FileDescription", "CamelPlayer"
-            VALUE "FileVersion", "0.1.0"
+            VALUE "FileVersion", CAMEL_VERSION_STRING
             VALUE "InternalName", "CamelPlayer"
             VALUE "LegalCopyright", "Justin Lu. Mozilla Public License 2.0."
             VALUE "OriginalFilename", "CamelPlayer.exe"
             VALUE "ProductName", "CamelPlayer"
-            VALUE "ProductVersion", "0.1.0"
+            VALUE "ProductVersion", CAMEL_VERSION_STRING
         END
     END
     BLOCK "VarFileInfo"

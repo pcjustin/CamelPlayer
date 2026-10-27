@@ -14,6 +14,8 @@
     <CharacterSet>Unicode</CharacterSet>
     <OutDir>$(CamelRoot)build\$(Configuration)\$(MSBuildProjectName)\</OutDir>
     <IntDir>$(CamelRoot)build\obj\$(Configuration)\$(MSBuildProjectName)\</IntDir>
+    <!-- major.minor.patch of the next or current release; GitHub tags are made from it -->
+    <CamelVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</CamelVersion>
   </PropertyGroup>
 
   <!-- vcpkg manifest mode with the VS-bundled vcpkg (docs/Plan.md §15.1, §15.4 item 6) -->

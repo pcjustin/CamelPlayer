@@ -388,6 +388,19 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE946;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_About" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <TextBlock x:Name="AboutVersionText" Style="{StaticResource BodyStrongTextBlockStyle}" IsTextSelectionEnabled="True" />
+                                    <TextBlock x:Uid="Settings_AboutLicense" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
 
