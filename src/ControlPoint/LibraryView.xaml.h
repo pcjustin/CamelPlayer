@@ -95,10 +95,14 @@ private:
         bool favoriteAlbums = false;
         bool smartList() const { return smart || favoriteAlbums; }
         hstring title, detail;
+        double offset = 0; // where its list was scrolled when another view opened over it
     };
 
     void open(View view, bool push);
     void showList(Mode mode);
+    Microsoft::UI::Xaml::Controls::ListViewBase listOf(Mode mode);
+    // Scrolls a list reopened by Back to where it was, once its items are there.
+    void restoreOffset();
     void fillSortChoices();
     void startCollection();
     // Explains an empty view: no library folder yet, or no album grouped by the scan yet.
@@ -142,6 +146,7 @@ private:
     ui::BrowseFetch fetch_; // the current collection's listing
     View current_;
     std::vector<View> back_;
+    std::optional<double> restoreOffset_;
     std::function<void()> leave_; // Back from a search that began outside the library pages
     std::function<void(ui::SourceFetch, std::string)> savePlaylist_;
     uint64_t generation_ = 0; // changes whenever another view opens

@@ -129,6 +129,16 @@ Windows::Foundation::IInspectable item(const ui::BrowseRow& row) {
     return item;
 }
 
+ScrollViewer scrollViewerOf(DependencyObject const& root) {
+    std::vector<DependencyObject> pending{root};
+    for (size_t i = 0; i < pending.size(); ++i) {
+        if (auto viewer = pending[i].try_as<ScrollViewer>()) return viewer;
+        for (int32_t child = 0; child < Media::VisualTreeHelper::GetChildrenCount(pending[i]); ++child)
+            pending.push_back(Media::VisualTreeHelper::GetChild(pending[i], child));
+    }
+    return nullptr;
+}
+
 } // namespace
 
 void LibraryView::InitializeComponent() {
@@ -338,7 +348,11 @@ void LibraryView::open(View view, bool push) {
     AlbumFormats().Children().Clear();
     AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
-    if (push) back_.push_back(current_);
+    restoreOffset_.reset();
+    if (push) {
+        back_.push_back(current_);
+        if (const auto viewer = scrollViewerOf(listOf(current_.mode))) back_.back().offset = viewer.VerticalOffset();
+    }
     current_ = std::move(view);
     ++generation_;
     HeaderTitle().Text(current_.title);
@@ -376,6 +390,19 @@ void LibraryView::showList(Mode mode) {
                              : Visibility::Collapsed);
     FolderList().Visibility(mode == Mode::Folders ? Visibility::Visible : Visibility::Collapsed);
     FolderTrail().Visibility(mode == Mode::Folders && current_.folder ? Visibility::Visible : Visibility::Collapsed);
+}
+
+ListViewBase LibraryView::listOf(Mode mode) {
+    if (mode == Mode::Albums) return AlbumGrid();
+    return mode == Mode::Folders ? FolderList().as<ListViewBase>() : RowList().as<ListViewBase>();
+}
+
+void LibraryView::restoreOffset() {
+    const auto offset = std::exchange(restoreOffset_, std::nullopt);
+    if (!offset || *offset <= 0) return;
+    const auto list = listOf(current_.mode);
+    list.UpdateLayout();
+    if (const auto viewer = scrollViewerOf(list)) viewer.ChangeView(nullptr, *offset, nullptr, true);
 }
 
 void LibraryView::fillSortChoices() {
@@ -465,7 +492,10 @@ void LibraryView::startCollection() {
     collection_ = make_self<ui::LibraryCollection>(DispatcherQueue(), std::move(fetch));
     const auto source = collection_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>();
     (current_.mode == Mode::Albums ? AlbumGrid().as<ItemsControl>() : RowList().as<ItemsControl>()).ItemsSource(source);
-    collection_->start([this](int64_t total) { showEmpty(total); });
+    collection_->start([this](int64_t total) {
+        showEmpty(total);
+        restoreOffset();
+    });
 }
 
 void LibraryView::loadAlbumDetail() {
@@ -509,6 +539,7 @@ void LibraryView::loadFolder() {
             for (const auto& t : listing->tracks) items.Append(item(trackRow(t, texts)));
             folderTracks_ = listing->tracks;
             FolderList().ItemsSource(items);
+            restoreOffset();
             if (listing->trail.empty()) return;
             auto names = single_threaded_vector<Windows::Foundation::IInspectable>();
             for (const auto& step : listing->trail) names.Append(box_value(ui::utf8(step.name)));
@@ -1001,7 +1032,9 @@ void LibraryView::OnBackClick(Windows::Foundation::IInspectable const&, RoutedEv
     if (back_.empty()) return;
     auto previous = std::move(back_.back());
     back_.pop_back();
+    const double offset = previous.offset;
     open(std::move(previous), false);
+    restoreOffset_ = offset;
 }
 
 void LibraryView::OnSortChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
@@ -1056,16 +1089,10 @@ void LibraryView::OnSearchRowScroll(Windows::Foundation::IInspectable const& sen
     const auto button = sender.as<Button>();
     const std::wstring tag(unbox_value_or<hstring>(button.Tag(), L""));
     const auto list = tag.starts_with(L"albums") ? SearchAlbums().as<DependencyObject>() : SearchArtists().as<DependencyObject>();
-    std::vector<DependencyObject> pending{list};
-    for (size_t i = 0; i < pending.size(); ++i) {
-        if (const auto viewer = pending[i].try_as<ScrollViewer>()) {
-            const bool forward = tag.ends_with(L"-forward");
-            const double step = viewer.ViewportWidth() * 0.8;
-            viewer.ChangeView(std::max(0.0, viewer.HorizontalOffset() + (forward ? step : -step)), nullptr, nullptr);
-            return;
-        }
-        for (int32_t child = 0; child < Media::VisualTreeHelper::GetChildrenCount(pending[i]); ++child)
-            pending.push_back(Media::VisualTreeHelper::GetChild(pending[i], child));
+    if (const auto viewer = scrollViewerOf(list)) {
+        const bool forward = tag.ends_with(L"-forward");
+        const double step = viewer.ViewportWidth() * 0.8;
+        viewer.ChangeView(std::max(0.0, viewer.HorizontalOffset() + (forward ? step : -step)), nullptr, nullptr);
     }
 }
 
