@@ -205,26 +205,26 @@ void LibraryView::show(hstring const& tag, hstring const& title) {
     });
 }
 
-void LibraryView::showAlbum(int64_t album, hstring const& title) {
+void LibraryView::showAlbum(int64_t album, hstring const& title, std::function<void()> leave) {
     if (!server_ || album <= 0) return;
     View view;
     view.mode = Mode::AlbumDetail;
     view.album = album;
     view.title = title;
     back_.clear();
-    leave_ = nullptr;
+    leave_ = std::move(leave);
     open(std::move(view), false);
     refreshTimer_.Start();
 }
 
-void LibraryView::showArtist(hstring const& artist) {
+void LibraryView::showArtist(hstring const& artist, std::function<void()> leave) {
     if (!server_ || artist.empty()) return;
     View view;
     view.mode = Mode::Albums;
     view.filter = LibraryGroupFilter{LibraryGroupField::Artist, camel::toUtf8(std::wstring_view(artist.c_str(), artist.size()))};
     view.title = artist;
     back_.clear();
-    leave_ = nullptr;
+    leave_ = std::move(leave);
     open(std::move(view), false);
     refreshTimer_.Start();
 }

@@ -264,8 +264,19 @@ void MainWindow::InitializeComponent() {
         selectPage(L"albums");
         get_self<LibraryView>(Library())->showArtist(artist);
     };
-    get_self<HomeView>(Home())->attach(server_, {openAlbum, openArtist, [this](hstring const& list) { viewAll(list); },
-                                                 [this](hstring const& period) { openStats(period); }});
+    // Like "View all", an album or artist opened from Home keeps Albums unselected and Back returns to Home.
+    const auto leaveHome = [this] {
+        Nav().SelectedItem(nullptr);
+        Home().Visibility(Visibility::Collapsed);
+        Library().Visibility(Visibility::Visible);
+        return [this] { selectPage(L"home"); };
+    };
+    get_self<HomeView>(Home())->attach(
+        server_, {[this, leaveHome](int64_t album, hstring const& title) {
+                      get_self<LibraryView>(Library())->showAlbum(album, title, leaveHome());
+                  },
+                  [this, leaveHome](hstring const& artist) { get_self<LibraryView>(Library())->showArtist(artist, leaveHome()); },
+                  [this](hstring const& list) { viewAll(list); }, [this](hstring const& period) { openStats(period); }});
     get_self<StatisticsView>(Stats())->attach(
         server_, {[this](Command command) { submitCommand(std::move(command)); }, openAlbum, openArtist});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");

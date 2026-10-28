@@ -25,8 +25,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
     // albums, artists, composers, genres, years, tracks, folders or a smart list (smart:added, smart:mostPlayed,
     // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:neverPlayed); starts a fresh navigation history.
     void show(hstring const& tag, hstring const& title);
-    void showAlbum(int64_t album, hstring const& title);
-    void showArtist(hstring const& artist);
+    // `leave`, when set, is what Back runs: return to the page the album or artist was opened from.
+    void showAlbum(int64_t album, hstring const& title, std::function<void()> leave = nullptr);
+    void showArtist(hstring const& artist, std::function<void()> leave = nullptr);
     // Full results for `query`. `leave` returns to the page the search started from when it was not a library page.
     void showSearch(hstring const& query, std::function<void()> leave);
     // Home's "View all": an album wall or artist list read through `fetch`; Back runs `leave`.
