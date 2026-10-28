@@ -4,6 +4,30 @@
 
 CamelPlayer is a Windows-native music player built with C++20 and WinUI 3. It is a separate project from the earlier macOS CamelPlayer, a controller for streaming from MinimServer to a network player, and shares only its name.
 
+## Features
+
+- Bit-perfect playback of FLAC, ALAC, WAV, AIFF and DSD (DSF/DSDIFF), plus AAC and MP3, through WASAPI exclusive or shared, ASIO and Kernel Streaming. DSD plays natively on ASIO or as DoP, and is converted to PCM only when you allow it.
+- An indicator that shows whether the sound reaches the device untouched, and the full signal path from file to device.
+- A library that indexes local folders and network shares in the background: albums, artists, composers, genres, years, tracks and folders, with covers and quick search (including Chinese and Japanese).
+- A queue that is saved between sessions, playlists with M3U8 import and export, smart lists, favorites, and autoplay of random tracks when the queue ends.
+- Home and Statistics pages with listening time, play counts and the most played tracks, albums and artists.
+- Media keys, the Windows volume flyout and lock screen, global hotkeys, and a notification-area icon.
+- Automatic updates from GitHub Releases, and an English and Traditional Chinese interface.
+
+## Screenshots
+
+The screenshots show a demo library with made-up albums and covers.
+
+| ![Home](assets/screenshots/home.png) | ![Album wall](assets/screenshots/albums.png) |
+|:---:|:---:|
+| Home: listening time and recently played albums | The album wall |
+| ![Album details](assets/screenshots/album.png) | ![Queue and signal path](assets/screenshots/playback.png) |
+| Album details with format badges and favorites | The queue and the expanded signal path of bit-perfect ASIO playback |
+| ![Statistics](assets/screenshots/statistics.png) | ![Output status](assets/screenshots/settings.png) |
+| Statistics for the last 30 days | Settings: the output status |
+
+## Playback engine
+
 The current implementation is an **MVP**: a stereo FLAC, ALAC, WAV, AIFF, AAC-LC, MP3 and DSD (DSF/DSDIFF) player with a bit-perfect output path for lossless sources, WASAPI exclusive and shared, ASIO, and Kernel Streaming backends. WASAPI shared mode always converts to the Windows mixer format and is shown as processed; WASAPI can follow the Windows default device, moving an open stream to a new default and resuming only active playback, while an explicitly selected device pauses when it disappears. Each backend has its own fixed sample rate (choosing one permits resampling PCM to it), predecode amount, silence after a format change and release of the device after a pause; WASAPI also sets the polling buffer, and WASAPI and KS the MMCSS task and priority. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Each format has its own decoder setting: FLAC can use FFmpeg, Symphonia, dr_flac or libsndfile; ALAC and AAC FFmpeg or Symphonia; WAV and AIFF FFmpeg, Symphonia, libsndfile or dr_wav; MP3 mpg123, FFmpeg, Symphonia or dr_mp3. AAC and MP3 decode to 24-bit PCM by default (16-bit per format), with declared encoder delay and padding trimmed. Mono files are duplicated to both channels bit for bit. With "convert when unsupported" (off by default) the player resamples with libsoxr, downmixes surround (ITU-R BS.775) or reduces depth with TPDF dither when a device does not take the file as it is; the indicator then shows the path as processed. Files are identified by content, not extension.
 
 ## Using CamelPlayer
