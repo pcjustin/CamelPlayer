@@ -15,8 +15,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 
 $projects = 'src\Common\Common.vcxproj', 'src\OutputBridge\OutputBridge.vcxproj', 'src\Engine\Engine.vcxproj',
-            'src\Server\Server.vcxproj', 'src\ControlPoint\App.vcxproj', 'src\Tools\camelcli\camelcli.vcxproj',
-            'tests\tests.vcxproj'
+            'src\Server\Server.vcxproj', 'src\ControlPoint\App.vcxproj', 'src\Updater\Updater.vcxproj',
+            'src\Tools\camelcli\camelcli.vcxproj', 'tests\tests.vcxproj'
 $entries = foreach ($project in $projects) {
     $json = & $MSBuild (Join-Path $root $project) -nologo -v:q -t:GetClCommandLines "-p:Configuration=$Configuration" `
         '-p:Platform=x64' "-p:SolutionDir=$root\" -getTargetResult:GetClCommandLines

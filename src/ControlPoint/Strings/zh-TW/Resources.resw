@@ -403,4 +403,35 @@
   <data name="Smart_Shuffle.Text" xml:space="preserve"><value>隨機播放</value></data>
   <data name="Smart_Save.Text" xml:space="preserve"><value>存成播放清單</value></data>
   <data name="Smart_Empty" xml:space="preserve"><value>這個清單目前是空的。</value></data>
+  <data name="Settings_AutoUpdate.Header" xml:space="preserve"><value>更新</value></data>
+  <data name="Settings_AutoUpdate.OnContent" xml:space="preserve"><value>自動檢查更新</value></data>
+  <data name="Settings_AutoUpdate.OffContent" xml:space="preserve"><value>自動檢查更新</value></data>
+  <data name="Settings_CheckUpdates.Content" xml:space="preserve"><value>檢查更新</value></data>
+  <data name="Update_Checking" xml:space="preserve"><value>正在檢查更新…</value></data>
+  <data name="Update_UpToDate" xml:space="preserve"><value>CamelPlayer 已是最新版本。</value></data>
+  <data name="Update_CheckFailed" xml:space="preserve"><value>無法檢查更新：{0}</value></data>
+  <data name="Update_Found" xml:space="preserve"><value>有新版 CamelPlayer {0}。</value></data>
+  <data name="Update_AvailableTitle" xml:space="preserve"><value>有新版 CamelPlayer {0}</value></data>
+  <data name="Update_AvailableText" xml:space="preserve"><value>目前版本是 {0}。更新會重新啟動 CamelPlayer，佇列和播放位置都會保留。</value></data>
+  <data name="Update_Install" xml:space="preserve"><value>更新</value></data>
+  <data name="Update_Notes.Content" xml:space="preserve"><value>版本說明</value></data>
+  <data name="Update_Skip.Content" xml:space="preserve"><value>略過這個版本</value></data>
+  <data name="Update_Cancel.Content" xml:space="preserve"><value>取消</value></data>
+  <data name="Update_Downloading" xml:space="preserve"><value>正在下載 CamelPlayer {0}… {1}</value></data>
+  <data name="Update_DownloadFailedTitle" xml:space="preserve"><value>無法下載更新</value></data>
+  <data name="Update_Retry" xml:space="preserve"><value>重試</value></data>
+  <data name="Update_ReadyTitle" xml:space="preserve"><value>CamelPlayer {0} 已可安裝</value></data>
+  <data name="Update_Restart" xml:space="preserve"><value>重新啟動並更新</value></data>
+  <data name="Update_StartFailed" xml:space="preserve"><value>無法啟動更新程式：{0}</value></data>
+  <data name="Update_NotesTitle" xml:space="preserve"><value>CamelPlayer {0} 的新功能</value></data>
+  <data name="Update_Close" xml:space="preserve"><value>關閉</value></data>
+  <data name="Update_ConfirmTitle" xml:space="preserve"><value>要重新啟動以更新嗎？</value></data>
+  <data name="Update_ConfirmText" xml:space="preserve"><value>播放會停止，CamelPlayer 會以 {0} 版重新啟動。佇列和播放位置都會保留。</value></data>
+  <data name="Update_ConfirmPrimary" xml:space="preserve"><value>重新啟動並更新</value></data>
+  <data name="Update_ConfirmCancel" xml:space="preserve"><value>稍後</value></data>
+  <data name="Update_InstalledTitle" xml:space="preserve"><value>已更新到 CamelPlayer {0}</value></data>
+  <data name="Update_FailedTitle" xml:space="preserve"><value>更新到 {0} 失敗，已還原</value></data>
+  <data name="Update_FailedText" xml:space="preserve"><value>已還原先前的版本，設定和媒體庫都保留。自動檢查不會再提示 {0}；設定 › 關於 中的「檢查更新」仍會提示。</value></data>
+  <data name="Update_CancelledTitle" xml:space="preserve"><value>更新到 {0} 已取消</value></data>
+  <data name="Update_CancelledText" xml:space="preserve"><value>CamelPlayer 沒有及時關閉，或未取得系統管理員權限。沒有變更任何檔案。</value></data>
 </root>

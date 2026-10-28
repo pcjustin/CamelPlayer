@@ -23,6 +23,7 @@ New features since 0.0.1:
 - **Windows integration:** media keys, the volume flyout and the lock screen show and control playback. System-wide hotkeys can be changed, and keyboard shortcuts work while the window is in front. CamelPlayer keeps running in the notification area after its window closes, and only one copy runs at a time.
 - **First-run guide** for adding music folders and choosing the output.
 - **Settings resets and data:** reset playback, the interface, the library, the cover cache or everything, and see where data is stored.
+- **Automatic updates:** CamelPlayer checks GitHub Releases at startup and daily, and after you confirm it downloads and verifies the new version, installs it and restarts. A failed update is undone.
 - **Diagnostic bundle:** Settings › About saves logs, settings, the output devices with the formats they accept, and the newest crash report in one zip for problem reports. Paths are left out unless you include them.
 - **Interface in English and Traditional Chinese.**
 - **Portable release:** a zip file with no installer, with its user guide in English and Traditional Chinese, third-party notices, the corresponding third-party source and SHA-256 checksums.

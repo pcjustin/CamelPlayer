@@ -22,6 +22,8 @@ SettingsDto settingsDto(const Settings& s) {
             s.trayNoticeShown,
             s.firstRunDone,
             s.autoplay,
+            s.checkUpdates,
+            s.skippedVersion,
             s.hotkeys,
             toUtf8(s.lastFile)};
 }
@@ -41,6 +43,8 @@ Settings nativeSettings(const SettingsDto& s) {
             s.trayNoticeShown,
             s.firstRunDone,
             s.autoplay,
+            s.checkUpdates,
+            s.skippedVersion,
             s.hotkeys,
             toWide(s.lastFileUtf8)};
 }

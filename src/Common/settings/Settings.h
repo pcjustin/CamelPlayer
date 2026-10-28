@@ -156,13 +156,15 @@ struct Settings {
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     bool firstRunDone = false;    // the first-run guide was finished or skipped
     bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)
+    bool checkUpdates = true;     // automatic update checks at startup and daily (docs/Plan.md §8.6)
+    std::string skippedVersion;   // the release the automatic check no longer offers
     HotkeySettings hotkeys;
     std::wstring lastFile;
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion
-// and decoders. Interface: language, close action, the tray notice, the first-run guide and the hotkeys. Each keeps the
-// other group.
+// and decoders. Interface: language, close action, the tray notice, the first-run guide, the hotkeys and the automatic
+// update check. Each keeps the other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

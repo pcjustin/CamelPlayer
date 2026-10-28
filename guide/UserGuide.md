@@ -8,11 +8,19 @@ CamelPlayer plays FLAC, ALAC, WAV, AIFF, AAC, MP3 and DSD (DSF and DSDIFF) files
 2. Extract the whole zip to a folder you can write to, for example `C:\Apps\CamelPlayer`. Keep all files together; nothing needs to be installed.
 3. Run `CamelPlayer.exe`. The program is not code-signed, so Windows may show "Windows protected your PC" the first time: choose **More info**, then **Run anyway**.
 
-CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Its settings, library and logs are kept in `%LOCALAPPDATA%\CamelPlayer`; Settings › Reset and data shows the folder and its size. To update, extract the new zip over the old folder or into a new one; your settings and library stay. To remove CamelPlayer, delete its folder and, if you want, the data folder.
+CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Its settings, library and logs are kept in `%LOCALAPPDATA%\CamelPlayer`; Settings › Reset and data shows the folder and its size. To remove CamelPlayer, delete its folder and, if you want, the data folder.
 
 The first start opens a short guide: add your music folders (local drives or a NAS) and choose the output. The library is scanned in the background and albums appear as it goes. You can skip the guide; Settings › Interface opens it again.
 
 Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface.
+
+## Updates
+
+CamelPlayer asks GitHub for a newer release when it starts and once a day while it runs. Each check is one request to the GitHub Releases API of the project; it sends nothing about you or your library. When a new version is out, a banner at the top of the window offers **Update**, **Release notes** and **Skip this version**; closing the banner means "later". Nothing is downloaded until you click **Update**.
+
+**Update** downloads the release zip, checks it against the release's SHA-256 checksums, then asks to restart if music is playing. CamelPlayer closes and the updater replaces the program files, then starts the new version. Your queue and position come back paused, and the new version shows what changed since your previous version. If the program folder is protected (for example under Program Files), Windows asks for administrator rights. If anything fails, or the new version does not start, the previous version and your settings and library are restored, and that version is no longer offered automatically.
+
+Settings › Interface › **Check for updates automatically** turns the startup and daily checks off. Settings › About › **Check for updates** checks at any time. You can still update by hand: extract the new zip over the old folder or into a new one; your settings and library stay.
 
 ## Choosing an output backend
 

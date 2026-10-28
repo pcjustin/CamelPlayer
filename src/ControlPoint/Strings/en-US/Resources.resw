@@ -403,4 +403,35 @@
   <data name="Smart_Shuffle.Text" xml:space="preserve"><value>Shuffle</value></data>
   <data name="Smart_Save.Text" xml:space="preserve"><value>Save as playlist</value></data>
   <data name="Smart_Empty" xml:space="preserve"><value>This list is empty for now.</value></data>
+  <data name="Settings_AutoUpdate.Header" xml:space="preserve"><value>Updates</value></data>
+  <data name="Settings_AutoUpdate.OnContent" xml:space="preserve"><value>Check for updates automatically</value></data>
+  <data name="Settings_AutoUpdate.OffContent" xml:space="preserve"><value>Check for updates automatically</value></data>
+  <data name="Settings_CheckUpdates.Content" xml:space="preserve"><value>Check for updates</value></data>
+  <data name="Update_Checking" xml:space="preserve"><value>Checking for updates…</value></data>
+  <data name="Update_UpToDate" xml:space="preserve"><value>CamelPlayer is up to date.</value></data>
+  <data name="Update_CheckFailed" xml:space="preserve"><value>Could not check for updates: {0}</value></data>
+  <data name="Update_Found" xml:space="preserve"><value>CamelPlayer {0} is available.</value></data>
+  <data name="Update_AvailableTitle" xml:space="preserve"><value>CamelPlayer {0} is available</value></data>
+  <data name="Update_AvailableText" xml:space="preserve"><value>You have {0}. Updating restarts CamelPlayer; the queue and position are kept.</value></data>
+  <data name="Update_Install" xml:space="preserve"><value>Update</value></data>
+  <data name="Update_Notes.Content" xml:space="preserve"><value>Release notes</value></data>
+  <data name="Update_Skip.Content" xml:space="preserve"><value>Skip this version</value></data>
+  <data name="Update_Cancel.Content" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Update_Downloading" xml:space="preserve"><value>Downloading CamelPlayer {0}… {1}</value></data>
+  <data name="Update_DownloadFailedTitle" xml:space="preserve"><value>The update could not be downloaded</value></data>
+  <data name="Update_Retry" xml:space="preserve"><value>Try again</value></data>
+  <data name="Update_ReadyTitle" xml:space="preserve"><value>CamelPlayer {0} is ready to install</value></data>
+  <data name="Update_Restart" xml:space="preserve"><value>Restart and update</value></data>
+  <data name="Update_StartFailed" xml:space="preserve"><value>The updater could not be started: {0}</value></data>
+  <data name="Update_NotesTitle" xml:space="preserve"><value>What’s new in CamelPlayer {0}</value></data>
+  <data name="Update_Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Update_ConfirmTitle" xml:space="preserve"><value>Restart to update?</value></data>
+  <data name="Update_ConfirmText" xml:space="preserve"><value>Playback stops and CamelPlayer restarts with version {0}. The queue and position are kept.</value></data>
+  <data name="Update_ConfirmPrimary" xml:space="preserve"><value>Restart and update</value></data>
+  <data name="Update_ConfirmCancel" xml:space="preserve"><value>Not now</value></data>
+  <data name="Update_InstalledTitle" xml:space="preserve"><value>Updated to CamelPlayer {0}</value></data>
+  <data name="Update_FailedTitle" xml:space="preserve"><value>The update to {0} failed and was undone</value></data>
+  <data name="Update_FailedText" xml:space="preserve"><value>The previous version was restored with your settings and library. Automatic checks no longer offer {0}; Check for updates in Settings › About still does.</value></data>
+  <data name="Update_CancelledTitle" xml:space="preserve"><value>The update to {0} was cancelled</value></data>
+  <data name="Update_CancelledText" xml:space="preserve"><value>CamelPlayer did not close in time or administrator rights were not granted. Nothing was changed.</value></data>
 </root>

@@ -20,11 +20,23 @@
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
         </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <NavigationView x:Name="Nav" PaneDisplayMode="Left" OpenPaneLength="200" IsBackButtonVisible="Collapsed"
+        <!-- Automatic updates (docs/Plan.md §8.6): offered here, downloaded and installed only after Update. -->
+        <InfoBar x:Name="UpdateBar" Severity="Informational" IsOpen="False" IsClosable="True">
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+                <Button x:Name="UpdateInstallButton" Style="{StaticResource AccentButtonStyle}" Click="OnUpdateInstallClick" />
+                <Button x:Name="UpdateNotesButton" x:Uid="Update_Notes" Click="OnUpdateNotesClick" />
+                <Button x:Name="UpdateSkipButton" x:Uid="Update_Skip" Click="OnUpdateSkipClick" />
+                <ProgressBar x:Name="UpdateProgress" Width="240" VerticalAlignment="Center" Visibility="Collapsed" />
+                <Button x:Name="UpdateCancelButton" x:Uid="Update_Cancel" Click="OnUpdateCancelClick" Visibility="Collapsed" />
+            </StackPanel>
+        </InfoBar>
+
+        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Left" OpenPaneLength="200" IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="True" SelectionChanged="OnNavSelectionChanged">
             <!-- Search on every page (docs/Plan.md §8.2): grouped suggestions while typing, Enter opens all results. -->
             <NavigationView.AutoSuggestBox>
@@ -324,6 +336,7 @@
                                 </StackPanel>
                                 <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
                                 <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ToggleSwitch x:Name="AutoUpdateSwitch" x:Uid="Settings_AutoUpdate" Toggled="OnUpdateSwitchToggled" />
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
                                 <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
                                            Foreground="{ThemeResource SystemFillColorCautionBrush}" />
@@ -405,6 +418,11 @@
                                 <StackPanel Spacing="4">
                                     <TextBlock x:Name="AboutVersionText" Style="{StaticResource BodyStrongTextBlockStyle}" IsTextSelectionEnabled="True" />
                                     <TextBlock x:Uid="Settings_AboutLicense" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Button x:Name="CheckUpdatesButton" x:Uid="Settings_CheckUpdates" Click="OnCheckUpdatesClick" />
+                                    <TextBlock x:Name="UpdateStatusText" VerticalAlignment="Center" TextWrapping="Wrap"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
                                 <TextBlock x:Uid="Settings_Diagnostics" Style="{StaticResource GroupHeaderStyle}" />
                                 <TextBlock x:Uid="Settings_DiagnosticsText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -499,7 +517,7 @@
         </NavigationView>
 
         <!-- Full-width playback bar (docs/Plan.md §8.1) -->
-        <Grid Grid.Row="1" Padding="24,8,24,12" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
+        <Grid Grid.Row="2" Padding="24,8,24,12" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
             <Grid.Resources>
                 <Style x:Key="BadgeStyle" TargetType="Border">

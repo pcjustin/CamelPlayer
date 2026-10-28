@@ -198,6 +198,22 @@
       <Link>assets\CamelPlayer.ico</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Automatic updates (docs/Plan.md §8.6): the updater and the changelog shown after an update. -->
+    <Content Include="$(CamelRoot)build\$(Configuration)\Updater\CamelUpdater.exe">
+      <Link>CamelUpdater.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(CamelRoot)CHANGELOG.md">
+      <Link>CHANGELOG.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(CamelRoot)src\Updater\Updater.vcxproj">
+      <Project>{6B0F6E0A-5C1D-4E52-9A39-3D0C2C8E1A06}</Project>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

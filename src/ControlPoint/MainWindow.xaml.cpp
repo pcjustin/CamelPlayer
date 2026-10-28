@@ -49,6 +49,30 @@ namespace winrt::CamelPlayer::implementation {
 
 namespace {
 
+std::filesystem::path programDirectory() {
+    std::wstring executable(32768, L'\0');
+    executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
+    return std::filesystem::path(executable).parent_path();
+}
+
+// A dialog showing release notes or a changelog section as plain, selectable text.
+ContentDialog textDialog(XamlRoot const& root, hstring const& title, hstring const& text) {
+    ContentDialog dialog;
+    dialog.XamlRoot(root);
+    dialog.Title(box_value(title));
+    TextBlock body;
+    body.Text(text);
+    body.TextWrapping(TextWrapping::Wrap);
+    body.IsTextSelectionEnabled(true);
+    ScrollViewer scroll;
+    scroll.MaxHeight(420);
+    scroll.Content(body);
+    dialog.Content(scroll);
+    dialog.CloseButtonText(tr(L"Update_Close"));
+    dialog.DefaultButton(ContentDialogButton::Close);
+    return dialog;
+}
+
 constexpr std::optional<SampleType> kFormatChoices[] = {std::nullopt, SampleType::Int16, SampleType::Int24, SampleType::Int24In32,
                                                         SampleType::Int32};
 
@@ -257,6 +281,7 @@ void MainWindow::InitializeComponent() {
         if (camel::measure::measuring())
             camel::log::info("measure: main window loaded %.0f ms after process start", camel::measure::sinceProcessStart());
         showFirstRunGuideIfDue(); // a dialog needs a XamlRoot
+        showUpdateResult();
     });
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
@@ -309,6 +334,13 @@ void MainWindow::InitializeComponent() {
         });
         applyHotkeys();
     }
+    updateTimer_ = DispatcherQueue().CreateTimer();
+    updateTimer_.Interval(std::chrono::seconds(10)); // the startup check waits until startup work has settled
+    updateTimer_.Tick([this](auto&&, auto&&) {
+        updateTimer_.Interval(std::chrono::hours(24));
+        if (settings_.checkUpdates) checkForUpdates(false);
+    });
+    updateTimer_.Start();
     AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& e) {
         if (exiting_ || settings_.closeAction == CloseAction::Exit) return;
         e.Cancel(true);
@@ -318,6 +350,8 @@ void MainWindow::InitializeComponent() {
     Closed([this](auto&&, auto&&) {
         tray_.reset();
         artworkToken_.cancel();
+        updateToken_.cancel();
+        updateTimer_.Stop();
         uiTimer_.Stop();
         seekTimer_.Stop();
         server_->setListener({});
@@ -383,6 +417,7 @@ void MainWindow::populateSettings() {
     fill(ConvertDsdCombo(), {tr(L"Convert_Off"), tr(L"ConvertDsd_On")}, settings_.convertDsdWhenUnsupported ? 1 : 0);
     AutoplaySwitch().IsOn(settings_.autoplay);
     QueueAutoplaySwitch().IsOn(settings_.autoplay);
+    AutoUpdateSwitch().IsOn(settings_.checkUpdates);
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -504,6 +539,7 @@ void MainWindow::readSettingsFromUi() {
     settings_.resampleQuality = ResampleQuality(std::min(idx(ResampleQualityCombo()), 2));
     settings_.convertDsdWhenUnsupported = idx(ConvertDsdCombo()) == 1;
     settings_.autoplay = AutoplaySwitch().IsOn();
+    settings_.checkUpdates = AutoUpdateSwitch().IsOn();
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -2415,6 +2451,220 @@ void MainWindow::OnRefreshDevicesClick(Windows::Foundation::IInspectable const&,
     Command command;
     command.kind = CommandKind::RefreshDevices;
     submitCommand(std::move(command));
+}
+
+void MainWindow::OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settingsChanged();
+}
+
+void MainWindow::OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    checkForUpdates(true);
+}
+
+// The startup and daily checks skip a skipped version and stay silent on failure; the About button does neither.
+winrt::fire_and_forget MainWindow::checkForUpdates(bool manual) {
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    if (manual) {
+        CheckUpdatesButton().IsEnabled(false);
+        UpdateStatusText().Text(tr(L"Update_Checking"));
+    }
+    co_await resume_background();
+    std::optional<update::Release> release;
+    std::string failure;
+    try {
+        update::cleanTemp(camel::dataDirectory());
+        release = update::check(CAMEL_VERSION_STRING);
+    } catch (const std::exception& e) {
+        failure = e.what();
+        camel::log::warn("update check: %s", e.what());
+    }
+    queue.TryEnqueue([weak, manual, release, failure] {
+        auto self = weak.get();
+        if (!self) return;
+        if (manual) {
+            self->CheckUpdatesButton().IsEnabled(true);
+            self->UpdateStatusText().Text(!failure.empty() ? ui::format(L"Update_CheckFailed", {std::wstring(ui::utf8(failure))})
+                                          : release        ? ui::format(L"Update_Found", {toWide(release->version)})
+                                                           : tr(L"Update_UpToDate"));
+        }
+        if (!release || (!manual && release->version == self->settings_.skippedVersion)) return;
+        if (self->release_ && self->release_->version == release->version) { // keeps a running or finished download
+            self->UpdateBar().IsOpen(true);
+            return;
+        }
+        camel::log::info("update: CamelPlayer %s is available", release->version.c_str());
+        self->release_ = release;
+        self->updateFiles_.clear();
+        self->showUpdateOffer();
+    });
+}
+
+void MainWindow::showUpdateOffer() {
+    if (!release_) return;
+    const auto& release = *release_;
+    const std::wstring version = toWide(release.version);
+    auto bar = UpdateBar();
+    bar.Severity(InfoBarSeverity::Informational);
+    bar.Title(ui::format(updateFiles_.empty() ? L"Update_AvailableTitle" : L"Update_ReadyTitle", {version}));
+    bar.Message(ui::format(L"Update_AvailableText", {L"" CAMEL_VERSION_STRING}));
+    UpdateInstallButton().Content(box_value(tr(updateFiles_.empty() ? L"Update_Install" : L"Update_Restart")));
+    UpdateInstallButton().Visibility(Visibility::Visible);
+    UpdateNotesButton().Visibility(release.notes.empty() ? Visibility::Collapsed : Visibility::Visible);
+    UpdateSkipButton().Visibility(Visibility::Visible);
+    UpdateProgress().Visibility(Visibility::Collapsed);
+    UpdateCancelButton().Visibility(Visibility::Collapsed);
+    bar.IsClosable(true);
+    bar.IsOpen(true);
+}
+
+winrt::fire_and_forget MainWindow::OnUpdateInstallClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    if (!release_) co_return;
+    if (!updateFiles_.empty()) {
+        restartToUpdate();
+        co_return;
+    }
+    const auto release = *release_;
+    const std::wstring version = toWide(release.version);
+    updateToken_ = {};
+    const auto token = updateToken_;
+    UpdateBar().Title(ui::format(L"Update_Downloading", {version, L""}));
+    UpdateBar().IsClosable(false);
+    UpdateInstallButton().Visibility(Visibility::Collapsed);
+    UpdateNotesButton().Visibility(Visibility::Collapsed);
+    UpdateSkipButton().Visibility(Visibility::Collapsed);
+    UpdateProgress().IsIndeterminate(true);
+    UpdateProgress().Visibility(Visibility::Visible);
+    UpdateCancelButton().Visibility(Visibility::Visible);
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await resume_background();
+    std::filesystem::path files;
+    std::string failure;
+    auto shownPercent = std::make_shared<int>(-1);
+    try {
+        files = update::prepare(
+            release,
+            [weak, queue, version, shownPercent](uint64_t done, uint64_t total) {
+                if (total == 0) return;
+                const int percent = int(done * 100 / total);
+                if (percent == *shownPercent) return;
+                *shownPercent = percent;
+                queue.TryEnqueue([weak, version, percent] {
+                    auto self = weak.get();
+                    if (!self) return;
+                    self->UpdateProgress().IsIndeterminate(false);
+                    self->UpdateProgress().Value(percent);
+                    self->UpdateBar().Title(ui::format(L"Update_Downloading", {version, std::to_wstring(percent) + L"%"}));
+                });
+            },
+            token);
+    } catch (const std::exception& e) {
+        failure = e.what();
+    }
+    const bool cancelled = token.cancelled();
+    queue.TryEnqueue([weak, files, failure, cancelled] {
+        auto self = weak.get();
+        if (!self) return;
+        if (!failure.empty()) {
+            camel::log::warn("update download: %s", failure.c_str());
+            self->showUpdateOffer();
+            if (cancelled) return;
+            self->UpdateBar().Severity(InfoBarSeverity::Error);
+            self->UpdateBar().Title(tr(L"Update_DownloadFailedTitle"));
+            self->UpdateBar().Message(ui::utf8(failure));
+            self->UpdateInstallButton().Content(box_value(tr(L"Update_Retry")));
+            return;
+        }
+        self->updateFiles_ = files;
+        self->showUpdateOffer();
+        self->restartToUpdate();
+    });
+}
+
+void MainWindow::OnUpdateCancelClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    updateToken_.cancel();
+}
+
+winrt::fire_and_forget MainWindow::OnUpdateNotesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    if (!release_) co_return;
+    const auto release = *release_;
+    co_await textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_NotesTitle", {toWide(release.version)}),
+                        ui::utf8(release.notes))
+        .ShowAsync();
+}
+
+void MainWindow::OnUpdateSkipClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!release_) return;
+    const auto& release = *release_;
+    settings_.skippedVersion = release.version;
+    applySettingsNow();
+    UpdateBar().IsOpen(false);
+}
+
+// Hands the verified files to CamelUpdater.exe and exits the normal way, so the queue and position are saved.
+winrt::fire_and_forget MainWindow::restartToUpdate() {
+    auto strong = get_strong();
+    if (!release_ || updateFiles_.empty()) co_return;
+    const auto release = *release_;
+    const auto files = updateFiles_;
+    if (server_ && server_->snapshot().playback.state == PlaybackState::Playing && !inTray_) {
+        ContentDialog dialog;
+        dialog.XamlRoot(ContentLayout().XamlRoot());
+        dialog.Title(box_value(tr(L"Update_ConfirmTitle")));
+        dialog.Content(box_value(ui::format(L"Update_ConfirmText", {toWide(release.version)})));
+        dialog.PrimaryButtonText(tr(L"Update_ConfirmPrimary"));
+        dialog.CloseButtonText(tr(L"Update_ConfirmCancel"));
+        dialog.DefaultButton(ContentDialogButton::Primary);
+        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    }
+    try {
+        update::startUpdater(programDirectory(), files, camel::dataDirectory(), release.version, CAMEL_VERSION_STRING);
+    } catch (const std::exception& e) {
+        camel::log::warn("update: %s", e.what());
+        UpdateBar().Severity(InfoBarSeverity::Error);
+        UpdateBar().Title(ui::format(L"Update_StartFailed", {std::wstring(ui::utf8(e.what()))}));
+        co_return;
+    }
+    camel::log::info("update: CamelUpdater takes over to install %s", release.version.c_str());
+    exiting_ = true;
+    Close();
+}
+
+winrt::fire_and_forget MainWindow::showUpdateResult() {
+    auto strong = get_strong();
+    const auto data = camel::dataDirectory();
+    const auto result = update::readResult(data);
+    if (!result) co_return;
+    const std::wstring version = toWide(result->version);
+    if (result->kind == update::Result::Kind::Installed) {
+        if (result->version != CAMEL_VERSION_STRING || !update::signalStarted(data)) {
+            update::removeResult(data);
+            co_return;
+        }
+        std::ifstream in(programDirectory() / L"CHANGELOG.md", std::ios::binary);
+        const std::string changelog{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        co_await textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_InstalledTitle", {version}),
+                            ui::utf8(update::changelogSince(changelog, result->previous, result->version)))
+            .ShowAsync();
+        co_return;
+    }
+    update::removeResult(data);
+    const bool failed = result->kind == update::Result::Kind::Failed;
+    if (failed) {
+        settings_.skippedVersion = result->version;
+        applySettingsNow();
+    }
+    auto bar = UpdateBar();
+    bar.Severity(InfoBarSeverity::Warning);
+    bar.Title(ui::format(failed ? L"Update_FailedTitle" : L"Update_CancelledTitle", {version}));
+    bar.Message(failed ? ui::format(L"Update_FailedText", {version}) : tr(L"Update_CancelledText"));
+    UpdateInstallButton().Visibility(Visibility::Collapsed);
+    UpdateNotesButton().Visibility(Visibility::Collapsed);
+    UpdateSkipButton().Visibility(Visibility::Collapsed);
+    bar.IsOpen(true);
 }
 
 } // namespace winrt::CamelPlayer::implementation

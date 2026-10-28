@@ -15,6 +15,7 @@
     <Project Path="src/Engine/Engine.vcxproj" />
     <Project Path="src/Server/Server.vcxproj" />
     <Project Path="src/ControlPoint/App.vcxproj" />
+    <Project Path="src/Updater/Updater.vcxproj" />
   </Folder>
   <Folder Name="/src/Tools/">
     <Project Path="src/Tools/camelcli/camelcli.vcxproj" />

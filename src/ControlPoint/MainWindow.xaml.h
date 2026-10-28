@@ -9,6 +9,7 @@
 #include "PlaylistView.xaml.h"
 #include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
+#include "Server/Support/Updates.h"
 #include "TrayIcon.h"
 #include "GlobalHotkeys.h"
 #include "MediaControls.h"
@@ -77,6 +78,15 @@ struct MainWindow : MainWindowT<MainWindow> {
     winrt::fire_and_forget OnAddFolderClick(Windows::Foundation::IInspectable const&,
                                             Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRemoveFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // Automatic updates (docs/Plan.md §8.6).
+    void OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnUpdateInstallClick(Windows::Foundation::IInspectable const&,
+                                                Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnUpdateNotesClick(Windows::Foundation::IInspectable const&,
+                                              Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnUpdateSkipClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnUpdateCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
     void populateSettings(); // fills every control from settings_
@@ -198,6 +208,17 @@ private:
     void fitNavigationPane();
     winrt::hstring shownScan_;
     uint64_t shownDevicesRevision_ = 0;
+
+    // Automatic updates (docs/Plan.md §8.6): the offered release, its verified files once downloaded, and the download.
+    winrt::fire_and_forget checkForUpdates(bool manual);
+    void showUpdateOffer();
+    winrt::fire_and_forget restartToUpdate();
+    // What the updater left from the previous run: the changelog after an update, or the undone or cancelled update.
+    winrt::fire_and_forget showUpdateResult();
+    std::optional<camel::server::update::Release> release_;
+    std::filesystem::path updateFiles_;
+    camel::server::CancellationToken updateToken_;
+    Microsoft::UI::Dispatching::DispatcherQueueTimer updateTimer_{nullptr};
 };
 
 } // namespace winrt::CamelPlayer::implementation
