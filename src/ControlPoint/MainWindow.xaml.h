@@ -201,6 +201,7 @@ private:
     std::optional<camel::server::PlaylistUndo> noticeUndo_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer noticeTimer_{nullptr};
     bool navUpdating_ = false;
+    bool resumeStats_ = false; // Back to Statistics keeps the period it showed
     Microsoft::UI::Xaml::Controls::MenuFlyout queueMenu_{nullptr};
     Windows::Foundation::IInspectable queueMenuItem_{nullptr};
     std::wstring shownNotices_;

@@ -14,6 +14,7 @@
 
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 
+#include "BrowseItem.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "UiText.h"
@@ -180,7 +181,6 @@ void StatisticsView::show(Range range) {
 void StatisticsView::hide() {
     ++generation_;
     HistoryList().ItemsSource(nullptr);
-    history_ = nullptr;
 }
 
 PlayPeriod StatisticsView::period() {
@@ -220,33 +220,9 @@ void StatisticsView::load() {
     query.period = period();
     query.metric = MetricCombo().SelectedIndex() == 1 ? PlayMetric::ListeningTime : PlayMetric::Plays;
     query.bucket = PlayBucketSize(std::clamp(BucketCombo().SelectedIndex(), 0, 2));
-    query.historyLimit = 0;
-    // History pages through the Server like the library lists.
-    ui::BrowseFetch fetch = [server = server_, period = query.period](int64_t offset, int64_t limit, std::optional<uint64_t>) {
-        PlayStatisticsQuery page;
-        page.period = period;
-        page.topLimit = 1; // the smallest the Server accepts
-        page.historyOffset = offset;
-        page.historyLimit = limit;
-        const auto result = server->playStatistics(page);
-        ui::BrowsePage out{0, result.historyTotal, {}};
-        for (const auto& h : result.history) {
-            ui::BrowseRow row{h.event,
-                              h.path,
-                              titleOf(h.title, h.name, h.path),
-                              ui::utf8(h.artist),
-                              startedText(h.startedMs, h.utcOffsetMinutes),
-                              hstring(ui::formatTime(double(h.heardMs) / 1000.0))};
-            row.file = h.track.file;
-            row.unavailable = !h.available;
-            out.rows.push_back(std::move(row));
-        }
-        return out;
-    };
-    history_ = make_self<ui::LibraryCollection>(DispatcherQueue(), std::move(fetch));
-    HistoryList().ItemsSource(
-        history_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>());
-    history_->start([this](int64_t total) { HistoryHeader().Text(ui::format(L"Stats_History", {std::to_wstring(total)})); });
+    // The lists grow with the page instead of scrolling on their own, so they show only the first rows.
+    query.topLimit = 10;
+    query.historyLimit = 10;
     background([this, server = server_, query] {
         auto stats = std::make_shared<PlayStatistics>(server->playStatistics(query));
         return std::function<void()>([this, stats] {
@@ -257,6 +233,7 @@ void StatisticsView::load() {
             AlbumsValue().Text(to_hstring(stats_.overview.albums));
             ArtistsValue().Text(to_hstring(stats_.overview.artists));
             showRanking();
+            showHistory();
             drawChart();
         });
     });
@@ -292,6 +269,23 @@ void StatisticsView::showRanking() {
         break;
     }
     RankList().ItemsSource(items);
+}
+
+void StatisticsView::showHistory() {
+    auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
+    for (const auto& h : stats_.history) {
+        ui::BrowseRow row{h.event,
+                          h.path,
+                          titleOf(h.title, h.name, h.path),
+                          ui::utf8(h.artist),
+                          startedText(h.startedMs, h.utcOffsetMinutes),
+                          hstring(ui::formatTime(double(h.heardMs) / 1000.0))};
+        row.file = h.track.file;
+        row.unavailable = !h.available;
+        items.Append(item(row));
+    }
+    HistoryList().ItemsSource(items);
+    HistoryHeader().Text(ui::format(L"Stats_History", {std::to_wstring(stats_.historyTotal)}));
 }
 
 // Listening time per day, week or month; empty days, weeks or months in between show as gaps on the baseline.

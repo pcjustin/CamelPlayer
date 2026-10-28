@@ -5,7 +5,6 @@
 #pragma once
 
 #include "StatisticsView.g.h"
-#include "LibraryCollection.h"
 #include "Server/Api/ServerApi.h"
 
 namespace winrt::CamelPlayer::implementation {
@@ -23,6 +22,8 @@ struct StatisticsView : StatisticsViewT<StatisticsView> {
 
     void attach(std::shared_ptr<camel::server::IServer> server, Handlers handlers);
     void show(Range range);
+    // Reloads with the period and options already chosen.
+    void load();
     void hide();
 
     void OnPeriodChanged(Windows::Foundation::IInspectable const&,
@@ -39,8 +40,8 @@ struct StatisticsView : StatisticsViewT<StatisticsView> {
 
 private:
     camel::server::PlayPeriod period();
-    void load();
     void showRanking();
+    void showHistory();
     void drawChart();
     winrt::fire_and_forget resetSelected(Microsoft::UI::Xaml::Controls::ListView list, Windows::Foundation::IInspectable clicked);
     void reloadWhenIdle();
@@ -51,7 +52,6 @@ private:
     uint64_t generation_ = 0;
     bool populating_ = false;
     camel::server::PlayStatistics stats_;
-    winrt::com_ptr<ui::LibraryCollection> history_;
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr};
     Microsoft::UI::Xaml::Controls::ListView menuList_{nullptr};
     Windows::Foundation::IInspectable menuItem_{nullptr};

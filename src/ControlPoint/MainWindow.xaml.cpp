@@ -256,29 +256,31 @@ void MainWindow::InitializeComponent() {
     });
     PlaylistNotice().Closed([this](auto&&, auto&&) { noticeUndo_.reset(); });
     refreshPlaylists();
-    const auto openAlbum = [this](int64_t album, hstring const& title) {
-        selectPage(L"albums");
-        get_self<LibraryView>(Library())->showAlbum(album, title);
-    };
-    const auto openArtist = [this](hstring const& artist) {
-        selectPage(L"albums");
-        get_self<LibraryView>(Library())->showArtist(artist);
-    };
-    // Like "View all", an album or artist opened from Home keeps Albums unselected and Back returns to Home.
-    const auto leaveHome = [this] {
+    // Like "View all", an album or artist opened from Home or Statistics keeps Albums unselected and Back returns there.
+    const auto leaveTo = [this](hstring const& page) {
         Nav().SelectedItem(nullptr);
         Home().Visibility(Visibility::Collapsed);
+        Stats().Visibility(Visibility::Collapsed);
         Library().Visibility(Visibility::Visible);
-        return [this] { selectPage(L"home"); };
+        return [this, page] {
+            resumeStats_ = page == L"stats";
+            selectPage(page);
+        };
     };
-    get_self<HomeView>(Home())->attach(
-        server_, {[this, leaveHome](int64_t album, hstring const& title) {
-                      get_self<LibraryView>(Library())->showAlbum(album, title, leaveHome());
-                  },
-                  [this, leaveHome](hstring const& artist) { get_self<LibraryView>(Library())->showArtist(artist, leaveHome()); },
-                  [this](hstring const& list) { viewAll(list); }, [this](hstring const& period) { openStats(period); }});
+    const auto openAlbum = [this, leaveTo](hstring const& from) {
+        return [this, leaveTo, from](int64_t album, hstring const& title) {
+            get_self<LibraryView>(Library())->showAlbum(album, title, leaveTo(from));
+        };
+    };
+    const auto openArtist = [this, leaveTo](hstring const& from) {
+        return
+            [this, leaveTo, from](hstring const& artist) { get_self<LibraryView>(Library())->showArtist(artist, leaveTo(from)); };
+    };
+    get_self<HomeView>(Home())->attach(server_,
+                                       {openAlbum(L"home"), openArtist(L"home"), [this](hstring const& list) { viewAll(list); },
+                                        [this](hstring const& period) { openStats(period); }});
     get_self<StatisticsView>(Stats())->attach(
-        server_, {[this](Command command) { submitCommand(std::move(command)); }, openAlbum, openArtist});
+        server_, {[this](Command command) { submitCommand(std::move(command)); }, openAlbum(L"stats"), openArtist(L"stats")});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     QueueList().ItemsSource(*queueItems_);
@@ -1102,7 +1104,9 @@ void MainWindow::showPage(hstring const& tag) {
     Home().Visibility(tag == L"home" ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"home") get_self<HomeView>(Home())->refresh();
     Stats().Visibility(tag == L"stats" ? Visibility::Visible : Visibility::Collapsed);
-    if (tag == L"stats")
+    if (tag == L"stats" && std::exchange(resumeStats_, false))
+        get_self<StatisticsView>(Stats())->load();
+    else if (tag == L"stats")
         get_self<StatisticsView>(Stats())->show(StatisticsView::Range::Last30Days);
     else
         get_self<StatisticsView>(Stats())->hide();

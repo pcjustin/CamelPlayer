@@ -133,11 +133,11 @@
                 <TextBlock x:Uid="Stats_Top" Style="{StaticResource SectionStyle}" />
                 <ComboBox x:Name="RankCombo" Grid.Column="1" MinWidth="110" SelectionChanged="OnRankChanged" />
             </Grid>
-            <ListView x:Name="RankList" Height="420" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
+            <ListView x:Name="RankList" ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
                       DoubleTapped="OnRowDoubleTapped" />
 
             <TextBlock x:Name="HistoryHeader" Style="{StaticResource SectionStyle}" />
-            <ListView x:Name="HistoryList" Height="420" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
+            <ListView x:Name="HistoryList" ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
                       DoubleTapped="OnRowDoubleTapped" />
         </StackPanel>
     </ScrollViewer>
