@@ -481,6 +481,19 @@ private:
         loggedUnderruns_ = count;
     }
 
+    // The driver's thread was held up: the ring had audio, yet the device may have played a gap.
+    void logLateCallbacks(const OutputStatus& status) {
+        if (status.lateCallbacks < loggedLateCallbacks_) loggedLateCallbacks_ = 0; // the output was reopened
+        const auto now = std::chrono::steady_clock::now();
+        if (status.lateCallbacks == loggedLateCallbacks_ || now - lateCallbacksLoggedAt_ < std::chrono::seconds(1)) return;
+        lateCallbacksLoggedAt_ = now;
+        log::info("output: %llu late driver callback(s) at %.1f s of %s (longest gap %.1f ms, period %.1f ms)",
+                  (unsigned long long)(status.lateCallbacks - loggedLateCallbacks_),
+                  framesToSeconds(currentPosition(), sourceRate_.load(std::memory_order_relaxed)), toUtf8(file_).c_str(),
+                  status.longestGapMs, status.periodMs);
+        loggedLateCallbacks_ = status.lateCallbacks;
+    }
+
     void logFirstAudio() {
         const int64_t at = firstAudio_.load(std::memory_order_acquire);
         if (firstAudioLogged_ || !at) return;
@@ -504,6 +517,7 @@ private:
     void reportAudible() {
         uint64_t buffered = 0;
         const OutputStatus status = outputStatus(); // drivers add measurements once the stream runs
+        logLateCallbacks(status);
         {
             std::lock_guard lock(snapMutex_);
             snap_.outputStatus = status;
@@ -584,6 +598,7 @@ private:
         firstAudio_ = 0;
         firstAudioLogged_ = false;
         loggedUnderruns_ = 0;
+        loggedLateCallbacks_ = 0;
         {
             std::lock_guard lock(snapMutex_);
             snap_.file = file_;
@@ -991,6 +1006,8 @@ private:
     std::array<int64_t, 7> stages_{};
     bool firstAudioLogged_ = true;
     uint64_t loggedUnderruns_ = 0;
+    uint64_t loggedLateCallbacks_ = 0;
+    std::chrono::steady_clock::time_point lateCallbacksLoggedAt_;
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;
     OutputPlan plan_;

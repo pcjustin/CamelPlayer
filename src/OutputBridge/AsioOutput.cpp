@@ -22,6 +22,8 @@
 #include "Common/util/Text.h"
 #include "OutputBridge/AsioAbi.h"
 #include "OutputBridge/AsioLayout.h"
+#include "OutputBridge/CallbackTiming.h"
+#include "OutputBridge/Mmcss.h"
 #include "OutputBridge/OutputChoices.h"
 
 namespace camel::audio {
@@ -125,6 +127,7 @@ public:
     void start() override {
         invoke([&] {
             if (buffersCreated_ && !started_) {
+                timing_.restart(periodMs_); // a pause stops the callbacks
                 // Some drivers accept a rate in canSampleRate/setSampleRate that they cannot run (Chord ASIO at 1411.2 kHz).
                 if (drv_->start() != asio::kOk)
                     throw Error(ErrorCode::DriverError,
@@ -165,6 +168,17 @@ public:
             const int length = snprintf(period, sizeof period, ", DSD callback period %.2f ms", double(us) / 1000.0);
             if (length > 0 && size_t(length) < sizeof period) s.detail += period;
         }
+        switch (mmcss_.load(std::memory_order_relaxed)) {
+        case Mmcss::Joined:
+            s.detail += ", driver thread joined to MMCSS Pro Audio";
+            break;
+        case Mmcss::Refused:
+            s.detail += ", MMCSS refused for the driver thread";
+            break;
+        default:
+            break;
+        }
+        timing_.report(s);
         return s;
     }
 
@@ -179,6 +193,8 @@ public:
 
     // --- driver callbacks (driver thread) ---
     void onBufferSwitch(long index) noexcept {
+        joinMmcss();
+        timing_.tick();
         IRenderSource* src = source_.load(std::memory_order_acquire);
         const size_t frames = bufferFrames_;
         const uint32_t bps = bytesPerSample(fmt_.type);
@@ -198,6 +214,22 @@ public:
             }
         }
     }
+    // Drivers such as Chord's call back on a thread of normal priority, which any busy program delays past the buffer
+    // period (an audible gap). Like other ASIO hosts, the player joins that thread to MMCSS on its first callback; the
+    // registration ends with the driver's thread.
+    void joinMmcss() noexcept {
+        const DWORD thread = GetCurrentThreadId();
+        if (mmcssThread_.exchange(thread, std::memory_order_relaxed) == thread) return;
+        if (GetThreadPriority(GetCurrentThread()) >= THREAD_PRIORITY_TIME_CRITICAL) {
+            mmcss_.store(Mmcss::DriverOwn, std::memory_order_relaxed);
+            return;
+        }
+        DWORD index = 0;
+        const HANDLE task = AvSetMmThreadCharacteristicsW(L"Pro Audio", &index);
+        if (task) AvSetMmThreadPriority(task, AVRT_PRIORITY_HIGH);
+        mmcss_.store(task ? Mmcss::Joined : Mmcss::Refused, std::memory_order_relaxed);
+    }
+
     long onMessage(long selector, long value) noexcept {
         switch (selector) {
         case asio::message::kSelectorSupported:
@@ -412,6 +444,8 @@ private:
         bufferFrames_ = dsd ? size_t(size) / 8 : size_t(size);
         callbacks_ = 0;
         callbackPeriodUs_ = 0;
+        periodMs_ = double(bufferFrames_) * 1000.0 / f.sampleRate;
+        timing_.reset(periodMs_);
         interleaved_.assign(bufferFrames_ * f.bytesPerFrame(), dsd ? kDsdSilence : 0);
         g_active = this;
         if (drv_->createBuffers(buffers_, 2, size, &callbacks) != asio::kOk) {
@@ -459,6 +493,11 @@ private:
     uint32_t callbacks_ = 0; // driver thread only
     std::chrono::steady_clock::time_point firstCallback_;
     std::atomic<uint64_t> callbackPeriodUs_{0};
+    double periodMs_ = 0;
+    CallbackTiming timing_;
+    enum class Mmcss : uint8_t { Unknown, Joined, DriverOwn, Refused };
+    std::atomic<DWORD> mmcssThread_{0};
+    std::atomic<Mmcss> mmcss_{Mmcss::Unknown};
     DeviceFormat fmt_;
     std::vector<uint8_t> interleaved_;
     std::atomic<IRenderSource*> source_{nullptr};

@@ -37,6 +37,11 @@ struct OutputStatus {
     // Saved parameters the device could not take and what is used instead (requested ≠ active); the settings keep
     // the requested values.
     std::vector<std::string> adjustments;
+    // Driver callbacks clearly later than the driver's own rhythm since the stream opened (CallbackTiming.h); only ASIO,
+    // whose driver owns the thread, measures them. Each can be an audible gap that no underrun counts.
+    uint64_t lateCallbacks = 0;
+    double longestGapMs = 0;
+    double periodMs = 0; // the buffer period
 };
 
 class IOutput {
