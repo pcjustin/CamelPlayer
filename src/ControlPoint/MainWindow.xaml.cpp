@@ -34,7 +34,6 @@
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
-#include "StatisticsView.xaml.h"
 #include "TrackMarks.h"
 
 using namespace winrt;
@@ -256,31 +255,21 @@ void MainWindow::InitializeComponent() {
     });
     PlaylistNotice().Closed([this](auto&&, auto&&) { noticeUndo_.reset(); });
     refreshPlaylists();
-    // Like "View all", an album or artist opened from Home or Statistics keeps Albums unselected and Back returns there.
-    const auto leaveTo = [this](hstring const& page) {
+    // Like "View all", an album or artist opened from Home keeps Albums unselected and Back returns to Home.
+    const auto leaveHome = [this] {
         Nav().SelectedItem(nullptr);
         Home().Visibility(Visibility::Collapsed);
-        Stats().Visibility(Visibility::Collapsed);
         Library().Visibility(Visibility::Visible);
-        return [this, page] {
-            resumeStats_ = page == L"stats";
-            selectPage(page);
-        };
+        return [this] { selectPage(L"home"); };
     };
-    const auto openAlbum = [this, leaveTo](hstring const& from) {
-        return [this, leaveTo, from](int64_t album, hstring const& title) {
-            get_self<LibraryView>(Library())->showAlbum(album, title, leaveTo(from));
-        };
-    };
-    const auto openArtist = [this, leaveTo](hstring const& from) {
-        return
-            [this, leaveTo, from](hstring const& artist) { get_self<LibraryView>(Library())->showArtist(artist, leaveTo(from)); };
-    };
-    get_self<HomeView>(Home())->attach(server_,
-                                       {openAlbum(L"home"), openArtist(L"home"), [this](hstring const& list) { viewAll(list); },
-                                        [this](hstring const& period) { openStats(period); }});
-    get_self<StatisticsView>(Stats())->attach(
-        server_, {[this](Command command) { submitCommand(std::move(command)); }, openAlbum(L"stats"), openArtist(L"stats")});
+    get_self<HomeView>(Home())->attach(
+        server_,
+        {[this, leaveHome](int64_t album, hstring const& title) {
+             get_self<LibraryView>(Library())->showAlbum(album, title, leaveHome());
+         },
+         [this, leaveHome](hstring const& artist) { get_self<LibraryView>(Library())->showArtist(artist, leaveHome()); },
+         [this](hstring const& list, hstring const& title, ui::BrowseFetch fetch) { viewAll(list, title, std::move(fetch)); },
+         [this](Command command) { submitCommand(std::move(command)); }});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     QueueList().ItemsSource(*queueItems_);
@@ -1011,27 +1000,12 @@ void MainWindow::selectPage(hstring const& tag) {
 }
 
 // Home's "View all" opens the full list in the library pages; Back returns to Home.
-void MainWindow::viewAll(hstring const& list) {
+void MainWindow::viewAll(hstring const& list, hstring const& title, ui::BrowseFetch fetch) {
     auto server = server_;
     const auto back = [this] { selectPage(L"home"); };
-    const hstring unknown = tr(L"Library_Unknown"), playsFormat = tr(L"Home_Plays");
-    const auto plays = [playsFormat](int64_t n) {
-        std::wstring text(playsFormat);
-        if (const auto at = text.find(L"{0}"); at != std::wstring::npos) text.replace(at, 3, std::to_wstring(n));
-        return hstring(text);
-    };
-    const auto ranked = [server](int64_t offset, int64_t limit) {
-        PlayStatisticsQuery query;
-        query.topLimit = std::clamp<int64_t>(offset + limit, 1, 500);
-        query.historyLimit = 0;
-        auto stats = server->playStatistics(query);
-        std::erase_if(stats.albums, [](const auto& a) { return a.plays == 0; }); // heard, but never counted as a play
-        std::erase_if(stats.artists, [](const auto& a) { return a.plays == 0; });
-        return stats;
-    };
+    const hstring unknown = tr(L"Library_Unknown");
     Nav().SelectedItem(nullptr);
     Home().Visibility(Visibility::Collapsed);
-    Stats().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     auto view = get_self<LibraryView>(Library());
     const auto albums = [unknown](const LibraryAlbumPage& page) {
@@ -1057,59 +1031,18 @@ void MainWindow::viewAll(hstring const& list) {
             },
             back);
     } else if (list == L"topAlbums") {
-        view->showAlbumList(
-            tr(L"Home_TopAlbums/Text"),
-            [ranked, plays](int64_t offset, int64_t limit, std::optional<uint64_t>) {
-                const auto stats = ranked(offset, limit);
-                ui::BrowsePage out{0, int64_t(stats.albums.size()), {}};
-                for (auto i = size_t(offset); i < stats.albums.size() && std::cmp_less(i, offset + limit); ++i)
-                    out.rows.push_back({stats.albums[i].album,
-                                        {},
-                                        ui::utf8(stats.albums[i].name),
-                                        ui::utf8(stats.albums[i].artist),
-                                        {},
-                                        plays(stats.albums[i].plays)});
-                return out;
-            },
-            back);
+        view->showAlbumList(title, std::move(fetch), back);
     } else if (list == L"topArtists") {
-        view->showArtistList(
-            tr(L"Home_TopArtists/Text"),
-            [ranked, plays](int64_t offset, int64_t limit, std::optional<uint64_t>) {
-                const auto stats = ranked(offset, limit);
-                ui::BrowsePage out{0, int64_t(stats.artists.size()), {}};
-                for (auto i = size_t(offset); i < stats.artists.size() && std::cmp_less(i, offset + limit); ++i)
-                    out.rows.push_back(
-                        {0, stats.artists[i].name, ui::utf8(stats.artists[i].name), {}, {}, plays(stats.artists[i].plays)});
-                return out;
-            },
-            back);
+        view->showArtistList(title, std::move(fetch), back);
+    } else {
+        view->showTrackList(title, std::move(fetch), back);
     }
-}
-
-// Home's listening tiles open the statistics page on their period.
-void MainWindow::openStats(hstring const& period) {
-    using Range = StatisticsView::Range;
-    const auto range = period == L"today"   ? Range::Today
-                       : period == L"week"  ? Range::ThisWeek
-                       : period == L"month" ? Range::ThisMonth
-                       : period == L"year"  ? Range::ThisYear
-                                            : Range::AllTime;
-    selectPage(L"stats");
-    get_self<StatisticsView>(Stats())->show(range);
 }
 
 void MainWindow::showPage(hstring const& tag) {
     shownTag_ = tag;
     Home().Visibility(tag == L"home" ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"home") get_self<HomeView>(Home())->refresh();
-    Stats().Visibility(tag == L"stats" ? Visibility::Visible : Visibility::Collapsed);
-    if (tag == L"stats" && std::exchange(resumeStats_, false))
-        get_self<StatisticsView>(Stats())->load();
-    else if (tag == L"stats")
-        get_self<StatisticsView>(Stats())->show(StatisticsView::Range::Last30Days);
-    else
-        get_self<StatisticsView>(Stats())->hide();
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" || tag == L"years" ||
                          tag == L"tracks" || tag == L"folders" || std::wstring_view(tag).starts_with(L"smart:");
@@ -1129,7 +1062,7 @@ void MainWindow::showPage(hstring const& tag) {
         playlistView->showPlaylist(std::stoll(std::wstring(page.substr(9))));
     else
         playlistView->hide();
-    const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home" && tag != L"stats";
+    const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home";
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") {
         refreshRoots();
@@ -1567,7 +1500,6 @@ void MainWindow::showSearchResults(hstring const& query) {
     SettingsPanel().Visibility(Visibility::Collapsed);
     PlaceholderPanel().Visibility(Visibility::Collapsed);
     Home().Visibility(Visibility::Collapsed);
-    Stats().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
 }
@@ -1694,11 +1626,12 @@ winrt::fire_and_forget MainWindow::OnDiagnosticBundleClick(Windows::Foundation::
 winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
     auto strong = get_strong();
     const hstring kind = unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L"");
-    const std::wstring key = kind == L"playback"    ? L"Playback"
-                             : kind == L"interface" ? L"Interface"
-                             : kind == L"library"   ? L"Library"
-                             : kind == L"covers"    ? L"Covers"
-                                                    : L"All";
+    const std::wstring key = kind == L"playback"     ? L"Playback"
+                             : kind == L"interface"  ? L"Interface"
+                             : kind == L"library"    ? L"Library"
+                             : kind == L"covers"     ? L"Covers"
+                             : kind == L"statistics" ? L"Statistics"
+                                                     : L"All";
     ContentDialog dialog;
     dialog.XamlRoot(ContentLayout().XamlRoot());
     dialog.Title(box_value(tr((L"Reset_" + key + L"Title/Text").c_str())));
@@ -1734,6 +1667,10 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
         updateQueuePanel();
         applySettingsNow();
         LanguageNote().Visibility(Visibility::Visible); // the language follows Windows again after a restart
+    } else if (kind == L"statistics") {
+        Command command;
+        command.kind = CommandKind::ResetAllPlayStatistics;
+        submitCommand(std::move(command));
     } else if (kind == L"library" || kind == L"covers") {
         auto server = server_;
         auto queue = DispatcherQueue();

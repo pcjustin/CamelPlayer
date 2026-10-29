@@ -30,9 +30,10 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void showArtist(hstring const& artist, std::function<void()> leave = nullptr);
     // Full results for `query`. `leave` returns to the page the search started from when it was not a library page.
     void showSearch(hstring const& query, std::function<void()> leave);
-    // Home's "View all": an album wall or artist list read through `fetch`; Back runs `leave`.
+    // Home's "View all": an album wall, artist list or track list read through `fetch`; Back runs `leave`.
     void showAlbumList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void showArtistList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
+    void showTrackList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void hide();
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
@@ -132,6 +133,9 @@ private:
     void playList(bool shuffle);
     // Marks or clears the menu's tracks or albums as favorites; paged lists reread once the Server applied the change.
     void markSelection(bool favorite);
+    // Deletes the plays of the selected tracks, or of the right-clicked one, after a confirmation; not undoable.
+    void resetSelection();
+    winrt::fire_and_forget confirmReset(std::vector<camel::server::LibraryTrackKey> tracks);
     void markAlbums(bool favorite);
     void reloadWhenIdle();
     void showAlbumFavorite(bool favorite);
@@ -161,7 +165,7 @@ private:
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};
-    std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowMarks_; // shown for track rows only
+    std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowMarks_; // favorites and statistics, for tracks only
     uint32_t cardMarksFirst_ = 0;                                             // album entries, hidden for artists
     ui::BrowseRow menuRow_;
     Windows::Foundation::IInspectable menuItem_{nullptr};

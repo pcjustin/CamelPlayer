@@ -5,7 +5,8 @@
 import "BrowseItem.idl";
 
 namespace CamelPlayer {
-// Listening totals, recently played and added albums, and the most played albums and artists (docs/Plan.md §8.2).
+// Recently played and added albums, and listening for a chosen period: totals, a chart, the most played and the
+// history (docs/Plan.md §8.2).
 [default_interface] runtimeclass HomeView : Microsoft.UI.Xaml.Controls.UserControl {
     HomeView();
 }

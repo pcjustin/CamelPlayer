@@ -354,37 +354,21 @@
   <data name="Hotkey_Taken" xml:space="preserve"><value>這個組合已被其他程式使用，請改用其他組合。</value></data>
   <data name="Settings_WindowKeys.Text" xml:space="preserve"><value>視窗在前景時</value></data>
   <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space 播放／暫停 · Ctrl+→ 下一首 · Ctrl+← 上一首 · Ctrl+Shift+→ 快轉 10 秒 · Ctrl+Shift+← 倒轉 10 秒。在文字欄位打字、或開著對話框和選單時不會作用。</value></data>
-  <data name="Nav_Stats.Content" xml:space="preserve"><value>統計</value></data>
-  <data name="Stats_Title.Text" xml:space="preserve"><value>統計</value></data>
-  <data name="Stats_ResetAll.Content" xml:space="preserve"><value>重置所有統計…</value></data>
-  <data name="Stats_ListeningTime.Text" xml:space="preserve"><value>聆聽時間</value></data>
-  <data name="Stats_Plays.Text" xml:space="preserve"><value>播放次數</value></data>
-  <data name="Stats_Tracks.Text" xml:space="preserve"><value>曲目</value></data>
-  <data name="Stats_Albums.Text" xml:space="preserve"><value>專輯</value></data>
-  <data name="Stats_Artists.Text" xml:space="preserve"><value>演出者</value></data>
-  <data name="Stats_Chart.Text" xml:space="preserve"><value>聆聽時間</value></data>
-  <data name="Stats_Top.Text" xml:space="preserve"><value>最常播放</value></data>
-  <data name="Stats_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>檔案不存在或離線</value></data>
-  <data name="Stats_Last7Days" xml:space="preserve"><value>最近 7 天</value></data>
-  <data name="Stats_Last30Days" xml:space="preserve"><value>最近 30 天</value></data>
-  <data name="Stats_ThisYear" xml:space="preserve"><value>今年</value></data>
-  <data name="Stats_AllTime" xml:space="preserve"><value>全部</value></data>
-  <data name="Stats_Custom" xml:space="preserve"><value>自訂範圍</value></data>
-  <data name="Stats_ByPlays" xml:space="preserve"><value>依播放次數</value></data>
-  <data name="Stats_ByTime" xml:space="preserve"><value>依聆聽時間</value></data>
-  <data name="Stats_ByDay" xml:space="preserve"><value>依日</value></data>
-  <data name="Stats_ByWeek" xml:space="preserve"><value>依週</value></data>
-  <data name="Stats_ByMonth" xml:space="preserve"><value>依月</value></data>
-  <data name="Stats_TopTracks" xml:space="preserve"><value>曲目</value></data>
-  <data name="Stats_TopAlbums" xml:space="preserve"><value>專輯</value></data>
-  <data name="Stats_TopArtists" xml:space="preserve"><value>演出者</value></data>
-  <data name="Stats_History" xml:space="preserve"><value>播放歷史（{0} 次）</value></data>
-  <data name="Stats_ResetSelected" xml:space="preserve"><value>重置所選曲目的統計…</value></data>
-  <data name="Stats_ResetSelectedTitle" xml:space="preserve"><value>重置統計？</value></data>
-  <data name="Stats_ResetSelectedText" xml:space="preserve"><value>將刪除 {0} 首曲目的播放紀錄，次數從零開始。此動作無法復原。</value></data>
-  <data name="Stats_ResetAllTitle" xml:space="preserve"><value>重置所有統計？</value></data>
-  <data name="Stats_ResetAllText" xml:space="preserve"><value>將刪除所有播放紀錄，所有次數從零開始。此動作無法復原。</value></data>
-  <data name="Stats_ResetPrimary" xml:space="preserve"><value>重置</value></data>
+  <data name="Home_Listening.Text" xml:space="preserve"><value>聆聽</value></data>
+  <data name="Home_TopTracks.Text" xml:space="preserve"><value>最常播放的曲目</value></data>
+  <data name="Home_NoPlaysInPeriod.Text" xml:space="preserve"><value>這段期間沒有播放紀錄。</value></data>
+  <data name="Home_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>檔案不存在或離線</value></data>
+  <data name="Home_ByPlays" xml:space="preserve"><value>依播放次數</value></data>
+  <data name="Home_ByTime" xml:space="preserve"><value>依聆聽時間</value></data>
+  <data name="Home_History" xml:space="preserve"><value>播放紀錄（{0} 次）</value></data>
+  <data name="Home_HistoryTitle" xml:space="preserve"><value>播放紀錄</value></data>
+  <data name="Library_MenuResetStatistics" xml:space="preserve"><value>重置統計…</value></data>
+  <data name="Library_ResetStatisticsTitle" xml:space="preserve"><value>重置統計？</value></data>
+  <data name="Library_ResetStatisticsText" xml:space="preserve"><value>將刪除 {0} 首曲目的播放紀錄，次數從零開始。此動作無法復原。</value></data>
+  <data name="Library_ResetStatisticsPrimary" xml:space="preserve"><value>重置</value></data>
+  <data name="Reset_StatisticsTitle.Text" xml:space="preserve"><value>聆聽統計</value></data>
+  <data name="Reset_StatisticsText.Text" xml:space="preserve"><value>刪除所有播放紀錄，所有次數從零開始。</value></data>
+  <data name="Reset_StatisticsConfirm" xml:space="preserve"><value>所有播放紀錄都會被刪除，所有次數從零開始。最愛、播放清單和媒體庫不受影響。此動作無法復原。</value></data>
   <data name="Marks_AddFavorite" xml:space="preserve"><value>加入最愛</value></data>
   <data name="Marks_RemoveFavorite" xml:space="preserve"><value>從最愛移除</value></data>
   <data name="Marks_AddFavoriteAlbum" xml:space="preserve"><value>加入最愛專輯</value></data>

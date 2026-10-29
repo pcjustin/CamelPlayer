@@ -19,10 +19,10 @@ New features since 0.0.1:
 - **Playlists:** create them from any selection, then rename, reorder, remove entries, and import and export M3U8 files.
 - **Favorites** for tracks and albums.
 - **Smart lists:** recently added, most played, last played, favorite tracks, favorite albums and never played.
-- **Statistics:** listening time, plays, top tracks, albums and artists, a listening chart and play history for any period.
+- **Listening statistics on Home:** listening time and plays for today, this week, this month, this year and all time. The chosen period shows a listening-time chart, the most played albums, artists and tracks by plays or listening time, and the play history. The statistics of selected tracks can be reset from their right-click menu.
 - **Windows integration:** media keys, the volume flyout and the lock screen show and control playback. System-wide hotkeys can be changed, and keyboard shortcuts work while the window is in front. CamelPlayer keeps running in the notification area after its window closes, and only one copy runs at a time.
 - **First-run guide** for adding music folders and choosing the output.
-- **Settings resets and data:** reset playback, the interface, the library, the cover cache or everything, and see where data is stored.
+- **Settings resets and data:** reset playback, the interface, the library, the cover cache, the listening statistics or everything, and see where data is stored.
 - **Automatic updates:** CamelPlayer checks GitHub Releases at startup and daily, and after you confirm it downloads and verifies the new version, installs it and restarts. A failed update is undone.
 - **Diagnostic bundle:** Settings › About saves logs, settings, the output devices with the formats they accept, and the newest crash report in one zip for problem reports. Paths are left out unless you include them.
 - **Interface in English and Traditional Chinese.**

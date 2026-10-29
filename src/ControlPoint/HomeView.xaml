@@ -45,6 +45,27 @@
                 </StackPanel>
             </Border>
         </DataTemplate>
+        <!-- A ranked or played track: its rank or start time, title, artist and plays, listening time or time heard. -->
+        <DataTemplate x:Key="TrackTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="Auto" MinWidth="0" />
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" MinWidth="72" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Uid="Home_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
+                          Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </DataTemplate>
         <ItemsPanelTemplate x:Key="RowPanel">
             <ItemsStackPanel Orientation="Horizontal" />
         </ItemsPanelTemplate>
@@ -58,7 +79,28 @@
                 <TextBlock x:Name="LibraryCounts" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
-            <Grid ColumnSpacing="12">
+            <Grid Margin="0,12,0,0">
+                <TextBlock x:Uid="Home_RecentlyPlayed" Style="{StaticResource SectionHeaderStyle}" />
+                <HyperlinkButton x:Uid="Home_ViewAll" Tag="played" Click="OnViewAllClick" HorizontalAlignment="Right" />
+            </Grid>
+            <TextBlock x:Name="PlayedEmpty" x:Uid="Home_NoPlays" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+            <GridView x:Name="PlayedRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                      SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
+                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                      ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
+
+            <Grid Margin="0,12,0,0">
+                <TextBlock x:Uid="Home_RecentlyAdded" Style="{StaticResource SectionHeaderStyle}" />
+                <HyperlinkButton x:Uid="Home_ViewAll" Tag="added" Click="OnViewAllClick" HorizontalAlignment="Right" />
+            </Grid>
+            <GridView x:Name="AddedRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                      SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
+                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                      ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
+
+            <!-- Listening: a card picks the period that the chart, the most played and the history below show. -->
+            <TextBlock x:Uid="Home_Listening" Style="{StaticResource SectionHeaderStyle}" Margin="0,12,0,0" />
+            <Grid x:Name="Tiles" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -102,45 +144,58 @@
                     </StackPanel>
                 </Border>
             </Grid>
+            <Border Style="{StaticResource StatTileStyle}" Height="190">
+                <Grid RowSpacing="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Canvas x:Name="Chart" SizeChanged="OnChartSizeChanged" Background="Transparent" />
+                    <Canvas x:Name="ChartAxis" Grid.Row="1" Height="16" />
+                </Grid>
+            </Border>
+            <TextBlock x:Name="PeriodEmpty" x:Uid="Home_NoPlaysInPeriod" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
 
-            <Grid Margin="0,12,0,0">
-                <TextBlock x:Uid="Home_RecentlyPlayed" Style="{StaticResource SectionHeaderStyle}" />
-                <HyperlinkButton x:Uid="Home_ViewAll" Tag="played" Click="OnViewAllClick" HorizontalAlignment="Right" />
-            </Grid>
-            <TextBlock x:Name="PlayedEmpty" x:Uid="Home_NoPlays" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
-            <GridView x:Name="PlayedRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
-                      SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
-                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                      ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
+            <StackPanel x:Name="PeriodLists" Spacing="12">
+                <Grid Margin="0,12,0,0">
+                    <TextBlock x:Uid="Home_MostPlayed" Style="{StaticResource SectionHeaderStyle}" />
+                    <ComboBox x:Name="MetricCombo" MinWidth="110" HorizontalAlignment="Right" SelectionChanged="OnMetricChanged" />
+                </Grid>
 
-            <Grid Margin="0,12,0,0">
-                <TextBlock x:Uid="Home_RecentlyAdded" Style="{StaticResource SectionHeaderStyle}" />
-                <HyperlinkButton x:Uid="Home_ViewAll" Tag="added" Click="OnViewAllClick" HorizontalAlignment="Right" />
-            </Grid>
-            <GridView x:Name="AddedRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
-                      SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
-                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                      ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
+                <Grid>
+                    <TextBlock x:Uid="Home_TopAlbums" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                    <HyperlinkButton x:Uid="Home_ViewAll" Tag="topAlbums" Click="OnViewAllClick" HorizontalAlignment="Right" />
+                </Grid>
+                <GridView x:Name="TopAlbumsRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                          SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
+                          ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                          ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
 
-            <TextBlock x:Uid="Home_MostPlayed" Style="{StaticResource SectionHeaderStyle}" Margin="0,12,0,0" />
+                <Grid>
+                    <TextBlock x:Uid="Home_TopArtists" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                    <HyperlinkButton x:Uid="Home_ViewAll" Tag="topArtists" Click="OnViewAllClick" HorizontalAlignment="Right" />
+                </Grid>
+                <ListView x:Name="TopArtistsRow" ItemTemplate="{StaticResource ArtistTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                          SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnArtistClick"
+                          ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                          ScrollViewer.VerticalScrollMode="Disabled" />
 
-            <Grid>
-                <TextBlock x:Uid="Home_TopAlbums" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                <HyperlinkButton x:Uid="Home_ViewAll" Tag="topAlbums" Click="OnViewAllClick" HorizontalAlignment="Right" />
-            </Grid>
-            <GridView x:Name="TopAlbumsRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
-                      SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
-                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                      ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
+                <Grid>
+                    <TextBlock x:Uid="Home_TopTracks" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                    <HyperlinkButton x:Uid="Home_ViewAll" Tag="topTracks" Click="OnViewAllClick" HorizontalAlignment="Right" />
+                </Grid>
+                <ListView x:Name="TopTracksList" ItemTemplate="{StaticResource TrackTemplate}" SelectionMode="None"
+                          IsItemClickEnabled="True" ItemClick="OnTrackClick"
+                          ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" />
 
-            <Grid>
-                <TextBlock x:Uid="Home_TopArtists" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                <HyperlinkButton x:Uid="Home_ViewAll" Tag="topArtists" Click="OnViewAllClick" HorizontalAlignment="Right" />
-            </Grid>
-            <ListView x:Name="TopArtistsRow" ItemTemplate="{StaticResource ArtistTemplate}" ItemsPanel="{StaticResource RowPanel}"
-                      SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnArtistClick"
-                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                      ScrollViewer.VerticalScrollMode="Disabled" />
+                <Grid Margin="0,12,0,0">
+                    <TextBlock x:Name="HistoryHeader" Style="{StaticResource SectionHeaderStyle}" />
+                    <HyperlinkButton x:Uid="Home_ViewAll" Tag="history" Click="OnViewAllClick" HorizontalAlignment="Right" />
+                </Grid>
+                <ListView x:Name="HistoryList" ItemTemplate="{StaticResource TrackTemplate}" SelectionMode="None"
+                          IsItemClickEnabled="True" ItemClick="OnTrackClick"
+                          ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" />
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

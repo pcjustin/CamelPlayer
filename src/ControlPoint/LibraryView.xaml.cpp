@@ -252,6 +252,17 @@ void LibraryView::showArtistList(hstring const& title, ui::BrowseFetch fetch, st
     refreshTimer_.Start();
 }
 
+void LibraryView::showTrackList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave) {
+    View view;
+    view.mode = Mode::Tracks;
+    view.title = title;
+    view.fetch = std::move(fetch);
+    back_.clear();
+    leave_ = std::move(leave);
+    open(std::move(view), false);
+    refreshTimer_.Start();
+}
+
 void LibraryView::showSearch(hstring const& query, std::function<void()> leave) {
     if (!server_ || query.empty()) return;
     View view;
@@ -422,7 +433,8 @@ void LibraryView::fillSortChoices() {
     for (const auto* key : keys) SortCombo().Items().Append(box_value(tr(key)));
     SortCombo().Visibility(keys.empty() ? Visibility::Collapsed : Visibility::Visible);
     if (!keys.empty()) SortCombo().SelectedIndex(selected);
-    DescendingToggle().Visibility(current_.mode == Mode::Tracks && !current_.smart ? Visibility::Visible : Visibility::Collapsed);
+    DescendingToggle().Visibility(current_.mode == Mode::Tracks && !current_.smart && !current_.fetch ? Visibility::Visible
+                                                                                                      : Visibility::Collapsed);
     DescendingToggle().IsChecked(descending_);
     populating_ = false;
 }
@@ -731,6 +743,35 @@ void LibraryView::markSelection(bool favorite) {
     });
 }
 
+void LibraryView::resetSelection() {
+    if (!menuItem_ || !menuList_ || !submit_) return;
+    background([this, rows = selectionRows(menuList_, menuItem_, menuPaged_)] {
+        std::vector<LibraryTrackKey> tracks;
+        for (const auto& row : rows())
+            if (row.file && !row.folder && std::ranges::find(tracks, LibraryTrackKey{row.file}) == tracks.end())
+                tracks.push_back({row.file});
+        return std::function<void()>([this, tracks = std::move(tracks)] {
+            if (!tracks.empty()) confirmReset(tracks);
+        });
+    });
+}
+
+winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tracks) {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    dialog.XamlRoot(XamlRoot());
+    dialog.Title(box_value(tr(L"Library_ResetStatisticsTitle")));
+    dialog.Content(box_value(ui::format(L"Library_ResetStatisticsText", {std::to_wstring(tracks.size())})));
+    dialog.PrimaryButtonText(tr(L"Library_ResetStatisticsPrimary"));
+    dialog.CloseButtonText(tr(L"Playlist_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Close);
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || !submit_) co_return;
+    Command command;
+    command.kind = CommandKind::ResetPlayStatistics;
+    command.tracks = std::move(tracks);
+    submit_(std::move(command));
+}
+
 void LibraryView::markAlbums(bool favorite) {
     if (!menuItem_ || !menuList_ || !submit_) return;
     background([this, rows = selectionRows(menuList_, menuItem_, menuPaged_), favorite, paged = menuPaged_] {
@@ -901,6 +942,14 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
         }
         if (playlistMenu_) playlistMenu_(rowMenu_, [this] { return menuSources(); });
         rowMarks_ = ui::appendFavoriteMenu(rowMenu_, [this](bool favorite) { markSelection(favorite); });
+        MenuFlyoutItem reset;
+        reset.Text(tr(L"Library_MenuResetStatistics"));
+        FontIcon resetIcon;
+        resetIcon.Glyph(L"\xE72C");
+        reset.Icon(resetIcon);
+        reset.Click([this](auto&&, auto&&) { resetSelection(); });
+        rowMenu_.Items().Append(reset);
+        rowMarks_.push_back(reset);
     }
     for (const auto& entry : rowMarks_) entry.Visibility(item.IsTrack() ? Visibility::Visible : Visibility::Collapsed);
     // Groups have no queue actions; their first playlist entry follows a separator that is hidden with them.

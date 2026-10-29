@@ -104,8 +104,7 @@ private:
     void showPage(winrt::hstring const& tag);
     // Selects the navigation item with this tag; its page opens through the selection handler.
     void selectPage(winrt::hstring const& tag);
-    void viewAll(winrt::hstring const& list);
-    void openStats(winrt::hstring const& period);
+    void viewAll(winrt::hstring const& list, winrt::hstring const& title, ui::BrowseFetch fetch);
     void showSearchResults(winrt::hstring const& query);
     void showSuggestions(const camel::server::LibrarySearchResults& results, winrt::hstring const& text);
     // What a suggestion opens; the list holds them in display order next to their items.
@@ -201,7 +200,6 @@ private:
     std::optional<camel::server::PlaylistUndo> noticeUndo_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer noticeTimer_{nullptr};
     bool navUpdating_ = false;
-    bool resumeStats_ = false; // Back to Statistics keeps the period it showed
     Microsoft::UI::Xaml::Controls::MenuFlyout queueMenu_{nullptr};
     Windows::Foundation::IInspectable queueMenuItem_{nullptr};
     std::wstring shownNotices_;
