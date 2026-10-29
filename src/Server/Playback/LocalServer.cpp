@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <objbase.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -24,6 +25,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/DeviceWatcher.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/PlayStatistics.h"
@@ -707,15 +709,9 @@ private:
                 }
                 break;
             }
-            case CommandKind::RefreshDevices: {
-                DeviceCatalog catalog;
-                catalog.wasapi = devices(audio::listWasapiDevices());
-                catalog.asio = devices(audio::listAsioDrivers());
-                catalog.ks = devices(audio::listKsPins());
-                catalog.revision = state_.devices.revision + 1;
-                state_.devices = std::move(catalog);
+            case CommandKind::RefreshDevices:
+                refreshDevices();
                 break;
-            }
             case CommandKind::ShowControlPanel:
                 state_.controlPanelOpened = engine_->showControlPanel();
                 break;
@@ -1177,7 +1173,7 @@ private:
             p.format = restored_->format;
         }
         if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
-            p.underruns == state_.playback.underruns)
+            p.underruns == state_.playback.underruns && state_.devices.revision == published_.devices.revision)
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
@@ -1206,8 +1202,35 @@ private:
         }
     }
 
+    void refreshDevices() {
+        DeviceCatalog catalog;
+        catalog.wasapi = devices(audio::listWasapiDevices());
+        catalog.asio = devices(audio::listAsioDrivers());
+        catalog.ks = devices(audio::listKsPins());
+        catalog.revision = state_.devices.revision + 1;
+        state_.devices = std::move(catalog);
+    }
+
+    // A DAC switched on or off raises several endpoint events, and its KS pin and ASIO device can follow later; the
+    // lists are read again once the events stop, so a device switched on after the start can be chosen.
+    void refreshDevicesAfterChange() {
+        using Clock = std::chrono::steady_clock;
+        const int64_t changed = devicesChangedAt_.load(std::memory_order_acquire);
+        if (!changed || Clock::now() - Clock::time_point(Clock::duration(changed)) < kDevicesSettle) return;
+        devicesChangedAt_.store(0, std::memory_order_release);
+        refreshDevices();
+    }
+
     void run() {
         const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        std::unique_ptr<audio::DeviceWatcher> deviceWatcher;
+        try {
+            deviceWatcher = audio::watchAudioDevices([this] {
+                devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
+            });
+        } catch (const audio::Error& e) {
+            log::warn("device lists will not follow device changes: %s", e.what());
+        }
         for (;;) {
             std::optional<Pending> pending;
             {
@@ -1240,6 +1263,7 @@ private:
                 ensureNextQueued();
                 recordPlaybackLength();
                 updatePlaySession();
+                refreshDevicesAfterChange();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -1253,6 +1277,7 @@ private:
                 idle_.notify_all();
             }
         }
+        deviceWatcher.reset();
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
         engine_.reset();
@@ -1332,6 +1357,8 @@ private:
     } saved_;
     std::future<void> sessionWrite_;
     std::function<void(const Event&)> listener_;
+    static constexpr std::chrono::seconds kDevicesSettle{1};
+    std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
     std::thread worker_;
 };
 

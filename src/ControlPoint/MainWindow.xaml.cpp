@@ -631,7 +631,7 @@ bool MainWindow::followDevice(Backend previous) {
     const auto current = std::find_if(from.begin(), from.end(), [&](const DeviceInfo& d) { return d.id == savedId(previous); });
     const DeviceInfo* device = current != from.end() ? &*current : nullptr;
     if (!device && previous != Backend::Wasapi && savedId(previous).empty() && !from.empty()) device = &from.front();
-    if (!device) return true;
+    if (!device || device->name.empty()) return true; // a device that is not connected plays nothing to follow
     if (const auto match = matchDevice(previous, *device, settings_.backend, list(settings_.backend))) {
         savedId(settings_.backend) = *match;
         populateDeviceLists(server_->snapshot().devices);

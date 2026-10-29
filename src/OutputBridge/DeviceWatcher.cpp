@@ -9,6 +9,7 @@
 #include <wil/com.h>
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 
 #include "Common/AudioTypes.h"
@@ -16,9 +17,11 @@
 namespace camel::audio {
 namespace {
 
+enum class Watch : uint8_t { DefaultRender, Devices };
+
 class Client final : public IMMNotificationClient {
 public:
-    explicit Client(std::function<void()> onChange) : onChange_(std::move(onChange)) {}
+    Client(Watch watch, std::function<void()> onChange) : watch_(watch), onChange_(std::move(onChange)) {}
 
     void stop() {
         std::lock_guard lock(mutex_);
@@ -43,17 +46,25 @@ public:
     }
 
     HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
-        if (flow != eRender || role != eConsole) return S_OK;
-        std::lock_guard lock(mutex_);
-        if (!stopped_) onChange_();
+        if (watch_ == Watch::DefaultRender && flow == eRender && role == eConsole) notify();
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return deviceChanged(); }
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return deviceChanged(); }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return deviceChanged(); }
     HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
 
 private:
+    HRESULT deviceChanged() {
+        if (watch_ == Watch::Devices) notify();
+        return S_OK;
+    }
+    void notify() {
+        std::lock_guard lock(mutex_);
+        if (!stopped_) onChange_();
+    }
+
+    Watch watch_;
     std::function<void()> onChange_;
     std::mutex mutex_;
     bool stopped_ = false;
@@ -62,12 +73,12 @@ private:
 
 class EndpointWatcher final : public DeviceWatcher {
 public:
-    explicit EndpointWatcher(std::function<void()> onChange) {
+    EndpointWatcher(Watch watch, std::function<void()> onChange) {
         enumerator_ = wil::CoCreateInstance<MMDeviceEnumerator, IMMDeviceEnumerator>(CLSCTX_ALL);
-        client_ = new Client(std::move(onChange));
+        client_ = new Client(watch, std::move(onChange));
         if (FAILED(enumerator_->RegisterEndpointNotificationCallback(client_))) {
             client_->Release();
-            throw Error(ErrorCode::DriverError, "cannot watch the Windows default output device");
+            throw Error(ErrorCode::DriverError, "cannot watch the audio endpoints");
         }
     }
     ~EndpointWatcher() override {
@@ -87,9 +98,17 @@ private:
 
 std::unique_ptr<DeviceWatcher> watchDefaultRenderDevice(std::function<void()> onDefaultChanged) {
     try {
-        return std::make_unique<EndpointWatcher>(std::move(onDefaultChanged));
+        return std::make_unique<EndpointWatcher>(Watch::DefaultRender, std::move(onDefaultChanged));
     } catch (const wil::ResultException&) {
         throw Error(ErrorCode::DriverError, "cannot watch the Windows default output device");
+    }
+}
+
+std::unique_ptr<DeviceWatcher> watchAudioDevices(std::function<void()> onChange) {
+    try {
+        return std::make_unique<EndpointWatcher>(Watch::Devices, std::move(onChange));
+    } catch (const wil::ResultException&) {
+        throw Error(ErrorCode::DriverError, "cannot watch the audio devices");
     }
 }
 
