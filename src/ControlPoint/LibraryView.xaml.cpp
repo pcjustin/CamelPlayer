@@ -320,7 +320,8 @@ void LibraryView::loadSearchGroups() {
 }
 
 void LibraryView::showEmpty(int64_t total) {
-    if (current_.mode == Mode::Search || current_.fetch) return; // the search groups or Home explain an empty list
+    // An album always has tracks; the search groups or Home explain an empty list.
+    if (current_.mode == Mode::AlbumDetail || current_.mode == Mode::Search || current_.fetch) return;
     if (current_.smartList()) {
         EmptyText().Text(tr(L"Smart_Empty"));
         EmptyText().Visibility(total == 0 ? Visibility::Visible : Visibility::Collapsed);
@@ -332,7 +333,7 @@ void LibraryView::showEmpty(int64_t total) {
         EmptyText().Visibility(Visibility::Collapsed);
         return;
     }
-    EmptyText().Text(tr(noRoots ? L"Library_Empty" : L"Library_AlbumsPending"));
+    EmptyText().Text(noRoots ? tr(L"Library_Empty/Text") : tr(L"Library_AlbumsPending"));
     EmptyText().Visibility(Visibility::Visible);
 }
 
@@ -363,6 +364,7 @@ void LibraryView::open(View view, bool push) {
     AlbumFormats().Children().Clear();
     AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
+    EmptyText().Visibility(Visibility::Collapsed);
     restoreOffset_.reset();
     if (push) {
         back_.push_back(current_);
