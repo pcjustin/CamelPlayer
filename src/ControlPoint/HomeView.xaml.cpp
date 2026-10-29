@@ -199,10 +199,46 @@ struct PeriodData {
 void HomeView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     server_ = std::move(server);
     handlers_ = std::move(handlers);
+    using namespace std::chrono_literals;
+    changeTimer_ = DispatcherQueue().CreateTimer();
+    changeTimer_.Interval(3s); // the library pages' pace
+    changeTimer_.Tick([this](auto&&, auto&&) { refreshIfChanged(); });
+    changeTimer_.Start();
     MetricCombo().Items().Append(box_value(tr(L"Home_ByPlays")));
     MetricCombo().Items().Append(box_value(tr(L"Home_ByTime")));
     MetricCombo().SelectedIndex(0);
     showTiles();
+}
+
+void HomeView::setActive(bool active) {
+    if (!changeTimer_) return;
+    if (active)
+        changeTimer_.Start();
+    else
+        changeTimer_.Stop();
+}
+
+// A scan adds albums and tracks while Home shows; the album order's revision tells when to reread.
+winrt::fire_and_forget HomeView::refreshIfChanged() {
+    if (!server_ || probing_ || Visibility() != Visibility::Visible) co_return;
+    probing_ = true;
+    auto weak = get_weak();
+    auto server = server_;
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    std::optional<uint64_t> revision;
+    try {
+        revision = server->browseAlbums(AlbumSort::Added, std::nullopt, 0, 1, std::nullopt).revision;
+    } catch (const std::exception&) {
+    }
+    queue.TryEnqueue([weak, revision] {
+        auto self = weak.get();
+        if (!self) return;
+        self->probing_ = false;
+        if (!revision || *revision == self->revision_) return;
+        self->revision_ = *revision;
+        self->refresh();
+    });
 }
 
 winrt::fire_and_forget HomeView::refresh() {
@@ -251,6 +287,7 @@ winrt::fire_and_forget HomeView::refresh() {
     queue.TryEnqueue([weak, generation, data] {
         auto self = weak.get();
         if (!self || generation != self->generation_) return;
+        self->revision_ = data->added.revision;
         self->TodayTime().Text(listeningTime(data->today.listenedMs));
         self->TodayPlays().Text(plays(data->today.plays));
         self->WeekTime().Text(listeningTime(data->week.listenedMs));

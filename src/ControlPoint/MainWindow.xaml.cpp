@@ -370,6 +370,7 @@ void MainWindow::hideToTray() {
     AppWindow().Hide();
     uiTimer_.Stop();
     get_self<LibraryView>(Library())->setActive(false);
+    get_self<HomeView>(Home())->setActive(false);
     if (server_ && server_->snapshot().playback.state == PlaybackState::Playing) {
         Command pause;
         pause.kind = CommandKind::Pause;
@@ -397,6 +398,7 @@ void MainWindow::showFromTray() {
     if (!wasInTray) return;
     uiTimer_.Start();
     get_self<LibraryView>(Library())->setActive(true);
+    get_self<HomeView>(Home())->setActive(true);
     refreshFromServer();
 }
 

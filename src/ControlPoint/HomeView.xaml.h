@@ -26,8 +26,10 @@ struct HomeView : HomeViewT<HomeView> {
         std::function<void(camel::server::Command)> submit;
     };
     void attach(std::shared_ptr<camel::server::IServer> server, Handlers handlers);
-    // Rereads totals and rows; called whenever Home is shown.
+    // Rereads totals and rows; called whenever Home is shown, and again while it shows when the library changes.
     winrt::fire_and_forget refresh();
+    // Stops watching the library while the window sits in the notification area.
+    void setActive(bool active);
 
     void OnAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
@@ -59,10 +61,14 @@ private:
     camel::server::PlayMetric metric();
     // The rows of a period list's "View all", paged like the library lists.
     ui::BrowseFetch periodFetch(std::wstring_view list);
+    winrt::fire_and_forget refreshIfChanged();
 
     std::shared_ptr<camel::server::IServer> server_;
     Handlers handlers_;
     uint64_t generation_ = 0, periodGeneration_ = 0;
+    Microsoft::UI::Dispatching::DispatcherQueueTimer changeTimer_{nullptr};
+    uint64_t revision_ = 0; // the library revision Home last read
+    bool probing_ = false;
     std::map<std::wstring, std::vector<Windows::Foundation::IInspectable>> rows_; // by the row's x:Name
     std::unordered_map<void*, camel::server::CancellationToken> covers_;
     hstring period_ = L"month"; // the chosen card's tag
