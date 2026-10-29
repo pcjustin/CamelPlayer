@@ -46,7 +46,7 @@ const wchar_t* mmcssTaskName(MmcssTask t); // nullptr for Disabled
 struct PlaybackTiming {
     uint32_t predecodeSeconds = 10;
     uint32_t formatChangeSilenceMs = 0;
-    uint32_t releaseAfterPauseSeconds = 60; // 0 = never
+    uint32_t releaseAfterPauseSeconds = 1; // 0 = never
     bool operator==(const PlaybackTiming&) const = default;
 };
 

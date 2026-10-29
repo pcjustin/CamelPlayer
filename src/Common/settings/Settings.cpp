@@ -269,7 +269,7 @@ Settings fromJson(const std::string& text) {
     auto readTiming = [&](const json& o, PlaybackTiming& t) {
         t.predecodeSeconds = uint32_t(integer(o, "predecodeSeconds", 10, 1, 60));
         t.formatChangeSilenceMs = uint32_t(integer(o, "formatChangeSilenceMs", 0, 0, 2000));
-        t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", 60, 0, 3600));
+        t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", 1, 0, 3600));
     };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
     // A choice survives only when that decoder is integrated for that format.

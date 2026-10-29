@@ -384,7 +384,7 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
 TEST(SettingsBoundary, OutputParametersDefaultAndRejectInvalidValues) {
     const Settings defaults;
     for (const PlaybackTiming* t : {&defaults.wasapi.timing, &defaults.asio.timing, &defaults.ks.timing})
-        EXPECT_EQ(*t, (PlaybackTiming{10, 0, 60}));
+        EXPECT_EQ(*t, (PlaybackTiming{10, 0, 1}));
     EXPECT_EQ(defaults.wasapi.fixedRate, 0u);
     EXPECT_EQ(defaults.wasapi.pollBufferMs, 200.0);
     EXPECT_EQ(defaults.wasapi.mmcssTask, MmcssTask::ProAudio);
@@ -399,7 +399,7 @@ TEST(SettingsBoundary, OutputParametersDefaultAndRejectInvalidValues) {
     EXPECT_EQ(parsed.wasapi.pollBufferMs, 200.0);
     EXPECT_EQ(parsed.wasapi.mmcssTask, MmcssTask::ProAudio);
     EXPECT_EQ(parsed.wasapi.mmcssPriority, MmcssPriority::High);
-    EXPECT_EQ(parsed.wasapi.timing, (PlaybackTiming{10, 0, 60}));
+    EXPECT_EQ(parsed.wasapi.timing, (PlaybackTiming{10, 0, 1}));
     EXPECT_EQ(parsed.asio.fixedRate, 0u);
     EXPECT_EQ(parsed.asio.timing.predecodeSeconds, 10u);
     EXPECT_EQ(parsed.ks.fixedRate, 768000u);
