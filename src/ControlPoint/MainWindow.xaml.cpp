@@ -1483,18 +1483,7 @@ void MainWindow::showSearchResults(hstring const& query) {
     std::function<void()> leave;
     if (!fromLibrary) {
         // Back returns to the page the search started from, such as Settings.
-        leave = [this, tag = shownTag_] {
-            if (tag == L"settings") {
-                Nav().SelectedItem(Nav().SettingsItem());
-                return;
-            }
-            for (const auto& entry : Nav().MenuItems())
-                if (const auto item = entry.try_as<NavigationViewItem>();
-                    item && unbox_value_or<hstring>(item.Tag(), L"") == tag) {
-                    Nav().SelectedItem(item);
-                    return;
-                }
-        };
+        leave = [this, tag = shownTag_] { returnToPage(tag); };
     }
     Nav().SelectedItem(nullptr);
     SettingsPanel().Visibility(Visibility::Collapsed);
@@ -1502,6 +1491,28 @@ void MainWindow::showSearchResults(hstring const& query) {
     Home().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
+}
+
+void MainWindow::returnToPage(hstring const& tag) {
+    if (tag == L"settings")
+        Nav().SelectedItem(Nav().SettingsItem());
+    else
+        selectPage(tag);
+}
+
+// The playback bar opens the playing album or artist over the current page: Back returns to the library view it
+// covered, or through the returned `leave` to any other page.
+std::function<void()> MainWindow::openLibraryOverPage() {
+    if (Library().Visibility() == Visibility::Visible) return nullptr;
+    const hstring tag = shownTag_;
+    Nav().SelectedItem(nullptr);
+    SettingsPanel().Visibility(Visibility::Collapsed);
+    PlaceholderPanel().Visibility(Visibility::Collapsed);
+    Home().Visibility(Visibility::Collapsed);
+    Playlists().Visibility(Visibility::Collapsed);
+    get_self<PlaylistView>(Playlists())->hide();
+    Library().Visibility(Visibility::Visible);
+    return [this, tag] { returnToPage(tag); };
 }
 
 void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {
@@ -2318,14 +2329,15 @@ void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsComplet
 
 void MainWindow::OnCoverClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (!server_ || server_->snapshot().playback.pathUtf8.empty()) return;
-    selectPage(L"albums");
     const auto snapshot = server_->snapshot();
     const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                       [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (current != snapshot.queue.entries.end() && current->albumId > 0) {
-        Library().Visibility(Visibility::Visible);
-        get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album));
+        auto leave = openLibraryOverPage();
+        const bool keepHistory = !leave;
+        get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album), std::move(leave), keepHistory);
     } else {
+        selectPage(L"albums");
         showPage(L"albums");
     }
 }
@@ -2336,9 +2348,9 @@ void MainWindow::OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Rout
     const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                       [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (current == snapshot.queue.entries.end() || current->albumId <= 0) return;
-    selectPage(L"albums");
-    Library().Visibility(Visibility::Visible);
-    get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album));
+    auto leave = openLibraryOverPage();
+    const bool keepHistory = !leave;
+    get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album), std::move(leave), keepHistory);
 }
 
 void MainWindow::OnArtistLinkClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -2347,9 +2359,9 @@ void MainWindow::OnArtistLinkClick(Windows::Foundation::IInspectable const&, Rou
     const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                       [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (current == snapshot.queue.entries.end() || current->artist.empty()) return;
-    selectPage(L"albums");
-    Library().Visibility(Visibility::Visible);
-    get_self<LibraryView>(Library())->showArtist(ui::utf8(current->artist));
+    auto leave = openLibraryOverPage();
+    const bool keepHistory = !leave;
+    get_self<LibraryView>(Library())->showArtist(ui::utf8(current->artist), std::move(leave), keepHistory);
 }
 
 void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,

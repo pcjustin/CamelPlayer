@@ -106,6 +106,8 @@ private:
     void selectPage(winrt::hstring const& tag);
     void viewAll(winrt::hstring const& list, winrt::hstring const& title, ui::BrowseFetch fetch);
     void showSearchResults(winrt::hstring const& query);
+    void returnToPage(winrt::hstring const& tag);
+    std::function<void()> openLibraryOverPage();
     void showSuggestions(const camel::server::LibrarySearchResults& results, winrt::hstring const& text);
     // What a suggestion opens; the list holds them in display order next to their items.
     struct Suggestion {
