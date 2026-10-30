@@ -16,6 +16,7 @@
 
 #include "ArtworkLoader.h"
 #include "BrowseItem.h"
+#include "CardSize.h"
 #include "UiText.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
@@ -30,7 +31,8 @@ using ui::tr;
 namespace winrt::CamelPlayer::implementation {
 namespace {
 
-constexpr double kCoverSlot = 176; // a 160 px tile, its gap and its container margin
+constexpr double kCoverExtra = 16;    // the gap after a tile and its container margin
+constexpr double kCoverRowExtra = 90; // a row's height beyond its covers
 constexpr int64_t kRowItems = 30;
 constexpr int64_t kListRows = 10;
 
@@ -540,15 +542,18 @@ void HomeView::OnChartSizeChanged(Windows::Foundation::IInspectable const&, Size
 void HomeView::fill(ItemsControl const& row) {
     const auto found = rows_.find(std::wstring(row.Name()));
     if (found == rows_.end()) return;
-    const auto fit = size_t(std::max(1.0, std::floor((row.ActualWidth() + 4) / kCoverSlot)));
+    const auto fit = ui::fitCovers(row.ActualWidth() + 4, kCoverExtra).columns;
     auto shown = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
     for (size_t i = 0; i < found->second.size() && i < fit; ++i) shown.Append(found->second[i]);
     row.ItemsSource(shown);
 }
 
+// The last tile's container margin may hang past the row, so it does not count against the width.
 void HomeView::OnRowSizeChanged(Windows::Foundation::IInspectable const& sender, SizeChangedEventArgs const& e) {
-    if (std::floor(e.PreviousSize().Width / kCoverSlot) != std::floor(e.NewSize().Width / kCoverSlot))
-        fill(sender.as<ItemsControl>());
+    const auto fit = ui::fitCovers(e.NewSize().Width + 4, kCoverExtra);
+    Resources().Lookup(box_value(L"HomeCards")).as<CamelPlayer::CardSize>().Cover(fit.cover);
+    for (const auto& row : {PlayedRow(), AddedRow(), TopAlbumsRow()}) row.Height(fit.cover + kCoverRowExtra);
+    if (ui::fitCovers(e.PreviousSize().Width + 4, kCoverExtra).columns != fit.columns) fill(sender.as<ItemsControl>());
 }
 
 void HomeView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {

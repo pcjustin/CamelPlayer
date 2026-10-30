@@ -63,6 +63,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+    void OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&,
                                  Microsoft::UI::Xaml::DataContextChangedEventArgs const&);

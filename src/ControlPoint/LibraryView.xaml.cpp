@@ -10,12 +10,14 @@
 #endif
 
 #include <algorithm>
+#include <limits>
 #include <random>
 #include <utility>
 
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
+#include "CardSize.h"
 #include "DialogPlacement.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
@@ -1127,6 +1129,26 @@ void LibraryView::showInitials(std::vector<LibraryInitial> initials) {
 
 void LibraryView::OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
     layoutInitials();
+}
+
+// The wall's columns are set explicitly so that a resize cannot keep the size of a tile that scrolled out of view.
+void LibraryView::OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {
+    constexpr double kTileExtra = 20;      // a tile's padding and its container margin
+    constexpr double kSearchRowExtra = 90; // the search album row's height beyond its covers
+    const auto fit = ui::fitCovers(e.NewSize().Width, kTileExtra);
+    Resources().Lookup(box_value(L"WallCards")).as<CamelPlayer::CardSize>().Cover(fit.cover);
+    SearchAlbums().Height(fit.cover + kSearchRowExtra);
+    const auto panel = AlbumGrid().ItemsPanelRoot().try_as<ItemsWrapGrid>();
+    if (!panel) return;
+    if (panel.Children().Size() == 0) {
+        panel.ItemWidth(std::numeric_limits<double>::quiet_NaN());
+        panel.ItemHeight(std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const auto tile = panel.Children().GetAt(0).as<FrameworkElement>();
+    tile.Measure({float(fit.cover + kTileExtra), std::numeric_limits<float>::infinity()});
+    panel.ItemWidth(fit.cover + kTileExtra);
+    panel.ItemHeight(tile.DesiredSize().Height);
 }
 
 // Every row keeps an easy target; when they do not all fit, evenly spaced letters stay and a dot between two of

@@ -11,6 +11,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:CamelPlayer">
     <UserControl.Resources>
+        <local:CardSize x:Key="WallCards" />
         <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
@@ -83,24 +84,26 @@
             </Grid>
         </DataTemplate>
         <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">
-            <StackPanel Width="176" Spacing="2" Padding="8" Background="Transparent" ContextRequested="OnCardContextRequested">
-                <Border Width="160" Height="160" CornerRadius="8" Margin="0,0,0,6"
-                        Background="{ThemeResource ControlFillColorSecondaryBrush}">
-                    <Grid>
-                        <FontIcon Glyph="&#xE93C;" FontSize="40" Opacity="0.4" />
-                        <Image Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
-                               DataContextChanged="OnArtworkContextChanged" />
-                        <Border Visibility="{x:Bind IsFavorite, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                Margin="6" Padding="5" CornerRadius="12" Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}">
-                            <FontIcon Glyph="&#xE00B;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        </Border>
-                    </Grid>
-                </Border>
-                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
-                           Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
-                           Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
+            <Grid Padding="8" Background="Transparent" ContextRequested="OnCardContextRequested">
+                <StackPanel Width="{Binding Cover, Source={StaticResource WallCards}}" Spacing="2">
+                    <Border Width="{Binding Cover, Source={StaticResource WallCards}}" Height="{Binding Cover, Source={StaticResource WallCards}}"
+                            CornerRadius="8" Margin="0,0,0,6" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                        <Grid>
+                            <FontIcon Glyph="&#xE93C;" FontSize="40" Opacity="0.4" />
+                            <Image Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
+                                   DataContextChanged="OnArtworkContextChanged" />
+                            <Border Visibility="{x:Bind IsFavorite, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                    Margin="6" Padding="5" CornerRadius="12" Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}">
+                                <FontIcon Glyph="&#xE00B;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                               Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </Grid>
         </DataTemplate>
     </UserControl.Resources>
 
@@ -189,7 +192,7 @@
         </Grid>
 
         <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
-                  IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" />
+                  IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" SizeChanged="OnAlbumGridSizeChanged" />
         <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed">
             <ListView.Header>

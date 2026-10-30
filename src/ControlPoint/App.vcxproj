@@ -93,6 +93,9 @@
     <ClInclude Include="BrowseItem.h">
       <DependentUpon>BrowseItem.idl</DependentUpon>
     </ClInclude>
+    <ClInclude Include="CardSize.h">
+      <DependentUpon>CardSize.idl</DependentUpon>
+    </ClInclude>
     <ClInclude Include="LibraryCollection.h" />
     <ClInclude Include="QueueItem.h">
       <DependentUpon>QueueItem.idl</DependentUpon>
@@ -141,6 +144,9 @@
     <ClCompile Include="BrowseItem.cpp">
       <DependentUpon>BrowseItem.idl</DependentUpon>
     </ClCompile>
+    <ClCompile Include="CardSize.cpp">
+      <DependentUpon>CardSize.idl</DependentUpon>
+    </ClCompile>
     <ClCompile Include="QueueItem.cpp">
       <DependentUpon>QueueItem.idl</DependentUpon>
     </ClCompile>
@@ -161,6 +167,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Midl>
     <Midl Include="BrowseItem.idl" />
+    <Midl Include="CardSize.idl" />
     <Midl Include="QueueItem.idl" />
     <Midl Include="LibraryView.idl">
       <SubType>Code</SubType>
