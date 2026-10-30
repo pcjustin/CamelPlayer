@@ -263,6 +263,11 @@
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         <!-- The jump bar beside a whole list: #, A–Z, kana and Han, the ones without names dimmed. -->
         <Grid x:Name="InitialsBar" Grid.Row="1" Grid.Column="1" Width="28" Margin="8,0,0,0" Visibility="Collapsed"
-              SizeChanged="OnInitialsBarSizeChanged" />
+              SizeChanged="OnInitialsBarSizeChanged">
+            <Grid.Resources>
+                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+            </Grid.Resources>
+        </Grid>
     </Grid>
 </UserControl>
