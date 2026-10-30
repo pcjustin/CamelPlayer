@@ -67,6 +67,14 @@ Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
     elseif ($_.LastWriteTime -gt $zipMaxDate) { $_.LastWriteTime = $zipMaxDate }
 }
 
+# The installation check (Updates.h) compares the program folder with this list: "<sha256>  <size>  <path>".
+$stageRoot = (Resolve-Path $stage).Path
+$manifest = Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName | ForEach-Object {
+    $rel = $_.FullName.Substring($stageRoot.Length + 1).Replace('\', '/')
+    "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Length)  $rel"
+}
+[System.IO.File]::WriteAllLines((Join-Path $stage 'install-manifest.txt'), [string[]]$manifest, (New-Object System.Text.UTF8Encoding $false))
+
 $zip = Join-Path $dist "$name-win-x64.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal

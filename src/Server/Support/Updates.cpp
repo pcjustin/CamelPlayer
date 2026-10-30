@@ -29,6 +29,7 @@ namespace files = camel::updatefiles;
 
 constexpr char kGitHubApi[] = "https://api.github.com";
 constexpr char kLatestPath[] = "/repos/pcjustin/CamelPlayer/releases/latest";
+constexpr char kTagPath[] = "/repos/pcjustin/CamelPlayer/releases/tags/v";
 
 class NotFound : public std::runtime_error {
 public:
@@ -155,14 +156,16 @@ std::optional<Version> parseVersion(std::string_view text) {
     return v;
 }
 
-std::optional<Release> newerRelease(const std::string& json, std::string_view current, bool allowHttp) {
+namespace {
+
+// The stable release `json` describes when `wanted` accepts its version and it has the zip and the sums.
+std::optional<Release> releaseFrom(const std::string& json, bool allowHttp, const std::function<bool(const Version&)>& wanted) {
     const auto j = nlohmann::json::parse(json);
     if (j.value("draft", false) || j.value("prerelease", false)) return std::nullopt;
-    const auto latest = parseVersion(j.value("tag_name", std::string()));
-    const auto installed = parseVersion(current);
-    if (!latest || !installed || *latest <= *installed) return std::nullopt;
+    const auto tagged = parseVersion(j.value("tag_name", std::string()));
+    if (!tagged || !wanted(*tagged)) return std::nullopt;
     Release release;
-    release.version = versionText(*latest);
+    release.version = versionText(*tagged);
     release.notes = j.value("body", std::string());
     release.zipName = "CamelPlayer-" + release.version + "-win-x64.zip";
     const std::string sumsName = "CamelPlayer-" + release.version + "-SHA256SUMS.txt";
@@ -179,6 +182,18 @@ std::optional<Release> newerRelease(const std::string& json, std::string_view cu
         }
     if (release.zipUrl.empty() || release.sumsUrl.empty()) return std::nullopt;
     return release;
+}
+
+} // namespace
+
+std::optional<Release> newerRelease(const std::string& json, std::string_view current, bool allowHttp) {
+    const auto installed = parseVersion(current);
+    return releaseFrom(json, allowHttp, [&](const Version& v) { return installed && *installed < v; });
+}
+
+std::optional<Release> exactRelease(const std::string& json, std::string_view version, bool allowHttp) {
+    const auto wanted = parseVersion(version);
+    return releaseFrom(json, allowHttp, [&](const Version& v) { return wanted && *wanted == v; });
 }
 
 std::optional<std::string> checksumFor(std::string_view sums, std::string_view fileName) {
@@ -324,6 +339,16 @@ std::optional<Release> check(std::string_view current) {
     return newerRelease(body, current, apiBase() != kGitHubApi);
 }
 
+std::optional<Release> releaseOf(std::string_view version) {
+    std::string body;
+    try {
+        body = httpGet(apiBase() + kTagPath + std::string(version));
+    } catch (const NotFound&) {
+        return std::nullopt;
+    }
+    return exactRelease(body, version, apiBase() != kGitHubApi);
+}
+
 std::filesystem::path tempDirectory() {
     wchar_t temp[MAX_PATH + 1] = {};
     if (!GetTempPathW(DWORD(std::size(temp)), temp)) throw std::runtime_error("no temp folder");
@@ -407,6 +432,104 @@ bool signalStarted(const std::filesystem::path& dataDirectory) {
     }
     std::ofstream(dataDirectory / files::kStarted) << 1;
     return true;
+}
+
+std::vector<ManifestEntry> parseManifest(std::string_view text) {
+    std::vector<ManifestEntry> entries;
+    std::istringstream lines{std::string(text)};
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.ends_with('\r')) line.pop_back();
+        if (line.empty()) continue;
+        const auto hashEnd = line.find("  ");
+        const auto sizeEnd = hashEnd == std::string::npos ? hashEnd : line.find("  ", hashEnd + 2);
+        if (sizeEnd == std::string::npos || hashEnd != 64) throw std::runtime_error("manifest: malformed line " + line);
+        ManifestEntry entry;
+        entry.sha256 = line.substr(0, 64);
+        if (entry.sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
+            throw std::runtime_error("manifest: malformed line " + line);
+        const char* first = line.data() + hashEnd + 2;
+        const char* last = line.data() + sizeEnd;
+        if (const auto [end, error] = std::from_chars(first, last, entry.size); error != std::errc() || end != last)
+            throw std::runtime_error("manifest: malformed line " + line);
+        try {
+            entry.path = entryPath(line.substr(sizeEnd + 2), true);
+        } catch (const std::runtime_error&) {
+            throw std::runtime_error("manifest: unsafe path " + line);
+        }
+        if (entry.path.empty()) throw std::runtime_error("manifest: malformed line " + line);
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
+std::optional<InstallCheck> checkInstallation(const std::filesystem::path& programDirectory, bool full) {
+    std::error_code error;
+    const auto manifest = programDirectory / files::kManifest;
+    if (!std::filesystem::exists(manifest, error)) return std::nullopt;
+    std::ifstream in(manifest, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot read " + toUtf8(manifest.filename().wstring()));
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    InstallCheck check;
+    for (const auto& entry : parseManifest(text)) {
+        ++check.files;
+        const auto file = programDirectory / entry.path;
+        const auto size = std::filesystem::file_size(file, error);
+        if (error) {
+            check.missing.push_back(entry.path);
+            continue;
+        }
+        bool same = size == entry.size;
+        if (same && full) {
+            try {
+                same = sha256File(file) == entry.sha256;
+            } catch (const std::runtime_error&) {
+                same = false;
+            }
+        }
+        if (!same) check.damaged.push_back(entry.path);
+    }
+    return check;
+}
+
+bool verified(const std::filesystem::path& dataDirectory, std::string_view version) {
+    std::ifstream in(dataDirectory / files::kVerified);
+    std::string stored;
+    return in >> stored && stored == version;
+}
+
+void markVerified(const std::filesystem::path& dataDirectory, std::string_view version) {
+    std::ofstream(dataDirectory / files::kVerified) << version << '\n';
+}
+
+std::string describeInstallation(const std::filesystem::path& programDirectory) {
+    std::optional<InstallCheck> check;
+    try {
+        check = checkInstallation(programDirectory, true);
+    } catch (const std::exception& e) {
+        return std::string("The installation could not be checked: ") + e.what() + "\n";
+    }
+    if (!check) return "No install-manifest.txt: a development build, or the list was removed.\n";
+    std::string text = std::to_string(check->files) + " files listed, " + std::to_string(check->missing.size()) + " missing, " +
+                       std::to_string(check->damaged.size()) + " damaged.\n";
+    for (const auto& path : check->missing) text += "missing: " + toUtf8(path.generic_wstring()) + "\n";
+    for (const auto& path : check->damaged) text += "damaged: " + toUtf8(path.generic_wstring()) + "\n";
+    return text;
+}
+
+void keepUnlistedFiles(const std::filesystem::path& programDirectory, const std::filesystem::path& files) {
+    namespace fs = std::filesystem;
+    for (auto it = fs::recursive_directory_iterator(programDirectory); it != fs::recursive_directory_iterator(); ++it) {
+        const auto relative = it->path().lexically_relative(programDirectory);
+        if (it->is_directory()) {
+            if (relative == files::kBackup) it.disable_recursion_pending();
+            continue;
+        }
+        const auto target = files / relative;
+        if (fs::exists(target)) continue;
+        fs::create_directories(target.parent_path());
+        fs::copy_file(it->path(), target);
+    }
 }
 
 std::string changelogSince(const std::string& changelog, std::string_view previous, std::string_view version) {

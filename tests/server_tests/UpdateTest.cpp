@@ -11,6 +11,7 @@
 #include <map>
 #include <thread>
 
+#include "Common/util/Text.h"
 #include "Server/Support/Updates.h"
 #include "Server/Support/ZipWriter.h"
 #include "TestUtil.h"
@@ -382,4 +383,96 @@ TEST(Update, DISABLED_ReachesTheRealGitHubApi) {
     const auto body = update::httpGet(update::latestReleaseUrl());
     EXPECT_NE(body.find("tag_name"), std::string::npos);
     EXPECT_FALSE(update::check("99.0.0"));
+}
+
+TEST(Update, ParsesInstallManifestsAndRefusesUnsafePaths) {
+    const std::string hash(64, 'a');
+    const auto entries = update::parseManifest(hash + "  12  CamelPlayer.exe\r\n\r\n" + hash + "  0  en-us/Microsoft UI.mui\n");
+    ASSERT_EQ(entries.size(), 2u);
+    EXPECT_EQ(entries[0].sha256, hash);
+    EXPECT_EQ(entries[0].size, 12u);
+    EXPECT_EQ(entries[0].path, fs::path(L"CamelPlayer.exe"));
+    EXPECT_EQ(entries[1].path, fs::path(L"en-us") / L"Microsoft UI.mui");
+    for (const auto& bad : std::vector<std::string>{hash + "  12  ../evil.dll", hash + "  12  C:/evil.dll", hash + "  x  a.dll",
+                                                    hash + "  12", "abc  12  a.dll", std::string(64, 'G') + "  12  a.dll"})
+        EXPECT_THROW(update::parseManifest(bad), std::runtime_error) << bad;
+}
+
+TEST(Update, ChecksAnInstallationAgainstItsManifest) {
+    const auto app = testutil::tempDir() / L"install-check";
+    fs::remove_all(app);
+    writeText(app / L"CamelPlayer.exe", "player");
+    writeText(app / L"en-us" / L"a.mui", "mui");
+    writeText(app / L"gone.dll", "gone");
+    EXPECT_FALSE(update::checkInstallation(app, true)) << "a development build has no manifest";
+    std::string manifest;
+    for (const auto* name : {L"CamelPlayer.exe", L"en-us/a.mui", L"gone.dll"})
+        manifest +=
+            update::sha256File(app / name) + "  " + std::to_string(fs::file_size(app / name)) + "  " + camel::toUtf8(name) + "\n";
+    writeText(app / camel::updatefiles::kManifest, manifest);
+    writeText(app / L"extra.txt", "not listed");
+
+    auto check = update::checkInstallation(app, true);
+    ASSERT_TRUE(check);
+    EXPECT_TRUE(check->intact());
+    EXPECT_EQ(check->files, 3u);
+
+    fs::remove(app / L"gone.dll");
+    writeText(app / L"en-us" / L"a.mui", "MUI"); // same size, other bytes
+    check = update::checkInstallation(app, false);
+    ASSERT_TRUE(check);
+    EXPECT_EQ(check->missing, std::vector<fs::path>{L"gone.dll"});
+    EXPECT_TRUE(check->damaged.empty()) << "the quick check compares sizes only";
+    check = update::checkInstallation(app, true);
+    EXPECT_EQ(check->damaged, std::vector<fs::path>{fs::path(L"en-us") / L"a.mui"});
+    writeText(app / L"CamelPlayer.exe", "short");
+    EXPECT_EQ(update::checkInstallation(app, false)->damaged, std::vector<fs::path>{L"CamelPlayer.exe"});
+
+    const auto text = update::describeInstallation(app);
+    EXPECT_NE(text.find("3 files listed, 1 missing, 2 damaged"), std::string::npos) << text;
+    EXPECT_NE(text.find("missing: gone.dll"), std::string::npos) << text;
+    EXPECT_NE(text.find("damaged: en-us/a.mui"), std::string::npos) << text;
+
+    const auto data = app / L"data";
+    fs::create_directories(data);
+    EXPECT_FALSE(update::verified(data, "0.1.0"));
+    update::markVerified(data, "0.1.0");
+    EXPECT_TRUE(update::verified(data, "0.1.0"));
+    EXPECT_FALSE(update::verified(data, "0.1.1")) << "a new version is checked fully again";
+}
+
+TEST(Update, FindsTheRunningVersionsReleaseForARepair) {
+    FakeGitHub github;
+    const auto dir = testutil::tempDir() / L"update-repair";
+    fs::remove_all(dir);
+    Redirected redirected(github, dir / L"temp");
+    const auto tag = "/repos/pcjustin/CamelPlayer/releases/tags/v0.1.0";
+
+    EXPECT_FALSE(update::releaseOf("0.1.0")) << "no longer on GitHub (404)";
+    github.route(tag, releaseJson(github.base(), "v0.1.0", true));
+    EXPECT_FALSE(update::releaseOf("0.1.0")) << "not a pre-release";
+    github.route(tag, releaseJson(github.base(), "v0.1.1"));
+    EXPECT_FALSE(update::releaseOf("0.1.0")) << "only the same version";
+    github.route(tag, releaseJson(github.base(), "v0.1.0"));
+    const auto release = update::releaseOf("0.1.0");
+    ASSERT_TRUE(release);
+    EXPECT_EQ(release->version, "0.1.0");
+    EXPECT_EQ(release->zipName, "CamelPlayer-0.1.0-win-x64.zip");
+    EXPECT_FALSE(update::exactRelease(releaseJson("http://example.com", "v0.1.0"), "0.1.0"));
+}
+
+TEST(Update, KeepsUnlistedFilesWhenRepairing) {
+    const auto dir = testutil::tempDir() / L"update-keep";
+    fs::remove_all(dir);
+    const auto app = dir / L"app", files = dir / L"files";
+    writeText(app / L"CamelPlayer.exe", "damaged");
+    writeText(app / L"plugins" / L"mine.dll", "mine");
+    writeText(app / L"notes.txt", "notes");
+    writeText(app / camel::updatefiles::kBackup / L"old.dll", "backup");
+    writeText(files / L"CamelPlayer.exe", "release");
+    update::keepUnlistedFiles(app, files);
+    EXPECT_EQ(readText(files / L"CamelPlayer.exe"), "release");
+    EXPECT_EQ(readText(files / L"plugins" / L"mine.dll"), "mine");
+    EXPECT_EQ(readText(files / L"notes.txt"), "notes");
+    EXPECT_FALSE(fs::exists(files / camel::updatefiles::kBackup));
 }

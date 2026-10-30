@@ -246,7 +246,7 @@
   <data name="Settings_About.Text" xml:space="preserve"><value>About</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
   <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>Diagnostics</value></data>
-  <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>Collects logs, settings, the output devices and the formats they accept, and the newest crash report into one zip file to attach to a GitHub issue.</value></data>
+  <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>Collects logs, settings, the output devices and the formats they accept, the installation check and the newest crash report into one zip file to attach to a GitHub issue.</value></data>
   <data name="Settings_DiagnosticPaths.Content" xml:space="preserve"><value>Include file and folder paths</value></data>
   <data name="Settings_DiagnosticButton.Content" xml:space="preserve"><value>Create diagnostic bundle…</value></data>
   <data name="Diagnostic_Saved" xml:space="preserve"><value>Diagnostic bundle saved</value></data>
@@ -418,4 +418,32 @@
   <data name="Update_FailedText" xml:space="preserve"><value>The previous version was restored with your settings and library. Automatic checks no longer offer {0}; Check for updates in Settings › About still does.</value></data>
   <data name="Update_CancelledTitle" xml:space="preserve"><value>The update to {0} was cancelled</value></data>
   <data name="Update_CancelledText" xml:space="preserve"><value>CamelPlayer did not close in time or administrator rights were not granted. Nothing was changed.</value></data>
+  <data name="Settings_CheckInstall.Content" xml:space="preserve"><value>Check installation</value></data>
+  <data name="Install_Checking" xml:space="preserve"><value>Checking the program files…</value></data>
+  <data name="Install_Intact" xml:space="preserve"><value>All {0} program files are intact.</value></data>
+  <data name="Install_Problems" xml:space="preserve"><value>{0} program files are damaged or missing.</value></data>
+  <data name="Install_NoManifest" xml:space="preserve"><value>This build has no file list to check against.</value></data>
+  <data name="Install_CheckFailed" xml:space="preserve"><value>Could not check the program files: {0}</value></data>
+  <data name="Repair_Title" xml:space="preserve"><value>Some program files are damaged or missing</value></data>
+  <data name="Repair_Text" xml:space="preserve"><value>{0} files of CamelPlayer {1} do not match the release. Repair downloads this version again from GitHub and restarts CamelPlayer; your settings and library are kept.</value></data>
+  <data name="Repair_Install" xml:space="preserve"><value>Repair</value></data>
+  <data name="Repair_Details.Content" xml:space="preserve"><value>Details</value></data>
+  <data name="Repair_Skip.Content" xml:space="preserve"><value>Skip</value></data>
+  <data name="Repair_Finding" xml:space="preserve"><value>Looking for this version on GitHub…</value></data>
+  <data name="Repair_Downloading" xml:space="preserve"><value>Downloading the program files… {0}</value></data>
+  <data name="Repair_DownloadFailedTitle" xml:space="preserve"><value>The program files could not be downloaded</value></data>
+  <data name="Repair_GoneTitle" xml:space="preserve"><value>This version is no longer on GitHub</value></data>
+  <data name="Repair_GoneText" xml:space="preserve"><value>Download CamelPlayer again from the project's GitHub Releases page and extract the whole zip.</value></data>
+  <data name="Repair_UseUpdate" xml:space="preserve"><value>The version you have is no longer on GitHub. Updating replaces all program files, which repairs them too.</value></data>
+  <data name="Repair_ConfirmTitle" xml:space="preserve"><value>Restart to repair?</value></data>
+  <data name="Repair_ConfirmText" xml:space="preserve"><value>Playback stops and CamelPlayer restarts with repaired files. The queue and position are kept.</value></data>
+  <data name="Repair_ConfirmPrimary" xml:space="preserve"><value>Restart and repair</value></data>
+  <data name="Repair_DoneTitle" xml:space="preserve"><value>CamelPlayer was repaired</value></data>
+  <data name="Repair_DoneText" xml:space="preserve"><value>The program files were replaced with the release's own.</value></data>
+  <data name="Repair_FailedTitle" xml:space="preserve"><value>The repair failed and was undone</value></data>
+  <data name="Repair_FailedText" xml:space="preserve"><value>The previous files were put back with your settings and library.</value></data>
+  <data name="Repair_CancelledTitle" xml:space="preserve"><value>The repair was cancelled</value></data>
+  <data name="Repair_DetailsTitle" xml:space="preserve"><value>Damaged or missing program files</value></data>
+  <data name="Repair_Missing" xml:space="preserve"><value>Missing</value></data>
+  <data name="Repair_Damaged" xml:space="preserve"><value>Damaged</value></data>
 </root>

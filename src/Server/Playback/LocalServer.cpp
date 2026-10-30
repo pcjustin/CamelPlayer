@@ -275,6 +275,9 @@ public:
     void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths, const std::string& appVersion) const {
         DiagnosticInput input;
         input.dataDirectory = std::filesystem::absolute(settingsFile_).parent_path();
+        std::wstring executable(32768, wchar_t{});
+        executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
+        input.programDirectory = std::filesystem::path(executable).parent_path();
         input.includePaths = includePaths;
         input.appVersion = appVersion;
         input.snapshot = snapshot();

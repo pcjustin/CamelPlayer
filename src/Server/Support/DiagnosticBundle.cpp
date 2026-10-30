@@ -16,6 +16,7 @@
 
 #include "Common/DecoderKind.h"
 #include "Common/util/Text.h"
+#include "Server/Support/Updates.h"
 #include "Server/Support/ZipWriter.h"
 
 namespace camel::server {
@@ -187,6 +188,7 @@ void writeDiagnosticBundle(const std::filesystem::path& zip, const DiagnosticInp
         writer.add("library-folders.txt", rootsText(input));
         writer.add("playback.txt", playbackText(input));
         writer.add("devices.txt", devicesText(input));
+        writer.add("installation.txt", update::describeInstallation(input.programDirectory));
         std::error_code ec;
         std::vector<std::filesystem::path> logs, dumps;
         for (const auto& entry : std::filesystem::directory_iterator(input.dataDirectory / L"logs", ec))

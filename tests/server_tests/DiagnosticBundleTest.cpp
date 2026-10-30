@@ -132,12 +132,13 @@ TEST(DiagnosticBundle, LeavesPathsOutUnlessIncluded) {
 
     writeDiagnosticBundle(file, input);
     auto entries = readZip(file);
-    EXPECT_EQ(entries.size(), 8u);
+    EXPECT_EQ(entries.size(), 9u);
     for (const auto& [name, text] : entries) EXPECT_EQ(text.find("secret"), std::string::npos) << name;
     EXPECT_EQ(entries.at("logs/CamelPlayer-20261027.log"), "a\nengine: <path> via dr_flac\n");
     EXPECT_EQ(entries.at("crashdumps/crash-20261026-061058.dmp"), "new");
     EXPECT_FALSE(entries.contains("crashdumps/crash-20261020-010101.dmp"));
     EXPECT_NE(entries.at("system.txt").find("CamelPlayer 0.1.0"), std::string::npos);
+    EXPECT_NE(entries.at("installation.txt").find("No install-manifest.txt"), std::string::npos);
     EXPECT_NE(entries.at("devices.txt").find("Speakers (DAVE)"), std::string::npos);
     EXPECT_NE(entries.at("devices.txt").find("probed"), std::string::npos);
     EXPECT_NE(entries.at("library-folders.txt").find("Root 1: online, network"), std::string::npos);

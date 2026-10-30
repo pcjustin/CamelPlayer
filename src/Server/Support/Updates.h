@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "Server/Artwork/ArtworkProvider.h"
 
@@ -54,6 +55,36 @@ void download(const std::string& url, const std::filesystem::path& file, const P
 
 // The newer release, or nothing when the repository has none (404) or only older ones. Throws on failures.
 std::optional<Release> check(std::string_view current);
+
+// The /releases/tags/v<version> response when it is that stable release with both assets; same rules as newerRelease.
+std::optional<Release> exactRelease(const std::string& json, std::string_view version, bool allowHttp = false);
+// The published release of `version`, to repair an installation with; nothing when GitHub no longer has it (404).
+std::optional<Release> releaseOf(std::string_view version);
+
+// The installation check (docs/Plan.md §8.6): the program folder against the package's install-manifest.txt.
+struct ManifestEntry {
+    std::string sha256;
+    uint64_t size = 0;
+    std::filesystem::path path; // relative to the program folder
+};
+// Throws std::runtime_error on a malformed line or a path outside the folder.
+std::vector<ManifestEntry> parseManifest(std::string_view text);
+
+struct InstallCheck {
+    size_t files = 0; // listed in the manifest
+    std::vector<std::filesystem::path> missing, damaged;
+    bool intact() const { return missing.empty() && damaged.empty(); }
+};
+// Nothing when the folder has no manifest (a development build). `full` compares SHA-256 hashes, otherwise sizes only.
+// Throws std::runtime_error when the manifest cannot be read.
+std::optional<InstallCheck> checkInstallation(const std::filesystem::path& programDirectory, bool full);
+// Whether `version`'s files passed a full check before; set after one does, so later starts compare sizes only.
+bool verified(const std::filesystem::path& dataDirectory, std::string_view version);
+void markVerified(const std::filesystem::path& dataDirectory, std::string_view version);
+// The check as text for the diagnostic bundle.
+std::string describeInstallation(const std::filesystem::path& programDirectory);
+// Copies the program folder's files that `files` lacks into it, so installing `files` keeps them.
+void keepUnlistedFiles(const std::filesystem::path& programDirectory, const std::filesystem::path& files);
 
 // %TEMP%\CamelPlayer-update: downloads, the extracted files, the data snapshot and the running updater.
 std::filesystem::path tempDirectory();

@@ -25,16 +25,28 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Automatic updates (docs/Plan.md §8.6): offered here, downloaded and installed only after Update. -->
-        <InfoBar x:Name="UpdateBar" Severity="Informational" IsOpen="False" IsClosable="True">
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
-                <Button x:Name="UpdateInstallButton" Style="{StaticResource AccentButtonStyle}" Click="OnUpdateInstallClick" />
-                <Button x:Name="UpdateNotesButton" x:Uid="Update_Notes" Click="OnUpdateNotesClick" />
-                <Button x:Name="UpdateSkipButton" x:Uid="Update_Skip" Click="OnUpdateSkipClick" />
-                <ProgressBar x:Name="UpdateProgress" Width="240" VerticalAlignment="Center" Visibility="Collapsed" />
-                <Button x:Name="UpdateCancelButton" x:Uid="Update_Cancel" Click="OnUpdateCancelClick" Visibility="Collapsed" />
-            </StackPanel>
-        </InfoBar>
+        <StackPanel>
+            <!-- The installation check (docs/Plan.md §8.6): damaged or missing program files, repaired only after Repair. -->
+            <InfoBar x:Name="RepairBar" Severity="Warning" IsOpen="False" IsClosable="False">
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+                    <Button x:Name="RepairButton" Style="{StaticResource AccentButtonStyle}" Click="OnRepairClick" />
+                    <Button x:Name="RepairDetailsButton" x:Uid="Repair_Details" Click="OnRepairDetailsClick" />
+                    <Button x:Name="RepairSkipButton" x:Uid="Repair_Skip" Click="OnRepairSkipClick" />
+                    <ProgressBar x:Name="RepairProgress" Width="240" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <Button x:Name="RepairCancelButton" x:Uid="Update_Cancel" Click="OnRepairCancelClick" Visibility="Collapsed" />
+                </StackPanel>
+            </InfoBar>
+            <!-- Automatic updates (docs/Plan.md §8.6): offered here, downloaded and installed only after Update. -->
+            <InfoBar x:Name="UpdateBar" Severity="Informational" IsOpen="False" IsClosable="True">
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+                    <Button x:Name="UpdateInstallButton" Style="{StaticResource AccentButtonStyle}" Click="OnUpdateInstallClick" />
+                    <Button x:Name="UpdateNotesButton" x:Uid="Update_Notes" Click="OnUpdateNotesClick" />
+                    <Button x:Name="UpdateSkipButton" x:Uid="Update_Skip" Click="OnUpdateSkipClick" />
+                    <ProgressBar x:Name="UpdateProgress" Width="240" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <Button x:Name="UpdateCancelButton" x:Uid="Update_Cancel" Click="OnUpdateCancelClick" Visibility="Collapsed" />
+                </StackPanel>
+            </InfoBar>
+        </StackPanel>
 
         <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Left" OpenPaneLength="200" IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="True" SelectionChanged="OnNavSelectionChanged">
@@ -422,6 +434,11 @@
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <Button x:Name="CheckUpdatesButton" x:Uid="Settings_CheckUpdates" Click="OnCheckUpdatesClick" />
                                     <TextBlock x:Name="UpdateStatusText" VerticalAlignment="Center" TextWrapping="Wrap"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Button x:Name="CheckInstallButton" x:Uid="Settings_CheckInstall" Click="OnCheckInstallClick" />
+                                    <TextBlock x:Name="InstallStatusText" VerticalAlignment="Center" TextWrapping="Wrap"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
                                 <TextBlock x:Uid="Settings_Diagnostics" Style="{StaticResource GroupHeaderStyle}" />

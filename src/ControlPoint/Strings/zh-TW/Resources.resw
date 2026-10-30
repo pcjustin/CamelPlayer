@@ -246,7 +246,7 @@
   <data name="Settings_About.Text" xml:space="preserve"><value>關於</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
   <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>診斷資料</value></data>
-  <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>將紀錄檔、設定、輸出裝置與其支援的格式，以及最近一次的當機報告收集成一個 zip 檔，可附加在 GitHub issue 中。</value></data>
+  <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>將紀錄檔、設定、輸出裝置與其支援的格式、安裝檢查結果，以及最近一次的當機報告收集成一個 zip 檔，可附加在 GitHub issue 中。</value></data>
   <data name="Settings_DiagnosticPaths.Content" xml:space="preserve"><value>包含檔案與資料夾路徑</value></data>
   <data name="Settings_DiagnosticButton.Content" xml:space="preserve"><value>建立診斷資料…</value></data>
   <data name="Diagnostic_Saved" xml:space="preserve"><value>診斷資料已儲存</value></data>
@@ -418,4 +418,32 @@
   <data name="Update_FailedText" xml:space="preserve"><value>已還原先前的版本，設定和媒體庫都保留。自動檢查不會再提示 {0}；設定 › 關於 中的「檢查更新」仍會提示。</value></data>
   <data name="Update_CancelledTitle" xml:space="preserve"><value>更新到 {0} 已取消</value></data>
   <data name="Update_CancelledText" xml:space="preserve"><value>CamelPlayer 沒有及時關閉，或未取得系統管理員權限。沒有變更任何檔案。</value></data>
+  <data name="Settings_CheckInstall.Content" xml:space="preserve"><value>檢查安裝</value></data>
+  <data name="Install_Checking" xml:space="preserve"><value>正在檢查程式檔案…</value></data>
+  <data name="Install_Intact" xml:space="preserve"><value>全部 {0} 個程式檔案都正常。</value></data>
+  <data name="Install_Problems" xml:space="preserve"><value>有 {0} 個程式檔案損毀或遺失。</value></data>
+  <data name="Install_NoManifest" xml:space="preserve"><value>這個版本沒有可供比對的檔案清單。</value></data>
+  <data name="Install_CheckFailed" xml:space="preserve"><value>無法檢查程式檔案：{0}</value></data>
+  <data name="Repair_Title" xml:space="preserve"><value>部分程式檔案損毀或遺失</value></data>
+  <data name="Repair_Text" xml:space="preserve"><value>CamelPlayer {1} 有 {0} 個檔案與正式版不符。修復會從 GitHub 重新下載這個版本並重新啟動 CamelPlayer，設定和媒體庫都會保留。</value></data>
+  <data name="Repair_Install" xml:space="preserve"><value>修復</value></data>
+  <data name="Repair_Details.Content" xml:space="preserve"><value>詳細資料</value></data>
+  <data name="Repair_Skip.Content" xml:space="preserve"><value>略過</value></data>
+  <data name="Repair_Finding" xml:space="preserve"><value>正在 GitHub 上尋找這個版本…</value></data>
+  <data name="Repair_Downloading" xml:space="preserve"><value>正在下載程式檔案… {0}</value></data>
+  <data name="Repair_DownloadFailedTitle" xml:space="preserve"><value>無法下載程式檔案</value></data>
+  <data name="Repair_GoneTitle" xml:space="preserve"><value>GitHub 上已經沒有這個版本</value></data>
+  <data name="Repair_GoneText" xml:space="preserve"><value>請從專案的 GitHub Releases 頁面重新下載 CamelPlayer，並把整個 zip 解壓縮。</value></data>
+  <data name="Repair_UseUpdate" xml:space="preserve"><value>GitHub 上已經沒有你目前的版本。更新會替換所有程式檔案，也能一併修復。</value></data>
+  <data name="Repair_ConfirmTitle" xml:space="preserve"><value>要重新啟動以修復嗎？</value></data>
+  <data name="Repair_ConfirmText" xml:space="preserve"><value>播放會停止，CamelPlayer 會以修復後的檔案重新啟動。佇列和播放位置都會保留。</value></data>
+  <data name="Repair_ConfirmPrimary" xml:space="preserve"><value>重新啟動並修復</value></data>
+  <data name="Repair_DoneTitle" xml:space="preserve"><value>CamelPlayer 已修復</value></data>
+  <data name="Repair_DoneText" xml:space="preserve"><value>程式檔案已換成正式版的原始檔案。</value></data>
+  <data name="Repair_FailedTitle" xml:space="preserve"><value>修復失敗，已還原</value></data>
+  <data name="Repair_FailedText" xml:space="preserve"><value>已放回原本的檔案，設定和媒體庫都保留。</value></data>
+  <data name="Repair_CancelledTitle" xml:space="preserve"><value>修復已取消</value></data>
+  <data name="Repair_DetailsTitle" xml:space="preserve"><value>損毀或遺失的程式檔案</value></data>
+  <data name="Repair_Missing" xml:space="preserve"><value>遺失</value></data>
+  <data name="Repair_Damaged" xml:space="preserve"><value>損毀</value></data>
 </root>

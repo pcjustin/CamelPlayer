@@ -18,7 +18,8 @@
 namespace camel::server {
 
 struct DiagnosticInput {
-    std::filesystem::path dataDirectory; // holds settings.json, logs\ and crashdumps\.
+    std::filesystem::path dataDirectory;    // holds settings.json, logs\ and crashdumps\.
+    std::filesystem::path programDirectory; // checked against its install-manifest.txt
     bool includePaths = false;
     std::string appVersion;
     Snapshot snapshot;

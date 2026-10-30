@@ -87,6 +87,13 @@ struct MainWindow : MainWindowT<MainWindow> {
                                               Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnUpdateSkipClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnUpdateCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // The installation check (docs/Plan.md §8.6).
+    void OnCheckInstallClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnRepairClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnRepairDetailsClick(Windows::Foundation::IInspectable const&,
+                                                Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRepairSkipClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRepairCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
     void populateSettings(); // fills every control from settings_
@@ -213,13 +220,19 @@ private:
     // Automatic updates (docs/Plan.md §8.6): the offered release, its verified files once downloaded, and the download.
     winrt::fire_and_forget checkForUpdates(bool manual);
     void showUpdateOffer();
-    winrt::fire_and_forget restartToUpdate();
+    winrt::fire_and_forget restartToUpdate(camel::server::update::Release release, std::filesystem::path files);
     // What the updater left from the previous run: the changelog after an update, or the undone or cancelled update.
     winrt::fire_and_forget showUpdateResult();
     std::optional<camel::server::update::Release> release_;
     std::filesystem::path updateFiles_;
     camel::server::CancellationToken updateToken_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer updateTimer_{nullptr};
+    // The installation check: at each start (a full one for a version not verified yet) and from Settings › About.
+    winrt::fire_and_forget checkInstallation(bool manual);
+    void showRepairOffer();
+    void showRepairResult(wchar_t const* title, wchar_t const* text, Microsoft::UI::Xaml::Controls::InfoBarSeverity severity);
+    std::optional<camel::server::update::InstallCheck> installCheck_; // the last check that found problems
+    camel::server::CancellationToken repairToken_;
 };
 
 } // namespace winrt::CamelPlayer::implementation

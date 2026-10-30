@@ -284,6 +284,7 @@ void MainWindow::InitializeComponent() {
             camel::log::info("measure: main window loaded %.0f ms after process start", camel::measure::sinceProcessStart());
         showFirstRunGuideIfDue(); // a dialog needs a XamlRoot
         showUpdateResult();
+        checkInstallation(false);
     });
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
     Command refresh;
@@ -2471,7 +2472,7 @@ winrt::fire_and_forget MainWindow::checkForUpdates(bool manual) {
 }
 
 void MainWindow::showUpdateOffer() {
-    if (!release_) return;
+    if (!release_ || (RepairBar().IsOpen() && RepairBar().Severity() != InfoBarSeverity::Success)) return;
     const auto& release = *release_;
     const std::wstring version = toWide(release.version);
     auto bar = UpdateBar();
@@ -2492,7 +2493,7 @@ winrt::fire_and_forget MainWindow::OnUpdateInstallClick(Windows::Foundation::IIn
     auto strong = get_strong();
     if (!release_) co_return;
     if (!updateFiles_.empty()) {
-        restartToUpdate();
+        restartToUpdate(*release_, updateFiles_);
         co_return;
     }
     const auto release = *release_;
@@ -2534,7 +2535,7 @@ winrt::fire_and_forget MainWindow::OnUpdateInstallClick(Windows::Foundation::IIn
         failure = e.what();
     }
     const bool cancelled = token.cancelled();
-    queue.TryEnqueue([weak, files, failure, cancelled] {
+    queue.TryEnqueue([weak, release, files, failure, cancelled] {
         auto self = weak.get();
         if (!self) return;
         if (!failure.empty()) {
@@ -2549,7 +2550,7 @@ winrt::fire_and_forget MainWindow::OnUpdateInstallClick(Windows::Foundation::IIn
         }
         self->updateFiles_ = files;
         self->showUpdateOffer();
-        self->restartToUpdate();
+        self->restartToUpdate(release, files);
     });
 }
 
@@ -2574,33 +2575,216 @@ void MainWindow::OnUpdateSkipClick(Windows::Foundation::IInspectable const&, Rou
     UpdateBar().IsOpen(false);
 }
 
-// Hands the verified files to CamelUpdater.exe and exits the normal way, so the queue and position are saved.
-winrt::fire_and_forget MainWindow::restartToUpdate() {
+// Hands the verified files to CamelUpdater.exe and exits the normal way, so the queue and position are saved. The
+// running version's own files repair the installation.
+winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, std::filesystem::path files) {
     auto strong = get_strong();
-    if (!release_ || updateFiles_.empty()) co_return;
-    const auto release = *release_;
-    const auto files = updateFiles_;
+    const bool repair = release.version == CAMEL_VERSION_STRING;
+    auto bar = repair ? RepairBar() : UpdateBar();
     if (server_ && server_->snapshot().playback.state == PlaybackState::Playing && !inTray_) {
         ContentDialog dialog;
         dialog.XamlRoot(ContentLayout().XamlRoot());
-        dialog.Title(box_value(tr(L"Update_ConfirmTitle")));
-        dialog.Content(box_value(ui::format(L"Update_ConfirmText", {toWide(release.version)})));
-        dialog.PrimaryButtonText(tr(L"Update_ConfirmPrimary"));
+        dialog.Title(box_value(tr(repair ? L"Repair_ConfirmTitle" : L"Update_ConfirmTitle")));
+        dialog.Content(
+            box_value(repair ? tr(L"Repair_ConfirmText") : ui::format(L"Update_ConfirmText", {toWide(release.version)})));
+        dialog.PrimaryButtonText(tr(repair ? L"Repair_ConfirmPrimary" : L"Update_ConfirmPrimary"));
         dialog.CloseButtonText(tr(L"Update_ConfirmCancel"));
         dialog.DefaultButton(ContentDialogButton::Primary);
-        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) {
+            if (repair) showRepairOffer();
+            co_return;
+        }
     }
     try {
         update::startUpdater(programDirectory(), files, camel::dataDirectory(), release.version, CAMEL_VERSION_STRING);
     } catch (const std::exception& e) {
         camel::log::warn("update: %s", e.what());
-        UpdateBar().Severity(InfoBarSeverity::Error);
-        UpdateBar().Title(ui::format(L"Update_StartFailed", {std::wstring(ui::utf8(e.what()))}));
+        if (repair) showRepairOffer();
+        bar.Severity(InfoBarSeverity::Error);
+        bar.Title(ui::format(L"Update_StartFailed", {std::wstring(ui::utf8(e.what()))}));
         co_return;
     }
-    camel::log::info("update: CamelUpdater takes over to install %s", release.version.c_str());
+    camel::log::info("update: CamelUpdater takes over to %s %s", repair ? "repair" : "install", release.version.c_str());
     exiting_ = true;
     Close();
+}
+
+void MainWindow::OnCheckInstallClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    checkInstallation(true);
+}
+
+// A version whose files have not passed a full check yet gets one, later starts compare sizes; the About button always
+// checks fully. A development build has no install-manifest.txt and nothing to check.
+winrt::fire_and_forget MainWindow::checkInstallation(bool manual) {
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    if (manual) {
+        CheckInstallButton().IsEnabled(false);
+        InstallStatusText().Text(tr(L"Install_Checking"));
+    }
+    co_await resume_background();
+    const auto data = camel::dataDirectory();
+    const bool full = manual || !update::verified(data, CAMEL_VERSION_STRING);
+    std::optional<update::InstallCheck> check;
+    std::string failure;
+    try {
+        check = update::checkInstallation(programDirectory(), full);
+        if (check && check->intact() && full) update::markVerified(data, CAMEL_VERSION_STRING);
+    } catch (const std::exception& e) {
+        failure = e.what();
+        camel::log::warn("installation check: %s", e.what());
+    }
+    if (check && !check->intact())
+        camel::log::warn("installation check: %zu of %zu files missing, %zu damaged", check->missing.size(), check->files,
+                         check->damaged.size());
+    queue.TryEnqueue([weak, manual, check, failure] {
+        auto self = weak.get();
+        if (!self) return;
+        if (manual) {
+            self->CheckInstallButton().IsEnabled(true);
+            self->InstallStatusText().Text(
+                !failure.empty() ? ui::format(L"Install_CheckFailed", {std::wstring(ui::utf8(failure))})
+                : !check         ? tr(L"Install_NoManifest")
+                : check->intact()
+                    ? ui::format(L"Install_Intact", {std::to_wstring(check->files)})
+                    : ui::format(L"Install_Problems", {std::to_wstring(check->missing.size() + check->damaged.size())}));
+        }
+        if (!check || check->intact()) return;
+        self->installCheck_ = check;
+        // A repair result still shown keeps its message; its button tries again.
+        if (!manual && self->RepairBar().IsOpen()) return;
+        self->showRepairOffer();
+    });
+}
+
+void MainWindow::showRepairOffer() {
+    if (!installCheck_) return;
+    auto bar = RepairBar();
+    bar.Severity(InfoBarSeverity::Warning);
+    bar.Title(tr(L"Repair_Title"));
+    bar.Message(ui::format(L"Repair_Text", {std::to_wstring(installCheck_->missing.size() + installCheck_->damaged.size()),
+                                            L"" CAMEL_VERSION_STRING}));
+    RepairButton().Content(box_value(tr(L"Repair_Install")));
+    RepairButton().Visibility(Visibility::Visible);
+    RepairDetailsButton().Visibility(Visibility::Visible);
+    RepairSkipButton().Visibility(Visibility::Visible);
+    RepairProgress().Visibility(Visibility::Collapsed);
+    RepairCancelButton().Visibility(Visibility::Collapsed);
+    bar.IsClosable(false);
+    bar.IsOpen(true);
+    UpdateBar().IsOpen(false);
+}
+
+// What the updater reported after a repair; Repair stays for one that did not complete.
+void MainWindow::showRepairResult(wchar_t const* title, wchar_t const* text, InfoBarSeverity severity) {
+    auto bar = RepairBar();
+    bar.Severity(severity);
+    bar.Title(tr(title));
+    bar.Message(tr(text));
+    const bool done = severity == InfoBarSeverity::Success;
+    RepairButton().Content(box_value(tr(L"Update_Retry")));
+    RepairButton().Visibility(done ? Visibility::Collapsed : Visibility::Visible);
+    RepairDetailsButton().Visibility(Visibility::Collapsed);
+    RepairSkipButton().Visibility(done ? Visibility::Collapsed : Visibility::Visible);
+    RepairProgress().Visibility(Visibility::Collapsed);
+    RepairCancelButton().Visibility(Visibility::Collapsed);
+    bar.IsClosable(done);
+    bar.IsOpen(true);
+}
+
+// Downloads the running version again and installs it over the program folder like an update. When GitHub no longer
+// has it, a newer release is offered instead, which replaces the files as well.
+winrt::fire_and_forget MainWindow::OnRepairClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    repairToken_ = {};
+    const auto token = repairToken_;
+    RepairBar().Severity(InfoBarSeverity::Warning);
+    RepairBar().Title(tr(L"Repair_Finding"));
+    RepairBar().Message(L"");
+    RepairButton().Visibility(Visibility::Collapsed);
+    RepairDetailsButton().Visibility(Visibility::Collapsed);
+    RepairSkipButton().Visibility(Visibility::Collapsed);
+    RepairProgress().IsIndeterminate(true);
+    RepairProgress().Visibility(Visibility::Visible);
+    RepairCancelButton().Visibility(Visibility::Visible);
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await resume_background();
+    std::optional<update::Release> release, newer;
+    std::filesystem::path files;
+    std::string failure;
+    auto shownPercent = std::make_shared<int>(-1);
+    try {
+        release = update::releaseOf(CAMEL_VERSION_STRING);
+        if (!release) {
+            newer = update::check(CAMEL_VERSION_STRING);
+        } else {
+            files = update::prepare(
+                *release,
+                [weak, queue, shownPercent](uint64_t done, uint64_t total) {
+                    if (total == 0) return;
+                    const int percent = int(done * 100 / total);
+                    if (percent == *shownPercent) return;
+                    *shownPercent = percent;
+                    queue.TryEnqueue([weak, percent] {
+                        auto self = weak.get();
+                        if (!self) return;
+                        self->RepairProgress().IsIndeterminate(false);
+                        self->RepairProgress().Value(percent);
+                        self->RepairBar().Title(ui::format(L"Repair_Downloading", {std::to_wstring(percent) + L"%"}));
+                    });
+                },
+                token);
+            update::keepUnlistedFiles(programDirectory(), files);
+        }
+    } catch (const std::exception& e) {
+        failure = e.what();
+    }
+    const bool cancelled = token.cancelled();
+    queue.TryEnqueue([weak, release, newer, files, failure, cancelled] {
+        auto self = weak.get();
+        if (!self) return;
+        if (failure.empty() && release) {
+            self->restartToUpdate(*release, files);
+            return;
+        }
+        if (failure.empty() && newer) {
+            camel::log::info("repair: %s is no longer on GitHub; offering %s", CAMEL_VERSION_STRING, newer->version.c_str());
+            self->RepairBar().IsOpen(false);
+            self->release_ = newer;
+            self->updateFiles_.clear();
+            self->showUpdateOffer();
+            self->UpdateBar().Message(tr(L"Repair_UseUpdate"));
+            return;
+        }
+        if (!failure.empty()) camel::log::warn("repair: %s", failure.c_str());
+        self->showRepairOffer();
+        if (cancelled) return;
+        self->RepairBar().Severity(InfoBarSeverity::Error);
+        self->RepairBar().Title(tr(failure.empty() ? L"Repair_GoneTitle" : L"Repair_DownloadFailedTitle"));
+        self->RepairBar().Message(failure.empty() ? tr(L"Repair_GoneText") : hstring(ui::utf8(failure)));
+        self->RepairButton().Content(box_value(tr(L"Update_Retry")));
+    });
+}
+
+winrt::fire_and_forget MainWindow::OnRepairDetailsClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    if (!installCheck_) co_return;
+    std::wstring text;
+    for (const auto& path : installCheck_->missing)
+        text += std::wstring(tr(L"Repair_Missing")) + L"  " + path.generic_wstring() + L"\n";
+    for (const auto& path : installCheck_->damaged)
+        text += std::wstring(tr(L"Repair_Damaged")) + L"  " + path.generic_wstring() + L"\n";
+    co_await textDialog(ContentLayout().XamlRoot(), tr(L"Repair_DetailsTitle"), hstring(text)).ShowAsync();
+}
+
+void MainWindow::OnRepairSkipClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    RepairBar().IsOpen(false);
+    showUpdateOffer();
+}
+
+void MainWindow::OnRepairCancelClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    repairToken_.cancel();
 }
 
 winrt::fire_and_forget MainWindow::showUpdateResult() {
@@ -2609,9 +2793,14 @@ winrt::fire_and_forget MainWindow::showUpdateResult() {
     const auto result = update::readResult(data);
     if (!result) co_return;
     const std::wstring version = toWide(result->version);
+    const bool repair = result->version == CAMEL_VERSION_STRING;
     if (result->kind == update::Result::Kind::Installed) {
-        if (result->version != CAMEL_VERSION_STRING || !update::signalStarted(data)) {
+        if (!repair || !update::signalStarted(data)) {
             update::removeResult(data);
+            co_return;
+        }
+        if (result->previous == result->version) {
+            showRepairResult(L"Repair_DoneTitle", L"Repair_DoneText", InfoBarSeverity::Success);
             co_return;
         }
         std::ifstream in(programDirectory() / L"CHANGELOG.md", std::ios::binary);
@@ -2623,6 +2812,11 @@ winrt::fire_and_forget MainWindow::showUpdateResult() {
     }
     update::removeResult(data);
     const bool failed = result->kind == update::Result::Kind::Failed;
+    if (repair) {
+        showRepairResult(failed ? L"Repair_FailedTitle" : L"Repair_CancelledTitle",
+                         failed ? L"Repair_FailedText" : L"Update_CancelledText", InfoBarSeverity::Warning);
+        co_return;
+    }
     if (failed) {
         settings_.skippedVersion = result->version;
         applySettingsNow();

@@ -66,6 +66,10 @@ While raw DSD plays, the **DSD** or **DoP** badge shows that volume and every ot
 
 **A hotkey does not work.** Settings › Hotkeys reports a combination another program already holds; press a different one.
 
+**"Some program files are damaged or missing".** The first time each version starts, CamelPlayer compares its program folder with the release's list of files; **Check installation** in Settings › About does it at any time. **Details** lists the files. **Repair** downloads the same version from GitHub again and replaces the program files; your settings and library stay. If an antivirus program quarantined a file, restore it there or exclude the CamelPlayer folder first.
+
+**Windows reports a missing DLL, or CamelPlayer does not start at all.** The zip was not extracted completely, CamelPlayer was started from inside the zip, or an antivirus program removed a file. Extract the whole zip again into a folder of its own and start `CamelPlayer.exe` from there.
+
 ## Reporting a problem
 
-Open an issue on the project's GitHub page and fill in the form. In Settings › About, select **Create diagnostic bundle…** and attach the zip it saves. It holds the logs, settings, your output devices with the formats they accept, and the newest crash report. File and folder paths are left out unless you check **Include file and folder paths**. The crash report is a memory snapshot of CamelPlayer, so only attach the bundle where you are comfortable sharing it.
+Open an issue on the project's GitHub page and fill in the form. In Settings › About, select **Create diagnostic bundle…** and attach the zip it saves. It holds the logs, settings, your output devices with the formats they accept, the result of the installation check, and the newest crash report. File and folder paths are left out unless you check **Include file and folder paths**. The crash report is a memory snapshot of CamelPlayer, so only attach the bundle where you are comfortable sharing it.
