@@ -375,7 +375,7 @@
   <data name="Hotkey_Clear" xml:space="preserve"><value>清除</value></data>
   <data name="Hotkey_Taken" xml:space="preserve"><value>這個組合已被其他程式使用，請改用其他組合。</value></data>
   <data name="Settings_WindowKeys.Text" xml:space="preserve"><value>視窗在前景時</value></data>
-  <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space 播放／暫停 · Ctrl+→ 下一首 · Ctrl+← 上一首 · Ctrl+Shift+→ 快轉 10 秒 · Ctrl+Shift+← 倒轉 10 秒。在文字欄位打字、或開著對話框和選單時不會作用。</value></data>
+  <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space 播放／暫停 · Ctrl+→ 下一首 · Ctrl+← 上一首 · Ctrl+Shift+→ 快轉 10 秒 · Ctrl+Shift+← 倒轉 10 秒 · Alt+← 或滑鼠的上一頁鍵：資料庫頁面返回。播放的按鍵在文字欄位打字、或開著對話框和選單時不會作用。</value></data>
   <data name="Home_Listening.Text" xml:space="preserve"><value>聆聽</value></data>
   <data name="Home_TopTracks.Text" xml:space="preserve"><value>最常播放的曲目</value></data>
   <data name="Home_NoPlaysInPeriod.Text" xml:space="preserve"><value>這段期間沒有播放紀錄。</value></data>

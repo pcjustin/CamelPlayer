@@ -375,7 +375,7 @@
   <data name="Hotkey_Clear" xml:space="preserve"><value>Clear</value></data>
   <data name="Hotkey_Taken" xml:space="preserve"><value>Another program uses this combination; choose another one.</value></data>
   <data name="Settings_WindowKeys.Text" xml:space="preserve"><value>While CamelPlayer is in front</value></data>
-  <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space play / pause · Ctrl+→ next track · Ctrl+← previous track · Ctrl+Shift+→ forward 10 s · Ctrl+Shift+← back 10 s. They do nothing while you type in a text box or a dialog or menu is open.</value></data>
+  <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space play / pause · Ctrl+→ next track · Ctrl+← previous track · Ctrl+Shift+→ forward 10 s · Ctrl+Shift+← back 10 s · Alt+← or the mouse back button: back in the library pages. The playback keys do nothing while you type in a text box or a dialog or menu is open.</value></data>
   <data name="Home_Listening.Text" xml:space="preserve"><value>Listening</value></data>
   <data name="Home_TopTracks.Text" xml:space="preserve"><value>Most played tracks</value></data>
   <data name="Home_NoPlaysInPeriod.Text" xml:space="preserve"><value>No plays in this period.</value></data>
