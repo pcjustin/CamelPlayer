@@ -108,11 +108,16 @@ ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
     return row;
 }
 
-ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, const Texts& texts) {
+// The artist shows only on an album with more than one, where it tells the tracks apart.
+ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, bool oneArtist, const Texts& texts) {
     std::wstring number;
     if (t.number) number = (discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L". ";
-    ui::BrowseRow row{
-        t.id, t.path, hstring(number + std::wstring(titleOf(t, texts))), ui::utf8(t.artist), {}, duration(t.durationMs)};
+    ui::BrowseRow row{t.id,
+                      t.path,
+                      hstring(number + std::wstring(titleOf(t, texts))),
+                      oneArtist ? hstring{} : ui::utf8(t.artist),
+                      {},
+                      duration(t.durationMs)};
     row.file = t.track.file;
     row.marks = true;
     row.favorite = t.favorite;
@@ -536,7 +541,10 @@ void LibraryView::loadAlbumDetail() {
             showAlbumFavorite(a.favorite);
             showAlbumFormats(detail->formats);
             auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
-            for (const auto& t : detail->tracks) items.Append(item(albumTrackRow(t, a.discs > 1, texts)));
+            const bool oneArtist = std::all_of(detail->tracks.begin(), detail->tracks.end(), [&](const LibraryTrackRow& t) {
+                return t.artist == detail->tracks.front().artist;
+            });
+            for (const auto& t : detail->tracks) items.Append(item(albumTrackRow(t, a.discs > 1, oneArtist, texts)));
             detailTracks_ = std::move(detail->tracks);
             RowList().ItemsSource(items);
         });
