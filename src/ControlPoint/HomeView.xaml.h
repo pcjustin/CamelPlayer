@@ -24,9 +24,12 @@ struct HomeView : HomeViewT<HomeView> {
         // rows of the chosen period.
         std::function<void(hstring const& list, hstring const& title, ui::BrowseFetch fetch)> viewAll;
         std::function<void(camel::server::Command)> submit;
+        std::function<void()> openListening;
     };
     void attach(std::shared_ptr<camel::server::IServer> server, Handlers handlers);
-    // Rereads totals and rows; called whenever Home is shown, and again while it shows when the library changes.
+    // Shows the Home page or the Listening page.
+    void show(bool listening);
+    // Rereads totals and rows; called whenever a page is shown, and again while it shows when the library changes.
     winrt::fire_and_forget refresh();
     // Stops watching the library while the window sits in the notification area.
     void setActive(bool active);
@@ -35,6 +38,7 @@ struct HomeView : HomeViewT<HomeView> {
     void OnArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnTrackClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
     void OnViewAllClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnMonthSummaryClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnStatTileTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const&);
     void OnMetricChanged(Windows::Foundation::IInspectable const&,
                          Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -57,6 +61,7 @@ private:
     // Reads the chart, the most played and the history of the chosen period.
     winrt::fire_and_forget loadPeriod();
     void showTiles();
+    void showMonthSummary(const camel::server::PlayOverview& month, const std::optional<camel::server::PlayRankedGroup>& album);
     void drawChart();
     camel::server::PlayMetric metric();
     // The rows of a period list's "View all", paged like the library lists.
@@ -72,6 +77,7 @@ private:
     std::map<std::wstring, std::vector<Windows::Foundation::IInspectable>> rows_; // by the row's x:Name
     std::unordered_map<void*, camel::server::CancellationToken> covers_;
     hstring period_ = L"month"; // the chosen card's tag
+    bool listening_ = false;    // the Listening page shows rather than Home
     ChartData chart_;
 };
 

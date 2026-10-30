@@ -276,12 +276,13 @@ void MainWindow::InitializeComponent() {
     });
     PlaylistNotice().Closed([this](auto&&, auto&&) { noticeUndo_.reset(); });
     refreshPlaylists();
-    // Like "View all", an album or artist opened from Home keeps Albums unselected and Back returns to Home.
+    // Like "View all", an album or artist opened from Home or Listening keeps Albums unselected and Back returns to
+    // that page.
     const auto leaveHome = [this] {
         Nav().SelectedItem(nullptr);
         Home().Visibility(Visibility::Collapsed);
         Library().Visibility(Visibility::Visible);
-        return [this] { selectPage(L"home"); };
+        return [this, tag = shownTag_] { returnToPage(tag); };
     };
     get_self<HomeView>(Home())->attach(
         server_,
@@ -290,7 +291,7 @@ void MainWindow::InitializeComponent() {
          },
          [this, leaveHome](hstring const& artist) { get_self<LibraryView>(Library())->showArtist(artist, leaveHome()); },
          [this](hstring const& list, hstring const& title, ui::BrowseFetch fetch) { viewAll(list, title, std::move(fetch)); },
-         [this](Command command) { submitCommand(std::move(command)); }});
+         [this](Command command) { submitCommand(std::move(command)); }, [this] { showPage(L"listening"); }});
     std::ifstream queueState(camel::dataDirectory() / L"queue-panel-open");
     queueState >> queueOpen_;
     QueueList().ItemsSource(*queueItems_);
@@ -1032,10 +1033,10 @@ void MainWindow::selectPage(hstring const& tag) {
     }
 }
 
-// Home's "View all" opens the full list in the library pages; Back returns to Home.
+// "View all" on Home or Listening opens the full list in the library pages; Back returns to that page.
 void MainWindow::viewAll(hstring const& list, hstring const& title, ui::BrowseFetch fetch) {
     auto server = server_;
-    const auto back = [this] { selectPage(L"home"); };
+    const auto back = [this, tag = shownTag_] { returnToPage(tag); };
     const hstring unknown = tr(L"Library_Unknown");
     Nav().SelectedItem(nullptr);
     Home().Visibility(Visibility::Collapsed);
@@ -1074,8 +1075,13 @@ void MainWindow::viewAll(hstring const& list, hstring const& title, ui::BrowseFe
 
 void MainWindow::showPage(hstring const& tag) {
     shownTag_ = tag;
-    Home().Visibility(tag == L"home" ? Visibility::Visible : Visibility::Collapsed);
-    if (tag == L"home") get_self<HomeView>(Home())->refresh();
+    const bool home = tag == L"home" || tag == L"listening";
+    Home().Visibility(home ? Visibility::Visible : Visibility::Collapsed);
+    if (home) {
+        auto homeView = get_self<HomeView>(Home());
+        homeView->show(tag == L"listening");
+        homeView->refresh();
+    }
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" || tag == L"years" ||
                          tag == L"tracks" || tag == L"folders" || std::wstring_view(tag).starts_with(L"smart:");
@@ -1095,13 +1101,14 @@ void MainWindow::showPage(hstring const& tag) {
         playlistView->showPlaylist(std::stoll(std::wstring(page.substr(9))));
     else
         playlistView->hide();
-    const bool placeholder = !library && !playlists && tag != L"settings" && tag != L"home";
+    const bool placeholder = !library && !playlists && tag != L"settings" && !home;
     PlaceholderPanel().Visibility(placeholder ? Visibility::Visible : Visibility::Collapsed);
     if (tag == L"settings") {
         refreshRoots();
         showDataLocation();
         AboutVersionText().Text(L"CamelPlayer " CAMEL_VERSION_STRING);
     }
+    showTitleBack();
 }
 
 // Library folders as Settings shows them: icon, name and location (docs/Plan.md §8.2).
@@ -1468,8 +1475,13 @@ void MainWindow::addSettingsLinks() {
 }
 
 void MainWindow::showTitleBack() {
-    AppTitleBar().IsBackButtonVisible(Library().Visibility() == Visibility::Visible &&
-                                      get_self<LibraryView>(Library())->canGoBack());
+    AppTitleBar().IsBackButtonVisible(
+        listeningShown() || (Library().Visibility() == Visibility::Visible && get_self<LibraryView>(Library())->canGoBack()));
+}
+
+// Listening opens from Home's month card and keeps Home selected in the navigation pane; Back returns to Home.
+bool MainWindow::listeningShown() {
+    return shownTag_ == L"listening" && Home().Visibility() == Visibility::Visible;
 }
 
 void MainWindow::OnTitleBackRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
@@ -1478,7 +1490,10 @@ void MainWindow::OnTitleBackRequested(TitleBar const&, Windows::Foundation::IIns
 
 bool MainWindow::goBack() {
     if (!AppTitleBar().IsBackButtonVisible()) return false;
-    get_self<LibraryView>(Library())->goBack();
+    if (listeningShown())
+        showPage(L"home");
+    else
+        get_self<LibraryView>(Library())->goBack();
     return true;
 }
 
@@ -1607,10 +1622,14 @@ void MainWindow::showSearchResults(hstring const& query) {
 }
 
 void MainWindow::returnToPage(hstring const& tag) {
-    if (tag == L"settings")
+    if (tag == L"settings") {
         Nav().SelectedItem(Nav().SettingsItem());
-    else
+    } else if (tag == L"listening") {
+        selectPage(L"home");
+        showPage(tag);
+    } else {
         selectPage(tag);
+    }
 }
 
 // The playback bar opens the playing album or artist over the current page: Back returns to the library view it

@@ -224,6 +224,7 @@
   <data name="Search_ScrollBack.AutomationProperties.Name" xml:space="preserve"><value>Previous</value></data>
   <data name="Search_ScrollForward.ToolTipService.ToolTip" xml:space="preserve"><value>Next</value></data>
   <data name="Search_ScrollForward.AutomationProperties.Name" xml:space="preserve"><value>Next</value></data>
+  <data name="Home_SummaryAlbum" xml:space="preserve"><value>Most played album: {0} · {1}</value></data>
   <data name="Nav_Home.Content" xml:space="preserve"><value>Home</value></data>
   <data name="Home_Title.Text" xml:space="preserve"><value>Home</value></data>
   <data name="Home_Today.Text" xml:space="preserve"><value>Today</value></data>

@@ -175,8 +175,9 @@ private:
     void colorCaptionButtons();
     void showTitleBack();
     void addSettingsLinks();
-    // Goes back in the library pages when the title bar offers Back.
+    // Goes back in the library pages, or from Listening to Home, when the title bar offers Back.
     bool goBack();
+    bool listeningShown();
     void applyTheme();
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();

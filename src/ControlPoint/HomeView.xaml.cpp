@@ -187,6 +187,7 @@ ui::BrowseRow historyRow(const PlayHistoryEntry& h) {
 
 struct HomeData {
     PlayOverview today, week, month, year, all;
+    std::optional<PlayRankedGroup> monthAlbum; // the month's most played album
     LibraryAlbumPage played, added;
     int64_t tracks = 0, artists = 0;
 };
@@ -209,7 +210,20 @@ void HomeView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     MetricCombo().Items().Append(box_value(tr(L"Home_ByPlays")));
     MetricCombo().Items().Append(box_value(tr(L"Home_ByTime")));
     MetricCombo().SelectedIndex(0);
+    SummaryMore().Text(tr(L"Home_ViewAll/Content"));
     showTiles();
+}
+
+void HomeView::show(bool listening) {
+    if (listening == listening_) return;
+    listening_ = listening;
+    HomePart().Visibility(listening ? Visibility::Collapsed : Visibility::Visible);
+    ListeningPart().Visibility(listening ? Visibility::Visible : Visibility::Collapsed);
+    Scroller().ChangeView(nullptr, 0.0, nullptr, true);
+}
+
+void HomeView::OnMonthSummaryClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (handlers_.openListening) handlers_.openListening();
 }
 
 void HomeView::setActive(bool active) {
@@ -245,7 +259,7 @@ winrt::fire_and_forget HomeView::refreshIfChanged() {
 
 winrt::fire_and_forget HomeView::refresh() {
     if (!server_) co_return;
-    loadPeriod();
+    if (listening_) loadPeriod();
     const uint64_t generation = ++generation_;
     auto weak = get_weak();
     auto server = server_;
@@ -256,13 +270,14 @@ winrt::fire_and_forget HomeView::refresh() {
     try {
         SYSTEMTIME now{};
         GetLocalTime(&now);
-        const auto overview = [&](std::optional<int64_t> from) {
+        const auto statistics = [&](std::optional<int64_t> from) {
             PlayStatisticsQuery query;
             query.period.fromMs = from;
             query.topLimit = 1;
             query.historyLimit = 0;
-            return server->playStatistics(query).overview;
+            return server->playStatistics(query);
         };
+        const auto overview = [&](std::optional<int64_t> from) { return statistics(from).overview; };
         // Albums, tracks and artists each order the whole library first (a few hundred ms on a large one), so they run
         // on their own readers and Home waits for the slowest instead of the sum.
         auto added = std::async(std::launch::async,
@@ -273,7 +288,9 @@ winrt::fire_and_forget HomeView::refresh() {
                                   [&] { return server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total; });
         data->today = overview(localStartMs(0));
         data->week = overview(localStartMs((now.wDayOfWeek + 6) % 7)); // weeks start on Monday
-        data->month = overview(localStartMs(0, Start::Month));
+        const auto month = statistics(localStartMs(0, Start::Month));
+        data->month = month.overview;
+        if (!month.albums.empty()) data->monthAlbum = month.albums.front();
         data->year = overview(localStartMs(0, Start::Year));
         data->all = overview(std::nullopt);
         data->played = server->recentlyPlayedAlbums(0, kRowItems);
@@ -300,6 +317,7 @@ winrt::fire_and_forget HomeView::refresh() {
         self->YearPlays().Text(plays(data->year.plays));
         self->AllTime().Text(listeningTime(data->all.listenedMs));
         self->AllPlays().Text(plays(data->all.plays));
+        self->showMonthSummary(data->month, data->monthAlbum);
 
         const auto albums = [](const LibraryAlbumPage& page) {
             std::vector<Windows::Foundation::IInspectable> out;
@@ -319,6 +337,26 @@ winrt::fire_and_forget HomeView::refresh() {
         if (camel::measure::measuring())
             camel::log::info("measure: home shown %.0f ms after process start", camel::measure::sinceProcessStart());
     });
+}
+
+void HomeView::showMonthSummary(const PlayOverview& month, const std::optional<PlayRankedGroup>& album) {
+    const hstring totals = listeningTime(month.listenedMs) + L" · " + plays(month.plays);
+    SummaryTotals().Text(totals);
+    hstring line;
+    if (album) {
+        const hstring title = album->name.empty() ? tr(L"Library_Unknown") : ui::utf8(album->name);
+        line = ui::format(L"Home_SummaryAlbum", {std::wstring(title), std::wstring(ui::utf8(album->artist))});
+    }
+    SummaryAlbum().Text(line);
+    SummaryAlbum().Visibility(album ? Visibility::Visible : Visibility::Collapsed);
+    SummaryCoverFrame().Visibility(album ? Visibility::Visible : Visibility::Collapsed);
+    auto& token = covers_[winrt::get_abi(SummaryCover())];
+    token.cancel();
+    token = {};
+    SummaryCover().Source(nullptr);
+    if (album && album->album > 0) ui::loadArtwork(SummaryCover(), server_, {ArtworkKind::Album, album->album, {}}, token);
+    Automation::AutomationProperties::SetName(MonthSummary(),
+                                              tr(L"Home_Month/Text") + L", " + totals + (album ? L", " + line : hstring{}));
 }
 
 PlayMetric HomeView::metric() {
@@ -550,6 +588,7 @@ void HomeView::fill(ItemsControl const& row) {
 
 // The last tile's container margin may hang past the row, so it does not count against the width.
 void HomeView::OnRowSizeChanged(Windows::Foundation::IInspectable const& sender, SizeChangedEventArgs const& e) {
+    if (e.NewSize().Width <= 0) return; // a row of the page that is hidden
     const auto fit = ui::fitCovers(e.NewSize().Width + 4, kCoverExtra);
     Resources().Lookup(box_value(L"HomeCards")).as<CamelPlayer::CardSize>().Cover(fit.cover);
     for (const auto& row : {PlayedRow(), AddedRow(), TopAlbumsRow()}) row.Height(fit.cover + kCoverRowExtra);
