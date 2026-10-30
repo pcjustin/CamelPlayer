@@ -198,6 +198,7 @@ std::string toJson(const Settings& s) {
     j["convertDsdWhenUnsupported"] = s.convertDsdWhenUnsupported;
     j["language"] = s.language;
     j["closeAction"] = s.closeAction == CloseAction::Exit ? "exit" : "tray";
+    j["theme"] = s.theme == Theme::Light ? "light" : s.theme == Theme::Dark ? "dark" : "system";
     j["trayNoticeShown"] = s.trayNoticeShown;
     j["firstRunDone"] = s.firstRunDone;
     j["autoplay"] = s.autoplay;
@@ -297,6 +298,8 @@ Settings fromJson(const std::string& text) {
     s.convertDsdWhenUnsupported = boolean(j, "convertDsdWhenUnsupported", false);
     s.language = str(j, "language", "");
     s.closeAction = str(j, "closeAction", "tray") == "exit" ? CloseAction::Exit : CloseAction::Tray;
+    const auto theme = str(j, "theme", "system");
+    s.theme = theme == "light" ? Theme::Light : theme == "dark" ? Theme::Dark : Theme::System;
     s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
     s.firstRunDone = boolean(j, "firstRunDone", false);
     s.autoplay = boolean(j, "autoplay", true);
@@ -387,6 +390,7 @@ Settings resetPlayback(const Settings& s) {
     Settings reset;
     reset.language = s.language;
     reset.closeAction = s.closeAction;
+    reset.theme = s.theme;
     reset.trayNoticeShown = s.trayNoticeShown;
     reset.firstRunDone = s.firstRunDone;
     reset.hotkeys = s.hotkeys;
@@ -401,6 +405,7 @@ Settings resetInterface(const Settings& s) {
     Settings reset = s;
     reset.language = defaults.language;
     reset.closeAction = defaults.closeAction;
+    reset.theme = defaults.theme;
     reset.trayNoticeShown = defaults.trayNoticeShown;
     reset.firstRunDone = defaults.firstRunDone;
     reset.hotkeys = defaults.hotkeys;

@@ -24,6 +24,7 @@
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
+#include "DialogPlacement.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
 #include "Common/settings/Settings.h"
@@ -57,7 +58,7 @@ std::filesystem::path programDirectory() {
 // A dialog showing release notes or a changelog section as plain, selectable text.
 ContentDialog textDialog(XamlRoot const& root, hstring const& title, hstring const& text) {
     ContentDialog dialog;
-    dialog.XamlRoot(root);
+    ui::placeDialog(dialog, root);
     dialog.Title(box_value(title));
     TextBlock body;
     body.Text(text);
@@ -188,8 +189,20 @@ void MainWindow::InitializeComponent() {
         executablePath.resize(executablePathLength);
         const auto iconPath = std::filesystem::path(executablePath).parent_path() / L"assets" / L"CamelPlayer.ico";
         std::error_code error;
-        if (std::filesystem::exists(iconPath, error)) AppWindow().SetIcon(iconPath.c_str());
+        if (std::filesystem::exists(iconPath, error)) {
+            AppWindow().SetIcon(iconPath.c_str());
+            ImageIconSource icon;
+            icon.ImageSource(Media::Imaging::BitmapImage(Windows::Foundation::Uri(iconPath.wstring())));
+            AppTitleBar().IconSource(icon);
+        }
     }
+    if (!Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported())
+        ThemeBackground().Visibility(Visibility::Visible);
+    ExtendsContentIntoTitleBar(true);
+    SetTitleBar(AppTitleBar());
+    AppWindow().TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
+    colorCaptionButtons();
+    Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) { colorCaptionButtons(); });
 
     if (!server_) server_ = createLocalServer();
     settings_ = server_->snapshot().settings;
@@ -472,9 +485,11 @@ void MainWindow::populateSettings() {
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
     fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
+    fill(ThemeCombo(), {tr(L"Theme_System"), tr(L"Theme_Light"), tr(L"Theme_Dark")}, int(settings_.theme));
     populateDeviceLists(server_->snapshot().devices);
     populating_ = false;
     updateBackendGroups();
+    applyTheme();
 }
 
 void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
@@ -589,6 +604,7 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
+    settings_.theme = Theme(std::clamp(idx(ThemeCombo()), 0, 2));
 }
 
 void MainWindow::OnAutoplayToggled(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -605,6 +621,7 @@ void MainWindow::settingsChanged() {
     if (populating_ || !server_) return;
     const Backend previous = settings_.backend;
     readSettingsFromUi();
+    applyTheme();
     if (settings_.backend != previous && !followDevice(previous) &&
         server_->snapshot().playback.state == PlaybackState::Playing) {
         // Never move sound to another device unannounced; its level may differ a lot.
@@ -754,9 +771,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         for (const auto& entry : snapshot.queue.entries)
             rows.push_back({entry.id,
                             entry.title.empty() ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
-                            : entry.artist.empty() ? ui::utf8(entry.title)
-                                                   : ui::utf8(entry.title) + L" · " + ui::utf8(entry.artist),
-                            ui::utf8(entry.source.pathUtf8()), entry.automatic, entry.file, entry.favorite});
+                                                : ui::utf8(entry.title),
+                            ui::utf8(entry.artist), ui::utf8(entry.source.pathUtf8()), entry.automatic, entry.file,
+                            entry.favorite});
         queueItems_->update(std::move(rows), snapshot.queueEntryId);
     } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
         shownQueueEntryId_ = snapshot.queueEntryId;
@@ -1377,6 +1394,35 @@ void MainWindow::OnRepeatClick(Windows::Foundation::IInspectable const&, RoutedE
     submitCommand(std::move(command));
 }
 
+// Takes effect at once; the window content carries the theme, and the backdrop and caption buttons follow it.
+void MainWindow::applyTheme() {
+    const auto theme = settings_.theme == Theme::Light  ? ElementTheme::Light
+                       : settings_.theme == Theme::Dark ? ElementTheme::Dark
+                                                        : ElementTheme::Default;
+    const auto content = Content().as<FrameworkElement>();
+    if (content.RequestedTheme() != theme) content.RequestedTheme(theme);
+}
+
+// The minimize, maximize and close buttons sit on our title bar, so they follow the app's light or dark theme.
+void MainWindow::colorCaptionButtons() {
+    const bool dark = Content().as<FrameworkElement>().ActualTheme() == ElementTheme::Dark;
+    const auto bar = AppWindow().TitleBar();
+    const Windows::UI::Color foreground = dark ? Windows::UI::Color{255, 255, 255, 255} : Windows::UI::Color{255, 0, 0, 0};
+    const Windows::UI::Color transparent{0, 0, 0, 0};
+    bar.ButtonBackgroundColor(transparent);
+    bar.ButtonInactiveBackgroundColor(transparent);
+    bar.ButtonForegroundColor(foreground);
+    bar.ButtonHoverForegroundColor(foreground);
+    bar.ButtonPressedForegroundColor(foreground);
+    bar.ButtonInactiveForegroundColor(dark ? Windows::UI::Color{255, 140, 140, 140} : Windows::UI::Color{255, 120, 120, 120});
+    bar.ButtonHoverBackgroundColor(dark ? Windows::UI::Color{24, 255, 255, 255} : Windows::UI::Color{24, 0, 0, 0});
+    bar.ButtonPressedBackgroundColor(dark ? Windows::UI::Color{16, 255, 255, 255} : Windows::UI::Color{16, 0, 0, 0});
+}
+
+void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
+    Nav().IsPaneOpen(!Nav().IsPaneOpen());
+}
+
 void MainWindow::fitNavigationPane() {
     const bool compact = queueOpen_ && Nav().ActualWidth() > 0 && Nav().ActualWidth() < 1200;
     if (compact == navCompacted_) return;
@@ -1524,7 +1570,6 @@ std::function<void()> MainWindow::openLibraryOverPage() {
 }
 
 void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {
-    if (!Nav().IsPaneOpen()) Nav().IsPaneOpen(true); // the box is hidden behind its icon in the compact pane
     SearchBox().Focus(FocusState::Keyboard);
     e.Handled(true);
 }
@@ -1652,7 +1697,7 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
                              : kind == L"statistics" ? L"Statistics"
                                                      : L"All";
     ContentDialog dialog;
-    dialog.XamlRoot(ContentLayout().XamlRoot());
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(tr((L"Reset_" + key + L"Title/Text").c_str())));
     StackPanel content;
     content.Spacing(12);
@@ -1752,6 +1797,21 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     StackPanel welcome;
     welcome.Children().Append(text(L"Guide_Welcome"));
 
+    // Appearance: applied and saved at once, so the guide itself already shows the choice.
+    ContentDialog dialog;
+    StackPanel appearance;
+    appearance.Spacing(12);
+    appearance.Children().Append(text(L"Guide_Theme"));
+    RadioButtons themes;
+    for (const auto* key : {L"Theme_System", L"Theme_Light", L"Theme_Dark"}) themes.Items().Append(box_value(tr(key)));
+    themes.SelectedIndex(int32_t(settings_.theme));
+    themes.SelectionChanged([this, themes, dialog](auto&&, auto&&) {
+        settings_.theme = Theme(std::clamp(themes.SelectedIndex(), 0, 2));
+        applySettingsNow();
+        dialog.RequestedTheme(Content().as<FrameworkElement>().ActualTheme());
+    });
+    appearance.Children().Append(themes);
+
     StackPanel folders;
     folders.Spacing(12);
     folders.Children().Append(text(L"Guide_Folders"));
@@ -1806,12 +1866,12 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     StackPanel done;
     done.Children().Append(text(L"Guide_Done"));
 
-    const std::array<std::pair<const wchar_t*, UIElement>, 4> steps{{{L"Guide_WelcomeTitle", welcome},
+    const std::array<std::pair<const wchar_t*, UIElement>, 5> steps{{{L"Guide_WelcomeTitle", welcome},
+                                                                     {L"Guide_ThemeTitle", appearance},
                                                                      {L"Guide_FoldersTitle", folders},
                                                                      {L"Guide_OutputTitle", output},
                                                                      {L"Guide_DoneTitle", done}}};
-    ContentDialog dialog;
-    dialog.XamlRoot(ContentLayout().XamlRoot());
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.DefaultButton(ContentDialogButton::Primary);
     size_t step = 0;
     const auto show = [&] {
@@ -2070,7 +2130,7 @@ winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSourc
     auto strong = get_strong();
     if (preview.tracks > 1000) {
         ContentDialog dialog;
-        dialog.XamlRoot(ContentLayout().XamlRoot());
+        ui::placeDialog(dialog, ContentLayout().XamlRoot());
         dialog.Title(box_value(tr(L"Playlist_ConfirmTitle")));
         std::wstring count = std::to_wstring(preview.tracks);
         for (auto at = int64_t(count.size()) - 3; at > 0; at -= 3) count.insert(size_t(at), L",");
@@ -2109,7 +2169,7 @@ winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSourc
 winrt::fire_and_forget MainWindow::askNewPlaylist(ui::SourceFetch fetch) {
     auto strong = get_strong();
     ContentDialog dialog;
-    dialog.XamlRoot(ContentLayout().XamlRoot());
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(tr(L"Playlist_NewTitle")));
     TextBox name;
     name.PlaceholderText(tr(L"Playlist_NamePlaceholder"));
@@ -2584,7 +2644,7 @@ winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, std:
     auto bar = repair ? RepairBar() : UpdateBar();
     if (server_ && server_->snapshot().playback.state == PlaybackState::Playing && !inTray_) {
         ContentDialog dialog;
-        dialog.XamlRoot(ContentLayout().XamlRoot());
+        ui::placeDialog(dialog, ContentLayout().XamlRoot());
         dialog.Title(box_value(tr(repair ? L"Repair_ConfirmTitle" : L"Update_ConfirmTitle")));
         dialog.Content(
             box_value(repair ? tr(L"Repair_ConfirmText") : ui::format(L"Update_ConfirmText", {toWide(release.version)})));

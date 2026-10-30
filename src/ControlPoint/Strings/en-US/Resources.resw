@@ -196,6 +196,10 @@
   <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer is still running</value></data>
   <data name="Tray_NoticeText" xml:space="preserve"><value>Playback is paused and the library keeps updating. Click the icon to open CamelPlayer, or right-click it and choose Exit.</value></data>
   <data name="Settings_CloseAction.Header" xml:space="preserve"><value>When closing the window</value></data>
+  <data name="Settings_Theme.Header" xml:space="preserve"><value>Theme</value></data>
+  <data name="Theme_System" xml:space="preserve"><value>Use the Windows setting</value></data>
+  <data name="Theme_Light" xml:space="preserve"><value>Light</value></data>
+  <data name="Theme_Dark" xml:space="preserve"><value>Dark</value></data>
   <data name="Close_Tray" xml:space="preserve"><value>Minimize to the notification area</value></data>
   <data name="Close_Exit" xml:space="preserve"><value>Exit CamelPlayer</value></data>
   <data name="Search_Box.PlaceholderText" xml:space="preserve"><value>Search the library</value></data>
@@ -231,7 +235,9 @@
   <data name="Home_DaysHours" xml:space="preserve"><value>{0} d {1} h</value></data>
   <data name="Settings_Guide.Content" xml:space="preserve"><value>Open the first-run guide</value></data>
   <data name="Guide_WelcomeTitle" xml:space="preserve"><value>Welcome to CamelPlayer</value></data>
-  <data name="Guide_Welcome" xml:space="preserve"><value>Two quick steps: choose where your music is, then how CamelPlayer plays it. You can skip and change both later in Settings.</value></data>
+  <data name="Guide_Welcome" xml:space="preserve"><value>Three quick steps: choose how CamelPlayer looks, where your music is, and how it plays. You can skip and change all of it later in Settings.</value></data>
+  <data name="Guide_ThemeTitle" xml:space="preserve"><value>Choose the look</value></data>
+  <data name="Guide_Theme" xml:space="preserve"><value>Light, dark, or the same as Windows. The window changes as you choose.</value></data>
   <data name="Guide_FoldersTitle" xml:space="preserve"><value>Add your music folders</value></data>
   <data name="Guide_Folders" xml:space="preserve"><value>Add as many folders as you like, on this computer or a NAS. CamelPlayer builds the library in the background.</value></data>
   <data name="Guide_OutputTitle" xml:space="preserve"><value>Choose the output</value></data>
@@ -271,7 +277,7 @@
   <data name="Reset_PlaybackText.Text" xml:space="preserve"><value>Backend, devices, every backend setting, conversion and decoders return to their defaults (WASAPI following the Windows default device).</value></data>
   <data name="Reset_PlaybackConfirm" xml:space="preserve"><value>Output goes back to WASAPI following the Windows default device, and every backend setting, conversion and decoder choice to its default. The library, statistics and interface settings stay.</value></data>
   <data name="Reset_InterfaceTitle.Text" xml:space="preserve"><value>Interface</value></data>
-  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>Language, what closing the window does, the queue panel, the tray notice, the first-run guide and the hotkeys return to their defaults.</value></data>
+  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>Language, theme, what closing the window does, the queue panel, the tray notice, the first-run guide and the hotkeys return to their defaults.</value></data>
   <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>The language follows Windows again after a restart; closing the window minimizes to the notification area; the queue panel closes; the tray notice and the first-run guide count as not shown.</value></data>
   <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>Rebuild the library</value></data>
   <data name="Reset_LibraryText.Text" xml:space="preserve"><value>Reads the tags and covers of every file again and rebuilds the albums. Play statistics and playlists stay.</value></data>

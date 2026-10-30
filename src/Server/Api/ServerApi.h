@@ -55,6 +55,7 @@ struct SettingsDto {
     KsSettings ks;
     std::string language;
     CloseAction closeAction = CloseAction::Tray;
+    Theme theme = Theme::System;
     bool trayNoticeShown = false;
     bool firstRunDone = false;
     bool autoplay = true;

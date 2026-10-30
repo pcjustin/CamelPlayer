@@ -20,6 +20,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "TrackMarks.h"
+#include "DialogPlacement.h"
 #include "UiText.h"
 
 using namespace winrt;
@@ -68,7 +69,7 @@ std::optional<std::filesystem::path> pickExportFile(HWND owner, const hstring& n
 
 ContentDialog dialog(XamlRoot const& root, hstring const& title, hstring const& primary) {
     ContentDialog dialog;
-    dialog.XamlRoot(root);
+    ui::placeDialog(dialog, root);
     dialog.Title(box_value(title));
     dialog.PrimaryButtonText(primary);
     dialog.CloseButtonText(tr(L"Playlist_Cancel"));

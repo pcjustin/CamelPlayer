@@ -16,6 +16,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
+#include "DialogPlacement.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
 
@@ -765,7 +766,7 @@ void LibraryView::resetSelection() {
 winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tracks) {
     auto strong = get_strong();
     ContentDialog dialog;
-    dialog.XamlRoot(XamlRoot());
+    ui::placeDialog(dialog, XamlRoot());
     dialog.Title(box_value(tr(L"Library_ResetStatisticsTitle")));
     dialog.Content(box_value(ui::format(L"Library_ResetStatisticsText", {std::to_wstring(tracks.size())})));
     dialog.PrimaryButtonText(tr(L"Library_ResetStatisticsPrimary"));

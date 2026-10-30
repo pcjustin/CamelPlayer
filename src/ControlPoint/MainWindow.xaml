@@ -21,11 +21,47 @@
         </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel>
+        <!-- Where Mica is not available (Windows 10) its fallback keeps the Windows colours; this follows the app's theme. -->
+        <Border x:Name="ThemeBackground" Grid.RowSpan="4" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                Visibility="Collapsed" />
+
+        <!-- The window's own title bar, in the app's theme: the pane toggle, and search on every page (docs/Plan.md §8.2):
+             grouped suggestions while typing, Enter opens all results. -->
+        <TitleBar x:Name="AppTitleBar" Title="CamelPlayer" IsPaneToggleButtonVisible="True"
+                  PaneToggleRequested="OnPaneToggleRequested">
+            <TitleBar.Content>
+                <AutoSuggestBox x:Name="SearchBox" x:Uid="Search_Box" QueryIcon="Find" UpdateTextOnSelect="False"
+                                Width="420" VerticalAlignment="Center"
+                                TextChanged="OnSearchTextChanged" QuerySubmitted="OnSearchQuerySubmitted">
+                    <AutoSuggestBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:BrowseItem">
+                            <Grid ColumnSpacing="12" Padding="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </DataTemplate>
+                    </AutoSuggestBox.ItemTemplate>
+                </AutoSuggestBox>
+            </TitleBar.Content>
+        </TitleBar>
+
+        <StackPanel Grid.Row="1">
             <!-- What opening the data at startup had to repair (a damaged settings file or library database). -->
             <InfoBar x:Name="RecoveryBar" Severity="Warning" IsOpen="False" IsClosable="True" />
             <!-- The installation check (docs/Plan.md §8.6): damaged or missing program files, repaired only after Repair. -->
@@ -50,33 +86,9 @@
             </InfoBar>
         </StackPanel>
 
-        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Left" OpenPaneLength="200" IsBackButtonVisible="Collapsed"
+        <NavigationView x:Name="Nav" Grid.Row="2" PaneDisplayMode="Left" OpenPaneLength="200" IsBackButtonVisible="Collapsed"
+                        IsPaneToggleButtonVisible="False"
                         IsSettingsVisible="True" SelectionChanged="OnNavSelectionChanged">
-            <!-- Search on every page (docs/Plan.md §8.2): grouped suggestions while typing, Enter opens all results. -->
-            <NavigationView.AutoSuggestBox>
-                <AutoSuggestBox x:Name="SearchBox" x:Uid="Search_Box" QueryIcon="Find" UpdateTextOnSelect="False"
-                                TextChanged="OnSearchTextChanged" QuerySubmitted="OnSearchQuerySubmitted">
-                    <AutoSuggestBox.ItemTemplate>
-                        <DataTemplate x:DataType="local:BrowseItem">
-                            <Grid ColumnSpacing="12" Padding="0,4">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                                <TextBlock Grid.Column="1" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center"
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            </Grid>
-                        </DataTemplate>
-                    </AutoSuggestBox.ItemTemplate>
-                </AutoSuggestBox>
-            </NavigationView.AutoSuggestBox>
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Uid="Nav_Home" Tag="home" Icon="Home" />
                 <NavigationViewItem x:Uid="Nav_Albums" Tag="albums" Icon="Library" />
@@ -218,7 +230,7 @@
                                 <StackPanel x:Name="AsioGroup" Spacing="12">
                                     <TextBlock Text="ASIO" Style="{StaticResource GroupHeaderStyle}" />
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <ComboBox x:Name="AsioDriverCombo" x:Uid="Settings_AsioDriver" Width="520" SelectionChanged="OnSettingChanged" />
+                                        <ComboBox x:Name="AsioDriverCombo" x:Uid="Settings_AsioDriver" Width="360" SelectionChanged="OnSettingChanged" />
                                         <Button x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" VerticalAlignment="Bottom" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
@@ -343,6 +355,7 @@
                                     <TextBlock x:Uid="Settings_Interface" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
                                 <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
+                                <ComboBox x:Name="ThemeCombo" x:Uid="Settings_Theme" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ToggleSwitch x:Name="AutoUpdateSwitch" x:Uid="Settings_AutoUpdate" Toggled="OnUpdateSwitchToggled" />
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
@@ -506,13 +519,18 @@
                                     <FontIcon x:Uid="Queue_AutomaticIcon" Glyph="&#xE8B1;" FontSize="12"
                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                               Visibility="{x:Bind ShowsAutomatic, Mode=OneWay}" />
-                                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
-                                               Visibility="{x:Bind IsNotCurrent, Mode=OneWay}" />
-                                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
-                                               FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                               Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Padding="0,4"
+                                                ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}">
+                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                                   Visibility="{x:Bind IsNotCurrent, Mode=OneWay}" />
+                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                                   FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                   Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
+                                        <TextBlock Text="{x:Bind Artist, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{x:Bind HasArtist, Mode=OneWay}" />
+                                    </StackPanel>
                                     <FontIcon Grid.Column="2" Glyph="&#xE00B;" FontSize="12" Visibility="{x:Bind IsFavorite, Mode=OneWay}"
                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                                     <Button Grid.Column="3" Width="32" Height="32" Padding="0" CornerRadius="16"
@@ -536,7 +554,7 @@
         </NavigationView>
 
         <!-- Full-width playback bar (docs/Plan.md §8.1) -->
-        <Grid Grid.Row="2" Padding="24,8,24,12" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
+        <Grid Grid.Row="3" Padding="24,8,24,12" RowSpacing="4" Background="{ThemeResource LayerFillColorDefaultBrush}"
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
             <Grid.Resources>
                 <Style x:Key="BadgeStyle" TargetType="Border">
@@ -608,15 +626,31 @@
                         </Grid>
                     </Button>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" HorizontalAlignment="Stretch">
+                        <StackPanel.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.ThemeDictionaries>
+                                    <ResourceDictionary x:Key="Default">
+                                        <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                        <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                                        <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
+                                    </ResourceDictionary>
+                                    <ResourceDictionary x:Key="Light">
+                                        <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                        <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                                        <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
+                                    </ResourceDictionary>
+                                </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
+                        </StackPanel.Resources>
                         <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
-                                   MaxLines="1" FontSize="13" FontWeight="SemiBold" />
+                                   MaxLines="1" FontSize="14" FontWeight="SemiBold" />
                         <HyperlinkButton x:Name="ArtistLink" Click="OnArtistLinkClick" Padding="0"
                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Visibility="Collapsed">
-                            <TextBlock x:Name="ArtistLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" />
+                            <TextBlock x:Name="ArtistLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />
                         </HyperlinkButton>
                         <HyperlinkButton x:Name="AlbumLink" Click="OnAlbumLinkClick" Padding="0"
                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Visibility="Collapsed">
-                            <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" />
+                            <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />
                         </HyperlinkButton>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="16,0,0,0">

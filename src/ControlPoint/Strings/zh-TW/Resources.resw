@@ -196,6 +196,10 @@
   <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer 仍在執行</value></data>
   <data name="Tray_NoticeText" xml:space="preserve"><value>播放已暫停，媒體庫會繼續更新。按圖示可開啟 CamelPlayer，按右鍵選「結束」可結束程式。</value></data>
   <data name="Settings_CloseAction.Header" xml:space="preserve"><value>關閉視窗時</value></data>
+  <data name="Settings_Theme.Header" xml:space="preserve"><value>主題</value></data>
+  <data name="Theme_System" xml:space="preserve"><value>依 Windows 設定</value></data>
+  <data name="Theme_Light" xml:space="preserve"><value>淺色</value></data>
+  <data name="Theme_Dark" xml:space="preserve"><value>深色</value></data>
   <data name="Close_Tray" xml:space="preserve"><value>縮到系統列</value></data>
   <data name="Close_Exit" xml:space="preserve"><value>結束 CamelPlayer</value></data>
   <data name="Search_Box.PlaceholderText" xml:space="preserve"><value>搜尋媒體庫</value></data>
@@ -231,7 +235,9 @@
   <data name="Home_DaysHours" xml:space="preserve"><value>{0} 天 {1} 小時</value></data>
   <data name="Settings_Guide.Content" xml:space="preserve"><value>重新開啟入門引導</value></data>
   <data name="Guide_WelcomeTitle" xml:space="preserve"><value>歡迎使用 CamelPlayer</value></data>
-  <data name="Guide_Welcome" xml:space="preserve"><value>只要兩步：選擇音樂所在的資料夾，再選擇播放的輸出方式。也可以略過，之後在「設定」修改。</value></data>
+  <data name="Guide_Welcome" xml:space="preserve"><value>只要三步：選擇外觀、音樂所在的資料夾，再選擇播放的輸出方式。也可以略過，之後在「設定」修改。</value></data>
+  <data name="Guide_ThemeTitle" xml:space="preserve"><value>選擇外觀</value></data>
+  <data name="Guide_Theme" xml:space="preserve"><value>淺色、深色，或跟 Windows 設定一樣。選擇後視窗會立即改變。</value></data>
   <data name="Guide_FoldersTitle" xml:space="preserve"><value>加入音樂資料夾</value></data>
   <data name="Guide_Folders" xml:space="preserve"><value>可以加入多個資料夾，本機或 NAS 都可以。CamelPlayer 會在背景建立媒體庫。</value></data>
   <data name="Guide_OutputTitle" xml:space="preserve"><value>選擇輸出</value></data>
@@ -271,7 +277,7 @@
   <data name="Reset_PlaybackText.Text" xml:space="preserve"><value>後端、裝置、各後端參數、轉換與解碼器回到預設值（WASAPI 跟隨 Windows 預設裝置）。</value></data>
   <data name="Reset_PlaybackConfirm" xml:space="preserve"><value>輸出會回到 WASAPI 跟隨 Windows 預設裝置，各後端參數、轉換與解碼器也回到預設值。媒體庫、統計與介面設定不受影響。</value></data>
   <data name="Reset_InterfaceTitle.Text" xml:space="preserve"><value>介面</value></data>
-  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>語言、關閉視窗時的行為、佇列面板、系統列提示、入門引導與快捷鍵回到預設值。</value></data>
+  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>語言、主題、關閉視窗時的行為、佇列面板、系統列提示、入門引導與快捷鍵回到預設值。</value></data>
   <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>重新啟動後語言改回跟隨 Windows；關閉視窗會縮到系統列；佇列面板會關閉；系統列提示與入門引導視為尚未顯示。</value></data>
   <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>重建媒體庫</value></data>
   <data name="Reset_LibraryText.Text" xml:space="preserve"><value>重新讀取每個檔案的標籤與封面並重建專輯；播放統計與播放清單會保留。</value></data>

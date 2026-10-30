@@ -87,6 +87,7 @@ struct MainWindow : MainWindowT<MainWindow> {
                                               Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnUpdateSkipClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnUpdateCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPaneToggleRequested(Microsoft::UI::Xaml::Controls::TitleBar const&, Windows::Foundation::IInspectable const&);
     // The installation check (docs/Plan.md §8.6).
     void OnCheckInstallClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRepairClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -169,6 +170,8 @@ private:
     bool queueShownMeasured_ = false;
     winrt::com_ptr<ui::QueueCollection> queueItems_ = winrt::make_self<ui::QueueCollection>();
     void updateQueuePanel();
+    void colorCaptionButtons();
+    void applyTheme();
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();
     void showFromTray();

@@ -119,6 +119,8 @@ uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format);
 
 // What closing the main window does (docs/Plan.md §8.4).
 enum class CloseAction : uint8_t { Tray, Exit };
+// The window's colours: the Windows app mode, or always light or dark.
+enum class Theme : uint8_t { System, Light, Dark };
 
 // A global hotkey as RegisterHotKey takes it: MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8 and a virtual-key code;
 // key 0 leaves the action without a hotkey.
@@ -154,6 +156,7 @@ struct Settings {
     KsSettings ks;
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
     CloseAction closeAction = CloseAction::Tray;
+    Theme theme = Theme::System;
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     bool firstRunDone = false;    // the first-run guide was finished or skipped
     bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)

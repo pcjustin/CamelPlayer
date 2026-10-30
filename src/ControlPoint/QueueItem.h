@@ -10,7 +10,7 @@ namespace ui {
 
 struct QueueRow {
     uint64_t id = 0; // queue entry id
-    winrt::hstring title, path;
+    winrt::hstring title, artist, path;
     bool automatic = false; // added by autoplay
     int64_t file = 0;       // the library file, 0 outside the library
     bool favorite = false;
@@ -25,6 +25,8 @@ struct QueueItem : QueueItemT<QueueItem> {
     QueueItem() = default;
 
     hstring Title() const { return row_.title; }
+    hstring Artist() const { return row_.artist; }
+    bool HasArtist() const { return !row_.artist.empty(); }
     hstring Path() const { return row_.path; }
     bool IsCurrent() const { return current_; }
     bool IsNotCurrent() const { return !current_; }

@@ -89,6 +89,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="UiText.h" />
+    <ClInclude Include="DialogPlacement.h" />
     <ClInclude Include="BrowseItem.h">
       <DependentUpon>BrowseItem.idl</DependentUpon>
     </ClInclude>

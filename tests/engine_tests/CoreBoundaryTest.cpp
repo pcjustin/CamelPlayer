@@ -350,6 +350,20 @@ TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {
     EXPECT_FALSE(invalid.trayNoticeShown);
 }
 
+TEST(SettingsBoundary, TheThemeFollowsWindowsUntilSetAndResetsWithTheInterface) {
+    EXPECT_EQ(Settings{}.theme, Theme::System);
+    Settings settings;
+    for (const auto theme : {Theme::Light, Theme::Dark, Theme::System}) {
+        settings.theme = theme;
+        EXPECT_EQ(fromJson(toJson(settings)).theme, theme);
+    }
+    EXPECT_EQ(fromJson(R"({"theme":"sepia"})").theme, Theme::System);
+    EXPECT_EQ(fromJson(R"({"theme":1})").theme, Theme::System);
+    settings.theme = Theme::Dark;
+    EXPECT_EQ(resetPlayback(settings).theme, Theme::Dark);
+    EXPECT_EQ(resetInterface(settings).theme, Theme::System);
+}
+
 TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
     const auto file = caseFile(".json");
     for (auto mode : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard}) {
