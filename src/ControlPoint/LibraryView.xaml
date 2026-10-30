@@ -194,7 +194,7 @@
         <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" SizeChanged="OnAlbumGridSizeChanged" />
         <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
-                  IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed">
+                  IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" SizeChanged="OnRowListSizeChanged">
             <ListView.Header>
                 <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
                 <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">

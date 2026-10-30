@@ -409,6 +409,7 @@ void LibraryView::open(View view, bool push) {
 }
 
 void LibraryView::showList(Mode mode) {
+    fitAlbumTracks();
     AlbumGrid().Visibility(mode == Mode::Albums ? Visibility::Visible : Visibility::Collapsed);
     RowList().Visibility(mode == Mode::Groups || mode == Mode::Tracks || mode == Mode::AlbumDetail || mode == Mode::Search
                              ? Visibility::Visible
@@ -1132,6 +1133,18 @@ void LibraryView::OnInitialsBarSizeChanged(Windows::Foundation::IInspectable con
 }
 
 // The wall's columns are set explicitly so that a resize cannot keep the size of a tile that scrolled out of view.
+// An album's tracks read across more easily at the width the Settings page uses than across a wide window; the list
+// keeps its full width so that its scroll bar stays at the window edge.
+void LibraryView::fitAlbumTracks() {
+    constexpr double kAlbumTracksWidth = 820;
+    const double spare = current_.mode == Mode::AlbumDetail ? std::max(0.0, RowList().ActualWidth() - kAlbumTracksWidth) : 0.0;
+    RowList().Padding(ThicknessHelper::FromLengths(0, 0, spare, 0));
+}
+
+void LibraryView::OnRowListSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
+    fitAlbumTracks();
+}
+
 void LibraryView::OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {
     constexpr double kTileExtra = 20;      // a tile's padding and its container margin
     constexpr double kSearchRowExtra = 90; // the search album row's height beyond its covers

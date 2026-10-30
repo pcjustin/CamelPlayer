@@ -64,6 +64,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+    void OnRowListSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&,
                                  Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
@@ -109,6 +110,7 @@ private:
 
     void open(View view, bool push);
     void showList(Mode mode);
+    void fitAlbumTracks();
     Microsoft::UI::Xaml::Controls::ListViewBase listOf(Mode mode);
     // Scrolls a list reopened by Back to where it was, once its items are there.
     void restoreOffset();
