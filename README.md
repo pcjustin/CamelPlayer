@@ -2,17 +2,11 @@
 
 ![CamelPlayer logo](assets/camelplayer-logo.jpg)
 
-CamelPlayer is a Windows-native music player built with C++20 and WinUI 3. It is a separate project from the earlier macOS CamelPlayer, a controller for streaming from MinimServer to a network player, and shares only its name.
+CamelPlayer is a Windows music player for listening through a DAC. It plays FLAC, ALAC, WAV, AIFF, DSD, AAC and MP3 bit-perfect over WASAPI exclusive, ASIO or Kernel Streaming, shows exactly what reaches the device, and keeps a large library on local drives or a NAS quick to browse.
 
-## Features
+It is built with C++20, WinUI 3 and Rust, and is a separate project from the earlier macOS CamelPlayer, a controller for streaming from MinimServer to a network player, with which it shares only its name.
 
-- Bit-perfect playback of FLAC, ALAC, WAV, AIFF and DSD (DSF/DSDIFF), plus AAC and MP3, through WASAPI exclusive or shared, ASIO and Kernel Streaming. DSD plays natively on ASIO or as DoP, and is converted to PCM only when you allow it.
-- An indicator that shows whether the sound reaches the device untouched, and the full signal path from file to device.
-- A library that indexes local folders and network shares in the background: albums, artists, composers, genres, years, tracks and folders, with covers, quick search (including Chinese and Japanese) and a jump bar beside long lists. A daily backup restores the library if its database is ever damaged.
-- A queue that is saved between sessions, playlists with M3U8 import and export, smart lists, favorites, and autoplay of random tracks when the queue ends.
-- A Home page with recently played and added albums and this month's listening, and a Listening page for today, this week, this month, this year or all time: a listening-time chart, the most played albums, artists and tracks, and the play history.
-- Media keys, the Windows volume flyout and lock screen, global hotkeys, and a notification-area icon.
-- Automatic updates from GitHub Releases, a check that repairs damaged or missing program files, light and dark themes, and an English and Traditional Chinese interface.
+**Download:** a portable zip from [GitHub Releases](https://github.com/pcjustin/CamelPlayer/releases), no installer needed. **Read:** the [user guide](guide/UserGuide.md) ([繁體中文](guide/UserGuide.zh-TW.md)), also inside the zip, and [what changed](CHANGELOG.md).
 
 ## Screenshots
 
@@ -20,29 +14,105 @@ The screenshots show a demo library with made-up albums and covers.
 
 | ![Home](assets/screenshots/home.png) | ![Album wall](assets/screenshots/albums.png) |
 |:---:|:---:|
-| Home: recently played and added albums | The album wall |
+| Home: recently played and recently added albums | The album wall with its jump bar |
 | ![Album details](assets/screenshots/album.png) | ![Queue and signal path](assets/screenshots/playback.png) |
-| Album details with format badges and favorites | The queue and the expanded signal path of bit-perfect ASIO playback |
+| Album details with format badges and favorites | The queue and the signal path of bit-perfect ASIO playback |
 | ![Listening](assets/screenshots/listening.png) | ![Output status](assets/screenshots/settings.png) |
-| Listening: this month | Settings: the output status |
+| Listening: this month's time, plays and most played | Settings: the output status during playback |
 
-## Playback engine
+## Features
 
-CamelPlayer is a stereo FLAC, ALAC, WAV, AIFF, AAC-LC, MP3 and DSD (DSF/DSDIFF) player with a bit-perfect output path for lossless sources, WASAPI exclusive and shared, ASIO, and Kernel Streaming backends. WASAPI shared mode always converts to the Windows mixer format and is shown as processed; WASAPI can follow the Windows default device, moving an open stream to a new default and resuming only active playback, while an explicitly selected device pauses when it disappears. Each backend has its own fixed sample rate (choosing one permits resampling PCM to it), predecode amount, silence after a format change and release of the device after a pause; WASAPI also sets the polling buffer, and WASAPI and KS the MMCSS task and priority. The ASIO driver calls back on its own thread; unless the driver already runs it at time-critical priority, that thread joins MMCSS Pro Audio on its first callback, and callbacks late against the driver's own rhythm are reported in the device details and the log. It supports opening a file, playback, pause, stop, seeking, and live output/decoder changes. Each format has its own decoder setting: FLAC can use FFmpeg, Symphonia, dr_flac or libsndfile; ALAC and AAC FFmpeg or Symphonia; WAV and AIFF FFmpeg, Symphonia, libsndfile or dr_wav; MP3 mpg123, FFmpeg, Symphonia or dr_mp3. AAC and MP3 decode to 24-bit PCM by default (16-bit per format), with declared encoder delay and padding trimmed. Mono files are duplicated to both channels bit for bit. With "convert when unsupported" (off by default) the player resamples with libsoxr, downmixes surround (ITU-R BS.775) or reduces depth with TPDF dither when a device does not take the file as it is; the indicator then shows the path as processed. Files are identified by content, not extension.
+### Sound
 
-## Using CamelPlayer
+- **Bit-perfect playback** of 16- and 24-bit lossless files through WASAPI exclusive, ASIO or Kernel Streaming, and WASAPI shared mode when other programs must play too.
+- **DSD** from DSF and DSDIFF files as native DSD on ASIO or as DoP on every backend, up to DSD512 where the device takes it.
+- **Nothing is converted without your permission.** When a device does not take a file as it is, CamelPlayer skips it and tells you, unless you allow resampling, downmixing to stereo, dither to a lower bit depth or DSD to PCM.
+- **The signal path on screen:** badges show bit-perfect, processed, lossy source or raw DSD playback, and the format line opens every step from file to device.
+- **Gapless playback** between tracks of the same format.
+- **Output settings for each backend:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
 
-Releases are portable zip files on GitHub Releases; extract one and run `CamelPlayer.exe`. The [user guide](guide/UserGuide.md) ([繁體中文](guide/UserGuide.zh-TW.md)), also included in the zip, covers installing, choosing an output backend, DSD settings and common problems. To report a problem, open a GitHub issue and attach the diagnostic bundle from Settings › About. [CHANGELOG.md](CHANGELOG.md) lists what each release adds.
+### Library
 
-## Build
+- **Local folders and NAS shares**, several added at once, scanned in the background and followed as files change. Offline folders keep their tracks, and moved files keep their history, favorites and playlist entries.
+- **Browsing:** Home, an album wall sorted by title, artist, year or date added, artists, composers, genres, years, a sortable track list, album details by disc with format badges, and folder pages, all with covers. Album covers are sized so that every row fills the window.
+- **A jump bar** beside the album, artist, composer and genre lists goes straight to #, A–Z, kana or Han.
+- **Search** from the title bar (Ctrl+F) with suggestions as you type, including Chinese and Japanese.
+
+### Queue, playlists and favorites
+
+- **A queue** with play next, add to the end, reordering, shuffle, repeat and history, restored at the next start. When it ends, autoplay keeps random library tracks playing.
+- **Playlists** made from any selection, with M3U8 import and export.
+- **Favorite tracks and albums**, and smart lists: recently added, most played, last played, favorites and never played.
+
+### Listening
+
+- **Home** shows this month's listening time, plays and most played album, and opens the **Listening** page: totals for today, this week, this month, this year and all time, a listening-time chart, the most played albums, artists and tracks, and the play history.
+
+### Windows
+
+- **Media keys**, the volume flyout and the lock screen show and control playback, and system-wide hotkeys can be changed.
+- **The notification area** keeps CamelPlayer running after its window closes, and only one copy runs at a time.
+- **Light and dark themes** or the Windows setting, and an English and Traditional Chinese interface.
+
+### Reliability
+
+- **Automatic updates** from GitHub Releases, checked and confirmed before installing, and undone if they fail.
+- **An installation check** on the first start of each version repairs damaged or missing program files.
+- **Damaged data recovery:** settings come back from the previous start's copy and the library from its daily backup.
+- **A diagnostic bundle** in Settings › About collects what a problem report needs.
+
+## Getting started
+
+1. Download `CamelPlayer-<version>-win-x64.zip` from [GitHub Releases](https://github.com/pcjustin/CamelPlayer/releases), and if you like, check it against `CamelPlayer-<version>-SHA256SUMS.txt`.
+2. Extract the whole zip to a folder you can write to and run `CamelPlayer.exe`. CamelPlayer is not code-signed, so Windows may ask you to confirm the first start.
+3. The first-run guide sets the look, your music folders and the output.
+
+CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Settings, the library and logs are kept in `%LOCALAPPDATA%\CamelPlayer`. To report a problem, open a GitHub issue and attach the diagnostic bundle from Settings › About.
+
+## Formats and outputs
+
+| Format | Decoders (default first) | Notes |
+| --- | --- | --- |
+| FLAC | libsndfile, FFmpeg, Symphonia, dr_flac | Complete decodes verify the STREAMINFO MD5. |
+| WAV, AIFF | libsndfile, FFmpeg, Symphonia, dr_wav | |
+| ALAC | Symphonia, FFmpeg | |
+| AAC-LC | Symphonia, FFmpeg | Decoded to 24-bit PCM (16-bit as an option) with encoder delay and padding trimmed. |
+| MP3 | mpg123, FFmpeg, Symphonia, dr_mp3 | As AAC. A file that declares no length is listed with an estimate until it first plays. |
+| DSF, DSDIFF | DSD Nexus | Raw DSD; DST-compressed DSDIFF is not supported. |
+
+Files are recognized by their content, not their extension. Mono files are copied to both channels bit for bit, and only stereo output is produced; a surround file plays only when downmixing is allowed (ITU-R BS.775).
+
+| Backend | Bit-perfect | DSD | Notes |
+| --- | --- | --- | --- |
+| WASAPI exclusive (default) | Yes | DoP | Can follow the Windows default device; a device you chose pauses when it disappears. |
+| WASAPI shared | No | To PCM only | Always goes through the Windows mixer, so it is shown as processed. |
+| ASIO | Yes | Native or DoP | The ASIO callback thread joins MMCSS Pro Audio, and late callbacks are reported. |
+| Kernel Streaming | Yes | DoP | Windows defines no Kernel Streaming DSD format. |
+
+DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where the device offers 1411.2 kHz. DSD becomes PCM only when you set a backend's DSD output to PCM or allow it after native DSD and DoP were refused: it is decimated to 352.8 kHz with a multistage FIR filter (100% modulation = 0 dBFS), resampled with libsoxr to 88.2, 176.4 or 352.8 kHz and quantized once. Allowed PCM conversions use libsoxr for resampling and TPDF dither for a lower bit depth.
+
+## Keyboard and mouse
+
+| Keys | While CamelPlayer is in front |
+| --- | --- |
+| Space | Play or pause |
+| Ctrl+→ / Ctrl+← | Next or previous track |
+| Ctrl+Shift+→ / Ctrl+Shift+← | Forward or back 10 seconds |
+| Alt+← or the mouse back button | Back, like the title bar's Back button |
+| Ctrl+F | Search the library |
+| Delete | Remove the selected queue or playlist entries |
+| Ctrl-click, Shift-click | Select several rows for their right-click menu |
+
+The system-wide hotkeys work in every program: Alt+Home plays or pauses and Alt+Page Up / Alt+Page Down go to the previous or next track, changeable in Settings › Hotkeys.
+
+## Building from source
 
 Requirements:
 
 - Windows x64; the application targets Windows 10 version 1809 or later.
 - Visual Studio 2026 with the Desktop development with C++ workload and Windows SDK 10.0.26100.0. The C++ WinUI app development tools component is not required.
 - Rust stable with the `x86_64-pc-windows-msvc` target.
-- Internet access for the initial vcpkg, NuGet, and Cargo dependency restore.
-- At least 25 GB of available disk space is recommended for the initial build. Building FFmpeg can take about an hour; subsequent builds use caches.
+- Internet access for the first vcpkg, NuGet and Cargo restore, and at least 25 GB of free disk space. Building FFmpeg the first time takes about an hour; later builds use caches.
 
 Run from the repository root:
 
@@ -53,11 +123,25 @@ Run from the repository root:
 .\build.cmd -Test                    # Build and run ordinary tests
 ```
 
-The version comes from the `VERSION` file at the repository root; the build puts it in the executable's file properties, Settings › About and `camelcli --version`. Change it before tagging a release on GitHub (tag `v` + the version). A Release build packages `dist/CamelPlayer-<version>-win-x64.zip`, with the third-party source and symbol archives and `CamelPlayer-<version>-SHA256SUMS.txt` beside it.
+The executables are written to `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe` and `build/<Configuration>/tests/tests.exe`. A Release build packages `dist/CamelPlayer-<version>-win-x64.zip` with the third-party source and symbol archives and `CamelPlayer-<version>-SHA256SUMS.txt` beside it.
 
-Executables are generated at `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe`, and `build/<Configuration>/tests/tests.exe`. Configuration and logs are stored under `%LOCALAPPDATA%/CamelPlayer`.
+The version comes from the `VERSION` file; the build puts it in the executable's file properties, Settings › About and `camelcli --version`. Change it before tagging a release on GitHub (tag `v` followed by the version).
 
-Each build also writes `build/compile_commands.json` from the MSBuild projects, so clangd (for example in VS Code) applies the repository's `.clang-tidy` checks and `.clang-format` style to the C++ in `src/`. Diagnostics are fixed in the code or the check configuration, never suppressed with `NOLINT`. Rust code is kept clean with `cargo fmt` and `cargo clippy -- -D warnings`.
+Each build also writes `build/compile_commands.json`, so clangd (for example in VS Code) applies the repository's `.clang-tidy` checks and `.clang-format` style to the C++ in `src/`. Diagnostics are fixed in the code or the check configuration, never suppressed with `NOLINT`. Rust code is kept clean with `cargo fmt` and `cargo clippy -- -D warnings`.
+
+## Testing
+
+`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-10-30 a full Release run passed all 638 enabled C++ tests, including the 100k-track search latency target, and all 47 Rust tests.
+
+The 112 disabled tests play audio on named devices or scan a NAS, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
+
+```powershell
+.\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*"
+```
+
+NAS tests are also opt-in: set `CAMEL_NAS_ROOT` to an authorized share or album and select `LibraryNas.DISABLED_ReadOnlyFullAndIncrementalScan`. `LibraryNas.DISABLED_IsolatedChangesOverflowAndReconnection` and `LibraryNas.DISABLED_UniqueFingerprintsPreserveMoveHistory` create and remove their own temporary folders on that share, so run them only with permission to create files there. Their databases and reports stay under `build/testtmp/nas-library`.
+
+[VALIDATION.md](VALIDATION.md) records the hardware, NAS and performance runs, and the limits they found.
 
 ## Command-line companion
 
@@ -72,56 +156,36 @@ camelcli gen-test-audio [directory]
 camelcli bench-decoders <directory> --runs 3   # every recognized format; pure decode, separate FLAC MD5, seek checks
 ```
 
-`decode` checks decoder output against STREAMINFO MD5. `capture` compares the engine's output with an independent libFLAC reference decode. Test audio covers 16/24-bit FLAC at rates up to 768 kHz, plus damaged, truncated, and missing-MD5 inputs. The test suite additionally generates 20/32-bit FLAC fixtures to check that unsupported depths are rejected cleanly.
+`decode` checks decoder output against the STREAMINFO MD5, and `capture` compares the engine's output with an independent libFLAC decode. The generated test audio covers 16- and 24-bit FLAC at rates up to 768 kHz, plus damaged, truncated and missing-MD5 files.
 
-## Validation and limitations
+## How it works
 
-The latest full Release run passed **all 628 enabled C++ tests**, including the 100k-track search latency target; 112 hardware and opt-in NAS tests remain disabled. The artwork regressions passed **14/14**, including CD-subfolder covers and misleading source extensions; the user confirmed all covers display correctly. The earlier Debug full run passed 562/563: the 100k-track search latency target (p95 < 100 ms) is defined for optimized builds and measures 332 ms unoptimized. The library identity and playback-gating regressions passed **137/137 in Debug**, and three opt-in NAS checks passed in both configurations, including ten physical local/NAS relocation scenarios and actual Server playback-state gating. The Rust Engine suite passed all 47 tests.
+CamelPlayer runs as one process with these parts:
 
-Performance (Release, caches not flushed): warm 100k-track grouped-search first page p95 79.5–85.4 ms; synthetic 100k-track local-SSD first scan 364 s (target ≤ 15 minutes). A read-only full scan of an 86,684-file NAS share (75,507 tracks) took 27.1 minutes, and unchanged rescans took 19–20 seconds; NAS scan time is recorded rather than targeted. The latest hardware run covered **91 hardware cases** through the engine and Server APIs: FLAC playback controls on Chord/DAVE WASAPI, ASIO and KS and Cirrus WASAPI and KS; WAV, ALAC, AAC, MP3, WASAPI shared mode and DSD (native, DoP, DSD to PCM) wherever the device can play them; and DSD64 to DSD512 on DAVE, where DSD512 DoP (a 1411.2 kHz carrier) is refused or reported as a driver failure rather than assumed. KS has no native DSD: Windows defines no KS DSD format, so KS plays DSD as DoP or permitted DSD to PCM. Hardware validation covers Chord/DAVE (WASAPI, ASIO, KS) and the built-in Cirrus codec (WASAPI, KS): Cirrus takes 24-in-32 up to 192 kHz, a container DAVE refuses. Cirrus has no DSD mode, so it only receives DSD converted to PCM, never DoP or native DSD. A separate DAVE run of the new output parameters (polling buffer, MMCSS, fixed rate, silence after a DoP-to-PCM switch, release after pause) passed 5/5. Three Server concurrency/listener tests also passed 20 repetitions each (60 executions). Server capture tests compare 16/24-bit PCM from all four FLAC decoders with an independent libFLAC reference.
+- **The control point** (`src/ControlPoint`), the WinUI 3 application, sends versioned commands to the Server and shows its snapshots and events; command IDs and revisions keep stale updates from showing. Every list is virtualized over pages read off the UI thread, and each listing's order is built once per library revision, so a random page of 100k tracks takes about 3 ms and of 1,000 albums about 42 ms (p95, Release).
+- **The Server** (`src/Server`) owns settings, device enumeration, the library and playback control.
+- **The Engine** (the Rust crate `rust/audio_engine`, hosted from `src/Engine`) owns every playback session. It asks the chosen C++ decoder adapter for frames through a versioned callback ABI, enforces supported input, track ranges and seeking, pre-decodes into a ring buffer, converts to the device format (repacking, and resampling, downmixing, dither or DSD to PCM only when allowed), packs native DSD or DoP, queues the next track for gapless playback and renders to the OutputBridge. For FLAC it reports whether the STREAMINFO frame count and MD5 were verified; the MD5 counts as verified only after a complete decode.
+- **The OutputBridge** (`src/OutputBridge`) holds the WASAPI, ASIO and Kernel Streaming backends. ASIO uses an independent host implementation of the driver interface, so no Steinberg SDK is needed (ASIO is a trademark of Steinberg Media Technologies GmbH).
+- Shared types and utilities live in `src/Common`, the CLI in `src/Tools/camelcli`, the updater in `src/Updater` and the Symphonia adapter in `rust/symphonia_ffi`. Tests are grouped into `tests/server_tests`, `tests/bridge_tests` and `tests/engine_tests`.
 
-Hardware tests are disabled during ordinary runs because they play audio and require the named devices and local `testdata/` files (FLAC, WAV, ALAC, AAC, MP3 and DSF samples), which are not distributed. Lower the volume, then run them explicitly after building:
+**The library** normalizes overlapping folders and aliases, skips reparse points to avoid cycles, and indexes supported audio with image and LRC sidecars into SQLite. A CUE sheet is not split: as in Roon, its file is one track. TagLib reads tags, including several artists, composers and genres, while FLAC STREAMINFO and Vorbis comments are read without a decoder. Scans publish batches of 500 files, reread a file only when it changes, and group albums as each batch is written, so albums appear during the first scan; several folders scan at the same time. Folder monitoring coalesces changes for 2 seconds and rescans only the folders named, rescans fully after lost notifications, polls local folders every 30 minutes and network shares every 6 hours, and checks that each folder is reachable every 60 seconds. An incomplete or offline scan keeps the tracks it did not see; a complete scan marks missing files unavailable without forgetting them.
 
-```powershell
-.\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*"
-```
+**Moved files** keep their identity, statistics, favorites, playlist entries and queue entries. Local NTFS and ReFS moves are matched by volume GUID, 128-bit file ID and creation time; moves on a NAS or across volumes need a unique fingerprint recorded before the file disappeared, a SHA-256 over the file size and its first and last 64 KiB, so fingerprinting reads at most 128 KiB per file. Each new or changed file is fingerprinted right after its tags are read, while its start is still cached, and fingerprinting waits while music plays from the same storage. Copies stay separate, and missing or ambiguous fingerprints keep separate identities. Move decisions wait for a complete scan.
 
-NAS validation is also opt-in: set `CAMEL_NAS_ROOT` to an authorized share or album and select `LibraryNas.DISABLED_ReadOnlyFullAndIncrementalScan`. The `LibraryNas.DISABLED_IsolatedChangesOverflowAndReconnection` and `LibraryNas.DISABLED_UniqueFingerprintsPreserveMoveHistory` cases create and clean their own temporary folders on that share; run them only with permission to create test files. All index databases and reports stay under local `build/testtmp/nas-library`.
+**Covers** come from the first track's own folder (including CD subfolders), then its embedded front cover, then the parent of a disc folder; the player bar prefers the playing track's embedded cover. WIC makes thumbnails up to 256 pixels in the background after a scan, with libwebp where Windows cannot decode WebP, so browsing never reads covers from the music storage. They stay within a 512 MiB disk cache and a 32 MiB in-memory cache, and source images are limited to 32 MiB, 16,384 pixels a side and 40 million pixels.
 
-A real Release SMB run passed representative FLAC/DSD full and unchanged incremental scans, 2,000 change events with a zero-byte notification-overflow signal, recursive rename/delete detection and temporary-directory unavailability/reconnection without losing records. Tag edits did not trigger an index update within 120 seconds in this environment; a test-only 2-second polling interval recovered them. The production polling default remains 30 minutes, so external changes missed by notifications can remain stale until the next poll. The performance run measured the 100k-track Release Server search first-page p95 at 85.4 ms; one/two-character fallback p95 was 1,146/939 ms. A synthetic local-SSD first scan completed in 897.3 s, with its first 500-file batch at 633.3 s. The authorized NAS full scan took 10,507 s (86,684 files seen, 147 diagnostics); an unchanged rescan took 192.7 s (0 updates, 4 diagnostics). At the user's request, the full NAS fingerprint run was stopped after 157 of 86,680 files (3.21 GB) in 438 s; the observed rate projects about 109 hours for 2.87 TB. The local index passed SQLite integrity check after stopping. See the partial report under `build/testtmp/nas-library`; physical network interruption remains untested. The NAS follow-up changes passed 30 related tests in both Debug and Release.
+**Search and sorting** normalize Chinese and Japanese text, with OpenCC dictionaries beside each executable, and sort with NLS-versioned Windows collation. A sort tag garbled into question marks is ignored in favor of the name.
 
-CamelPlayer plays 16/24-bit lossless sources and AAC/MP3 to stereo output; without conversion it only repacks integers. FLAC, WAV and AIFF default to libsndfile, ALAC and AAC to Symphonia and MP3 to mpg123; an earlier saved FLAC choice is kept. DSF and DSDIFF files are read as raw DSD through DSD Nexus and play bit for bit as native DSD on ASIO (the default there, `asio.dsdOutput`) or as DoP on every backend; DoP needs a carrier of DSD rate / 16, so DSD512 DoP plays only where the device reports 1411.2 kHz. DSD becomes PCM only with explicit permission: a backend's DSD output set to "to PCM", or "convert DSD when unsupported" (off by default) after native/DoP failed. It is then decimated to 352.8 kHz by a multistage FIR filter (100% DSD modulation = 0 dBFS), resampled with libsoxr to the configured 88.2/176.4/352.8 kHz and quantized once; multichannel DSD also needs "convert when unsupported" to downmix. DST decompression stays disabled. MP3 test files are encoded with LAME inside the test program only. Complete decodes starting at frame zero verify an available STREAMINFO MD5 and enforce known frame counts. After a nonzero seek, the remaining frame count is checked without comparing a partial digest to the whole-file MD5.
+## Dependencies and licensing
 
-## Dependencies and repository contents
-
-The WinUI control point submits versioned commands to a same-process C++ Server, which owns settings, device enumeration and reference-engine control. Snapshots and events carry command IDs and revisions to reject stale UI updates. A versioned Engine/Bridge C ABI and Rust Engine are integrated; the C++ OutputBridge wraps the existing output backends.
-
-The internal Server library service normalizes overlapping roots and aliases, skips reparse points to prevent cycles and escapes, and scans supported audio plus image and LRC sidecars into local SQLite storage. CUE sheets are not supported, as in Roon: a file with a CUE sheet is one track. TagLib reads file tags, multivalued artists/composers/genres and embedded-cover presence; the existing decoder registry validates playback format scope and supplies stream information. FLAC STREAMINFO and Vorbis comments are read without opening a decoder or loading embedded artwork. MP3 files that declare no length are indexed with an estimate, which the first mpg123 playback replaces with the exact length. Scans publish batches of 500 files and reread metadata only when a file changes. A new or changed file is fingerprinted right after its tags are read, while its start is still in the storage's cache, so moved files keep their history without a second pass over a NAS (images are not fingerprinted). Cancelled, incomplete or offline scans retain unseen records; a complete scan marks confirmed missing files unavailable without deleting their identities. Recursive directory monitoring coalesces events for 2 seconds and rescans only the folders a change names, rescans fully after notification loss, polls local folders every 30 minutes and network shares every 6 hours, and checks root availability every 60 seconds. Versioned Server browse/search commands provide paginated albums, artists and tracks with cancellation and revision checks.
-
-The control point browses the library on its own pages: an album wall sorted by title, artist, year or date added; artist, composer, genre and year lists that open a filtered album wall; a sortable track list; album details by disc; and Roon-style folder pages that list each library folder by name and location (`\\server\share` or `COMPUTER › [D:] label › folder`), with a breadcrumb and only folders that contain music. Every list is virtualized over pages fetched off the UI thread; each listing's order is built once per library revision, so a random page of 100k tracks takes about 3 ms and of 1,000 albums about 42 ms (p95, Release). Albums are grouped as each scan batch is written, so they appear during a first scan; several library folders scan at the same time, a newly added folder is registered at once, and Settings shows the running scan's progress. Library tracks play and display under their on-disk spelling rather than the lowercase index key. Album-wall tiles, album details, folder and song rows on the Folders page, and the playback bar load covers through the Server off the UI thread. Album covers are resolved from the first track's actual folder (including CD subfolders), then its embedded front cover, then the parent of a disc folder; the playback bar prefers its current track's embedded front cover. A folder uses its own cover, then its first album, then its folder icon. WIC generates aspect-preserving thumbnails of one size, up to 256 pixels, with libwebp when Windows cannot decode WebP; they are made in the background after a scan, so browsing reads no covers from the music storage. Versioned local JPEGs stay within a 512 MiB disk cache and the UI keeps a 32 MiB thumbnail LRU; obsolete loads are cancelled on recycling, navigation and track changes. Input images are limited to 32 MiB, 16,384 pixels per side and 40 million pixels. A full-width playback bar centers all transport controls with Play / Pause at the window center and keeps only the queue toggle at the right edge. The queue panel opens beside the content (its state is remembered) and supports removing, reordering, double-click playback, and clearing and saving as a playlist from its ⋯ menu; tracks and folders offer Play next and Add to end of queue from their right-click menu, and Ctrl/Shift-click selects several rows for these menus. Folders (with all subfolders), albums, tracks, artists, composers, genres, years, search results and queue entries offer Create playlist and Add to playlist ▸ (existing playlists and New playlist…) from their right-click menu: the current page stays open, a notice shows the playlist, its track count, a link and Undo, selections over 1,000 tracks ask first with their count and length, and a new playlist's name opens for renaming beside its entry under Playlists in the navigation pane. A playlist page plays, renames, deletes after confirmation, removes selected entries (Delete), reorders by dragging, reorders by a column after confirmation and marks entries whose file is missing or offline; playlists longer than 25,000 entries list their first 25,000. M3U8 export writes UTF-8 with #EXTINF lines, keeps duplicates and uses paths relative to the playlist file on its drive or share; import reads M3U8 and M3U (system code page when not UTF-8), keeps the file's order and duplicates, keeps entries outside the library by path, marks entries of offline library folders unavailable until they return, and skips web addresses. CUE references are not supported. Below the controls, badges show the playback state, the bit-perfect indicator, a lossy source and raw DSD bypassing all PCM processing; the format line expands into the signal path. Settings groups library, status, output and decoder options into cards, with links to each card that stay under its title while the cards scroll, and its status area lists the output format, mode, device buffer, underruns and device details, with notices for a saved device that is not connected and for each requested ≠ active value. Closing the window minimizes CamelPlayer to the notification area by default (Settings › Interface can make it exit instead): playback pauses, library scans and folder monitoring continue, the tray icon reopens the window and its menu exits; launching CamelPlayer again shows the running instance. Media keys, the Windows volume flyout and the lock screen show the current track with its cover and position and control playback, seeking included. System-wide hotkeys (Alt+Home play/pause, Alt+Page Up / Page Down previous/next by default) can be changed, cleared or restored in Settings, which also reports a combination another program holds; while the window is in front, Space plays or pauses, Ctrl+→ / ← go to the next or previous track, Ctrl+Shift+→ / ← move 10 seconds, and Alt+← or the mouse back button goes back in the library pages. The queue, its shuffle order, history, shuffle and repeat modes and the current track's position are saved and restored at the next start, paused and without opening the file until Play. When the queue ends, autoplay (on by default; Settings › Playback or the queue panel's ⋯ menu) keeps playing random available library tracks not played in the last 7 days (the one played longest ago when none is left): each is added, marked, to the end of the queue as the last entry starts, so it plays gaplessly; tracks you add replace an automatic entry that has not started, at most 100 played automatic entries are kept, Play on an empty queue starts with one, and repeat modes take precedence. The search box in the title bar (Ctrl+F) suggests tracks, albums and artists while typing; Enter opens all results, with album covers and artists above the matching tracks. A short first-run guide (reopenable from Settings) adds music folders and chooses the output. Settings › Reset and data shows where data is stored and resets playback and output, the interface, the library (rereading all tags while keeping statistics and playlists), the cover cache, or everything (restarting as a new installation). Home, the start page, shows the library's album, track and artist counts under its title, recently played and recently added albums, and a card with this month's listening time, plays and most played album that opens the Listening page. Its album rows and the album wall take the number of covers that keeps them closest to 160 pixels, never under 140, and size them to fill the width, so every window size ends flush at the right. The Listening page's cards show listening time and plays for today, this week, this month, this year and all time; the chosen card sets the period of everything below it: a listening-time chart (the last 7 days for today, the days of this week or month, the months of this year, or the months since the first play), the most played albums, artists and tracks by plays or listening time, and the play history, newest first. Clicking a track plays it and an album or artist opens it; "View all" lists every album, artist or track of the period, or its whole history. Tracks whose file is missing or offline are marked. The statistics of selected tracks (Reset statistics… in their right-click menu) or of the whole library (Settings › Reset and data) can be reset after a confirmation; this cannot be undone. Tracks and albums can be marked as favorites: a heart on rows of the Tracks page, album details, playlists and the queue, Add to / Remove from favorites in their right-click menus (for every selected track), Add to / Remove from favorite albums on album cards, a heart beside the album playback options, a heart on the covers of favorite albums, and a large heart at the right of the playback bar for the playing track. Album details show a badge for each format, bit depth and sample rate among the album's tracks, such as FLAC · 24-bit / 96 kHz, MP3 · 44.1 kHz or DSD64. An album stays a favorite when its folder moves or the library is reread. Smart lists in the navigation pane list recently added tracks (the last 30 days, dated by when each file was created on disk), the 100 most played and 100 last played tracks, favorite tracks and favorite albums (the latest marked first) and tracks never played (the latest added first); each can be played, shuffled or saved as a playlist named after it.
-
-Search normalizes CJK text and lists use NLS-versioned Windows sorting; affected Library/Server regressions pass 80/80 in Debug and Release, with final text and ordering checks 3/3 in both. OpenCC dictionaries are deployed beside each executable.
-
-Verified moves retain the original file/track identities, ratings, favorites, playback statistics, playlist links and queue entries. Local NTFS/ReFS moves use a volume GUID, 128-bit file ID and creation time; NAS and cross-volume moves require a unique fingerprint match recorded before the source disappeared: a SHA-256 over the file size and its first and last 64 KiB, so fingerprinting reads at most 128 KiB per file. Full-file SHA-256 values recorded by earlier versions still match moves; files still present trade them for sampled ones. Copies stay separate; without reliable local IDs, missing or ambiguous fingerprints also keep separate identities. Move decisions wait for a complete scan, and partial scans can resume pending decisions. Background fingerprinting checks cancellation and a playback callback between reads, validates file versions before saving and invalidates fingerprints after edits. The Server supplies this callback, so fingerprinting waits while music plays from the same storage.
-
-The WinUI application lives in `src/ControlPoint`, the Server in `src/Server`, the Rust Engine host and decoder adapters in `src/Engine`, the output backends in `src/OutputBridge`, shared types and utilities in `src/Common`, and the CLI in `src/Tools/camelcli`. The Rust workspace in `rust/` holds the Engine crate `rust/audio_engine` and the Symphonia decoder FFI adapter `rust/symphonia_ffi`. Tests are grouped into `tests/server_tests`, `tests/bridge_tests` and `tests/engine_tests`. The Rust Engine owns every playback session: it requests decoded frames from the selected C++ decoder adapter through a versioned host callback ABI, enforces supported input, track ranges and seek, predecodes into a ring buffer, converts to the device format (repacking, and resampling, downmixing, dither or DSD to PCM when permitted), packs native DSD or DoP, queues the next track for gapless playback and renders to the OutputBridge with its own render state (active, paused, underrun, end of stream, fault). For FLAC it reports STREAMINFO frame-count and MD5 verification states; full-source MD5 becomes verified only after complete decoding. Tests and all required build configuration are included.
-
-FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine are restored through Cargo with one committed workspace lockfile and linked into one static library. ASIO uses an independent host implementation of the driver interface; no Steinberg SDK is needed to build (ASIO is a trademark of Steinberg Media Technologies GmbH).
-
-The repository also includes third-party license/notice snapshots and a versioned [dependency inventory](third_party/dependencies.json). See [third-party notices](THIRD-PARTY-NOTICES.md) for the source and license information that must accompany a release.
-
-Local planning documents, root-level development probes, private test music, downloaded package directories, build outputs and binary caches are excluded from Git. GitHub's automatic source archive contains the files committed at the release tag; it does not contain dependencies downloaded separately by package managers.
-
-To refresh the checked-in notice snapshots after restoring dependencies:
+FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine come from Cargo with one committed workspace lockfile and are linked into one static library. The repository includes third-party license and notice snapshots and a [dependency inventory](third_party/dependencies.json); [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists what must accompany a release. To refresh the notice snapshots after restoring dependencies:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File msbuild/collect-licenses.ps1
 ```
 
-## License and release status
+Local planning documents, development probes, private test music, downloaded packages, build outputs and caches are kept out of Git, so GitHub's source archive of a release tag holds only the committed files, not the dependencies the package managers download.
 
-CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components retain their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD, or other notices.
+CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components keep their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD or other notices. MPL-2.0 allows CamelPlayer to be combined with the Microsoft-licensed Windows App SDK and WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release; a review of the complete notice set is still due before the first public release.
 
-MPL-2.0 allows CamelPlayer code to be combined with Microsoft-licensed Windows App SDK/WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release. A review of the complete notice set is still a check before the first public release.
-
-For any future binary release, provide access to the exact corresponding source, dependency modifications and build information, and include all required notices. The packaging command also builds `CamelPlayer-<version>-win-x64-third-party-source.zip` with the exact sources of the LGPL and MPL libraries linked into the program, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) explains how to rebuild against a modified one. `msbuild/check-licenses.ps1`, run by the build and packaging scripts, fails on a file without the MPL-2.0 header or a dependency missing from the notices. The local packaging command prepares files; it does not establish redistribution permission or publish a release.
+A binary release must come with access to the exact corresponding source, dependency changes and build information, and all required notices. Packaging also builds `CamelPlayer-<version>-win-x64-third-party-source.zip` with the exact sources of the LGPL and MPL libraries linked into the program, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) explains how to rebuild against a modified one. `msbuild/check-licenses.ps1`, run by the build and packaging scripts, fails on a file without the MPL-2.0 header or a dependency missing from the notices. Packaging prepares the files; it does not establish permission to redistribute or publish a release.
