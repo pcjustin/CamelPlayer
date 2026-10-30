@@ -1114,22 +1114,64 @@ void LibraryView::loadInitials() {
     background([this, server = server_, albums, sort = albumSort_, field = current_.field] {
         auto initials =
             std::make_shared<std::vector<LibraryInitial>>(albums ? server->albumInitials(sort) : server->groupInitials(field));
-        return std::function<void()>([this, initials] { showInitials(*initials); });
+        return std::function<void()>([this, initials] { showInitials(std::move(*initials)); });
     });
 }
 
-void LibraryView::showInitials(const std::vector<LibraryInitial>& initials) {
+void LibraryView::showInitials(std::vector<LibraryInitial> initials) {
+    initials_ = std::move(initials);
+    initialSlots_ = 0;
+    InitialsBar().Visibility(Visibility::Visible);
+    layoutInitials();
+}
+
+void LibraryView::OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
+    layoutInitials();
+}
+
+// Every row keeps an easy target; when they do not all fit, evenly spaced letters stay and a dot between two of
+// them stands for the letters left out, jumping to the first of those with names.
+void LibraryView::layoutInitials() {
+    constexpr double kRowHeight = 18;
     const auto& labels = libraryInitialLabels();
     auto bar = InitialsBar();
+    if (bar.Visibility() != Visibility::Visible || bar.ActualHeight() <= 0) return;
+    size_t slots = std::min(labels.size(), std::max<size_t>(3, size_t(bar.ActualHeight() / kRowHeight)));
+    if (slots < labels.size() && slots % 2 == 0) --slots;
+    if (slots == initialSlots_) return;
+    initialSlots_ = slots;
+
+    // Each row covers labels [first, last).
+    std::vector<std::pair<size_t, size_t>> rows;
+    if (slots == labels.size()) {
+        for (size_t i = 0; i < labels.size(); ++i) rows.emplace_back(i, i + 1);
+    } else {
+        const size_t letters = slots / 2 + 1;
+        size_t previous = 0;
+        for (size_t i = 0; i < letters; ++i) {
+            const size_t shown = (i * (labels.size() - 1) + (letters - 1) / 2) / (letters - 1);
+            if (i > 0) rows.emplace_back(previous + 1, shown);
+            rows.emplace_back(shown, shown + 1);
+            previous = shown;
+        }
+    }
+
     bar.Children().Clear();
     bar.RowDefinitions().Clear();
-    for (size_t row = 0; row < labels.size(); ++row) {
+    for (size_t row = 0; row < rows.size(); ++row) {
+        const auto [first, last] = rows[row];
         bar.RowDefinitions().Append(RowDefinition());
-        const auto found = std::find_if(initials.begin(), initials.end(),
-                                        [&](const LibraryInitial& initial) { return initial.label == labels[row]; });
+        const LibraryInitial* found = nullptr;
+        for (size_t i = first; i < last && !found; ++i)
+            for (const auto& initial : initials_)
+                if (initial.label == labels[i]) found = &initial;
+        const bool dot = last - first > 1;
+        const hstring name = dot ? ui::utf8(labels[first]) + L"–" + ui::utf8(labels[last - 1]) : ui::utf8(labels[first]);
         Button jump;
-        jump.Content(box_value(ui::utf8(labels[row])));
-        Automation::AutomationProperties::SetName(jump, ui::utf8(labels[row]));
+        jump.Content(box_value(dot ? hstring(L"•") : name));
+        Automation::AutomationProperties::SetName(jump, name);
+        if (dot) ToolTipService::SetToolTip(jump, box_value(name));
+        jump.FontSize(12);
         jump.Padding(Thickness{});
         jump.MinWidth(0);
         jump.MinHeight(0);
@@ -1137,25 +1179,15 @@ void LibraryView::showInitials(const std::vector<LibraryInitial>& initials) {
         jump.Background(Media::SolidColorBrush(Microsoft::UI::Colors::Transparent()));
         jump.HorizontalAlignment(HorizontalAlignment::Stretch);
         jump.VerticalAlignment(VerticalAlignment::Stretch);
-        jump.IsEnabled(found != initials.end());
-        if (found != initials.end())
+        jump.IsEnabled(found != nullptr);
+        if (found)
             jump.Click([this, offset = found->offset](auto&&, auto&&) {
-                if (!collection_ || offset >= int64_t(collection_->Size())) return;
+                if (!collection_ || std::cmp_greater_equal(offset, collection_->Size())) return;
                 listOf(current_.mode).ScrollIntoView(collection_->GetAt(uint32_t(offset)), ScrollIntoViewAlignment::Leading);
             });
         Grid::SetRow(jump, int32_t(row));
         bar.Children().Append(jump);
     }
-    bar.Visibility(Visibility::Visible);
-    OnInitialsBarSizeChanged(nullptr, nullptr);
-}
-
-// The letters shrink with a short window so all of them stay in the bar.
-void LibraryView::OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
-    const auto bar = InitialsBar();
-    if (bar.Children().Size() == 0) return;
-    const double size = std::clamp(bar.ActualHeight() / bar.Children().Size() * 0.7, 8.0, 12.0);
-    for (const auto& child : bar.Children()) child.as<Control>().FontSize(size);
 }
 
 bool LibraryView::canGoBack() const {

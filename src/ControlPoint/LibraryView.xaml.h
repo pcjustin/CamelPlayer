@@ -117,7 +117,8 @@ private:
     void showEmpty(int64_t total);
     void showCount(int64_t total);
     void loadInitials();
-    void showInitials(const std::vector<camel::server::LibraryInitial>& initials);
+    void showInitials(std::vector<camel::server::LibraryInitial> initials);
+    void layoutInitials();
     void loadAlbumDetail();
     void loadFolder();
     void loadSearchGroups();
@@ -171,6 +172,8 @@ private:
     bool populating_ = false;
     std::optional<bool> hasRoots_;
     winrt::com_ptr<ui::LibraryCollection> collection_;
+    std::vector<camel::server::LibraryInitial> initials_;
+    size_t initialSlots_ = 0; // rows the jump bar shows now
     std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
