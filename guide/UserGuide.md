@@ -52,11 +52,11 @@ While raw DSD plays, the **DSD** or **DoP** badge shows that volume and every ot
 
 **A file is skipped with "The device cannot play this format bit-perfectly".** The device does not accept the file's sample rate, bit depth or channel count. Check that the right device is selected, try a different **Sample format**, or allow conversion (see above).
 
-**No sound, or "Output device not connected".** Turn the DAC on, choose it under Output device and select **Refresh device lists**. A device you selected yourself is never replaced by another one; select it again or choose "Follow Windows default".
+**No sound, or "Output device not connected".** Turn the DAC on and choose it under Output device. The lists update by themselves when a device appears or goes away; **Refresh device lists** reads them again at once. A device you selected yourself is never replaced by another one; select it again or choose "Follow Windows default".
 
 **DSD plays as loud noise or hiss.** The DAC does not understand DoP (or the driver does not pass it unchanged). Set DSD output to **Convert to PCM**. Turn the volume down before trying DSD on a new device.
 
-**Other programs are silent while CamelPlayer plays.** Exclusive mode, ASIO and Kernel Streaming take the device for themselves. Use WASAPI shared mode, or set **Release the device after pausing** to a short time.
+**Other programs are silent while CamelPlayer plays.** Exclusive mode, ASIO and Kernel Streaming take the device for themselves. Stop releases it at once; after a pause it is released after **Release the device after pausing** (one second by default). To play alongside other programs, use WASAPI shared mode.
 
 **Clicks, missing beginnings or a short mute when the format changes.** Some DACs need time to switch between sample rates or between PCM and DSD. Raise **Silence after a format change** (Buffers and timing) to 200–500 ms.
 
