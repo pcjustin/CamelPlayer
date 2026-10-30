@@ -8,11 +8,11 @@ CamelPlayer is a Windows-native music player built with C++20 and WinUI 3. It is
 
 - Bit-perfect playback of FLAC, ALAC, WAV, AIFF and DSD (DSF/DSDIFF), plus AAC and MP3, through WASAPI exclusive or shared, ASIO and Kernel Streaming. DSD plays natively on ASIO or as DoP, and is converted to PCM only when you allow it.
 - An indicator that shows whether the sound reaches the device untouched, and the full signal path from file to device.
-- A library that indexes local folders and network shares in the background: albums, artists, composers, genres, years, tracks and folders, with covers and quick search (including Chinese and Japanese).
+- A library that indexes local folders and network shares in the background: albums, artists, composers, genres, years, tracks and folders, with covers, quick search (including Chinese and Japanese) and a jump bar beside long lists. A daily backup restores the library if its database is ever damaged.
 - A queue that is saved between sessions, playlists with M3U8 import and export, smart lists, favorites, and autoplay of random tracks when the queue ends.
 - A Home page with recently played and added albums, and listening for today, this week, this month, this year or all time: a listening-time chart, the most played albums, artists and tracks, and the play history.
 - Media keys, the Windows volume flyout and lock screen, global hotkeys, and a notification-area icon.
-- Automatic updates from GitHub Releases, and an English and Traditional Chinese interface.
+- Automatic updates from GitHub Releases, a check that repairs damaged or missing program files, light and dark themes, and an English and Traditional Chinese interface.
 
 ## Screenshots
 

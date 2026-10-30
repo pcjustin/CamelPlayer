@@ -35,7 +35,7 @@ Settings › Playback › Output backend picks how audio reaches the device. Eac
 | ASIO | Your DAC has its own ASIO driver | Bit-perfect and the only backend with native DSD. **Open control panel** shows the driver's own settings. |
 | Kernel Streaming | A device without ASIO where WASAPI misbehaves | Talks to the driver directly. While it plays, Windows and other programs cannot use the device. |
 
-The badges under the playback controls show the path in use: **Bit-perfect** means the file's samples reach the device unchanged, **Processed** that something converted them (shared mode, a fixed sample rate or a conversion you allowed). Click the format line to see each step. The Status card in Settings lists the output format, the mode, the device buffer and underruns; "Requested ≠ active" means the device could not take a saved setting and what it uses instead.
+The badges at the bottom right of the player bar show the path in use: **Bit-perfect** means the file's samples reach the device unchanged, **Processed** that something converted them (shared mode, a fixed sample rate or a conversion you allowed). Click the format line to see each step. The Status card in Settings lists the output format, the mode, the device buffer and underruns; "Requested ≠ active" means the device could not take a saved setting and what it uses instead.
 
 When a device does not take a file as it is, CamelPlayer skips it and tells you, so nothing is converted without your permission. Set **When the device does not take a file as it is** to **Convert it** to allow resampling, downmixing to stereo or reducing the bit depth. **Sample rate** fixes one output rate for every PCM file (shown as Processed); leave it at **Follow the file** for bit-perfect playback.
 
