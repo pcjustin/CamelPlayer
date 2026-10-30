@@ -18,6 +18,7 @@
     <Grid KeyboardAcceleratorPlacementMode="Hidden" PreviewKeyDown="OnWindowKeyDown">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
+            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="OnBackAccelerator" />
         </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -32,7 +33,7 @@
 
         <!-- The window's own title bar, in the app's theme: the pane toggle, and search on every page (docs/Plan.md §8.2):
              grouped suggestions while typing, Enter opens all results. -->
-        <TitleBar x:Name="AppTitleBar" Title="CamelPlayer" IsPaneToggleButtonVisible="True"
+        <TitleBar x:Name="AppTitleBar" Title="CamelPlayer" IsPaneToggleButtonVisible="True" IsTabStop="False"
                   PaneToggleRequested="OnPaneToggleRequested" BackRequested="OnTitleBackRequested">
             <TitleBar.Content>
                 <AutoSuggestBox x:Name="SearchBox" x:Uid="Search_Box" QueryIcon="Find" UpdateTextOnSelect="False"
@@ -594,7 +595,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Slider x:Name="PositionSlider" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
+                <Slider x:Name="PositionSlider" x:Uid="Player_Position" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
                         VerticalAlignment="Center" ValueChanged="OnSliderValueChanged" />
                 <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right" Text="0:00 / 0:00"
                            Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -633,7 +634,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="CoverButton" Click="OnCoverClick" Padding="0"
+                    <Button x:Name="CoverButton" x:Uid="Player_Cover" Click="OnCoverClick" Padding="0"
                             Background="Transparent" BorderThickness="0" VerticalAlignment="Center">
                         <Grid Width="60" Height="60">
                             <FontIcon Glyph="&#xE93C;" FontSize="28" Opacity="0.4" />

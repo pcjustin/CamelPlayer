@@ -182,7 +182,7 @@
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
                 </StackPanel>
             </Grid>
-            <ComboBox x:Name="SortCombo" Grid.Column="1" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
+            <ComboBox x:Name="SortCombo" x:Uid="Library_SortCombo" Grid.Column="1" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
             <ToggleButton x:Name="DescendingToggle" Grid.Column="2" VerticalAlignment="Center" Click="OnDescendingClick">
                 <SymbolIcon Symbol="Sort" />
             </ToggleButton>

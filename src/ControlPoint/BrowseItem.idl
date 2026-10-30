@@ -4,7 +4,7 @@
 
 namespace CamelPlayer {
 // One row or tile of a library view; a placeholder until its page arrives, then filled in place.
-[default_interface] runtimeclass BrowseItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged {
+[default_interface] runtimeclass BrowseItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged, Windows.Foundation.IStringable {
     String Title { get; };
     String Subtitle { get; };
     String Detail { get; };

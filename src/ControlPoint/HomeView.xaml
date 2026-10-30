@@ -159,7 +159,7 @@
             <StackPanel x:Name="PeriodLists" Spacing="12">
                 <Grid Margin="0,12,0,0">
                     <TextBlock x:Uid="Home_MostPlayed" Style="{StaticResource SectionHeaderStyle}" />
-                    <ComboBox x:Name="MetricCombo" MinWidth="110" HorizontalAlignment="Right" SelectionChanged="OnMetricChanged" />
+                    <ComboBox x:Name="MetricCombo" x:Uid="Home_MetricCombo" MinWidth="110" HorizontalAlignment="Right" SelectionChanged="OnMetricChanged" />
                 </Grid>
 
                 <Grid>

@@ -205,6 +205,11 @@ void MainWindow::InitializeComponent() {
     Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) { colorCaptionButtons(); });
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
+    Content().AddHandler(UIElement::PointerPressedEvent(),
+                         box_value(Input::PointerEventHandler([this](auto&&, Input::PointerRoutedEventArgs const& e) {
+                             if (e.GetCurrentPoint(nullptr).Properties().IsXButton1Pressed() && goBack()) e.Handled(true);
+                         })),
+                         true);
 
     if (!server_) server_ = createLocalServer();
     settings_ = server_->snapshot().settings;
@@ -1124,6 +1129,7 @@ void MainWindow::showRoots(ListView const& list) {
         row.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
         row.Children().Append(icon);
         row.Children().Append(lines);
+        Automation::AutomationProperties::SetName(row, ui::utf8(root.name) + L", " + hstring(location));
         list.Items().Append(row);
     }
 }
@@ -1436,7 +1442,17 @@ void MainWindow::showTitleBack() {
 }
 
 void MainWindow::OnTitleBackRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
+    goBack();
+}
+
+void MainWindow::OnBackAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {
+    if (goBack()) e.Handled(true);
+}
+
+bool MainWindow::goBack() {
+    if (!AppTitleBar().IsBackButtonVisible()) return false;
     get_self<LibraryView>(Library())->goBack();
+    return true;
 }
 
 void MainWindow::fitNavigationPane() {
@@ -2756,11 +2772,12 @@ winrt::fire_and_forget MainWindow::checkInstallation(bool manual) {
 
 void MainWindow::showRepairOffer() {
     if (!installCheck_) return;
+    const auto& check = installCheck_.value();
     auto bar = RepairBar();
     bar.Severity(InfoBarSeverity::Warning);
     bar.Title(tr(L"Repair_Title"));
-    bar.Message(ui::format(L"Repair_Text", {std::to_wstring(installCheck_->missing.size() + installCheck_->damaged.size()),
-                                            L"" CAMEL_VERSION_STRING}));
+    bar.Message(
+        ui::format(L"Repair_Text", {std::to_wstring(check.missing.size() + check.damaged.size()), L"" CAMEL_VERSION_STRING}));
     RepairButton().Content(box_value(tr(L"Repair_Install")));
     RepairButton().Visibility(Visibility::Visible);
     RepairDetailsButton().Visibility(Visibility::Visible);

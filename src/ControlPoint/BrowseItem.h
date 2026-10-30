@@ -37,6 +37,8 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     bool HasMarks() const { return row_.marks; }
     bool IsFavorite() const { return row_.favorite; }
     hstring FavoriteGlyph() const { return row_.favorite ? L"\xE00B" : L"\xE006"; }
+    // What a screen reader announces for the tile or row.
+    hstring ToString() const { return row_.subtitle.empty() ? row_.title : row_.title + L", " + row_.subtitle; }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
     }
