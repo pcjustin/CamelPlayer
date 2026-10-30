@@ -158,22 +158,22 @@ TEST_F(LibraryViewsTest, AlbumArtistsCreditEachOfTheirNames) {
 }
 
 TEST_F(LibraryViewsTest, GroupsCountAlbumsAndTracksAndCreditEveryArtist) {
-    const auto artists = browseGroups(*store, LibraryGroupField::Artist, 0, 50);
+    const auto artists = browseGroups(*store, LibraryGroupField::Artist, false, 0, 50);
     ASSERT_EQ(artists.total, 2);
     EXPECT_EQ(artists.groups[0].name, "Amy");
     EXPECT_EQ(artists.groups[0].albums, 2);
     EXPECT_EQ(artists.groups[0].tracks, 2);
     EXPECT_EQ(artists.groups[1].name, "Zed");
     EXPECT_EQ(artists.groups[1].tracks, 3);
-    const auto composers = browseGroups(*store, LibraryGroupField::Composer, 0, 50);
+    const auto composers = browseGroups(*store, LibraryGroupField::Composer, false, 0, 50);
     ASSERT_EQ(composers.groups.size(), 1u);
     EXPECT_EQ(composers.groups[0].name, "Bach");
     EXPECT_EQ(composers.groups[0].tracks, 2);
-    const auto years = browseGroups(*store, LibraryGroupField::Year, 0, 50);
+    const auto years = browseGroups(*store, LibraryGroupField::Year, false, 0, 50);
     ASSERT_EQ(years.groups.size(), 2u);
     EXPECT_EQ(years.groups[0].name, "2022"); // newest first
     EXPECT_EQ(years.groups[1].name, "2020");
-    EXPECT_EQ(browseGroups(*store, LibraryGroupField::Genre, 1, 1).groups[0].name, "Rock");
+    EXPECT_EQ(browseGroups(*store, LibraryGroupField::Genre, false, 1, 1).groups[0].name, "Rock");
 }
 
 TEST_F(LibraryViewsTest, InitialsMarkWhereEachLetterKanaAndHanBegin) {
@@ -195,7 +195,7 @@ INSERT INTO tracks(id,file_id,album_id,title,artist,album,year,disc_number,track
     using Initials = std::vector<LibraryInitial>;
     const auto names = [&](LibraryGroupField field) {
         std::vector<std::string> out;
-        for (const auto& group : browseGroups(*store, field, 0, 50).groups) out.push_back(group.name);
+        for (const auto& group : browseGroups(*store, field, false, 0, 50).groups) out.push_back(group.name);
         return out;
     };
     EXPECT_EQ(names(LibraryGroupField::Artist), (std::vector<std::string>{"Amy", "eve", "Zed", "あいみょん", "宇多田ヒカル"}));
@@ -297,6 +297,46 @@ TEST_F(LibraryViewsTest, SmartListsFollowPlaysFavoritesAndTheDateAdded) {
     EXPECT_TRUE(albums.albums[0].favorite);
 }
 
+TEST_F(LibraryViewsTest, FavoriteArtistsAndComposersAreKeptByName) {
+    using Names = std::vector<std::pair<LibraryGroupField, std::string>>;
+    const auto names = [](const LibraryGroupPage& page) {
+        Names out;
+        for (const auto& group : page.groups) out.emplace_back(group.field, group.name);
+        return out;
+    };
+    const auto before = browseGroups(*store, LibraryGroupField::Artist, false, 0, 50).revision;
+    setArtistFavorite(*store, {{LibraryGroupField::Artist, "Zed"}}, true);
+    Sleep(5);
+    setArtistFavorite(*store, {{LibraryGroupField::Composer, "Bach"}, {LibraryGroupField::Artist, "Amy"}}, true);
+    const auto artists = browseGroups(*store, LibraryGroupField::Artist, false, 0, 50);
+    EXPECT_NE(artists.revision, before);
+    ASSERT_EQ(artists.groups.size(), 2u);
+    EXPECT_TRUE(artists.groups[0].favorite);
+    EXPECT_TRUE(artists.groups[1].favorite);
+    // Artists before composers, each the latest marked first.
+    EXPECT_EQ(
+        names(favoriteArtists(*store, 0, 50)),
+        (Names{{LibraryGroupField::Artist, "Amy"}, {LibraryGroupField::Artist, "Zed"}, {LibraryGroupField::Composer, "Bach"}}));
+    EXPECT_EQ(favoriteArtists(*store, 2, 1).total, 3);
+    EXPECT_EQ(names(favoriteArtists(*store, 2, 1)), (Names{{LibraryGroupField::Composer, "Bach"}}));
+
+    setArtistFavorite(*store, {{LibraryGroupField::Artist, "Amy"}}, false);
+    setArtistFavorite(*store, {{LibraryGroupField::Artist, "Zed"}}, true); // keeps the time it became a favorite
+    EXPECT_EQ(names(browseGroups(*store, LibraryGroupField::Artist, true, 0, 50)), (Names{{LibraryGroupField::Artist, "Zed"}}));
+    EXPECT_FALSE(artistPage(*store, {LibraryGroupField::Artist, "Amy"}, 10, 50).favorite);
+    EXPECT_TRUE(artistPage(*store, {LibraryGroupField::Composer, "Bach"}, 10, 50).favorite);
+    // A composer mark is not an artist mark.
+    setArtistFavorite(*store, {{LibraryGroupField::Composer, "Amy"}}, true);
+    EXPECT_FALSE(artistPage(*store, {LibraryGroupField::Artist, "Amy"}, 10, 50).favorite);
+
+    // A name that leaves the library is listed again when it returns.
+    store->write([](sqlite::Database& db) { db.exec("UPDATE files SET available=0 WHERE id IN (1,2,3)"); }).get();
+    EXPECT_EQ(names(favoriteArtists(*store, 0, 50)), (Names{}));
+    store->write([](sqlite::Database& db) { db.exec("UPDATE files SET available=1 WHERE id IN (1,2,3)"); }).get();
+    EXPECT_EQ(names(favoriteArtists(*store, 0, 50)),
+              (Names{{LibraryGroupField::Artist, "Zed"}, {LibraryGroupField::Composer, "Bach"}}));
+}
+
 TEST_F(LibraryViewsTest, AlbumDetailListsEachFormatCombinationTheMostCommonFirst) {
     store
         ->write([](sqlite::Database& db) {
@@ -319,7 +359,7 @@ TEST_F(LibraryViewsTest, PagingRefusesAChangedRevision) {
     store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Renamed' WHERE id=1"); }).get();
     EXPECT_THROW(browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 2, 2, first.revision), std::runtime_error);
     EXPECT_THROW(browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 2, first.revision), std::runtime_error);
-    EXPECT_THROW(browseGroups(*store, LibraryGroupField::Artist, 0, 2, first.revision), std::runtime_error);
+    EXPECT_THROW(browseGroups(*store, LibraryGroupField::Artist, false, 0, 2, first.revision), std::runtime_error);
 }
 
 TEST_F(LibraryViewsTest, AlbumDetailListsTracksByDiscAndNumber) {

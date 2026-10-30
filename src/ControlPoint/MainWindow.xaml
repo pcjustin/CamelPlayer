@@ -117,6 +117,9 @@
                         <NavigationViewItem x:Uid="Nav_SmartFavoriteAlbums" Tag="smart:favoriteAlbums">
                             <NavigationViewItem.Icon><FontIcon Glyph="&#xE93C;" /></NavigationViewItem.Icon>
                         </NavigationViewItem>
+                        <NavigationViewItem x:Uid="Nav_SmartFavoriteArtists" Tag="smart:favoriteArtists">
+                            <NavigationViewItem.Icon><FontIcon Glyph="&#xE77B;" /></NavigationViewItem.Icon>
+                        </NavigationViewItem>
                         <NavigationViewItem x:Uid="Nav_SmartNeverPlayed" Tag="smart:neverPlayed">
                             <NavigationViewItem.Icon><FontIcon Glyph="&#xE7C1;" /></NavigationViewItem.Icon>
                         </NavigationViewItem>

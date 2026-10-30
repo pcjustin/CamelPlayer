@@ -18,6 +18,7 @@ struct BrowseRow {
     bool unavailable = false; // a playlist entry whose file is missing or offline
     bool marks = false;       // shows the track's favorite heart
     bool favorite = false;
+    bool composer = false; // a group row naming a composer, which lists of favorite artists mix with artists
 };
 
 } // namespace ui

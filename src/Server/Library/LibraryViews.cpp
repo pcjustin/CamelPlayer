@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <iterator>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -286,6 +287,39 @@ std::string groupValues(LibraryGroupField field) {
            "LEFT JOIN track_values v ON v.track_id=t.id AND v.field=" + literal(column) + " WHERE" + kVisible;
 }
 
+std::unordered_set<std::string> favoriteNames(Query& q, LibraryGroupField field) {
+    std::unordered_set<std::string> names;
+    if (field != LibraryGroupField::Artist && field != LibraryGroupField::Composer) return names;
+    auto rows = q.db.prepare("SELECT name FROM favorite_names WHERE field=?");
+    rows.bind(1, std::string_view(fieldName(field)));
+    while (rows.step()) names.insert(rows.text(0));
+    return names;
+}
+
+// Every group of a field with its favorite mark, read once per library revision; marking a favorite changes it.
+std::shared_ptr<const std::vector<LibraryGroup>> groupsOf(const LibraryStore& store, Query& q, LibraryGroupField field) {
+    return ordered<LibraryGroup>(store, q.revision, "groups|" + std::to_string(int(field)), [&] {
+        const auto favorites = favoriteNames(q, field);
+        std::vector<LibraryGroup> out;
+        auto rows = q.db.prepare("SELECT name,COUNT(DISTINCT album),COUNT(DISTINCT track) FROM (" + groupValues(field) +
+                                 ") WHERE coalesce(name,'')<>'' GROUP BY name ORDER BY min(sort),name");
+        while (rows.step()) {
+            auto name = rows.text(0);
+            const bool favorite = favorites.contains(name);
+            out.push_back({std::move(name), rows.integer(1), rows.integer(2), favorite, field});
+        }
+        return out;
+    });
+}
+
+LibraryGroupPage groupPage(uint64_t revision, const std::vector<LibraryGroup>& groups, int64_t offset, int64_t limit) {
+    LibraryGroupPage page;
+    page.revision = revision;
+    page.total = int64_t(groups.size());
+    for (int64_t i = offset; i < std::min<int64_t>(offset + limit, page.total); ++i) page.groups.push_back(groups[size_t(i)]);
+    return page;
+}
+
 // Labels each position of an ordered list with the last initial whose start does not follow it; `starts` holds where
 // "A" … "Z", "あ" and "漢" begin in the list's own ordering, everything before "A" being "#".
 template <typename Key> std::vector<LibraryInitial> initialsOf(const std::vector<Key>& keys, const std::vector<Key>& starts) {
@@ -372,23 +406,15 @@ LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset,
     return page;
 }
 
-LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, int64_t offset, int64_t limit,
-                              std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
+LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, bool favoritesOnly, int64_t offset,
+                              int64_t limit, std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
-    const std::string values = groupValues(field);
-    const auto groups = ordered<LibraryGroup>(store, q.revision, "groups|" + std::to_string(int(field)), [&] {
-        std::vector<LibraryGroup> out;
-        auto rows = q.db.prepare("SELECT name,COUNT(DISTINCT album),COUNT(DISTINCT track) FROM (" + values +
-                                 ") WHERE coalesce(name,'')<>'' GROUP BY name ORDER BY min(sort),name");
-        while (rows.step()) out.push_back({rows.text(0), rows.integer(1), rows.integer(2)});
-        return out;
-    });
-    LibraryGroupPage page;
-    page.revision = q.revision;
-    page.total = int64_t(groups->size());
-    for (int64_t i = offset; i < std::min<int64_t>(offset + limit, page.total); ++i) page.groups.push_back((*groups)[size_t(i)]);
-    return page;
+    const auto groups = groupsOf(store, q, field);
+    if (!favoritesOnly) return groupPage(q.revision, *groups, offset, limit);
+    std::vector<LibraryGroup> favorites;
+    std::ranges::copy_if(*groups, std::back_inserter(favorites), &LibraryGroup::favorite);
+    return groupPage(q.revision, favorites, offset, limit);
 }
 
 const std::vector<std::string>& libraryInitialLabels() {
@@ -500,6 +526,9 @@ LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter
             rows.bind(1, songs);
             while (rows.step()) page.songs.push_back(trackRow(rows));
         }
+        auto mark = q.db.prepare("SELECT 1 FROM favorite_names WHERE field=? AND name=?");
+        mark.bind(1, std::string_view(fieldName(artist.field))).bind(2, artist.value);
+        page.favorite = mark.step();
     }
     auto own = artist, guest = artist;
     own.role = LibraryAlbumRole::Own;
@@ -580,6 +609,45 @@ LibraryAlbumPage favoriteAlbums(const LibraryStore& store, int64_t offset, int64
     while (statement.step()) rows.push_back(album(statement));
     page.albums = inOrder(*order, offset, limit, std::move(rows), [](const LibraryAlbum& a) { return a.id; });
     return page;
+}
+
+LibraryGroupPage favoriteArtists(const LibraryStore& store, int64_t offset, int64_t limit,
+                                 std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
+    checkRange(offset, limit);
+    Query q(store, expectedRevision, token);
+    const auto favorites = ordered<LibraryGroup>(store, q.revision, "favoriteArtists", [&] {
+        std::vector<LibraryGroup> out;
+        for (const auto field : {LibraryGroupField::Artist, LibraryGroupField::Composer}) {
+            const auto groups = groupsOf(store, q, field);
+            std::unordered_map<std::string, const LibraryGroup*> held;
+            for (const auto& group : *groups) held.emplace(group.name, &group);
+            auto rows = q.db.prepare("SELECT name FROM favorite_names WHERE field=? ORDER BY added DESC,name");
+            rows.bind(1, std::string_view(fieldName(field)));
+            while (rows.step())
+                if (const auto found = held.find(rows.text(0)); found != held.end()) out.push_back(*found->second);
+        }
+        return out;
+    });
+    return groupPage(q.revision, *favorites, offset, limit);
+}
+
+void setArtistFavorite(LibraryStore& store, const std::vector<LibraryGroupFilter>& artists, bool favorite) {
+    store
+        .write([&](sqlite::Database& db) {
+            auto mark = db.prepare(favorite ? "INSERT OR IGNORE INTO favorite_names(field,name,added) VALUES(?1,?2,?3)"
+                                            : "DELETE FROM favorite_names WHERE field=?1 AND name=?2");
+            const auto at =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                    .count();
+            for (const auto& artist : artists) {
+                mark.bind(1, std::string_view(fieldName(artist.field))).bind(2, artist.value);
+                if (favorite) mark.bind(3, int64_t(at));
+                mark.run();
+                mark.reset();
+            }
+            db.exec("UPDATE library_revision SET value=value+1 WHERE id=1");
+        })
+        .get();
 }
 
 LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const CancellationToken& token) {

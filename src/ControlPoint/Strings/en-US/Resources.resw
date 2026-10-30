@@ -402,11 +402,21 @@
   <data name="Marks_FavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>Favorite</value></data>
   <data name="Marks_AlbumFavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>Favorite album</value></data>
   <data name="Marks_AlbumFavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>Favorite album</value></data>
+  <data name="Marks_AddFavoriteArtist" xml:space="preserve"><value>Add to favorite artists</value></data>
+  <data name="Marks_RemoveFavoriteArtist" xml:space="preserve"><value>Remove from favorite artists</value></data>
+  <data name="Marks_AddFavoriteComposer" xml:space="preserve"><value>Add to favorite composers</value></data>
+  <data name="Marks_RemoveFavoriteComposer" xml:space="preserve"><value>Remove from favorite composers</value></data>
+  <data name="Marks_FavoriteArtist" xml:space="preserve"><value>Favorite artist</value></data>
+  <data name="Marks_FavoriteComposer" xml:space="preserve"><value>Favorite composer</value></data>
+  <data name="Library_FavoritesOnly.Text" xml:space="preserve"><value>Favorites only</value></data>
+  <data name="Library_RoleArtist" xml:space="preserve"><value>Artist</value></data>
+  <data name="Library_RoleComposer" xml:space="preserve"><value>Composer</value></data>
   <data name="Nav_SmartAdded.Content" xml:space="preserve"><value>Recently added</value></data>
   <data name="Nav_SmartMostPlayed.Content" xml:space="preserve"><value>Most played</value></data>
   <data name="Nav_SmartRecentlyPlayed.Content" xml:space="preserve"><value>Recently played</value></data>
   <data name="Nav_SmartFavorites.Content" xml:space="preserve"><value>Favorites</value></data>
   <data name="Nav_SmartFavoriteAlbums.Content" xml:space="preserve"><value>Favorite albums</value></data>
+  <data name="Nav_SmartFavoriteArtists.Content" xml:space="preserve"><value>Favorite artists</value></data>
   <data name="Nav_SmartNeverPlayed.Content" xml:space="preserve"><value>Never played</value></data>
   <data name="Smart_PlayAll.Text" xml:space="preserve"><value>Play all</value></data>
   <data name="Smart_Shuffle.Text" xml:space="preserve"><value>Shuffle</value></data>

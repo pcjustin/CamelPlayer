@@ -402,11 +402,21 @@
   <data name="Marks_FavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>最愛</value></data>
   <data name="Marks_AlbumFavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>最愛專輯</value></data>
   <data name="Marks_AlbumFavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>最愛專輯</value></data>
+  <data name="Marks_AddFavoriteArtist" xml:space="preserve"><value>加入最愛演出者</value></data>
+  <data name="Marks_RemoveFavoriteArtist" xml:space="preserve"><value>從最愛演出者移除</value></data>
+  <data name="Marks_AddFavoriteComposer" xml:space="preserve"><value>加入最愛作曲家</value></data>
+  <data name="Marks_RemoveFavoriteComposer" xml:space="preserve"><value>從最愛作曲家移除</value></data>
+  <data name="Marks_FavoriteArtist" xml:space="preserve"><value>最愛演出者</value></data>
+  <data name="Marks_FavoriteComposer" xml:space="preserve"><value>最愛作曲家</value></data>
+  <data name="Library_FavoritesOnly.Text" xml:space="preserve"><value>只顯示最愛</value></data>
+  <data name="Library_RoleArtist" xml:space="preserve"><value>演出者</value></data>
+  <data name="Library_RoleComposer" xml:space="preserve"><value>作曲家</value></data>
   <data name="Nav_SmartAdded.Content" xml:space="preserve"><value>最近加入</value></data>
   <data name="Nav_SmartMostPlayed.Content" xml:space="preserve"><value>最常播放</value></data>
   <data name="Nav_SmartRecentlyPlayed.Content" xml:space="preserve"><value>最近播放</value></data>
   <data name="Nav_SmartFavorites.Content" xml:space="preserve"><value>最愛</value></data>
   <data name="Nav_SmartFavoriteAlbums.Content" xml:space="preserve"><value>最愛專輯</value></data>
+  <data name="Nav_SmartFavoriteArtists.Content" xml:space="preserve"><value>最愛演出者</value></data>
   <data name="Nav_SmartNeverPlayed.Content" xml:space="preserve"><value>從未播放</value></data>
   <data name="Smart_PlayAll.Text" xml:space="preserve"><value>全部播放</value></data>
   <data name="Smart_Shuffle.Text" xml:space="preserve"><value>隨機播放</value></data>

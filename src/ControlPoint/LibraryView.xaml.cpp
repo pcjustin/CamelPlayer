@@ -35,7 +35,8 @@ namespace {
 // Localized texts are read on the UI thread and handed to background fetches.
 struct Texts {
     hstring unknown = tr(L"Library_Unknown"), albums = tr(L"Library_Albums"), tracks = tr(L"Library_Tracks"),
-            folder = tr(L"Library_Folder"), artists = tr(L"Search_ArtistCount");
+            folder = tr(L"Library_Folder"), artists = tr(L"Search_ArtistCount"), artist = tr(L"Library_RoleArtist"),
+            composer = tr(L"Library_RoleComposer");
 };
 
 hstring counted(const hstring& format, int64_t n) {
@@ -92,6 +93,19 @@ ui::BrowsePage albumPage(const LibraryAlbumPage& page, const Texts& texts) {
     for (const auto& a : page.albums) {
         out.rows.push_back({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, counted(texts.tracks, a.tracks)});
         out.rows.back().favorite = a.favorite;
+    }
+    return out;
+}
+
+// `roles` labels each row as an artist or a composer, for lists that hold both.
+ui::BrowsePage groupPage(const LibraryGroupPage& page, const Texts& texts, bool roles) {
+    ui::BrowsePage out{page.revision, page.total, {}};
+    // Tracks not yet grouped into albums would make a zero count misleading.
+    for (const auto& g : page.groups) {
+        const bool composer = g.field == LibraryGroupField::Composer;
+        out.rows.push_back({0, g.name, orUnknown(g.name, texts), g.albums ? counted(texts.albums, g.albums) : hstring{},
+                            roles ? (composer ? texts.composer : texts.artist) : hstring{}, counted(texts.tracks, g.tracks)});
+        out.rows.back().composer = composer;
     }
     return out;
 }
@@ -186,6 +200,7 @@ void LibraryView::show(hstring const& tag, hstring const& title) {
     for (const auto& [name, list] : kSmart)
         if (tag == name) view.smart = list;
     view.favoriteAlbums = tag == L"smart:favoriteAlbums";
+    view.favoriteArtists = tag == L"smart:favoriteArtists";
     if (tag == L"albums" || view.favoriteAlbums)
         view.mode = Mode::Albums;
     else if (tag == L"tracks" || view.smart)
@@ -339,7 +354,7 @@ void LibraryView::showEmpty(int64_t total) {
     // An album always has tracks; the search groups, the artist page or Home explain an empty list.
     if (current_.mode == Mode::AlbumDetail || current_.mode == Mode::Artist || current_.mode == Mode::Search || current_.fetch)
         return;
-    if (current_.smartList()) {
+    if (current_.smartList() || current_.favoriteArtists || current_.favoritesOnly) {
         EmptyText().Text(tr(L"Smart_Empty"));
         EmptyText().Visibility(total == 0 ? Visibility::Visible : Visibility::Collapsed);
         return;
@@ -384,6 +399,15 @@ void LibraryView::open(View view, bool push) {
     AlbumFormats().Children().Clear();
     AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
+    ArtistFavoriteButton().Visibility(view.mode == Mode::Artist ? Visibility::Visible : Visibility::Collapsed);
+    showArtistFavorite(false);
+    const auto heart = tr(view.field == LibraryGroupField::Composer ? L"Marks_FavoriteComposer" : L"Marks_FavoriteArtist");
+    ToolTipService::SetToolTip(ArtistFavoriteButton(), box_value(heart));
+    Automation::AutomationProperties::SetName(ArtistFavoriteButton(), heart);
+    const bool named = view.field == LibraryGroupField::Artist || view.field == LibraryGroupField::Composer;
+    FavoritesToggle().Visibility(
+        view.mode == Mode::Groups && named && !view.fetch && !view.favoriteArtists ? Visibility::Visible : Visibility::Collapsed);
+    FavoritesToggle().IsChecked(view.favoritesOnly);
     EmptyText().Visibility(Visibility::Collapsed);
     InitialsBar().Visibility(Visibility::Collapsed);
     restoreOffset_.reset();
@@ -500,19 +524,14 @@ void LibraryView::startCollection() {
                                                                              std::optional<uint64_t> revision) {
             return albumPage(server->browseAlbums(sort, filter, offset, limit, revision), texts);
         };
+    } else if (current_.favoriteArtists) {
+        fetch = [server, texts](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
+            return groupPage(server->favoriteArtists(offset, limit, revision), texts, true);
+        };
     } else if (current_.mode == Mode::Groups) {
-        fetch = [server, texts, field = current_.field](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
-            const auto page = server->browseGroups(field, offset, limit, revision);
-            ui::BrowsePage out{page.revision, page.total, {}};
-            // Tracks not yet grouped into albums would make a zero count misleading.
-            for (const auto& g : page.groups)
-                out.rows.push_back({0,
-                                    g.name,
-                                    orUnknown(g.name, texts),
-                                    g.albums ? counted(texts.albums, g.albums) : hstring{},
-                                    {},
-                                    counted(texts.tracks, g.tracks)});
-            return out;
+        fetch = [server, texts, field = current_.field, favorites = current_.favoritesOnly](int64_t offset, int64_t limit,
+                                                                                            std::optional<uint64_t> revision) {
+            return groupPage(server->browseGroups(field, favorites, offset, limit, revision), texts, false);
         };
     } else if (current_.mode == Mode::Search) {
         fetch = [server, texts, query = current_.query](int64_t offset, int64_t limit, std::optional<uint64_t> revision) {
@@ -609,6 +628,7 @@ void LibraryView::loadArtist() {
         return std::function<void()>([this, page, texts, credits, parts] {
             HeaderDetail().Text(counted(texts.tracks, page->tracks) + L" · " +
                                 counted(texts.albums, page->albums.total + page->appearances.total));
+            showArtistFavorite(page->favorite);
             credits_.clear();
             for (size_t i = 0; i < parts->size() && i < credits.size(); ++i) credits_[credits[i]] = (*parts)[i];
             const auto header = [](const wchar_t* key, int64_t total) { return tr(key) + L" · " + to_hstring(total); };
@@ -747,6 +767,7 @@ std::optional<PlaylistSource> LibraryView::sourceOf(Target target, Mode mode, Li
         if (row.id) return PlaylistSource{Kind::Album, row.id, {}, {}};
     } else if (target == Target::Artists || mode == Mode::Groups) {
         if (row.value.empty()) return std::nullopt;
+        if (row.composer) return PlaylistSource{Kind::Composer, 0, {}, row.value};
         if (target == Target::Artists || field == LibraryGroupField::Artist)
             return PlaylistSource{Kind::Artist, 0, {}, row.value};
         if (field == LibraryGroupField::Composer) return PlaylistSource{Kind::Composer, 0, {}, row.value};
@@ -903,6 +924,21 @@ void LibraryView::markAlbums(bool favorite) {
     });
 }
 
+void LibraryView::markArtists(bool favorite) {
+    if (!menuItem_ || !menuList_ || !submit_) return;
+    const auto field = menuTarget_ == Target::Artists ? LibraryGroupField::Artist : current_.field;
+    background([this, rows = selectionRows(menuList_, menuItem_, menuPaged_), field, favorite, paged = menuPaged_] {
+        std::vector<LibraryGroupFilter> artists;
+        for (const auto& row : rows())
+            if (!row.value.empty()) artists.push_back({row.composer ? LibraryGroupField::Composer : field, row.value});
+        return std::function<void()>([this, artists = std::move(artists), favorite, paged] {
+            if (artists.empty()) return;
+            submit_(ui::artistFavoriteCommand(artists, favorite));
+            if (paged) reloadWhenIdle();
+        });
+    });
+}
+
 void LibraryView::reloadWhenIdle() {
     background([this, server = server_] {
         server->waitIdle();
@@ -1012,6 +1048,23 @@ void LibraryView::OnAlbumFavoriteClick(Windows::Foundation::IInspectable const&,
     if (submit_ && current_.album) submit_(ui::albumFavoriteCommand({current_.album}, favorite));
 }
 
+void LibraryView::showArtistFavorite(bool favorite) {
+    ArtistFavoriteButton().IsChecked(favorite);
+    ArtistFavoriteIcon().Glyph(favorite ? L"\xE00B" : L"\xE006");
+}
+
+void LibraryView::OnArtistFavoriteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    const bool favorite = ArtistFavoriteButton().IsChecked() && ArtistFavoriteButton().IsChecked().Value();
+    showArtistFavorite(favorite);
+    if (submit_ && current_.filter)
+        submit_(ui::artistFavoriteCommand({{current_.filter->field, current_.filter->value}}, favorite));
+}
+
+void LibraryView::OnFavoritesOnlyClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    current_.favoritesOnly = FavoritesToggle().IsChecked().Value();
+    open(current_, false);
+}
+
 void LibraryView::showMenu(MenuFlyout const& menu, FrameworkElement const& element, Input::ContextRequestedEventArgs const& e) {
     Primitives::FlyoutShowOptions options;
     if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
@@ -1060,8 +1113,12 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
         reset.Click([this](auto&&, auto&&) { resetSelection(); });
         rowMenu_.Items().Append(reset);
         rowMarks_.push_back(reset);
+        rowArtistMarks_ = ui::appendArtistFavoriteMenu(rowMenu_, [this](bool favorite) { markArtists(favorite); });
     }
     for (const auto& entry : rowMarks_) entry.Visibility(item.IsTrack() ? Visibility::Visible : Visibility::Collapsed);
+    const bool named = group && (row.composer || current_.field == LibraryGroupField::Artist);
+    for (const auto& entry : rowArtistMarks_) entry.Visibility(named ? Visibility::Visible : Visibility::Collapsed);
+    ui::labelArtistFavoriteMenu(rowArtistMarks_, row.composer);
     // Groups have no queue actions; their first playlist entry follows a separator that is hidden with them.
     const auto queueVisibility = group ? Visibility::Collapsed : Visibility::Visible;
     rowMenu_.Items().GetAt(0).Visibility(menuRow_.folder ? Visibility::Visible : Visibility::Collapsed);
@@ -1093,9 +1150,11 @@ void LibraryView::OnCardContextRequested(UIElement const& sender, Input::Context
         cardMenu_.Items().RemoveAt(0); // the separator before the playlist entries
         cardMarksFirst_ = cardMenu_.Items().Size();
         ui::appendAlbumFavoriteMenu(cardMenu_, [this](bool favorite) { markAlbums(favorite); });
+        cardArtistMarks_ = ui::appendArtistFavoriteMenu(cardMenu_, [this](bool favorite) { markArtists(favorite); });
     }
-    for (uint32_t i = cardMarksFirst_; i < cardMenu_.Items().Size(); ++i)
+    for (uint32_t i = cardMarksFirst_; i < cardMenu_.Items().Size() - uint32_t(cardArtistMarks_.size()); ++i)
         cardMenu_.Items().GetAt(i).Visibility(artist ? Visibility::Collapsed : Visibility::Visible);
+    for (const auto& entry : cardArtistMarks_) entry.Visibility(artist ? Visibility::Visible : Visibility::Collapsed);
     showMenu(cardMenu_, element, e);
 }
 
@@ -1187,7 +1246,7 @@ void LibraryView::OnArtworkContextChanged(FrameworkElement const& sender, DataCo
 
 // The size of a whole list (all albums, artists, tracks…) under its title; filtered lists keep their own detail.
 void LibraryView::showCount(int64_t total) {
-    if (!current_.detail.empty() || current_.fetch || current_.smartList()) return;
+    if (!current_.detail.empty() || current_.fetch || current_.smartList() || current_.favoriteArtists) return;
     const wchar_t* key = nullptr;
     if (current_.mode == Mode::Albums && !current_.filter) key = L"Library_Albums";
     if (current_.mode == Mode::Tracks) key = L"Library_Tracks";
@@ -1203,7 +1262,7 @@ void LibraryView::showCount(int64_t total) {
 
 // Whole lists in a name order get the jump bar: albums by title or artist, artists, composers and genres.
 void LibraryView::loadInitials() {
-    if (current_.fetch || current_.smartList() || current_.filter) return;
+    if (current_.fetch || current_.smartList() || current_.filter || current_.favoriteArtists || current_.favoritesOnly) return;
     const bool albums = current_.mode == Mode::Albums && (albumSort_ == AlbumSort::Title || albumSort_ == AlbumSort::Artist);
     const bool groups = current_.mode == Mode::Groups && current_.field != LibraryGroupField::Year;
     if (!albums && !groups) return;
@@ -1391,8 +1450,9 @@ void LibraryView::OnRowClick(Windows::Foundation::IInspectable const&, ItemClick
     const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
     if (current_.mode == Mode::Groups) {
         if (row.value.empty()) return;
-        const bool named = current_.field == LibraryGroupField::Artist || current_.field == LibraryGroupField::Composer;
-        openGroup(current_.field, row.value, row.title, named ? hstring{} : current_.title, true);
+        const auto field = row.composer ? LibraryGroupField::Composer : current_.field;
+        const bool named = field == LibraryGroupField::Artist || field == LibraryGroupField::Composer;
+        openGroup(field, row.value, row.title, named ? hstring{} : current_.title, true);
     } else if (current_.mode == Mode::AlbumDetail || current_.mode == Mode::Artist) {
         const auto& tracks = current_.mode == Mode::Artist ? artistTracks_ : detailTracks_;
         const auto found = std::find_if(tracks.begin(), tracks.end(), [&](const auto& t) { return t.id == row.id; });

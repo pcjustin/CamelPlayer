@@ -54,6 +54,8 @@ struct LibraryAlbumPage {
 struct LibraryGroup {
     std::string name;
     int64_t albums = 0, tracks = 0;
+    bool favorite = false;                               // artists and composers only
+    LibraryGroupField field = LibraryGroupField::Artist; // favoriteArtists lists both fields
 };
 
 struct LibraryGroupPage {
@@ -98,6 +100,7 @@ struct LibraryArtistPage {
     int64_t tracks = 0;                 // every visible track credited to them
     std::vector<LibraryTrackRow> songs; // the most played, then by year and album order
     LibraryAlbumPage albums, appearances;
+    bool favorite = false;
 };
 
 struct LibraryFolderEntry {
@@ -130,8 +133,10 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
 LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset, int64_t limit,
                                       const CancellationToken& token = {});
 
-LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, int64_t offset, int64_t limit,
-                              std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+// `favoritesOnly` keeps the favorite artists or composers.
+LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, bool favoritesOnly, int64_t offset,
+                              int64_t limit, std::optional<uint64_t> expectedRevision = std::nullopt,
+                              const CancellationToken& token = {});
 
 // Where an initial starts in a whole list, for the jump bar beside it: "#" (digits and symbols), "A"–"Z", "あ" (kana)
 // and "漢" (Han, Hangul and the scripts sorted after them). Initials without names are left out; a script sorted between
@@ -174,6 +179,13 @@ LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64
 // Favorite albums, the latest marked first.
 LibraryAlbumPage favoriteAlbums(const LibraryStore& store, int64_t offset, int64_t limit,
                                 std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+// Favorite artists, then favorite composers, each the latest marked first; a name the library no longer holds is left
+// out until it returns.
+LibraryGroupPage favoriteArtists(const LibraryStore& store, int64_t offset, int64_t limit,
+                                 std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+// Marks or clears artists and composers (the filters' field and value) as favorites; a name already marked keeps the time
+// it became one.
+void setArtistFavorite(LibraryStore& store, const std::vector<LibraryGroupFilter>& artists, bool favorite);
 LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t album, const CancellationToken& token = {});
 // Shows the names and root locations scans recorded, without reading the music storage.
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token = {});

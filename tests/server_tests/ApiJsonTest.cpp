@@ -185,6 +185,16 @@ TEST(ApiJson, FavoriteCommandsRoundTrip) {
     j = toJson(album);
     j["albums"] = json::array({"3"});
     EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    Command artist;
+    artist.kind = CommandKind::SetArtistFavorite;
+    artist.artists = {{LibraryGroupField::Artist, "mizuki"}, {LibraryGroupField::Composer, "澤野弘之"}};
+    artist.favorite = true;
+    EXPECT_EQ(throughText(artist, commandFromJson), artist);
+    j = toJson(artist);
+    j["artists"][0]["field"] = "genre";
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    j.erase("artists");
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
 }
 
 TEST(ApiJson, AddingALibraryRootRoundTripsItsPath) {

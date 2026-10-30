@@ -1320,6 +1320,14 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     album.albums = {store.openReader().scalar("SELECT album_id FROM tracks").value()};
     EXPECT_FALSE(send(album).commandError);
     EXPECT_EQ(store.openReader().scalar("SELECT album_favorite FROM stats WHERE file_id=" + std::to_string(file)), 1);
+    Command artist = command(CommandKind::SetArtistFavorite);
+    artist.favorite = true;
+    EXPECT_THROW(server->submit(artist), std::invalid_argument);
+    artist.artists = {{LibraryGroupField::Genre, "Rock"}};
+    EXPECT_THROW(server->submit(artist), std::invalid_argument);
+    artist.artists = {{LibraryGroupField::Composer, "Someone"}};
+    EXPECT_FALSE(send(artist).commandError);
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM favorite_names WHERE field='composer' AND name='Someone'"), 1);
     server.reset();
 }
 

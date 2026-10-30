@@ -40,7 +40,8 @@
             </StackPanel>
         </DataTemplate>
         <DataTemplate x:Key="ArtistTemplate" x:DataType="local:BrowseItem">
-            <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+            <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                    ContextRequested="OnArtistContextRequested">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon Glyph="&#xE77B;" FontSize="14" />
                     <TextBlock Text="{x:Bind Title, Mode=OneWay}" />

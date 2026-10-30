@@ -45,6 +45,14 @@ Command albumFavoriteCommand(std::vector<int64_t> albums, bool favorite) {
     return command;
 }
 
+Command artistFavoriteCommand(std::vector<LibraryGroupFilter> artists, bool favorite) {
+    Command command;
+    command.kind = CommandKind::SetArtistFavorite;
+    command.artists = std::move(artists);
+    command.favorite = favorite;
+    return command;
+}
+
 std::vector<MenuFlyoutItemBase> appendFavoriteMenu(MenuFlyout const& menu, const std::function<void(bool)>& choose) {
     std::vector<MenuFlyoutItemBase> added{MenuFlyoutSeparator(),
                                           entry(tr(L"Marks_AddFavorite"), L"\xE00B", [choose] { choose(true); }),
@@ -57,6 +65,19 @@ void appendAlbumFavoriteMenu(MenuFlyout const& menu, const std::function<void(bo
     menu.Items().Append(MenuFlyoutSeparator());
     menu.Items().Append(entry(tr(L"Marks_AddFavoriteAlbum"), L"\xE00B", [choose] { choose(true); }));
     menu.Items().Append(entry(tr(L"Marks_RemoveFavoriteAlbum"), L"\xE006", [choose] { choose(false); }));
+}
+
+std::vector<MenuFlyoutItemBase> appendArtistFavoriteMenu(MenuFlyout const& menu, const std::function<void(bool)>& choose) {
+    std::vector<MenuFlyoutItemBase> added{MenuFlyoutSeparator(),
+                                          entry(tr(L"Marks_AddFavoriteArtist"), L"\xE00B", [choose] { choose(true); }),
+                                          entry(tr(L"Marks_RemoveFavoriteArtist"), L"\xE006", [choose] { choose(false); })};
+    for (const auto& item : added) menu.Items().Append(item);
+    return added;
+}
+
+void labelArtistFavoriteMenu(const std::vector<MenuFlyoutItemBase>& entries, bool composer) {
+    entries[1].as<MenuFlyoutItem>().Text(tr(composer ? L"Marks_AddFavoriteComposer" : L"Marks_AddFavoriteArtist"));
+    entries[2].as<MenuFlyoutItem>().Text(tr(composer ? L"Marks_RemoveFavoriteComposer" : L"Marks_RemoveFavoriteArtist"));
 }
 
 void rowFavoriteClicked(Windows::Foundation::IInspectable const& button, Submit const& submit) {

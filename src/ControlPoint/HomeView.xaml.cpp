@@ -17,6 +17,7 @@
 #include "ArtworkLoader.h"
 #include "BrowseItem.h"
 #include "CardSize.h"
+#include "TrackMarks.h"
 #include "UiText.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
@@ -285,8 +286,8 @@ winrt::fire_and_forget HomeView::refresh() {
         auto tracks = std::async(std::launch::async, [&] {
             return server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 1, std::nullopt).total;
         });
-        auto artists = std::async(std::launch::async,
-                                  [&] { return server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total; });
+        auto artists = std::async(
+            std::launch::async, [&] { return server->browseGroups(LibraryGroupField::Artist, false, 0, 1, std::nullopt).total; });
         data->today = overview(localStartMs(0));
         data->week = overview(localStartMs((now.wDayOfWeek + 6) % 7)); // weeks start on Monday
         const auto month = statistics(localStartMs(0, Start::Month));
@@ -604,6 +605,25 @@ void HomeView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemClickE
 void HomeView::OnArtistClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
     const auto& row = get_self<BrowseItem>(e.ClickedItem().as<CamelPlayer::BrowseItem>())->row();
     if (!row.value.empty() && handlers_.openArtist) handlers_.openArtist(ui::utf8(row.value));
+}
+
+void HomeView::OnArtistContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
+    const auto element = sender.as<FrameworkElement>();
+    const auto item = element.DataContext().try_as<CamelPlayer::BrowseItem>();
+    if (!item || !handlers_.submit) return;
+    menuArtist_ = get_self<BrowseItem>(item)->row().value;
+    if (menuArtist_.empty()) return;
+    if (!artistMenu_) {
+        artistMenu_ = MenuFlyout();
+        ui::appendArtistFavoriteMenu(artistMenu_, [this](bool favorite) {
+            handlers_.submit(ui::artistFavoriteCommand({{LibraryGroupField::Artist, menuArtist_}}, favorite));
+        });
+        artistMenu_.Items().RemoveAt(0); // the separator, with nothing above it
+    }
+    Primitives::FlyoutShowOptions options;
+    if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
+    artistMenu_.ShowAt(element, options);
+    e.Handled(true);
 }
 
 void HomeView::OnTrackClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {

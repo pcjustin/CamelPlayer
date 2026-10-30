@@ -97,13 +97,14 @@ enum class CommandKind : uint8_t {
     RemoveLibraryRoot,   // rootId
     ResetPlayStatistics, // tracks: delete their plays and zero their counters
     ResetAllPlayStatistics,
-    AddLibraryRoot,  // path: a folder to index; overlapping and alias paths are normalized by the Server
-    QueueAdd,        // sources: append entries without changing the current track
-    QueuePlayNext,   // sources: insert entries after the current entry
-    QueueRemove,     // entryIds: remove entries without stopping the current track
-    QueueClear,      // keep the current queue entry, if any
-    SetFavorite,     // tracks + favorite
-    SetAlbumFavorite // albums + favorite: marks or clears every track of the albums
+    AddLibraryRoot,   // path: a folder to index; overlapping and alias paths are normalized by the Server
+    QueueAdd,         // sources: append entries without changing the current track
+    QueuePlayNext,    // sources: insert entries after the current entry
+    QueueRemove,      // entryIds: remove entries without stopping the current track
+    QueueClear,       // keep the current queue entry, if any
+    SetFavorite,      // tracks + favorite
+    SetAlbumFavorite, // albums + favorite: marks or clears every track of the albums
+    SetArtistFavorite // artists + favorite: artists and composers by name
 };
 
 struct Command {
@@ -123,6 +124,7 @@ struct Command {
     std::string path;
     bool favorite = false;
     std::vector<int64_t> albums;
+    std::vector<LibraryGroupFilter> artists;
     bool operator==(const Command&) const = default;
 };
 
@@ -288,7 +290,7 @@ public:
     virtual LibraryAlbumPage browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
                                           int64_t limit, std::optional<uint64_t> revision,
                                           const CancellationToken& token = {}) const = 0;
-    virtual LibraryGroupPage browseGroups(LibraryGroupField field, int64_t offset, int64_t limit,
+    virtual LibraryGroupPage browseGroups(LibraryGroupField field, bool favoritesOnly, int64_t offset, int64_t limit,
                                           std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryInitial> groupInitials(LibraryGroupField field, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryInitial> albumInitials(AlbumSort sort, const CancellationToken& token = {}) const = 0;
@@ -304,6 +306,8 @@ public:
                                             const CancellationToken& token = {}) const = 0;
     virtual LibraryAlbumPage favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                             const CancellationToken& token = {}) const = 0;
+    virtual LibraryGroupPage favoriteArtists(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                             const CancellationToken& token = {}) const = 0;
     virtual std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token = {}) const = 0;
     virtual LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const = 0;
     virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;

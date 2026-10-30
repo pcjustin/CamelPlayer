@@ -426,6 +426,12 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
 )sql");
             updateLibraryNameRules(db);
         },
+        // Favorite artists and composers are kept by name, so they outlast rescans, moves and rebuilds, and come back
+        // with a name that left the library and returned.
+        [](sqlite::Database& db) {
+            db.exec("CREATE TABLE favorite_names (field TEXT NOT NULL CHECK (field IN ('artist', 'composer')), name TEXT NOT "
+                    "NULL, added INTEGER NOT NULL, PRIMARY KEY (field, name)) WITHOUT ROWID;");
+        },
     };
     return migrations;
 }

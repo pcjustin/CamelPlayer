@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 27> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 28> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -91,7 +91,10 @@ constexpr Names<CommandKind, 27> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::QueueRemove, "queueRemove"},
                                                   {CommandKind::QueueClear, "queueClear"},
                                                   {CommandKind::SetFavorite, "setFavorite"},
-                                                  {CommandKind::SetAlbumFavorite, "setAlbumFavorite"}};
+                                                  {CommandKind::SetAlbumFavorite, "setAlbumFavorite"},
+                                                  {CommandKind::SetArtistFavorite, "setArtistFavorite"}};
+constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},
+                                                       {LibraryGroupField::Composer, "composer"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
 constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
@@ -378,9 +381,10 @@ CommandStamp commandStampFromJson(const json& j) {
 }
 
 json toJson(const Command& c) {
-    json sources = json::array(), tracks = json::array();
+    json sources = json::array(), tracks = json::array(), artists = json::array();
     for (const auto& s : c.sources) sources.push_back(toJson(s));
     for (const auto& t : c.tracks) tracks.push_back({{"file", t.file}});
+    for (const auto& a : c.artists) artists.push_back({{"field", nameOf(a.field, kArtistFields)}, {"name", a.value}});
     return {{"apiVersion", c.apiVersion},
             {"kind", nameOf(c.kind, kCommandKinds)},
             {"source", optionalJson(c.source)},
@@ -396,7 +400,8 @@ json toJson(const Command& c) {
             {"tracks", tracks},
             {"path", c.path},
             {"favorite", c.favorite},
-            {"albums", c.albums}};
+            {"albums", c.albums},
+            {"artists", artists}};
 }
 
 Command commandFromJson(const json& j) {
@@ -425,6 +430,9 @@ Command commandFromJson(const json& j) {
             if (!v.is_number_integer()) invalid("albums holds a non-integer");
             c.albums.push_back(v.get<int64_t>());
         }
+    if (j.contains("artists") || c.kind == CommandKind::SetArtistFavorite)
+        for (const auto& a : array(j, "artists"))
+            c.artists.push_back({enumFrom(field(a, "field"), kArtistFields, "artist field"), value<std::string>(a, "name")});
     return c;
 }
 

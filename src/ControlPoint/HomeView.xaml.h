@@ -46,6 +46,8 @@ struct HomeView : HomeViewT<HomeView> {
     void OnChartSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnCoverLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCoverUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnArtistContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                                  Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
 private:
     // The days, weeks or months the chart shows for the chosen period, and the listening in each.
@@ -79,6 +81,8 @@ private:
     hstring period_ = L"month"; // the chosen card's tag
     bool listening_ = false;    // the Listening page shows rather than Home
     ChartData chart_;
+    Microsoft::UI::Xaml::Controls::MenuFlyout artistMenu_{nullptr};
+    std::string menuArtist_; // the artist the menu marks
 };
 
 } // namespace winrt::CamelPlayer::implementation

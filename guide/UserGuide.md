@@ -24,7 +24,7 @@ The navigation pane lists **Albums** (sorted by title, artist, year or date adde
 
 Click a track to play it. Right-click tracks, albums, artists or folders for **Play next** and **Add to end of queue**; Ctrl-click and Shift-click select several rows first. The queue button at the right of the player bar opens the queue: drag entries to reorder them, press Delete to remove them, and use its ⋯ menu to clear the queue, save it as a playlist or turn **Autoplay when the queue ends** on or off. Autoplay keeps random library tracks you have not played in the last 7 days playing after the last one. The cover in the player bar opens the playing album.
 
-Right-click a selection for **Create playlist** or **Add to playlist**. A playlist plays, renames, reorders by dragging and saves an M3U8 file with **Export M3U8**; **Import M3U8** on the Playlists page reads M3U8 and M3U files. The heart beside a track or album marks it as a favorite, and **Smart Playlists** gathers recently added, most played, last played and never played tracks and your favorites.
+Right-click a selection for **Create playlist** or **Add to playlist**. A playlist plays, renames, reorders by dragging and saves an M3U8 file with **Export M3U8**; **Import M3U8** on the Playlists page reads M3U8 and M3U files. The heart beside a track or album marks it as a favorite; an artist or composer is marked by the heart on their page or from the right-click menu of their name, and **Favorites only** narrows the Artists and Composers lists to them. **Smart Playlists** gathers recently added, most played, last played and never played tracks and your favorites, with **Favorite artists** listing your artists and then your composers.
 
 | Keys | While CamelPlayer is in front |
 | --- | --- |

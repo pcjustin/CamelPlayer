@@ -19,8 +19,8 @@ New features since 0.0.1:
 - **Play queue:** play next, add to the end, reorder, remove and save as a playlist, with shuffle, repeat and track history. The queue and position are restored at the next start.
 - **Autoplay:** when the queue ends, random library tracks keep playing.
 - **Playlists:** create them from any selection, then rename, reorder, remove entries, and import and export M3U8 files.
-- **Favorites** for tracks and albums.
-- **Smart lists:** recently added, most played, last played, favorite tracks, favorite albums and never played.
+- **Favorites** for tracks, albums, artists and composers. The Artists and Composers lists can show only their favorites.
+- **Smart lists:** recently added, most played, last played, favorite tracks, favorite albums, favorite artists and never played.
 - **Listening page:** listening time and plays for today, this week, this month, this year and all time, with this month's time, plays and most played album on Home. The chosen period shows a listening-time chart, the most played albums, artists and tracks by plays or listening time, and the play history. The statistics of selected tracks can be reset from their right-click menu.
 - **Windows integration:** media keys, the volume flyout and the lock screen show and control playback. System-wide hotkeys can be changed, and keyboard shortcuts work while the window is in front. CamelPlayer keeps running in the notification area after its window closes, and only one copy runs at a time.
 - **First-run guide** for choosing the look, adding music folders and choosing the output.

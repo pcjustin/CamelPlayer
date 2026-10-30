@@ -23,7 +23,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit,
                 ui::PlaylistMenu playlistMenu, std::function<void(ui::SourceFetch, std::string name)> savePlaylist);
     // albums, artists, composers, genres, years, tracks, folders or a smart list (smart:added, smart:mostPlayed,
-    // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:neverPlayed); starts a fresh navigation history.
+    // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:favoriteArtists, smart:neverPlayed); starts a
+    // fresh navigation history.
     void show(hstring const& tag, hstring const& title);
     // `leave`, when set, is what Back runs: return to the page the album or artist was opened from. `keepHistory` opens
     // it over the current library view instead, so Back returns there.
@@ -81,6 +82,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
         e.Handled(true);
     }
     void OnAlbumFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnArtistFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnFavoritesOnlyClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnShuffleListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSaveListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -107,6 +110,8 @@ private:
         std::optional<camel::server::SmartList> smart;
         bool favoriteAlbums = false;
         bool smartList() const { return smart || favoriteAlbums; }
+        bool favoriteArtists = false; // artists and composers, so it lists groups of both fields
+        bool favoritesOnly = false;   // the Artists or Composers list narrowed to its favorites
         hstring title, detail;
         double offset = 0; // where its list was scrolled when another view opened over it
     };
@@ -157,8 +162,11 @@ private:
     void resetSelection();
     winrt::fire_and_forget confirmReset(std::vector<camel::server::LibraryTrackKey> tracks);
     void markAlbums(bool favorite);
+    // Marks or clears the menu's artists or composers as favorites.
+    void markArtists(bool favorite);
     void reloadWhenIdle();
     void showAlbumFavorite(bool favorite);
+    void showArtistFavorite(bool favorite);
     void showAlbumFormats(const std::vector<camel::server::LibraryAlbumFormat>& formats);
     void showMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, Microsoft::UI::Xaml::FrameworkElement const& element,
                   Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const& e);
@@ -191,7 +199,9 @@ private:
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};
     std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowMarks_; // favorites and statistics, for tracks only
-    uint32_t cardMarksFirst_ = 0;                                             // album entries, hidden for artists
+    // Favorite artist entries, for artist and composer rows and artist chips only.
+    std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowArtistMarks_, cardArtistMarks_;
+    uint32_t cardMarksFirst_ = 0; // album entries, hidden for artists
     ui::BrowseRow menuRow_;
     Windows::Foundation::IInspectable menuItem_{nullptr};
     Microsoft::UI::Xaml::Controls::ListViewBase menuList_{nullptr};

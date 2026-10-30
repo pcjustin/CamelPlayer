@@ -32,8 +32,8 @@ public:
     LibraryAlbumPage recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token = {}) const override;
     LibraryAlbumPage browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset, int64_t limit,
                                   std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
-    LibraryGroupPage browseGroups(LibraryGroupField field, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
-                                  const CancellationToken& token = {}) const override;
+    LibraryGroupPage browseGroups(LibraryGroupField field, bool favoritesOnly, int64_t offset, int64_t limit,
+                                  std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
     std::vector<LibraryInitial> groupInitials(LibraryGroupField field, const CancellationToken& token = {}) const override;
     std::vector<LibraryInitial> albumInitials(AlbumSort sort, const CancellationToken& token = {}) const override;
     std::vector<std::vector<LibraryNamePart>> creditParts(const std::vector<std::string>& credits,
@@ -46,6 +46,8 @@ public:
                                     const CancellationToken& token = {}) const override;
     LibraryAlbumPage favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                     const CancellationToken& token = {}) const override;
+    LibraryGroupPage favoriteArtists(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                     const CancellationToken& token = {}) const override;
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token = {}) const override;
     LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const override;
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;

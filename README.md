@@ -44,7 +44,7 @@ The screenshots show a demo library with made-up albums and covers.
 
 - **A queue** with play next, add to the end, reordering, shuffle, repeat and history, restored at the next start. When it ends, autoplay keeps random library tracks playing.
 - **Playlists** made from any selection, with M3U8 import and export.
-- **Favorite tracks and albums**, and smart lists: recently added, most played, last played, favorites and never played.
+- **Favorite tracks, albums, artists and composers**, and smart lists: recently added, most played, last played, favorites and never played. A favorite artist is kept by name, so it stays one through rescans and moves.
 
 ### Listening
 

@@ -71,7 +71,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetAlbumFavorite)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetArtistFavorite)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -86,8 +86,15 @@ void validate(const Command& c) {
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) || c.tracks.empty() == trackKeys ||
         c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
         c.albums.empty() == (c.kind == CommandKind::SetAlbumFavorite) ||
-        (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite))
+        c.artists.empty() == (c.kind == CommandKind::SetArtistFavorite) ||
+        (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite &&
+         c.kind != CommandKind::SetArtistFavorite))
         throw std::invalid_argument("invalid Server command payload");
+    if (std::ranges::any_of(c.artists, [](const LibraryGroupFilter& a) {
+            return (a.field != LibraryGroupField::Artist && a.field != LibraryGroupField::Composer) || a.value.empty() ||
+                   a.role != LibraryAlbumRole::Any;
+        }))
+        throw std::invalid_argument("invalid favorite artist");
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
         throw std::invalid_argument("track ranges require the future segment playback adapter");
@@ -723,6 +730,10 @@ private:
                 applyMarks(entries_);
                 ++marks_;
                 queueChanged_ = true;
+                break;
+            case CommandKind::SetArtistFavorite:
+                if (!library_) throw std::logic_error("Server library is not configured");
+                setArtistFavorite(*library_, c.artists, c.favorite);
                 break;
             case CommandKind::ApplySettings: {
                 if (c.settings) {
@@ -1440,9 +1451,9 @@ LibraryAlbumPage LocalServer::browseAlbums(AlbumSort sort, const std::optional<L
                                            const CancellationToken& token) const {
     return camel::server::browseAlbums(impl_->library(), sort, filter, offset, limit, revision, token);
 }
-LibraryGroupPage LocalServer::browseGroups(LibraryGroupField field, int64_t offset, int64_t limit,
+LibraryGroupPage LocalServer::browseGroups(LibraryGroupField field, bool favoritesOnly, int64_t offset, int64_t limit,
                                            std::optional<uint64_t> revision, const CancellationToken& token) const {
-    return camel::server::browseGroups(impl_->library(), field, offset, limit, revision, token);
+    return camel::server::browseGroups(impl_->library(), field, favoritesOnly, offset, limit, revision, token);
 }
 std::vector<LibraryInitial> LocalServer::groupInitials(LibraryGroupField field, const CancellationToken& token) const {
     return camel::server::groupInitials(impl_->library(), field, token);
@@ -1474,6 +1485,10 @@ LibraryTrackRowPage LocalServer::smartTracks(SmartList list, int64_t offset, int
 LibraryAlbumPage LocalServer::favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                              const CancellationToken& token) const {
     return camel::server::favoriteAlbums(impl_->library(), offset, limit, revision, token);
+}
+LibraryGroupPage LocalServer::favoriteArtists(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                              const CancellationToken& token) const {
+    return camel::server::favoriteArtists(impl_->library(), offset, limit, revision, token);
 }
 std::optional<ArtworkReference> LocalServer::artwork(const ArtworkRequest& request, const CancellationToken& token) const {
     return impl_->artwork(request, token);
