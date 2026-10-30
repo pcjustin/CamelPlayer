@@ -90,8 +90,6 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnUpdateCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPaneToggleRequested(Microsoft::UI::Xaml::Controls::TitleBar const&, Windows::Foundation::IInspectable const&);
     void OnTitleBackRequested(Microsoft::UI::Xaml::Controls::TitleBar const&, Windows::Foundation::IInspectable const&);
-    void OnBackAccelerator(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&,
-                           Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const&);
     // The installation check (docs/Plan.md §8.6).
     void OnCheckInstallClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRepairClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

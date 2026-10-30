@@ -18,7 +18,6 @@
     <Grid KeyboardAcceleratorPlacementMode="Hidden" PreviewKeyDown="OnWindowKeyDown">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
-            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="OnBackAccelerator" />
         </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

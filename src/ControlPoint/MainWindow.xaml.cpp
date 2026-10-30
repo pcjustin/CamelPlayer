@@ -1344,6 +1344,11 @@ void MainWindow::OnWindowKeyDown(Windows::Foundation::IInspectable const&, Input
     if (key != VirtualKey::Space && key != VirtualKey::Left && key != VirtualKey::Right) return;
     if (capturing_ || !server_ || !Content().XamlRoot()) return;
     if (Media::VisualTreeHelper::GetOpenPopupsForXamlRoot(Content().XamlRoot()).Size() > 0) return;
+    // Alt+Left goes back wherever the focus is, before a focused slider or list takes the arrow key for itself.
+    if (key == VirtualKey::Left && GetKeyState(VK_MENU) < 0 && GetKeyState(VK_CONTROL) >= 0 && GetKeyState(VK_SHIFT) >= 0) {
+        if (!e.KeyStatus().WasKeyDown && goBack()) e.Handled(true);
+        return;
+    }
     const auto focused = Input::FocusManager::GetFocusedElement(Content().XamlRoot());
     if (focused && (focused.try_as<TextBox>() || focused.try_as<PasswordBox>() || focused.try_as<RichEditBox>() ||
                     focused.try_as<NumberBox>() || focused.try_as<AutoSuggestBox>()))
@@ -1469,10 +1474,6 @@ void MainWindow::showTitleBack() {
 
 void MainWindow::OnTitleBackRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
     goBack();
-}
-
-void MainWindow::OnBackAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {
-    if (goBack()) e.Handled(true);
 }
 
 bool MainWindow::goBack() {
