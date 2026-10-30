@@ -34,6 +34,8 @@ public:
                                   std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
     LibraryGroupPage browseGroups(LibraryGroupField field, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                   const CancellationToken& token = {}) const override;
+    std::vector<LibraryInitial> groupInitials(LibraryGroupField field, const CancellationToken& token = {}) const override;
+    std::vector<LibraryInitial> albumInitials(AlbumSort sort, const CancellationToken& token = {}) const override;
     LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                         std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
     LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,

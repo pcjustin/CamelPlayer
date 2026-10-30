@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <random>
 
+#include "Server/Library/LibraryText.h"
 #include "Server/Library/LibraryViews.h"
 #include "Server/Library/PlayStatistics.h"
 #include "TestUtil.h"
@@ -140,6 +141,41 @@ TEST_F(LibraryViewsTest, GroupsCountAlbumsAndTracksAndCreditEveryArtist) {
     EXPECT_EQ(browseGroups(*store, LibraryGroupField::Genre, 1, 1).groups[0].name, "Rock");
 }
 
+TEST_F(LibraryViewsTest, InitialsMarkWhereEachLetterKanaAndHanBegin) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec(R"sql(
+INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES
+ (7,2,1,'c:\m\a\7.flac','audio',1,1,1),(8,2,1,'c:\m\a\8.flac','audio',1,1,1),(9,2,1,'c:\m\a\9.flac','audio',1,1,1);
+INSERT INTO albums(id,folder_id,grouping_key,title,album_artist,year,added) VALUES
+ (5,2,'e','1999','あいみょん',2001,50),(6,2,'f','delta','宇多田ヒカル',2002,60),(7,2,'g','あの夏','eve',2003,70);
+INSERT INTO tracks(id,file_id,album_id,title,artist,album,year,disc_number,track_number,format,sample_rate,total_frames) VALUES
+ (7,7,5,'x','あいみょん','1999',2001,1,1,'flac',1000,1000),(8,8,6,'y','宇多田ヒカル','delta',2002,1,1,'flac',1000,1000),
+ (9,9,7,'z','eve','あの夏',2003,1,1,'flac',1000,1000);
+)sql");
+            for (int64_t track = 1; track <= 9; ++track) updateLibraryTrackText(db, track);
+            for (int64_t album = 1; album <= 7; ++album) updateLibraryAlbumText(db, album);
+        })
+        .get();
+    using Initials = std::vector<LibraryInitial>;
+    const auto names = [&](LibraryGroupField field) {
+        std::vector<std::string> out;
+        for (const auto& group : browseGroups(*store, field, 0, 50).groups) out.push_back(group.name);
+        return out;
+    };
+    EXPECT_EQ(names(LibraryGroupField::Artist), (std::vector<std::string>{"Amy", "eve", "Zed", "あいみょん", "宇多田ヒカル"}));
+    EXPECT_EQ(groupInitials(*store, LibraryGroupField::Artist), (Initials{{"A", 0}, {"E", 1}, {"Z", 2}, {"あ", 3}, {"漢", 4}}));
+    EXPECT_EQ(titles(browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 50)),
+              (std::vector<std::string>{"1999", "Alpha", "Beta", "delta", "あの夏"}));
+    EXPECT_EQ(albumInitials(*store, AlbumSort::Title), (Initials{{"#", 0}, {"A", 1}, {"B", 2}, {"D", 3}, {"あ", 4}}));
+    EXPECT_EQ(titles(browseAlbums(*store, AlbumSort::Artist, std::nullopt, 0, 50)),
+              (std::vector<std::string>{"Alpha", "あの夏", "Beta", "1999", "delta"}));
+    EXPECT_EQ(albumInitials(*store, AlbumSort::Artist), (Initials{{"A", 0}, {"E", 1}, {"Z", 2}, {"あ", 3}, {"漢", 4}}));
+    EXPECT_TRUE(albumInitials(*store, AlbumSort::Year).empty());
+    EXPECT_TRUE(groupInitials(*store, LibraryGroupField::Year).empty());
+    EXPECT_EQ(libraryInitialLabels().size(), 29u);
+}
+
 TEST_F(LibraryViewsTest, TrackRowsSortByEachColumnInEitherDirection) {
     EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, false, 0, 50)), (std::vector<int64_t>{2, 3, 1, 4}));
     EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, true, 0, 50)), (std::vector<int64_t>{4, 1, 3, 2}));
@@ -163,7 +199,7 @@ TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
     const auto rows = browseTrackRows(*store, TrackSort::Title, false, 0, 50);
     EXPECT_NE(rows.revision, before);
     ASSERT_EQ(rows.tracks.size(), 4u);
-    EXPECT_TRUE(rows.tracks[1].favorite); // Song B
+    EXPECT_TRUE(rows.tracks[1].favorite);  // Song B
     EXPECT_FALSE(rows.tracks[3].favorite); // Song D, cleared again
     const auto detail = albumDetail(*store, 1);
     ASSERT_EQ(detail.tracks.size(), 3u);
@@ -183,12 +219,18 @@ TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
 }
 
 TEST_F(LibraryViewsTest, SmartListsFollowPlaysFavoritesAndTheDateAdded) {
-    const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto now =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     store
         ->write([now](sqlite::Database& db) {
-            db.exec("UPDATE files SET added=" + std::to_string(now - 40 * 86400) + " WHERE id IN (1,2);"
-                    "UPDATE files SET added=" + std::to_string(now - 86400) + " WHERE id=3;"
-                    "UPDATE files SET added=" + std::to_string(now) + " WHERE id IN (4,5);"
+            db.exec("UPDATE files SET added=" + std::to_string(now - 40 * 86400) +
+                    " WHERE id IN (1,2);"
+                    "UPDATE files SET added=" +
+                    std::to_string(now - 86400) +
+                    " WHERE id=3;"
+                    "UPDATE files SET added=" +
+                    std::to_string(now) +
+                    " WHERE id IN (4,5);"
                     "INSERT INTO stats(file_id,play_count,listened_ms) VALUES(1,3,1000),(2,3,2000),(5,9,9000);"
                     "INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES"
                     "(1,100,0,1000,1),(2,300,0,1000,1),(3,200,0,10,0),(5,400,0,1000,1);");
@@ -227,8 +269,7 @@ TEST_F(LibraryViewsTest, AlbumDetailListsEachFormatCombinationTheMostCommonFirst
                     "UPDATE tracks SET bits_per_sample=24,sample_rate=96000 WHERE id=3;");
         })
         .get();
-    EXPECT_EQ(albumDetail(*store, 1).formats,
-              (std::vector<LibraryAlbumFormat>{{"flac", 16, 44100, 2}, {"flac", 24, 96000, 1}}));
+    EXPECT_EQ(albumDetail(*store, 1).formats, (std::vector<LibraryAlbumFormat>{{"flac", 16, 44100, 2}, {"flac", 24, 96000, 1}}));
 }
 
 TEST_F(LibraryViewsTest, AFavoriteAlbumStaysAFavoriteWhenItsTracksMoveToAnotherAlbum) {
@@ -315,9 +356,11 @@ TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
                     "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000) "
                     "INSERT INTO albums(id,folder_id,grouping_key,title,album_artist,added,sort_key) "
                     "SELECT 100+x,10,'big'||x,printf('Album %04d',x),'Artist',x,CAST(printf('album %04d',x) AS BLOB) FROM n;"
-                    "INSERT INTO tracks(file_id,album_id,title,artist,album,sample_rate,total_frames,title_sort,artist_sort,album_sort) "
+                    "INSERT INTO "
+                    "tracks(file_id,album_id,title,artist,album,sample_rate,total_frames,title_sort,artist_sort,album_sort) "
                     "SELECT id,101+(id-1001)%1000,printf('Track %06d',id),'Artist','Album',1000,1000,"
-                    "CAST(printf('track %06d',id) AS BLOB),CAST('artist' AS BLOB),CAST('album' AS BLOB) FROM files WHERE folder_id=10;");
+                    "CAST(printf('track %06d',id) AS BLOB),CAST('artist' AS BLOB),CAST('album' AS BLOB) FROM files WHERE "
+                    "folder_id=10;");
         })
         .get();
     // The first page of a listing builds its order once per library revision; later pages only read their slice.

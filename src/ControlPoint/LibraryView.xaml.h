@@ -62,6 +62,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
                                 Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&,
                                  Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
@@ -115,6 +116,8 @@ private:
     // Explains an empty view: no library folder yet, or no album grouped by the scan yet.
     void showEmpty(int64_t total);
     void showCount(int64_t total);
+    void loadInitials();
+    void showInitials(const std::vector<camel::server::LibraryInitial>& initials);
     void loadAlbumDetail();
     void loadFolder();
     void loadSearchGroups();

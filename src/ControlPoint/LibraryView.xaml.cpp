@@ -365,6 +365,7 @@ void LibraryView::open(View view, bool push) {
     AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
     EmptyText().Visibility(Visibility::Collapsed);
+    InitialsBar().Visibility(Visibility::Collapsed);
     restoreOffset_.reset();
     if (push) {
         back_.push_back(current_);
@@ -513,6 +514,7 @@ void LibraryView::startCollection() {
     collection_->start([this](int64_t total) {
         showEmpty(total);
         showCount(total);
+        loadInitials();
         restoreOffset();
     });
 }
@@ -1093,6 +1095,59 @@ void LibraryView::showCount(int64_t total) {
                                                   : L"Library_YearCount";
     }
     if (key) HeaderDetail().Text(counted(tr(key), total));
+}
+
+// Whole lists in a name order get the jump bar: albums by title or artist, artists, composers and genres.
+void LibraryView::loadInitials() {
+    if (current_.fetch || current_.smartList() || current_.filter) return;
+    const bool albums = current_.mode == Mode::Albums && (albumSort_ == AlbumSort::Title || albumSort_ == AlbumSort::Artist);
+    const bool groups = current_.mode == Mode::Groups && current_.field != LibraryGroupField::Year;
+    if (!albums && !groups) return;
+    background([this, server = server_, albums, sort = albumSort_, field = current_.field] {
+        auto initials =
+            std::make_shared<std::vector<LibraryInitial>>(albums ? server->albumInitials(sort) : server->groupInitials(field));
+        return std::function<void()>([this, initials] { showInitials(*initials); });
+    });
+}
+
+void LibraryView::showInitials(const std::vector<LibraryInitial>& initials) {
+    const auto& labels = libraryInitialLabels();
+    auto bar = InitialsBar();
+    bar.Children().Clear();
+    bar.RowDefinitions().Clear();
+    for (size_t row = 0; row < labels.size(); ++row) {
+        bar.RowDefinitions().Append(RowDefinition());
+        const auto found = std::find_if(initials.begin(), initials.end(),
+                                        [&](const LibraryInitial& initial) { return initial.label == labels[row]; });
+        Button jump;
+        jump.Content(box_value(ui::utf8(labels[row])));
+        Automation::AutomationProperties::SetName(jump, ui::utf8(labels[row]));
+        jump.Padding(Thickness{});
+        jump.MinWidth(0);
+        jump.MinHeight(0);
+        jump.BorderThickness(Thickness{});
+        jump.Background(Media::SolidColorBrush(Microsoft::UI::Colors::Transparent()));
+        jump.HorizontalAlignment(HorizontalAlignment::Stretch);
+        jump.VerticalAlignment(VerticalAlignment::Stretch);
+        jump.IsEnabled(found != initials.end());
+        if (found != initials.end())
+            jump.Click([this, offset = found->offset](auto&&, auto&&) {
+                if (!collection_ || offset >= int64_t(collection_->Size())) return;
+                listOf(current_.mode).ScrollIntoView(collection_->GetAt(uint32_t(offset)), ScrollIntoViewAlignment::Leading);
+            });
+        Grid::SetRow(jump, int32_t(row));
+        bar.Children().Append(jump);
+    }
+    bar.Visibility(Visibility::Visible);
+    OnInitialsBarSizeChanged(nullptr, nullptr);
+}
+
+// The letters shrink with a short window so all of them stay in the bar.
+void LibraryView::OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
+    const auto bar = InitialsBar();
+    if (bar.Children().Size() == 0) return;
+    const double size = std::clamp(bar.ActualHeight() / bar.Children().Size() * 0.7, 8.0, 12.0);
+    for (const auto& child : bar.Children()) child.as<Control>().FontSize(size);
 }
 
 bool LibraryView::canGoBack() const {

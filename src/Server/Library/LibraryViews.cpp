@@ -16,6 +16,7 @@
 #include <sqlite3.h>
 
 #include "Common/util/Text.h"
+#include "Server/Library/LibraryText.h"
 
 namespace camel::server {
 namespace {
@@ -206,17 +207,73 @@ std::pair<std::string, std::string> rootText(const std::string& key, const std::
 }
 } // namespace
 
+namespace {
+
+constexpr const char* kAlbumOrders[] = {"a.sort_key", "lower(coalesce(a.album_artist,'')),a.sort_key",
+                                        "coalesce(a.year,0) DESC,a.sort_key",
+                                        "coalesce(MIN(f.added),a.added) DESC,a.sort_key"}; // an album joined with its first file
+
+std::string albumsFrom(const std::string& condition) {
+    return std::string(" FROM albums a JOIN tracks t ON t.album_id=a.id") + kJoins + kStats + "WHERE" + kVisible + condition;
+}
+
+// A group's name, track, album and sort key for each visible track.
+std::string groupValues(LibraryGroupField field) {
+    if (field == LibraryGroupField::Year)
+        return std::string("SELECT CAST(t.year AS TEXT) name,t.id track,t.album_id album,-t.year sort FROM tracks t") + kJoins +
+               "WHERE" + kVisible + " AND t.year>0";
+    const std::string column = fieldName(field);
+    const std::string sortFallback = field == LibraryGroupField::Artist ? "t.artist_sort" : "NULL";
+    return "SELECT coalesce(nullif(v.value,''),t." + column + ") name,t.id track,t.album_id album,coalesce(v.sort_key," +
+           sortFallback + ") sort FROM tracks t" + kJoins +
+           "LEFT JOIN track_values v ON v.track_id=t.id AND v.field=" + literal(column) + " WHERE" + kVisible;
+}
+
+// Labels each position of an ordered list with the last initial whose start does not follow it; `starts` holds where
+// "A" … "Z", "あ" and "漢" begin in the list's own ordering, everything before "A" being "#".
+template <typename Key> std::vector<LibraryInitial> initialsOf(const std::vector<Key>& keys, const std::vector<Key>& starts) {
+    const auto& labels = libraryInitialLabels();
+    std::vector<LibraryInitial> out;
+    size_t initial = 0;
+    for (size_t i = 0; i < keys.size(); ++i) {
+        while (initial < starts.size() && !(keys[i] < starts[initial])) ++initial;
+        if (out.empty() || out.back().label != labels[initial]) out.push_back({labels[initial], int64_t(i)});
+    }
+    return out;
+}
+
+// Where the initials begin among the library's sort keys (LCMapString in its sort locale): the smaller key of each
+// letter's two cases, the smallest kana and the smallest of the Han characters that open the stroke and the
+// pronunciation orders.
+std::vector<std::vector<uint8_t>> sortKeyStarts(sqlite::Database& db) {
+    auto state = db.prepare("SELECT value FROM app_state WHERE key='sort_locale'");
+    const std::wstring locale = state.step() ? toWide(state.text(0)) : L"zh-TW";
+    const auto smallest = [&](std::initializer_list<const char*> texts) {
+        std::vector<uint8_t> least;
+        for (const auto* text : texts) {
+            auto key = librarySortKey(text, locale);
+            if (least.empty() || key < least) least = std::move(key);
+        }
+        return least;
+    };
+    std::vector<std::vector<uint8_t>> starts;
+    for (char c = 'A'; c <= 'Z'; ++c)
+        starts.push_back(smallest({std::string(1, c).c_str(), std::string(1, char(c + 32)).c_str()}));
+    starts.push_back(smallest({"\xE3\x81\x81", "\xE3\x81\x82", "\xE3\x82\xA1", "\xE3\x82\xA2", "\xEF\xBD\xB1"})); // ぁあァアｱ
+    starts.push_back(smallest({"\xE4\xB8\x80", "\xE4\xB9\x99", "\xE5\x85\xAB", "\xE5\xB7\xB4", "\xE9\x98\xBF"})); // 一乙八巴阿
+    return starts;
+}
+
+} // namespace
+
 LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
                               int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision,
                               const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
-    static constexpr const char* orders[] = {
-        "a.sort_key", "lower(coalesce(a.album_artist,'')),a.sort_key", "coalesce(a.year,0) DESC,a.sort_key",
-        "coalesce(MIN(f.added),a.added) DESC,a.sort_key"}; // an album joined with its first file
+    const auto& orders = kAlbumOrders;
     const std::string condition = filter ? groupCondition(*filter) : std::string{};
-    const std::string from =
-        std::string(" FROM albums a JOIN tracks t ON t.album_id=a.id") + kJoins + kStats + "WHERE" + kVisible + condition;
+    const std::string from = albumsFrom(condition);
     const auto order = ordered<int64_t>(store, q.revision, "albums|" + std::to_string(int(sort)) + "|" + condition, [&] {
         return ids(q.db, "SELECT a.id" + from + " GROUP BY a.id ORDER BY " + orders[size_t(sort)] + ",a.id");
     });
@@ -262,19 +319,7 @@ LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field
                               std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
-    std::string values;
-    if (field == LibraryGroupField::Year) {
-        values = std::string("SELECT CAST(t.year AS TEXT) name,t.id track,t.album_id album,-t.year sort FROM tracks t") + kJoins +
-                 "WHERE" + kVisible + " AND t.year>0";
-    } else {
-        const std::string column = fieldName(field);
-        const std::string sortFallback = field == LibraryGroupField::Artist ? "t.artist_sort" : "NULL";
-        values = "SELECT coalesce(nullif(v.value,''),t." + column +
-                 ") name,t.id track,t.album_id album,"
-                 "coalesce(v.sort_key," +
-                 sortFallback + ") sort FROM tracks t" + kJoins +
-                 "LEFT JOIN track_values v ON v.track_id=t.id AND v.field=" + literal(column) + " WHERE" + kVisible;
-    }
+    const std::string values = groupValues(field);
     const auto groups = ordered<LibraryGroup>(store, q.revision, "groups|" + std::to_string(int(field)), [&] {
         std::vector<LibraryGroup> out;
         auto rows = q.db.prepare("SELECT name,COUNT(DISTINCT album),COUNT(DISTINCT track) FROM (" + values +
@@ -287,6 +332,49 @@ LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field
     page.total = int64_t(groups->size());
     for (int64_t i = offset; i < std::min<int64_t>(offset + limit, page.total); ++i) page.groups.push_back((*groups)[size_t(i)]);
     return page;
+}
+
+const std::vector<std::string>& libraryInitialLabels() {
+    static const std::vector<std::string> labels = [] {
+        std::vector<std::string> out{"#"};
+        for (char c = 'A'; c <= 'Z'; ++c) out.emplace_back(1, c);
+        out.emplace_back("\xE3\x81\x82"); // あ
+        out.emplace_back("\xE6\xBC\xA2"); // 漢
+        return out;
+    }();
+    return labels;
+}
+
+std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field, const CancellationToken& token) {
+    if (field == LibraryGroupField::Year) return {};
+    Query q(store, std::nullopt, token);
+    std::vector<std::vector<uint8_t>> keys;
+    auto rows = q.db.prepare("SELECT min(sort) FROM (" + groupValues(field) +
+                             ") WHERE coalesce(name,'')<>'' GROUP BY name ORDER BY min(sort),name");
+    while (rows.step()) keys.push_back(rows.blob(0));
+    return initialsOf(keys, sortKeyStarts(q.db));
+}
+
+std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort sort, const CancellationToken& token) {
+    if (sort != AlbumSort::Title && sort != AlbumSort::Artist) return {};
+    Query q(store, std::nullopt, token);
+    const std::string query = std::string("SELECT ") +
+                              (sort == AlbumSort::Title ? "a.sort_key" : "lower(coalesce(a.album_artist,''))") + albumsFrom({}) +
+                              " GROUP BY a.id ORDER BY " + kAlbumOrders[size_t(sort)] + ",a.id";
+    auto rows = q.db.prepare(query);
+    if (sort == AlbumSort::Title) {
+        std::vector<std::vector<uint8_t>> keys;
+        while (rows.step()) keys.push_back(rows.blob(0));
+        return initialsOf(keys, sortKeyStarts(q.db));
+    }
+    // Album artists sort as lowercased UTF-8 bytes: kana begins at U+3040 and what follows Bopomofo (U+3100) is Han.
+    std::vector<std::string> names;
+    while (rows.step()) names.push_back(rows.text(0));
+    std::vector<std::string> starts;
+    for (char c = 'a'; c <= 'z'; ++c) starts.emplace_back(1, c);
+    starts.emplace_back("\xE3\x81\x80");
+    starts.emplace_back("\xE3\x84\x80");
+    return initialsOf(names, starts);
 }
 
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,

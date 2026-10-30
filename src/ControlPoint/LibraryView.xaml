@@ -109,8 +109,12 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
         <!-- The title starts at the page edge as on every page; going back is the title bar's back button. -->
-        <Grid ColumnSpacing="12">
+        <Grid Grid.ColumnSpan="2" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -257,5 +261,8 @@
                   IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />
         <TextBlock x:Name="EmptyText" Grid.Row="1" TextWrapping="Wrap" Visibility="Collapsed"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <!-- The jump bar beside a whole list: #, A–Z, kana and Han, the ones without names dimmed. -->
+        <Grid x:Name="InitialsBar" Grid.Row="1" Grid.Column="1" Width="28" Margin="8,0,0,0" Visibility="Collapsed"
+              SizeChanged="OnInitialsBarSizeChanged" />
     </Grid>
 </UserControl>

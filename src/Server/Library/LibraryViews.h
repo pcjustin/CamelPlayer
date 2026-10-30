@@ -114,6 +114,22 @@ LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset,
 
 LibraryGroupPage browseGroups(const LibraryStore& store, LibraryGroupField field, int64_t offset, int64_t limit,
                               std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+
+// Where an initial starts in a whole list, for the jump bar beside it: "#" (digits and symbols), "A"–"Z", "あ" (kana)
+// and "漢" (Han, Hangul and the scripts sorted after them). Initials without names are left out; a script sorted between
+// two initials joins the earlier one.
+struct LibraryInitial {
+    std::string label;
+    int64_t offset = 0;
+    bool operator==(const LibraryInitial&) const = default;
+};
+// Every initial in jump bar order.
+const std::vector<std::string>& libraryInitialLabels();
+// The initials of browseGroups(field); none for years.
+std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field,
+                                          const CancellationToken& token = {});
+// The initials of browseAlbums(sort) without a filter; none for the year and date sorts.
+std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort sort, const CancellationToken& token = {});
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                     std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64_t offset, int64_t limit,

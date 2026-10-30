@@ -290,6 +290,8 @@ public:
                                           const CancellationToken& token = {}) const = 0;
     virtual LibraryGroupPage browseGroups(LibraryGroupField field, int64_t offset, int64_t limit,
                                           std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
+    virtual std::vector<LibraryInitial> groupInitials(LibraryGroupField field, const CancellationToken& token = {}) const = 0;
+    virtual std::vector<LibraryInitial> albumInitials(AlbumSort sort, const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                                 std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,

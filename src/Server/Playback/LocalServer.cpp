@@ -1434,6 +1434,12 @@ LibraryGroupPage LocalServer::browseGroups(LibraryGroupField field, int64_t offs
                                            std::optional<uint64_t> revision, const CancellationToken& token) const {
     return camel::server::browseGroups(impl_->library(), field, offset, limit, revision, token);
 }
+std::vector<LibraryInitial> LocalServer::groupInitials(LibraryGroupField field, const CancellationToken& token) const {
+    return camel::server::groupInitials(impl_->library(), field, token);
+}
+std::vector<LibraryInitial> LocalServer::albumInitials(AlbumSort sort, const CancellationToken& token) const {
+    return camel::server::albumInitials(impl_->library(), sort, token);
+}
 LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                                  std::optional<uint64_t> revision, const CancellationToken& token) const {
     return camel::server::browseTrackRows(impl_->library(), sort, descending, offset, limit, revision, token);
