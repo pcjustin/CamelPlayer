@@ -191,6 +191,7 @@
                                     <FontIcon Glyph="&#xE7F5;" FontSize="20" />
                                     <TextBlock x:Uid="Settings_Playback" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
+                                <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ComboBox x:Name="BackendCombo" x:Uid="Settings_Backend" Width="360" SelectionChanged="OnSettingChanged" />
                                 <InfoBar x:Name="BackendNotice" Severity="Warning" IsOpen="False" IsClosable="True" />
                                 <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
@@ -287,7 +288,6 @@
                                     <TextBlock x:Uid="Settings_KsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
 
-                                <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
                             </StackPanel>
                         </Border>

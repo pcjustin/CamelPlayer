@@ -72,6 +72,7 @@
   <data name="Settings_KsPacketMs.Header" xml:space="preserve"><value>封包長度（ms）</value></data>
   <data name="Settings_KsNote.Text" xml:space="preserve"><value>Kernel Streaming 佔用裝置時，Windows 和其他程式都無法透過這個裝置發聲（包括系統音效）。</value></data>
   <data name="Settings_FixedRate.Header" xml:space="preserve"><value>取樣率</value></data>
+  <data name="Settings_FixedRate.Description" xml:space="preserve"><value>非「跟隨檔案」時，PCM 會重新取樣（顯示為已處理）。</value></data>
   <data name="Rate_FollowFile" xml:space="preserve"><value>跟隨檔案</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>輪詢緩衝長度（ms）</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS 任務</value></data>
@@ -81,9 +82,10 @@
   <data name="Priority_High" xml:space="preserve"><value>高</value></data>
   <data name="Priority_Critical" xml:space="preserve"><value>關鍵</value></data>
   <data name="Settings_Predecode.Header" xml:space="preserve"><value>預先解碼（秒）</value></data>
+  <data name="Settings_Predecode.Description" xml:space="preserve"><value>從下一首開始生效。</value></data>
   <data name="Settings_FormatSilence.Header" xml:space="preserve"><value>格式切換後的靜音（ms）</value></data>
   <data name="Settings_ReleaseAfterPause.Header" xml:space="preserve"><value>暫停後釋放裝置（秒，0 = 不釋放）</value></data>
-  <data name="Settings_ApplyNote.Text" xml:space="preserve"><value>所有變更立即套用；輸出設定會重新開啟裝置，從目前位置接著播。固定取樣率會把 PCM 檔案重新取樣到該取樣率（顯示為已處理）；DSD 走自己的路徑。預先解碼從下一個串流開始生效。</value></data>
+  <data name="Settings_ApplyNote.Text" xml:space="preserve"><value>所有變更立即套用；輸出設定會重新開啟裝置，從目前位置接著播。</value></data>
   <data name="Settings_Refresh.Content" xml:space="preserve"><value>重新整理裝置清單</value></data>
   <data name="Settings_Status.Text" xml:space="preserve"><value>狀態</value></data>
   <data name="Settings_Interface.Text" xml:space="preserve"><value>介面</value></data>
