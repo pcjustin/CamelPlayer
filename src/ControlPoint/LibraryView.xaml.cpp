@@ -18,6 +18,7 @@
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "CardSize.h"
+#include "CreditText.h"
 #include "DialogPlacement.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
@@ -365,6 +366,7 @@ void LibraryView::hide() {
 
 void LibraryView::open(View view, bool push) {
     cancelArtwork();
+    credits_.clear();
     DetailCover().Source(nullptr);
     DetailCoverFrame().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     AlbumActions().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
@@ -533,14 +535,32 @@ void LibraryView::loadAlbumDetail() {
     detailTracks_.clear();
     background([this, server = server_, id = current_.album, texts = Texts{}] {
         auto detail = std::make_shared<LibraryAlbumDetail>(server->albumDetail(id));
-        return std::function<void()>([this, detail, texts] {
+        // The album artist first, then every other track artist.
+        std::vector<std::string> credits{detail->album.artist};
+        for (const auto& t : detail->tracks)
+            if (std::find(credits.begin(), credits.end(), t.artist) == credits.end()) credits.push_back(t.artist);
+        auto parts = std::make_shared<std::vector<std::vector<LibraryNamePart>>>();
+        try {
+            *parts = server->creditParts(credits);
+        } catch (const std::exception& e) {
+            camel::log::warn("album credits: %s", e.what());
+        }
+        return std::function<void()>([this, detail, texts, credits, parts] {
             const auto& a = detail->album;
-            std::wstring info(ui::utf8(a.artist));
-            if (a.year) info += (info.empty() ? L"" : L" · ") + std::to_wstring(a.year);
-            info += (info.empty() ? L"" : L" · ") + std::wstring(counted(texts.tracks, a.tracks)) + L" · " +
-                    std::wstring(duration(a.durationMs));
+            std::wstring info;
+            if (a.year) info += L" · " + std::to_wstring(a.year);
+            info += L" · " + std::wstring(counted(texts.tracks, a.tracks)) + L" · " + std::wstring(duration(a.durationMs));
             HeaderTitle().Text(orUnknown(a.title, texts));
-            HeaderDetail().Text(hstring(info));
+            const auto openArtist = [this](hstring const& name) { showArtist(name, nullptr, true); };
+            if (!parts->empty() && !a.artist.empty())
+                ui::showCredit(HeaderDetail(), parts->front(), openArtist);
+            else
+                HeaderDetail().Text(ui::utf8(a.artist));
+            Documents::Run rest;
+            rest.Text(a.artist.empty() ? hstring(info.substr(3)) : hstring(info));
+            HeaderDetail().Inlines().Append(rest);
+            credits_.clear();
+            for (size_t i = 1; i < parts->size(); ++i) credits_[credits[i]] = (*parts)[i];
             showAlbumFavorite(a.favorite);
             showAlbumFormats(detail->formats);
             auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
@@ -1143,6 +1163,26 @@ void LibraryView::fitAlbumTracks() {
 
 void LibraryView::OnRowListSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
     fitAlbumTracks();
+}
+
+// On the album page a track's artists replace its subtitle, each name a link to that artist's albums.
+void LibraryView::OnRowContainerContentChanging(ListViewBase const&, ContainerContentChangingEventArgs const& args) {
+    if (args.InRecycleQueue()) return;
+    const auto root = args.ItemContainer().ContentTemplateRoot().try_as<FrameworkElement>();
+    if (!root) return;
+    const auto subtitle = root.FindName(L"SubtitleText").try_as<TextBlock>();
+    const auto credit = root.FindName(L"CreditPanel").try_as<StackPanel>();
+    if (!subtitle || !credit) return;
+    const auto& row = ui::LibraryCollection::rowOf(args.Item());
+    const auto found = credits_.find(winrt::to_string(row.subtitle));
+    const bool linked = found != credits_.end();
+    ToolTipService::SetToolTip(credit, linked ? box_value(row.subtitle) : nullptr);
+    if (linked)
+        ui::showCreditButtons(
+            credit, found->second, [this](hstring const& name) { showArtist(name, nullptr, true); },
+            Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>(), subtitle.FontSize());
+    credit.Visibility(linked ? Visibility::Visible : Visibility::Collapsed);
+    subtitle.Visibility(linked ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void LibraryView::OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {

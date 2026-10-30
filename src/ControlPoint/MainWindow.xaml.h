@@ -56,7 +56,6 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnPlaybackFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void showPlaybackFavorite(bool favorite);
     void OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnArtistLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSliderValueChanged(Windows::Foundation::IInspectable const&,
                               Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
     void OnNavSelectionChanged(Microsoft::UI::Xaml::Controls::NavigationView const&,
@@ -134,6 +133,7 @@ private:
     std::vector<double> frameIntervals_;
     void recordFrame();
     winrt::hstring shownTag_ = L"albums";
+    winrt::hstring shownArtist_; // the player bar's artist credit
     void removeSelectedQueueEntries();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
     winrt::fire_and_forget refreshRoots();
@@ -174,6 +174,8 @@ private:
     void updateQueuePanel();
     void colorCaptionButtons();
     void showTitleBack();
+    void showPlayerArtist(hstring const& artist);
+    void openArtist(hstring const& artist);
     void addSettingsLinks();
     // Goes back in the library pages, or from Listening to Home, when the title bar offers Back.
     bool goBack();

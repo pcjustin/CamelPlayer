@@ -179,6 +179,7 @@ public:
         if (!directory.empty() && std::filesystem::is_directory(directory)) {
             artwork_ = std::make_unique<ArtworkCache>(directory / "thumbs");
             library_ = std::make_unique<LibraryStore>(directory);
+            library_->write([](sqlite::Database& db) { updateLibraryNameRules(db); });
             libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
             // Covers being shown take the storage first: scans drop to one worker and fingerprints wait meanwhile.
@@ -362,6 +363,13 @@ public:
     LibraryStore& library() const {
         if (!library_) throw std::runtime_error("library is not configured");
         return *library_;
+    }
+
+    // Reading every credit takes a moment on a large library, so the names are kept until the library changes.
+    std::shared_ptr<const LibraryCreditNames> creditNames(const CancellationToken& token) const {
+        std::lock_guard lock(creditMutex_);
+        creditNames_ = libraryCreditNames(library(), creditNames_, token);
+        return creditNames_;
     }
 
     // The published queue keeps every entry: library files keep their identity, others only their path.
@@ -1308,6 +1316,8 @@ private:
     mutable std::atomic<int64_t> artworkUntil_{0}; // steady_clock ticks; read by scan workers, so declared before them
     std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
+    mutable std::mutex creditMutex_;
+    mutable std::shared_ptr<const LibraryCreditNames> creditNames_;
     std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
     std::jthread coverWarmer_; // uses artwork_, library_ and engine_, so it stops before they go
@@ -1439,6 +1449,14 @@ std::vector<LibraryInitial> LocalServer::groupInitials(LibraryGroupField field, 
 }
 std::vector<LibraryInitial> LocalServer::albumInitials(AlbumSort sort, const CancellationToken& token) const {
     return camel::server::albumInitials(impl_->library(), sort, token);
+}
+std::vector<std::vector<LibraryNamePart>> LocalServer::creditParts(const std::vector<std::string>& credits,
+                                                                   const CancellationToken& token) const {
+    const auto names = impl_->creditNames(token);
+    std::vector<std::vector<LibraryNamePart>> parts;
+    parts.reserve(credits.size());
+    for (const auto& credit : credits) parts.push_back(camel::server::creditParts(*names, credit));
+    return parts;
 }
 LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
                                                  std::optional<uint64_t> revision, const CancellationToken& token) const {

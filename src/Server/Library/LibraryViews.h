@@ -4,11 +4,15 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "Server/Artwork/ArtworkProvider.h"
+#include "Server/Library/LibraryNames.h"
 #include "Server/Library/LibraryStore.h"
 #include "Server/Library/PlayStatistics.h"
 
@@ -125,6 +129,21 @@ struct LibraryInitial {
 };
 // Every initial in jump bar order.
 const std::vector<std::string>& libraryInitialLabels();
+// What showing artist credits needs, read once per library revision: the names the library knows, and the artist names
+// the Artists list holds.
+struct LibraryCreditNames {
+    uint64_t revision = 0;
+    LibraryNameSplitter splitter;
+    std::unordered_set<std::string> artists;
+};
+// Reads them again unless `cached` belongs to the current library revision.
+std::shared_ptr<const LibraryCreditNames> libraryCreditNames(const LibraryStore& store,
+                                                             std::shared_ptr<const LibraryCreditNames> cached,
+                                                             const CancellationToken& token = {});
+// A credit's parts as pages show them; a part is marked as a name only when the Artists list holds it, so it opens that
+// artist's albums.
+std::vector<LibraryNamePart> creditParts(const LibraryCreditNames& names, std::string_view credit);
+
 // The initials of browseGroups(field); none for years.
 std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field,
                                           const CancellationToken& token = {});

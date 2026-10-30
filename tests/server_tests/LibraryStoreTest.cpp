@@ -73,10 +73,10 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_TRUE(store.report().created);
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 14);
+    EXPECT_EQ(db.userVersion(), 15);
     EXPECT_EQ(tables(db), (std::set<std::string>{"albums", "app_state", "change_log", "covers", "files", "folders",
                                                  "library_revision", "play_events", "playlist_items", "playlists", "queue",
-                                                 "roots", "stats", "track_values", "tracks", "tracks_fts"}));
+                                                 "roots", "stats", "track_tags", "track_values", "tracks", "tracks_fts"}));
     auto mode = db.prepare("PRAGMA journal_mode");
     ASSERT_TRUE(mode.step());
     EXPECT_EQ(mode.text(0), "wal");
@@ -127,7 +127,7 @@ TEST(LibraryStore, UpgradesV1WithoutInventingFingerprintsOrChangingHistory) {
     EXPECT_EQ(store.report().migratedFrom, 1);
     EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 14);
+    EXPECT_EQ(db.userVersion(), 15);
     EXPECT_EQ(db.scalar("SELECT rating FROM stats JOIN files ON files.id=stats.file_id WHERE files.path='C:/music/old.flac'"), 5);
     EXPECT_EQ(db.scalar("SELECT play_count FROM stats"), 17);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL AND created=0 AND volume_key IS NULL"), 1);
@@ -167,7 +167,7 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
     LibraryStore store(dir);
     EXPECT_EQ(store.report().migratedFrom, 11);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 14);
+    EXPECT_EQ(db.userVersion(), 15);
     for (const char* table : {"tracks", "stats", "play_events", "playlist_items", "queue"})
         EXPECT_EQ(db.scalar(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name LIKE 'cue%'"), 0)
             << table;
@@ -210,7 +210,7 @@ TEST(LibraryStore, WriterRunsEachJobInOneTransaction) {
     for (auto& t : threads) t.join();
     for (auto& j : jobs) j.get();
     auto reader = store.openReader();
-    EXPECT_EQ(reader.scalar("SELECT COUNT(*) FROM app_state"), 400);
+    EXPECT_EQ(reader.scalar("SELECT COUNT(*) FROM app_state WHERE key<>'name_rules'"), 400);
     EXPECT_EQ(reader.scalar("SELECT COUNT(*) FROM app_state WHERE key = 'kept'"), 0);
     EXPECT_THROW(reader.exec("INSERT INTO app_state (key, value) VALUES ('ro', 'x')"), sqlite::Error);
 }
@@ -223,10 +223,10 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-        EXPECT_EQ(store.report().migratedFrom, 14);
+        EXPECT_EQ(store.report().migratedFrom, 15);
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 15);
-        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v14.bak"));
+        EXPECT_EQ(db.userVersion(), 16);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v15.bak"));
     }
     const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
                                        db.exec("CREATE TABLE half (x INTEGER)");
@@ -236,7 +236,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 15);
+        EXPECT_EQ(db.userVersion(), 16);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
@@ -265,18 +265,68 @@ TEST(LibraryStore, UpgradesV13ByDatingFilesByTheirCreationOnDisk) {
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM stats WHERE favorite_at IS NOT NULL OR album_favorite_at IS NOT NULL"), 0);
 }
 
+TEST(LibraryStore, UpgradesV14ByKeepingTagsAndSplittingTheNamesTheyCredit) {
+    const auto dir = freshDir("upgrade-v14");
+    {
+        LibraryStore store(dir, std::vector<Migration>(libraryMigrations().begin(), libraryMigrations().begin() + 14));
+        store
+            .write([](Database& db) {
+                addTrack(db, "C:/music/album/01.flac", "Duet");
+                addTrack(db, "C:/music/album/02.flac", "Solo");
+                addTrack(db, "C:/music/album/03.flac", "Band");
+                const auto value = [&](int64_t track, const char* field, int64_t position, const char* text, const char* sort) {
+                    db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source) VALUES(?,?,?,?,?)")
+                        .bind(1, track)
+                        .bind(2, std::string_view(field))
+                        .bind(3, position)
+                        .bind(4, std::string_view(text))
+                        .bind(5, std::string_view(sort))
+                        .run();
+                };
+                value(1, "artist", 0, "Aimer with chelly", "Aimer");
+                value(1, "composer", 0, "ACAね、ぬゆり", "");
+                value(1, "genre", 0, "J-Pop; Rock", "");
+                value(2, "artist", 0, "Aimer", "Aimer sort");
+                value(3, "artist", 0, "Bob Marley & The Wailers", "");
+            })
+            .get();
+    }
+    LibraryStore store(dir);
+    auto db = store.openReader();
+    const auto names = [&](int64_t track, const char* field) {
+        std::vector<std::string> out;
+        auto rows = db.prepare("SELECT value FROM track_values WHERE track_id=? AND field=? ORDER BY position");
+        rows.bind(1, track).bind(2, std::string_view(field));
+        while (rows.step()) out.push_back(rows.text(0));
+        return out;
+    };
+    EXPECT_EQ(names(1, "artist"), (std::vector<std::string>{"Aimer", "chelly"}));
+    EXPECT_EQ(names(1, "composer"), (std::vector<std::string>{"ACAね", "ぬゆり"}));
+    EXPECT_EQ(names(1, "genre"), (std::vector<std::string>{"J-Pop; Rock"})); // genres are not names
+    EXPECT_EQ(names(3, "artist"), (std::vector<std::string>{"Bob Marley & The Wailers"}));
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM track_tags WHERE track_id=1 AND value='Aimer with chelly'"), 1);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM app_state WHERE key='name_rules'"), 1);
+    // A split name sorts by itself; a tag that is one name keeps its sort tag.
+    auto sort = db.prepare("SELECT sort_source FROM track_values WHERE track_id=? AND field='artist' AND position=0");
+    EXPECT_TRUE(sort.bind(1, int64_t{1}).step());
+    EXPECT_EQ(sort.text(0), "");
+    sort.reset();
+    EXPECT_TRUE(sort.bind(1, int64_t{2}).step());
+    EXPECT_EQ(sort.text(0), "Aimer sort");
+}
+
 TEST(LibraryStore, KeepsTheNewestThreeBackups) {
     const auto dir = freshDir("rotate");
     {
         LibraryStore store(dir);
     }
     std::vector<Migration> extra;
-    for (int v = 14; v <= 18; v++) {
+    for (int v = 15; v <= 19; v++) {
         extra.push_back(addTable("t" + std::to_string(v)));
         LibraryStore store(dir, withExtra(extra));
     }
     EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
-    for (int v : {16, 17, 18}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+    for (int v : {17, 18, 19}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
 }
 
 TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
@@ -287,7 +337,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-    } // writes library.db.v14.bak
+    } // writes library.db.v15.bak
     std::filesystem::remove(dir / "library.db-wal");
     std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'x');
     {
@@ -297,7 +347,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
         auto db = store.openReader();
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
-        EXPECT_EQ(db.userVersion(), 15); // the backup was migrated again
+        EXPECT_EQ(db.userVersion(), 16); // the backup was migrated again
     }
     for (const auto& e : std::filesystem::directory_iterator(dir))
         if (e.path().extension() == ".bak") std::filesystem::remove(e.path());

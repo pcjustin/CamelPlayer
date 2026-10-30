@@ -65,6 +65,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnRowListSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+    void OnRowContainerContentChanging(Microsoft::UI::Xaml::Controls::ListViewBase const&,
+                                       Microsoft::UI::Xaml::Controls::ContainerContentChangingEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtworkContextChanged(Microsoft::UI::Xaml::FrameworkElement const&,
                                  Microsoft::UI::Xaml::DataContextChangedEventArgs const&);
@@ -178,6 +180,8 @@ private:
     std::vector<camel::server::LibraryInitial> initials_;
     size_t initialSlots_ = 0; // rows the jump bar shows now
     std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_;
+    // The album page's track artists split into names, by credit; empty on other pages.
+    std::unordered_map<std::string, std::vector<camel::server::LibraryNamePart>> credits_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};

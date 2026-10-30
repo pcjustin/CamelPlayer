@@ -12,6 +12,10 @@
     xmlns:local="using:CamelPlayer">
     <UserControl.Resources>
         <local:CardSize x:Key="WallCards" />
+        <Style x:Key="CreditSeparatorStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
         <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
@@ -26,8 +30,12 @@
                     <ColumnDefinition Width="Auto" MinWidth="56" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SubtitleText" Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <!-- An album's track artists, each name a link; filled in code in place of the subtitle, and with the room of
+                     the detail column, which album tracks leave empty. -->
+                <StackPanel x:Name="CreditPanel" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center"
+                            Visibility="Collapsed" />
                 <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
@@ -194,7 +202,24 @@
         <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" SizeChanged="OnAlbumGridSizeChanged" />
         <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
-                  IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" SizeChanged="OnRowListSizeChanged">
+                  IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" SizeChanged="OnRowListSizeChanged"
+                  ContainerContentChanging="OnRowContainerContentChanging">
+            <ListView.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.ThemeDictionaries>
+                        <ResourceDictionary x:Key="Default">
+                            <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                            <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                            <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="Light">
+                            <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                            <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                            <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
+                        </ResourceDictionary>
+                    </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
+            </ListView.Resources>
             <ListView.Header>
                 <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
                 <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">

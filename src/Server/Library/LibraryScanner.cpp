@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryNames.h"
 #include "Server/Library/LibraryViews.h"
 
 #include <windows.h>
@@ -267,7 +268,7 @@ int year(const Metadata& m) {
 }
 
 // One upsert carries the derived search and sort columns, so the row is written and FTS-indexed once.
-void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::wstring_view locale) {
+void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::wstring_view locale, LibraryNameSplitter& names) {
     auto s = db.prepare("INSERT INTO tracks(file_id,title,album,album_artist,artist,composer,genre,year,track_number,track_total,"
                         "disc_number,disc_total,format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
                         "length_estimated,title_sort_tag,album_sort_tag,artist_sort_tag,rg_track_gain,rg_track_peak,"
@@ -323,9 +324,11 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
     auto row = db.prepare("SELECT id FROM tracks WHERE file_id=?");
     row.bind(1, file).step();
     const int64_t track = row.integer(0);
-    db.prepare("DELETE FROM track_values WHERE track_id=?").bind(1, track).run();
+    db.prepare("DELETE FROM track_values WHERE track_id=? AND field='genre'").bind(1, track).run();
+    db.prepare("DELETE FROM track_tags WHERE track_id=?").bind(1, track).run();
     auto value = db.prepare("INSERT INTO track_values(track_id,field,position,value,sort_source,value_norm,sort_key) "
                             "VALUES(?,?,?,?,?,?,?)");
+    auto credit = db.prepare("INSERT INTO track_tags(track_id,field,position,value,sort_source) VALUES(?,?,?,?,?)");
     for (const auto* field : {"ARTIST", "COMPOSER", "GENRE"}) {
         int64_t position = 0;
         const auto sorts = m.tags.value((std::string(field) + "SORT").c_str());
@@ -334,6 +337,18 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
             const auto text = trimmedTag(item.to8Bit(true));
             const auto source = sort == sorts.end() ? std::string{} : trimmedTag((sort++)->to8Bit(true));
             if (text.empty()) continue;
+            // Artists and composers keep their tags; the names they credit are derived from all tags together.
+            if (std::string_view(field) != "GENRE") {
+                credit.bind(1, track)
+                    .bind(2, toUtf8(lower(toWide(field))))
+                    .bind(3, position++)
+                    .bind(4, text)
+                    .bind(5, source)
+                    .run();
+                credit.reset();
+                names.learn(text);
+                continue;
+            }
             value.bind(1, track)
                 .bind(2, toUtf8(lower(toWide(field))))
                 .bind(3, position++)
@@ -345,6 +360,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
             value.reset();
         }
     }
+    deriveLibraryNames(db, names, {track});
 }
 
 struct Entry {
@@ -914,6 +930,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     const bool reread = dirty.step();
     dirty.reset();
     derivedChanged = derivedChanged || reread;
+    // The names the library knows, read by the first batch that writes tags; only the writer thread touches it.
+    std::optional<LibraryNameSplitter> names;
     // Writes run in submission order on the store's writer; the dispatcher waits only when several are outstanding.
     std::deque<std::future<void>> writes;
     auto drainWrites = wil::scope_exit([&] {
@@ -1011,7 +1029,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=?").bind(1, file).run();
                 if (entry.rejected || entry.metadata) trackFolders.insert(folderId);
                 if (entry.metadata) {
-                    writeMetadata(db, file, *entry.metadata, locale);
+                    if (!names) names = loadLibraryNames(db);
+                    writeMetadata(db, file, *entry.metadata, locale, *names);
                     report.updated++;
                 }
             }
@@ -1136,6 +1155,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             .write([&](sqlite::Database& db) {
                 if (token.cancelled()) return;
                 rebuildAlbums(db, root);
+                // Names learned late in the scan, and names gone with removed files, can change how earlier credits split.
+                deriveLibraryNames(db, loadLibraryNames(db));
                 db.prepare("DELETE FROM app_state WHERE key=?").bind(1, derivedKey).run();
             })
             .get();

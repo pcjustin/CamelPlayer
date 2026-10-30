@@ -108,6 +108,12 @@ void merge(sqlite::Database& db, int64_t prior, int64_t current) {
             .bind(1, oldTrack.integer(0))
             .bind(2, newTrack.integer(0))
             .run();
+        db.prepare("DELETE FROM track_tags WHERE track_id=?").bind(1, oldTrack.integer(0)).run();
+        db.prepare("INSERT INTO track_tags(track_id,field,position,value,sort_source) "
+                   "SELECT ?,field,position,value,sort_source FROM track_tags WHERE track_id=?")
+            .bind(1, oldTrack.integer(0))
+            .bind(2, newTrack.integer(0))
+            .run();
     }
     db.prepare("UPDATE tracks SET file_id=? WHERE file_id=? AND NOT EXISTS(SELECT 1 FROM tracks WHERE file_id=?)")
         .bind(1, prior)

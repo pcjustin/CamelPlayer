@@ -345,6 +345,24 @@ const std::vector<std::string>& libraryInitialLabels() {
     return labels;
 }
 
+std::shared_ptr<const LibraryCreditNames>
+libraryCreditNames(const LibraryStore& store, std::shared_ptr<const LibraryCreditNames> cached, const CancellationToken& token) {
+    Query q(store, std::nullopt, token);
+    if (cached && cached->revision == q.revision) return cached;
+    auto names = std::make_shared<LibraryCreditNames>();
+    names->revision = q.revision;
+    names->splitter = loadLibraryNames(q.db);
+    auto artists = q.db.prepare("SELECT DISTINCT value FROM track_values WHERE field='artist'");
+    while (artists.step()) names->artists.insert(artists.text(0));
+    return names;
+}
+
+std::vector<LibraryNamePart> creditParts(const LibraryCreditNames& names, std::string_view credit) {
+    auto parts = names.splitter.parts(credit);
+    for (auto& part : parts) part.name = part.name && names.artists.contains(part.text);
+    return parts;
+}
+
 std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field, const CancellationToken& token) {
     if (field == LibraryGroupField::Year) return {};
     Query q(store, std::nullopt, token);

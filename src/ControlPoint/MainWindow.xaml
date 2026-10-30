@@ -673,10 +673,15 @@
                         </StackPanel.Resources>
                         <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
                                    MaxLines="1" FontSize="14" FontWeight="SemiBold" />
-                        <HyperlinkButton x:Name="ArtistLink" Click="OnArtistLinkClick" Padding="0"
-                                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Visibility="Collapsed">
-                            <TextBlock x:Name="ArtistLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />
-                        </HyperlinkButton>
+                        <!-- Each name in the artist credit opens that artist. -->
+                        <StackPanel x:Name="ArtistCredit" Orientation="Horizontal" Visibility="Collapsed">
+                            <StackPanel.Resources>
+                                <Style x:Key="CreditSeparatorStyle" TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                </Style>
+                            </StackPanel.Resources>
+                        </StackPanel>
                         <HyperlinkButton x:Name="AlbumLink" Click="OnAlbumLinkClick" Padding="0"
                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Visibility="Collapsed">
                             <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />

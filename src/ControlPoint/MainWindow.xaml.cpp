@@ -24,6 +24,7 @@
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
+#include "CreditText.h"
 #include "DialogPlacement.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
@@ -797,9 +798,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                            [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     if (s.pathUtf8.empty()) {
         TitleText().Text(tr(L"NoFile"));
-        ArtistLinkText().Text(L"");
+        showPlayerArtist({});
         AlbumLinkText().Text(L"");
-        ArtistLink().Visibility(Visibility::Collapsed);
         AlbumLink().Visibility(Visibility::Collapsed);
         SourceText().Text(L"");
     } else {
@@ -807,10 +807,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         TitleText().Text(currentEntry != snapshot.queue.entries.end() && !currentEntry->title.empty()
                              ? ui::utf8(currentEntry->title)
                              : hstring(p.stem().wstring()));
-        ArtistLinkText().Text(currentEntry == snapshot.queue.entries.end() ? hstring{} : ui::utf8(currentEntry->artist));
-        ArtistLink().Visibility(currentEntry != snapshot.queue.entries.end() && !currentEntry->artist.empty()
-                                    ? Visibility::Visible
-                                    : Visibility::Collapsed);
+        showPlayerArtist(currentEntry == snapshot.queue.entries.end() ? hstring{} : ui::utf8(currentEntry->artist));
         AlbumLinkText().Text(currentEntry == snapshot.queue.entries.end() ? hstring{} : ui::utf8(currentEntry->album));
         AlbumLink().Visibility(currentEntry != snapshot.queue.entries.end() && !currentEntry->album.empty()
                                    ? Visibility::Visible
@@ -2499,15 +2496,43 @@ void MainWindow::OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Rout
     get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album), std::move(leave), keepHistory);
 }
 
-void MainWindow::OnArtistLinkClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    if (!server_) return;
-    const auto snapshot = server_->snapshot();
-    const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
-                                      [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
-    if (current == snapshot.queue.entries.end() || current->artist.empty()) return;
+// The credit shows as plain text at once and gains its links when the library has split it into names.
+void MainWindow::showPlayerArtist(hstring const& artist) {
+    if (artist == shownArtist_) return;
+    shownArtist_ = artist;
+    const auto open = [weak = get_weak()](hstring const& name) {
+        if (auto window = weak.get()) window->openArtist(name);
+    };
+    const auto show = [this, open](const std::vector<LibraryNamePart>& parts) {
+        ui::showCreditButtons(
+            ArtistCredit(), parts, open,
+            ArtistCredit().Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>(), 12);
+    };
+    show({{winrt::to_string(artist), false}});
+    ToolTipService::SetToolTip(ArtistCredit(), artist.empty() ? nullptr : box_value(artist));
+    ArtistCredit().Visibility(artist.empty() ? Visibility::Collapsed : Visibility::Visible);
+    if (artist.empty() || !server_) return;
+    [](winrt::weak_ref<MainWindow> weak, std::shared_ptr<IServer> server, Microsoft::UI::Dispatching::DispatcherQueue queue,
+       hstring artist, std::function<void(const std::vector<LibraryNamePart>&)> show) -> winrt::fire_and_forget {
+        co_await winrt::resume_background();
+        std::vector<LibraryNamePart> parts;
+        try {
+            parts = server->creditParts({winrt::to_string(artist)}).front();
+        } catch (const std::exception& e) {
+            camel::log::warn("player bar credit: %s", e.what());
+            co_return;
+        }
+        queue.TryEnqueue([weak, artist, parts, show] {
+            auto self = weak.get();
+            if (self && self->shownArtist_ == artist) show(parts);
+        });
+    }(get_weak(), server_, DispatcherQueue(), artist, show);
+}
+
+void MainWindow::openArtist(hstring const& artist) {
     auto leave = openLibraryOverPage();
     const bool keepHistory = !leave;
-    get_self<LibraryView>(Library())->showArtist(ui::utf8(current->artist), std::move(leave), keepHistory);
+    get_self<LibraryView>(Library())->showArtist(artist, std::move(leave), keepHistory);
 }
 
 void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,

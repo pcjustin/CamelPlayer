@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Library/LibrarySchema.h"
+#include "Server/Library/LibraryNames.h"
 
 #include <stdexcept>
 #include <string>
@@ -407,6 +408,23 @@ ALTER TABLE queue DROP COLUMN cue_index;
                     "THEN (created-116444736000000000)/10000000 ELSE CAST(strftime('%s','now') AS INTEGER) END);"
                     "ALTER TABLE stats ADD COLUMN favorite_at INTEGER;"
                     "ALTER TABLE stats ADD COLUMN album_favorite_at INTEGER;");
+        },
+        // Artist and composer tags move to track_tags as written; track_values keeps the names they credit, split by
+        // LibraryNameSplitter and derived again whenever the library learns names ("Aimer with chelly" credits both).
+        [](sqlite::Database& db) {
+            db.exec(R"sql(
+CREATE TABLE track_tags (
+    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    field TEXT NOT NULL CHECK (field IN ('artist', 'composer')),
+    position INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    sort_source TEXT,
+    PRIMARY KEY (track_id, field, position)
+);
+INSERT INTO track_tags(track_id,field,position,value,sort_source)
+    SELECT track_id,field,position,value,sort_source FROM track_values WHERE field IN ('artist','composer');
+)sql");
+            updateLibraryNameRules(db);
         },
     };
     return migrations;
