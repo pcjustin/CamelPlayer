@@ -205,6 +205,7 @@ void MainWindow::InitializeComponent() {
     Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) { colorCaptionButtons(); });
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
+    addSettingsLinks();
     Content().AddHandler(UIElement::PointerPressedEvent(),
                          box_value(Input::PointerEventHandler([this](auto&&, Input::PointerRoutedEventArgs const& e) {
                              if (e.GetCurrentPoint(nullptr).Properties().IsXButton1Pressed() && goBack()) e.Handled(true);
@@ -1436,6 +1437,31 @@ void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IIn
 }
 
 // Back sits in the title bar, as in other Windows apps, while a library page has somewhere to return to.
+void MainWindow::addSettingsLinks() {
+    const std::pair<const wchar_t*, FrameworkElement> cards[] = {
+        {L"Settings_Library/Text", LibraryCard()},
+        {L"Settings_Playback/Text", PlaybackCard()},
+        {L"Settings_Status/Text", StatusCard()},
+        {L"Settings_Decoders/Text", DecodersCard()},
+        {L"Settings_Interface/Text", InterfaceCard()},
+        {L"Settings_Hotkeys/Text", HotkeysCard()},
+        {L"Reset_Title/Text", ResetCard()},
+        {L"Settings_About/Text", AboutCard()},
+    };
+    for (const auto& [title, card] : cards) {
+        HyperlinkButton link;
+        link.Content(box_value(tr(title)));
+        link.Padding(ThicknessHelper::FromLengths(0, 5, 0, 6));
+        link.Click([card](auto&&, auto&&) {
+            BringIntoViewOptions options;
+            options.VerticalAlignmentRatio(0);
+            options.AnimationDesired(true);
+            card.StartBringIntoView(options);
+        });
+        SettingsLinks().Children().Append(link);
+    }
+}
+
 void MainWindow::showTitleBack() {
     AppTitleBar().IsBackButtonVisible(Library().Visibility() == Visibility::Visible &&
                                       get_self<LibraryView>(Library())->canGoBack());
