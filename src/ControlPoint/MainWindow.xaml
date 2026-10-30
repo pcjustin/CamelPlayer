@@ -33,7 +33,7 @@
         <!-- The window's own title bar, in the app's theme: the pane toggle, and search on every page (docs/Plan.md §8.2):
              grouped suggestions while typing, Enter opens all results. -->
         <TitleBar x:Name="AppTitleBar" Title="CamelPlayer" IsPaneToggleButtonVisible="True"
-                  PaneToggleRequested="OnPaneToggleRequested">
+                  PaneToggleRequested="OnPaneToggleRequested" BackRequested="OnTitleBackRequested">
             <TitleBar.Content>
                 <AutoSuggestBox x:Name="SearchBox" x:Uid="Search_Box" QueryIcon="Find" UpdateTextOnSelect="False"
                                 Width="420" VerticalAlignment="Center"

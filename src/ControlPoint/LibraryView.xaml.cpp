@@ -146,7 +146,6 @@ void LibraryView::InitializeComponent() {
     LibraryViewT::InitializeComponent();
     ToolTipService::SetToolTip(DescendingToggle(), box_value(tr(L"Library_Descending")));
     Automation::AutomationProperties::SetName(DescendingToggle(), tr(L"Library_Descending"));
-    Automation::AutomationProperties::SetName(BackButton(), tr(L"Library_Back"));
 }
 
 void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu,
@@ -360,7 +359,7 @@ void LibraryView::hide() {
 void LibraryView::open(View view, bool push) {
     cancelArtwork();
     DetailCover().Source(nullptr);
-    DetailCover().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
+    DetailCoverFrame().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     AlbumActions().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     AlbumFormats().Children().Clear();
     AlbumFormats().Visibility(Visibility::Collapsed);
@@ -375,7 +374,7 @@ void LibraryView::open(View view, bool push) {
     ++generation_;
     HeaderTitle().Text(current_.title);
     HeaderDetail().Text(current_.detail);
-    BackButton().Visibility(back_.empty() && !leave_ ? Visibility::Collapsed : Visibility::Visible);
+    if (backChanged_) backChanged_(canGoBack());
     SearchGroups().Visibility(current_.mode == Mode::Search ? Visibility::Visible : Visibility::Collapsed);
     SearchAlbums().ItemsSource(nullptr);
     SearchArtists().ItemsSource(nullptr);
@@ -513,6 +512,7 @@ void LibraryView::startCollection() {
     (current_.mode == Mode::Albums ? AlbumGrid().as<ItemsControl>() : RowList().as<ItemsControl>()).ItemsSource(source);
     collection_->start([this](int64_t total) {
         showEmpty(total);
+        showCount(total);
         restoreOffset();
     });
 }
@@ -1077,6 +1077,30 @@ void LibraryView::OnArtworkUnloaded(Windows::Foundation::IInspectable const& sen
 
 void LibraryView::OnArtworkContextChanged(FrameworkElement const& sender, DataContextChangedEventArgs const&) {
     bindArtwork(sender.as<Image>());
+}
+
+// The size of a whole list (all albums, artists, tracks…) under its title; filtered lists keep their own detail.
+void LibraryView::showCount(int64_t total) {
+    if (!current_.detail.empty() || current_.fetch || current_.smartList()) return;
+    const wchar_t* key = nullptr;
+    if (current_.mode == Mode::Albums && !current_.filter) key = L"Library_Albums";
+    if (current_.mode == Mode::Tracks && !current_.filter) key = L"Library_Tracks";
+    if (current_.mode == Mode::Groups) {
+        using Field = LibraryGroupField;
+        key = current_.field == Field::Artist     ? L"Search_ArtistCount"
+              : current_.field == Field::Composer ? L"Library_ComposerCount"
+              : current_.field == Field::Genre    ? L"Library_GenreCount"
+                                                  : L"Library_YearCount";
+    }
+    if (key) HeaderDetail().Text(counted(tr(key), total));
+}
+
+bool LibraryView::canGoBack() const {
+    return !back_.empty() || leave_;
+}
+
+void LibraryView::goBack() {
+    OnBackClick(nullptr, nullptr);
 }
 
 void LibraryView::OnBackClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

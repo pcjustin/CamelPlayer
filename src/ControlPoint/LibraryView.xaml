@@ -109,23 +109,20 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+        <!-- The title starts at the page edge as on every page; going back is the title bar's back button. -->
         <Grid ColumnSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Button x:Name="BackButton" Click="OnBackClick" Visibility="Collapsed" VerticalAlignment="Center">
-                <SymbolIcon Symbol="Back" />
-            </Button>
-            <Grid Grid.Column="1" ColumnSpacing="12">
+            <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border CornerRadius="8" VerticalAlignment="Top">
-                    <Image x:Name="DetailCover" Width="160" Height="160" Stretch="Uniform" Visibility="Collapsed" />
+                <Border x:Name="DetailCoverFrame" CornerRadius="8" VerticalAlignment="Top" Margin="0,0,16,0" Visibility="Collapsed">
+                    <Image x:Name="DetailCover" Width="160" Height="160" Stretch="Uniform" />
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
@@ -181,8 +178,8 @@
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
                 </StackPanel>
             </Grid>
-            <ComboBox x:Name="SortCombo" Grid.Column="2" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
-            <ToggleButton x:Name="DescendingToggle" Grid.Column="3" VerticalAlignment="Center" Click="OnDescendingClick">
+            <ComboBox x:Name="SortCombo" Grid.Column="1" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
+            <ToggleButton x:Name="DescendingToggle" Grid.Column="2" VerticalAlignment="Center" Click="OnDescendingClick">
                 <SymbolIcon Symbol="Sort" />
             </ToggleButton>
         </Grid>

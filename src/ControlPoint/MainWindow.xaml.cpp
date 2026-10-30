@@ -203,6 +203,8 @@ void MainWindow::InitializeComponent() {
     AppWindow().TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
     colorCaptionButtons();
     Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) { colorCaptionButtons(); });
+    get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
+    Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
 
     if (!server_) server_ = createLocalServer();
     settings_ = server_->snapshot().settings;
@@ -1421,6 +1423,16 @@ void MainWindow::colorCaptionButtons() {
 
 void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
     Nav().IsPaneOpen(!Nav().IsPaneOpen());
+}
+
+// Back sits in the title bar, as in other Windows apps, while a library page has somewhere to return to.
+void MainWindow::showTitleBack() {
+    AppTitleBar().IsBackButtonVisible(Library().Visibility() == Visibility::Visible &&
+                                      get_self<LibraryView>(Library())->canGoBack());
+}
+
+void MainWindow::OnTitleBackRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
+    get_self<LibraryView>(Library())->goBack();
 }
 
 void MainWindow::fitNavigationPane() {

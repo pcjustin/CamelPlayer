@@ -129,6 +129,9 @@
   <data name="Library_Unknown" xml:space="preserve"><value>未知</value></data>
   <data name="Library_Albums" xml:space="preserve"><value>{0} 張專輯</value></data>
   <data name="Library_Tracks" xml:space="preserve"><value>{0} 首</value></data>
+  <data name="Library_ComposerCount" xml:space="preserve"><value>{0} 位作曲家</value></data>
+  <data name="Library_GenreCount" xml:space="preserve"><value>{0} 種類型</value></data>
+  <data name="Library_YearCount" xml:space="preserve"><value>{0} 個年份</value></data>
   <data name="Library_Folder" xml:space="preserve"><value>資料夾</value></data>
   <data name="Library_SortTitle" xml:space="preserve"><value>標題</value></data>
   <data name="Library_SortArtist" xml:space="preserve"><value>演出者</value></data>
@@ -137,7 +140,6 @@
   <data name="Library_SortDuration" xml:space="preserve"><value>長度</value></data>
   <data name="Library_SortAdded" xml:space="preserve"><value>加入日期</value></data>
   <data name="Library_Descending" xml:space="preserve"><value>遞減</value></data>
-  <data name="Library_Back" xml:space="preserve"><value>返回</value></data>
   <data name="Settings_Library.Text" xml:space="preserve"><value>媒體庫</value></data>
   <data name="Settings_AddFolder.Content" xml:space="preserve"><value>加入資料夾…</value></data>
   <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>移除資料夾</value></data>

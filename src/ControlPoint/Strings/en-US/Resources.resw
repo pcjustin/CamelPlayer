@@ -129,6 +129,9 @@
   <data name="Library_Unknown" xml:space="preserve"><value>Unknown</value></data>
   <data name="Library_Albums" xml:space="preserve"><value>{0} albums</value></data>
   <data name="Library_Tracks" xml:space="preserve"><value>{0} tracks</value></data>
+  <data name="Library_ComposerCount" xml:space="preserve"><value>{0} composers</value></data>
+  <data name="Library_GenreCount" xml:space="preserve"><value>{0} genres</value></data>
+  <data name="Library_YearCount" xml:space="preserve"><value>{0} years</value></data>
   <data name="Library_Folder" xml:space="preserve"><value>Folder</value></data>
   <data name="Library_SortTitle" xml:space="preserve"><value>Title</value></data>
   <data name="Library_SortArtist" xml:space="preserve"><value>Artist</value></data>
@@ -137,7 +140,6 @@
   <data name="Library_SortDuration" xml:space="preserve"><value>Duration</value></data>
   <data name="Library_SortAdded" xml:space="preserve"><value>Date added</value></data>
   <data name="Library_Descending" xml:space="preserve"><value>Descending</value></data>
-  <data name="Library_Back" xml:space="preserve"><value>Back</value></data>
   <data name="Settings_Library.Text" xml:space="preserve"><value>Library</value></data>
   <data name="Settings_AddFolder.Content" xml:space="preserve"><value>Add folder…</value></data>
   <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>Remove folder</value></data>

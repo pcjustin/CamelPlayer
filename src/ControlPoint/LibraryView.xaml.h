@@ -38,6 +38,10 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void hide();
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
+    // Whether Back has somewhere to go; `changed` hears it after every page change. The window's title bar shows Back.
+    bool canGoBack() const;
+    void goBack();
+    void setBackChanged(std::function<void(bool)> changed) { backChanged_ = std::move(changed); }
 
     void OnBackClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSortChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -110,6 +114,7 @@ private:
     void startCollection();
     // Explains an empty view: no library folder yet, or no album grouped by the scan yet.
     void showEmpty(int64_t total);
+    void showCount(int64_t total);
     void loadAlbumDetail();
     void loadFolder();
     void loadSearchGroups();
@@ -154,6 +159,7 @@ private:
     std::vector<View> back_;
     std::optional<double> restoreOffset_;
     std::function<void()> leave_; // Back from a search that began outside the library pages
+    std::function<void(bool)> backChanged_;
     std::function<void(ui::SourceFetch, std::string)> savePlaylist_;
     uint64_t generation_ = 0; // changes whenever another view opens
     camel::server::AlbumSort albumSort_ = camel::server::AlbumSort::Title;
