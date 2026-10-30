@@ -695,11 +695,12 @@
                     </StackPanel>
                 </Grid>
             </Grid>
-            <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) -->
-            <Grid Grid.Row="3" ColumnSpacing="8">
+            <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1), at the right so the
+                 cover and the track's three lines stand on their own. -->
+            <Grid Grid.Row="3" ColumnSpacing="8" HorizontalAlignment="Right">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
@@ -725,14 +726,15 @@
                     </Border>
                 </StackPanel>
                 <HyperlinkButton x:Name="FormatButton" x:Uid="SignalPath_Toggle" Grid.Column="1" Click="OnFormatClick"
-                                 Padding="4,2" HorizontalAlignment="Left" MinWidth="0">
+                                 Padding="4,2" MinWidth="0" MaxWidth="420">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="FormatText" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis" />
                         <FontIcon x:Name="FormatChevron" Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
                     </StackPanel>
                 </HyperlinkButton>
             </Grid>
-            <StackPanel x:Name="SignalPathPanel" Grid.Row="4" Spacing="2" Padding="4,2,0,0" Visibility="Collapsed">
+            <StackPanel x:Name="SignalPathPanel" Grid.Row="4" Spacing="2" Padding="4,2,0,0" Visibility="Collapsed"
+                        HorizontalAlignment="Right" MaxWidth="720">
                 <TextBlock x:Name="SourceText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock x:Name="SignalPathText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
