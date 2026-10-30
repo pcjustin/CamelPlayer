@@ -1127,19 +1127,19 @@ winrt::fire_and_forget MainWindow::refreshRoots() {
 
 namespace {
 
-// A folder, or a Windows library expanded to the folders it holds now (later library changes are not followed).
+// Folders, with a Windows library expanded to the folders it holds now (later library changes are not followed).
 std::vector<std::wstring> pickMusicFolders(HWND owner) {
     std::vector<std::wstring> folders;
     auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
     FILEOPENDIALOGOPTIONS options{};
     dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_ALLNONSTORAGEITEMS);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_ALLNONSTORAGEITEMS | FOS_ALLOWMULTISELECT);
     winrt::com_ptr<IShellItem> music;
     if (SUCCEEDED(SHGetKnownFolderItem(FOLDERID_MusicLibrary, KF_FLAG_DEFAULT, nullptr, IID_PPV_ARGS(music.put()))))
         dialog->SetFolder(music.get());
     if (FAILED(dialog->Show(owner))) return folders;
-    winrt::com_ptr<IShellItem> item;
-    if (FAILED(dialog->GetResult(item.put()))) return folders;
+    winrt::com_ptr<IShellItemArray> items;
+    if (FAILED(dialog->GetResults(items.put()))) return folders;
     const auto add = [&](IShellItem* folder) {
         PWSTR path = nullptr;
         if (SUCCEEDED(folder->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
@@ -1147,19 +1147,23 @@ std::vector<std::wstring> pickMusicFolders(HWND owner) {
             CoTaskMemFree(path);
         }
     };
-    winrt::com_ptr<IShellLibrary> library;
-    winrt::com_ptr<IShellItemArray> members;
-    if (SUCCEEDED(SHLoadLibraryFromItem(item.get(), STGM_READ, IID_PPV_ARGS(library.put()))) &&
-        SUCCEEDED(library->GetFolders(LFF_FORCEFILESYSTEM, IID_PPV_ARGS(members.put())))) {
+    const auto forEach = [](IShellItemArray* array, auto&& visit) {
         DWORD count = 0;
-        members->GetCount(&count);
+        array->GetCount(&count);
         for (DWORD i = 0; i < count; ++i) {
-            winrt::com_ptr<IShellItem> member;
-            if (SUCCEEDED(members->GetItemAt(i, member.put()))) add(member.get());
+            winrt::com_ptr<IShellItem> item;
+            if (SUCCEEDED(array->GetItemAt(i, item.put()))) visit(item.get());
         }
-    } else {
-        add(item.get());
-    }
+    };
+    forEach(items.get(), [&](IShellItem* item) {
+        winrt::com_ptr<IShellLibrary> library;
+        winrt::com_ptr<IShellItemArray> members;
+        if (SUCCEEDED(SHLoadLibraryFromItem(item, STGM_READ, IID_PPV_ARGS(library.put()))) &&
+            SUCCEEDED(library->GetFolders(LFF_FORCEFILESYSTEM, IID_PPV_ARGS(members.put()))))
+            forEach(members.get(), add);
+        else
+            add(item);
+    });
     return folders;
 }
 

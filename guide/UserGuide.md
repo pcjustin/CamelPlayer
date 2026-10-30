@@ -10,7 +10,7 @@ CamelPlayer plays FLAC, ALAC, WAV, AIFF, AAC, MP3 and DSD (DSF and DSDIFF) files
 
 CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Its settings, library and logs are kept in `%LOCALAPPDATA%\CamelPlayer`; Settings › Reset and data shows the folder and its size. To remove CamelPlayer, delete its folder and, if you want, the data folder.
 
-The first start opens a short guide: add your music folders (local drives or a NAS) and choose the output. The library is scanned in the background and albums appear as it goes. You can skip the guide; Settings › Interface opens it again.
+The first start opens a short guide: add your music folders (local drives or a NAS) and choose the output. In the folder window, hold Ctrl to select several folders at once. The library is scanned in the background and albums appear as it goes. You can skip the guide; Settings › Interface opens it again.
 
 Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface.
 
