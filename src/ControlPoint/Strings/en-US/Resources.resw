@@ -152,8 +152,10 @@
   <data name="Queue_Title.Text" xml:space="preserve"><value>Queue</value></data>
   <data name="Queue_Close.Content" xml:space="preserve"><value>Close</value></data>
   <data name="Queue_RemoveEntry" xml:space="preserve"><value>Remove track from queue</value></data>
-  <data name="Queue_Clear.Content" xml:space="preserve"><value>Clear queue</value></data>
-  <data name="Queue_Save.Content" xml:space="preserve"><value>Save queue as playlist</value></data>
+  <data name="Queue_Clear.Text" xml:space="preserve"><value>Clear queue</value></data>
+  <data name="Queue_Save.Text" xml:space="preserve"><value>Save queue as playlist</value></data>
+  <data name="Queue_More.AutomationProperties.Name" xml:space="preserve"><value>More queue options</value></data>
+  <data name="Queue_More.ToolTipService.ToolTip" xml:space="preserve"><value>More queue options</value></data>
   <data name="Queue_SaveTitle" xml:space="preserve"><value>Save queue as playlist</value></data>
   <data name="Queue_DefaultName" xml:space="preserve"><value>Queue</value></data>
   <data name="Queue_SavePrimary" xml:space="preserve"><value>Save</value></data>
@@ -357,8 +359,7 @@
   <data name="Settings_Autoplay.Header" xml:space="preserve"><value>When the queue ends</value></data>
   <data name="Settings_Autoplay.OnContent" xml:space="preserve"><value>Keep playing random tracks from the library</value></data>
   <data name="Settings_Autoplay.OffContent" xml:space="preserve"><value>Stop</value></data>
-  <data name="Queue_Autoplay.OnContent" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
-  <data name="Queue_Autoplay.OffContent" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
+  <data name="Queue_Autoplay.Text" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
   <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>Added automatically after the queue ended</value></data>
   <data name="Settings_Hotkeys.Text" xml:space="preserve"><value>Hotkeys</value></data>
   <data name="Settings_HotkeysText.Text" xml:space="preserve"><value>System-wide: these work in every program. Click a combination and press the new one (with Ctrl, Alt or Win); Esc keeps the old one.</value></data>

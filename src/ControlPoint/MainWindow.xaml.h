@@ -63,6 +63,7 @@ struct MainWindow : MainWindowT<MainWindow> {
                                Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const&);
     // Settings › Playback and the queue panel switch the same autoplay setting (docs/Plan.md §8.1).
     void OnAutoplayToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnHotkeyDefaultsClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     // Shortcuts while the window is in front (docs/Plan.md §8.4); never while text is typed or a dialog or menu is open.
     void OnWindowKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);

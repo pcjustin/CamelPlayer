@@ -152,8 +152,10 @@
   <data name="Queue_Title.Text" xml:space="preserve"><value>播放佇列</value></data>
   <data name="Queue_Close.Content" xml:space="preserve"><value>關閉</value></data>
   <data name="Queue_RemoveEntry" xml:space="preserve"><value>從佇列移除此曲</value></data>
-  <data name="Queue_Clear.Content" xml:space="preserve"><value>清空佇列</value></data>
-  <data name="Queue_Save.Content" xml:space="preserve"><value>將佇列儲存為播放清單</value></data>
+  <data name="Queue_Clear.Text" xml:space="preserve"><value>清空佇列</value></data>
+  <data name="Queue_Save.Text" xml:space="preserve"><value>將佇列儲存為播放清單</value></data>
+  <data name="Queue_More.AutomationProperties.Name" xml:space="preserve"><value>更多佇列選項</value></data>
+  <data name="Queue_More.ToolTipService.ToolTip" xml:space="preserve"><value>更多佇列選項</value></data>
   <data name="Queue_SaveTitle" xml:space="preserve"><value>將佇列儲存為播放清單</value></data>
   <data name="Queue_DefaultName" xml:space="preserve"><value>播放佇列</value></data>
   <data name="Queue_SavePrimary" xml:space="preserve"><value>儲存</value></data>
@@ -357,8 +359,7 @@
   <data name="Settings_Autoplay.Header" xml:space="preserve"><value>播完佇列後</value></data>
   <data name="Settings_Autoplay.OnContent" xml:space="preserve"><value>繼續隨機播放音樂庫的歌曲</value></data>
   <data name="Settings_Autoplay.OffContent" xml:space="preserve"><value>停止</value></data>
-  <data name="Queue_Autoplay.OnContent" xml:space="preserve"><value>播完後自動播放</value></data>
-  <data name="Queue_Autoplay.OffContent" xml:space="preserve"><value>播完後自動播放</value></data>
+  <data name="Queue_Autoplay.Text" xml:space="preserve"><value>播完後自動播放</value></data>
   <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>佇列播完後自動加入</value></data>
   <data name="Settings_Hotkeys.Text" xml:space="preserve"><value>快捷鍵</value></data>
   <data name="Settings_HotkeysText.Text" xml:space="preserve"><value>全系統：在任何程式中都有效。點選組合後按下新的組合（需含 Ctrl、Alt 或 Win）；按 Esc 保留原本的組合。</value></data>

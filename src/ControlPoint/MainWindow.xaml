@@ -475,22 +475,42 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <Grid ColumnSpacing="8" Padding="0,0,8,0">
+                    <Grid ColumnSpacing="4" Padding="0,0,8,0">
                         <Grid.Resources>
                             <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
                             <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
                             <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
                             <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
                         </Grid.Resources>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" />
                             <TextBlock x:Name="QueueCountText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
-                        <Button Grid.Column="1" x:Uid="Queue_ClosePanel" Click="OnQueueToggleClick" Width="36" Height="36"
+                        <Button Grid.Column="1" x:Uid="Queue_More" Width="36" Height="36" Padding="0" CornerRadius="18"
+                                VerticalAlignment="Top">
+                            <FontIcon Glyph="&#xE712;" FontSize="14" />
+                            <Button.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                    <ToggleMenuFlyoutItem x:Name="QueueAutoplayItem" x:Uid="Queue_Autoplay"
+                                                          Click="OnQueueAutoplayClick" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Uid="Queue_Save" Click="OnQueueSaveClick">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74E;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Uid="Queue_Clear" Click="OnQueueClearClick">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                        <Button Grid.Column="2" x:Uid="Queue_ClosePanel" Click="OnQueueToggleClick" Width="36" Height="36"
                                 Padding="0" CornerRadius="18" VerticalAlignment="Top">
                             <FontIcon Glyph="&#xE711;" FontSize="14" />
                         </Button>
@@ -544,11 +564,6 @@
                     </ListView>
                     <TextBlock x:Name="QueueEmptyText" x:Uid="Queue_Empty" Grid.Row="1" TextWrapping="Wrap" Margin="0,0,8,0"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
-                    <StackPanel Grid.Row="2" Spacing="8" Padding="0,0,8,0">
-                        <ToggleSwitch x:Name="QueueAutoplaySwitch" x:Uid="Queue_Autoplay" Toggled="OnAutoplayToggled" />
-                        <Button x:Uid="Queue_Clear" Click="OnQueueClearClick" HorizontalAlignment="Stretch" />
-                        <Button x:Uid="Queue_Save" Click="OnQueueSaveClick" HorizontalAlignment="Stretch" />
-                    </StackPanel>
                 </Grid>
             </Grid>
         </NavigationView>

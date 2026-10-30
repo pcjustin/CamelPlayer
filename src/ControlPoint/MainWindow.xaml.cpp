@@ -437,7 +437,7 @@ void MainWindow::populateSettings() {
          int(settings_.resampleQuality));
     fill(ConvertDsdCombo(), {tr(L"Convert_Off"), tr(L"ConvertDsd_On")}, settings_.convertDsdWhenUnsupported ? 1 : 0);
     AutoplaySwitch().IsOn(settings_.autoplay);
-    QueueAutoplaySwitch().IsOn(settings_.autoplay);
+    QueueAutoplayItem().IsChecked(settings_.autoplay);
     AutoUpdateSwitch().IsOn(settings_.checkUpdates);
     applyHotkeys();
 
@@ -614,9 +614,13 @@ void MainWindow::OnAutoplayToggled(Windows::Foundation::IInspectable const& send
     const bool on = sender.as<ToggleSwitch>().IsOn();
     populating_ = true;
     AutoplaySwitch().IsOn(on);
-    QueueAutoplaySwitch().IsOn(on);
+    QueueAutoplayItem().IsChecked(on);
     populating_ = false;
     settingsChanged();
+}
+
+void MainWindow::OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    AutoplaySwitch().IsOn(QueueAutoplayItem().IsChecked());
 }
 
 void MainWindow::settingsChanged() {
