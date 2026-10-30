@@ -47,22 +47,32 @@ TEST(LibraryNames, KeepsOtherBracketsWithTheirName) {
     EXPECT_EQ(splitter.names("ACE(工藤ともり、CHiCO)、光田康典"), (Names{"ACE(工藤ともり、CHiCO)", "光田康典"}));
 }
 
-TEST(LibraryNames, SplitsAmbiguousSeparatorsOnlyBetweenKnownNames) {
+TEST(LibraryNames, SplitsAmbiguousSeparatorsNextToAKnownName) {
     const LibraryNameSplitter splitter({"Ado", "初音ミク", "Bob Marley", "Calexico", "Iron & Wine", "絢香", "コブクロ",
-                                        "Akihiro Namba", "Takeshi Ueda", "Xi", "Sakuzyo", "Barry White", "Tamia"});
+                                        "Akihiro Namba", "Takeshi Ueda", "Xi", "Sakuzyo", "Barry White", "Tamia", "Evan Call"});
     EXPECT_EQ(splitter.names("Ado, 初音ミク"), (Names{"Ado", "初音ミク"}));
     EXPECT_EQ(splitter.names("22/7"), (Names{"22/7"}));
     EXPECT_EQ(splitter.names("3×4×S"), (Names{"3×4×S"}));
-    EXPECT_EQ(splitter.names("Bob Marley & The Wailers"), (Names{"Bob Marley & The Wailers"}));
     EXPECT_EQ(splitter.names("Calexico and Iron & Wine"), (Names{"Calexico", "Iron & Wine"}));
     EXPECT_EQ(splitter.names("絢香 x コブクロ"), (Names{"絢香", "コブクロ"}));
     EXPECT_EQ(splitter.names("TOMORROW X TOGETHER"), (Names{"TOMORROW X TOGETHER"}));
     EXPECT_EQ(splitter.names("Akihiro Namba × Takeshi Ueda"), (Names{"Akihiro Namba", "Takeshi Ueda"}));
     EXPECT_EQ(splitter.names("Xi Vs Sakuzyo"), (Names{"Xi", "Sakuzyo"}));
-    EXPECT_EQ(splitter.names("Barry White, Tamia and Toots Thielemans"), (Names{"Barry White, Tamia and Toots Thielemans"}));
+    EXPECT_EQ(splitter.names("Evan Call, Uyanga Bold"), (Names{"Evan Call", "Uyanga Bold"}));
+    EXPECT_EQ(splitter.names("Barry White, Tamia and Toots Thielemans"), (Names{"Barry White", "Tamia", "Toots Thielemans"}));
+    EXPECT_EQ(splitter.names("Earth, Wind & Fire"), (Names{"Earth, Wind & Fire"}));
 }
 
-TEST(LibraryNames, SplitsColonsOnlyBetweenKnownNames) {
+TEST(LibraryNames, KeepsBandsOpeningWithTheAndInstrumentsWithTheirName) {
+    const LibraryNameSplitter splitter({"Bob Marley", "Florence", "Yo-Yo Ma", "Anne-Sophie Mutter"});
+    EXPECT_EQ(splitter.names("Bob Marley & The Wailers"), (Names{"Bob Marley & The Wailers"}));
+    EXPECT_EQ(splitter.names("Florence and the Machine"), (Names{"Florence and the Machine"}));
+    EXPECT_EQ(splitter.names("Yo-Yo Ma, cello"), (Names{"Yo-Yo Ma, cello"}));
+    EXPECT_EQ(splitter.names("Anne-Sophie Mutter / Violin"), (Names{"Anne-Sophie Mutter / Violin"}));
+    EXPECT_EQ(splitter.names("Yo-Yo Ma, cello, Anne-Sophie Mutter"), (Names{"Yo-Yo Ma, cello", "Anne-Sophie Mutter"}));
+}
+
+TEST(LibraryNames, SplitsColonsNextToAKnownName) {
     const LibraryNameSplitter splitter({"SawanoHiroyuki[nZk]", "mizuki", "Claudio Abbado", "Chicago Symphony Orchestra"});
     EXPECT_EQ(splitter.names("SawanoHiroyuki[nZk]:mizuki"), (Names{"SawanoHiroyuki[nZk]", "mizuki"}));
     EXPECT_EQ(splitter.names("Claudio Abbado: Chicago Symphony Orchestra"),
@@ -72,10 +82,10 @@ TEST(LibraryNames, SplitsColonsOnlyBetweenKnownNames) {
 }
 
 TEST(LibraryNames, CaseTellsNamesApartButWidthDoesNot) {
-    const LibraryNameSplitter cased({"Lisa", "Ado"});
-    EXPECT_EQ(cased.names("LiSA & Ado"), (Names{"LiSA & Ado"}));
-    const LibraryNameSplitter wide({"ＬｉＳＡ", "Ado"});
-    EXPECT_EQ(wide.names("LiSA & Ado"), (Names{"LiSA", "Ado"}));
+    const LibraryNameSplitter cased({"Lisa"});
+    EXPECT_EQ(cased.names("LiSA & Uru"), (Names{"LiSA & Uru"}));
+    const LibraryNameSplitter wide({"ＬｉＳＡ"});
+    EXPECT_EQ(wide.names("LiSA & Uru"), (Names{"LiSA", "Uru"}));
     EXPECT_EQ(libraryNameKey("ＬｉＳＡ"), libraryNameKey("LiSA"));
     EXPECT_NE(libraryNameKey("LiSA"), libraryNameKey("Lisa"));
 }
@@ -83,7 +93,8 @@ TEST(LibraryNames, CaseTellsNamesApartButWidthDoesNot) {
 TEST(LibraryNames, KnowsNamesFromCreditsWithFeaturedArtists) {
     const LibraryNameSplitter splitter({"Aimer with chelly", "Vaundy feat. Aimer", "milet & Aimer"});
     EXPECT_EQ(splitter.names("chelly & Vaundy"), (Names{"chelly", "Vaundy"}));
-    EXPECT_EQ(splitter.names("milet & Aimer"), (Names{"milet & Aimer"}));
+    EXPECT_EQ(splitter.names("milet & Aimer"), (Names{"milet", "Aimer"}));
+    EXPECT_EQ(splitter.names("milet & Uru"), (Names{"milet & Uru"}));
 }
 
 TEST(LibraryNames, PartsGiveBackTheCredit) {

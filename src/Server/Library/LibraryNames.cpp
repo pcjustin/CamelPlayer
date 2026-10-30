@@ -188,6 +188,25 @@ std::vector<Span> ambiguousSeparators(std::wstring_view s) {
     return spans;
 }
 
+// What a performer plays or sings, which a credit may name after the performer instead of another performer.
+constexpr std::wstring_view kInstruments[] = {
+    L"violin", L"viola",       L"cello",     L"violoncello", L"double bass", L"bass",          L"piano",    L"fortepiano",
+    L"organ",  L"harpsichord", L"guitar",    L"harp",        L"flute",       L"oboe",          L"clarinet", L"bassoon",
+    L"horn",   L"trumpet",     L"trombone",  L"percussion",  L"soprano",     L"mezzo-soprano", L"alto",     L"countertenor",
+    L"tenor",  L"baritone",    L"conductor", L"vocals",      L"vocal"};
+
+// Whether a separator keeps the segments around it in one name: & or "and" before a name opening with "The", as in
+// "Bob Marley & The Wailers", or any separator before an instrument, as in "Yo-Yo Ma, cello". `next` ends the segment
+// after it.
+bool binds(std::wstring_view s, const Span& span, size_t next) {
+    const auto separator = trimmed(s.substr(span.begin, span.end - span.begin));
+    const bool conjunction = separator == L"&" || separator == L"\xFF06" || wordAt(separator, 0, L"and");
+    if (conjunction && wordAt(s, span.end, L"the") && span.end + 3 < s.size() && space(s[span.end + 3])) return true;
+    std::wstring word(trimmed(s.substr(span.end, next - span.end)));
+    for (auto& c : word) c = wchar_t(std::towlower(c));
+    return std::find(std::begin(kInstruments), std::end(kInstruments), word) != std::end(kInstruments);
+}
+
 } // namespace
 
 std::string libraryNameKey(std::string_view name) {
@@ -214,23 +233,33 @@ std::vector<LibraryNamePart> LibraryNameSplitter::parts(std::string_view credit)
             tokens.separator(token.text);
             continue;
         }
-        // The finest division into consecutive groups of segments that are all known names; none leaves the name whole.
+        // Of the divisions into two or more groups of consecutive segments, each group a known name or one segment, the
+        // one with the most known names, then the finest; without a known name the name stays whole.
         const std::wstring_view s = token.text;
-        const auto spans = ambiguousSeparators(s);
+        std::vector<Span> spans;
+        const auto separators = ambiguousSeparators(s);
+        for (size_t k = 0; k < separators.size(); ++k)
+            if (!binds(s, separators[k], k + 1 < separators.size() ? separators[k + 1].begin : s.size()))
+                spans.push_back(separators[k]);
         const size_t segments = spans.size() + 1;
         const auto begin = [&](size_t k) { return k == 0 ? 0 : spans[k - 1].end; };
         const auto end = [&](size_t k) { return k == spans.size() ? s.size() : spans[k].begin; };
-        std::vector<int> best(segments + 1, -1);
+        std::vector<std::pair<int, int>> best(segments + 1, {-1, 0}); // known names, groups
         std::vector<size_t> from(segments + 1, 0);
-        best[0] = 0;
+        best[0] = {0, 0};
         for (size_t i = 1; i <= segments && !spans.empty(); ++i)
             for (size_t j = 0; j < i; ++j) {
-                if (best[j] < 0 || best[j] + 1 <= best[i]) continue;
-                if (!known_.contains(keyOf(s.substr(begin(j), end(i - 1) - begin(j))))) continue;
-                best[i] = best[j] + 1;
+                if (best[j].first < 0 || (j == 0 && i == segments)) continue;
+                const auto group = s.substr(begin(j), end(i - 1) - begin(j));
+                if (trimmed(group).empty()) continue;
+                const bool known = known_.contains(keyOf(group));
+                if (!known && i - j > 1) continue;
+                const std::pair score{best[j].first + (known ? 1 : 0), best[j].second + 1};
+                if (score <= best[i]) continue;
+                best[i] = score;
                 from[i] = j;
             }
-        if (best[segments] < 2) {
+        if (best[segments].first < 1) {
             out.push_back(token);
             continue;
         }

@@ -27,8 +27,9 @@ struct LibraryNamePart {
 std::string libraryNameKey(std::string_view name);
 
 // Splits credits at the separators that always divide names (; ； 、 feat. ft. featuring with, and a bracket that opens
-// with one of those words), then at & ＆ , ， / ／ × : ： x and vs only where every part is a known name, so "22/7" and
-// "Bob Marley & The Wailers" stay whole. Text in any other bracket belongs to the name.
+// with one of those words), then at & ＆ , ， / ／ × : ： x and vs where at least one part is a known name, except & and
+// "and" before a name opening with "The" and any of them before an instrument, so "22/7", "Bob Marley & The Wailers"
+// and "Yo-Yo Ma, cello" stay whole. Text in any other bracket belongs to the name.
 class LibraryNameSplitter {
 public:
     LibraryNameSplitter() = default;
@@ -47,7 +48,7 @@ private:
 };
 
 // Changes whenever LibraryNameSplitter splits differently, so that libraries derive their names again.
-constexpr std::string_view kLibraryNameRules = "2";
+constexpr std::string_view kLibraryNameRules = "3";
 
 // A splitter that knows every artist and composer tag and album artist in the library.
 LibraryNameSplitter loadLibraryNames(sqlite::Database& db);
