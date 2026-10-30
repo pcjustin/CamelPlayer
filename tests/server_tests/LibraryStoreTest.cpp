@@ -74,9 +74,9 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
     EXPECT_EQ(db.userVersion(), 14);
-    EXPECT_EQ(tables(db),
-              (std::set<std::string>{"albums", "app_state", "change_log", "covers", "files", "folders", "library_revision", "play_events", "playlist_items",
-                                     "playlists", "queue", "roots", "stats", "track_values", "tracks", "tracks_fts"}));
+    EXPECT_EQ(tables(db), (std::set<std::string>{"albums", "app_state", "change_log", "covers", "files", "folders",
+                                                 "library_revision", "play_events", "playlist_items", "playlists", "queue",
+                                                 "roots", "stats", "track_values", "tracks", "tracks_fts"}));
     auto mode = db.prepare("PRAGMA journal_mode");
     ASSERT_TRUE(mode.step());
     EXPECT_EQ(mode.text(0), "wal");
@@ -143,18 +143,22 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
                 const auto other = addTrack(db, "C:/music/other.flac", "Other");
                 db.exec("INSERT INTO track_values(track_id,field,position,value) SELECT id,'artist',0,'Kept artist' FROM tracks "
                         "WHERE title='Kept'");
-                db.prepare("INSERT INTO stats(file_id,cue_index,play_count,rating,listened_ms) VALUES(?,0,3,5,1000),(?,0,1,NULL,10)")
+                db.prepare(
+                      "INSERT INTO stats(file_id,cue_index,play_count,rating,listened_ms) VALUES(?,0,3,5,1000),(?,0,1,NULL,10)")
                     .bind(1, file)
                     .bind(2, other)
                     .run();
-                db.prepare("INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES(?,0,1,0,1000,1)")
+                db.prepare(
+                      "INSERT INTO play_events(file_id,cue_index,started,utc_offset,heard_ms,counted) VALUES(?,0,1,0,1000,1)")
                     .bind(1, file)
                     .run();
                 db.exec("INSERT INTO playlists(id,name,created,modified,revision) VALUES(1,'Kept',0,0,1)");
-                db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,cue_index,source_description) VALUES(1,0,?,0,'k')")
+                db.prepare(
+                      "INSERT INTO playlist_items(playlist_id,position,file_id,cue_index,source_description) VALUES(1,0,?,0,'k')")
                     .bind(1, file)
                     .run();
-                db.prepare("INSERT INTO queue(position,entry_id,file_id,cue_index,path,source_description) VALUES(0,1,?,0,'p','k')")
+                db.prepare(
+                      "INSERT INTO queue(position,entry_id,file_id,cue_index,path,source_description) VALUES(0,1,?,0,'p','k')")
                     .bind(1, file)
                     .run();
             })
@@ -177,12 +181,13 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM play_events"), 1);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM playlist_items"), 1);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM queue"), 1);
-    store.write([](Database& w) {
-             EXPECT_EQ(w.scalar("PRAGMA foreign_keys"), 1);
-             EXPECT_THROW(w.exec("INSERT INTO tracks(file_id) VALUES(1)"), sqlite::Error); // one track per file
-             w.exec("UPDATE tracks SET title='Renamed' WHERE title='Kept'");                // the triggers came back
-             EXPECT_EQ(w.scalar("SELECT COUNT(*) FROM tracks_fts WHERE tracks_fts MATCH 'renamed'"), 1);
-         })
+    store
+        .write([](Database& w) {
+            EXPECT_EQ(w.scalar("PRAGMA foreign_keys"), 1);
+            EXPECT_THROW(w.exec("INSERT INTO tracks(file_id) VALUES(1)"), sqlite::Error); // one track per file
+            w.exec("UPDATE tracks SET title='Renamed' WHERE title='Kept'");               // the triggers came back
+            EXPECT_EQ(w.scalar("SELECT COUNT(*) FROM tracks_fts WHERE tracks_fts MATCH 'renamed'"), 1);
+        })
         .get();
 }
 
@@ -235,7 +240,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
-    EXPECT_THROW((LibraryStore(dir)), MigrationError); // the extra migration is newer than the production schema
+    EXPECT_THROW((LibraryStore(dir)), NewerLibraryError); // the extra migration is newer than the production schema
 }
 
 TEST(LibraryStore, UpgradesV13ByDatingFilesByTheirCreationOnDisk) {
@@ -251,7 +256,8 @@ TEST(LibraryStore, UpgradesV13ByDatingFilesByTheirCreationOnDisk) {
             })
             .get();
     }
-    const auto before = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto before =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     LibraryStore store(dir);
     auto db = store.openReader();
     EXPECT_EQ(db.scalar("SELECT added FROM files WHERE path='C:/music/album/01.flac'"), 1577836800);
@@ -302,9 +308,57 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks"), 0);
 }
 
+namespace {
+
+std::vector<std::filesystem::path> dailyFiles(const std::filesystem::path& dir) {
+    std::vector<std::filesystem::path> out;
+    for (const auto& e : std::filesystem::directory_iterator(dir))
+        if (e.path().filename().wstring().starts_with(L"library.db.daily-") && e.path().extension() == ".bak")
+            out.push_back(e.path().filename());
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+} // namespace
+
+TEST(LibraryStore, TakesACheckedDailyBackupThatADamagedFileIsReplacedByFirst) {
+    const auto dir = freshDir("daily");
+    {
+        LibraryStore store(dir);
+        store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "Daily"); }).get();
+        EXPECT_TRUE(store.backupIfDue());
+        EXPECT_FALSE(store.backupIfDue()) << "one a day";
+    }
+    auto daily = dailyFiles(dir);
+    ASSERT_EQ(daily.size(), 1u);
+    const auto today = daily.front();
+    const auto old = std::filesystem::file_time_type::clock::now() - std::chrono::hours(48);
+    for (const auto* name : {L"library.db.daily-20200101.bak", L"library.db.daily-20200102.bak"}) {
+        std::filesystem::copy_file(dir / today, dir / name);
+        std::filesystem::last_write_time(dir / name, old);
+    }
+    std::filesystem::last_write_time(dir / today, old);
+    {
+        LibraryStore store(dir);
+        store.write([](Database& db) { addTrack(db, "C:/music/album/02.flac", "Later"); }).get();
+        EXPECT_TRUE(store.backupIfDue()) << "the newest is two days old";
+    }
+    daily = dailyFiles(dir);
+    EXPECT_EQ(daily, std::vector<std::filesystem::path>{today}) << "only the newest is kept";
+
+    std::filesystem::remove(dir / "library.db-wal");
+    std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'x');
+    LibraryStore store(dir);
+    EXPECT_TRUE(store.report().damaged);
+    EXPECT_TRUE(store.report().restoredBackup);
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks WHERE title IN ('Daily', 'Later')"), 2);
+}
+
 TEST(LibraryStore, PagesAreCheckedOnlyAfterTheDatabaseWasNotClosed) {
     const auto dir = freshDir("unclosed");
-    { LibraryStore store(dir); }
+    {
+        LibraryStore store(dir);
+    }
     {
         LibraryStore store(dir);
         EXPECT_FALSE(store.report().checked);

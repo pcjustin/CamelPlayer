@@ -412,31 +412,79 @@ std::filesystem::path settingsPath() {
     return dataDirectory() / L"settings.json";
 }
 
-Settings loadSettings(const std::filesystem::path& path) {
+namespace {
+
+// Nothing for a missing file; throws NewerSettingsError, or another exception for a corrupt file.
+std::optional<Settings> readSettings(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
-    if (!in) return {};
+    if (!in) return std::nullopt;
     std::stringstream ss;
     ss << in.rdbuf();
     in.close();
-    try {
-        const auto contents = ss.str();
-        const auto parsed = json::parse(contents);
-        Settings settings = fromJson(contents);
-        const int schema = parsed.value("schema", 0);
-        if (schema < Settings::kSchemaVersion) {
-            try {
-                saveSettings(settings, path);
-            } catch (const std::exception& e) {
-                log::warn("settings: loaded schema %d but could not persist migration (%s)", schema, e.what());
-            }
+    const auto contents = ss.str();
+    const auto parsed = json::parse(contents);
+    if (parsed.is_object() && parsed.contains("schema") && parsed["schema"].is_number_integer() &&
+        parsed["schema"].get<int>() > Settings::kSchemaVersion)
+        throw NewerSettingsError("settings.json has schema " + std::to_string(parsed["schema"].get<int>()) +
+                                 ", newer than this program (" + std::to_string(Settings::kSchemaVersion) + ")");
+    Settings settings = fromJson(contents);
+    const int schema = parsed.value("schema", 0);
+    if (schema < Settings::kSchemaVersion) {
+        try {
+            saveSettings(settings, path);
+        } catch (const std::exception& e) {
+            log::warn("settings: loaded schema %d but could not persist migration (%s)", schema, e.what());
         }
-        return settings;
+    }
+    return settings;
+}
+
+void keepAsBad(const std::filesystem::path& path, const std::exception& e) {
+    log::warn("settings: corrupt file kept as settings.json.bad (%s)", e.what());
+    std::error_code ec;
+    std::filesystem::rename(path, std::filesystem::path(path).concat(L".bad"), ec);
+}
+
+} // namespace
+
+Settings loadSettings(const std::filesystem::path& path) {
+    try {
+        return readSettings(path).value_or(Settings{});
+    } catch (const NewerSettingsError&) {
+        throw;
     } catch (const std::exception& e) {
-        log::warn("settings: corrupt file, using defaults (%s)", e.what());
-        std::error_code ec;
-        std::filesystem::rename(path, std::filesystem::path(path).concat(L".bad"), ec);
+        keepAsBad(path, e);
         return {};
     }
+}
+
+Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recovery) {
+    recovery = SettingsRecovery::None;
+    const auto lastGood = std::filesystem::path(path).concat(L".last-good");
+    std::error_code ec;
+    try {
+        const auto settings = readSettings(path);
+        if (settings) std::filesystem::copy_file(path, lastGood, std::filesystem::copy_options::overwrite_existing, ec);
+        return settings.value_or(Settings{});
+    } catch (const NewerSettingsError&) {
+        throw;
+    } catch (const std::exception& e) {
+        keepAsBad(path, e);
+    }
+    try {
+        if (const auto settings = readSettings(lastGood)) {
+            saveSettings(*settings, path);
+            recovery = SettingsRecovery::RestoredLastGood;
+            log::warn("settings: restored settings.json.last-good");
+            return *settings;
+        }
+    } catch (const NewerSettingsError&) {
+        throw;
+    } catch (const std::exception& e) {
+        log::warn("settings: settings.json.last-good is unusable too (%s)", e.what());
+    }
+    recovery = SettingsRecovery::Reset;
+    return {};
 }
 
 void saveSettings(const Settings& s, const std::filesystem::path& path) {

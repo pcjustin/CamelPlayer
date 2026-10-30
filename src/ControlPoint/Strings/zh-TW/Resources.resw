@@ -243,6 +243,14 @@
   <data name="Guide_Skip" xml:space="preserve"><value>略過</value></data>
   <data name="Guide_Finish" xml:space="preserve"><value>完成</value></data>
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer 找不到或無法建立 %LOCALAPPDATA% 中的資料夾，因此無法啟動。請確認該資料夾存在且你的帳號可以寫入。</value></data>
+  <data name="Error_NewerData" xml:space="preserve"><value>這份 CamelPlayer 資料是由較新的版本建立的，這個版本無法使用。請改用較新版本的 CamelPlayer；資料都沒有變動。</value></data>
+  <data name="Error_DataFailed" xml:space="preserve"><value>CamelPlayer 無法開啟它的資料，因此無法啟動：{0}。資料都沒有變動。回報這個問題時，請附上 {1} 中的紀錄檔。</value></data>
+  <data name="Recovery_Title" xml:space="preserve"><value>CamelPlayer 修復了損毀的資料</value></data>
+  <data name="Recovery_SettingsRestored" xml:space="preserve"><value>設定檔損毀，已用上次啟動時保存的副本還原。</value></data>
+  <data name="Recovery_SettingsReset" xml:space="preserve"><value>設定檔損毀且沒有可用的副本，設定已回到預設值。</value></data>
+  <data name="Recovery_LibraryRestored" xml:space="preserve"><value>媒體庫資料庫損毀，已用最近一次的每日備份還原；之後的變更（例如新的播放清單或播放紀錄）可能遺失。</value></data>
+  <data name="Recovery_LibraryRebuilt" xml:space="preserve"><value>媒體庫資料庫損毀且沒有可用的備份，已建立新的媒體庫：請到「設定」重新加入音樂資料夾。播放清單和播放統計已無法復原。</value></data>
+  <data name="Recovery_Kept" xml:space="preserve"><value>損毀的檔案以 .bad 副檔名保留在 {0}。</value></data>
   <data name="Settings_About.Text" xml:space="preserve"><value>關於</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
   <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>診斷資料</value></data>

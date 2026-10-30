@@ -7,6 +7,7 @@
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "Common/AudioFormat.h"
@@ -175,8 +176,19 @@ const PlaybackTiming& timing(const Settings& s);
 std::filesystem::path dataDirectory(); // %LOCALAPPDATA%\CamelPlayer (created on demand)
 std::filesystem::path settingsPath();
 
-// Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad).
+// Settings a newer CamelPlayer wrote (a higher schema): this version neither reads nor replaces them.
+class NewerSettingsError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad). Throws NewerSettingsError.
 Settings loadSettings(const std::filesystem::path& path = settingsPath());
+
+enum class SettingsRecovery : uint8_t { None, RestoredLastGood, Reset };
+// loadSettings at the program's start: a readable file is also copied to settings.json.last-good, and that copy replaces
+// a corrupt file before the defaults would. `recovery` tells which happened. Throws NewerSettingsError.
+Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recovery);
 // Atomic replace (write temp file, then MoveFileEx).
 void saveSettings(const Settings& s, const std::filesystem::path& path = settingsPath());
 

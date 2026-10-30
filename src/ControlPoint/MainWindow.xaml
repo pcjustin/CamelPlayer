@@ -26,6 +26,8 @@
         </Grid.RowDefinitions>
 
         <StackPanel>
+            <!-- What opening the data at startup had to repair (a damaged settings file or library database). -->
+            <InfoBar x:Name="RecoveryBar" Severity="Warning" IsOpen="False" IsClosable="True" />
             <!-- The installation check (docs/Plan.md §8.6): damaged or missing program files, repaired only after Repair. -->
             <InfoBar x:Name="RepairBar" Severity="Warning" IsOpen="False" IsClosable="False">
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">

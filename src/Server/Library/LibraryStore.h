@@ -30,6 +30,11 @@ class MigrationError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };
+// The database has a schema a newer CamelPlayer made; it is left as it is.
+class NewerLibraryError : public MigrationError {
+public:
+    using MigrationError::MigrationError;
+};
 
 // The scans in progress (none when idle), summed over roots: files their listings found so far, files they checked,
 // and how many have checked everything and are finishing (regrouping albums).
@@ -50,7 +55,7 @@ public:
     };
 
     // Opens or creates `directory`/library.db, which must be on a local disk. Throws MigrationError (after restoring the
-    // database as it was) when a migration fails.
+    // database as it was) when a migration fails, NewerLibraryError when the schema is newer than `migrations`.
     explicit LibraryStore(const std::filesystem::path& directory, const std::vector<Migration>& migrations = libraryMigrations());
     ~LibraryStore();
     LibraryStore(const LibraryStore&) = delete;
@@ -71,7 +76,12 @@ public:
         return {scanning_.load(), scanFound_.load(), scanChecked_.load(), scanFinishing_.load()};
     }
 
+    // library.db.daily-YYYYMMDD.bak: a copy taken while idle, or at exit, once the last is a day old; kept only when it
+    // passes quick_check. A damaged database is replaced by it before the migration backups. True when one was made.
+    bool backupIfDue();
+
     static constexpr int kKeptBackups = 3;
+    static constexpr int kKeptDailyBackups = 1;
 
 private:
     friend class LibraryScanner;

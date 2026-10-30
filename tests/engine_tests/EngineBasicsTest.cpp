@@ -172,6 +172,49 @@ TEST(Settings, CorruptFileFallsBackToDefaults) {
     std::filesystem::remove(std::filesystem::path(p).concat(L".bad"));
 }
 
+TEST(Settings, OpeningKeepsALastGoodCopyThatReplacesACorruptFile) {
+    const auto p = testutil::tempDir() / L"settings-open.json";
+    const auto lastGood = std::filesystem::path(p).concat(L".last-good");
+    const auto bad = std::filesystem::path(p).concat(L".bad");
+    for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
+    Settings saved;
+    saved.backend = Backend::Asio;
+    saveSettings(saved, p);
+    auto recovery = SettingsRecovery::Reset;
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Asio);
+    EXPECT_EQ(recovery, SettingsRecovery::None);
+    EXPECT_TRUE(std::filesystem::exists(lastGood));
+
+    std::ofstream(p, std::ios::binary | std::ios::trunc) << "{ not json";
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Asio);
+    EXPECT_EQ(recovery, SettingsRecovery::RestoredLastGood);
+    EXPECT_TRUE(std::filesystem::exists(bad));
+    EXPECT_EQ(loadSettings(p).backend, Backend::Asio) << "the restored copy is written back";
+
+    std::ofstream(p, std::ios::binary | std::ios::trunc) << "{ not json";
+    std::ofstream(lastGood, std::ios::binary | std::ios::trunc) << "[]";
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Wasapi);
+    EXPECT_EQ(recovery, SettingsRecovery::Reset);
+
+    std::filesystem::remove(p);
+    std::ofstream(lastGood, std::ios::binary | std::ios::trunc) << R"({"schema":3,"backend":"asio"})";
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Wasapi) << "a missing file is not a damaged one";
+    EXPECT_EQ(recovery, SettingsRecovery::None);
+    for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
+}
+
+TEST(Settings, ANewerSchemaIsNeitherReadNorMovedAside) {
+    const auto p = testutil::tempDir() / L"settings-newer.json";
+    std::filesystem::remove(std::filesystem::path(p).concat(L".bad"));
+    std::ofstream(p, std::ios::binary | std::ios::trunc) << R"({"schema":99,"backend":"asio"})";
+    auto recovery = SettingsRecovery::None;
+    EXPECT_THROW(loadSettings(p), NewerSettingsError);
+    EXPECT_THROW(openSettings(p, recovery), NewerSettingsError);
+    EXPECT_TRUE(std::filesystem::exists(p));
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(p).concat(L".bad")));
+    std::filesystem::remove(p);
+}
+
 TEST(FlacStreamInfo, ReadsGeneratedFile) {
     SourceInfo si;
     ASSERT_TRUE(readFlacStreamInfo(testutil::testFile("24-96k"), si));

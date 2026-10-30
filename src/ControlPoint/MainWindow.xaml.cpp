@@ -284,6 +284,7 @@ void MainWindow::InitializeComponent() {
             camel::log::info("measure: main window loaded %.0f ms after process start", camel::measure::sinceProcessStart());
         showFirstRunGuideIfDue(); // a dialog needs a XamlRoot
         showUpdateResult();
+        showDataRecovery();
         checkInstallation(false);
     });
     Nav().SelectedItem(Nav().MenuItems().GetAt(0));
@@ -2607,6 +2608,26 @@ winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, std:
     camel::log::info("update: CamelUpdater takes over to %s %s", repair ? "repair" : "install", release.version.c_str());
     exiting_ = true;
     Close();
+}
+
+void MainWindow::showDataRecovery() {
+    if (!server_) return;
+    const auto recovery = server_->dataRecovery();
+    std::wstring text;
+    // Sentences after a full-width full stop need no space.
+    const auto add = [&text](hstring const& sentence) {
+        if (!text.empty() && text.back() != L'。') text += L' ';
+        text += sentence;
+    };
+    if (recovery.settings == camel::SettingsRecovery::RestoredLastGood) add(tr(L"Recovery_SettingsRestored"));
+    if (recovery.settings == camel::SettingsRecovery::Reset) add(tr(L"Recovery_SettingsReset"));
+    if (recovery.library == DataRecovery::Library::RestoredBackup) add(tr(L"Recovery_LibraryRestored"));
+    if (recovery.library == DataRecovery::Library::Rebuilt) add(tr(L"Recovery_LibraryRebuilt"));
+    if (text.empty()) return;
+    add(ui::format(L"Recovery_Kept", {camel::dataDirectory().wstring()}));
+    RecoveryBar().Title(tr(L"Recovery_Title"));
+    RecoveryBar().Message(text);
+    RecoveryBar().IsOpen(true);
 }
 
 void MainWindow::OnCheckInstallClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

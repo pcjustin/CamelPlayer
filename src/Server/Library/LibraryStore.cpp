@@ -8,6 +8,8 @@
 #include <shlwapi.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <utility>
 
@@ -72,6 +74,21 @@ std::vector<std::pair<int, std::filesystem::path>> backups(const std::filesystem
     return out;
 }
 
+// library.db.daily-YYYYMMDD.bak files, newest first.
+std::vector<std::filesystem::path> dailyBackups(const std::filesystem::path& db) {
+    std::vector<std::filesystem::path> out;
+    std::error_code ec;
+    const std::wstring prefix = db.filename().wstring() + L".daily-";
+    for (const auto& entry : std::filesystem::directory_iterator(db.parent_path(), ec)) {
+        const std::wstring name = entry.path().filename().wstring();
+        if (name.size() != prefix.size() + 12 || !name.starts_with(prefix) || !name.ends_with(L".bak")) continue;
+        if (name.substr(prefix.size(), 8).find_first_not_of(L"0123456789") != std::wstring::npos) continue;
+        out.push_back(entry.path());
+    }
+    std::sort(out.begin(), out.end(), std::greater<>());
+    return out;
+}
+
 void configure(sqlite::Database& db) {
     // Scan batches touch FTS and index pages across the whole database; the default 2 MiB cache rereads them per row.
     db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -65536;");
@@ -108,13 +125,15 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
         removeDatabase(bad);
         std::filesystem::rename(path_, bad, ec);
         removeDatabase(path_);
-        for (const auto& [version, backup] : backups(path_)) {
+        auto candidates = dailyBackups(path_);
+        for (const auto& [version, backup] : backups(path_)) candidates.push_back(backup);
+        for (const auto& backup : candidates) {
             std::filesystem::copy_file(backup, path_, std::filesystem::copy_options::overwrite_existing, ec);
             auto restored = ec ? std::nullopt : openIfHealthy(path_);
             if (restored) {
                 db_.emplace(std::move(*restored));
                 report_.restoredBackup = true;
-                log::warn("library: damaged database replaced by the schema %d backup", version);
+                log::warn("library: damaged database replaced by %s", toUtf8(backup.filename().wstring()).c_str());
                 break;
             }
             removeDatabase(path_);
@@ -129,8 +148,8 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
 
     const int version = db_->userVersion();
     if (std::cmp_greater(version, migrations.size()))
-        throw MigrationError("library.db has schema version " + std::to_string(version) + ", newer than this program (" +
-                             std::to_string(migrations.size()) + ")");
+        throw NewerLibraryError("library.db has schema version " + std::to_string(version) + ", newer than this program (" +
+                                std::to_string(migrations.size()) + ")");
     if (std::cmp_less(version, migrations.size())) {
         std::optional<std::filesystem::path> backup;
         if (version > 0) {
@@ -183,6 +202,43 @@ std::future<void> LibraryStore::write(std::function<void(sqlite::Database&)> wor
     }
     cv_.notify_all();
     return done;
+}
+
+bool LibraryStore::backupIfDue() {
+    std::error_code ec;
+    if (const auto daily = dailyBackups(path_); !daily.empty()) {
+        const auto made = std::filesystem::last_write_time(daily.front(), ec);
+        if (!ec && std::filesystem::file_time_type::clock::now() - made < std::chrono::hours(24)) return false;
+    }
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    wchar_t suffix[32];
+    swprintf(suffix, std::size(suffix), L".daily-%04u%02u%02u.bak", now.wYear, now.wMonth, now.wDay);
+    const auto target = withSuffix(path_, suffix);
+    const auto temp = withSuffix(target, L".tmp");
+    removeDatabase(temp);
+    try {
+        openReader().backupTo(temp);
+        bool usable = false;
+        {
+            sqlite::Database copy(temp);
+            usable = healthy(copy);
+        }
+        if (!usable) {
+            removeDatabase(temp);
+            log::warn("library: the daily backup failed its check and was dropped");
+            return false;
+        }
+        std::filesystem::rename(temp, target);
+    } catch (const std::exception& e) {
+        removeDatabase(temp);
+        log::warn("library: daily backup failed: %s", e.what());
+        return false;
+    }
+    const auto all = dailyBackups(path_);
+    for (size_t i = kKeptDailyBackups; i < all.size(); i++) std::filesystem::remove(all[i], ec);
+    log::info("library: daily backup %s", toUtf8(target.filename().wstring()).c_str());
+    return true;
 }
 
 sqlite::Database LibraryStore::openReader() const {

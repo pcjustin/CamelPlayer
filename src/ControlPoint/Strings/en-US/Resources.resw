@@ -243,6 +243,14 @@
   <data name="Guide_Skip" xml:space="preserve"><value>Skip</value></data>
   <data name="Guide_Finish" xml:space="preserve"><value>Finish</value></data>
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer cannot find or create its data folder in %LOCALAPPDATA%, so it will not start. Check that the folder exists and that your account can write to it.</value></data>
+  <data name="Error_NewerData" xml:space="preserve"><value>This CamelPlayer data was written by a newer version, which this version cannot use. Start the newer CamelPlayer instead; nothing was changed.</value></data>
+  <data name="Error_DataFailed" xml:space="preserve"><value>CamelPlayer cannot open its data, so it will not start: {0}. Nothing was changed. When you report this, attach the logs from {1}.</value></data>
+  <data name="Recovery_Title" xml:space="preserve"><value>CamelPlayer repaired damaged data</value></data>
+  <data name="Recovery_SettingsRestored" xml:space="preserve"><value>The settings file was damaged and was restored from the copy saved at the previous start.</value></data>
+  <data name="Recovery_SettingsReset" xml:space="preserve"><value>The settings file was damaged and no usable copy was left, so the settings are back to their defaults.</value></data>
+  <data name="Recovery_LibraryRestored" xml:space="preserve"><value>The library database was damaged and was restored from the latest daily backup; changes since then, such as new playlists or plays, may be missing.</value></data>
+  <data name="Recovery_LibraryRebuilt" xml:space="preserve"><value>The library database was damaged and no usable backup was left, so a new library was started: add your music folders again in Settings. Playlists and play statistics are gone.</value></data>
+  <data name="Recovery_Kept" xml:space="preserve"><value>The damaged files are kept in {0} with the .bad extension.</value></data>
   <data name="Settings_About.Text" xml:space="preserve"><value>About</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
   <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>Diagnostics</value></data>

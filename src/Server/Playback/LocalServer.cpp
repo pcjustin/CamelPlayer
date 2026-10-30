@@ -204,6 +204,7 @@ public:
                     for (int i = 0; i < 300 && !stop.stop_requested(); ++i)
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     if (busy()) continue;
+                    library_->backupIfDue();
                     try {
                         if (const auto made = artwork_->prepare(*library_, busy))
                             log::info("artwork: prepared %zu album covers", made);
@@ -248,7 +249,10 @@ public:
         }
         cv_.notify_one();
         if (worker_.joinable()) worker_.join();
-        if (library_) library_->close();
+        if (library_) {
+            library_->backupIfDue(); // for a day that never had an idle moment
+            library_->close();
+        }
     }
 
     CommandStamp enqueue(Command c, bool restore = false) {
@@ -296,6 +300,16 @@ public:
         }
         server::writeDiagnosticBundle(file, input);
     }
+
+    DataRecovery dataRecovery() const {
+        DataRecovery recovery;
+        recovery.settings = settingsRecovery_;
+        if (library_ && library_->report().damaged)
+            recovery.library =
+                library_->report().restoredBackup ? DataRecovery::Library::RestoredBackup : DataRecovery::Library::Rebuilt;
+        return recovery;
+    }
+    SettingsRecovery settingsRecovery_ = SettingsRecovery::None;
 
     void setListener(std::function<void(const Event&)> listener) {
         std::lock_guard lock(mutex_);
@@ -1485,9 +1499,20 @@ void LocalServer::writeDiagnosticBundle(const std::filesystem::path& file, bool 
     impl_->writeDiagnosticBundle(file, includePaths, appVersion);
 }
 
+DataRecovery LocalServer::dataRecovery() const {
+    return impl_->dataRecovery();
+}
+void LocalServer::setSettingsRecovery(SettingsRecovery recovery) {
+    impl_->settingsRecovery_ = recovery;
+}
+
 std::shared_ptr<IServer> createLocalServer() {
     const auto path = settingsPath();
-    return std::make_shared<LocalServer>(loadSettings(path), path);
+    auto recovery = SettingsRecovery::None;
+    const auto settings = openSettings(path, recovery);
+    auto server = std::make_shared<LocalServer>(settings, path);
+    server->setSettingsRecovery(recovery);
+    return server;
 }
 
 } // namespace camel::server

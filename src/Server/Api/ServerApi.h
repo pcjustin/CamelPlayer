@@ -249,6 +249,12 @@ private:
     std::optional<Snapshot> current_;
 };
 
+// What opening the data at startup had to repair, for the window to tell the user.
+struct DataRecovery {
+    SettingsRecovery settings = SettingsRecovery::None;
+    enum class Library : uint8_t { None, RestoredBackup, Rebuilt } library = Library::None;
+};
+
 class IServer {
 public:
     virtual ~IServer() = default;
@@ -310,8 +316,11 @@ public:
     // The diagnostic bundle (docs/Plan.md §17.5); probes the selected output device only while playback is stopped.
     virtual void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
                                        const std::string& appVersion) const = 0;
+    virtual DataRecovery dataRecovery() const = 0;
 };
 
+// Throws NewerSettingsError or NewerLibraryError for data a newer CamelPlayer wrote, and MigrationError or another
+// exception when the data cannot be opened; nothing is changed then.
 std::shared_ptr<IServer> createLocalServer();
 
 } // namespace camel::server

@@ -93,7 +93,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     if (camel::measure::measuring())
         camel::log::info("measure: opening the server %.0f ms after process start", camel::measure::sinceProcessStart());
-    auto server = camel::server::createLocalServer();
+    // Data that cannot be opened is left as it is, and the user learns why instead of the program vanishing.
+    std::shared_ptr<camel::server::IServer> server;
+    try {
+        server = camel::server::createLocalServer();
+    } catch (const std::exception& e) {
+        camel::log::error("cannot open the data: %s", e.what());
+        const bool newer =
+            dynamic_cast<const camel::NewerSettingsError*>(&e) || dynamic_cast<const camel::server::NewerLibraryError*>(&e);
+        const auto text =
+            newer ? ui::tr(L"Error_NewerData") : ui::format(L"Error_DataFailed", {camel::toWide(e.what()), logs.wstring()});
+        MessageBoxW(nullptr, text.c_str(), L"CamelPlayer", MB_ICONERROR | MB_OK);
+        return 1;
+    }
     if (camel::measure::measuring())
         camel::log::info("measure: server opened %.0f ms after process start", camel::measure::sinceProcessStart());
     try {

@@ -229,6 +229,8 @@ private:
     Microsoft::UI::Dispatching::DispatcherQueueTimer updateTimer_{nullptr};
     // The installation check: at each start (a full one for a version not verified yet) and from Settings › About.
     winrt::fire_and_forget checkInstallation(bool manual);
+    // A settings file or library database that was damaged at startup and how it was replaced.
+    void showDataRecovery();
     void showRepairOffer();
     void showRepairResult(wchar_t const* title, wchar_t const* text, Microsoft::UI::Xaml::Controls::InfoBarSeverity severity);
     std::optional<camel::server::update::InstallCheck> installCheck_; // the last check that found problems

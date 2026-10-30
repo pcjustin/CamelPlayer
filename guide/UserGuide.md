@@ -64,6 +64,10 @@ While raw DSD plays, the **DSD** or **DoP** badge shows that volume and every ot
 
 **A library folder shows as offline.** The drive or NAS share cannot be reached. Its tracks stay in the library, marked unavailable, and come back when the folder does. New files are found automatically; if tags look out of date, **Rebuild the library** in Settings › Reset and data rereads every file and keeps statistics and playlists.
 
+**"CamelPlayer repaired damaged data".** A settings file or library database that could not be read is kept with the `.bad` extension in the data folder. The settings come back from the copy saved at the previous start. The library comes back from its daily backup, made while CamelPlayer is idle or as it exits, so changes since then may be missing. Without a usable copy the settings return to their defaults, or a new library starts and the music folders have to be added again.
+
+**CamelPlayer says its data was written by a newer version.** An older CamelPlayer was started after a newer one had upgraded the settings or the library. Start the newer version again; the older one changed nothing.
+
 **A hotkey does not work.** Settings › Hotkeys reports a combination another program already holds; press a different one.
 
 **"Some program files are damaged or missing".** The first time each version starts, CamelPlayer compares its program folder with the release's list of files; **Check installation** in Settings › About does it at any time. **Details** lists the files. **Repair** downloads the same version from GitHub again and replaces the program files; your settings and library stay. If an antivirus program quarantined a file, restore it there or exclude the CamelPlayer folder first.
