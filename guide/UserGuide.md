@@ -1,6 +1,6 @@
 # CamelPlayer user guide
 
-CamelPlayer plays FLAC, ALAC, WAV, AIFF, AAC, MP3 and DSD (DSF and DSDIFF) files on Windows, sending lossless music to your DAC bit-perfect. This guide covers installing it, choosing how it reaches your DAC, DSD playback and common problems. [繁體中文版](UserGuide.zh-TW.md)
+CamelPlayer plays FLAC, ALAC, WAV, AIFF, AAC, MP3 and DSD (DSF and DSDIFF) files on Windows, sending lossless music to your DAC bit-perfect. This guide covers installing it, getting around, choosing how it reaches your DAC, DSD playback and common problems. [繁體中文版](UserGuide.zh-TW.md)
 
 ## Installing
 
@@ -15,6 +15,27 @@ The first start opens a short guide: choose a light or dark look (or the Windows
 Settings › Interface › **Theme** switches between light, dark and the Windows setting at any time.
 
 Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface.
+
+## Getting around
+
+**Home** shows recently played and recently added albums and, at the bottom, this month's listening time, plays and most played album. Click that card for the **Listening** page, where the cards for today, this week, this month, this year and all time choose the period of the chart, the most played albums, artists and tracks (by plays or listening time) and the play history below them. **View all** opens a whole list. Back in the title bar, Alt+← or the mouse back button returns to Home.
+
+The navigation pane lists **Albums** (sorted by title, artist, year or date added), **Artists**, **Composers**, **Genres**, **Years**, **Tracks** and **Folders**. The letters beside the album, artist, composer and genre lists jump to that part of the list; in a short window a dot stands for the letters left out between two others. An album lists its tracks by disc with a badge for each format, bit depth and sample rate it contains. Search from the title bar (Ctrl+F): suggestions appear as you type, and Enter lists every match.
+
+Click a track to play it. Right-click tracks, albums, artists or folders for **Play next** and **Add to end of queue**; Ctrl-click and Shift-click select several rows first. The queue button at the right of the player bar opens the queue: drag entries to reorder them, press Delete to remove them, and use its ⋯ menu to clear the queue, save it as a playlist or turn **Autoplay when the queue ends** on or off. Autoplay keeps random library tracks you have not played in the last 7 days playing after the last one. The cover in the player bar opens the playing album.
+
+Right-click a selection for **Create playlist** or **Add to playlist**. A playlist plays, renames, reorders by dragging and saves an M3U8 file with **Export M3U8**; **Import M3U8** on the Playlists page reads M3U8 and M3U files. The heart beside a track or album marks it as a favorite, and **Smart Playlists** gathers recently added, most played, last played and never played tracks and your favorites.
+
+| Keys | While CamelPlayer is in front |
+| --- | --- |
+| Space | Play or pause |
+| Ctrl+→ / Ctrl+← | Next or previous track |
+| Ctrl+Shift+→ / Ctrl+Shift+← | Forward or back 10 seconds |
+| Alt+← or the mouse back button | Back |
+| Ctrl+F | Search the library |
+| Delete | Remove the selected queue or playlist entries |
+
+The system-wide hotkeys (Alt+Home to play or pause, Alt+Page Up and Alt+Page Down for the previous and next track) work in every program and can be changed in Settings › Hotkeys.
 
 ## Updates
 
