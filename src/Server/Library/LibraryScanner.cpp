@@ -317,7 +317,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
     for (const auto* field : {"TITLE", "ALBUM", "ARTIST"}) s.bind(i++, normalizeLibrarySearch(tag(m, field)));
     for (const auto& [field, sortField] : {std::pair{"TITLE", "TITLESORT"}, {"ALBUM", "ALBUMSORT"}, {"ARTIST", "ARTISTSORT"}}) {
         const auto sortTag = tag(m, sortField);
-        s.bind(i++, librarySortKey(sortTag.empty() ? tag(m, field) : sortTag, locale));
+        s.bind(i++, librarySortKey(librarySortSource(sortTag, tag(m, field)), locale));
     }
     s.run();
     auto row = db.prepare("SELECT id FROM tracks WHERE file_id=?");
@@ -340,7 +340,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
                 .bind(4, text)
                 .bind(5, source)
                 .bind(6, normalizeLibrarySearch(text))
-                .bind(7, librarySortKey(source.empty() ? text : source, locale))
+                .bind(7, librarySortKey(librarySortSource(source, text), locale))
                 .run();
             value.reset();
         }

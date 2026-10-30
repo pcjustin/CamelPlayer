@@ -18,6 +18,9 @@ class Database;
 class LibraryStore;
 
 std::string normalizeLibrarySearch(std::string_view text);
+// What a name sorts by: its sort tag, unless the tag is empty, only question marks or holds two in a row, which is text
+// a wrong encoding lost.
+std::string librarySortSource(const std::string& tag, const std::string& name);
 std::vector<uint8_t> librarySortKey(std::string_view text, std::wstring_view locale = L"zh-TW");
 std::vector<uint8_t> libraryNlsVersion(std::wstring_view locale = L"zh-TW");
 void updateLibraryTrackText(sqlite::Database& db, int64_t track, std::wstring_view locale = {});

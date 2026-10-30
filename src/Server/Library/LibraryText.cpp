@@ -6,6 +6,8 @@
 #include <windows.h>
 #define Opencc_BUILT_AS_STATIC
 #include <opencc/SimpleConverter.hpp>
+#include <algorithm>
+#include <cwctype>
 #include <filesystem>
 #include <stdexcept>
 #include <utility>
@@ -52,6 +54,15 @@ std::string normalizeLibrarySearch(std::string_view text) {
     return converter.Convert(toUtf8(normalized));
 }
 
+std::string librarySortSource(const std::string& tag, const std::string& name) {
+    const auto wide = toWide(tag);
+    const auto question = [](wchar_t c) { return c == L'?' || c == 0xFF1F; };
+    const bool blank = std::all_of(wide.begin(), wide.end(), [&](wchar_t c) { return question(c) || iswspace(c); });
+    const bool garbled = std::adjacent_find(wide.begin(), wide.end(),
+                                            [&](wchar_t a, wchar_t b) { return question(a) && question(b); }) != wide.end();
+    return blank || garbled ? name : tag;
+}
+
 std::vector<uint8_t> librarySortKey(std::string_view text, std::wstring_view locale) {
     const std::wstring name(locale);
     if (name != L"zh-TW" && name != L"zh-TW_pronun") throw std::invalid_argument("unsupported library sort locale");
@@ -82,23 +93,22 @@ void updateLibraryTrackText(sqlite::Database& db, int64_t track, std::wstring_vi
         selected = state.step() ? toWide(state.text(0)) : L"zh-TW";
     }
     auto row = db.prepare("SELECT coalesce(title,''),coalesce(album,''),coalesce(artist,''),"
-                          "coalesce(nullif(title_sort_tag,''),title,''),coalesce(nullif(album_sort_tag,''),album,''),"
-                          "coalesce(nullif(artist_sort_tag,''),artist,'') FROM tracks WHERE id=?");
+                          "coalesce(title_sort_tag,''),coalesce(album_sort_tag,''),coalesce(artist_sort_tag,'') FROM tracks "
+                          "WHERE id=?");
     row.bind(1, track);
     if (!row.step()) return;
     auto update = db.prepare(
         "UPDATE tracks SET title_norm=?,album_norm=?,artist_norm=?,title_sort=?,album_sort=?,artist_sort=? WHERE id=?");
     for (int i = 0; i < 3; ++i) {
         update.bind(i + 1, normalizeLibrarySearch(row.text(i)));
-        const auto key = librarySortKey(row.text(i + 3), selected);
+        const auto key = librarySortKey(librarySortSource(row.text(i + 3), row.text(i)), selected);
         update.bind(i + 4, key);
     }
     update.bind(7, track).run();
-    auto values =
-        db.prepare("SELECT field,position,value,coalesce(nullif(sort_source,''),value) FROM track_values WHERE track_id=?");
+    auto values = db.prepare("SELECT field,position,value,coalesce(sort_source,'') FROM track_values WHERE track_id=?");
     values.bind(1, track);
     while (values.step()) {
-        const auto key = librarySortKey(values.text(3), selected);
+        const auto key = librarySortKey(librarySortSource(values.text(3), values.text(2)), selected);
         db.prepare("UPDATE track_values SET value_norm=?,sort_key=? WHERE track_id=? AND field=? AND position=?")
             .bind(1, normalizeLibrarySearch(values.text(2)))
             .bind(2, key)
@@ -115,11 +125,11 @@ void updateLibraryAlbumText(sqlite::Database& db, int64_t id, std::wstring_view 
         auto state = db.prepare("SELECT value FROM app_state WHERE key='sort_locale'");
         selected = state.step() ? toWide(state.text(0)) : L"zh-TW";
     }
-    auto album = db.prepare("SELECT title,coalesce(album_artist,''),coalesce((SELECT nullif(album_sort_tag,'') FROM tracks WHERE "
-                            "album_id=? ORDER BY id LIMIT 1),title) FROM albums WHERE id=?");
+    auto album = db.prepare("SELECT title,coalesce(album_artist,''),coalesce((SELECT album_sort_tag FROM tracks WHERE "
+                            "album_id=? ORDER BY id LIMIT 1),'') FROM albums WHERE id=?");
     album.bind(1, id).bind(2, id);
     if (album.step()) {
-        const auto key = librarySortKey(album.text(2), selected);
+        const auto key = librarySortKey(librarySortSource(album.text(2), album.text(0)), selected);
         db.prepare("UPDATE albums SET title_norm=?,artist_norm=?,sort_key=? WHERE id=?")
             .bind(1, normalizeLibrarySearch(album.text(0)))
             .bind(2, normalizeLibrarySearch(album.text(1)))
@@ -182,7 +192,8 @@ void LibraryTextIndex::run(std::stop_token stop) {
         };
         try {
             const auto version = version_(locale);
-            std::string signature = toUtf8(locale) + ":";
+            // The "tags3" part rebuilds the keys once for sort tags garbled into question marks.
+            std::string signature = toUtf8(locale) + ":tags3:";
             constexpr char hex[] = "0123456789abcdef";
             for (auto byte : version) {
                 signature += hex[byte >> 4];

@@ -32,19 +32,61 @@ TEST(LibraryText, SupportsStrokeAndBopomofoWithVersionedKeys) {
     EXPECT_THROW(librarySortKey("text", L"not-a-locale"), std::invalid_argument);
 }
 
+TEST(LibraryText, SortTagsOfOnlyQuestionMarksGiveWayToTheName) {
+    EXPECT_EQ(librarySortSource("Hirasawa, Susumu", "平沢進"), "Hirasawa, Susumu");
+    EXPECT_EQ(librarySortSource("", "喜多郎"), "喜多郎");
+    EXPECT_EQ(librarySortSource("？？？？", "喜多郎"), "喜多郎");
+    EXPECT_EQ(librarySortSource("?? ?", "喜多郎"), "喜多郎");
+    EXPECT_EQ(librarySortSource("Who?", "Who"), "Who?");
+    EXPECT_EQ(librarySortSource("？？？？　Ｆｅａｔ．　？？？？", "キノシタ Feat. そらみこ"), "キノシタ Feat. そらみこ");
+
+    const auto directory = testutil::tempDir() / "library-garbled-sort-tags";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec(
+                "INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music/album');"
+                "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) VALUES(1,1,1,'C:/music/1.flac','audio',1,1);"
+                "INSERT INTO albums(id,folder_id,grouping_key,title,added) VALUES(1,1,'a','Silk Road',0);"
+                "INSERT INTO tracks(id,file_id,album_id,title,artist,album,title_sort_tag,album_sort_tag,artist_sort_tag) "
+                "VALUES(1,1,1,'Silk Road','喜多郎','Silk Road','????','？？','？？？？');"
+                "INSERT INTO track_values(track_id,field,position,value,sort_source) VALUES(1,'artist',0,'喜多郎','？？？？');");
+            updateLibraryTrackText(db, 1);
+            updateLibraryAlbumText(db, 1);
+        })
+        .get();
+    auto reader = store.openReader();
+    auto track = reader.prepare("SELECT title_sort,album_sort,artist_sort FROM tracks WHERE id=1");
+    ASSERT_TRUE(track.step());
+    EXPECT_EQ(track.blob(0), librarySortKey("Silk Road"));
+    EXPECT_EQ(track.blob(1), librarySortKey("Silk Road"));
+    EXPECT_EQ(track.blob(2), librarySortKey("喜多郎"));
+    auto value = reader.prepare("SELECT sort_key FROM track_values WHERE track_id=1");
+    ASSERT_TRUE(value.step());
+    EXPECT_EQ(value.blob(0), librarySortKey("喜多郎"));
+    auto album = reader.prepare("SELECT sort_key FROM albums WHERE id=1");
+    ASSERT_TRUE(album.step());
+    EXPECT_EQ(album.blob(0), librarySortKey("Silk Road"));
+}
+
 TEST(LibraryText, RebuildsOnNlsVersionAndLocaleChangesWhileReadersRemainAvailable) {
     const auto directory = testutil::tempDir() / "library-r08-rebuild";
     std::filesystem::remove_all(directory);
     LibraryStore store(directory);
-    store.write([](sqlite::Database& db) {
-        db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
-                "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music/album');"
-                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<201) "
-                "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) SELECT x,1,1,'C:/music/'||x||'.flac','audio',1,1 FROM n;"
-                "INSERT INTO tracks(id,file_id,title,artist,album,title_sort_tag) "
-                "SELECT id,id,'臺灣音樂','カタカナ','ＡＢＣ','zzz' FROM files;"
-                "INSERT INTO track_values(track_id,field,position,value,sort_source) VALUES(1,'artist',0,'音樂','before');");
-    }).get();
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music/album');"
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<201) "
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) SELECT "
+                    "x,1,1,'C:/music/'||x||'.flac','audio',1,1 FROM n;"
+                    "INSERT INTO tracks(id,file_id,title,artist,album,title_sort_tag) "
+                    "SELECT id,id,'臺灣音樂','カタカナ','ＡＢＣ','zzz' FROM files;"
+                    "INSERT INTO track_values(track_id,field,position,value,sort_source) VALUES(1,'artist',0,'音樂','before');");
+        })
+        .get();
     std::promise<void> entered, release;
     auto released = release.get_future().share();
     {
