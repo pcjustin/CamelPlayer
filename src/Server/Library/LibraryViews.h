@@ -27,9 +27,14 @@ enum class TrackSort : uint8_t { Title, Artist, Album, Year, Duration, Added };
 // (the latest first) and never counted as played (the latest added first).
 enum class SmartList : uint8_t { RecentlyAdded, MostPlayed, RecentlyPlayed, Favorites, NeverPlayed };
 
+// Which albums of an artist or composer an album listing holds: every album with one of their tracks, the albums whose
+// album artist credits them, or the other albums with one of their tracks.
+enum class LibraryAlbumRole : uint8_t { Any, Own, Guest };
+
 struct LibraryGroupFilter {
     LibraryGroupField field = LibraryGroupField::Artist;
-    std::string value; // the year as decimal text for Year
+    std::string value;                             // the year as decimal text for Year
+    LibraryAlbumRole role = LibraryAlbumRole::Any; // album listings of artists and composers only
     bool operator==(const LibraryGroupFilter&) const = default;
 };
 
@@ -84,6 +89,15 @@ struct LibraryAlbumDetail {
     LibraryAlbum album;
     std::vector<LibraryTrackRow> tracks;     // disc, then track order
     std::vector<LibraryAlbumFormat> formats; // the most common first
+};
+
+// An artist's or composer's page (docs/Plan.md §8.2): the tracks credited to them, the most played first, then their
+// own albums and the other albums with some of their tracks, the newest first.
+struct LibraryArtistPage {
+    uint64_t revision = 0;
+    int64_t tracks = 0;                 // every visible track credited to them
+    std::vector<LibraryTrackRow> songs; // the most played, then by year and album order
+    LibraryAlbumPage albums, appearances;
 };
 
 struct LibraryFolderEntry {
@@ -149,8 +163,12 @@ std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGrou
                                           const CancellationToken& token = {});
 // The initials of browseAlbums(sort) without a filter; none for the year and date sorts.
 std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort sort, const CancellationToken& token = {});
-LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,
+LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending,
+                                    const std::optional<LibraryGroupFilter>& filter, int64_t offset, int64_t limit,
                                     std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+// `songs` of the tracks and at most `albums` of each album listing.
+LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter& artist, int64_t songs, int64_t albums,
+                             const CancellationToken& token = {});
 LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64_t offset, int64_t limit,
                                 std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
 // Favorite albums, the latest marked first.

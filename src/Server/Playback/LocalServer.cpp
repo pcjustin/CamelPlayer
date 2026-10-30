@@ -1458,9 +1458,14 @@ std::vector<std::vector<LibraryNamePart>> LocalServer::creditParts(const std::ve
     for (const auto& credit : credits) parts.push_back(camel::server::creditParts(*names, credit));
     return parts;
 }
-LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
-                                                 std::optional<uint64_t> revision, const CancellationToken& token) const {
-    return camel::server::browseTrackRows(impl_->library(), sort, descending, offset, limit, revision, token);
+LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending, const std::optional<LibraryGroupFilter>& filter,
+                                                 int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                                 const CancellationToken& token) const {
+    return camel::server::browseTrackRows(impl_->library(), sort, descending, filter, offset, limit, revision, token);
+}
+LibraryArtistPage LocalServer::artistPage(const LibraryGroupFilter& artist, const CancellationToken& token) const {
+    constexpr int64_t kSongs = 10, kAlbums = 50;
+    return camel::server::artistPage(impl_->library(), artist, kSongs, kAlbums, token);
 }
 LibraryTrackRowPage LocalServer::smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                              const CancellationToken& token) const {

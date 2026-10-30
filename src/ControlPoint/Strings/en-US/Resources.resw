@@ -215,6 +215,7 @@
   <data name="Search_Box.AutomationProperties.Name" xml:space="preserve"><value>Search the library</value></data>
   <data name="Search_Tracks" xml:space="preserve"><value>Tracks</value></data>
   <data name="Search_Albums" xml:space="preserve"><value>Albums</value></data>
+  <data name="Artist_AppearsOn" xml:space="preserve"><value>Appears on</value></data>
   <data name="Search_Artists" xml:space="preserve"><value>Artists</value></data>
   <data name="Search_ArtistCount" xml:space="preserve"><value>{0} artists</value></data>
   <data name="Search_All" xml:space="preserve"><value>Show all results for “{0}”</value></data>

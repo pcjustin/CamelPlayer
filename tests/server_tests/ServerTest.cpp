@@ -104,9 +104,8 @@ TEST_F(ServerTest, LibraryFingerprintingFollowsActualPlaybackState) {
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
     scanner.addRoot(dir / "music");
-    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
-        return std::make_unique<ManualOutput>(probe);
-    });
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
+                                           [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
     const auto waitFor = [](const std::function<bool()>& check) {
         const auto end = std::chrono::steady_clock::now() + 8s;
         while (std::chrono::steady_clock::now() < end) {
@@ -115,16 +114,19 @@ TEST_F(ServerTest, LibraryFingerprintingFollowsActualPlaybackState) {
         }
         return false;
     };
-    ASSERT_TRUE(waitFor([&] { return store.openReader().scalar("SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL").value() == 1; }));
+    ASSERT_TRUE(waitFor(
+        [&] { return store.openReader().scalar("SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL").value() == 1; }));
     for (const auto release : {CommandKind::Pause, CommandKind::Stop}) {
         send(select());
         const auto file = dir / "music" / (release == CommandKind::Pause ? "pause.lrc" : "stop.lrc");
         std::ofstream(file) << (release == CommandKind::Pause ? "lyrics" : "different lyrics");
-        ASSERT_TRUE(waitFor([&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 1; }));
+        ASSERT_TRUE(waitFor(
+            [&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 1; }));
         std::this_thread::sleep_for(1200ms);
         EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value(), 1);
         send(command(release));
-        ASSERT_TRUE(waitFor([&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 0; }));
+        ASSERT_TRUE(waitFor(
+            [&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 0; }));
     }
     server.reset();
 }
@@ -740,7 +742,9 @@ protected:
         auto row = store->openReader().prepare("SELECT id FROM files WHERE path LIKE ? AND available=1");
         return row.bind(1, "%" + toUtf8(path.filename().wstring())).step() ? row.integer(0) : 0;
     }
-    TrackSource track(const std::filesystem::path& path) { return TrackSource(toUtf8((dir / "music" / path.filename()).wstring())); }
+    TrackSource track(const std::filesystem::path& path) {
+        return TrackSource(toUtf8((dir / "music" / path.filename()).wstring()));
+    }
 };
 
 TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
@@ -755,8 +759,9 @@ TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
     EXPECT_EQ(server->libraryRoots().size(), 2u);
     // The monitor rereads roots on its next pass rather than after its 60-second availability interval.
     // Tracks and their albums appear with each written batch.
-    ASSERT_TRUE(waitFor([&] { return server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).total == 1; }, 20s));
-    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, 0, 10, std::nullopt).total, 1);
+    ASSERT_TRUE(
+        waitFor([&] { return server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).total == 1; }, 20s));
+    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
     const auto albums = server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt);
     EXPECT_EQ(server->albumDetail(albums.albums[0].id).tracks.size(), 1u);
     const auto roots = server->browseFolder(std::nullopt);
@@ -770,7 +775,7 @@ TEST_F(LibraryPlaybackTest, ALibraryTrackPlaysUnderItsOnDiskSpelling) {
     const auto music = setUp({});
     std::filesystem::copy_file(testutil::generatedFile({"spelling", 48000, 16, 2, 0.3}), music / "Mixed Case.flac");
     ASSERT_TRUE(scanner->scan(root).complete);
-    const auto rows = server->browseTrackRows(TrackSort::Title, false, 0, 10, std::nullopt);
+    const auto rows = server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt);
     ASSERT_EQ(rows.tracks.size(), 1u);
     ASSERT_NE(rows.tracks[0].path.find("mixed case.flac"), std::string::npos); // the lowercase index key
     send(queueReplace({TrackSource(rows.tracks[0].path)}));
@@ -861,9 +866,10 @@ TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
     server.reset();
     std::filesystem::remove(music / a.filename());
     ASSERT_TRUE(scanner->scan(root).complete);
-    store->write([](sqlite::Database& db) {
-             db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%restore-gone-a%')");
-         })
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%restore-gone-a%')");
+        })
         .get();
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
@@ -889,9 +895,10 @@ TEST_F(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
     server.reset();
     std::filesystem::remove(music / a.filename());
     ASSERT_TRUE(scanner->scan(root).complete);
-    store->write([](sqlite::Database& db) {
-             db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%untitled-gone%')");
-         })
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("DELETE FROM tracks WHERE file_id IN (SELECT id FROM files WHERE path LIKE '%untitled-gone%')");
+        })
         .get();
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
@@ -910,14 +917,15 @@ TEST_F(LibraryPlaybackTest, AutoplayFollowsTheLastEntryWithAnUnplayedLibraryTrac
     setUp({a, b, c});
     server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    store->write([&](sqlite::Database& db) {
-             db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,?,0,1000,1)")
-                 .bind(1, file(b))
-                 .bind(2, int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      std::chrono::system_clock::now().time_since_epoch())
-                                      .count()))
-                 .run();
-         })
+    store
+        ->write([&](sqlite::Database& db) {
+            db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,?,0,1000,1)")
+                .bind(1, file(b))
+                .bind(2, int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count()))
+                .run();
+        })
         .get();
     send(queueReplace({track(a)}));
     ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 2; }));
@@ -1015,7 +1023,7 @@ TEST_F(LibraryPlaybackTest, ShutdownSavesTheQueueAndLeavesTheServerReadable) {
     server->shutdown();
     server->shutdown();
     EXPECT_THROW(server->submit(command(CommandKind::Play)), std::runtime_error);
-    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, 0, 10, std::nullopt).total, 1);
+    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
     auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
     ASSERT_TRUE(row.step());
     EXPECT_NE(row.text(0).find("\"position\":12000"), std::string::npos);
@@ -1042,7 +1050,8 @@ TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLeng
     const auto b = testutil::generatedFile({"play-gapless-b", 48000, 16, 2, 0.4});
     setUp({a, b});
     send(queueReplace({track(a), track(b)}));
-    ASSERT_TRUE(waitFor([&] { return stopped() && server->snapshot().queueEntryId == server->snapshot().queue.entries.back().id; }));
+    ASSERT_TRUE(
+        waitFor([&] { return stopped() && server->snapshot().queueEntryId == server->snapshot().queue.entries.back().id; }));
     const auto statistics = plays(2);
     ASSERT_EQ(statistics.history.size(), 2u);
     EXPECT_EQ(statistics.history[0].track.file, file(b)); // newest first
@@ -1166,9 +1175,8 @@ TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
-    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
-        return std::make_unique<ManualOutput>(probe);
-    });
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
+                                           [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
     auto playing = send(queueReplace({TrackSource(toUtf8(a.wstring())), TrackSource(toUtf8(b.wstring()))}));
     const auto ids = entryIds(playing);
     std::vector<int32_t> heard;
@@ -1235,9 +1243,8 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
     LibraryScanner scanner(store);
     ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
     store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET total_frames=1 WHERE length_estimated=1"); }).get();
-    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
-        return std::make_unique<ManualOutput>(probe);
-    });
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
+                                           [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
     ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
     const auto end = std::chrono::steady_clock::now() + 5s;
     const auto corrected = [&] {
@@ -1260,9 +1267,8 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     LibraryScanner scanner(store);
     ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
     const auto file = store.openReader().scalar("SELECT id FROM files WHERE kind='audio'").value();
-    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json", [&](const Settings&) {
-        return std::make_unique<ManualOutput>(probe);
-    });
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
+                                           [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
     ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
     const auto end = std::chrono::steady_clock::now() + 10s;
     while (server->snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {

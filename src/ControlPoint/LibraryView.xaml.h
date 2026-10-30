@@ -56,6 +56,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnPlayAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSearchRowScroll(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSearchArtistClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
+    void OnArtistViewAllClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRowContextRequested(Microsoft::UI::Xaml::UIElement const&,
                                Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
     void OnCardContextRequested(Microsoft::UI::Xaml::UIElement const&,
@@ -94,7 +95,7 @@ private:
     void cancelArtwork();
     std::unordered_map<void*, ArtworkSlot> artworkSlots_;
     camel::server::CancellationToken detailArtwork_;
-    enum class Mode { Albums, Groups, Tracks, AlbumDetail, Folders, Search };
+    enum class Mode { Albums, Groups, Tracks, AlbumDetail, Artist, Folders, Search };
     struct View {
         Mode mode = Mode::Albums;
         camel::server::LibraryGroupField field = camel::server::LibraryGroupField::Artist;
@@ -125,6 +126,10 @@ private:
     void showInitials(std::vector<camel::server::LibraryInitial> initials);
     void layoutInitials();
     void loadAlbumDetail();
+    void loadArtist();
+    // The page of an artist or composer, or the albums of a genre or year.
+    void openGroup(camel::server::LibraryGroupField field, std::string value, hstring const& title, hstring const& detail,
+                   bool push);
     void loadFolder();
     void loadSearchGroups();
     void playTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, size_t index);
@@ -179,8 +184,8 @@ private:
     winrt::com_ptr<ui::LibraryCollection> collection_;
     std::vector<camel::server::LibraryInitial> initials_;
     size_t initialSlots_ = 0; // rows the jump bar shows now
-    std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_;
-    // The album page's track artists split into names, by credit; empty on other pages.
+    std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_, artistTracks_;
+    // The track artists of the album or artist page split into names, by credit; empty on other pages.
     std::unordered_map<std::string, std::vector<camel::server::LibraryNamePart>> credits_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};

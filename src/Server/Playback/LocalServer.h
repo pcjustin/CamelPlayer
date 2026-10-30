@@ -38,8 +38,10 @@ public:
     std::vector<LibraryInitial> albumInitials(AlbumSort sort, const CancellationToken& token = {}) const override;
     std::vector<std::vector<LibraryNamePart>> creditParts(const std::vector<std::string>& credits,
                                                           const CancellationToken& token = {}) const override;
-    LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
-                                        std::optional<uint64_t> revision, const CancellationToken& token = {}) const override;
+    LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, const std::optional<LibraryGroupFilter>& filter,
+                                        int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                        const CancellationToken& token = {}) const override;
+    LibraryArtistPage artistPage(const LibraryGroupFilter& artist, const CancellationToken& token = {}) const override;
     LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                     const CancellationToken& token = {}) const override;
     LibraryAlbumPage favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,

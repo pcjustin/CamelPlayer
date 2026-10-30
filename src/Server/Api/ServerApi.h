@@ -295,8 +295,11 @@ public:
     // Each artist credit split into its names and the text between them; a part marked as a name opens that artist.
     virtual std::vector<std::vector<LibraryNamePart>> creditParts(const std::vector<std::string>& credits,
                                                                   const CancellationToken& token = {}) const = 0;
-    virtual LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, int64_t offset, int64_t limit,
-                                                std::optional<uint64_t> revision, const CancellationToken& token = {}) const = 0;
+    virtual LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, const std::optional<LibraryGroupFilter>& filter,
+                                                int64_t offset, int64_t limit, std::optional<uint64_t> revision,
+                                                const CancellationToken& token = {}) const = 0;
+    // An artist's or composer's page: their ten most played tracks and the first albums of each listing.
+    virtual LibraryArtistPage artistPage(const LibraryGroupFilter& artist, const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                             const CancellationToken& token = {}) const = 0;
     virtual LibraryAlbumPage favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,

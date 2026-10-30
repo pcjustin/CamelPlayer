@@ -50,8 +50,8 @@ INSERT INTO tracks(id,file_id,album_id,title,artist,album,composer,genre,year,di
  (4,4,2,'Song D','Amy','Alpha','','Jazz',2022,1,1,'mp3',1000,40000,CAST('song d' AS BLOB),CAST('amy' AS BLOB),CAST('alpha' AS BLOB)),
  (5,5,3,'Song E','Amy','Gamma','','Jazz',2021,1,1,'flac',1000,5000,CAST('song e' AS BLOB),CAST('amy' AS BLOB),CAST('gamma' AS BLOB)),
  (6,6,4,'Song F','Amy','Offline','','Jazz',2019,1,1,'flac',1000,5000,CAST('song f' AS BLOB),CAST('amy' AS BLOB),CAST('offline' AS BLOB));
-INSERT INTO track_values(track_id,field,position,value,sort_key) VALUES
- (3,'artist',0,'Amy',CAST('amy' AS BLOB)),(3,'artist',1,'Zed',CAST('zed' AS BLOB));
+INSERT INTO track_values(track_id,field,position,value,value_norm,sort_key) VALUES
+ (3,'artist',0,'Amy','amy',CAST('amy' AS BLOB)),(3,'artist',1,'Zed','zed',CAST('zed' AS BLOB));
 )sql");
             })
             .get();
@@ -122,6 +122,41 @@ TEST_F(LibraryViewsTest, GroupFiltersNarrowTheAlbumWall) {
                  std::invalid_argument);
 }
 
+TEST_F(LibraryViewsTest, AnArtistPageListsTheirSongsTheirAlbumsAndTheirAppearances) {
+    store->write([](sqlite::Database& db) { db.exec("INSERT INTO stats(file_id,play_count) VALUES(4,3)"); }).get();
+    const LibraryGroupFilter amy{LibraryGroupField::Artist, "Amy"};
+    const auto page = artistPage(*store, amy, 10, 50);
+    EXPECT_EQ(page.tracks, 2);
+    ASSERT_EQ(page.songs.size(), 2U);
+    EXPECT_EQ(page.songs[0].id, 4); // played, before the older unplayed one
+    EXPECT_EQ(page.songs[1].id, 3);
+    EXPECT_EQ(titles(page.albums), (std::vector<std::string>{"Alpha"})); // Gamma and Offline are not visible
+    EXPECT_EQ(titles(page.appearances), (std::vector<std::string>{"Beta"}));
+    EXPECT_EQ(artistPage(*store, amy, 1, 50).songs.size(), 1U);
+
+    const auto zed = artistPage(*store, LibraryGroupFilter{LibraryGroupField::Artist, "Zed"}, 10, 50);
+    EXPECT_EQ(zed.tracks, 3);
+    EXPECT_EQ(titles(zed.albums), (std::vector<std::string>{"Beta"}));
+    EXPECT_EQ(zed.appearances.total, 0);
+    const auto bach = artistPage(*store, LibraryGroupFilter{LibraryGroupField::Composer, "Bach"}, 10, 50);
+    EXPECT_EQ(bach.tracks, 2);
+    EXPECT_EQ(bach.albums.total, 0);
+    EXPECT_EQ(titles(bach.appearances), (std::vector<std::string>{"Beta"}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, false, amy, 0, 50)), (std::vector<int64_t>{3, 4}));
+}
+
+TEST_F(LibraryViewsTest, AlbumArtistsCreditEachOfTheirNames) {
+    store->write([](sqlite::Database& db) { db.exec("UPDATE albums SET album_artist='Amy, Zed' WHERE id=1"); }).get();
+    const auto own = [&](const std::string& name) {
+        return titles(browseAlbums(*store, AlbumSort::Title,
+                                   LibraryGroupFilter{LibraryGroupField::Artist, name, LibraryAlbumRole::Own}, 0, 50));
+    };
+    EXPECT_EQ(own("Amy"), (std::vector<std::string>{"Alpha", "Beta"}));
+    EXPECT_EQ(own("Zed"), (std::vector<std::string>{"Beta"}));
+    EXPECT_TRUE(own("Am").empty());
+    EXPECT_EQ(artistPage(*store, LibraryGroupFilter{LibraryGroupField::Artist, "Amy"}, 10, 50).appearances.total, 0);
+}
+
 TEST_F(LibraryViewsTest, GroupsCountAlbumsAndTracksAndCreditEveryArtist) {
     const auto artists = browseGroups(*store, LibraryGroupField::Artist, 0, 50);
     ASSERT_EQ(artists.total, 2);
@@ -177,14 +212,14 @@ INSERT INTO tracks(id,file_id,album_id,title,artist,album,year,disc_number,track
 }
 
 TEST_F(LibraryViewsTest, TrackRowsSortByEachColumnInEitherDirection) {
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, false, 0, 50)), (std::vector<int64_t>{2, 3, 1, 4}));
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, true, 0, 50)), (std::vector<int64_t>{4, 1, 3, 2}));
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Album, false, 0, 50)), (std::vector<int64_t>{4, 2, 1, 3}));
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Artist, false, 0, 50)), (std::vector<int64_t>{4, 3, 2, 1}));
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Duration, true, 0, 50)), (std::vector<int64_t>{4, 1, 3, 2}));
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Year, true, 0, 50)), (std::vector<int64_t>{4, 2, 1, 3}));
-    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Added, true, 0, 50)), (std::vector<int64_t>{4, 3, 2, 1}));
-    const auto page = browseTrackRows(*store, TrackSort::Title, false, 0, 1);
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 50)), (std::vector<int64_t>{2, 3, 1, 4}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, true, std::nullopt, 0, 50)), (std::vector<int64_t>{4, 1, 3, 2}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Album, false, std::nullopt, 0, 50)), (std::vector<int64_t>{4, 2, 1, 3}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Artist, false, std::nullopt, 0, 50)), (std::vector<int64_t>{4, 3, 2, 1}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Duration, true, std::nullopt, 0, 50)), (std::vector<int64_t>{4, 1, 3, 2}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Year, true, std::nullopt, 0, 50)), (std::vector<int64_t>{4, 2, 1, 3}));
+    EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Added, true, std::nullopt, 0, 50)), (std::vector<int64_t>{4, 3, 2, 1}));
+    const auto page = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 1);
     EXPECT_EQ(page.total, 4);
     ASSERT_EQ(page.tracks.size(), 1u);
     EXPECT_EQ(page.tracks[0].durationMs, 10000);
@@ -193,10 +228,10 @@ TEST_F(LibraryViewsTest, TrackRowsSortByEachColumnInEitherDirection) {
 }
 
 TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
-    const auto before = browseTrackRows(*store, TrackSort::Title, false, 0, 50).revision;
+    const auto before = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 50).revision;
     setTrackFavorite(*store, {{3}, {4}}, true);
     setTrackFavorite(*store, {{4}}, false);
-    const auto rows = browseTrackRows(*store, TrackSort::Title, false, 0, 50);
+    const auto rows = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 50);
     EXPECT_NE(rows.revision, before);
     ASSERT_EQ(rows.tracks.size(), 4u);
     EXPECT_TRUE(rows.tracks[1].favorite);  // Song B
@@ -279,10 +314,10 @@ TEST_F(LibraryViewsTest, AFavoriteAlbumStaysAFavoriteWhenItsTracksMoveToAnotherA
 }
 
 TEST_F(LibraryViewsTest, PagingRefusesAChangedRevision) {
-    const auto first = browseTrackRows(*store, TrackSort::Title, false, 0, 2);
-    EXPECT_NO_THROW(browseTrackRows(*store, TrackSort::Title, false, 2, 2, first.revision));
+    const auto first = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 2);
+    EXPECT_NO_THROW(browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 2, 2, first.revision));
     store->write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Renamed' WHERE id=1"); }).get();
-    EXPECT_THROW(browseTrackRows(*store, TrackSort::Title, false, 2, 2, first.revision), std::runtime_error);
+    EXPECT_THROW(browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 2, 2, first.revision), std::runtime_error);
     EXPECT_THROW(browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 2, first.revision), std::runtime_error);
     EXPECT_THROW(browseGroups(*store, LibraryGroupField::Artist, 0, 2, first.revision), std::runtime_error);
 }
@@ -365,7 +400,7 @@ TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
         .get();
     // The first page of a listing builds its order once per library revision; later pages only read their slice.
     const auto coldStart = std::chrono::steady_clock::now();
-    ASSERT_EQ(browseTrackRows(*store, TrackSort::Title, false, 0, 100).total, 100004);
+    ASSERT_EQ(browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 100).total, 100004);
     const double trackCold = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - coldStart).count();
     const auto albumStart = std::chrono::steady_clock::now();
     ASSERT_EQ(browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 100).total, 1002);
@@ -374,7 +409,7 @@ TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
     std::vector<double> tracks, albums;
     for (int i = 0; i < 30; ++i) {
         auto start = std::chrono::steady_clock::now();
-        const auto page = browseTrackRows(*store, TrackSort::Title, false, int64_t(random() % 99'900), 100);
+        const auto page = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, int64_t(random() % 99'900), 100);
         tracks.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
         ASSERT_EQ(page.tracks.size(), 100u);
         start = std::chrono::steady_clock::now();

@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <wil/resource.h>
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <list>
@@ -117,7 +118,7 @@ std::shared_ptr<const std::vector<T>> ordered(const LibraryStore& store, uint64_
     auto order = std::make_shared<const std::vector<T>>(build());
     std::lock_guard lock(mutex);
     entries.push_front({key, order});
-    if (entries.size() > 8) entries.pop_back();
+    if (entries.size() > 16) entries.pop_back(); // an artist page keeps three: its tracks and two album rows
     return order;
 }
 
@@ -150,6 +151,62 @@ constexpr const char* kAlbumColumns =
     "a.id,coalesce(a.folder_id,0),coalesce(a.title,''),coalesce(a.album_artist,''),coalesce(a.year,0),COUNT(*),"
     "coalesce(MAX(t.disc_number),1),coalesce(MIN(f.added),a.added),SUM(";
 constexpr const char* kAlbumFavorite = "),MAX(coalesce(s.album_favorite,0))";
+
+// The library's names for one revision, read once, so album artists divide as track credits do.
+std::shared_ptr<const LibraryNameSplitter> namesAt(const LibraryStore& store, Query& q) {
+    static std::mutex mutex;
+    static std::string key;
+    static std::shared_ptr<const LibraryNameSplitter> names;
+    const auto wanted = toUtf8(store.path().wstring()) + "|" + std::to_string(q.revision);
+    std::lock_guard lock(mutex);
+    if (!names || key != wanted) {
+        names = std::make_shared<const LibraryNameSplitter>(loadLibraryNames(q.db));
+        key = wanted;
+    }
+    return names;
+}
+
+// Albums whose album artist credits `name`, visible or not.
+std::string creditedAlbums(const LibraryStore& store, Query& q, const std::string& name) {
+    std::string ids;
+    std::shared_ptr<const LibraryNameSplitter> names;
+    auto rows = q.db.prepare("SELECT id,album_artist FROM albums WHERE instr(album_artist,?)>0");
+    rows.bind(1, name);
+    while (rows.step()) {
+        if (rows.text(1) != name) {
+            if (!names) names = namesAt(store, q);
+            const auto credited = names->names(rows.text(1));
+            if (std::find(credited.begin(), credited.end(), name) == credited.end()) continue;
+        }
+        ids += (ids.empty() ? "" : ",") + std::to_string(rows.integer(0));
+    }
+    return ids;
+}
+
+// The visible tracks a filter matches, as groupCondition does, read once per library revision. The lookup index finds
+// the tracks holding the value among their values; only the single-column match walks every track.
+std::shared_ptr<const std::vector<int64_t>> groupTracks(const LibraryStore& store, Query& q, const LibraryGroupFilter& filter) {
+    const auto condition = groupCondition(filter);
+    return ordered<int64_t>(store, q.revision, "groupTracks|" + condition, [&] {
+        const std::string from = std::string("SELECT t.id FROM tracks t") + kJoins + "WHERE" + kVisible;
+        if (filter.field == LibraryGroupField::Year) return ids(q.db, from + condition);
+        const std::string column = fieldName(filter.field), field = literal(column), value = literal(filter.value);
+        return ids(q.db, from + " AND t.id IN (SELECT track_id FROM track_values WHERE field=" + field +
+                             " AND value_norm=" + literal(normalizeLibrarySearch(filter.value)) + " AND value=" + value +
+                             " UNION ALL SELECT id FROM tracks c WHERE c." + column + "=" + value +
+                             " AND NOT EXISTS(SELECT 1 FROM track_values v WHERE v.track_id=c.id AND v.field=" + field + "))");
+    });
+}
+
+std::string albumCondition(const LibraryStore& store, Query& q, const LibraryGroupFilter& filter) {
+    if (filter.role == LibraryAlbumRole::Any || filter.field == LibraryGroupField::Genre ||
+        filter.field == LibraryGroupField::Year)
+        return groupCondition(filter);
+    const auto own = creditedAlbums(store, q, filter.value);
+    if (filter.role == LibraryAlbumRole::Own) return " AND a.id IN (" + own + ")";
+    const auto tracks = groupTracks(store, q, filter);
+    return " AND t.id IN (" + idList(*tracks, 0, int64_t(tracks->size())) + ") AND a.id NOT IN (" + own + ")";
+}
 
 } // namespace
 
@@ -272,7 +329,7 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
     const auto& orders = kAlbumOrders;
-    const std::string condition = filter ? groupCondition(*filter) : std::string{};
+    const std::string condition = filter ? albumCondition(store, q, *filter) : std::string{};
     const std::string from = albumsFrom(condition);
     const auto order = ordered<int64_t>(store, q.revision, "albums|" + std::to_string(int(sort)) + "|" + condition, [&] {
         return ids(q.db, "SELECT a.id" + from + " GROUP BY a.id ORDER BY " + orders[size_t(sort)] + ",a.id");
@@ -351,7 +408,7 @@ libraryCreditNames(const LibraryStore& store, std::shared_ptr<const LibraryCredi
     if (cached && cached->revision == q.revision) return cached;
     auto names = std::make_shared<LibraryCreditNames>();
     names->revision = q.revision;
-    names->splitter = loadLibraryNames(q.db);
+    names->splitter = *namesAt(store, q);
     auto artists = q.db.prepare("SELECT DISTINCT value FROM track_values WHERE field='artist'");
     while (artists.step()) names->artists.insert(artists.text(0));
     return names;
@@ -395,10 +452,12 @@ std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort s
     return initialsOf(names, starts);
 }
 
-LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending, int64_t offset, int64_t limit,
+LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending,
+                                    const std::optional<LibraryGroupFilter>& filter, int64_t offset, int64_t limit,
                                     std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
+    const std::string condition = filter ? groupCondition(*filter) : std::string{};
     const std::string direction = descending ? " DESC" : "";
     const std::string orders[] = {"t.title_sort" + direction,
                                   "t.artist_sort" + direction + ",t.album_sort,t.disc_number,t.track_number",
@@ -406,8 +465,8 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
                                   "coalesce(t.year,0)" + direction + ",t.album_sort,t.disc_number,t.track_number",
                                   std::string(kDuration) + direction,
                                   "coalesce(f.added,0)" + direction + ",t.id" + direction};
-    const auto order = ordered<int64_t>(store, q.revision, "tracks|" + std::to_string(int(sort)) + direction, [&] {
-        return ids(q.db, std::string("SELECT t.id FROM tracks t") + kJoins + "WHERE" + kVisible + " ORDER BY " +
+    const auto order = ordered<int64_t>(store, q.revision, "tracks|" + std::to_string(int(sort)) + direction + condition, [&] {
+        return ids(q.db, std::string("SELECT t.id FROM tracks t") + kJoins + "WHERE" + kVisible + condition + " ORDER BY " +
                              orders[size_t(sort)] + ",t.id");
     });
     LibraryTrackRowPage page;
@@ -420,6 +479,33 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
                                   "WHERE t.id IN (" + slice + ")");
     while (statement.step()) rows.push_back(trackRow(statement));
     page.tracks = inOrder(*order, offset, limit, std::move(rows), [](const LibraryTrackRow& t) { return t.id; });
+    return page;
+}
+
+LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter& artist, int64_t songs, int64_t albums,
+                             const CancellationToken& token) {
+    checkRange(0, songs);
+    checkRange(0, albums);
+    LibraryArtistPage page;
+    {
+        Query q(store, std::nullopt, token);
+        page.revision = q.revision;
+        const auto tracks = groupTracks(store, q, artist);
+        page.tracks = int64_t(tracks->size());
+        if (!tracks->empty()) {
+            auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                                     "WHERE t.id IN (" + idList(*tracks, 0, page.tracks) +
+                                     ") ORDER BY coalesce(s.play_count,0) DESC,coalesce(s.listened_ms,0) DESC,"
+                                     "coalesce(t.year,0),t.album_sort,t.disc_number,t.track_number,t.id LIMIT ?");
+            rows.bind(1, songs);
+            while (rows.step()) page.songs.push_back(trackRow(rows));
+        }
+    }
+    auto own = artist, guest = artist;
+    own.role = LibraryAlbumRole::Own;
+    guest.role = LibraryAlbumRole::Guest;
+    page.albums = browseAlbums(store, AlbumSort::Year, own, 0, albums, std::nullopt, token);
+    page.appearances = browseAlbums(store, AlbumSort::Year, guest, 0, albums, std::nullopt, token);
     return page;
 }
 

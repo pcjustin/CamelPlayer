@@ -215,6 +215,7 @@
   <data name="Search_Box.AutomationProperties.Name" xml:space="preserve"><value>搜尋媒體庫</value></data>
   <data name="Search_Tracks" xml:space="preserve"><value>曲目</value></data>
   <data name="Search_Albums" xml:space="preserve"><value>專輯</value></data>
+  <data name="Artist_AppearsOn" xml:space="preserve"><value>參與演出</value></data>
   <data name="Search_Artists" xml:space="preserve"><value>演出者</value></data>
   <data name="Search_ArtistCount" xml:space="preserve"><value>{0} 位演出者</value></data>
   <data name="Search_All" xml:space="preserve"><value>顯示所有「{0}」的結果</value></data>

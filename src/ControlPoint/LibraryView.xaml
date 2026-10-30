@@ -221,23 +221,96 @@
                 </ResourceDictionary>
             </ListView.Resources>
             <ListView.Header>
-                <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
-                <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">
-                    <Grid ColumnSpacing="4">
+                <StackPanel>
+                    <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
+                    <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">
+                        <Grid ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="SearchAlbumsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="albums-back" Click="OnSearchRowScroll" Padding="6">
+                                <FontIcon Glyph="&#xE76B;" FontSize="12" />
+                            </Button>
+                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="albums-forward" Click="OnSearchRowScroll" Padding="6">
+                                <FontIcon Glyph="&#xE76C;" FontSize="12" />
+                            </Button>
+                        </Grid>
+                        <GridView x:Name="SearchAlbums" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                                  IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
+                                  ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                  ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <GridView.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsStackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </GridView.ItemsPanel>
+                        </GridView>
+                        <Grid ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="SearchArtistsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="artists-back" Click="OnSearchRowScroll" Padding="6">
+                                <FontIcon Glyph="&#xE76B;" FontSize="12" />
+                            </Button>
+                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="artists-forward" Click="OnSearchRowScroll" Padding="6">
+                                <FontIcon Glyph="&#xE76C;" FontSize="12" />
+                            </Button>
+                        </Grid>
+                        <ListView x:Name="SearchArtists" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnSearchArtistClick"
+                                  ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                  ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <ListView.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsStackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListView.ItemsPanel>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="local:BrowseItem">
+                                    <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                            Tag="artist" ContextRequested="OnCardContextRequested">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon Glyph="&#xE77B;" FontSize="14" />
+                                            <TextBlock Text="{x:Bind Title, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <TextBlock x:Name="SearchTracksHeader" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    </StackPanel>
+                    <!-- An artist's or composer's page (docs/Plan.md §8.2): their most played tracks above their albums. -->
+                    <Grid x:Name="ArtistTracksHeader" Padding="0,0,20,4" Visibility="Collapsed">
+                        <TextBlock x:Name="ArtistTracksTitle" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                        <HyperlinkButton x:Name="ArtistTracksAll" x:Uid="Home_ViewAll" Tag="tracks" Click="OnArtistViewAllClick"
+                                         HorizontalAlignment="Right" />
+                    </Grid>
+                </StackPanel>
+            </ListView.Header>
+            <ListView.Footer>
+                <StackPanel x:Name="ArtistAlbums" Spacing="8" Padding="0,16,20,8" Visibility="Collapsed">
+                    <Grid x:Name="ArtistOwnHeader" ColumnSpacing="4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="SearchAlbumsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="albums-back" Click="OnSearchRowScroll" Padding="6">
+                        <TextBlock x:Name="ArtistOwnTitle" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="own-back" Click="OnSearchRowScroll" Padding="6">
                             <FontIcon Glyph="&#xE76B;" FontSize="12" />
                         </Button>
-                        <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="albums-forward" Click="OnSearchRowScroll" Padding="6">
+                        <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="own-forward" Click="OnSearchRowScroll" Padding="6">
                             <FontIcon Glyph="&#xE76C;" FontSize="12" />
                         </Button>
+                        <HyperlinkButton x:Name="ArtistOwnAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="own" Click="OnArtistViewAllClick" />
                     </Grid>
-                    <GridView x:Name="SearchAlbums" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                    <GridView x:Name="ArtistOwn" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
                               IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                               ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                               ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -247,43 +320,34 @@
                             </ItemsPanelTemplate>
                         </GridView.ItemsPanel>
                     </GridView>
-                    <Grid ColumnSpacing="4">
+                    <Grid x:Name="ArtistGuestHeader" ColumnSpacing="4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="SearchArtistsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="artists-back" Click="OnSearchRowScroll" Padding="6">
+                        <TextBlock x:Name="ArtistGuestTitle" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="guest-back" Click="OnSearchRowScroll" Padding="6">
                             <FontIcon Glyph="&#xE76B;" FontSize="12" />
                         </Button>
-                        <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="artists-forward" Click="OnSearchRowScroll" Padding="6">
+                        <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="guest-forward" Click="OnSearchRowScroll" Padding="6">
                             <FontIcon Glyph="&#xE76C;" FontSize="12" />
                         </Button>
+                        <HyperlinkButton x:Name="ArtistGuestAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="guest" Click="OnArtistViewAllClick" />
                     </Grid>
-                    <ListView x:Name="SearchArtists" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnSearchArtistClick"
+                    <GridView x:Name="ArtistGuest" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                              IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                               ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                               ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                        <ListView.ItemsPanel>
+                        <GridView.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <ItemsStackPanel Orientation="Horizontal" />
                             </ItemsPanelTemplate>
-                        </ListView.ItemsPanel>
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="local:BrowseItem">
-                                <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                        Tag="artist" ContextRequested="OnCardContextRequested">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE77B;" FontSize="14" />
-                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" />
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                    <TextBlock x:Name="SearchTracksHeader" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        </GridView.ItemsPanel>
+                    </GridView>
                 </StackPanel>
-            </ListView.Header>
+            </ListView.Footer>
         </ListView>
         <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />

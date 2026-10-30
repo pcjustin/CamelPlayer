@@ -282,8 +282,9 @@ winrt::fire_and_forget HomeView::refresh() {
         // on their own readers and Home waits for the slowest instead of the sum.
         auto added = std::async(std::launch::async,
                                 [&] { return server->browseAlbums(AlbumSort::Added, std::nullopt, 0, kRowItems, std::nullopt); });
-        auto tracks = std::async(std::launch::async,
-                                 [&] { return server->browseTrackRows(TrackSort::Title, false, 0, 1, std::nullopt).total; });
+        auto tracks = std::async(std::launch::async, [&] {
+            return server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 1, std::nullopt).total;
+        });
         auto artists = std::async(std::launch::async,
                                   [&] { return server->browseGroups(LibraryGroupField::Artist, 0, 1, std::nullopt).total; });
         data->today = overview(localStartMs(0));
