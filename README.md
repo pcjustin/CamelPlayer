@@ -135,7 +135,7 @@ Each build also writes `build/compile_commands.json`, so clangd (for example in 
 
 ## Testing
 
-`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-10-30 a full Release run passed all 638 enabled C++ tests, including the 100k-track search latency target, and all 47 Rust tests.
+`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-10-31 a full Release run passed all 661 enabled C++ tests, including the 100k-track search latency target, and all 47 Rust tests.
 
 The 112 disabled tests play audio on named devices or scan a NAS, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
 
@@ -190,6 +190,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File msbuild/collect-licenses.ps1
 
 Local planning documents, development probes, private test music, downloaded packages, build outputs and caches are kept out of Git, so GitHub's source archive of a release tag holds only the committed files, not the dependencies the package managers download.
 
-CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components keep their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD or other notices. MPL-2.0 allows CamelPlayer to be combined with the Microsoft-licensed Windows App SDK and WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release; a review of the complete notice set is still due before the first public release.
+CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components keep their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD or other notices. MPL-2.0 allows CamelPlayer to be combined with the Microsoft-licensed Windows App SDK and WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release. Before the 0.1.0 release every dependency's version and license in the notices was checked against the inventory.
 
 A binary release must come with access to the exact corresponding source, dependency changes and build information, and all required notices. Packaging also builds `CamelPlayer-<version>-win-x64-third-party-source.zip` with the exact sources of the LGPL and MPL libraries linked into the program, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) explains how to rebuild against a modified one. `msbuild/check-licenses.ps1`, run by the build and packaging scripts, fails on a file without the MPL-2.0 header or a dependency missing from the notices. Packaging prepares the files; it does not establish permission to redistribute or publish a release.

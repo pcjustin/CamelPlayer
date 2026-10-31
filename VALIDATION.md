@@ -4,7 +4,7 @@ This file records how CamelPlayer 0.1.0 was checked beyond its ordinary automate
 
 ## Automated tests
 
-On 2026-10-30 a full Release run passed all 638 enabled C++ tests, including the 100k-track search latency target, and all 47 Rust Engine tests. 112 tests are disabled in ordinary runs because they play audio on named devices or scan a NAS.
+On 2026-10-31 a full Release run passed all 661 enabled C++ tests, including the 100k-track search latency target, and all 47 Rust Engine tests. 112 tests are disabled in ordinary runs because they play audio on named devices or scan a NAS.
 
 Earlier targeted runs:
 
@@ -24,6 +24,8 @@ What the decoding tests check:
 
 ## Hardware
 
+On 2026-10-31, before the release, all 97 hardware tests passed again in 196 seconds on the same two devices: playback on every backend with each FLAC decoder, the other formats, DSD rates and DSD switching, device fallback, the output parameters and the Server's playback path.
+
 The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Server APIs on a Chord DAVE (WASAPI, ASIO and Kernel Streaming) and a built-in Cirrus codec (WASAPI and Kernel Streaming).
 
 - 91 hardware cases passed: FLAC playback controls on every backend of both devices, and WAV, ALAC, AAC, MP3, WASAPI shared mode and DSD (native, DoP and DSD to PCM) wherever the device can play them.
@@ -33,6 +35,14 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 - A separate DAVE run of the output parameters (polling buffer, MMCSS, fixed sample rate, silence after a DoP-to-PCM switch and release after a pause) passed 5/5.
 
 ## Library performance
+
+Measured on 2026-10-31 in Release on a copy of the owner's 70,715-track NAS library, with measurements on (`CAMELPLAYER_MEASURE`):
+
+- A warm start showed the main window 1.22–1.25 s after the process started and Home's content after 1.9–2.1 s (target: an interactive main window within 2 seconds). The first start after the copy took 2.9 s, as it also upgraded the library database.
+- After fast album-wall scrolling and 30 idle seconds the process used 282 MB of private memory (317 MB working set; target: 500 MB or less).
+- During fast album-wall scrolling the frame clock ran at about 32 frames a second on that machine (median 31 ms between frames). Most two-second windows had no frame over 46 ms; a few had one frame of 106–226 ms while covers loaded.
+- The owner's 157 plays from the NAS on 2026-10-30 and 2026-10-31 started sound a median 0.53 s after the play request, 90% within 0.98 s and the slowest after 3.0 s (target: 1 second from a NAS). Start-up from local files was not measured again.
+- The 100k-track first scan below was not repeated, for lack of free disk space for the synthetic files.
 
 Measured on 2026-10-24 after the scan speed-up, in Release with caches not flushed:
 
