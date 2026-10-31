@@ -25,6 +25,7 @@ SettingsDto settingsDto(const Settings& s) {
             s.autoplay,
             s.checkUpdates,
             s.artistPictures,
+            s.folderTree,
             s.skippedVersion,
             s.hotkeys,
             toUtf8(s.lastFile)};
@@ -48,6 +49,7 @@ Settings nativeSettings(const SettingsDto& s) {
             s.autoplay,
             s.checkUpdates,
             s.artistPictures,
+            s.folderTree,
             s.skippedVersion,
             s.hotkeys,
             toWide(s.lastFileUtf8)};

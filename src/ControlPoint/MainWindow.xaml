@@ -375,6 +375,7 @@
                                 <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ToggleSwitch x:Name="AutoUpdateSwitch" x:Uid="Settings_AutoUpdate" Toggled="OnUpdateSwitchToggled" />
                                 <ToggleSwitch x:Name="ArtistPicturesSwitch" x:Uid="Settings_ArtistPictures" Toggled="OnArtistPicturesToggled" />
+                                <ToggleSwitch x:Name="FolderTreeSwitch" x:Uid="Settings_FolderTree" Toggled="OnFolderTreeToggled" />
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
                                 <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
                                            Foreground="{ThemeResource SystemFillColorCautionBrush}" />

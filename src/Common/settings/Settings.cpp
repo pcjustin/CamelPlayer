@@ -206,6 +206,7 @@ std::string toJson(const Settings& s) {
     j["artistPictures"] = s.artistPictures == OnlineLookup::Allowed   ? "allowed"
                           : s.artistPictures == OnlineLookup::Refused ? "refused"
                                                                       : "ask";
+    j["folderTree"] = s.folderTree;
     j["skippedVersion"] = s.skippedVersion;
     j["hotkeys"] = {{"playPause", {s.hotkeys.playPause.modifiers, s.hotkeys.playPause.key}},
                     {"previous", {s.hotkeys.previous.modifiers, s.hotkeys.previous.key}},
@@ -311,6 +312,7 @@ Settings fromJson(const std::string& text) {
     s.artistPictures = pictures == "allowed"   ? OnlineLookup::Allowed
                        : pictures == "refused" ? OnlineLookup::Refused
                                                : OnlineLookup::Ask;
+    s.folderTree = boolean(j, "folderTree", false);
     s.skippedVersion = str(j, "skippedVersion", "");
     if (j.contains("hotkeys") && j["hotkeys"].is_object()) {
         const json& h = j["hotkeys"];
@@ -403,6 +405,7 @@ Settings resetPlayback(const Settings& s) {
     reset.hotkeys = s.hotkeys;
     reset.checkUpdates = s.checkUpdates;
     reset.artistPictures = s.artistPictures;
+    reset.folderTree = s.folderTree;
     reset.skippedVersion = s.skippedVersion;
     reset.lastFile = s.lastFile;
     return reset;
@@ -419,6 +422,7 @@ Settings resetInterface(const Settings& s) {
     reset.hotkeys = defaults.hotkeys;
     reset.checkUpdates = defaults.checkUpdates;
     reset.artistPictures = defaults.artistPictures;
+    reset.folderTree = defaults.folderTree;
     return reset;
 }
 

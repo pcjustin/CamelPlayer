@@ -427,6 +427,9 @@
   <data name="Settings_ArtistPictures.Header" xml:space="preserve"><value>演出者照片</value></data>
   <data name="Settings_ArtistPictures.OnContent" xml:space="preserve"><value>從 Wikimedia Commons 查演出者照片</value></data>
   <data name="Settings_ArtistPictures.OffContent" xml:space="preserve"><value>從 Wikimedia Commons 查演出者照片</value></data>
+  <data name="Settings_FolderTree.Header" xml:space="preserve"><value>資料夾</value></data>
+  <data name="Settings_FolderTree.OnContent" xml:space="preserve"><value>以樹狀顯示資料夾（foobar2000 風格）</value></data>
+  <data name="Settings_FolderTree.OffContent" xml:space="preserve"><value>以樹狀顯示資料夾（foobar2000 風格）</value></data>
   <data name="Nav_SmartAdded.Content" xml:space="preserve"><value>最近加入</value></data>
   <data name="Nav_SmartMostPlayed.Content" xml:space="preserve"><value>最常播放</value></data>
   <data name="Nav_SmartRecentlyPlayed.Content" xml:space="preserve"><value>最近播放</value></data>

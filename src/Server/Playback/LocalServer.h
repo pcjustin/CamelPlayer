@@ -56,6 +56,7 @@ public:
                                         const CancellationToken& token = {}) override;
     LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const override;
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;
+    std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryRootInfo> libraryRoots() const override;
     LibraryScanProgress libraryScanProgress() const override;
     std::vector<PlaylistSummary> playlists() const override;

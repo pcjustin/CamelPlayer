@@ -23,4 +23,9 @@ void BrowseItem::setFavorite(bool favorite) {
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"FavoriteGlyph"));
 }
 
+void BrowseItem::setExpanded(bool expanded) {
+    row_.expanded = expanded;
+    changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"ChevronGlyph"));
+}
+
 } // namespace winrt::CamelPlayer::implementation

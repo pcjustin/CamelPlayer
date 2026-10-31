@@ -8,6 +8,7 @@
 #include "LibraryCollection.h"
 #include "PlaylistMenu.h"
 #include "TrackMarks.h"
+#include <set>
 #include <unordered_map>
 #include "Server/Api/ServerApi.h"
 
@@ -39,6 +40,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void showArtistList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void showTrackList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void hide();
+    // Settings › Interface: the Folders page as one tree, as in foobar2000, instead of one folder at a time.
+    void setFolderTree(bool on);
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
     // Whether Back has somewhere to go; `changed` hears it after every page change. The window's title bar shows Back.
@@ -93,6 +96,12 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnRemovePictureClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnAllowPicturesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnRefusePicturesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // The folder tree: a click opens or closes a folder, a double click plays it or a track, and the arrows and Enter do
+    // the same from the keyboard.
+    void OnTreeTapped(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const&);
+    void OnTreeDoubleTapped(Windows::Foundation::IInspectable const&,
+                            Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+    void OnTreeKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
 
 private:
     struct ArtworkSlot {
@@ -143,6 +152,15 @@ private:
     void openGroup(camel::server::LibraryGroupField field, std::string value, hstring const& title, hstring const& detail,
                    bool push);
     void loadFolder();
+    // The folder tree lists `parent`'s subfolders and tracks below it, or the music folders when it is null, and opens
+    // those of them left open before.
+    void expandTree(CamelPlayer::BrowseItem const& parent);
+    void toggleTree(CamelPlayer::BrowseItem const& node);
+    // Plays a folder of the tree, or its folder's tracks from a track on.
+    void playTree(CamelPlayer::BrowseItem const& node);
+    // The row of the folder holding the tree row at `index`, if any.
+    std::optional<uint32_t> treeParent(uint32_t index) const;
+    void saveOpenFolders() const;
     void loadSearchGroups();
     void playTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, size_t index);
     void queueItem(const ui::BrowseRow& row, bool playNext);
@@ -208,6 +226,11 @@ private:
     std::vector<camel::server::LibraryInitial> initials_;
     size_t initialSlots_ = 0; // rows the jump bar shows now
     std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_, artistTracks_;
+    bool folderTree_ = false;
+    Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable> treeItems_{nullptr};
+    std::unordered_map<int64_t, std::vector<camel::server::LibraryTrackRow>> treeTracks_; // by folder, as listed
+    std::set<int64_t> openFolders_; // kept in the data folder, so the tree opens as it was left
+    bool openFoldersRead_ = false;
     // The track artists of the album or artist page split into names, by credit; empty on other pages.
     std::unordered_map<std::string, std::vector<camel::server::LibraryNamePart>> credits_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;

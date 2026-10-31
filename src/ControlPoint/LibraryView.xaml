@@ -103,6 +103,24 @@
                 </Grid>
             </Grid>
         </DataTemplate>
+        <!-- The Folders page as one tree, as in foobar2000 (Settings › Interface): folders open in place, tracks by file name. -->
+        <DataTemplate x:Key="FolderTreeTemplate" x:DataType="local:BrowseItem">
+            <Grid Background="Transparent" ColumnSpacing="8" Margin="{x:Bind Indent, Mode=OneWay}" ContextRequested="OnRowContextRequested"
+                  Tapped="OnTreeTapped" DoubleTapped="OnTreeDoubleTapped">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="{x:Bind ChevronGlyph, Mode=OneWay}" FontSize="10" />
+                <FontIcon Grid.Column="1" Glyph="{x:Bind TreeGlyph}" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <!-- A folder's track count follows its name: "Album (12)". -->
+                <TextBlock Grid.Column="2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                    <Run Text="{x:Bind Title, Mode=OneWay}" /><Run Text=" " /><Run Text="{x:Bind Detail, Mode=OneWay}"
+                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </TextBlock>
+            </Grid>
+        </DataTemplate>
         <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">
             <Grid Padding="8" Background="Transparent" ContextRequested="OnCardContextRequested">
                 <StackPanel Width="{Binding Cover, Source={StaticResource WallCards}}" Spacing="2">
@@ -411,6 +429,14 @@
         </ListView>
         <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />
+        <ListView x:Name="FolderTree" Grid.Row="1" ItemTemplate="{StaticResource FolderTreeTemplate}" SelectionMode="Extended"
+                  Visibility="Collapsed" PreviewKeyDown="OnTreeKeyDown">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                    <Setter Property="MinHeight" Value="32" />
+                </Style>
+            </ListView.ItemContainerStyle>
+        </ListView>
         <TextBlock x:Name="EmptyText" Grid.Row="1" TextWrapping="Wrap" Visibility="Collapsed"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         <!-- The jump bar beside a whole list: #, A–Z, kana and Han, the ones without names dimmed. -->

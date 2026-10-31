@@ -395,6 +395,8 @@ void LibraryView::hide() {
     collection_ = nullptr;
     AlbumGrid().ItemsSource(nullptr);
     RowList().ItemsSource(nullptr);
+    FolderTree().ItemsSource(nullptr);
+    treeItems_ = nullptr;
     ArtistOwn().ItemsSource(nullptr);
     ArtistGuest().ItemsSource(nullptr);
 }
@@ -478,13 +480,15 @@ void LibraryView::showList(Mode mode) {
                                  mode == Mode::Search
                              ? Visibility::Visible
                              : Visibility::Collapsed);
-    FolderList().Visibility(mode == Mode::Folders ? Visibility::Visible : Visibility::Collapsed);
+    FolderList().Visibility(mode == Mode::Folders && !folderTree_ ? Visibility::Visible : Visibility::Collapsed);
+    FolderTree().Visibility(mode == Mode::Folders && folderTree_ ? Visibility::Visible : Visibility::Collapsed);
     FolderTrail().Visibility(mode == Mode::Folders && current_.folder ? Visibility::Visible : Visibility::Collapsed);
 }
 
 ListViewBase LibraryView::listOf(Mode mode) {
     if (mode == Mode::Albums) return AlbumGrid();
-    return mode == Mode::Folders ? FolderList().as<ListViewBase>() : RowList().as<ListViewBase>();
+    if (mode == Mode::Folders) return folderTree_ ? FolderTree().as<ListViewBase>() : FolderList().as<ListViewBase>();
+    return RowList().as<ListViewBase>();
 }
 
 void LibraryView::restoreOffset() {
@@ -684,7 +688,169 @@ void LibraryView::loadArtist() {
     });
 }
 
+void LibraryView::setFolderTree(bool on) {
+    if (folderTree_ == on) return;
+    folderTree_ = on;
+    if (!server_ || current_.mode != Mode::Folders) return;
+    View view;
+    view.mode = Mode::Folders;
+    view.title = current_.folder && !back_.empty() ? back_.front().title : current_.title;
+    back_.clear();
+    open(std::move(view), false);
+}
+
+void LibraryView::expandTree(CamelPlayer::BrowseItem const& parent) {
+    std::optional<int64_t> folder;
+    int depth = 0;
+    if (parent) {
+        auto* node = get_self<BrowseItem>(parent);
+        folder = node->row().id;
+        depth = node->row().depth + 1;
+        node->setExpanded(true);
+    }
+    background([this, server = server_, folder, depth, parent, texts = Texts{}] {
+        auto listing = std::make_shared<LibraryFolderListing>(server->browseFolder(folder));
+        return std::function<void()>([this, listing, folder, depth, parent, texts] {
+            if (!treeItems_) return;
+            uint32_t at = 0;
+            if (parent) {
+                // Closed again, or gone with a reload, while it was read.
+                if (!treeItems_.IndexOf(parent, at) || !get_self<BrowseItem>(parent)->row().expanded) return;
+                ++at;
+            }
+            std::vector<CamelPlayer::BrowseItem> open;
+            for (const auto& child : listing->folders) {
+                ui::BrowseRow row{child.id, child.path, ui::utf8(child.name), {}, L"(" + to_hstring(child.tracks) + L")"};
+                row.folder = true;
+                row.depth = depth;
+                const auto node = item(row);
+                treeItems_.InsertAt(at++, node);
+                if (openFolders_.contains(child.id)) open.push_back(node.as<CamelPlayer::BrowseItem>());
+            }
+            if (folder) {
+                for (const auto& t : listing->tracks) {
+                    auto row = trackRow(t, texts);
+                    if (!t.name.empty()) row.title = ui::utf8(t.name);
+                    row.subtitle = row.detail = row.trailing = {};
+                    row.depth = depth;
+                    treeItems_.InsertAt(at++, item(row));
+                }
+                treeTracks_[*folder] = listing->tracks;
+            }
+            for (const auto& node : open) expandTree(node);
+        });
+    });
+}
+
+void LibraryView::toggleTree(CamelPlayer::BrowseItem const& node) {
+    auto* self = get_self<BrowseItem>(node);
+    if (!self->row().folder || !treeItems_) return;
+    if (!self->row().expanded) {
+        openFolders_.insert(self->row().id);
+        expandTree(node);
+    } else {
+        // Folders open inside stay remembered, so they open again with it.
+        openFolders_.erase(self->row().id);
+        self->setExpanded(false);
+        uint32_t at = 0;
+        if (treeItems_.IndexOf(node, at))
+            while (at + 1 < treeItems_.Size() && ui::LibraryCollection::rowOf(treeItems_.GetAt(at + 1)).depth > self->row().depth)
+                treeItems_.RemoveAt(at + 1);
+    }
+    saveOpenFolders();
+}
+
+std::optional<uint32_t> LibraryView::treeParent(uint32_t index) const {
+    const auto depth = ui::LibraryCollection::rowOf(treeItems_.GetAt(index)).depth;
+    while (index-- > 0)
+        if (ui::LibraryCollection::rowOf(treeItems_.GetAt(index)).depth < depth) return index;
+    return std::nullopt;
+}
+
+void LibraryView::playTree(CamelPlayer::BrowseItem const& node) {
+    const auto& row = get_self<BrowseItem>(node)->row();
+    if (row.folder) {
+        queueFolder(row.id, false, true);
+        return;
+    }
+    uint32_t at = 0;
+    if (!treeItems_ || !treeItems_.IndexOf(node, at)) return;
+    const auto parent = treeParent(at);
+    if (!parent) return;
+    const auto found = treeTracks_.find(ui::LibraryCollection::rowOf(treeItems_.GetAt(*parent)).id);
+    if (found == treeTracks_.end()) return;
+    const auto& tracks = found->second;
+    const auto track = std::find_if(tracks.begin(), tracks.end(), [&](const auto& t) { return t.id == row.id; });
+    if (track != tracks.end()) playTracks(tracks, size_t(track - tracks.begin()));
+}
+
+void LibraryView::saveOpenFolders() const {
+    std::ofstream file(camel::dataDirectory() / L"folder-tree-open", std::ios::trunc);
+    for (const auto id : openFolders_) file << id << '\n';
+}
+
+void LibraryView::OnTreeTapped(Windows::Foundation::IInspectable const& sender, Input::TappedRoutedEventArgs const&) {
+    if (selecting()) return;
+    if (const auto node = sender.as<FrameworkElement>().DataContext().try_as<CamelPlayer::BrowseItem>()) toggleTree(node);
+}
+
+void LibraryView::OnTreeDoubleTapped(Windows::Foundation::IInspectable const& sender,
+                                     Input::DoubleTappedRoutedEventArgs const& e) {
+    const auto node = sender.as<FrameworkElement>().DataContext().try_as<CamelPlayer::BrowseItem>();
+    if (!node) return;
+    // The first click of the two opened or closed the folder; playing it leaves it as it was.
+    if (get_self<BrowseItem>(node)->row().folder) toggleTree(node);
+    playTree(node);
+    e.Handled(true);
+}
+
+void LibraryView::OnTreeKeyDown(Windows::Foundation::IInspectable const&, Input::KeyRoutedEventArgs const& e) {
+    const auto container = e.OriginalSource().try_as<ListViewItem>();
+    const auto node = container ? container.Content().try_as<CamelPlayer::BrowseItem>() : nullptr;
+    if (!node || !treeItems_) return;
+    const auto& row = get_self<BrowseItem>(node)->row();
+    switch (e.Key()) {
+    case Windows::System::VirtualKey::Enter:
+        playTree(node);
+        break;
+    case Windows::System::VirtualKey::Right:
+        if (!row.folder || row.expanded) return;
+        toggleTree(node);
+        break;
+    case Windows::System::VirtualKey::Left: {
+        if (row.folder && row.expanded) {
+            toggleTree(node);
+            break;
+        }
+        uint32_t at = 0;
+        if (!treeItems_.IndexOf(node, at)) return;
+        if (const auto parent = treeParent(at)) {
+            FolderTree().SelectedIndex(int32_t(*parent));
+            if (const auto target = FolderTree().ContainerFromIndex(int32_t(*parent)).try_as<Control>())
+                target.Focus(FocusState::Keyboard);
+        }
+        break;
+    }
+    default:
+        return;
+    }
+    e.Handled(true);
+}
+
 void LibraryView::loadFolder() {
+    if (folderTree_) {
+        FolderTree().ItemsSource(nullptr);
+        treeTracks_.clear();
+        if (!openFoldersRead_) {
+            std::ifstream file(camel::dataDirectory() / L"folder-tree-open");
+            for (int64_t id = 0; file >> id;) openFolders_.insert(id);
+            openFoldersRead_ = true;
+        }
+        treeItems_ = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
+        FolderTree().ItemsSource(treeItems_);
+        expandTree(nullptr);
+        return;
+    }
     FolderList().ItemsSource(nullptr);
     FolderTrail().ItemsSource(nullptr);
     folderTrail_.clear();
@@ -765,13 +931,7 @@ void LibraryView::queueItem(const ui::BrowseRow& row, bool playNext) {
 void LibraryView::queueFolder(int64_t folder, bool playNext, bool playNow) {
     if (!server_ || folder <= 0) return;
     background([this, server = server_, folder, playNext, playNow] {
-        std::vector<int64_t> pending{folder};
-        std::vector<LibraryTrackRow> tracks;
-        for (size_t i = 0; i < pending.size(); ++i) {
-            const auto listing = server->browseFolder(pending[i]);
-            tracks.insert(tracks.end(), listing.tracks.begin(), listing.tracks.end());
-            for (const auto& child : listing.folders) pending.push_back(child.id);
-        }
+        auto tracks = server->folderTracks(folder);
         return std::function<void()>([this, tracks = std::move(tracks), playNext, playNow] {
             if (playNow)
                 playTracks(tracks, 0);
@@ -1228,7 +1388,7 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
     if (!group && !item.IsTrack() && (current_.mode != Mode::Folders || !item.IsFolder())) return;
     menuRow_ = row;
     menuItem_ = item;
-    menuList_ = current_.mode == Mode::Folders ? FolderList().as<ListViewBase>() : RowList().as<ListViewBase>();
+    menuList_ = current_.mode == Mode::Folders ? listOf(Mode::Folders) : RowList().as<ListViewBase>();
     menuTarget_ = Target::Rows;
     menuPaged_ = current_.mode == Mode::Groups || current_.mode == Mode::Tracks || current_.mode == Mode::Search;
     if (!rowMenu_) {

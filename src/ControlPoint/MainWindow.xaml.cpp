@@ -453,6 +453,8 @@ void MainWindow::populateSettings() {
     QueueAutoplayItem().IsChecked(settings_.autoplay);
     AutoUpdateSwitch().IsOn(settings_.checkUpdates);
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
+    FolderTreeSwitch().IsOn(settings_.folderTree);
+    get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -582,6 +584,7 @@ void MainWindow::readSettingsFromUi() {
         settings_.artistPictures = camel::OnlineLookup::Allowed;
     else if (settings_.artistPictures == camel::OnlineLookup::Allowed)
         settings_.artistPictures = camel::OnlineLookup::Refused;
+    settings_.folderTree = FolderTreeSwitch().IsOn();
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -647,6 +650,7 @@ void MainWindow::settingsChanged() {
     const Backend previous = settings_.backend;
     readSettingsFromUi();
     applyTheme();
+    get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     if (settings_.backend != previous && !followDevice(previous) &&
         server_->snapshot().playback.state == PlaybackState::Playing) {
         // Never move sound to another device unannounced; its level may differ a lot.
@@ -2604,6 +2608,10 @@ void MainWindow::OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&,
 }
 
 void MainWindow::OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settingsChanged();
+}
+
+void MainWindow::OnFolderTreeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
 }
 

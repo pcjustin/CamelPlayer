@@ -62,6 +62,7 @@ struct SettingsDto {
     bool autoplay = true;
     bool checkUpdates = true;
     OnlineLookup artistPictures = OnlineLookup::Ask;
+    bool folderTree = false;
     std::string skippedVersion;
     HotkeySettings hotkeys;
     std::string lastFileUtf8;
@@ -324,6 +325,8 @@ public:
                                                 const CancellationToken& token = {}) = 0;
     virtual LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const = 0;
     virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;
+    // Every track in a folder and below it, in the Folders page's order (see folderTracks in LibraryViews.h).
+    virtual std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
     virtual LibraryScanProgress libraryScanProgress() const = 0;
     virtual std::vector<PlaylistSummary> playlists() const = 0;

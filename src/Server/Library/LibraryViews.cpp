@@ -13,6 +13,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <stdexcept>
 #include <unordered_map>
 #include <sqlite3.h>
@@ -674,6 +675,34 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const Canc
     return detail;
 }
 
+namespace {
+
+// The visible tracks in each folder and below it for one library revision, by folder id; folders without any are left
+// out.
+std::shared_ptr<const std::vector<std::pair<int64_t, int64_t>>> folderTrackCounts(const LibraryStore& store, Query& q) {
+    return ordered<std::pair<int64_t, int64_t>>(store, q.revision, "folderCounts", [&] {
+        std::unordered_map<int64_t, int64_t> parents, counts;
+        auto folders = q.db.prepare("SELECT id,coalesce(parent_id,0) FROM folders");
+        while (folders.step()) parents[folders.integer(0)] = folders.integer(1);
+        auto rows = q.db.prepare(std::string("SELECT f.folder_id,count(*) FROM tracks t") + kJoins + "WHERE" + kVisible +
+                                 "AND f.folder_id IS NOT NULL GROUP BY f.folder_id");
+        while (rows.step()) {
+            const auto tracks = rows.integer(1);
+            int64_t id = rows.integer(0);
+            for (int depth = 0; id && depth < 256; ++depth) {
+                counts[id] += tracks;
+                const auto parent = parents.find(id);
+                id = parent == parents.end() ? 0 : parent->second;
+            }
+        }
+        std::vector<std::pair<int64_t, int64_t>> out(counts.begin(), counts.end());
+        std::ranges::sort(out);
+        return out;
+    });
+}
+
+} // namespace
+
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token) {
     Query q(store, std::nullopt, token);
     LibraryFolderListing listing;
@@ -698,9 +727,13 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
                                          "coalesce(r.location,'') FROM folders d JOIN roots r ON r.id=d.root_id "
                                          "WHERE d.parent_id IS NULL AND r.removed IS NULL AND r.online=1 ORDER BY d.path");
     if (folder) folders.bind(1, *folder);
+    const auto counts = folderTrackCounts(store, q);
     while (folders.step()) {
         if (token.cancelled()) throw std::runtime_error("library query cancelled");
         listing.folders.push_back(entry(folders, !folder));
+        const auto id = listing.folders.back().id;
+        const auto count = std::ranges::lower_bound(*counts, std::pair<int64_t, int64_t>{id, 0});
+        if (count != counts->end() && count->first == id) listing.folders.back().tracks = count->second;
     }
     if (folder) {
         auto up = q.db.prepare("SELECT d.id,d.path,coalesce(d.name,''),coalesce(r.display,''),coalesce(r.location,''),"
@@ -718,6 +751,33 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
         while (rows.step()) listing.tracks.push_back(trackRow(rows));
     }
     return listing;
+}
+
+std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t folder, const CancellationToken& token) {
+    Query q(store, std::nullopt, token);
+    auto children = q.db.prepare("SELECT id FROM folders WHERE parent_id=? ORDER BY path");
+    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                             "WHERE f.folder_id=? AND" + kVisible + " ORDER BY t.disc_number,t.track_number,f.path");
+    std::vector<LibraryTrackRow> out;
+    std::vector<std::pair<int64_t, bool>> pending{{folder, false}}; // a folder, and whether its subfolders are listed
+    while (!pending.empty()) {
+        if (token.cancelled()) throw std::runtime_error("library query cancelled");
+        auto [id, expanded] = pending.back();
+        pending.pop_back();
+        if (expanded) {
+            rows.reset();
+            rows.bind(1, id);
+            while (rows.step()) out.push_back(trackRow(rows));
+            continue;
+        }
+        pending.emplace_back(id, true);
+        std::vector<int64_t> subfolders;
+        children.reset();
+        children.bind(1, id);
+        while (children.step()) subfolders.push_back(children.integer(0));
+        for (const auto subfolder : std::views::reverse(subfolders)) pending.emplace_back(subfolder, false);
+    }
+    return out;
 }
 
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store) {

@@ -307,6 +307,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     settings.closeAction = CloseAction::Exit;
     settings.trayNoticeShown = settings.firstRunDone = true;
     settings.artistPictures = OnlineLookup::Allowed;
+    settings.folderTree = true;
     settings.lastFile = L"C:\\music\\a.flac";
 
     const auto playback = resetPlayback(settings);
@@ -319,6 +320,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_EQ(playback.closeAction, CloseAction::Exit);
     EXPECT_TRUE(playback.trayNoticeShown && playback.firstRunDone);
     EXPECT_EQ(playback.artistPictures, OnlineLookup::Allowed);
+    EXPECT_TRUE(playback.folderTree);
     EXPECT_EQ(playback.lastFile, settings.lastFile);
 
     const auto ui = resetInterface(settings);
@@ -326,6 +328,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_EQ(ui.closeAction, CloseAction::Tray);
     EXPECT_FALSE(ui.trayNoticeShown || ui.firstRunDone);
     EXPECT_EQ(ui.artistPictures, OnlineLookup::Ask);
+    EXPECT_FALSE(ui.folderTree);
     EXPECT_EQ(ui.backend, Backend::Asio);
     EXPECT_EQ(ui.asio, settings.asio);
     EXPECT_TRUE(ui.convertWhenUnsupported);
@@ -347,6 +350,13 @@ TEST(SettingsBoundary, OnlineArtistPicturesAreAskedAboutUntilAnswered) {
         EXPECT_EQ(fromJson(toJson(settings)).artistPictures, answer);
     }
     EXPECT_EQ(fromJson(R"({"artistPictures":"maybe"})").artistPictures, OnlineLookup::Ask);
+}
+
+TEST(SettingsBoundary, TheFolderTreeIsOffUntilTurnedOn) {
+    EXPECT_FALSE(Settings{}.folderTree);
+    Settings settings;
+    settings.folderTree = true;
+    EXPECT_TRUE(fromJson(toJson(settings)).folderTree);
 }
 
 TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {

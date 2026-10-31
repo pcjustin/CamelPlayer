@@ -107,6 +107,7 @@ struct LibraryFolderEntry {
     int64_t id = 0;
     std::string name, path;
     std::string location; // roots only: libraryLocation of the folder
+    int64_t tracks = 0;   // the visible tracks in it and below it
 };
 
 struct LibraryFolderListing {
@@ -190,6 +191,9 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t album, const C
 // Shows the names and root locations scans recorded, without reading the music storage.
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token = {});
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store);
+// Every visible track in `folder` and below it in the order the Folders page lists them: each subfolder's tracks
+// first, by folder name, then the folder's own.
+std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t folder, const CancellationToken& token = {});
 
 // A stored root key as people write it: the volume or share's own spelling without the extended-length prefix.
 std::string libraryDisplayPath(const std::string& key);

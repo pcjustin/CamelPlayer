@@ -421,6 +421,29 @@ INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,
     EXPECT_FALSE(all[1].online);
 }
 
+TEST_F(LibraryViewsTest, FoldersCountTheTracksBelowThemAndPlayInTreeOrder) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec(R"sql(
+INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,1,1,'c:\m\loose.flac','audio',1,1,1);
+INSERT INTO tracks(id,file_id,title) VALUES(7,7,'Loose');
+)sql");
+        })
+        .get();
+    const auto roots = browseFolder(*store, std::nullopt);
+    ASSERT_EQ(roots.folders.size(), 1u);
+    EXPECT_EQ(roots.folders[0].tracks, 5); // three in "a", the available one in "b" and its own
+    const auto top = browseFolder(*store, 1);
+    ASSERT_EQ(top.folders.size(), 2u);
+    EXPECT_EQ(top.folders[0].tracks, 3);
+    EXPECT_EQ(top.folders[1].tracks, 1);
+    // Each subfolder in disc and track order, then the folder's own tracks.
+    std::vector<int64_t> order;
+    for (const auto& t : folderTracks(*store, 1)) order.push_back(t.id);
+    EXPECT_EQ(order, (std::vector<int64_t>{2, 1, 3, 4, 7}));
+    EXPECT_TRUE(folderTracks(*store, 4).empty()); // an offline root
+}
+
 TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
     store
         ->write([](sqlite::Database& db) {

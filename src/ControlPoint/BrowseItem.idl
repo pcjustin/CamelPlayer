@@ -18,5 +18,8 @@ namespace CamelPlayer {
     Boolean HasAvatar { get; }; // an artist or composer row: their picture, or their initial on AvatarBrush
     String Initial { get; };
     Microsoft.UI.Xaml.Media.Brush AvatarBrush { get; };
+    Microsoft.UI.Xaml.Thickness Indent { get; }; // a folder tree row's depth
+    String ChevronGlyph { get; };                // an open or closed folder in the tree; none for a track
+    String TreeGlyph { get; };                   // a folder or a note
 }
 } // namespace CamelPlayer

@@ -1517,6 +1517,9 @@ LibraryAlbumDetail LocalServer::albumDetail(int64_t album, const CancellationTok
 LibraryFolderListing LocalServer::browseFolder(std::optional<int64_t> folder, const CancellationToken& token) const {
     return camel::server::browseFolder(impl_->library(), folder, token);
 }
+std::vector<LibraryTrackRow> LocalServer::folderTracks(int64_t folder, const CancellationToken& token) const {
+    return camel::server::folderTracks(impl_->library(), folder, token);
+}
 std::vector<LibraryRootInfo> LocalServer::libraryRoots() const {
     return camel::server::libraryRoots(impl_->library());
 }

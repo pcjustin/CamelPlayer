@@ -427,6 +427,9 @@
   <data name="Settings_ArtistPictures.Header" xml:space="preserve"><value>Artist pictures</value></data>
   <data name="Settings_ArtistPictures.OnContent" xml:space="preserve"><value>Look up artist pictures on Wikimedia Commons</value></data>
   <data name="Settings_ArtistPictures.OffContent" xml:space="preserve"><value>Look up artist pictures on Wikimedia Commons</value></data>
+  <data name="Settings_FolderTree.Header" xml:space="preserve"><value>Folders</value></data>
+  <data name="Settings_FolderTree.OnContent" xml:space="preserve"><value>Show folders as a tree (foobar2000 style)</value></data>
+  <data name="Settings_FolderTree.OffContent" xml:space="preserve"><value>Show folders as a tree (foobar2000 style)</value></data>
   <data name="Nav_SmartAdded.Content" xml:space="preserve"><value>Recently added</value></data>
   <data name="Nav_SmartMostPlayed.Content" xml:space="preserve"><value>Most played</value></data>
   <data name="Nav_SmartRecentlyPlayed.Content" xml:space="preserve"><value>Recently played</value></data>

@@ -21,6 +21,8 @@ struct BrowseRow {
     bool favorite = false;
     bool composer = false; // a group row naming a composer, which lists of favorite artists mix with artists
     bool avatar = false;   // an artist or composer row, shown with their picture
+    int depth = -1;        // a folder tree row: how far below the music folders it is
+    bool expanded = false; // a folder tree row whose folder is open
 };
 
 } // namespace ui
@@ -45,6 +47,9 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     Microsoft::UI::Xaml::Media::Brush AvatarBrush() const {
         return Microsoft::UI::Xaml::Media::SolidColorBrush(ui::avatarColor(row_.title));
     }
+    Microsoft::UI::Xaml::Thickness Indent() const { return {20.0 * std::max(row_.depth, 0), 0, 0, 0}; }
+    hstring ChevronGlyph() const { return !row_.folder ? L"" : row_.expanded ? L"\xE70D" : L"\xE76C"; }
+    hstring TreeGlyph() const { return row_.folder ? L"\xE8B7" : L"\xE8D6"; }
     // What a screen reader announces for the tile or row.
     hstring ToString() const { return row_.subtitle.empty() ? row_.title : row_.title + L", " + row_.subtitle; }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
@@ -56,6 +61,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     bool loaded() const { return loaded_; }
     void fill(const ui::BrowseRow& row);
     void setFavorite(bool favorite);
+    void setExpanded(bool expanded);
 
 private:
     ui::BrowseRow row_;
