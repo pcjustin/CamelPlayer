@@ -118,6 +118,8 @@ pub(crate) struct DecoderSource {
     full_coverage_possible: bool,
     /// Set by the engine once the output format is known; turns decoded frames into device bytes.
     pub(crate) converter: Option<crate::convert::Converter>,
+    /// The track's ReplayGain as a factor, 1 for none.
+    pub(crate) gain: f64,
 }
 
 pub(crate) fn is_decoder_kind(decoder_kind: u32) -> bool {
@@ -147,6 +149,7 @@ impl DecoderSource {
             || source.path_length_bytes > usize::MAX as u64
             || source.has_end_frame > 1
             || source.reserved != 0
+            || !source.gain_db.is_finite()
         {
             return Err(crate::ENGINE_E_INVALID_ARGUMENT);
         }
@@ -254,6 +257,7 @@ impl DecoderSource {
             },
             full_coverage_possible,
             converter: None,
+            gain: 10f64.powf(source.gain_db / 20.0),
         })
     }
 

@@ -440,6 +440,12 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
                     "checked INTEGER, mbid TEXT, candidates TEXT, author TEXT, license TEXT, license_url TEXT, page TEXT, "
                     "changed INTEGER NOT NULL DEFAULT 0);");
         },
+        // ReplayGain analysis of a whole album (docs/Plan.md §5.9), beside each track's own; a track's analysis goes when
+        // its file changes, and its album is analyzed again.
+        [](sqlite::Database& db) {
+            db.exec("ALTER TABLE tracks ADD COLUMN rg_analysis_album_gain REAL;"
+                    "ALTER TABLE tracks ADD COLUMN rg_analysis_album_peak REAL;");
+        },
     };
     return migrations;
 }

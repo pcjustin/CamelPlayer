@@ -45,6 +45,8 @@ pub(crate) struct Converter {
     out_channels: usize,
     /// Depth of the final quantization: the source depth, or less when the device takes less.
     quantize_bits: u32,
+    /// The track's ReplayGain as a factor, applied before the DSP chain; 1 leaves the samples untouched.
+    gain: f64,
     /// Depth of the final quantization while the DSP chain acts: the device's, 24 at most (0 for float).
     dsp_bits: u32,
     matrix: Option<[Vec<f64>; 2]>,
@@ -143,6 +145,7 @@ impl Converter {
                 } else {
                     out.valid_bits.min(24)
                 },
+                gain: 1.0,
                 dsp_bits: Self::device_bits(out),
                 matrix: Some(downmix_matrix(in_channels).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?),
                 resampler,
@@ -182,6 +185,7 @@ impl Converter {
                 out: *out,
                 out_channels,
                 quantize_bits: 0,
+                gain: 1.0,
                 dsp_bits: 0,
                 matrix: None,
                 resampler: None,
@@ -250,6 +254,7 @@ impl Converter {
             out: *out,
             out_channels,
             quantize_bits,
+            gain: 1.0,
             dsp_bits: Self::device_bits(out),
             matrix,
             resampler,
@@ -307,7 +312,8 @@ impl Converter {
         dsp: &mut Dsp,
     ) -> Result<(), i32> {
         let input = &samples[..frames * self.in_channels];
-        if dsp.active() && matches!(self.mode, Mode::Bypass | Mode::Duplicate | Mode::Widen) {
+        if self.processes(dsp) && matches!(self.mode, Mode::Bypass | Mode::Duplicate | Mode::Widen)
+        {
             let mut floats = self.to_device_channels(input);
             return self.emit(&mut floats, dsp);
         }
@@ -357,6 +363,17 @@ impl Converter {
                 self.resample_and_emit(mixed, dsp)
             }
         }
+    }
+
+    /// The converter with the track's ReplayGain as a factor.
+    pub(crate) fn with_gain(mut self, gain: f64) -> Self {
+        self.gain = gain;
+        self
+    }
+
+    // Whether PCM goes through float: a gain or the DSP chain changes it.
+    fn processes(&self, dsp: &Dsp) -> bool {
+        self.gain != 1.0 || dsp.active()
     }
 
     /// Ends the source: flushes the resampler's tail into the pending output. Further calls do nothing.
@@ -458,8 +475,13 @@ impl Converter {
     // The single final stage, after the DSP chain while it acts: float32 for a float device, else TPDF-dithered
     // integers at `quantize_bits`, or at the device depth while the chain acts.
     fn emit(&mut self, floats: &mut [f64], dsp: &mut Dsp) -> Result<(), i32> {
-        let processed = dsp.active();
-        if processed {
+        let processed = self.processes(dsp);
+        if self.gain != 1.0 {
+            for v in floats.iter_mut() {
+                *v *= self.gain;
+            }
+        }
+        if dsp.active() {
             dsp.process(floats);
         }
         if self.out.sample_format == SAMPLE_F32_LE {

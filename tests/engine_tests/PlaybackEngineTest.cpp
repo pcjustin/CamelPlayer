@@ -358,6 +358,33 @@ TEST_F(EngineStateTest, InactiveBackendSettingsDoNotRestartPlayback) {
     EXPECT_EQ(probe.creations, 1);
 }
 
+TEST_F(EngineStateTest, ATrackGainAndTheVolumeShowAsProcessedAndZeroStaysBitPerfect) {
+    const auto plan = [&] { return engine->snapshot().plan.value_or(OutputPlan{}); };
+    engine->openAndPlay(testutil::testFile("24-96k"), std::nullopt, -6.5);
+    engine->waitIdle();
+    EXPECT_EQ(plan().gainDb, -6.5);
+    EXPECT_EQ(plan().state, PipelineState::Processed);
+    ASSERT_EQ(pull(4096), 4096u);
+    engine->openAndPlay(testutil::testFile("24-96k"), std::nullopt, 0.0);
+    engine->waitIdle();
+    EXPECT_EQ(plan().state, PipelineState::BitPerfect);
+    // Software volume below 0 dB processes; Fixed leaves its value unused.
+    settings.volume = {VolumeMode::Software, -20.0, false};
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_EQ(plan().volumeDb, -20.0);
+    EXPECT_EQ(plan().state, PipelineState::Processed);
+    settings.volume.muted = true;
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_TRUE(plan().muted);
+    settings.volume.mode = VolumeMode::Fixed;
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_EQ(plan().state, PipelineState::BitPerfect);
+    ASSERT_EQ(pull(4096), 4096u);
+}
+
 TEST_F(EngineStateTest, TheDspChainChangesThePathWithoutReopeningAndStaysBitPerfectWhileFlat) {
     open();
     const auto plan = [&] { return engine->snapshot().plan.value_or(OutputPlan{}); };

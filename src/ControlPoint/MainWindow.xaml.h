@@ -94,6 +94,17 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqExportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
+    void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
+                             Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+    void OnVolumeChanged(Windows::Foundation::IInspectable const&,
+                         Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
+    void OnVolumeWheel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
+    void OnMuteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnReplayGainChanged(Windows::Foundation::IInspectable const&,
+                             Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+    void OnReplayGainValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
+                                  Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
+    void OnReplayGainToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspRestoreOrderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCrossfeedToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCrossfeedPresetChanged(Windows::Foundation::IInspectable const&,
@@ -129,6 +140,9 @@ private:
     uint32_t eqRate() const; // the playing output rate, else 48 kHz
     // The rest of the DSP card: crossfeed, convolution, the order and the chain's headroom.
     void showDsp();
+    void showVolume();
+    void showReplayGain();
+    void showLoudnessProgress();
     void showDspOrder();
     void showDspSummary();
     winrt::fire_and_forget loadConvolution();
@@ -196,6 +210,7 @@ private:
     std::string impulseFile_;
     uint32_t impulseRate_ = 0;
     uint64_t impulseLoads_ = 0;
+    int volumeWheel_ = 0;         // the part of a wheel notch not yet applied
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;

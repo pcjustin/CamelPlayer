@@ -70,6 +70,9 @@ Snapshot fullSnapshot() {
     OutputPlan plan{{176400, 2, SampleType::Int24In32}};
     plan.duplicate = plan.downmix = plan.resample = plan.widen = plan.reduce = plan.shared = true;
     plan.dsd = DsdPath::Dop;
+    plan.gainDb = -6.5;
+    plan.volumeDb = -20.0;
+    plan.muted = true;
     plan.state = PipelineState::LossySource;
     p.plan = plan;
     p.md5 = Md5State::Verified;

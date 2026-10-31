@@ -132,6 +132,7 @@ typedef struct CamelTrackSourceV1 {
     uint64_t end_frame_exclusive;
     uint32_t has_end_frame;
     uint32_t reserved;
+    double gain_db; // the track's ReplayGain, applied before the DSP chain; 0 leaves it bit-perfect
 } CamelTrackSourceV1;
 
 typedef struct CamelSourceInfoV1 {
@@ -268,6 +269,7 @@ typedef struct CamelDspV1 {
     const CamelEqBandV1* bands;
     const CamelCrossfeedV1* crossfeed;
     const CamelImpulse* impulse;
+    double volume_db; // the software volume, 0 or less; negative infinity mutes
 } CamelDspV1;
 
 // What a DSP setting does at a rate: whether it changes the signal, and the chain's preamp (0 dB or less).

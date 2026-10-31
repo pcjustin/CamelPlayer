@@ -508,6 +508,8 @@ void MainWindow::populateSettings() {
     FolderTreeSwitch().IsOn(settings_.folderTree);
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     showDsp();
+    showVolume();
+    showReplayGain();
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -642,6 +644,19 @@ void MainWindow::readSettingsFromUi() {
     if (eqEditor_) settings_.eq.bands = eqEditor_->settings().bands;
     settings_.crossfeed.enabled = CrossfeedSwitch().IsOn();
     settings_.convolution.enabled = ConvolutionSwitch().IsOn();
+    settings_.volume.mode = VolumeModeCombo().SelectedIndex() == 1 ? camel::VolumeMode::Software : camel::VolumeMode::Fixed;
+    settings_.volume.db = std::round(VolumeSlider().Value() * 2) / 2;
+    auto& rg = settings_.replayGain;
+    if (ReplayGainModeCombo().SelectedIndex() >= 0) rg.mode = camel::ReplayGainMode(ReplayGainModeCombo().SelectedIndex());
+    const auto preamp = [](double value, double fallback) {
+        return std::isnan(value) ? fallback
+                                 : std::clamp(std::round(value * 10) / 10, camel::ReplayGainSettings::kMinPreampDb,
+                                              camel::ReplayGainSettings::kMaxPreampDb);
+    };
+    rg.preampDb = preamp(ReplayGainPreampBox().Value(), rg.preampDb);
+    rg.noValuePreampDb = preamp(ReplayGainNoValueBox().Value(), rg.noValuePreampDb);
+    rg.preventClipping = ReplayGainClipSwitch().IsOn();
+    rg.speed = LoudnessSpeedCombo().SelectedIndex() == 1 ? camel::AnalysisSpeed::Fast : camel::AnalysisSpeed::Throttled;
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -771,6 +786,7 @@ void MainWindow::refreshFromServer() {
     if (!server_) return;
     applySnapshot(server_->snapshot());
     showScanProgress();
+    showLoudnessProgress();
 }
 
 void MainWindow::showScanProgress() {
@@ -989,12 +1005,25 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_Resample") + rates;
         }
+        // The track's ReplayGain, the chain's nodes in order, then the volume.
         hstring chain;
+        wchar_t db[32];
+        if (plan.gainDb != 0.0) {
+            swprintf_s(db, L" %+.1f dB", plan.gainDb);
+            chain = chain + L" → " + tr(L"SignalPath_ReplayGain") + db;
+        }
         for (const auto node : plan.dsp)
             chain = chain + L" → " +
                     tr(node == DspNode::Eq          ? L"SignalPath_Eq"
                        : node == DspNode::Crossfeed ? L"SignalPath_Crossfeed"
                                                     : L"SignalPath_Convolution");
+        if (plan.muted) {
+            chain = chain + L" → " + tr(L"SignalPath_Muted");
+        } else if (plan.volumeDb != 0.0) {
+            swprintf_s(db, L" %.1f dB", plan.volumeDb);
+            chain = chain + L" → " + tr(L"SignalPath_Volume") + db;
+        }
+        const bool processed = !plan.dsp.empty() || plan.gainDb != 0.0 || plan.volumeDb != 0.0 || plan.muted;
         if (plan.dsd != DsdPath::Pcm) path = path + chain;
         if (plan.dsd == DsdPath::Dop)
             path = path + L" → DoP · " + tr(L"SignalPath_DspBypassed");
@@ -1015,7 +1044,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         } else if (plan.widen)
             path = path + L" → float32";
         // The chain's output is quantized once, at the device depth up to 24 bits.
-        else if (!plan.dsp.empty())
+        else if (processed)
             path =
                 path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
         else if (plan.reduce || plan.resample || plan.downmix || lossy)
@@ -1024,7 +1053,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         else
             path = path + L" → " + tr(L"SignalPath_Pad") + L" " + to_hstring(s.source->bitsPerSample);
         SignalPathText().Text(path + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " + ui::utf8(s.outputMode));
-        dspActive = !plan.dsp.empty();
+        dspActive = processed;
     } else {
         Lamp().Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
         setAnnounced(LampText(), tr(L"Lamp_Idle"));
@@ -2843,6 +2872,98 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
     if (!out) camel::log::warn("EQ export: cannot write %s", camel::toUtf8(file.wstring()).c_str());
 }
 
+// Software volume (docs/Plan.md §5.9): the mode on the DSP card, and the slider and mute in the playback bar while it
+// is Software.
+void MainWindow::showVolume() {
+    const bool wasPopulating = std::exchange(populating_, true);
+    const bool software = settings_.volume.mode == camel::VolumeMode::Software;
+    VolumeModeCombo().SelectedIndex(software ? 1 : 0);
+    VolumePanel().Visibility(software ? Visibility::Visible : Visibility::Collapsed);
+    VolumeSlider().Value(settings_.volume.db);
+    MuteIcon().Glyph(settings_.volume.muted ? L"\xE74F" : L"\xE767");
+    const auto mute = tr(settings_.volume.muted ? L"Volume_Unmute" : L"Volume_Mute");
+    ToolTipService::SetToolTip(MuteButton(), box_value(mute));
+    Automation::AutomationProperties::SetName(MuteButton(), mute);
+    populating_ = wasPopulating;
+    showDspSummary();
+}
+
+void MainWindow::showReplayGain() {
+    const bool wasPopulating = std::exchange(populating_, true);
+    const auto& rg = settings_.replayGain;
+    ReplayGainModeCombo().SelectedIndex(int(rg.mode));
+    ReplayGainPreampBox().Value(rg.preampDb);
+    ReplayGainNoValueBox().Value(rg.noValuePreampDb);
+    ReplayGainClipSwitch().IsOn(rg.preventClipping);
+    LoudnessSpeedCombo().SelectedIndex(rg.speed == camel::AnalysisSpeed::Fast ? 1 : 0);
+    populating_ = wasPopulating;
+    showLoudnessProgress();
+    showDspSummary();
+}
+
+void MainWindow::showLoudnessProgress() {
+    if (!server_) return;
+    const auto progress = server_->loudnessProgress();
+    std::wstring text;
+    if (progress.total > 0) {
+        text = ui::format(L"Loudness_Progress", {std::to_wstring(progress.analyzed), std::to_wstring(progress.total)});
+        // A sentence after a full-width full stop needs no space.
+        const std::wstring separator = text.ends_with(L'。') ? L"" : L" ";
+        if (settings_.replayGain.mode == camel::ReplayGainMode::Off && progress.analyzed < progress.total)
+            text += separator + std::wstring(tr(L"Loudness_Off"));
+        else if (progress.running)
+            text += separator + std::wstring(tr(L"Loudness_Analyzing"));
+    }
+    if (LoudnessProgressText().Text() != text) LoudnessProgressText().Text(text);
+}
+
+void MainWindow::OnVolumeModeChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
+    if (populating_) return;
+    settings_.volume.mode = VolumeModeCombo().SelectedIndex() == 1 ? camel::VolumeMode::Software : camel::VolumeMode::Fixed;
+    showVolume();
+    settingsChanged();
+}
+
+void MainWindow::OnVolumeChanged(Windows::Foundation::IInspectable const&, Primitives::RangeBaseValueChangedEventArgs const& e) {
+    if (populating_) return;
+    settings_.volume.db = std::round(e.NewValue() * 2) / 2;
+    showDspSummary();
+    // A slider being dragged applies at most every 100 ms.
+    if (!eqTimer_.IsRunning()) eqTimer_.Start();
+}
+
+void MainWindow::OnVolumeWheel(Windows::Foundation::IInspectable const&, Input::PointerRoutedEventArgs const& e) {
+    // A notch moves 1 dB; one event may carry several notches, and a touchpad sends parts of one.
+    volumeWheel_ += e.GetCurrentPoint(VolumeSlider()).Properties().MouseWheelDelta();
+    const int notches = volumeWheel_ / WHEEL_DELTA;
+    volumeWheel_ %= WHEEL_DELTA;
+    if (notches != 0) VolumeSlider().Value(std::clamp(VolumeSlider().Value() + notches, camel::VolumeSettings::kMinDb, 0.0));
+    e.Handled(true);
+}
+
+void MainWindow::OnMuteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settings_.volume.muted = !settings_.volume.muted;
+    showVolume();
+    settingsChanged();
+}
+
+void MainWindow::OnReplayGainChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
+    if (populating_) return;
+    settingsChanged();
+    showLoudnessProgress();
+    showDspSummary();
+}
+
+void MainWindow::OnReplayGainValueChanged(NumberBox const&, NumberBoxValueChangedEventArgs const&) {
+    if (populating_) return;
+    settingsChanged();
+}
+
+void MainWindow::OnReplayGainToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (populating_) return;
+    settingsChanged();
+}
+
 // The DSP card (docs/Plan.md §5.9): every node from settings_, the order rows and the chain's headroom.
 void MainWindow::showDsp() {
     const bool wasPopulating = std::exchange(populating_, true);
@@ -2921,10 +3042,12 @@ void MainWindow::showDspSummary() {
     const bool anyOn = settings_.eq.enabled || settings_.crossfeed.enabled ||
                        (settings_.convolution.enabled && !settings_.convolution.file.empty());
     const auto analysis = camel::audio::analyzeDsp(chain, rate);
+    // The software volume and ReplayGain change the level whatever the chain does.
+    const bool levelled = camel::volumeDb(settings_.volume) != 0.0 || settings_.replayGain.mode != camel::ReplayGainMode::Off;
     if (!anyOn) {
-        DspSummaryText().Text(tr(L"Dsp_Off"));
+        DspSummaryText().Text(tr(levelled ? L"Dsp_OffLevelled" : L"Dsp_Off"));
     } else if (!analysis.active) {
-        DspSummaryText().Text(tr(L"Dsp_Flat"));
+        DspSummaryText().Text(tr(levelled ? L"Dsp_FlatLevelled" : L"Dsp_Flat"));
     } else {
         wchar_t db[16];
         swprintf_s(db, L"%.1f", -analysis.preampDb);
@@ -3063,6 +3186,24 @@ void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Wind
             break;
         }
     }
+    MenuFlyoutSubItem replayGain;
+    replayGain.Text(tr(L"Settings_ReplayGain/Text"));
+    constexpr const wchar_t* kModes[] = {L"Settings_ReplayGainOff/Content", L"Settings_ReplayGainTrack/Content",
+                                         L"Settings_ReplayGainAlbum/Content", L"Settings_ReplayGainAuto/Content"};
+    for (int mode = 0; mode < int(std::size(kModes)); ++mode) {
+        RadioMenuFlyoutItem item;
+        item.Text(tr(kModes[mode]));
+        item.GroupName(L"ReplayGainModes");
+        item.IsChecked(int(settings_.replayGain.mode) == mode);
+        item.Click([this, mode](auto&&, auto&&) {
+            settings_.replayGain.mode = camel::ReplayGainMode(mode);
+            showReplayGain();
+            settingsChanged();
+        });
+        replayGain.Items().Append(item);
+    }
+    items.Append(MenuFlyoutSeparator());
+    items.Append(replayGain);
     if (!settings_.eq.presets.empty()) {
         MenuFlyoutSubItem presets;
         presets.Text(tr(L"Dsp_MenuEqPresets"));

@@ -202,6 +202,35 @@ struct ConvolutionSettings {
     bool operator==(const ConvolutionSettings&) const = default;
 };
 
+// Software volume (docs/Plan.md §5.9): Fixed by default, leaving the level to the DAC or amplifier.
+enum class VolumeMode : uint8_t { Fixed, Software };
+
+struct VolumeSettings {
+    static constexpr double kMinDb = -80.0;
+    VolumeMode mode = VolumeMode::Fixed;
+    double db = 0.0; // -80 to 0
+    bool muted = false;
+    bool operator==(const VolumeSettings&) const = default;
+};
+
+// The volume the DSP chain applies in dB: 0 while Fixed, negative infinity while muted.
+double volumeDb(const VolumeSettings& volume);
+
+// ReplayGain (docs/Plan.md §5.9), off by default. Tracks without a value in their tags are analyzed in the background
+// while it is on, at the speed set here.
+enum class ReplayGainMode : uint8_t { Off, Track, Album, Auto };
+enum class AnalysisSpeed : uint8_t { Throttled, Fast };
+
+struct ReplayGainSettings {
+    static constexpr double kMinPreampDb = -15.0, kMaxPreampDb = 15.0;
+    ReplayGainMode mode = ReplayGainMode::Off;
+    double preampDb = 0.0;        // tracks with a value
+    double noValuePreampDb = 0.0; // tracks without one
+    bool preventClipping = true;
+    AnalysisSpeed speed = AnalysisSpeed::Throttled;
+    bool operator==(const ReplayGainSettings&) const = default;
+};
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -232,6 +261,8 @@ struct Settings {
     CrossfeedSettings crossfeed;
     ConvolutionSettings convolution;
     audio::DspOrder dspOrder = audio::kDefaultDspOrder;
+    VolumeSettings volume;
+    ReplayGainSettings replayGain;
     std::wstring lastFile;
 };
 

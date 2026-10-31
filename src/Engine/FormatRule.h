@@ -31,6 +31,9 @@ struct OutputPlan {
     DsdPath dsd = DsdPath::None;
     bool shared = false;      // through the WASAPI shared-mode mixer
     std::vector<DspNode> dsp; // the DSP nodes that change the signal, in order (docs/Plan.md §5.9)
+    double gainDb = 0.0;      // the track's ReplayGain
+    double volumeDb = 0.0;    // the software volume
+    bool muted = false;
     PipelineState state = PipelineState::BitPerfect;
     bool operator==(const OutputPlan&) const = default;
 };

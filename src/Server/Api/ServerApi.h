@@ -69,6 +69,8 @@ struct SettingsDto {
     CrossfeedSettings crossfeed;
     ConvolutionSettings convolution;
     audio::DspOrder dspOrder = audio::kDefaultDspOrder;
+    VolumeSettings volume;
+    ReplayGainSettings replayGain;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };
@@ -333,6 +335,8 @@ public:
     virtual std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
     virtual LibraryScanProgress libraryScanProgress() const = 0;
+    // How far loudness analysis for ReplayGain has come (docs/Plan.md §5.9).
+    virtual LoudnessProgress loudnessProgress() const = 0;
     virtual std::vector<PlaylistSummary> playlists() const = 0;
     virtual PlaylistPage playlistItems(int64_t playlist, int64_t offset, int64_t limit) const = 0;
     virtual SelectionPreview previewSelection(const std::vector<PlaylistSource>& sources,

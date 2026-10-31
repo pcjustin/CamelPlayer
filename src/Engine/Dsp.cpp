@@ -23,7 +23,8 @@ CamelDspV1 DspChain::abi() const {
             uint32_t(bands.size()),
             bands.data(),
             crossfeed ? &*crossfeed : nullptr,
-            impulse.get()};
+            impulse.get(),
+            volumeDb};
 }
 
 DspChain dspChain(const EqSettings& eq, const CrossfeedSettings& crossfeed, const ConvolutionSettings& convolution,
@@ -40,7 +41,9 @@ DspChain dspChain(const EqSettings& eq, const CrossfeedSettings& crossfeed, cons
 }
 
 DspChain dspChain(const Settings& settings, Impulse impulse) {
-    return dspChain(settings.eq, settings.crossfeed, settings.convolution, settings.dspOrder, std::move(impulse));
+    auto chain = dspChain(settings.eq, settings.crossfeed, settings.convolution, settings.dspOrder, std::move(impulse));
+    chain.volumeDb = volumeDb(settings.volume);
+    return chain;
 }
 
 DspChain eqChain(const EqSettings& eq) {

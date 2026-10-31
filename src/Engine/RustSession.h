@@ -30,10 +30,10 @@ public:
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,
     // decode to the depth `pcmBits` sets. `dsd` makes the stream native DSD or DoP. The Engine predecodes up to
-    // `predecodeSeconds` (within its memory limit). Throws Error on failure.
+    // `predecodeSeconds` (within its memory limit). `gainDb` is the track's ReplayGain. Throws Error on failure.
     RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
                 const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd = DsdPath::None,
-                uint32_t predecodeSeconds = 10);
+                uint32_t predecodeSeconds = 10, double gainDb = 0.0);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;
@@ -65,7 +65,7 @@ public:
 
     // Gapless: the next track plays without reopening the device. False when it does not decode to this session's
     // output format or cannot be opened; playback then ends normally after the current track.
-    bool queueNext(const std::filesystem::path& path, DecoderKind decoder);
+    bool queueNext(const std::filesystem::path& path, DecoderKind decoder, double gainDb = 0.0);
     // False once decoding has moved on to the queued track; it then becomes current at its boundary.
     bool clearNext();
 

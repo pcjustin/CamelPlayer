@@ -541,8 +541,8 @@
   <data name="Eq_ImportTitle" xml:space="preserve"><value>匯入等化器</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>檔案裡沒有 CamelPlayer 能讀取的濾波器。請選擇 Equalizer APO 設定檔或 AutoEq 的 ParametricEQ.txt。</value></data>
   <data name="SignalPath_Eq" xml:space="preserve"><value>參數式等化器</value></data>
-  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP：等化器、crossfeed 與卷積</value></data>
-  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP：等化器、crossfeed 與卷積</value></data>
+  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP：ReplayGain、等化器、crossfeed 與卷積</value></data>
+  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP：ReplayGain、等化器、crossfeed 與卷積</value></data>
   <data name="Dsp_Off" xml:space="preserve"><value>所有 DSP 都已關閉，播放維持 bit-perfect。</value></data>
   <data name="Dsp_Flat" xml:space="preserve"><value>目前沒有任何處理改變訊號，播放維持 bit-perfect。</value></data>
   <data name="Dsp_Headroom" xml:space="preserve"><value>整條 DSP 鏈的自動前級增益：−{0} dB，避免削波。</value></data>
@@ -584,4 +584,35 @@
   <data name="Convolution_FileTypes" xml:space="preserve"><value>IR 檔案 (*.wav, *.zip)</value></data>
   <data name="SignalPath_Crossfeed" xml:space="preserve"><value>crossfeed</value></data>
   <data name="SignalPath_Convolution" xml:space="preserve"><value>卷積</value></data>
+  <data name="Settings_Volume.Text" xml:space="preserve"><value>音量</value></data>
+  <data name="Settings_VolumeMode.Header" xml:space="preserve"><value>音量控制</value></data>
+  <data name="Settings_VolumeFixed.Content" xml:space="preserve"><value>固定（bit-perfect）</value></data>
+  <data name="Settings_VolumeSoftware.Content" xml:space="preserve"><value>軟體音量</value></data>
+  <data name="Settings_VolumeNote.Text" xml:space="preserve"><value>固定音量由 DAC 或擴大機控制音量。軟體音量會在播放列加上音量滑桿和靜音鍵，範圍 −80 到 0 dB；在 0 dB 時播放維持 bit-perfect。Windows 音量和媒體鍵仍然控制系統音量。</value></data>
+  <data name="Settings_ReplayGain.Text" xml:space="preserve"><value>ReplayGain</value></data>
+  <data name="Settings_ReplayGainMode.Header" xml:space="preserve"><value>模式</value></data>
+  <data name="Settings_ReplayGainOff.Content" xml:space="preserve"><value>關閉</value></data>
+  <data name="Settings_ReplayGainTrack.Content" xml:space="preserve"><value>曲目</value></data>
+  <data name="Settings_ReplayGainAlbum.Content" xml:space="preserve"><value>專輯</value></data>
+  <data name="Settings_ReplayGainAuto.Content" xml:space="preserve"><value>自動</value></data>
+  <data name="Settings_ReplayGainPreamp.Header" xml:space="preserve"><value>前級增益 (dB)</value></data>
+  <data name="Settings_ReplayGainNoValue.Header" xml:space="preserve"><value>無數值時 (dB)</value></data>
+  <data name="Settings_ReplayGainClip.Header" xml:space="preserve"><value>防止削波</value></data>
+  <data name="Settings_ReplayGainClip.OnContent" xml:space="preserve"><value>峰值會超過滿刻度時，自動少加一點增益</value></data>
+  <data name="Settings_ReplayGainClip.OffContent" xml:space="preserve"><value>峰值會超過滿刻度時，自動少加一點增益</value></data>
+  <data name="Settings_LoudnessSpeed.Header" xml:space="preserve"><value>背景分析</value></data>
+  <data name="Settings_LoudnessThrottled.Content" xml:space="preserve"><value>節流（單一執行緒）</value></data>
+  <data name="Settings_LoudnessFast.Content" xml:space="preserve"><value>快速（使用所有核心）</value></data>
+  <data name="Settings_ReplayGainNote.Text" xml:space="preserve"><value>自動模式在佇列依序播放同一張專輯時用專輯增益，其他情況（包括隨機播放）用曲目增益。數值來自檔案的 ReplayGain 標籤；沒有標籤的曲目會在 ReplayGain 開啟時於背景分析（EBU R128），先分析佇列中的曲目；節流分析在播放同一磁碟或網路共用的音樂時暫停。結果只存在音樂庫，不寫回檔案。設定變更從下一首開始生效。</value></data>
+  <data name="Volume_Slider.AutomationProperties.Name" xml:space="preserve"><value>音量</value></data>
+  <data name="Volume_Mute" xml:space="preserve"><value>靜音</value></data>
+  <data name="Volume_Unmute" xml:space="preserve"><value>取消靜音</value></data>
+  <data name="Loudness_Progress" xml:space="preserve"><value>{1} 首中有 {0} 首有 ReplayGain 數值。</value></data>
+  <data name="Loudness_Off" xml:space="preserve"><value>打開 ReplayGain 後，會在背景分析其餘曲目。</value></data>
+  <data name="Loudness_Analyzing" xml:space="preserve"><value>背景分析中…</value></data>
+  <data name="SignalPath_ReplayGain" xml:space="preserve"><value>ReplayGain</value></data>
+  <data name="SignalPath_Volume" xml:space="preserve"><value>音量</value></data>
+  <data name="SignalPath_Muted" xml:space="preserve"><value>靜音</value></data>
+  <data name="Dsp_OffLevelled" xml:space="preserve"><value>等化器、crossfeed 與卷積都已關閉；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
+  <data name="Dsp_FlatLevelled" xml:space="preserve"><value>目前鏈上沒有任何處理改變訊號；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
 </root>

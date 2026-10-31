@@ -28,9 +28,11 @@
 #include "OutputBridge/DeviceWatcher.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
+#include "Server/Library/Loudness.h"
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
 #include "Server/Playback/QueueSession.h"
+#include "Server/Playback/ReplayGain.h"
 #include "Server/Support/DiagnosticBundle.h"
 
 namespace camel::server {
@@ -221,6 +223,26 @@ public:
                     }
                 }
             });
+            shareLoudnessInputs();
+            LoudnessAnalyzer::Options loudness;
+            loudness.settings = [this] {
+                std::lock_guard lock(loudnessMutex_);
+                return loudnessSettings_;
+            };
+            loudness.decoders = [this] {
+                std::lock_guard lock(loudnessMutex_);
+                return loudnessDecoders_;
+            };
+            loudness.queued = [this] {
+                std::lock_guard lock(loudnessMutex_);
+                return queuedFiles_;
+            };
+            loudness.playingSource = [this] {
+                const auto snapshot = engine_->snapshot();
+                return snapshot.state == audio::PlayState::Playing ? std::filesystem::path(snapshot.file)
+                                                                   : std::filesystem::path{};
+            };
+            loudness_ = std::make_unique<LoudnessAnalyzer>(*library_, std::move(loudness));
         }
         if (library_ && [&] {
                 auto reader = library_->openReader();
@@ -246,8 +268,10 @@ public:
 
     ~Impl() { shutdown(); }
 
-    // The cover warmer stops before the worker releases the engine it reads; the worker saves the queue on its way out.
+    // The cover warmer and the loudness analysis stop before the worker releases the engine they read; the worker saves
+    // the queue on its way out.
     void shutdown() {
+        loudness_.reset();
         libraryMonitor_.reset();
         coverWarmer_ = {};
         {
@@ -371,6 +395,8 @@ public:
         if (!library_) throw std::runtime_error("library is not configured");
         return *library_;
     }
+
+    LoudnessProgress loudnessProgress() const { return loudness_ ? loudness_->progress() : LoudnessProgress{}; }
 
     // Reading every credit takes a moment on a large library, so the names are kept until the library changes.
     std::shared_ptr<const LibraryCreditNames> creditNames(const CancellationToken& token) const {
@@ -738,9 +764,17 @@ private:
             case CommandKind::ApplySettings: {
                 if (c.settings) {
                     const auto lastFile = settings_.lastFile;
+                    const auto replayGain = settings_.replayGain;
                     settings_ = nativeSettings(*c.settings);
                     settings_.lastFile = lastFile;
                     engine_->applySettings(settings_);
+                    shareLoudnessInputs();
+                    // A queued track took the old gain; it is queued again with the new one. The playing one keeps its.
+                    if (settings_.replayGain != replayGain && !chain_.empty() && engine_->clearNext()) {
+                        chain_.pop_back();
+                        attempted_ = {};
+                        checked_ = {};
+                    }
                     persist();
                 }
                 break;
@@ -974,9 +1008,9 @@ private:
         state_.queueEntryId = position.entryId;
         settings_.lastFile = path.wstring();
         if (play)
-            engine_->openAndPlay(path, source.decoder());
+            engine_->openAndPlay(path, source.decoder(), gainFor(position.entryId));
         else
-            engine_->load(path, source.decoder());
+            engine_->load(path, source.decoder(), gainFor(position.entryId));
         engine_->waitIdle(); // the next snapshot pairs this entry with its own playback state
         persist();
     }
@@ -1103,8 +1137,43 @@ private:
         attempted_ = attempt;
         const auto& source = playable(upcoming->entryId);
         if (source.decoder() != state_.track->decoder()) return;
-        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder()))
+        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder(), gainFor(upcoming->entryId)))
             chain_.push_back(upcoming->entryId);
+    }
+
+    // The ReplayGain of a queue entry from its library values (docs/Plan.md §5.9). Auto takes the album's while the
+    // queue plays the album in order: a neighbor in the queue is from the same album and shuffle is off.
+    double gainFor(uint64_t entryId) {
+        if (settings_.replayGain.mode == ReplayGainMode::Off) return 0.0;
+        const auto at = std::ranges::find(entries_, entryId, &QueueEntry::id);
+        TrackLoudness loudness;
+        if (at != entries_.end() && at->file && libraryReader_) {
+            try {
+                loudness = trackLoudness(*libraryReader_, at->file);
+            } catch (const std::exception& e) {
+                log::warn("ReplayGain: %s", e.what());
+            }
+        }
+        bool album = false;
+        if (at != entries_.end() && at->albumId != 0 && !policy_.shuffle()) {
+            album = (at != entries_.begin() && std::prev(at)->albumId == at->albumId) ||
+                    (std::next(at) != entries_.end() && std::next(at)->albumId == at->albumId);
+        }
+        return replayGainDb(settings_.replayGain, loudness, album);
+    }
+
+    // What the loudness analysis reads from another thread: the ReplayGain settings, the decoders and the files of the
+    // current and next queue entries, which it analyzes first.
+    void shareLoudnessInputs() {
+        std::vector<int64_t> files;
+        auto at = std::ranges::find(entries_, state_.queueEntryId, &QueueEntry::id);
+        if (at == entries_.end()) at = entries_.begin();
+        for (; at != entries_.end() && files.size() < 20; ++at)
+            if (at->file) files.push_back(at->file);
+        std::lock_guard lock(loudnessMutex_);
+        loudnessSettings_ = settings_.replayGain;
+        loudnessDecoders_ = settings_.decoderByFormat;
+        queuedFiles_ = std::move(files);
     }
 
     // Natural completion plays the next eligible entry; a track-local failure marks the entry and skips it.
@@ -1199,6 +1268,7 @@ private:
     }
 
     void publish(bool completed) {
+        shareLoudnessInputs();
         auto p = playback(engine_->snapshot());
         if (restored_ && p.state == PlaybackState::Stopped && state_.track) {
             p.state = PlaybackState::Paused;
@@ -1332,6 +1402,11 @@ private:
     std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
     std::jthread coverWarmer_; // uses artwork_, library_ and engine_, so it stops before they go
+    mutable std::mutex loudnessMutex_;
+    ReplayGainSettings loudnessSettings_;
+    DecoderByFormat loudnessDecoders_;
+    std::vector<int64_t> queuedFiles_;
+    std::unique_ptr<LoudnessAnalyzer> loudness_; // uses the four above, library_ and engine_
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
     std::chrono::steady_clock::time_point availabilityChecked_;
@@ -1525,6 +1600,9 @@ std::vector<LibraryRootInfo> LocalServer::libraryRoots() const {
 }
 LibraryScanProgress LocalServer::libraryScanProgress() const {
     return impl_->library().scanProgress();
+}
+LoudnessProgress LocalServer::loudnessProgress() const {
+    return impl_->loudnessProgress();
 }
 std::vector<PlaylistSummary> LocalServer::playlists() const {
     return listPlaylists(impl_->library());

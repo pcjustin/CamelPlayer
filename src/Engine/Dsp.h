@@ -27,6 +27,7 @@ struct DspChain {
     std::vector<CamelEqBandV1> bands;
     std::optional<CamelCrossfeedV1> crossfeed;
     Impulse impulse;
+    double volumeDb = 0.0; // negative infinity mutes
     // Points into this chain, which must outlive its use.
     CamelDspV1 abi() const;
 };

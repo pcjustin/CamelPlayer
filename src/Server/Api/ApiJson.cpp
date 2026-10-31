@@ -238,6 +238,9 @@ json toJson(const OutputPlan& p) {
             {"dsd", nameOf(p.dsd, kDsdPaths)},
             {"shared", p.shared},
             {"dsp", dspJson(p.dsp)},
+            {"gainDb", p.gainDb},
+            {"volumeDb", p.volumeDb},
+            {"muted", p.muted},
             {"state", nameOf(p.state, kPipelineStates)}};
 }
 
@@ -252,6 +255,9 @@ OutputPlan planFrom(const json& j) {
     p.dsd = enumFrom(field(j, "dsd"), kDsdPaths, "DSD path");
     p.shared = value<bool>(j, "shared");
     for (const auto& node : array(j, "dsp")) p.dsp.push_back(enumFrom(node, kDspNodes, "DSP node"));
+    p.gainDb = value<double>(j, "gainDb");
+    p.volumeDb = value<double>(j, "volumeDb");
+    p.muted = value<bool>(j, "muted");
     p.state = enumFrom(field(j, "state"), kPipelineStates, "pipeline state");
     return p;
 }

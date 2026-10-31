@@ -541,8 +541,8 @@
   <data name="Eq_ImportTitle" xml:space="preserve"><value>Import EQ</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>The file has no filters CamelPlayer can read. Choose an Equalizer APO configuration or an AutoEq ParametricEQ.txt file.</value></data>
   <data name="SignalPath_Eq" xml:space="preserve"><value>parametric EQ</value></data>
-  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP: equalizer, crossfeed and convolution</value></data>
-  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP: equalizer, crossfeed and convolution</value></data>
+  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP: ReplayGain, equalizer, crossfeed and convolution</value></data>
+  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP: ReplayGain, equalizer, crossfeed and convolution</value></data>
   <data name="Dsp_Off" xml:space="preserve"><value>Every DSP node is off, so playback stays bit-perfect.</value></data>
   <data name="Dsp_Flat" xml:space="preserve"><value>Nothing in the chain changes the signal now, so playback stays bit-perfect.</value></data>
   <data name="Dsp_Headroom" xml:space="preserve"><value>Automatic preamp for the whole chain: −{0} dB, so nothing clips.</value></data>
@@ -584,4 +584,35 @@
   <data name="Convolution_FileTypes" xml:space="preserve"><value>Impulse response (*.wav, *.zip)</value></data>
   <data name="SignalPath_Crossfeed" xml:space="preserve"><value>crossfeed</value></data>
   <data name="SignalPath_Convolution" xml:space="preserve"><value>convolution</value></data>
+  <data name="Settings_Volume.Text" xml:space="preserve"><value>Volume</value></data>
+  <data name="Settings_VolumeMode.Header" xml:space="preserve"><value>Volume control</value></data>
+  <data name="Settings_VolumeFixed.Content" xml:space="preserve"><value>Fixed (bit-perfect)</value></data>
+  <data name="Settings_VolumeSoftware.Content" xml:space="preserve"><value>Software</value></data>
+  <data name="Settings_VolumeNote.Text" xml:space="preserve"><value>Fixed leaves the level to your DAC or amplifier. Software adds a volume slider and mute to the player bar, from −80 to 0 dB; at 0 dB playback stays bit-perfect. The Windows volume and media keys keep controlling the system volume.</value></data>
+  <data name="Settings_ReplayGain.Text" xml:space="preserve"><value>ReplayGain</value></data>
+  <data name="Settings_ReplayGainMode.Header" xml:space="preserve"><value>Mode</value></data>
+  <data name="Settings_ReplayGainOff.Content" xml:space="preserve"><value>Off</value></data>
+  <data name="Settings_ReplayGainTrack.Content" xml:space="preserve"><value>Track</value></data>
+  <data name="Settings_ReplayGainAlbum.Content" xml:space="preserve"><value>Album</value></data>
+  <data name="Settings_ReplayGainAuto.Content" xml:space="preserve"><value>Auto</value></data>
+  <data name="Settings_ReplayGainPreamp.Header" xml:space="preserve"><value>Preamp (dB)</value></data>
+  <data name="Settings_ReplayGainNoValue.Header" xml:space="preserve"><value>Without a value (dB)</value></data>
+  <data name="Settings_ReplayGainClip.Header" xml:space="preserve"><value>Clipping prevention</value></data>
+  <data name="Settings_ReplayGainClip.OnContent" xml:space="preserve"><value>Lower a gain so the track's peak stays below full scale</value></data>
+  <data name="Settings_ReplayGainClip.OffContent" xml:space="preserve"><value>Lower a gain so the track's peak stays below full scale</value></data>
+  <data name="Settings_LoudnessSpeed.Header" xml:space="preserve"><value>Background analysis</value></data>
+  <data name="Settings_LoudnessThrottled.Content" xml:space="preserve"><value>Throttled (one thread)</value></data>
+  <data name="Settings_LoudnessFast.Content" xml:space="preserve"><value>Fast (all cores)</value></data>
+  <data name="Settings_ReplayGainNote.Text" xml:space="preserve"><value>Auto uses album gain while the queue plays an album's tracks in order, and track gain otherwise, including shuffle. Values come from the files' ReplayGain tags; tracks without them are analyzed in the background (EBU R128) while ReplayGain is on, queued tracks first; throttled analysis pauses while music plays from the same drive or share. The results stay in the library, never in the files. A change applies from the next track.</value></data>
+  <data name="Volume_Slider.AutomationProperties.Name" xml:space="preserve"><value>Volume</value></data>
+  <data name="Volume_Mute" xml:space="preserve"><value>Mute</value></data>
+  <data name="Volume_Unmute" xml:space="preserve"><value>Unmute</value></data>
+  <data name="Loudness_Progress" xml:space="preserve"><value>{0} of {1} tracks have a ReplayGain value.</value></data>
+  <data name="Loudness_Off" xml:space="preserve"><value>Turn ReplayGain on to analyze the rest in the background.</value></data>
+  <data name="Loudness_Analyzing" xml:space="preserve"><value>Analyzing in the background…</value></data>
+  <data name="SignalPath_ReplayGain" xml:space="preserve"><value>ReplayGain</value></data>
+  <data name="SignalPath_Volume" xml:space="preserve"><value>volume</value></data>
+  <data name="SignalPath_Muted" xml:space="preserve"><value>muted</value></data>
+  <data name="Dsp_OffLevelled" xml:space="preserve"><value>EQ, crossfeed and convolution are off; the software volume or ReplayGain can still change the level.</value></data>
+  <data name="Dsp_FlatLevelled" xml:space="preserve"><value>Nothing in the chain changes the signal now; the software volume or ReplayGain can still change the level.</value></data>
 </root>

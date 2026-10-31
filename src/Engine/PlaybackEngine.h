@@ -59,10 +59,11 @@ public:
     PlaybackEngine(const PlaybackEngine&) = delete;
     PlaybackEngine& operator=(const PlaybackEngine&) = delete;
 
-    // `decoder` overrides the per-format setting for this file; it must support the file's format.
-    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
+    // `decoder` overrides the per-format setting for this file; it must support the file's format. `gainDb` is its
+    // ReplayGain, which the Server works out.
+    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
     // Selects a file without playing it (startup restore, docs/Plan.md §2); play() starts it.
-    void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
+    void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
     void play();
     void pause();
     void togglePause();
@@ -74,7 +75,7 @@ public:
     bool showControlPanel();
     // Gapless: queues the file that follows the current one. True when it will play without reopening the device,
     // which needs the Rust Engine and the same negotiated output format.
-    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt);
+    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
     // Withdraws the queued file; false when it is already committed and becomes current at its boundary.
     bool clearNext();
     // Also withdraws already decoded successors, preserving the audible track and position.

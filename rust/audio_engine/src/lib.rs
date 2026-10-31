@@ -113,6 +113,8 @@ pub struct CamelTrackSourceV1 {
     pub end_frame_exclusive: u64,
     pub has_end_frame: u32,
     pub reserved: u32,
+    /// The track's ReplayGain in dB, applied before the DSP chain; 0 leaves the track bit-perfect.
+    pub gain_db: f64,
 }
 
 const CLOSING: usize = 1usize << (usize::BITS - 1);
@@ -256,6 +258,8 @@ pub struct CamelDspV1 {
     pub bands: *const CamelEqBandV1,
     pub crossfeed: *const CamelCrossfeedV1,
     pub impulse: *const CamelImpulse,
+    /// The software volume in dB, 0 or less; negative infinity mutes.
+    pub volume_db: f64,
 }
 
 /// What a DSP setting does at a rate: `active` 1 when it changes the signal, and the chain's preamp (0 or less).
@@ -720,15 +724,16 @@ impl CamelEngine {
     }
 
     // A converter for `info` to this engine's output format, or the reason none exists.
-    fn converter(&self, info: &CamelSourceInfoV1) -> Result<Converter, i32> {
+    fn converter(&self, source: &DecoderSource) -> Result<Converter, i32> {
         Converter::new(
-            info,
+            &source.info,
             &self.format,
             self.output_format.rate_hz,
             self.allow_conversion,
             self.allow_dsd_to_pcm,
             self.resample_quality,
         )
+        .map(|converter| converter.with_gain(source.gain))
     }
 
     // Positions are counted in output frames; a source frame maps through the rate ratio.
@@ -961,7 +966,7 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
             Ok(source) => source,
             Err(status) => return status,
         };
-        match engine.converter(&new_source.info) {
+        match engine.converter(&new_source) {
             Ok(converter) => new_source.converter = Some(converter),
             Err(status) => return status,
         }
@@ -1027,7 +1032,7 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
             return ENGINE_E_SEEK;
         }
         // Resampler state and pending output belong to the old position.
-        let converter = match engine.converter(&source.info) {
+        let converter = match engine.converter(source) {
             Ok(converter) => converter,
             Err(status) => return status,
         };
@@ -1154,7 +1159,7 @@ pub unsafe extern "C" fn camel_engine_stop_v1(
         let start_frame = if let Some(source) = source.as_mut() {
             let start_frame = source.start_frame();
             let seeked = source.seek(start_frame);
-            if let Ok(converter) = engine.converter(&source.info) {
+            if let Ok(converter) = engine.converter(source) {
                 source.converter = Some(converter);
             }
             engine.publish_source(Some(source));
@@ -1643,7 +1648,7 @@ pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
             Err(status) => return status,
         };
         // The queued track plays into the same device format; a converter takes it there or it is refused.
-        match engine.converter(&next.info) {
+        match engine.converter(&next) {
             Ok(converter) => next.converter = Some(converter),
             Err(status) => return status,
         }
@@ -1967,6 +1972,7 @@ unsafe fn dsp_settings(dsp: *const CamelDspV1) -> Result<dsp::Settings, i32> {
         bands: eq_bands(dsp.bands, dsp.band_count)?,
         crossfeed,
         impulse: (!dsp.impulse.is_null()).then(|| (*dsp.impulse).0.clone()),
+        volume_db: dsp.volume_db,
     })
 }
 
@@ -2413,6 +2419,10 @@ mod tests {
     }
 
     fn load_mock_source(engine: *mut CamelEngine) -> i32 {
+        load_mock_source_with_gain(engine, 0.0)
+    }
+
+    fn load_mock_source_with_gain(engine: *mut CamelEngine, gain_db: f64) -> i32 {
         let path = b"mock.flac";
         let command = CamelCommandStampV1 {
             struct_size: std::mem::size_of::<CamelCommandStampV1>() as u32,
@@ -2430,6 +2440,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db,
         };
         let host = mock_host();
         unsafe {
@@ -2454,6 +2465,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let host = mock_host();
         unsafe {
@@ -2529,6 +2541,7 @@ mod tests {
             bands: bands.as_ptr(),
             crossfeed: crossfeed.map_or(ptr::null(), |c| c as *const _),
             impulse,
+            volume_db: 0.0,
         }
     }
 
@@ -2548,6 +2561,10 @@ mod tests {
 
     // The mock track played through a 24-bit 48 kHz device with `setting`, `frames` frames as 32-bit containers.
     fn play_with_dsp(setting: &CamelDspV1, frames: usize) -> Vec<i32> {
+        play_with(setting, 0.0, frames)
+    }
+
+    fn play_with(setting: &CamelDspV1, gain_db: f64, frames: usize) -> Vec<i32> {
         let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
         cfg.format.rate_hz = 48_000;
         let mut engine = ptr::null_mut();
@@ -2559,7 +2576,7 @@ mod tests {
             unsafe { camel_engine_set_dsp_v1(engine, setting) },
             ENGINE_OK
         );
-        assert_eq!(load_mock_source(engine), ENGINE_OK);
+        assert_eq!(load_mock_source_with_gain(engine, gain_db), ENGINE_OK);
         assert_eq!(
             unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
             ENGINE_OK
@@ -2595,6 +2612,54 @@ mod tests {
             ]),
             exact
         );
+    }
+
+    #[test]
+    fn a_track_gain_and_the_volume_scale_the_samples_and_0_db_stays_bit_perfect() {
+        let exact = vec![256, -256, 512, -512, 768, -768, 1024, -1024];
+        let flat = dsp_setting(&[], None, ptr::null());
+        assert_eq!(play_with(&flat, 0.0, 4), exact);
+        // Half the level: -6.02 dB, within a step of the 24-bit dither.
+        let half = -20.0 * 2f64.log10();
+        let close = |got: Vec<i32>, want: Vec<i32>| {
+            assert!(
+                got.iter().zip(&want).all(|(g, w)| (g - w).abs() <= 1),
+                "{got:?} vs {want:?}"
+            );
+        };
+        let halved: Vec<i32> = exact.iter().map(|v| v / 2).collect();
+        close(play_with(&flat, half, 4), halved.clone());
+        let quiet = CamelDspV1 {
+            volume_db: half,
+            ..flat
+        };
+        close(play_with(&quiet, 0.0, 4), halved);
+        let muted = CamelDspV1 {
+            volume_db: f64::NEG_INFINITY,
+            ..flat
+        };
+        close(play_with(&muted, 0.0, 4), vec![0; 8]);
+        // A loud volume and an unusable gain are refused.
+        let loud = CamelDspV1 {
+            volume_db: 3.0,
+            ..flat
+        };
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
+        cfg.format.rate_hz = 48_000;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &loud) },
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            load_mock_source_with_gain(engine, f64::NAN),
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
     #[test]
@@ -2803,6 +2868,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         assert_eq!(
             unsafe {
@@ -2965,7 +3031,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelAudioFormatV1>(), 40);
         assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 72);
         assert_eq!(std::mem::size_of::<CamelCommandStampV1>(), 32);
-        assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 48);
+        assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 56);
         assert_eq!(std::mem::size_of::<CamelSourceInfoV1>(), 56);
         assert_eq!(std::mem::size_of::<CamelDecoderHostV1>(), 48);
         assert_eq!(std::mem::size_of::<CamelRenderRequestV1>(), 32);
@@ -2977,7 +3043,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelDspSummaryV1>(), 24);
         assert_eq!(std::mem::size_of::<CamelCrossfeedV1>(), 24);
         assert_eq!(std::mem::size_of::<CamelImpulseResponseV1>(), 32);
-        assert_eq!(std::mem::size_of::<CamelDspV1>(), 48);
+        assert_eq!(std::mem::size_of::<CamelDspV1>(), 56);
         assert_eq!(std::mem::offset_of!(CamelDspV1, bands), 24);
         assert_eq!(std::mem::offset_of!(CamelEqBandV1, frequency_hz), 24);
         assert_eq!(std::mem::offset_of!(CamelAudioFormatV1, channel_mask), 32);
@@ -3225,6 +3291,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let mut context = BlockingReadContext {
             read_started: AtomicBool::new(false),
@@ -3308,6 +3375,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let mut context = BlockingReadContext {
             read_started: AtomicBool::new(false),
@@ -3392,6 +3460,7 @@ mod tests {
                 end_frame_exclusive: 0,
                 has_end_frame: 0,
                 reserved: 0,
+                gain_db: 0.0,
             };
             let host =
                 unsafe { blocking_open_host(&mut *(context_address as *mut BlockingOpenContext)) };
@@ -3456,6 +3525,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let mut context = BlockingReadContext {
             read_started: AtomicBool::new(false),
@@ -3730,6 +3800,7 @@ mod tests {
             end_frame_exclusive: 3,
             has_end_frame: 1,
             reserved: 0,
+            gain_db: 0.0,
         };
         let host_abi = mock_host();
         let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
@@ -3757,6 +3828,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let mut metadata = MockMetadata {
             total_frames: 0,
@@ -3787,6 +3859,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let mut metadata = MockMetadata {
             total_frames: 5,
@@ -3817,6 +3890,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let host_abi = mock_host();
         let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
@@ -3937,6 +4011,7 @@ mod tests {
             end_frame_exclusive: 0,
             has_end_frame: 0,
             reserved: 0,
+            gain_db: 0.0,
         };
         let status = unsafe {
             camel_engine_load_flac_v1(

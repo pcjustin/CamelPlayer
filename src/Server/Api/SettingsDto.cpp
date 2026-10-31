@@ -32,6 +32,8 @@ SettingsDto settingsDto(const Settings& s) {
             s.crossfeed,
             s.convolution,
             s.dspOrder,
+            s.volume,
+            s.replayGain,
             toUtf8(s.lastFile)};
 }
 
@@ -60,6 +62,8 @@ Settings nativeSettings(const SettingsDto& s) {
             s.crossfeed,
             s.convolution,
             s.dspOrder,
+            s.volume,
+            s.replayGain,
             toWide(s.lastFileUtf8)};
 }
 

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <cmath>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -157,6 +158,12 @@ static constexpr const char* kEqKindIds[] = {"peaking",  "lowShelf", "highShelf"
 static constexpr const char* kEqChannelIds[] = {"all", "left", "right"};
 static constexpr const char* kCrossfeedPresetIds[] = {"default", "chuMoy", "janMeier", "custom"};
 static constexpr const char* kDspNodeIds[] = {"eq", "crossfeed", "convolution"};
+static constexpr const char* kReplayGainModeIds[] = {"off", "track", "album", "auto"};
+
+double volumeDb(const VolumeSettings& volume) {
+    if (volume.mode != VolumeMode::Software) return 0.0;
+    return volume.muted ? -std::numeric_limits<double>::infinity() : volume.db;
+}
 
 std::pair<uint32_t, double> crossfeedValues(const CrossfeedSettings& crossfeed) {
     switch (crossfeed.preset) {
@@ -289,6 +296,13 @@ std::string toJson(const Settings& s) {
                       {"cutoff", s.crossfeed.cutoffHz},
                       {"feed", s.crossfeed.feedDb}};
     j["convolution"] = {{"enabled", s.convolution.enabled}, {"file", s.convolution.file}};
+    j["volume"] = {
+        {"mode", s.volume.mode == VolumeMode::Software ? "software" : "fixed"}, {"db", s.volume.db}, {"muted", s.volume.muted}};
+    j["replayGain"] = {{"mode", kReplayGainModeIds[int(s.replayGain.mode)]},
+                       {"preamp", s.replayGain.preampDb},
+                       {"noValuePreamp", s.replayGain.noValuePreampDb},
+                       {"preventClipping", s.replayGain.preventClipping},
+                       {"analysis", s.replayGain.speed == AnalysisSpeed::Fast ? "fast" : "throttled"}};
     j["dspOrder"] = json::array();
     for (const auto node : s.dspOrder) j["dspOrder"].push_back(kDspNodeIds[int(node) - 1]);
     j["lastFile"] = toUtf8(s.lastFile);
@@ -438,6 +452,27 @@ Settings fromJson(const std::string& text) {
     if (j.contains("convolution") && j["convolution"].is_object()) {
         s.convolution.enabled = boolean(j["convolution"], "enabled", false);
         s.convolution.file = str(j["convolution"], "file", "");
+    }
+    const auto decibels = [](const json& o, const char* k, double def, double low, double high) {
+        return o.contains(k) && o[k].is_number() && o[k].get<double>() >= low && o[k].get<double>() <= high ? o[k].get<double>()
+                                                                                                            : def;
+    };
+    if (j.contains("volume") && j["volume"].is_object()) {
+        const json& v = j["volume"];
+        s.volume.mode = str(v, "mode", "fixed") == "software" ? VolumeMode::Software : VolumeMode::Fixed;
+        s.volume.db = decibels(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
+        s.volume.muted = boolean(v, "muted", false);
+    }
+    if (j.contains("replayGain") && j["replayGain"].is_object()) {
+        const json& r = j["replayGain"];
+        const auto mode = std::ranges::find(kReplayGainModeIds, str(r, "mode", "off"));
+        s.replayGain.mode =
+            mode == std::end(kReplayGainModeIds) ? ReplayGainMode::Off : ReplayGainMode(mode - std::begin(kReplayGainModeIds));
+        s.replayGain.preampDb = decibels(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+        s.replayGain.noValuePreampDb =
+            decibels(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+        s.replayGain.preventClipping = boolean(r, "preventClipping", true);
+        s.replayGain.speed = str(r, "analysis", "throttled") == "fast" ? AnalysisSpeed::Fast : AnalysisSpeed::Throttled;
     }
     if (j.contains("dspOrder") && j["dspOrder"].is_array() && j["dspOrder"].size() == 3) {
         audio::DspOrder order{};

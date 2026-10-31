@@ -82,12 +82,13 @@ Error engineError(const char* what, CamelEngineStatus status) {
 }
 
 // Borrows `utf8`, which must outlive the call that receives the source.
-CamelTrackSourceV1 trackSource(const std::string& utf8) {
+CamelTrackSourceV1 trackSource(const std::string& utf8, double gainDb) {
     CamelTrackSourceV1 source{};
     source.struct_size = sizeof(source);
     source.abi_version = CAMEL_ENGINE_ABI_VERSION;
     source.path_utf8 = reinterpret_cast<const uint8_t*>(utf8.data());
     source.path_length_bytes = utf8.size();
+    source.gain_db = gainDb;
     return source;
 }
 
@@ -99,7 +100,8 @@ void destroy(CamelEngine* engine) noexcept {
 } // namespace
 
 RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                         const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd, uint32_t predecodeSeconds)
+                         const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd, uint32_t predecodeSeconds,
+                         double gainDb)
     : pcmBits_(pcmBits), host_(makeDecoderHostV1(&pcmBits_)), raw_(dsd == DsdPath::Native || dsd == DsdPath::Dop),
       unitsPerFrame_(dsd == DsdPath::Native ? 8 : 1) {
     command_.struct_size = sizeof(command_);
@@ -114,7 +116,7 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
     if (const auto status = camel_engine_create_v1(&config, &engine_); status != CAMEL_ENGINE_OK)
         throw engineError("create", status);
     const auto utf8 = toUtf8(path.wstring());
-    const auto source = trackSource(utf8);
+    const auto source = trackSource(utf8, gainDb);
     auto command = nextCommand();
     auto status = camel_engine_load_flac_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_);
     if (status == CAMEL_ENGINE_OK && startFrame) {
@@ -204,9 +206,9 @@ void RustSession::reportAudible(uint64_t frame) {
     camel_engine_report_audible_position_v1(engine_, &command_, frame);
 }
 
-bool RustSession::queueNext(const std::filesystem::path& path, DecoderKind decoder) {
+bool RustSession::queueNext(const std::filesystem::path& path, DecoderKind decoder, double gainDb) {
     const auto utf8 = toUtf8(path.wstring());
-    const auto source = trackSource(utf8);
+    const auto source = trackSource(utf8, gainDb);
     const auto command = nextCommand();
     return camel_engine_queue_next_flac_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_) == CAMEL_ENGINE_OK;
 }

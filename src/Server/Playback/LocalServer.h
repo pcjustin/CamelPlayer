@@ -59,6 +59,7 @@ public:
     std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryRootInfo> libraryRoots() const override;
     LibraryScanProgress libraryScanProgress() const override;
+    LoudnessProgress loudnessProgress() const override;
     std::vector<PlaylistSummary> playlists() const override;
     PlaylistPage playlistItems(int64_t playlist, int64_t offset, int64_t limit) const override;
     SelectionPreview previewSelection(const std::vector<PlaylistSource>& sources,

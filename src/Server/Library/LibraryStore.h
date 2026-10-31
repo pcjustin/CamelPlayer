@@ -44,6 +44,12 @@ struct LibraryScanProgress {
     int64_t finishing = 0;
 };
 
+// Loudness analysis for ReplayGain: tracks with a value from their tags or analysis, of the tracks it covers.
+struct LoudnessProgress {
+    int64_t analyzed = 0, total = 0;
+    bool running = false; // an album is being analyzed now
+};
+
 class LibraryStore {
 public:
     struct OpenReport {

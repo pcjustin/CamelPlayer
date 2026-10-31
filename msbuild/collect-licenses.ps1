@@ -15,7 +15,7 @@ $nativeLicenses = [ordered]@{
     mpg123 = 'LGPL-2.1-or-later'; mp3lame = 'LGPL-2.0-only'; soxr = 'LGPL-2.1-or-later'
     'dsd-nexus' = 'LGPL-2.1-or-later'; sqlite3 = 'blessing'; taglib = 'LGPL-2.1-only OR MPL-1.1'; utfcpp = 'BSL-1.0'
     libwebp = 'BSD-3-Clause'; opencc = 'Apache-2.0'; 'marisa-trie' = 'BSD-2-Clause'; 'darts-clone' = 'BSD-2-Clause'; rapidjson = 'MIT'
-    tclap = 'MIT'
+    tclap = 'MIT'; libebur128 = 'MIT'
 }
 $testOnly = @('gtest', 'mp3lame') # linked into tests.exe only, never shipped
 $buildOnly = @('tclap') # OpenCC's command-line tools only; not part of the OpenCC library

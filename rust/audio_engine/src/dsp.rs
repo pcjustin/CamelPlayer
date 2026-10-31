@@ -34,6 +34,8 @@ pub(crate) struct Settings {
     pub bands: Vec<Band>,
     pub crossfeed: Option<crossfeed::Params>,
     pub impulse: Option<Arc<ImpulseResponse>>,
+    /// The software volume in dB, 0 or less; negative infinity mutes.
+    pub volume_db: f64,
 }
 
 impl Settings {
@@ -43,6 +45,7 @@ impl Settings {
         sorted.sort_unstable();
         sorted == [NODE_EQ, NODE_CROSSFEED, NODE_CONVOLUTION]
             && self.crossfeed.is_none_or(|p| p.valid())
+            && self.volume_db <= 0.0
             && self.impulse.as_ref().is_none_or(|ir| ir.rate() == rate)
     }
 }
@@ -347,7 +350,10 @@ impl Dsp {
                 self.reorder = None;
             }
         }
-        let target = 10f64.powf(analyze(&settings, self.rate, self.channels).preamp_db / 20.0);
+        // The volume is the chain's last gain and the preamp its first; both are scalars, so they apply as one.
+        let target = 10f64.powf(
+            (analyze(&settings, self.rate, self.channels).preamp_db + settings.volume_db) / 20.0,
+        );
         if target != self.target_gain {
             self.target_gain = target;
             if started {
@@ -609,6 +615,7 @@ mod tests {
                 bands,
                 crossfeed,
                 impulse: None,
+                volume_db: 0.0,
             });
             let mut samples: Vec<f64> = (0..9_600)
                 .flat_map(|i| [(i as f64 * 0.04).sin() * 0.3, 0.0])
@@ -634,6 +641,7 @@ mod tests {
             bands: vec![left_cut],
             crossfeed,
             impulse: None,
+            volume_db: 0.0,
         });
         let mut first = sine(500.0, 48_000.0, 0.5, 0..4800);
         dsp.process(&mut first);
@@ -642,6 +650,7 @@ mod tests {
             bands: vec![left_cut],
             crossfeed,
             impulse: None,
+            volume_db: 0.0,
         });
         let mut second = sine(500.0, 48_000.0, 0.5, 4800..9600);
         dsp.process(&mut second);
@@ -679,12 +688,54 @@ mod tests {
     }
 
     #[test]
+    fn the_volume_ramps_and_its_absence_is_a_bypass() {
+        let mut dsp = Dsp::new(48_000, 2);
+        dsp.set(Settings {
+            order: DEFAULT_ORDER,
+            volume_db: 0.0,
+            ..Settings::default()
+        });
+        assert!(!dsp.active());
+        let mut first = sine(1000.0, 48_000.0, 0.5, 0..4800);
+        dsp.process(&mut first);
+        dsp.set(Settings {
+            order: DEFAULT_ORDER,
+            volume_db: -20.0,
+            ..Settings::default()
+        });
+        assert!(dsp.active());
+        let mut second = sine(1000.0, 48_000.0, 0.5, 4800..9600);
+        dsp.process(&mut second);
+        // The fade has ended: a tenth of the level.
+        let peak = second[1920..].iter().fold(0.0, |m: f64, v| m.max(v.abs()));
+        assert!((peak - 0.05).abs() < 1e-3, "{peak}");
+        let joined: Vec<f64> = first.iter().chain(&second).step_by(2).copied().collect();
+        let largest_step = joined
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f64::max);
+        assert!(largest_step < 0.1, "{largest_step}");
+        // Back at 0 dB the chain fades back to a bypass.
+        dsp.set(Settings {
+            order: DEFAULT_ORDER,
+            ..Settings::default()
+        });
+        let mut rest = sine(1000.0, 48_000.0, 0.5, 9600..14400);
+        dsp.process(&mut rest);
+        assert!(!dsp.active());
+    }
+
+    #[test]
     fn invalid_settings_are_recognized() {
         let mut settings = eq(&[]);
         assert!(settings.valid(48_000));
         settings.order = [NODE_EQ, NODE_EQ, NODE_CONVOLUTION];
         assert!(!settings.valid(48_000));
         settings.order = DEFAULT_ORDER;
+        settings.volume_db = 0.5;
+        assert!(!settings.valid(48_000));
+        settings.volume_db = f64::NEG_INFINITY;
+        assert!(settings.valid(48_000));
         settings.impulse = Some(Arc::new(ImpulseResponse::new(&[1.0], 1, 44_100).unwrap()));
         assert!(!settings.valid(48_000));
     }

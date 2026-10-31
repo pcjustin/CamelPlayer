@@ -34,6 +34,7 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 | mpg123 | `mpg123` | 1.33.7#1 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/mpg123.txt) |
 | LAME | `mp3lame` | 3.100#17 | LGPL-2.0-only | tests only | [Notice](third_party/licenses/native/mp3lame.txt) |
 | libsoxr | `soxr` | 0.1.3#9 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/soxr.txt) |
+| libebur128 | `libebur128` | 1.2.6#3 | MIT | linked | [Notice](third_party/licenses/native/libebur128.txt) |
 | DSD Nexus (libdsf, libdsdiff, libdst), shared `dsdnexus.dll` | `dsd-nexus` | 0.1.82 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/dsd-nexus.txt) |
 | SQLite (with FTS5) | `sqlite3` | 3.53.4#2 | Public domain (SQLite blessing) | linked | [Notice](third_party/licenses/native/sqlite3.txt) |
 | TagLib | `taglib` | 2.3.1 | LGPL-2.1-only OR MPL-1.1 | linked | [Notice](third_party/licenses/native/taglib.txt) |

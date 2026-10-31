@@ -287,7 +287,8 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
                         "rg_track_peak=excluded.rg_track_peak,rg_album_gain=excluded.rg_album_gain,"
                         "rg_album_peak=excluded.rg_album_peak,title_norm=excluded.title_norm,album_norm=excluded.album_norm,"
                         "artist_norm=excluded.artist_norm,title_sort=excluded.title_sort,album_sort=excluded.album_sort,"
-                        "artist_sort=excluded.artist_sort");
+                        "artist_sort=excluded.artist_sort,rg_analysis_gain=NULL,rg_analysis_peak=NULL,"
+                        "rg_analysis_album_gain=NULL,rg_analysis_album_peak=NULL");
     s.bind(1, file);
     int i = 2;
     for (const auto* field : {"TITLE", "ALBUM", "ALBUMARTIST", "ARTIST", "COMPOSER", "GENRE"}) s.bind(i++, tag(m, field));

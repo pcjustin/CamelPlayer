@@ -210,20 +210,22 @@ public:
     bool writesSilence() const noexcept override { return rawDsd_.load(std::memory_order_acquire); }
 
     // ---- commands (control thread) ----
-    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
         resumeOnDefault_ = false;
         waitingForSource_ = false;
         file_ = file.wstring();
         fileDecoder_ = decoder;
+        gainDb_ = gainDb;
         startSession(0, true);
     }
 
-    void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+    void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
         resumeOnDefault_ = false;
         waitingForSource_ = false;
         teardown();
         file_ = file.wstring();
         fileDecoder_ = decoder;
+        gainDb_ = gainDb;
         format_.reset();
         position_ = 0;
         std::optional<SourceInfo> source;
@@ -302,10 +304,15 @@ public:
         return dspChain(settings_, std::move(impulse));
     }
 
-    // `plan` as the DSP chain leaves it: processed while a node changes the signal.
+    // `plan` as the track's ReplayGain and the DSP chain leave it: processed while either changes the signal. Raw DSD
+    // bypasses both.
     OutputPlan withDsp(OutputPlan plan) const {
+        const bool raw = plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop;
         plan.dsp = actingNodes(chainFor(plan), plan.format.sampleRate, plan.format.channels);
-        if (!plan.dsp.empty()) plan.state = PipelineState::Processed;
+        plan.gainDb = raw ? 0.0 : gainDb_;
+        plan.muted = !raw && settings_.volume.mode == VolumeMode::Software && settings_.volume.muted;
+        plan.volumeDb = raw || plan.muted ? 0.0 : volumeDb(settings_.volume);
+        if (!plan.dsp.empty() || plan.gainDb != 0.0 || plan.volumeDb != 0.0 || plan.muted) plan.state = PipelineState::Processed;
         return plan;
     }
 
@@ -334,7 +341,8 @@ public:
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged || conversionChanged;
         const bool dspChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
-                                settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder;
+                                settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder ||
+                                settings_.volume != s.volume;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -355,7 +363,7 @@ public:
         }
     }
 
-    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested) {
+    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
         if (!active_ || rust_->transitions().nextQueued) return false;
         AudioFormat format{};
         DecoderKind decoder{};
@@ -376,8 +384,8 @@ public:
         } catch (const Error&) {
             return false; // the device question fails again when the file is opened normally
         }
-        if (!plan || plan->format != fmt_ || !rust_->queueNext(file, decoder)) return false;
-        queued_.push_back({file.wstring(), source, format, requested, decoder, *plan});
+        if (!plan || plan->format != fmt_ || !rust_->queueNext(file, decoder, gainDb)) return false;
+        queued_.push_back({file.wstring(), source, format, requested, decoder, *plan, gainDb});
         publishQueue();
         return true;
     }
@@ -721,7 +729,7 @@ private:
         stages_[3] = measure::now();
         try {
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
-                                                  plan_.dsd, timing(settings_).predecodeSeconds);
+                                                  plan_.dsd, timing(settings_).predecodeSeconds, plan_.gainDb);
             rust_->setDsp(chainFor(plan_));
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;
@@ -895,6 +903,7 @@ private:
             const Queued next = queued_.front();
             queued_.pop_front();
             file_ = next.file;
+            gainDb_ = next.gainDb;
             negotiated_ = next.plan;
             plan_ = withDsp(negotiated_);
             sourceRate_ = next.source.sampleRate;
@@ -1070,6 +1079,7 @@ private:
     DeviceFormat fmt_;
     OutputPlan plan_;
     OutputPlan negotiated_;         // plan_ before the DSP chain, which withDsp() applies
+    double gainDb_ = 0.0;           // the current file's ReplayGain
     std::string planAdjustment_;    // a fixed rate the device refused
     uint64_t outputGeneration_ = 0; // counts output devices opened; a new one starts in an unknown format
     struct Opened {
@@ -1098,6 +1108,7 @@ private:
         std::optional<DecoderKind> requested;
         DecoderKind decoder;
         OutputPlan plan;
+        double gainDb = 0.0;
     };
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     std::thread decodeThread_, dspThread_;
@@ -1120,13 +1131,13 @@ PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f, DeviceWatcher
     : impl_(std::make_unique<Impl>(s, std::move(f), std::move(w))) {}
 PlaybackEngine::~PlaybackEngine() = default;
 
-void PlaybackEngine::openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+void PlaybackEngine::openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy, decoder] { impl_->openAndPlay(*fileCopy, decoder); });
+    impl_->post([this, fileCopy, decoder, gainDb] { impl_->openAndPlay(*fileCopy, decoder, gainDb); });
 }
-void PlaybackEngine::load(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
+void PlaybackEngine::load(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy, decoder] { impl_->load(*fileCopy, decoder); });
+    impl_->post([this, fileCopy, decoder, gainDb] { impl_->load(*fileCopy, decoder, gainDb); });
 }
 void PlaybackEngine::play() {
     impl_->post([this] { impl_->play(); });
@@ -1155,8 +1166,8 @@ void PlaybackEngine::applySettings(const Settings& s) {
 bool PlaybackEngine::showControlPanel() {
     return impl_->call<bool>([this] { return impl_->showControlPanel(); });
 }
-bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder) {
-    return impl_->call<bool>([this, &file, decoder] { return impl_->queueNext(file, decoder); });
+bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
+    return impl_->call<bool>([this, &file, decoder, gainDb] { return impl_->queueNext(file, decoder, gainDb); });
 }
 bool PlaybackEngine::clearNext() {
     return impl_->call<bool>([this] { return impl_->clearNext(); });
