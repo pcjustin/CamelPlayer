@@ -4,8 +4,8 @@
 
 //! Headphone crossfeed (docs/Plan.md §5.9): Bauer stereophonic-to-binaural (bs2b), following the filters of libbs2b
 //! by Boris Mikhaylov (MIT). Each ear gets its own channel through a first-order high boost and the other channel
-//! through a first-order low-pass `feed_db` lower at low frequencies; a mono signal keeps its level at DC. Unlike
-//! libbs2b it does not clip: the chain's headroom and the final quantization do.
+//! through a first-order low-pass `feed_db` lower at low frequencies; a mono signal keeps its level at DC. Like
+//! libbs2b's double path it does not clip: the chain's headroom and the final quantization handle the level.
 
 use std::f64::consts::PI;
 
@@ -127,7 +127,7 @@ mod tests {
         }
     }
 
-    // libbs2b's cross_feed_d, transcribed: its init() and the per-sample filters, without the final clipping.
+    // libbs2b 3.1.0's init() and cross_feed_d(), transcribed.
     fn reference(cutoff_hz: u32, feed_tenths: u32, rate: f64, input: &[[f64; 2]]) -> Vec<[f64; 2]> {
         let fc_lo = f64::from(cutoff_hz);
         let level = f64::from(feed_tenths) / 10.0;
