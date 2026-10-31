@@ -9,6 +9,24 @@
 #include "BrowseItem.g.cpp"
 #endif
 
+namespace ui {
+namespace {
+
+NowPlaying g_nowPlaying;
+
+} // namespace
+
+const NowPlaying& nowPlaying() {
+    return g_nowPlaying;
+}
+
+std::optional<NowPlaying> setNowPlaying(NowPlaying playing) {
+    if (playing == g_nowPlaying) return std::nullopt;
+    return std::exchange(g_nowPlaying, playing);
+}
+
+} // namespace ui
+
 namespace winrt::CamelPlayer::implementation {
 
 void BrowseItem::fill(const ui::BrowseRow& row) {
@@ -26,6 +44,12 @@ void BrowseItem::setFavorite(bool favorite) {
 void BrowseItem::setExpanded(bool expanded) {
     row_.expanded = expanded;
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"ChevronGlyph"));
+}
+
+void BrowseItem::playingChanged(int64_t was) {
+    if (row_.file == 0 || (row_.file != was && row_.file != ui::nowPlaying().file)) return;
+    for (const auto* name : {L"ShowsNumber", L"IsPlaying", L"IsNotPlaying", L"PlayingGlyph"})
+        changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(name));
 }
 
 } // namespace winrt::CamelPlayer::implementation

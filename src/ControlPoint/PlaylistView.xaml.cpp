@@ -126,6 +126,12 @@ void PlaylistView::hide() {
     PlaylistList().ItemsSource(nullptr);
 }
 
+void PlaylistView::showNowPlaying(int64_t was) {
+    entries_->forEachItem([was](Windows::Foundation::IInspectable const& value) {
+        get_self<BrowseItem>(value.as<CamelPlayer::BrowseItem>())->playingChanged(was);
+    });
+}
+
 void PlaylistView::reload(int64_t playlist) {
     if (Visibility() == Visibility::Visible && (playlist_ == 0 || playlist_ == playlist)) load();
 }

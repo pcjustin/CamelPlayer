@@ -31,7 +31,12 @@
                 </Grid.ColumnDefinitions>
                 <FontIcon x:Uid="Playlist_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
                           Foreground="{ThemeResource SystemFillColorCautionBrush}" />
-                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" Visibility="{x:Bind IsPlaying, Mode=OneWay}"
+                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
                 <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"

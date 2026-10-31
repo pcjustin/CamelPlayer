@@ -14,7 +14,7 @@ struct BrowseRow {
     int64_t id = 0;    // album, folder or track id
     std::string value; // group name, or the file path of a track
     winrt::hstring title, subtitle, detail, trailing;
-    winrt::hstring number, fileName; // a folder page track's album place and file
+    winrt::hstring number, fileName; // a track's place on its album, and its file on a folder page
     bool folder = false;
     int64_t file = 0;         // a track's file, which playlists refer to
     bool unavailable = false; // a playlist entry whose file is missing or offline
@@ -25,6 +25,17 @@ struct BrowseRow {
     int depth = -1;        // a folder tree row: how far below the music folders it is
     bool expanded = false; // a folder tree row whose folder is open
 };
+
+// The track the queue is on while it plays or pauses, which rows mark; read and changed on the UI thread only.
+struct NowPlaying {
+    int64_t file = 0; // 0: stopped, or a file outside the library
+    bool paused = false;
+    bool operator==(const NowPlaying&) const = default;
+};
+
+const NowPlaying& nowPlaying();
+// Records what plays now and returns what played before, or nothing when that did not change.
+std::optional<NowPlaying> setNowPlaying(NowPlaying playing);
 
 } // namespace ui
 
@@ -39,6 +50,10 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring Trailing() const { return row_.trailing; }
     hstring Number() const { return row_.number; }
     hstring FileName() const { return row_.fileName; }
+    bool ShowsNumber() const { return !row_.number.empty() && !IsPlaying(); }
+    bool IsPlaying() const { return row_.file != 0 && row_.file == ui::nowPlaying().file; }
+    bool IsNotPlaying() const { return !IsPlaying(); }
+    hstring PlayingGlyph() const { return ui::nowPlaying().paused ? L"\xE769" : L"\xE767"; }
     bool IsFolder() const { return row_.folder; }
     bool IsTrack() const { return !row_.folder && row_.id != 0 && !row_.value.empty(); }
     bool IsUnavailable() const { return row_.unavailable; }
@@ -54,7 +69,10 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring ChevronGlyph() const { return !row_.folder ? L"" : row_.expanded ? L"\xE70D" : L"\xE76C"; }
     hstring TreeGlyph() const { return row_.folder ? L"\xE8B7" : L"\xE8D6"; }
     // What a screen reader announces for the tile or row.
-    hstring ToString() const { return row_.subtitle.empty() ? row_.title : row_.title + L", " + row_.subtitle; }
+    hstring ToString() const {
+        const auto title = row_.number.empty() ? row_.title : row_.number + L" " + row_.title;
+        return row_.subtitle.empty() ? title : title + L", " + row_.subtitle;
+    }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
     }
@@ -65,6 +83,8 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     void fill(const ui::BrowseRow& row);
     void setFavorite(bool favorite);
     void setExpanded(bool expanded);
+    // Updates the playing mark when this row is the track that played before, `was`, or the one that plays now.
+    void playingChanged(int64_t was);
 
 private:
     ui::BrowseRow row_;

@@ -18,7 +18,7 @@ New features since 0.0.1:
 - **Artist and composer pages:** the ten most played tracks, the artist's own albums and the albums they appear on, each with View all.
 - **Artist pictures** on artist and composer pages and in the Artists and Composers lists: your own picture, a picture in the artist's folder or tracks, or, once you allow it, one from Wikimedia Commons with its author and license. Several artists of the same name can be told apart, and the online lookup can be turned off in Settings.
 - **Search** from the title bar (Ctrl+F) with suggestions as you type, including Chinese and Japanese text.
-- **Play queue:** play next, add to the end, reorder, remove and save as a playlist, with shuffle, repeat and track history. The queue and position are restored at the next start.
+- **Play queue:** play next, add to the end, reorder, remove and save as a playlist, with shuffle, repeat and track history. The queue and position are restored at the next start. Album, folder, track, artist, search, playlist and smart-list pages mark the track it is on, playing or paused.
 - **Autoplay:** when the queue ends, random library tracks keep playing.
 - **Playlists:** create them from any selection, then rename, reorder, remove entries, and import and export M3U8 files.
 - **Favorites** for tracks, albums, artists and composers. The Artists and Composers lists can show only their favorites.

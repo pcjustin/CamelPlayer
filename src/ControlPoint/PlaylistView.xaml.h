@@ -29,6 +29,8 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
     // Rereads the shown playlist when it is `playlist`, or the Playlists page.
     void reload(int64_t playlist);
     int64_t shown() const { return playlist_; }
+    // Marks the playing track afresh after ui::setNowPlaying, given the file that played before.
+    void showNowPlaying(int64_t was);
 
     void OnPlayClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRenameClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

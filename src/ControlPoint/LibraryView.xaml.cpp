@@ -133,14 +133,9 @@ ui::BrowseRow trackRow(const LibraryTrackRow& t, const Texts& texts) {
 
 // The artist shows only on an album with more than one, where it tells the tracks apart.
 ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, bool oneArtist, const Texts& texts) {
-    std::wstring number;
-    if (t.number) number = (discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L". ";
-    ui::BrowseRow row{t.id,
-                      t.path,
-                      hstring(number + std::wstring(titleOf(t, texts))),
-                      oneArtist ? hstring{} : ui::utf8(t.artist),
-                      {},
-                      duration(t.durationMs)};
+    ui::BrowseRow row{t.id, t.path, titleOf(t, texts), oneArtist ? hstring{} : ui::utf8(t.artist), {}, duration(t.durationMs)};
+    if (t.number)
+        row.number = hstring((discs ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number) + L".");
     row.file = t.track.file;
     row.marks = true;
     row.favorite = t.favorite;
@@ -386,6 +381,21 @@ void LibraryView::showEmpty(int64_t total) {
     }
     EmptyText().Text(noRoots ? tr(L"Library_Empty/Text") : tr(L"Library_AlbumsPending"));
     EmptyText().Visibility(Visibility::Visible);
+}
+
+void LibraryView::showNowPlaying(int64_t was) {
+    const auto mark = [was](Windows::Foundation::IInspectable const& value) {
+        if (const auto item = value.try_as<CamelPlayer::BrowseItem>()) get_self<BrowseItem>(item)->playingChanged(was);
+    };
+    std::vector<Windows::Foundation::IInspectable> sources{FolderList().ItemsSource(), FolderTree().ItemsSource()};
+    // A paged collection is visited only through the rows it has made; reading it whole would load every page.
+    if (collection_)
+        collection_->forEachItem(mark);
+    else
+        sources.push_back(RowList().ItemsSource());
+    for (const auto& source : sources)
+        if (const auto items = source.try_as<Windows::Foundation::Collections::IVector<Windows::Foundation::IInspectable>>())
+            for (const auto& value : items) mark(value);
 }
 
 void LibraryView::setActive(bool active) {

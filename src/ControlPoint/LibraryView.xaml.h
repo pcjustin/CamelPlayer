@@ -44,6 +44,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void setFolderTree(bool on);
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
+    // Marks the playing track afresh after ui::setNowPlaying, given the file that played before.
+    void showNowPlaying(int64_t was);
     // Whether Back has somewhere to go; `changed` hears it after every page change. The window's title bar shows Back.
     bool canGoBack() const;
     void goBack();

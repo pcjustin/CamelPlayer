@@ -811,6 +811,12 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
 
     const auto currentEntry = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
                                            [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
+    // Library and playlist rows mark the track the queue is on, until playback stops.
+    const bool onTrack = s.state != PlaybackState::Stopped && currentEntry != snapshot.queue.entries.end();
+    if (const auto was = ui::setNowPlaying({onTrack ? currentEntry->file : 0, s.state == PlaybackState::Paused})) {
+        get_self<LibraryView>(Library())->showNowPlaying(was->file);
+        get_self<PlaylistView>(Playlists())->showNowPlaying(was->file);
+    }
     if (s.pathUtf8.empty()) {
         TitleText().Text(tr(L"NoFile"));
         showPlayerArtist({});

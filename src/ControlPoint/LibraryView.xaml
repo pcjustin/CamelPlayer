@@ -40,7 +40,16 @@
                                    DataContextChanged="OnArtworkContextChanged" />
                         </Grid>
                     </Border>
-                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <!-- An album track's number; the track the queue is on shows a speaker or pause in its place. -->
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind Number, Mode=OneWay}" Visibility="{x:Bind ShowsNumber, Mode=OneWay}" />
+                        <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" Visibility="{x:Bind IsPlaying, Mode=OneWay}"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                   Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
+                    </StackPanel>
                 </StackPanel>
                 <TextBlock x:Name="SubtitleText" Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -95,10 +104,17 @@
                         <Image x:Name="TrackCover" Width="40" Height="40" Stretch="UniformToFill" Loaded="OnArtworkLoaded"
                                Unloaded="OnArtworkUnloaded" DataContextChanged="OnArtworkContextChanged" />
                     </Grid>
-                    <TextBlock Grid.Column="1" Text="{x:Bind Number, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Grid Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind Number, Mode=OneWay}" TextAlignment="Right" Visibility="{x:Bind ShowsNumber, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" HorizontalAlignment="Right"
+                                  Visibility="{x:Bind IsPlaying, Mode=OneWay}" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    </Grid>
                     <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                   Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
                         <TextBlock Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
@@ -121,12 +137,18 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <FontIcon Glyph="{x:Bind ChevronGlyph, Mode=OneWay}" FontSize="10" />
-                <FontIcon Grid.Column="1" Glyph="{x:Bind TreeGlyph}" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <FontIcon Grid.Column="1" Glyph="{x:Bind TreeGlyph}" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                          Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
+                <FontIcon Grid.Column="1" Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="16" Visibility="{x:Bind IsPlaying, Mode=OneWay}"
+                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                 <!-- A folder's track count follows its name: "Album (12)". -->
-                <TextBlock Grid.Column="2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                <TextBlock Grid.Column="2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Visibility="{x:Bind IsNotPlaying, Mode=OneWay}">
                     <Run Text="{x:Bind Title, Mode=OneWay}" /><Run Text=" " /><Run Text="{x:Bind Detail, Mode=OneWay}"
                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </TextBlock>
+                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
             </Grid>
         </DataTemplate>
         <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">

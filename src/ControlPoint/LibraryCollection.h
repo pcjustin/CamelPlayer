@@ -69,6 +69,11 @@ public:
         return n;
     }
 
+    // The rows made so far; a row made later reads its state then.
+    template <class F> void forEachItem(F&& f) const {
+        for (const auto& [index, item] : items_)
+            if (item) f(item);
+    }
     bool IndexOf(IInspectable const& value, uint32_t& index) const {
         for (const auto& [i, item] : items_)
             if (item == value) {
