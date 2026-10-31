@@ -28,11 +28,13 @@
 #include "DialogPlacement.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
+#include "Common/settings/EqText.h"
 #include "Common/settings/Settings.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "Common/Version.h"
+#include "Engine/Equalizer.h"
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
@@ -207,6 +209,8 @@ void MainWindow::InitializeComponent() {
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
+    eqEditor_ = std::make_unique<ui::EqEditor>(EqCurve(), EqBands(), EqHeadroomText(), EqAddBandButton(),
+                                               [this](const camel::EqSettings&, bool final) { eqChanged(final); });
     Content().AddHandler(UIElement::PointerPressedEvent(),
                          box_value(Input::PointerEventHandler([this](auto&&, Input::PointerRoutedEventArgs const& e) {
                              if (e.GetCurrentPoint(nullptr).Properties().IsXButton1Pressed() && goBack()) e.Handled(true);
@@ -226,6 +230,10 @@ void MainWindow::InitializeComponent() {
     uiTimer_.Interval(250ms);
     uiTimer_.Tick([this](auto&&, auto&&) { refreshFromServer(); });
     uiTimer_.Start();
+    eqTimer_ = dq.CreateTimer();
+    eqTimer_.Interval(100ms);
+    eqTimer_.IsRepeating(false);
+    eqTimer_.Tick([this](auto&&, auto&&) { settingsChanged(); });
     seekTimer_ = dq.CreateTimer();
     seekTimer_.Interval(200ms);
     seekTimer_.IsRepeating(false);
@@ -455,6 +463,7 @@ void MainWindow::populateSettings() {
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     FolderTreeSwitch().IsOn(settings_.folderTree);
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
+    showEq();
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -585,6 +594,8 @@ void MainWindow::readSettingsFromUi() {
     else if (settings_.artistPictures == camel::OnlineLookup::Allowed)
         settings_.artistPictures = camel::OnlineLookup::Refused;
     settings_.folderTree = FolderTreeSwitch().IsOn();
+    settings_.eq.enabled = EqSwitch().IsOn();
+    if (eqEditor_) settings_.eq.bands = eqEditor_->settings().bands;
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -887,6 +898,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
 
     // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
+    bool eqActive = false;
     const hstring decoder = ui::utf8(decoderName(s.decoder));
     if (s.output && s.source) {
         // A lossy source has no PCM depth of its own; its decoded output is passed on unchanged (docs/Plan.md §5.2).
@@ -931,6 +943,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_Resample") + rates;
         }
+        const hstring eq = plan.eq ? L" → " + tr(L"SignalPath_Eq") : hstring{};
+        if (plan.dsd != DsdPath::Pcm) path = path + eq;
         if (plan.dsd == DsdPath::Dop)
             path = path + L" → DoP · " + tr(L"SignalPath_DspBypassed");
         else if (plan.dsd == DsdPath::Native)
@@ -941,18 +955,23 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf(rates, 64, L" 352.8→%.1f kHz", s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_DsdToPcm") + L" 352.8 kHz";
             if (plan.resample) path = path + L" → " + tr(L"SignalPath_Resample") + rates;
+            path = path + eq;
             if (plan.widen)
                 path = path + L" → float32";
             else
                 path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(validBits(s.output->type)) + L"-bit";
         } else if (plan.widen)
             path = path + L" → float32";
+        // The EQ output is quantized once, at the device depth.
+        else if (plan.eq)
+            path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(validBits(s.output->type)) + L"-bit";
         else if (plan.reduce || plan.resample || plan.downmix || lossy)
             path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(plan.reduce ? 16 : s.source->bitsPerSample) +
                    L"-bit";
         else
             path = path + L" → " + tr(L"SignalPath_Pad") + L" " + to_hstring(s.source->bitsPerSample);
         SignalPathText().Text(path + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " + ui::utf8(s.outputMode));
+        eqActive = plan.eq;
     } else {
         Lamp().Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
         setAnnounced(LampText(), tr(L"Lamp_Idle"));
@@ -961,6 +980,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
         SignalPathText().Text(L"");
     }
+    EqButtonText().Foreground(themeBrush(eqActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush"));
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch.
     SignalNoteText().Text(BypassBadge().Visibility() == Visibility::Visible ? tr(L"Badge_DspBypassedTip") : hstring{});
 
@@ -1469,13 +1489,10 @@ void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IIn
 // Back sits in the title bar, as in other Windows apps, while a library page has somewhere to return to.
 void MainWindow::addSettingsLinks() {
     const std::pair<const wchar_t*, FrameworkElement> cards[] = {
-        {L"Settings_Library/Text", LibraryCard()},
-        {L"Settings_Playback/Text", PlaybackCard()},
-        {L"Settings_Status/Text", StatusCard()},
-        {L"Settings_Decoders/Text", DecodersCard()},
-        {L"Settings_Interface/Text", InterfaceCard()},
-        {L"Settings_Hotkeys/Text", HotkeysCard()},
-        {L"Reset_Title/Text", ResetCard()},
+        {L"Settings_Library/Text", LibraryCard()},   {L"Settings_Playback/Text", PlaybackCard()},
+        {L"Settings_Dsp/Text", DspCard()},           {L"Settings_Status/Text", StatusCard()},
+        {L"Settings_Decoders/Text", DecodersCard()}, {L"Settings_Interface/Text", InterfaceCard()},
+        {L"Settings_Hotkeys/Text", HotkeysCard()},   {L"Reset_Title/Text", ResetCard()},
         {L"Settings_About/Text", AboutCard()},
     };
     for (const auto& [title, card] : cards) {
@@ -2619,6 +2636,199 @@ void MainWindow::OnArtistPicturesToggled(Windows::Foundation::IInspectable const
 
 void MainWindow::OnFolderTreeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
+}
+
+void MainWindow::OnEqToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (populating_) return;
+    settings_.eq.enabled = EqSwitch().IsOn();
+    eqEditor_->show(settings_.eq, eqRate());
+    eqChanged(true);
+}
+
+uint32_t MainWindow::eqRate() const {
+    if (server_)
+        if (const auto output = server_->snapshot().playback.output) return output->sampleRate;
+    return 48000;
+}
+
+void MainWindow::showEq() {
+    if (!eqEditor_) return;
+    const bool wasPopulating = std::exchange(populating_, true);
+    EqSwitch().IsOn(settings_.eq.enabled);
+    EqPresetCombo().Items().Clear();
+    int selected = -1;
+    for (size_t i = 0; i < settings_.eq.presets.size(); ++i) {
+        EqPresetCombo().Items().Append(box_value(ui::utf8(settings_.eq.presets[i].name)));
+        if (settings_.eq.presets[i].name == settings_.eq.preset) selected = int(i);
+    }
+    EqPresetCombo().SelectedIndex(selected);
+    EqDeletePresetButton().IsEnabled(selected >= 0);
+    eqEditor_->show(settings_.eq, eqRate());
+    populating_ = wasPopulating;
+}
+
+void MainWindow::eqChanged(bool final) {
+    settings_.eq.bands = eqEditor_->settings().bands;
+    if (final) {
+        eqTimer_.Stop();
+        settingsChanged();
+    } else if (!eqTimer_.IsRunning()) {
+        eqTimer_.Start();
+    }
+}
+
+void MainWindow::OnEqPresetChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
+    const int index = EqPresetCombo().SelectedIndex();
+    if (populating_ || index < 0 || size_t(index) >= settings_.eq.presets.size()) return;
+    settings_.eq.bands = settings_.eq.presets[size_t(index)].bands;
+    settings_.eq.preset = settings_.eq.presets[size_t(index)].name;
+    showEq();
+    settingsChanged();
+}
+
+winrt::fire_and_forget MainWindow::OnEqSavePresetClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(tr(L"Eq_SaveTitle")));
+    TextBox name;
+    name.Header(box_value(tr(L"Eq_PresetName")));
+    name.Text(ui::utf8(settings_.eq.preset));
+    name.SelectAll();
+    dialog.Content(name);
+    dialog.PrimaryButtonText(tr(L"Eq_Save"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    std::wstring text(name.Text());
+    text.erase(0, text.find_first_not_of(L" \t"));
+    text.erase(text.find_last_not_of(L" \t") + 1);
+    if (text.empty()) co_return;
+    const auto utf8 = camel::toUtf8(text);
+    auto& presets = settings_.eq.presets;
+    const auto found = std::ranges::find(presets, utf8, &camel::EqPreset::name);
+    if (found != presets.end())
+        found->bands = eqEditor_->settings().bands;
+    else
+        presets.push_back({utf8, eqEditor_->settings().bands});
+    settings_.eq.preset = utf8;
+    showEq();
+    settingsChanged();
+}
+
+void MainWindow::OnEqDeletePresetClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    const int index = EqPresetCombo().SelectedIndex();
+    if (index < 0 || size_t(index) >= settings_.eq.presets.size()) return;
+    settings_.eq.presets.erase(settings_.eq.presets.begin() + index);
+    settings_.eq.preset.clear();
+    showEq();
+    settingsChanged();
+}
+
+// Back to the 5 flat bands a new EQ starts with; saved presets stay.
+void MainWindow::OnEqResetClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settings_.eq.bands = camel::defaultEqBands();
+    settings_.eq.preset.clear();
+    showEq();
+    settingsChanged();
+}
+
+// Equalizer APO and AutoEq ParametricEQ.txt: the filters become a preset named after the file, and the EQ turns on.
+void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
+    constexpr COMDLG_FILTERSPEC types[] = {{L"Equalizer APO / AutoEq", L"*.txt"}};
+    dialog->SetFileTypes(1, types);
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
+        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        return;
+    const std::filesystem::path file(path);
+    CoTaskMemFree(path);
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), {});
+    const auto bands = camel::parseEqualizerApo(text);
+    if (bands.empty()) {
+        textDialog(ContentLayout().XamlRoot(), tr(L"Eq_ImportTitle"), tr(L"Eq_ImportFailed")).ShowAsync();
+        return;
+    }
+    const auto name = camel::toUtf8(file.stem().wstring());
+    auto& presets = settings_.eq.presets;
+    const auto found = std::ranges::find(presets, name, &camel::EqPreset::name);
+    if (found != presets.end())
+        found->bands = bands;
+    else
+        presets.push_back({name, bands});
+    settings_.eq.bands = bands;
+    settings_.eq.preset = name;
+    settings_.eq.enabled = true;
+    showEq();
+    settingsChanged();
+}
+
+void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto dialog = winrt::create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);
+    constexpr COMDLG_FILTERSPEC types[] = {{L"Equalizer APO", L"*.txt"}};
+    dialog->SetFileTypes(1, types);
+    dialog->SetDefaultExtension(L"txt");
+    const auto name = settings_.eq.preset.empty() ? std::wstring(L"CamelPlayer EQ") : camel::toWide(settings_.eq.preset);
+    dialog->SetFileName((name + L".txt").c_str());
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
+        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        return;
+    const std::filesystem::path file(path);
+    CoTaskMemFree(path);
+    auto shown = settings_.eq;
+    shown.enabled = true;
+    const auto text = camel::formatEqualizerApo(settings_.eq.bands, camel::audio::analyzeEq(shown, eqRate()).preampDb);
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out.write(text.data(), std::streamsize(text.size()));
+    if (!out) camel::log::warn("EQ export: cannot write %s", camel::toUtf8(file.wstring()).c_str());
+}
+
+// The playback-bar EQ button: on or off, the saved presets, and the DSP settings.
+void MainWindow::OnEqMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
+    auto items = EqMenu().Items();
+    items.Clear();
+    ToggleMenuFlyoutItem on;
+    on.Text(tr(L"Eq_MenuOn"));
+    on.IsChecked(settings_.eq.enabled);
+    on.Click([this](auto&&, auto&&) {
+        settings_.eq.enabled = !settings_.eq.enabled;
+        showEq();
+        settingsChanged();
+    });
+    items.Append(on);
+    if (!settings_.eq.presets.empty()) {
+        items.Append(MenuFlyoutSeparator());
+        for (const auto& preset : settings_.eq.presets) {
+            RadioMenuFlyoutItem item;
+            item.Text(ui::utf8(preset.name));
+            item.GroupName(L"EqPresets");
+            item.IsChecked(preset.name == settings_.eq.preset);
+            item.Click([this, name = preset.name](auto&&, auto&&) {
+                const auto found = std::ranges::find(settings_.eq.presets, name, &camel::EqPreset::name);
+                if (found == settings_.eq.presets.end()) return;
+                settings_.eq.bands = found->bands;
+                settings_.eq.preset = name;
+                showEq();
+                settingsChanged();
+            });
+            items.Append(item);
+        }
+    }
+    items.Append(MenuFlyoutSeparator());
+    MenuFlyoutItem open;
+    open.Text(tr(L"Eq_MenuSettings"));
+    open.Click([this](auto&&, auto&&) {
+        returnToPage(L"settings");
+        BringIntoViewOptions options;
+        options.VerticalAlignmentRatio(0);
+        DspCard().StartBringIntoView(options);
+    });
+    items.Append(open);
 }
 
 void MainWindow::OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

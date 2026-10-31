@@ -504,4 +504,48 @@
   <data name="Repair_DetailsTitle" xml:space="preserve"><value>損毀或遺失的程式檔案</value></data>
   <data name="Repair_Missing" xml:space="preserve"><value>遺失</value></data>
   <data name="Repair_Damaged" xml:space="preserve"><value>損毀</value></data>
+  <data name="Settings_Dsp.Text" xml:space="preserve"><value>DSP</value></data>
+  <data name="Settings_Eq.Header" xml:space="preserve"><value>參數式等化器</value></data>
+  <data name="Settings_Eq.OnContent" xml:space="preserve"><value>播放時套用等化器</value></data>
+  <data name="Settings_Eq.OffContent" xml:space="preserve"><value>播放時套用等化器</value></data>
+  <data name="Settings_EqPreset.Header" xml:space="preserve"><value>預設組</value></data>
+  <data name="Settings_EqPreset.PlaceholderText" xml:space="preserve"><value>未儲存</value></data>
+  <data name="Settings_EqSavePreset.Content" xml:space="preserve"><value>另存為預設組…</value></data>
+  <data name="Settings_EqDeletePreset.Content" xml:space="preserve"><value>刪除預設組</value></data>
+  <data name="Settings_EqImport.Content" xml:space="preserve"><value>匯入…</value></data>
+  <data name="Settings_EqReset.Content" xml:space="preserve"><value>重設</value></data>
+  <data name="Settings_EqExport.Content" xml:space="preserve"><value>匯出…</value></data>
+  <data name="Settings_EqAddBand.Content" xml:space="preserve"><value>新增頻段</value></data>
+  <data name="Settings_EqNote.Text" xml:space="preserve"><value>拖曳編號圓點可調整該頻段的頻率與增益；在圓點上捲動滑鼠滾輪可調整 Q 值。前級增益會自動調低，避免提升頻段造成削波。等化器關閉或所有頻段都是平的時候，播放維持 bit-perfect。匯入可讀取 Equalizer APO 設定檔與 AutoEq 的 ParametricEQ.txt。</value></data>
+  <data name="Eq_Button.ToolTipService.ToolTip" xml:space="preserve"><value>等化器</value></data>
+  <data name="Eq_Button.AutomationProperties.Name" xml:space="preserve"><value>等化器</value></data>
+  <data name="Eq_Kind_Peaking" xml:space="preserve"><value>峰值</value></data>
+  <data name="Eq_Kind_LowShelf" xml:space="preserve"><value>低架</value></data>
+  <data name="Eq_Kind_HighShelf" xml:space="preserve"><value>高架</value></data>
+  <data name="Eq_Kind_LowPass" xml:space="preserve"><value>低通</value></data>
+  <data name="Eq_Kind_HighPass" xml:space="preserve"><value>高通</value></data>
+  <data name="Eq_Kind_BandPass" xml:space="preserve"><value>帶通</value></data>
+  <data name="Eq_Kind_Notch" xml:space="preserve"><value>陷波</value></data>
+  <data name="Eq_Kind_AllPass" xml:space="preserve"><value>全通</value></data>
+  <data name="Eq_Channels_All" xml:space="preserve"><value>雙聲道</value></data>
+  <data name="Eq_Channels_Left" xml:space="preserve"><value>左</value></data>
+  <data name="Eq_Channels_Right" xml:space="preserve"><value>右</value></data>
+  <data name="Eq_Column_Type" xml:space="preserve"><value>類型</value></data>
+  <data name="Eq_Column_Channels" xml:space="preserve"><value>聲道</value></data>
+  <data name="Eq_Column_Frequency" xml:space="preserve"><value>頻率 (Hz)</value></data>
+  <data name="Eq_Column_Gain" xml:space="preserve"><value>增益 (dB)</value></data>
+  <data name="Eq_Column_Q" xml:space="preserve"><value>Q</value></data>
+  <data name="Eq_Column_Slope" xml:space="preserve"><value>斜率 (/oct)</value></data>
+  <data name="Eq_RemoveBand" xml:space="preserve"><value>移除頻段</value></data>
+  <data name="Eq_Off" xml:space="preserve"><value>等化器已關閉。</value></data>
+  <data name="Eq_Flat" xml:space="preserve"><value>所有頻段都是平的，訊號原樣通過。</value></data>
+  <data name="Eq_Headroom" xml:space="preserve"><value>自動前級增益：−{0} dB，避免提升頻段造成削波。</value></data>
+  <data name="Eq_SaveTitle" xml:space="preserve"><value>儲存等化器預設組</value></data>
+  <data name="Eq_PresetName" xml:space="preserve"><value>名稱</value></data>
+  <data name="Eq_Save" xml:space="preserve"><value>儲存</value></data>
+  <data name="Eq_ImportTitle" xml:space="preserve"><value>匯入等化器</value></data>
+  <data name="Eq_ImportFailed" xml:space="preserve"><value>檔案裡沒有 CamelPlayer 能讀取的濾波器。請選擇 Equalizer APO 設定檔或 AutoEq 的 ParametricEQ.txt。</value></data>
+  <data name="Eq_MenuOn" xml:space="preserve"><value>開啟等化器</value></data>
+  <data name="Eq_MenuSettings" xml:space="preserve"><value>等化器設定…</value></data>
+  <data name="SignalPath_Eq" xml:space="preserve"><value>參數式等化器</value></data>
 </root>

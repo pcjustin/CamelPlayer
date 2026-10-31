@@ -308,6 +308,36 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- The parametric EQ (docs/Plan.md §5.9): one global setting with presets; EqEditor draws the curve and the
+                             band rows. -->
+                        <Border x:Name="DspCard" Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE7F6;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Dsp" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="EqSwitch" x:Uid="Settings_Eq" Toggled="OnEqToggled" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <ComboBox x:Name="EqPresetCombo" x:Uid="Settings_EqPreset" Width="240" SelectionChanged="OnEqPresetChanged" />
+                                    <Button x:Uid="Settings_EqSavePreset" VerticalAlignment="Bottom" Click="OnEqSavePresetClick" />
+                                    <Button x:Name="EqDeletePresetButton" x:Uid="Settings_EqDeletePreset" VerticalAlignment="Bottom"
+                                            Click="OnEqDeletePresetClick" />
+                                    <Button x:Uid="Settings_EqImport" VerticalAlignment="Bottom" Click="OnEqImportClick" />
+                                    <Button x:Uid="Settings_EqExport" VerticalAlignment="Bottom" Click="OnEqExportClick" />
+                                    <Button x:Uid="Settings_EqReset" VerticalAlignment="Bottom" Click="OnEqResetClick" />
+                                </StackPanel>
+                                <Border CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <Canvas x:Name="EqCurve" Height="220" Background="Transparent" />
+                                </Border>
+                                <TextBlock x:Name="EqHeadroomText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled">
+                                    <StackPanel x:Name="EqBands" Spacing="6" />
+                                </ScrollViewer>
+                                <Button x:Name="EqAddBandButton" x:Uid="Settings_EqAddBand" />
+                                <TextBlock x:Uid="Settings_EqNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </Border>
+
                         <!-- Status area (read-only, docs/Plan.md §6) -->
                         <Border x:Name="StatusCard" Style="{StaticResource SettingsCardStyle}">
                             <StackPanel Spacing="12">
@@ -763,6 +793,13 @@
                     <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
                         <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
                     </Border>
+                    <!-- Turns the EQ on or off and switches presets; accented while the EQ changes the signal. -->
+                    <Button x:Name="EqButton" x:Uid="Eq_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center">
+                        <TextBlock x:Name="EqButtonText" Text="EQ" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
+                        <Button.Flyout>
+                            <MenuFlyout x:Name="EqMenu" Placement="Top" Opening="OnEqMenuOpening" />
+                        </Button.Flyout>
+                    </Button>
                 </StackPanel>
                 <HyperlinkButton x:Name="FormatButton" x:Uid="SignalPath_Toggle" Grid.Column="1" Click="OnFormatClick"
                                  Padding="4,2" MinWidth="0" MaxWidth="420">

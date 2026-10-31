@@ -35,7 +35,8 @@ struct Played {
     std::string bytes;
 };
 
-// 0.3 s of DSD64 decodes completely before the device starts, so the capture has no underrun in the middle.
+// 0.3 s of DSD64. The capture runs at the device's pace: the Engine prepares device bytes only DSP_LEAD_MS ahead, so
+// a capture pulling as fast as it can would meet underruns, which a raw DSD stream fills with the idle pattern.
 std::filesystem::path dsfFile(const std::string& name, const Bytes& raw, uint32_t channels = 2, uint32_t rate = kDsd64) {
     const auto path = testutil::tempDir() / ("dsd-play-" + name + ".dsf");
     writeFile(path, dsf(raw, {.channels = channels, .rate = rate}));
@@ -49,6 +50,7 @@ Played play(const std::filesystem::path& file, const Settings& settings, std::fu
     CaptureOptions options;
     options.file = out;
     options.accepts = std::move(accepts);
+    options.realtime = true;
     Played played;
     {
         PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });

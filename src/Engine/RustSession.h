@@ -42,6 +42,11 @@ public:
     enum class Prefill : uint8_t { Decoded, Full, End };
     // Decode worker only. Throws Error when decoding fails.
     Prefill prefill(uint64_t& frames);
+    // DSP worker only: the device frames prepared, 0 when the device ring is full or nothing is decoded. Throws Error
+    // when processing fails.
+    uint64_t process();
+    // Heard within the DSP lead, crossfaded; an EQ that is off or flat keeps playback bit-perfect.
+    void setEq(const EqSettings& eq);
 
     struct Rendered {
         size_t frames = 0;

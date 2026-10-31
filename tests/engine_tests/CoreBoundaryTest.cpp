@@ -14,6 +14,7 @@
 #include "Engine/SamplePacker.h"
 #include "OutputBridge/WaveFormat.h"
 #include "Engine/verify/FlacMd5.h"
+#include "Common/settings/EqText.h"
 #include "Common/settings/Settings.h"
 #include "Common/util/Md5.h"
 #include "Common/util/Text.h"
@@ -357,6 +358,72 @@ TEST(SettingsBoundary, TheFolderTreeIsOffUntilTurnedOn) {
     Settings settings;
     settings.folderTree = true;
     EXPECT_TRUE(fromJson(toJson(settings)).folderTree);
+}
+
+TEST(SettingsBoundary, TheEqIsOffWithFiveFlatBandsAndKeepsItsPresetsThroughAPlaybackReset) {
+    const Settings defaults;
+    EXPECT_FALSE(defaults.eq.enabled);
+    ASSERT_EQ(defaults.eq.bands.size(), 5u);
+    EXPECT_EQ(defaults.eq.bands.front().kind, EqKind::LowShelf);
+    EXPECT_EQ(defaults.eq.bands.back().kind, EqKind::HighShelf);
+    for (const auto& band : defaults.eq.bands) EXPECT_EQ(band.gainDb, 0.0);
+
+    Settings settings;
+    settings.eq.enabled = true;
+    // More bands than the UI offers: the Engine and the settings take any number.
+    for (int i = 0; i < 12; ++i)
+        settings.eq.bands.push_back({EqKind::Notch, EqChannels::Right, 12, 50.0 + i, -3.5, 8.0, i % 2 == 0});
+    settings.eq.bands.push_back({EqKind::HighPass, EqChannels::Left, 36, 25.0, 0.0, 0.71, true});
+    settings.eq.preset = "HD 800";
+    settings.eq.presets = {{"HD 800", settings.eq.bands}, {"Flat", defaultEqBands()}};
+    const auto read = fromJson(toJson(settings));
+    EXPECT_EQ(read.eq, settings.eq);
+
+    const auto reset = resetPlayback(settings);
+    EXPECT_FALSE(reset.eq.enabled);
+    EXPECT_EQ(reset.eq.bands, defaultEqBands());
+    EXPECT_EQ(reset.eq.presets, settings.eq.presets);
+}
+
+TEST(SettingsBoundary, UnreadableEqBandsAreDroppedAndAMissingListKeepsTheDefaults) {
+    const auto read = fromJson(R"({"eq":{"enabled":true,"bands":[
+        {"type":"peaking","frequency":250,"gain":-4,"q":2},
+        {"type":"wobble","frequency":1000},
+        {"type":"lowPass","frequency":12000,"slope":7},
+        "nonsense"]}})");
+    EXPECT_TRUE(read.eq.enabled);
+    ASSERT_EQ(read.eq.bands.size(), 2u);
+    EXPECT_EQ(read.eq.bands[0].gainDb, -4.0);
+    EXPECT_EQ(read.eq.bands[1].slope, 12u); // a slope off the 6 dB steps falls back to 12
+    EXPECT_EQ(fromJson(R"({"eq":{"enabled":true}})").eq.bands, defaultEqBands());
+}
+
+TEST(EqText, ReadsAutoEqAndEqualizerApoFilters) {
+    const auto bands = parseEqualizerApo("Preamp: -6.2 dB\r\n"
+                                         "Filter 1: ON LSC Fc 105 Hz Gain 6.0 dB Q 0.70\r\n"
+                                         "Filter 2: ON PK Fc 2650 Hz Gain -3.4 dB Q 1.41\n"
+                                         "# a comment\n"
+                                         "Channel: R\n"
+                                         "Filter: OFF HSC Fc 10000 Hz Gain -2 dB Q 0.71\n"
+                                         "Filter 4: ON XX Fc 1 Hz\n"
+                                         "Channel: ALL\n"
+                                         "Filter 5: ON HP Fc 20 Hz\n");
+    ASSERT_EQ(bands.size(), 4u);
+    EXPECT_EQ(bands[0], (EqBand{EqKind::LowShelf, EqChannels::All, 12, 105.0, 6.0, 0.70, true}));
+    EXPECT_EQ(bands[1], (EqBand{EqKind::Peaking, EqChannels::All, 12, 2650.0, -3.4, 1.41, true}));
+    EXPECT_EQ(bands[2], (EqBand{EqKind::HighShelf, EqChannels::Right, 12, 10000.0, -2.0, 0.71, false}));
+    EXPECT_EQ(bands[3].kind, EqKind::HighPass);
+    EXPECT_EQ(bands[3].channels, EqChannels::All);
+    EXPECT_TRUE(parseEqualizerApo("nothing to see\n").empty());
+}
+
+TEST(EqText, WritesWhatItReads) {
+    const std::vector<EqBand> bands{{EqKind::Peaking, EqChannels::Left, 12, 1000.0, -4.5, 2.0, true},
+                                    {EqKind::Notch, EqChannels::Right, 12, 60.0, 0.0, 8.0, false},
+                                    {EqKind::LowPass, EqChannels::All, 12, 18000.0, 0.0, 0.71, true}};
+    const auto text = formatEqualizerApo(bands, -3.25);
+    EXPECT_TRUE(text.starts_with("Preamp: -3.3 dB")) << text;
+    EXPECT_EQ(parseEqualizerApo(text), bands);
 }
 
 TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {

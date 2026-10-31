@@ -148,6 +148,64 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
 }
 
 /// # Safety
+/// `engine` must be live and `bands` must point to `count` readable V1 bands.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_set_eq_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    bands: *const camel_audio_engine::CamelEqBandV1,
+    count: u32,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_set_eq_v1(engine, bands, count) }
+}
+
+/// # Safety
+/// `engine` must be live and `clipped` writable.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_get_eq_clipped_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    clipped: *mut u64,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_get_eq_clipped_v1(engine, clipped) }
+}
+
+/// # Safety
+/// See `camel_audio_engine::camel_eq_analyze_v1`.
+#[no_mangle]
+pub unsafe extern "C" fn camel_eq_analyze_v1(
+    bands: *const camel_audio_engine::CamelEqBandV1,
+    count: u32,
+    rate_hz: u32,
+    frequencies: *const f64,
+    points: u32,
+    left_db: *mut f64,
+    right_db: *mut f64,
+    summary: *mut camel_audio_engine::CamelEqSummaryV1,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_eq_analyze_v1(
+            bands,
+            count,
+            rate_hz,
+            frequencies,
+            points,
+            left_db,
+            right_db,
+            summary,
+        )
+    }
+}
+
+/// # Safety
+/// `engine` and `frames_processed` must reference valid storage. Call from the DSP worker.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_process_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    frames_processed: *mut u64,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_process_v1(engine, frames_processed) }
+}
+
+/// # Safety
 /// `engine` and `command` must remain valid for the call.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_seek_v1(

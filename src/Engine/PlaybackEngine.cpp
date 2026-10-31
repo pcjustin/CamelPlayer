@@ -19,6 +19,7 @@
 #include <thread>
 
 #include "Engine/decode/FormatProbe.h"
+#include "Engine/Equalizer.h"
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
 #include "OutputBridge/OutputBridge.h"
@@ -286,6 +287,27 @@ public:
         }
     }
 
+    // `plan` as the EQ leaves it: processed while the EQ changes the signal; raw DSD bypasses it.
+    OutputPlan withEq(OutputPlan plan) const {
+        plan.eq =
+            plan.dsd != DsdPath::Native && plan.dsd != DsdPath::Dop && analyzeEq(settings_.eq, plan.format.sampleRate).active;
+        if (plan.eq) plan.state = PipelineState::Processed;
+        return plan;
+    }
+
+    // The EQ changes without reopening anything: the Engine crossfades to it, and the path shows it.
+    void applyEq() {
+        if (!active_ || !rust_) return;
+        try {
+            rust_->setEq(settings_.eq);
+        } catch (const Error& e) {
+            log::warn("engine: %s", e.what());
+        }
+        plan_ = withEq(negotiated_);
+        std::lock_guard lock(snapMutex_);
+        if (snap_.plan) snap_.plan = plan_;
+    }
+
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
         // A lossy file decodes to the configured depth, so changing it reopens the stream like a decoder change.
@@ -297,6 +319,7 @@ public:
              settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported) &&
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged || conversionChanged;
+        const bool eqChanged = settings_.eq != s.eq;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -309,10 +332,12 @@ public:
             snap_.backend = s.backend;
             snap_.decoder = displayedDecoder(s);
         }
-        if ((outputChanged || decoderChanged) && wasActive)
+        if ((outputChanged || decoderChanged) && wasActive) {
             startSession(pos, wasPlaying);
-        else
+        } else {
+            if (eqChanged) applyEq();
             publish();
+        }
     }
 
     bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested) {
@@ -671,7 +696,8 @@ private:
             return fail(Error(ErrorCode::FormatNotSupported, msg), onDeviceFailure);
         }
         if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
-        plan_ = *plan;
+        negotiated_ = *plan;
+        plan_ = withEq(negotiated_);
         fmt_ = plan_.format;
         bpf_ = fmt_.bytesPerFrame();
         sourceRate_ = src.sampleRate;
@@ -681,6 +707,7 @@ private:
         try {
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
                                                   plan_.dsd, timing(settings_).predecodeSeconds);
+            rust_->setEq(settings_.eq);
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;
             return fail(e, waitingForSource_ ? PlayState::Paused : PlayState::Stopped);
@@ -702,6 +729,7 @@ private:
             decodeError_.reset();
         }
         decodeThread_ = std::thread([this] { decodeMain(); });
+        dspThread_ = std::thread([this] { dspMain(); });
 
         // Let the decoder get ahead before the device starts pulling.
         const auto startFrames = uint64_t(fmt_.sampleRate * kStartFillSeconds);
@@ -790,11 +818,25 @@ private:
         decodeDone_.store(true, std::memory_order_release);
     }
 
+    // Keeps the short device ring filled while decoding waits for slow storage (docs/Plan.md §5.1, §5.2).
+    void dspMain() {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        try {
+            while (!stopDecode_)
+                if (rust_->process() == 0) Sleep(2);
+        } catch (const Error& e) {
+            log::error("engine: DSP error: %s", e.what());
+            std::lock_guard lock(decodeErrMutex_);
+            if (!decodeError_) decodeError_ = e;
+        }
+    }
+
     uint64_t bufferedFrames() const { return prefilled_.load(std::memory_order_relaxed); }
 
     void stopDecoder() {
         stopDecode_ = true;
         if (decodeThread_.joinable()) decodeThread_.join();
+        if (dspThread_.joinable()) dspThread_.join();
     }
 
     void closeOutput() {
@@ -838,7 +880,8 @@ private:
             const Queued next = queued_.front();
             queued_.pop_front();
             file_ = next.file;
-            plan_ = next.plan;
+            negotiated_ = next.plan;
+            plan_ = withEq(negotiated_);
             sourceRate_ = next.source.sampleRate;
             fileDecoder_ = next.requested;
             format_ = next.format;
@@ -847,7 +890,7 @@ private:
             snap_.file = file_;
             snap_.format = next.format;
             snap_.decoder = next.decoder;
-            snap_.plan = next.plan;
+            snap_.plan = plan_;
             snap_.source = source;
             snap_.md5.reset();
             snap_.total = source.totalFrames;
@@ -1011,6 +1054,7 @@ private:
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;
     OutputPlan plan_;
+    OutputPlan negotiated_;         // plan_ before the EQ, which withEq() applies
     std::string planAdjustment_;    // a fixed rate the device refused
     uint64_t outputGeneration_ = 0; // counts output devices opened; a new one starts in an unknown format
     struct Opened {
@@ -1041,7 +1085,7 @@ private:
         OutputPlan plan;
     };
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
-    std::thread decodeThread_;
+    std::thread decodeThread_, dspThread_;
     std::mutex decodeErrMutex_;
     std::optional<Error> decodeError_;
 

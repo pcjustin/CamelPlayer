@@ -75,6 +75,17 @@ While raw DSD plays, the **DSD** or **DoP** badge shows that volume and every ot
 
 **Convert to PCM** turns DSD into PCM at the **DSD to PCM sample rate** (88.2, 176.4 or 352.8 kHz) for DACs without DSD support. If you keep native or DoP output, **When the device takes neither native DSD nor DoP** decides what happens when the device refuses it: skip the file and tell you (default), or convert it to PCM. DSDIFF files compressed with DST are not supported.
 
+## Equalizer
+
+Settings › DSP holds a parametric EQ. Turn on **Parametric EQ** to apply it. It starts with five flat bands: a low shelf at 100 Hz, peaking bands at 400 Hz, 1 kHz and 4 kHz, and a high shelf at 10 kHz.
+
+- Drag a numbered point on the curve to change its band's frequency and gain, and turn the mouse wheel over it to change its Q. The rows under the curve take exact values, the filter type (peaking, low or high shelf, low or high pass, band pass, notch or all pass), the channels (both, left or right) and, for low and high pass, a slope of 6 to 48 dB per octave. **Add band** adds bands up to ten, and a band's check box turns it off without removing it.
+- The preamp is lowered automatically by the largest boost so the EQ never clips; the line under the curve shows by how much.
+- **Save as preset…** names the current bands, and the preset list switches between them. **Import…** reads an Equalizer APO configuration or an AutoEq ParametricEQ.txt file as a new preset named after the file, and **Export…** writes the bands in the Equalizer APO format. **Reset** goes back to the five flat bands; saved presets stay.
+- The **EQ** button in the player bar turns the EQ on or off, switches presets and opens Settings › DSP. It is highlighted while the EQ changes the sound.
+
+Changes are heard within about a quarter of a second, without a gap. While the EQ acts, the badge shows **Processed**, the signal path lists the EQ, and its output is dithered once to the device's bit depth. While the EQ is off or every band is flat, playback stays bit-perfect. Raw DSD (native or DoP) bypasses the EQ; convert DSD to PCM to equalize it.
+
 ## Common problems
 
 **A file is skipped with "The device cannot play this format bit-perfectly".** The device does not accept the file's sample rate, bit depth or channel count. Check that the right device is selected, try a different **Sample format**, or allow conversion (see above).

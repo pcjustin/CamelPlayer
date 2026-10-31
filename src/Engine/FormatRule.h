@@ -30,6 +30,7 @@ struct OutputPlan {
     bool reduce = false; // fewer bits than the source, with dither
     DsdPath dsd = DsdPath::None;
     bool shared = false; // through the WASAPI shared-mode mixer
+    bool eq = false;     // the parametric EQ changes the signal (docs/Plan.md §5.9)
     PipelineState state = PipelineState::BitPerfect;
     bool operator==(const OutputPlan&) const = default;
 };

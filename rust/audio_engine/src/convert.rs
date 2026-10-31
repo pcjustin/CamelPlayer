@@ -9,11 +9,13 @@
 //! bits). Everything else — resampling, ITU-R BS.775 downmix, bit reduction and the decoded output of lossy sources —
 //! is processed in 64-bit float and quantized once at the end with TPDF dither. Raw DSD reaches a native DSD or DoP
 //! stream bit for bit (mono duplicated). DSD becomes PCM only with explicit permission: it is decimated to
-//! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once.
+//! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once. While the EQ changes the
+//! signal, every PCM path runs in float through it and is quantized once at the device depth; raw DSD bypasses it.
 
 use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32};
 use crate::dsd::{put_dop_sample, DOP_MARKERS, DSD_SILENCE};
 use crate::dsd2pcm::{DsdDecimator, PCM_RATE};
+use crate::eq::Equalizer;
 use crate::packing::pack_pcm;
 use crate::resample::Resampler;
 use crate::{
@@ -43,6 +45,8 @@ pub(crate) struct Converter {
     out_channels: usize,
     /// Depth of the final quantization: the source depth, or less when the device takes less.
     quantize_bits: u32,
+    /// Depth of the final quantization while the EQ acts: the device's (0 for float).
+    eq_bits: u32,
     matrix: Option<[Vec<f64>; 2]>,
     resampler: Option<Resampler>,
     dither: Tpdf,
@@ -139,6 +143,7 @@ impl Converter {
                 } else {
                     out.valid_bits.min(24)
                 },
+                eq_bits: Self::device_bits(out),
                 matrix: Some(downmix_matrix(in_channels).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?),
                 resampler,
                 dither: Tpdf(0x9E37_79B9_7F4A_7C15),
@@ -177,6 +182,7 @@ impl Converter {
                 out: *out,
                 out_channels,
                 quantize_bits: 0,
+                eq_bits: 0,
                 matrix: None,
                 resampler: None,
                 dither: Tpdf(0),
@@ -244,6 +250,7 @@ impl Converter {
             out: *out,
             out_channels,
             quantize_bits,
+            eq_bits: Self::device_bits(out),
             matrix,
             resampler,
             dither: Tpdf(0x9E37_79B9_7F4A_7C15),
@@ -292,9 +299,18 @@ impl Converter {
     }
 
     /// Converts `frames` decoded frames (`samples` interleaved: right-aligned integers, or float32 bit patterns for a
-    /// float source) and appends the device bytes to the pending output.
-    pub(crate) fn convert(&mut self, samples: &[i32], frames: usize) -> Result<(), i32> {
+    /// float source) and appends the device bytes to the pending output. `eq` processes PCM while it acts.
+    pub(crate) fn convert(
+        &mut self,
+        samples: &[i32],
+        frames: usize,
+        eq: &mut Equalizer,
+    ) -> Result<(), i32> {
         let input = &samples[..frames * self.in_channels];
+        if eq.active() && matches!(self.mode, Mode::Bypass | Mode::Duplicate | Mode::Widen) {
+            let mut floats = self.to_device_channels(input);
+            return self.emit(&mut floats, eq);
+        }
         match self.mode {
             Mode::Bypass => self.pack(input, self.in_bits),
             Mode::Duplicate => {
@@ -302,14 +318,8 @@ impl Converter {
                 self.pack(&stereo, self.in_bits)
             }
             Mode::Widen => {
-                let scale = 1.0 / f64::from(1u32 << (self.in_bits - 1));
-                let mut floats = Vec::with_capacity(frames * self.out_channels);
-                for frame in input.chunks_exact(self.in_channels) {
-                    for c in 0..self.out_channels {
-                        floats.push(f64::from(frame[c.min(self.in_channels - 1)]) * scale);
-                    }
-                }
-                self.emit(&floats)
+                let mut floats = self.to_device_channels(input);
+                self.emit(&mut floats, eq)
             }
             Mode::Dsd => {
                 for frame in input.chunks_exact(self.in_channels) {
@@ -340,35 +350,17 @@ impl Converter {
                     .expect("DSD to PCM has a decimator")
                     .process(input, frames, &mut decimated);
                 let mixed = self.mix_floats(&decimated);
-                match self.resampler.as_mut() {
-                    Some(resampler) => {
-                        let mut resampled = Vec::new();
-                        resampler
-                            .process(&mixed, &mut resampled)
-                            .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-                        self.emit(&resampled)
-                    }
-                    None => self.emit(&mixed),
-                }
+                self.resample_and_emit(mixed, eq)
             }
             Mode::Process => {
                 let mixed = self.mix(input, frames);
-                match self.resampler.as_mut() {
-                    Some(resampler) => {
-                        let mut resampled = Vec::new();
-                        resampler
-                            .process(&mixed, &mut resampled)
-                            .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-                        self.emit(&resampled)
-                    }
-                    None => self.emit(&mixed),
-                }
+                self.resample_and_emit(mixed, eq)
             }
         }
     }
 
     /// Ends the source: flushes the resampler's tail into the pending output. Further calls do nothing.
-    pub(crate) fn finish(&mut self) -> Result<(), i32> {
+    pub(crate) fn finish(&mut self, eq: &mut Equalizer) -> Result<(), i32> {
         if self.finished {
             return Ok(());
         }
@@ -382,9 +374,34 @@ impl Converter {
             resampler
                 .process(&[], &mut tail)
                 .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-            return self.emit(&tail);
+            return self.emit(&mut tail, eq);
         }
         Ok(())
+    }
+
+    fn resample_and_emit(&mut self, mut mixed: Vec<f64>, eq: &mut Equalizer) -> Result<(), i32> {
+        match self.resampler.as_mut() {
+            Some(resampler) => {
+                let mut resampled = Vec::new();
+                resampler
+                    .process(&mixed, &mut resampled)
+                    .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
+                self.emit(&mut resampled, eq)
+            }
+            None => self.emit(&mut mixed, eq),
+        }
+    }
+
+    // Integer source frames as float in [-1, 1) on the device's channels, a mono channel on both.
+    fn to_device_channels(&self, input: &[i32]) -> Vec<f64> {
+        let scale = 1.0 / f64::from(1u32 << (self.in_bits - 1));
+        let mut floats = Vec::with_capacity(input.len() / self.in_channels * self.out_channels);
+        for frame in input.chunks_exact(self.in_channels) {
+            for c in 0..self.out_channels {
+                floats.push(f64::from(frame[c.min(self.in_channels - 1)]) * scale);
+            }
+        }
+        floats
     }
 
     // Source samples as float in [-1, 1), mixed to stereo.
@@ -423,20 +440,38 @@ impl Converter {
         out
     }
 
-    // The single final stage: float32 for a float device, else TPDF-dithered integers at `quantize_bits`.
-    fn emit(&mut self, floats: &[f64]) -> Result<(), i32> {
+    fn device_bits(out: &AudioFormat) -> u32 {
+        if out.sample_format == SAMPLE_F32_LE {
+            0
+        } else {
+            out.valid_bits
+        }
+    }
+
+    // The single final stage, after the EQ while it acts: float32 for a float device, else TPDF-dithered integers at
+    // `quantize_bits`, or at the device depth while the EQ acts.
+    fn emit(&mut self, floats: &mut [f64], eq: &mut Equalizer) -> Result<(), i32> {
+        let equalized = eq.active();
+        if equalized {
+            eq.process(floats);
+        }
         if self.out.sample_format == SAMPLE_F32_LE {
-            for &v in floats {
+            for &v in floats.iter() {
                 self.pending
                     .extend_from_slice(&(v.clamp(-1.0, 1.0) as f32).to_le_bytes());
             }
             self.pending_frames += (floats.len() / self.out_channels) as u64;
             return Ok(());
         }
-        if !matches!(self.mode, Mode::Process | Mode::DsdPcm) {
+        if !equalized && !matches!(self.mode, Mode::Process | Mode::DsdPcm) {
             return Err(ENGINE_E_UNSUPPORTED_FORMAT);
         }
-        let full = f64::from(1u32 << (self.quantize_bits - 1));
+        let bits = if equalized {
+            self.eq_bits
+        } else {
+            self.quantize_bits
+        };
+        let full = f64::from(1u32 << (bits - 1));
         let integers: Vec<i32> = floats
             .iter()
             .map(|&v| {
@@ -448,7 +483,7 @@ impl Converter {
                 }
             })
             .collect();
-        self.pack(&integers, self.quantize_bits)
+        self.pack(&integers, bits)
     }
 
     // One DoP frame from the carried byte frame and `second`. Render stamps the real markers.
@@ -480,7 +515,7 @@ impl Converter {
 
 #[cfg(test)]
 mod tests {
-    use super::{Converter, Mode};
+    use super::{Converter, Equalizer, Mode};
     use crate::decoder_host::{
         CamelSourceInfoV1, SAMPLE_ENCODING_FLOAT32, SAMPLE_ENCODING_INTEGER,
     };
@@ -488,6 +523,11 @@ mod tests {
         AudioFormat, ABI_VERSION, AUDIO_PCM, ENGINE_E_UNSUPPORTED_FORMAT, QUALITY_HIGH,
         SAMPLE_F32_LE, SAMPLE_S16_LE, SAMPLE_S24_LE, SAMPLE_S32_LE,
     };
+
+    // An EQ that never acts, as when it is off.
+    fn flat() -> Equalizer {
+        Equalizer::new(48_000, 2)
+    }
 
     fn source(rate: u32, channels: u32, bits: u32, float: bool) -> CamelSourceInfoV1 {
         CamelSourceInfoV1 {
@@ -551,7 +591,7 @@ mod tests {
         let mut c = converter(source(48_000, 2, 24, false), SAMPLE_S24_LE, 48_000, false);
         assert_eq!(c.mode, Mode::Bypass);
         let samples = [1, -1, 8_388_607, -8_388_608];
-        c.convert(&samples, 2).unwrap();
+        c.convert(&samples, 2, &mut flat()).unwrap();
         assert_eq!(ints(c.pending(), 3), samples);
     }
 
@@ -559,7 +599,7 @@ mod tests {
     fn mono_is_duplicated_bit_for_bit() {
         let mut c = converter(source(44_100, 1, 16, false), SAMPLE_S32_LE, 44_100, false);
         assert_eq!(c.mode, Mode::Duplicate);
-        c.convert(&[123, -32_768, 32_767], 3).unwrap();
+        c.convert(&[123, -32_768, 32_767], 3, &mut flat()).unwrap();
         let out: Vec<i32> = ints(c.pending(), 4).iter().map(|v| v >> 16).collect();
         assert_eq!(out, [123, 123, -32_768, -32_768, 32_767, 32_767]);
     }
@@ -569,7 +609,7 @@ mod tests {
         let mut c = converter(source(96_000, 2, 24, false), SAMPLE_F32_LE, 96_000, false);
         assert_eq!(c.mode, Mode::Widen);
         let samples = [8_388_607, -8_388_608, 1, -1];
-        c.convert(&samples, 2).unwrap();
+        c.convert(&samples, 2, &mut flat()).unwrap();
         let back: Vec<i32> = floats(c.pending())
             .iter()
             .map(|&f| (f64::from(f) * 8_388_608.0) as i32)
@@ -627,7 +667,7 @@ mod tests {
         for channel in 0..6 {
             samples[channel * 6 + channel] = 1 << 22; // half full scale
         }
-        c.convert(&samples, 6).unwrap();
+        c.convert(&samples, 6, &mut flat()).unwrap();
         let out = floats(c.pending());
         let a = std::f32::consts::FRAC_1_SQRT_2 * 0.5;
         let expected = [
@@ -656,7 +696,8 @@ mod tests {
         let level = 1000.3; // in 16-bit LSB
         let sample = (level * 256.0) as i32;
         let frames = 20_000;
-        c.convert(&vec![sample; frames * 2], frames).unwrap();
+        c.convert(&vec![sample; frames * 2], frames, &mut flat())
+            .unwrap();
         let out = ints(c.pending(), 2);
         let mean = out.iter().map(|&v| f64::from(v)).sum::<f64>() / out.len() as f64;
         assert!(
@@ -672,7 +713,8 @@ mod tests {
         // L and C at 0.9 full scale sum beyond full scale; the result clips instead of wrapping.
         let mut c = converter(source(48_000, 3, 24, false), SAMPLE_S24_LE, 48_000, true);
         let high = (0.9 * 8_388_608.0) as i32;
-        c.convert(&[high, 0, high, -high, 0, -high], 2).unwrap();
+        c.convert(&[high, 0, high, -high, 0, -high], 2, &mut flat())
+            .unwrap();
         let out = ints(c.pending(), 3);
         assert_eq!(out[0], 8_388_607);
         assert_eq!(out[2], -8_388_608);
@@ -697,9 +739,9 @@ mod tests {
             })
             .collect();
         for chunk in samples.chunks(2 * 4096) {
-            c.convert(chunk, chunk.len() / 2).unwrap();
+            c.convert(chunk, chunk.len() / 2, &mut flat()).unwrap();
         }
-        c.finish().unwrap();
+        c.finish(&mut flat()).unwrap();
         let out = floats(c.pending());
         assert_eq!(out.len() / 2, 48_000, "length follows the rate ratio");
         let (mut signal, mut noise) = (0.0, 0.0);
@@ -753,9 +795,9 @@ mod tests {
         .unwrap();
         assert_eq!(c.mode, Mode::DsdPcm);
         for chunk in bytes.chunks(4096) {
-            c.convert(chunk, chunk.len()).unwrap();
+            c.convert(chunk, chunk.len(), &mut flat()).unwrap();
         }
-        c.finish().unwrap();
+        c.finish(&mut flat()).unwrap();
         floats(c.pending())
             .as_chunks::<2>()
             .0
@@ -823,7 +865,7 @@ mod tests {
             QUALITY_HIGH,
         )
         .unwrap();
-        s32.convert(&vec![0xFF; 2000], 2000).unwrap();
+        s32.convert(&vec![0xFF; 2000], 2000, &mut flat()).unwrap();
         let top = ints(s32.pending(), 4)[2 * 1500] >> 8;
         assert!(
             (8_388_600..=8_388_607).contains(&top),

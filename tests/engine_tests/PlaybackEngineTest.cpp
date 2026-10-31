@@ -83,10 +83,24 @@ protected:
         engine->openAndPlay(testutil::testFile("24-96k"));
         engine->waitIdle();
     }
+    // Pulls like a device that waits for the Engine: the device ring holds only a short lead, so a long pull takes
+    // several renders. Stops when the stream ends or nothing arrives for a second.
     size_t pull(size_t frames) {
         std::lock_guard lock(probe.renderMutex);
+        if (!probe.source) return 0;
         std::vector<uint8_t> buffer(frames * probe.format.bytesPerFrame());
-        return probe.source ? probe.source->render(buffer.data(), frames) : 0;
+        size_t done = 0;
+        auto idleSince = std::chrono::steady_clock::now();
+        while (done < frames && std::chrono::steady_clock::now() - idleSince < 1s) {
+            const auto got = probe.source->render(buffer.data() + done * probe.format.bytesPerFrame(), frames - done);
+            if (got) {
+                done += got;
+                idleSince = std::chrono::steady_clock::now();
+            } else {
+                std::this_thread::sleep_for(1ms);
+            }
+        }
+        return done;
     }
 };
 
@@ -344,6 +358,32 @@ TEST_F(EngineStateTest, InactiveBackendSettingsDoNotRestartPlayback) {
     EXPECT_EQ(probe.creations, 1);
 }
 
+TEST_F(EngineStateTest, TheEqChangesThePathWithoutReopeningAndStaysBitPerfectWhileFlat) {
+    open();
+    const auto plan = [&] { return engine->snapshot().plan.value_or(OutputPlan{}); };
+    ASSERT_EQ(plan().state, PipelineState::BitPerfect);
+    // On, but every band at 0 dB: nothing changes the signal.
+    settings.eq.enabled = true;
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_FALSE(plan().eq);
+    EXPECT_EQ(plan().state, PipelineState::BitPerfect);
+    settings.eq.bands[2].gainDb = -4.5;
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_TRUE(plan().eq);
+    EXPECT_EQ(plan().state, PipelineState::Processed);
+    ASSERT_EQ(pull(4096), 4096u);
+    settings.eq.enabled = false;
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_EQ(plan().state, PipelineState::BitPerfect);
+    // The device stays open and playback goes on.
+    EXPECT_EQ(probe.opens, 1);
+    EXPECT_EQ(probe.creations, 1);
+    EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
+}
+
 TEST_F(EngineStateTest, DecoderSwitchPreservesPausedPosition) {
     open();
     ASSERT_EQ(pull(17), 17u);
@@ -568,7 +608,9 @@ TEST_F(EngineStateTest, LostSourcePausesWithoutEndingTheTrackAndRetriesAtTheSave
     class Source final : public IDecoder {
     public:
         Source(SourceInfo info, std::filesystem::path path, std::shared_ptr<std::atomic<bool>> interrupt)
-            : info_(info), path_(std::move(path)), interrupt_(std::move(interrupt)) { info_.totalFrames = 44100 * 60; }
+            : info_(info), path_(std::move(path)), interrupt_(std::move(interrupt)) {
+            info_.totalFrames = 44100 * 60;
+        }
         const SourceInfo& info() const override { return info_; }
         size_t read(int32_t* dst, size_t frames) override {
             if (interrupt_->load()) {
@@ -581,6 +623,7 @@ TEST_F(EngineStateTest, LostSourcePausesWithoutEndingTheTrackAndRetriesAtTheSave
             return count;
         }
         void seek(uint64_t frame) override { position_ = frame; }
+
     private:
         SourceInfo info_;
         std::filesystem::path path_;
@@ -627,8 +670,7 @@ TEST_F(EngineStateTest, DiscardPreloadsWithdrawsAnAlreadyDecodedSuccessor) {
     open();
     ASSERT_TRUE(engine->queueNext(testutil::generatedFile({"withdraw-next", 96000, 24, 2, 0.3})));
     const auto deadline = std::chrono::steady_clock::now() + 3s;
-    while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(1ms);
+    while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(1ms);
     ASSERT_TRUE(engine->snapshot().nextSlotFree);
     ASSERT_EQ(engine->snapshot().queuedFiles, 1u);
     ASSERT_EQ(pull(4096), 4096u);
@@ -650,8 +692,7 @@ TEST_F(EngineStateTest, DiscardPreloadsPreservesTheTrackThatJustBecameAudible) {
     ASSERT_TRUE(engine->queueNext(next));
     const auto waitDecoded = [&] {
         const auto deadline = std::chrono::steady_clock::now() + 3s;
-        while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline)
-            std::this_thread::sleep_for(1ms);
+        while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(1ms);
         return engine->snapshot().nextSlotFree;
     };
     ASSERT_TRUE(waitDecoded());

@@ -12,6 +12,7 @@ mod convert;
 mod decoder_host;
 mod dsd;
 mod dsd2pcm;
+mod eq;
 mod packing;
 mod resample;
 mod ring;
@@ -34,6 +35,12 @@ const MAX_PREFILL_FRAMES: u64 = 4_096;
 // limit.
 const DEFAULT_PREBUFFER_MS: u64 = 10_000;
 const MAX_RING_BYTES: u64 = 64 << 20;
+// How far device bytes are prepared ahead of the output, which is how soon a DSP change is heard. The device ring
+// also holds at least MIN_DEVICE_RING_FRAMES, the largest period an output requests at once.
+const DSP_LEAD_MS: u64 = 250;
+const MIN_DEVICE_RING_FRAMES: u64 = 8_192;
+// The widest source a frame of the decoded ring must hold: eight channels of 32-bit sample words.
+const MAX_SOURCE_FRAME_BYTES: u64 = 8 * 4;
 
 pub const AUDIO_PCM: u32 = 1;
 pub const AUDIO_DSD: u32 = 2;
@@ -181,6 +188,34 @@ pub struct CamelFlacIntegrityV1 {
     pub has_reference_md5: u32,
     pub total_frames: u64,
     pub position_frames: u64,
+}
+
+/// One parametric EQ band (docs/Plan.md §5.9). `kind`: 1 peaking, 2 low shelf, 3 high shelf, 4 low-pass,
+/// 5 high-pass, 6 band-pass, 7 notch, 8 all-pass. `channels`: 0 all, 1 left, 2 right. `slope`: low- and high-pass
+/// dB per octave, 6 to 48 in steps of 6 (12 uses `q`). A band with `enabled` 0 is skipped.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelEqBandV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub kind: u32,
+    pub channels: u32,
+    pub slope: u32,
+    pub enabled: u32,
+    pub frequency_hz: f64,
+    pub gain_db: f64,
+    pub q: f64,
+}
+
+/// What an EQ setting does at a rate: `active` 1 when it changes the signal, and the preamp it applies (0 or less).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelEqSummaryV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub active: u32,
+    pub reserved: u32,
+    pub preamp_db: f64,
 }
 
 #[repr(C)]
@@ -370,7 +405,11 @@ pub struct CamelEngine {
     allow_dsd_to_pcm: bool,
     resample_quality: u32,
     max_render_units: u64,
+    // Decoded source samples, up to the prebuffer (docs/Plan.md §5.2). Prefill writes them; the DSP stage converts
+    // them into `ring`, which holds only about DSP_LEAD_MS of device bytes so DSP changes are heard quickly.
+    source_ring: SpscByteRing,
     ring: SpscByteRing,
+    stage: Mutex<Stage>,
     render_gate: RenderGate,
     prefill_gate: TryGate,
     consumer_gate: TryGate,
@@ -393,6 +432,8 @@ pub struct CamelEngine {
     read_frames: AtomicU64,
     boundary_at: AtomicU64,
     boundary_start_frame: AtomicU64,
+    // Decoding moved on to the queued track and render has not reached it yet.
+    pending_boundary: AtomicBool,
     transitions: AtomicU64,
     next_occupied: AtomicBool,
     // DoP: the marker the next rendered frame carries. Only render touches it.
@@ -400,6 +441,54 @@ pub struct CamelEngine {
 }
 
 const NO_BOUNDARY: u64 = u64::MAX;
+
+// The source frames of one track in `source_ring` and the converter that takes them to the device format.
+struct Segment {
+    converter: Converter,
+    channels: usize,
+    // 1 for raw DSD bytes, 4 for the i32 sample words of every other source.
+    sample_bytes: usize,
+    frames: u64,
+    read: u64,
+    // Decoding reached the track's end.
+    ended: bool,
+    // A track following gaplessly: the output frame its position restarts at, until the stage reaches it.
+    boundary_start: Option<u64>,
+}
+
+impl Segment {
+    fn new(converter: Converter, info: &CamelSourceInfoV1, boundary_start: Option<u64>) -> Self {
+        Segment {
+            converter,
+            channels: info.channel_count as usize,
+            sample_bytes: Self::sample_bytes(info),
+            frames: 0,
+            read: 0,
+            ended: false,
+            boundary_start,
+        }
+    }
+
+    fn sample_bytes(info: &CamelSourceInfoV1) -> usize {
+        if info.sample_encoding == SAMPLE_ENCODING_DSD {
+            1
+        } else {
+            4
+        }
+    }
+
+    fn frame_bytes(&self) -> usize {
+        self.channels * self.sample_bytes
+    }
+}
+
+struct Stage {
+    segments: std::collections::VecDeque<Segment>,
+    // Decoding reached the end of the last track with nothing queued.
+    stream_ended: bool,
+    // Global for the device: its filters keep their state across tracks, so gapless playback stays seamless.
+    eq: eq::Equalizer,
+}
 
 // What queries report about the source. Decoder I/O holds `source` for its whole duration, so queries read this
 // copy, which every source change refreshes while still holding `source`.
@@ -439,16 +528,122 @@ impl CamelEngine {
         *self.source_view.lock().unwrap()
     }
 
-    // Caller holds `source`; render must be drained.
+    // Caller holds `source`; render must be drained. The source's converter starts a new segment at the next prefill.
     fn reset_stream(&self) {
+        let mut stage = self.stage.lock().unwrap();
+        stage.segments.clear();
+        stage.stream_ended = false;
+        self.source_ring.clear();
         self.ring.clear();
         self.written_frames.store(0, Ordering::Release);
         self.read_frames.store(0, Ordering::Release);
         self.boundary_at.store(NO_BOUNDARY, Ordering::Release);
+        self.pending_boundary.store(false, Ordering::Release);
     }
 
     fn boundary_pending(&self) -> bool {
-        self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY
+        self.pending_boundary.load(Ordering::Acquire)
+    }
+
+    // The DSP stage: converts decoded frames into device bytes until `ring` is full or no decoded frames wait.
+    // Returns the device frames written.
+    fn pump(&self) -> Result<u64, i32> {
+        let bytes_per_frame = bytes_per_frame(&self.format).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?;
+        let mut stage = self.stage.lock().unwrap();
+        let Stage {
+            segments,
+            stream_ended,
+            eq,
+        } = &mut *stage;
+        let mut written = 0;
+        let status = loop {
+            let Some(segment) = segments.front_mut() else {
+                break Ok(());
+            };
+            let space = (self.ring.writable() / bytes_per_frame) as u64;
+            let pending = segment.converter.pending_frames();
+            if pending > 0 {
+                let frames = pending.min(space);
+                if frames == 0 {
+                    break Ok(());
+                }
+                let bytes = frames as usize * bytes_per_frame;
+                if self.ring.write(&segment.converter.pending()[..bytes]) != bytes {
+                    break Err(ENGINE_E_INVALID_STATE);
+                }
+                segment.converter.consume(frames);
+                self.written_frames.fetch_add(frames, Ordering::AcqRel);
+                written += frames;
+                continue;
+            }
+            if let Some(start) = segment.boundary_start {
+                // One boundary at a time: render reaches the previous one first.
+                if self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
+                    break Ok(());
+                }
+                segment.boundary_start = None;
+                self.boundary_start_frame.store(start, Ordering::Release);
+                self.boundary_at.store(
+                    self.written_frames.load(Ordering::Acquire),
+                    Ordering::Release,
+                );
+            }
+            let available = segment.frames - segment.read;
+            if available > 0 {
+                if space == 0 {
+                    break Ok(());
+                }
+                let frames = segment
+                    .converter
+                    .input_frames_for(space)
+                    .min(available)
+                    .min(MAX_PREFILL_FRAMES);
+                let mut bytes = vec![0u8; frames as usize * segment.frame_bytes()];
+                if self.source_ring.read(&mut bytes) != bytes.len() {
+                    break Err(ENGINE_E_INVALID_STATE);
+                }
+                let samples: Vec<i32> = if segment.sample_bytes == 1 {
+                    bytes.iter().map(|&b| i32::from(b)).collect()
+                } else {
+                    bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|b| i32::from_le_bytes(*b))
+                        .collect()
+                };
+                if let Err(status) = segment.converter.convert(&samples, frames as usize, eq) {
+                    break Err(status);
+                }
+                segment.read += frames;
+                continue;
+            }
+            if segment.ended {
+                if !segment.converter.finished() {
+                    // The resampler's tail belongs to this track and plays before any queued one.
+                    if let Err(status) = segment.converter.finish(eq) {
+                        break Err(status);
+                    }
+                    continue;
+                }
+                segments.pop_front();
+                continue;
+            }
+            break Ok(());
+        };
+        if let Err(status) = status {
+            self.fail_render(status);
+            return Err(status);
+        }
+        if segments.is_empty() && *stream_ended {
+            let _ = self.render_source_state.compare_exchange(
+                RENDER_STATE_ACTIVE as usize,
+                RENDER_STATE_END_OF_STREAM as usize,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
+        Ok(written)
     }
 
     // A converter for `info` to this engine's output format, or the reason none exists.
@@ -494,34 +689,43 @@ fn validate_config(config: &CamelEngineConfigV1) -> Result<(AudioFormat, u64), E
     ))
 }
 
-// At least one maximal render request; otherwise `prebuffer_ms` (0: DEFAULT_PREBUFFER_MS) of audio, aligned to
-// whole frames and capped at MAX_RING_BYTES.
-fn ring_capacity(
-    format: &AudioFormat,
-    max_render_units: u64,
-    rate_hz: u32,
-    prebuffer_ms: u32,
-) -> Option<usize> {
-    let align = |units: u64| {
-        if format.stream_kind == AUDIO_DSD {
-            units - units % 8
-        } else {
-            units
-        }
-    };
-    let minimum = format.required_bytes(align(max_render_units)).ok()?;
+fn whole_units(format: &AudioFormat, units: u64) -> u64 {
+    if format.stream_kind == AUDIO_DSD {
+        units - units % 8
+    } else {
+        units
+    }
+}
+
+// The decoded ring: `prebuffer_ms` (0: DEFAULT_PREBUFFER_MS) of source frames at the device rate and channel count,
+// as 32-bit sample words for PCM and as bytes for raw DSD, at least one prefill of the widest source and at most
+// MAX_RING_BYTES. A source with more channels or a higher rate than the device fits fewer milliseconds.
+fn source_ring_capacity(format: &AudioFormat, rate_hz: u32, prebuffer_ms: u32) -> Option<usize> {
     let milliseconds = match u64::from(prebuffer_ms) {
         0 => DEFAULT_PREBUFFER_MS,
         ms => ms,
     };
-    let prebuffer = u64::from(rate_hz)
-        .checked_mul(milliseconds)
-        .map(|units| units / 1000)
-        .and_then(|units| format.required_bytes(align(units)).ok())
-        .unwrap_or(u64::MAX);
-    let block = format.required_bytes(8).ok()?.max(1);
-    let capped = prebuffer.min(MAX_RING_BYTES - MAX_RING_BYTES % block);
-    usize::try_from(minimum.max(capped).max(1)).ok()
+    let units = u64::from(rate_hz).saturating_mul(milliseconds) / 1000;
+    let prebuffer = if format.stream_kind == AUDIO_PCM {
+        units.saturating_mul(u64::from(format.channel_count) * 4)
+    } else {
+        // A raw DSD source byte never takes more room than the device bytes carrying it.
+        format
+            .required_bytes(whole_units(format, units))
+            .unwrap_or(u64::MAX)
+    };
+    let minimum = MAX_PREFILL_FRAMES * MAX_SOURCE_FRAME_BYTES;
+    usize::try_from(prebuffer.min(MAX_RING_BYTES).max(minimum)).ok()
+}
+
+// The device ring: DSP_LEAD_MS of device frames, at least MIN_DEVICE_RING_FRAMES.
+fn device_ring_capacity(format: &AudioFormat, rate_hz: u32) -> Option<usize> {
+    let lead = u64::from(rate_hz).saturating_mul(DSP_LEAD_MS) / 1000;
+    let minimum = MIN_DEVICE_RING_FRAMES * units_per_frame(format);
+    let bytes = format
+        .required_bytes(whole_units(format, lead.max(minimum)))
+        .ok()?;
+    usize::try_from(bytes.clamp(1, MAX_RING_BYTES)).ok()
 }
 
 pub extern "C" fn camel_engine_abi_version() -> u32 {
@@ -541,18 +745,16 @@ pub unsafe extern "C" fn camel_engine_create_v1(
         *out_engine = ptr::null_mut();
         match validate_config(&*config) {
             Ok((format, max_render_units)) => {
-                let ring_capacity = match ring_capacity(
-                    &format,
-                    max_render_units,
-                    (*config).format.rate_hz,
-                    (*config).prebuffer_ms,
-                ) {
-                    Some(capacity) => capacity,
-                    None => return ENGINE_E_LIMIT_EXCEEDED,
-                };
-                let ring = match SpscByteRing::new(ring_capacity) {
-                    Ok(ring) => ring,
-                    Err(()) => return ENGINE_E_LIMIT_EXCEEDED,
+                let rate_hz = (*config).format.rate_hz;
+                let rings = source_ring_capacity(&format, rate_hz, (*config).prebuffer_ms)
+                    .zip(device_ring_capacity(&format, rate_hz))
+                    .and_then(|(source, device)| {
+                        SpscByteRing::new(source)
+                            .ok()
+                            .zip(SpscByteRing::new(device).ok())
+                    });
+                let Some((source_ring, ring)) = rings else {
+                    return ENGINE_E_LIMIT_EXCEEDED;
                 };
                 *out_engine = Box::into_raw(Box::new(CamelEngine {
                     format,
@@ -561,7 +763,13 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     allow_dsd_to_pcm: (*config).allow_dsd_to_pcm != 0,
                     resample_quality: (*config).resample_quality,
                     max_render_units,
+                    source_ring,
                     ring,
+                    stage: Mutex::new(Stage {
+                        segments: std::collections::VecDeque::new(),
+                        stream_ended: false,
+                        eq: eq::Equalizer::new(rate_hz, format.channel_count as usize),
+                    }),
                     render_gate: RenderGate::default(),
                     prefill_gate: TryGate::default(),
                     consumer_gate: TryGate::default(),
@@ -587,6 +795,7 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     read_frames: AtomicU64::new(0),
                     boundary_at: AtomicU64::new(NO_BOUNDARY),
                     boundary_start_frame: AtomicU64::new(0),
+                    pending_boundary: AtomicBool::new(false),
                     transitions: AtomicU64::new(0),
                     next_occupied: AtomicBool::new(false),
                     dop_phase: AtomicUsize::new(0),
@@ -934,9 +1143,6 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             return ENGINE_E_INVALID_STATE;
         };
         let epoch = engine.operation_epoch.load(Ordering::Acquire);
-        let Some(bytes_per_frame) = bytes_per_frame(&engine.format) else {
-            return ENGINE_E_UNSUPPORTED_FORMAT;
-        };
 
         let mut guard = engine.source.lock().unwrap();
         let status = (|| {
@@ -946,46 +1152,26 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             if !operation_is_current(engine, epoch) {
                 return ENGINE_E_NOT_READY;
             }
-            let writable_frames = engine.ring.writable() / bytes_per_frame;
-            let frame_limit = frame_limit
+            let frame_bytes = {
+                let mut stage = engine.stage.lock().unwrap();
+                // A loaded, seeked or stopped source starts its segment with the converter it was given.
+                if let Some(converter) = source.converter.take() {
+                    stage
+                        .segments
+                        .push_back(Segment::new(converter, &source.info, None));
+                }
+                // With no segment the track has ended and was played out; reading only finds its end.
+                stage.segments.back().map_or_else(
+                    || Segment::sample_bytes(&source.info) * source.info.channel_count as usize,
+                    Segment::frame_bytes,
+                )
+            };
+            let source_frames = frame_limit
                 .min(MAX_PREFILL_FRAMES)
-                .min(writable_frames as u64);
-            if frame_limit == 0 {
+                .min((engine.source_ring.writable() / frame_bytes) as u64);
+            if source_frames == 0 {
                 return ENGINE_OK;
             }
-            // Output converted earlier but not yet in the ring goes first.
-            let write_pending = |source: &mut DecoderSource, frames_prefilled: &mut u64| -> i32 {
-                let converter = source
-                    .converter
-                    .as_mut()
-                    .expect("loaded sources have a converter");
-                let frames = converter.pending_frames().min(frame_limit);
-                let bytes = frames as usize * bytes_per_frame;
-                let _current_command = engine.command.lock().unwrap();
-                if !operation_is_current(engine, epoch) {
-                    return ENGINE_E_NOT_READY; // still a valid continuation; seek, stop and load replace it
-                }
-                if engine.ring.write(&converter.pending()[..bytes]) != bytes {
-                    engine.fail_render(ENGINE_E_INVALID_STATE);
-                    return ENGINE_E_INVALID_STATE;
-                }
-                converter.consume(frames);
-                engine.written_frames.fetch_add(frames, Ordering::AcqRel);
-                *frames_prefilled = frames;
-                ENGINE_OK
-            };
-            if source
-                .converter
-                .as_ref()
-                .is_some_and(|c| c.pending_frames() > 0)
-            {
-                return write_pending(source, &mut *frames_prefilled);
-            }
-            let Some(converter) = source.converter.as_ref() else {
-                engine.fail_render(ENGINE_E_UNSUPPORTED_FORMAT);
-                return ENGINE_E_UNSUPPORTED_FORMAT;
-            };
-            let source_frames = converter.input_frames_for(frame_limit);
             let sample_count = match source_frames
                 .checked_mul(u64::from(source.info.channel_count))
                 .and_then(|count| usize::try_from(count).ok())
@@ -1011,64 +1197,108 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                     return status;
                 }
             };
+            let _current_command = engine.command.lock().unwrap();
             if !operation_is_current(engine, epoch) {
                 let _ = source.seek(start_position);
-                return ENGINE_E_NOT_READY;
+                return ENGINE_E_NOT_READY; // seek, stop and load replace the stream
             }
-            let converter = source.converter.as_mut().expect("checked above");
-            if frames_read == 0 && !converter.finished() {
-                // The resampler's tail belongs to this track and plays before any queued one.
-                if let Err(status) = converter.finish() {
-                    engine.fail_render(status);
-                    return status;
-                }
-                if converter.pending_frames() > 0 {
-                    return write_pending(source, &mut *frames_prefilled);
-                }
-            }
+            let mut stage = engine.stage.lock().unwrap();
             if frames_read == 0 {
-                let _current_command = engine.command.lock().unwrap();
-                if !operation_is_current(engine, epoch) {
-                    return ENGINE_E_NOT_READY;
+                if let Some(segment) = stage.segments.back_mut() {
+                    segment.ended = true;
                 }
                 let mut next = engine.next_source.lock().unwrap();
                 if next.is_some() {
                     // One boundary at a time: a second queued track waits until render reaches the first.
                     if !engine.boundary_pending() {
-                        if let Some(next) = next.take() {
+                        if let Some(mut next) = next.take() {
                             *engine.finished_view.lock().unwrap() = Some(SourceView::of(source));
-                            engine.boundary_start_frame.store(
-                                engine.output_frames(next.start_frame(), next.info.sample_rate),
-                                Ordering::Release,
-                            );
+                            let start =
+                                engine.output_frames(next.start_frame(), next.info.sample_rate);
+                            let converter = next
+                                .converter
+                                .take()
+                                .expect("queued sources have a converter");
+                            stage.segments.push_back(Segment::new(
+                                converter,
+                                &next.info,
+                                Some(start),
+                            ));
                             *source = next;
                         }
                         engine.next_occupied.store(false, Ordering::Release);
+                        engine.pending_boundary.store(true, Ordering::Release);
+                        stage.stream_ended = false;
                         // A track queued after the previous end was reached keeps the stream going.
                         engine
                             .render_source_state
                             .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
-                        engine.boundary_at.store(
-                            engine.written_frames.load(Ordering::Acquire),
-                            Ordering::Release,
-                        );
                     }
                     return ENGINE_OK;
                 }
-                engine
-                    .render_source_state
-                    .store(RENDER_STATE_END_OF_STREAM as usize, Ordering::Release);
+                stage.stream_ended = true;
                 return ENGINE_END;
             }
-
-            if let Err(status) = converter.convert(&samples, frames_read as usize) {
-                engine.fail_render(status);
-                return status;
+            let used = &samples[..frames_read as usize * source.info.channel_count as usize];
+            let mut bytes = Vec::with_capacity(frames_read as usize * frame_bytes);
+            if frame_bytes == source.info.channel_count as usize {
+                bytes.extend(used.iter().map(|&s| s as u8));
+            } else {
+                bytes.extend(used.iter().flat_map(|s| s.to_le_bytes()));
             }
-            write_pending(source, &mut *frames_prefilled)
+            if engine.source_ring.write(&bytes) != bytes.len() {
+                drop(stage);
+                engine.fail_render(ENGINE_E_INVALID_STATE);
+                return ENGINE_E_INVALID_STATE;
+            }
+            if let Some(segment) = stage.segments.back_mut() {
+                segment.frames += frames_read;
+            }
+            // Counted in device frames, like every position.
+            *frames_prefilled = engine
+                .output_frames(frames_read, source.info.sample_rate)
+                .max(1);
+            ENGINE_OK
         })();
+        // The decode worker keeps the device ring filled too; the DSP worker does it while decoding waits for I/O.
+        let status = match engine.pump() {
+            Err(error) if status >= 0 => error,
+            _ => status,
+        };
         engine.publish_source(guard.as_ref());
         status
+    })) {
+        Ok(status) => status,
+        Err(_) => {
+            if !engine.is_null() {
+                (&*engine).fail_render(ENGINE_E_PANIC);
+            }
+            ENGINE_E_PANIC
+        }
+    }
+}
+
+/// # Safety
+/// `engine` and `frames_processed` must reference a live handle and writable storage.
+///
+/// The DSP stage: turns decoded frames into device bytes until the device ring is full. Prefill runs it too; a
+/// separate worker calls this so the device ring stays filled while decoding waits for slow storage.
+pub unsafe extern "C" fn camel_engine_process_v1(
+    engine: *mut CamelEngine,
+    frames_processed: *mut u64,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || frames_processed.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        *frames_processed = 0;
+        match (&*engine).pump() {
+            Ok(frames) => {
+                *frames_processed = frames;
+                ENGINE_OK
+            }
+            Err(status) => status,
+        }
     })) {
         Ok(status) => status,
         Err(_) => {
@@ -1561,6 +1791,7 @@ pub unsafe extern "C" fn camel_engine_render_v1(
         if boundary != NO_BOUNDARY && boundary <= after {
             // The queued track is now audible: its position restarts at the boundary.
             engine.boundary_at.store(NO_BOUNDARY, Ordering::Release);
+            engine.pending_boundary.store(false, Ordering::Release);
             let start = engine.boundary_start_frame.load(Ordering::Acquire);
             engine
                 .submitted_position
@@ -1597,6 +1828,139 @@ pub unsafe extern "C" fn camel_engine_render_v1(
             }
             ENGINE_E_PANIC
         }
+    }
+}
+
+// The enabled bands of `count` V1 bands at `bands`, or the reason they cannot be read.
+unsafe fn eq_bands(bands: *const CamelEqBandV1, count: u32) -> Result<Vec<eq::Band>, i32> {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    if bands.is_null() {
+        return Err(ENGINE_E_INVALID_ARGUMENT);
+    }
+    let mut out = Vec::new();
+    for band in std::slice::from_raw_parts(bands, count as usize) {
+        if band.abi_version != ABI_VERSION {
+            return Err(ENGINE_E_ABI_MISMATCH);
+        }
+        if band.struct_size < std::mem::size_of::<CamelEqBandV1>() as u32 {
+            return Err(ENGINE_E_STRUCT_SIZE);
+        }
+        if band.enabled != 0 {
+            out.push(eq::Band {
+                kind: band.kind,
+                channels: band.channels,
+                slope: band.slope,
+                frequency: band.frequency_hz,
+                gain_db: band.gain_db,
+                q: band.q,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// # Safety
+/// `engine` must be live and `bands` must point to `count` readable V1 bands (any pointer when `count` is 0).
+///
+/// Sets the EQ: any number of bands, none to turn it off. Bands that cannot change the signal are skipped, and an EQ
+/// left without any is bypassed, keeping playback bit-perfect. The change crossfades and is heard within the DSP lead.
+pub unsafe extern "C" fn camel_engine_set_eq_v1(
+    engine: *mut CamelEngine,
+    bands: *const CamelEqBandV1,
+    count: u32,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        match eq_bands(bands, count) {
+            Ok(bands) => {
+                (&*engine).stage.lock().unwrap().eq.set(&bands);
+                ENGINE_OK
+            }
+            Err(status) => status,
+        }
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `engine` must be live and `clipped` writable.
+///
+/// The samples the EQ has sent above full scale since the engine was created; the final quantization clips them.
+pub unsafe extern "C" fn camel_engine_get_eq_clipped_v1(
+    engine: *mut CamelEngine,
+    clipped: *mut u64,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || clipped.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        *clipped = (&*engine).stage.lock().unwrap().eq.clipped();
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `bands` must point to `count` readable V1 bands; `frequencies`, `left_db` and `right_db` to `points` values each
+/// (any pointers when `points` is 0); `summary` to a writable V1 summary.
+///
+/// Analyzes an EQ setting at `rate_hz` without an engine, for the response curve: the level each channel gets at
+/// each frequency (preamp included), whether the setting changes the signal and the preamp it applies.
+pub unsafe extern "C" fn camel_eq_analyze_v1(
+    bands: *const CamelEqBandV1,
+    count: u32,
+    rate_hz: u32,
+    frequencies: *const f64,
+    points: u32,
+    left_db: *mut f64,
+    right_db: *mut f64,
+    summary: *mut CamelEqSummaryV1,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if summary.is_null()
+            || rate_hz == 0
+            || (points > 0 && (frequencies.is_null() || left_db.is_null() || right_db.is_null()))
+        {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let summary = &mut *summary;
+        if summary.abi_version != ABI_VERSION {
+            return ENGINE_E_ABI_MISMATCH;
+        }
+        if summary.struct_size < std::mem::size_of::<CamelEqSummaryV1>() as u32 {
+            return ENGINE_E_STRUCT_SIZE;
+        }
+        let bands = match eq_bands(bands, count) {
+            Ok(bands) => bands,
+            Err(status) => return status,
+        };
+        let rate = f64::from(rate_hz);
+        let preamp = eq::preamp_db(&bands, rate, 2);
+        summary.active = u32::from(eq::acts(&bands, rate));
+        summary.reserved = 0;
+        summary.preamp_db = preamp;
+        let points = points as usize;
+        if points > 0 {
+            let frequencies = std::slice::from_raw_parts(frequencies, points);
+            let left = std::slice::from_raw_parts_mut(left_db, points);
+            let right = std::slice::from_raw_parts_mut(right_db, points);
+            for (i, &f) in frequencies.iter().enumerate() {
+                left[i] = eq::response_db(&bands, rate, 0, f) + preamp;
+                right[i] = eq::response_db(&bands, rate, 1, f) + preamp;
+            }
+        }
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
     }
 }
 
@@ -1973,6 +2337,108 @@ mod tests {
         }
     }
 
+    fn eq_band(kind: u32, frequency_hz: f64, gain_db: f64, enabled: bool) -> CamelEqBandV1 {
+        CamelEqBandV1 {
+            struct_size: std::mem::size_of::<CamelEqBandV1>() as u32,
+            abi_version: ABI_VERSION,
+            kind,
+            channels: eq::CHANNELS_ALL,
+            slope: 12,
+            enabled: u32::from(enabled),
+            frequency_hz,
+            gain_db,
+            q: 0.71,
+        }
+    }
+
+    // The mock track played through a 24-bit 48 kHz device with `bands` as the EQ, as 32-bit containers.
+    fn play_with_eq(bands: &[CamelEqBandV1]) -> Vec<i32> {
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
+        cfg.format.rate_hz = 48_000;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(
+            unsafe { camel_engine_set_eq_v1(engine, bands.as_ptr(), bands.len() as u32) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source(engine), ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        prefill_until_end(engine);
+        let mut output = [0u8; 32];
+        let request = render_request(4, &mut output);
+        let mut result = render_result();
+        unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+        assert_eq!(result.units_rendered, 4);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        output
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| i32::from_le_bytes(*b) >> 8)
+            .collect()
+    }
+
+    #[test]
+    fn an_eq_that_is_off_or_flat_keeps_playback_bit_perfect() {
+        // The 16-bit mock samples zero-padded into 24 bits, untouched.
+        let exact = vec![256, -256, 512, -512, 768, -768, 1024, -1024];
+        assert_eq!(play_with_eq(&[]), exact);
+        assert_eq!(
+            play_with_eq(&[
+                eq_band(eq::KIND_PEAKING, 1000.0, 0.0, true),
+                eq_band(eq::KIND_LOW_SHELF, 100.0, 9.0, false),
+                eq_band(eq::KIND_HIGH_SHELF, 30_000.0, 6.0, true), // above Nyquist at 48 kHz
+            ]),
+            exact
+        );
+    }
+
+    #[test]
+    fn an_acting_eq_processes_at_the_device_depth() {
+        let processed = play_with_eq(&[eq_band(eq::KIND_HIGH_SHELF, 1000.0, -6.0, true)]);
+        assert_ne!(
+            processed,
+            vec![256, -256, 512, -512, 768, -768, 1024, -1024]
+        );
+        // Quantized once at 24 bits, not at the source's 16.
+        assert!(processed.iter().any(|s| s % 256 != 0), "{processed:?}");
+        let mut summary = CamelEqSummaryV1 {
+            struct_size: std::mem::size_of::<CamelEqSummaryV1>() as u32,
+            abi_version: ABI_VERSION,
+            active: 0,
+            reserved: 0,
+            preamp_db: 1.0,
+        };
+        let band = [eq_band(eq::KIND_PEAKING, 1000.0, 6.0, true)];
+        let frequencies = [1000.0, 20.0];
+        let (mut left, mut right) = ([0.0; 2], [0.0; 2]);
+        assert_eq!(
+            unsafe {
+                camel_eq_analyze_v1(
+                    band.as_ptr(),
+                    1,
+                    48_000,
+                    frequencies.as_ptr(),
+                    2,
+                    left.as_mut_ptr(),
+                    right.as_mut_ptr(),
+                    &mut summary,
+                )
+            },
+            ENGINE_OK
+        );
+        assert_eq!(summary.active, 1);
+        assert!((summary.preamp_db + 6.0).abs() < 1e-6);
+        // The boost is cancelled by the preamp at its centre, and the rest of the range sits 6 dB lower.
+        assert!(left[0].abs() < 1e-6 && (right[1] + 6.0).abs() < 0.01);
+    }
+
     #[test]
     fn queued_track_follows_without_a_gap_and_restarts_track_position() {
         let engine = mock_engine_at_48k();
@@ -2220,6 +2686,9 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelEngineStateV1>(), 152);
         assert_eq!(std::mem::size_of::<CamelFlacIntegrityV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelEngineTimelineV1>(), 88);
+        assert_eq!(std::mem::size_of::<CamelEqBandV1>(), 48);
+        assert_eq!(std::mem::size_of::<CamelEqSummaryV1>(), 24);
+        assert_eq!(std::mem::offset_of!(CamelEqBandV1, frequency_hz), 24);
         assert_eq!(std::mem::offset_of!(CamelAudioFormatV1, channel_mask), 32);
         assert_eq!(std::mem::offset_of!(CamelEngineConfigV1, format), 16);
         assert_eq!(std::mem::offset_of!(CamelCommandStampV1, command_id), 8);
@@ -2878,27 +3347,33 @@ mod tests {
     }
 
     #[test]
-    fn ring_holds_the_prebuffer_within_the_memory_limit() {
+    fn decoded_ring_holds_the_prebuffer_within_the_memory_limit() {
         let pcm = AudioFormat::from_abi(&format(AUDIO_PCM, SAMPLE_S24_LE, 24, 24)).unwrap();
+        // Two channels of 32-bit sample words per frame.
+        assert_eq!(source_ring_capacity(&pcm, 96_000, 0), Some(96_000 * 10 * 8));
         assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000, 0),
-            Some(96_000 * 10 * 6)
+            source_ring_capacity(&pcm, 96_000, 30_000),
+            Some(96_000 * 30 * 8)
+        );
+        assert_eq!(source_ring_capacity(&pcm, 96_000, 1_000), Some(96_000 * 8));
+        assert_eq!(
+            source_ring_capacity(&pcm, 768_000 * 4, 0),
+            Some(MAX_RING_BYTES as usize)
         );
         assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000, 30_000),
-            Some(96_000 * 30 * 6)
+            source_ring_capacity(&pcm, 1, 0),
+            Some((MAX_PREFILL_FRAMES * MAX_SOURCE_FRAME_BYTES) as usize)
         );
+    }
+
+    #[test]
+    fn device_ring_holds_the_dsp_lead_and_at_least_one_long_period() {
+        let pcm = AudioFormat::from_abi(&format(AUDIO_PCM, SAMPLE_S24_LE, 24, 24)).unwrap();
+        // 250 ms of 6-byte frames at 96 kHz; a 44.1 kHz device still holds 8192 frames.
+        assert_eq!(device_ring_capacity(&pcm, 96_000), Some(24_000 * 6));
         assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 96_000, 1_000),
-            Some(96_000 * 6)
-        );
-        assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 768_000 * 4, 0),
-            Some((MAX_RING_BYTES - MAX_RING_BYTES % (8 * 6)) as usize)
-        );
-        assert_eq!(
-            ring_capacity(&pcm, MAX_RENDER_UNITS, 1, 0),
-            Some(MAX_RENDER_UNITS as usize * 6)
+            device_ring_capacity(&pcm, 22_050),
+            Some(MIN_DEVICE_RING_FRAMES as usize * 6)
         );
     }
 

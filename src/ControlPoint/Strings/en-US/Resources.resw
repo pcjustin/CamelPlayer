@@ -504,4 +504,48 @@
   <data name="Repair_DetailsTitle" xml:space="preserve"><value>Damaged or missing program files</value></data>
   <data name="Repair_Missing" xml:space="preserve"><value>Missing</value></data>
   <data name="Repair_Damaged" xml:space="preserve"><value>Damaged</value></data>
+  <data name="Settings_Dsp.Text" xml:space="preserve"><value>DSP</value></data>
+  <data name="Settings_Eq.Header" xml:space="preserve"><value>Parametric EQ</value></data>
+  <data name="Settings_Eq.OnContent" xml:space="preserve"><value>Apply the EQ to playback</value></data>
+  <data name="Settings_Eq.OffContent" xml:space="preserve"><value>Apply the EQ to playback</value></data>
+  <data name="Settings_EqPreset.Header" xml:space="preserve"><value>Preset</value></data>
+  <data name="Settings_EqPreset.PlaceholderText" xml:space="preserve"><value>Unsaved</value></data>
+  <data name="Settings_EqSavePreset.Content" xml:space="preserve"><value>Save as preset…</value></data>
+  <data name="Settings_EqDeletePreset.Content" xml:space="preserve"><value>Delete preset</value></data>
+  <data name="Settings_EqImport.Content" xml:space="preserve"><value>Import…</value></data>
+  <data name="Settings_EqReset.Content" xml:space="preserve"><value>Reset</value></data>
+  <data name="Settings_EqExport.Content" xml:space="preserve"><value>Export…</value></data>
+  <data name="Settings_EqAddBand.Content" xml:space="preserve"><value>Add band</value></data>
+  <data name="Settings_EqNote.Text" xml:space="preserve"><value>Drag a numbered point to change its band's frequency and gain; the mouse wheel over a point changes its Q. The preamp is lowered automatically so boosts do not clip. While the EQ is off or every band is flat, playback stays bit-perfect. Import reads Equalizer APO configurations and AutoEq ParametricEQ.txt files.</value></data>
+  <data name="Eq_Button.ToolTipService.ToolTip" xml:space="preserve"><value>Equalizer</value></data>
+  <data name="Eq_Button.AutomationProperties.Name" xml:space="preserve"><value>Equalizer</value></data>
+  <data name="Eq_Kind_Peaking" xml:space="preserve"><value>Peaking</value></data>
+  <data name="Eq_Kind_LowShelf" xml:space="preserve"><value>Low shelf</value></data>
+  <data name="Eq_Kind_HighShelf" xml:space="preserve"><value>High shelf</value></data>
+  <data name="Eq_Kind_LowPass" xml:space="preserve"><value>Low pass</value></data>
+  <data name="Eq_Kind_HighPass" xml:space="preserve"><value>High pass</value></data>
+  <data name="Eq_Kind_BandPass" xml:space="preserve"><value>Band pass</value></data>
+  <data name="Eq_Kind_Notch" xml:space="preserve"><value>Notch</value></data>
+  <data name="Eq_Kind_AllPass" xml:space="preserve"><value>All pass</value></data>
+  <data name="Eq_Channels_All" xml:space="preserve"><value>Both</value></data>
+  <data name="Eq_Channels_Left" xml:space="preserve"><value>Left</value></data>
+  <data name="Eq_Channels_Right" xml:space="preserve"><value>Right</value></data>
+  <data name="Eq_Column_Type" xml:space="preserve"><value>Type</value></data>
+  <data name="Eq_Column_Channels" xml:space="preserve"><value>Channels</value></data>
+  <data name="Eq_Column_Frequency" xml:space="preserve"><value>Frequency (Hz)</value></data>
+  <data name="Eq_Column_Gain" xml:space="preserve"><value>Gain (dB)</value></data>
+  <data name="Eq_Column_Q" xml:space="preserve"><value>Q</value></data>
+  <data name="Eq_Column_Slope" xml:space="preserve"><value>Slope (/oct)</value></data>
+  <data name="Eq_RemoveBand" xml:space="preserve"><value>Remove band</value></data>
+  <data name="Eq_Off" xml:space="preserve"><value>The EQ is off.</value></data>
+  <data name="Eq_Flat" xml:space="preserve"><value>Every band is flat, so the signal passes unchanged.</value></data>
+  <data name="Eq_Headroom" xml:space="preserve"><value>Automatic preamp: −{0} dB, so boosts do not clip.</value></data>
+  <data name="Eq_SaveTitle" xml:space="preserve"><value>Save EQ preset</value></data>
+  <data name="Eq_PresetName" xml:space="preserve"><value>Name</value></data>
+  <data name="Eq_Save" xml:space="preserve"><value>Save</value></data>
+  <data name="Eq_ImportTitle" xml:space="preserve"><value>Import EQ</value></data>
+  <data name="Eq_ImportFailed" xml:space="preserve"><value>The file has no filters CamelPlayer can read. Choose an Equalizer APO configuration or an AutoEq ParametricEQ.txt file.</value></data>
+  <data name="Eq_MenuOn" xml:space="preserve"><value>EQ on</value></data>
+  <data name="Eq_MenuSettings" xml:space="preserve"><value>EQ settings…</value></data>
+  <data name="SignalPath_Eq" xml:space="preserve"><value>parametric EQ</value></data>
 </root>

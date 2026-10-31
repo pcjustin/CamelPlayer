@@ -208,6 +208,40 @@ typedef struct CamelEngineTimelineV1 {
     uint32_t reserved2;
 } CamelEngineTimelineV1;
 
+// One parametric EQ band (docs/Plan.md §5.9).
+enum {
+    CAMEL_EQ_PEAKING = 1,
+    CAMEL_EQ_LOW_SHELF = 2,
+    CAMEL_EQ_HIGH_SHELF = 3,
+    CAMEL_EQ_LOW_PASS = 4,
+    CAMEL_EQ_HIGH_PASS = 5,
+    CAMEL_EQ_BAND_PASS = 6,
+    CAMEL_EQ_NOTCH = 7,
+    CAMEL_EQ_ALL_PASS = 8,
+};
+enum { CAMEL_EQ_CHANNELS_ALL = 0, CAMEL_EQ_CHANNELS_LEFT = 1, CAMEL_EQ_CHANNELS_RIGHT = 2 };
+
+typedef struct CamelEqBandV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t kind;
+    uint32_t channels;
+    uint32_t slope; // low- and high-pass dB per octave, 6 to 48 in steps of 6; 12 uses q
+    uint32_t enabled;
+    double frequency_hz;
+    double gain_db;
+    double q;
+} CamelEqBandV1;
+
+// What an EQ setting does at a rate: whether it changes the signal, and its preamp (0 dB or less).
+typedef struct CamelEqSummaryV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t active;
+    uint32_t reserved;
+    double preamp_db;
+} CamelEqSummaryV1;
+
 typedef struct CamelFlacIntegrityV1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -243,6 +277,16 @@ CamelEngineStatus camel_engine_get_timeline_v1(CamelEngine* engine, CamelEngineT
 CamelEngineStatus camel_engine_report_audible_position_v1(CamelEngine* engine, const CamelCommandStampV1* command,
                                                           uint64_t audible_frame);
 CamelEngineStatus camel_engine_prefill_v1(CamelEngine* engine, uint64_t frame_limit, uint64_t* frames_prefilled);
+// The DSP stage: decoded frames to device bytes until the short device ring is full; a worker of its own calls it.
+CamelEngineStatus camel_engine_process_v1(CamelEngine* engine, uint64_t* frames_processed);
+// Any number of bands, none to turn the EQ off; heard within the DSP lead, crossfaded. Bands that cannot change the
+// signal are skipped, and an EQ without any keeps playback bit-perfect.
+CamelEngineStatus camel_engine_set_eq_v1(CamelEngine* engine, const CamelEqBandV1* bands, uint32_t count);
+// Samples the EQ sent above full scale since the engine was created.
+CamelEngineStatus camel_engine_get_eq_clipped_v1(CamelEngine* engine, uint64_t* clipped);
+// Without an engine: each channel's level at each frequency (preamp included), whether the setting acts, its preamp.
+CamelEngineStatus camel_eq_analyze_v1(const CamelEqBandV1* bands, uint32_t count, uint32_t rate_hz, const double* frequencies,
+                                      uint32_t points, double* left_db, double* right_db, CamelEqSummaryV1* summary);
 CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
                                                uint64_t* frames_read);
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,

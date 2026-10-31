@@ -65,6 +65,7 @@ struct SettingsDto {
     bool folderTree = false;
     std::string skippedVersion;
     HotkeySettings hotkeys;
+    EqSettings eq;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };

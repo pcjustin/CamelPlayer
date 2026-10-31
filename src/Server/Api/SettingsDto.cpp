@@ -28,6 +28,7 @@ SettingsDto settingsDto(const Settings& s) {
             s.folderTree,
             s.skippedVersion,
             s.hotkeys,
+            s.eq,
             toUtf8(s.lastFile)};
 }
 
@@ -52,6 +53,7 @@ Settings nativeSettings(const SettingsDto& s) {
             s.folderTree,
             s.skippedVersion,
             s.hotkeys,
+            s.eq,
             toWide(s.lastFileUtf8)};
 }
 

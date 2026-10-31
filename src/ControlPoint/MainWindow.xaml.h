@@ -13,6 +13,7 @@
 #include "TrayIcon.h"
 #include "GlobalHotkeys.h"
 #include "MediaControls.h"
+#include "EqEditor.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -82,6 +83,16 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnFolderTreeToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqPresetChanged(Windows::Foundation::IInspectable const&,
+                           Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+    winrt::fire_and_forget OnEqSavePresetClick(Windows::Foundation::IInspectable const&,
+                                               Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqDeletePresetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqImportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqExportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnEqMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnUpdateInstallClick(Windows::Foundation::IInspectable const&,
                                                 Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -101,6 +112,11 @@ struct MainWindow : MainWindowT<MainWindow> {
 
 private:
     void populateSettings(); // fills every control from settings_
+    // The EQ (docs/Plan.md §5.9): the DSP card from settings_.eq, and its changes applied. A dragged point applies at
+    // most every 100 ms and is saved when released.
+    void showEq();
+    void eqChanged(bool final);
+    uint32_t eqRate() const; // the playing output rate, else 48 kHz
     void populateDeviceLists(const camel::server::DeviceCatalog& devices);
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format that has integrated decoders.
@@ -158,6 +174,8 @@ private:
     std::vector<camel::server::LibraryRootInfo> roots_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer uiTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
+    Microsoft::UI::Dispatching::DispatcherQueueTimer eqTimer_{nullptr};
+    std::unique_ptr<ui::EqEditor> eqEditor_;
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;

@@ -221,9 +221,16 @@ DeviceFormat deviceFormatFrom(const json& j) {
 }
 
 json toJson(const OutputPlan& p) {
-    return {{"format", toJson(p.format)},      {"duplicate", p.duplicate}, {"downmix", p.downmix},
-            {"resample", p.resample},          {"widen", p.widen},         {"reduce", p.reduce},
-            {"dsd", nameOf(p.dsd, kDsdPaths)}, {"shared", p.shared},       {"state", nameOf(p.state, kPipelineStates)}};
+    return {{"format", toJson(p.format)},
+            {"duplicate", p.duplicate},
+            {"downmix", p.downmix},
+            {"resample", p.resample},
+            {"widen", p.widen},
+            {"reduce", p.reduce},
+            {"dsd", nameOf(p.dsd, kDsdPaths)},
+            {"shared", p.shared},
+            {"eq", p.eq},
+            {"state", nameOf(p.state, kPipelineStates)}};
 }
 
 OutputPlan planFrom(const json& j) {
@@ -236,6 +243,7 @@ OutputPlan planFrom(const json& j) {
     p.reduce = value<bool>(j, "reduce");
     p.dsd = enumFrom(field(j, "dsd"), kDsdPaths, "DSD path");
     p.shared = value<bool>(j, "shared");
+    p.eq = value<bool>(j, "eq");
     p.state = enumFrom(field(j, "state"), kPipelineStates, "pipeline state");
     return p;
 }

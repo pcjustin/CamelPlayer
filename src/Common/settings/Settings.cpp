@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <shlobj.h>
 
+#include <algorithm>
 #include <fstream>
 #include <cmath>
 #include <nlohmann/json.hpp>
@@ -151,6 +152,60 @@ static uint32_t fixedRateFrom(double rate) {
     return 0;
 }
 
+static constexpr const char* kEqKindIds[] = {"peaking",  "lowShelf", "highShelf", "lowPass",
+                                             "highPass", "bandPass", "notch",     "allPass"};
+static constexpr const char* kEqChannelIds[] = {"all", "left", "right"};
+
+std::vector<EqBand> defaultEqBands() {
+    return {{EqKind::LowShelf, EqChannels::All, 12, 100.0},
+            {EqKind::Peaking, EqChannels::All, 12, 400.0},
+            {EqKind::Peaking, EqChannels::All, 12, 1000.0},
+            {EqKind::Peaking, EqChannels::All, 12, 4000.0},
+            {EqKind::HighShelf, EqChannels::All, 12, 10000.0}};
+}
+
+static json eqBandsJson(const std::vector<EqBand>& bands) {
+    json out = json::array();
+    for (const auto& b : bands)
+        out.push_back({{"type", kEqKindIds[int(b.kind) - 1]},
+                       {"channels", kEqChannelIds[int(b.channels)]},
+                       {"slope", b.slope},
+                       {"frequency", b.frequencyHz},
+                       {"gain", b.gainDb},
+                       {"q", b.q},
+                       {"enabled", b.enabled}});
+    return out;
+}
+
+// Bands that cannot be read are dropped; `fallback` stands in for a missing or unreadable list.
+static std::vector<EqBand> eqBandsFrom(const json& list, const std::vector<EqBand>& fallback) {
+    if (!list.is_array()) return fallback;
+    std::vector<EqBand> bands;
+    for (const auto& item : list) {
+        if (!item.is_object()) continue;
+        EqBand band;
+        const auto type = item.value("type", std::string());
+        const auto kind = std::ranges::find(kEqKindIds, type);
+        if (kind == std::end(kEqKindIds)) continue;
+        band.kind = EqKind(kind - std::begin(kEqKindIds) + 1);
+        const auto channels = std::ranges::find(kEqChannelIds, item.value("channels", std::string("all")));
+        band.channels = channels == std::end(kEqChannelIds) ? EqChannels::All : EqChannels(channels - std::begin(kEqChannelIds));
+        const auto number = [&](const char* key, double fallbackValue, double minimum, double maximum) {
+            if (!item.contains(key) || !item[key].is_number()) return fallbackValue;
+            const double value = item[key].get<double>();
+            return std::isfinite(value) && value >= minimum && value <= maximum ? value : fallbackValue;
+        };
+        const double slope = number("slope", 12, 6, 48);
+        band.slope = std::fmod(slope, 6.0) == 0.0 ? uint32_t(slope) : 12;
+        band.frequencyHz = number("frequency", 1000.0, 1.0, 1e6);
+        band.gainDb = number("gain", 0.0, -60.0, 60.0);
+        band.q = number("q", 0.71, 0.01, 100.0);
+        band.enabled = !item.contains("enabled") || !item["enabled"].is_boolean() || item["enabled"].get<bool>();
+        bands.push_back(band);
+    }
+    return bands;
+}
+
 static json timingJson(const PlaybackTiming& t) {
     return {{"predecodeSeconds", t.predecodeSeconds},
             {"formatChangeSilenceMs", t.formatChangeSilenceMs},
@@ -211,6 +266,9 @@ std::string toJson(const Settings& s) {
     j["hotkeys"] = {{"playPause", {s.hotkeys.playPause.modifiers, s.hotkeys.playPause.key}},
                     {"previous", {s.hotkeys.previous.modifiers, s.hotkeys.previous.key}},
                     {"next", {s.hotkeys.next.modifiers, s.hotkeys.next.key}}};
+    json presets = json::array();
+    for (const auto& p : s.eq.presets) presets.push_back({{"name", p.name}, {"bands", eqBandsJson(p.bands)}});
+    j["eq"] = {{"enabled", s.eq.enabled}, {"bands", eqBandsJson(s.eq.bands)}, {"preset", s.eq.preset}, {"presets", presets}};
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
@@ -329,6 +387,17 @@ Settings fromJson(const std::string& text) {
         s.hotkeys.previous = hotkey("previous", defaults.previous);
         s.hotkeys.next = hotkey("next", defaults.next);
     }
+    if (j.contains("eq") && j["eq"].is_object()) {
+        const json& e = j["eq"];
+        s.eq.enabled = boolean(e, "enabled", false);
+        s.eq.bands = eqBandsFrom(e.contains("bands") ? e["bands"] : json(), defaultEqBands());
+        s.eq.preset = str(e, "preset", "");
+        if (e.contains("presets") && e["presets"].is_array())
+            for (const auto& p : e["presets"])
+                if (p.is_object() && p.contains("name") && p["name"].is_string() && !p["name"].get<std::string>().empty())
+                    s.eq.presets.push_back(
+                        {p["name"].get<std::string>(), eqBandsFrom(p.contains("bands") ? p["bands"] : json(), {})});
+    }
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {
         const json& w = j["wasapi"];
@@ -407,6 +476,7 @@ Settings resetPlayback(const Settings& s) {
     reset.artistPictures = s.artistPictures;
     reset.folderTree = s.folderTree;
     reset.skippedVersion = s.skippedVersion;
+    reset.eq.presets = s.eq.presets;
     reset.lastFile = s.lastFile;
     return reset;
 }

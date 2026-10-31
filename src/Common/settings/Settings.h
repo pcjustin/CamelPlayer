@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "Common/AudioFormat.h"
 #include "Common/AudioTypes.h"
@@ -141,6 +142,41 @@ struct HotkeySettings {
     bool operator==(const HotkeySettings&) const = default;
 };
 
+// A parametric EQ band (docs/Plan.md §5.9).
+enum class EqKind : uint8_t { Peaking = 1, LowShelf, HighShelf, LowPass, HighPass, BandPass, Notch, AllPass };
+enum class EqChannels : uint8_t { All, Left, Right };
+
+struct EqBand {
+    EqKind kind = EqKind::Peaking;
+    EqChannels channels = EqChannels::All;
+    uint32_t slope = 12; // low- and high-pass dB per octave, 6 to 48 in steps of 6; 12 uses q
+    double frequencyHz = 1000.0;
+    double gainDb = 0.0;
+    double q = 0.71;
+    bool enabled = true;
+    bool operator==(const EqBand&) const = default;
+};
+
+struct EqPreset {
+    std::string name;
+    std::vector<EqBand> bands;
+    bool operator==(const EqPreset&) const = default;
+};
+
+// The 5 flat bands a new EQ starts with: low shelf 100 Hz; peaking 400 Hz, 1 kHz and 4 kHz; high shelf 10 kHz.
+std::vector<EqBand> defaultEqBands();
+
+// One global EQ (docs/Plan.md §5.9), off by default. The Engine takes any number of bands; the UI adds up to
+// kMaxUiBands for now.
+struct EqSettings {
+    static constexpr size_t kMaxUiBands = 10;
+    bool enabled = false;
+    std::vector<EqBand> bands = defaultEqBands();
+    std::string preset; // the saved preset last chosen, "" for none
+    std::vector<EqPreset> presets;
+    bool operator==(const EqSettings&) const = default;
+};
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -167,12 +203,13 @@ struct Settings {
     bool folderTree = false;    // the Folders page as one tree, as in foobar2000 (made for a friend of the user)
     std::string skippedVersion; // the release the automatic check no longer offers
     HotkeySettings hotkeys;
+    EqSettings eq;
     std::wstring lastFile;
 };
 
-// Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion
-// and decoders. Interface: language, close action, the tray notice, the first-run guide, the hotkeys, the automatic
-// update check, the online artist pictures and the folder tree. Each keeps the other group.
+// Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
+// decoders and the EQ, whose saved presets stay. Interface: language, close action, the tray notice, the first-run guide, the
+// hotkeys, the automatic update check, the online artist pictures and the folder tree. Each keeps the other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 
