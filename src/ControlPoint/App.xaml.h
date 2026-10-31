@@ -6,6 +6,7 @@
 
 #include "App.xaml.g.h"
 #include "Server/Api/ServerApi.h"
+#include "Common/util/CrashDump.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -16,6 +17,7 @@ struct App : AppT<App> {
 private:
     std::shared_ptr<camel::server::IServer> server_;
     Microsoft::UI::Xaml::Window window_{nullptr};
+    std::optional<camel::HangWatch> hangWatch_;
 };
 
 } // namespace winrt::CamelPlayer::implementation

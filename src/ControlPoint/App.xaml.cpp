@@ -26,6 +26,9 @@ App::App(std::shared_ptr<camel::server::IServer> server) : server_(std::move(ser
 void App::OnLaunched(LaunchActivatedEventArgs const&) {
     window_ = make<MainWindow>(std::move(server_));
     window_.Activate();
+    hangWatch_.emplace([queue = window_.DispatcherQueue()](
+                           std::function<void()> ping) { return queue.TryEnqueue([ping = std::move(ping)] { ping(); }); },
+                       std::chrono::seconds(10));
 }
 
 } // namespace winrt::CamelPlayer::implementation

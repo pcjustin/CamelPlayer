@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <charconv>
+#include <chrono>
 #include <cwctype>
 #include <cstdlib>
 #include <cstring>
@@ -867,6 +868,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     for (const auto& folder : folders)
         if (contains(path, folder) && folder != path) subtrees.push_back(folder);
     const bool partial = !subtrees.empty();
+    const auto started = std::chrono::steady_clock::now();
+    const auto seconds = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(); };
+    if (!partial) log::info("library: scanning %s", key(path).c_str());
     // How the root reads on disk, for the folder pages and Settings; the scan is reading this storage anyway.
     const auto display = partial ? std::string{} : libraryDisplayPath(key(path));
     const auto rootName = toUtf8(Path(toWide(display)).filename().wstring());
@@ -1106,6 +1110,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         report.diagnostics.push_back("root became unavailable (" + std::to_string(report.rootError) + "): " + key(path));
     }
     report.complete = complete && !token.cancelled() && report.online;
+    if (!partial) log::info("library: %zu files read in %.1f s%s", report.seen, seconds(), report.complete ? "" : ", incomplete");
     std::lock_guard crossRoot(store_.scanMutex_);
     finishing = true;
     ++store_.scanFinishing_;
@@ -1156,6 +1161,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         store_
             .write([&](sqlite::Database& db) {
                 if (token.cancelled()) return;
+                log::info("library: rebuilding albums and names");
                 rebuildAlbums(db, root);
                 // Names learned late in the scan, and names gone with removed files, can change how earlier credits split.
                 deriveLibraryNames(db, loadLibraryNames(db));
@@ -1163,6 +1169,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             })
             .get();
     report.complete = report.complete && !token.cancelled();
+    if (!partial) log::info("library: scan finished in %.1f s", seconds());
     return report;
 }
 
