@@ -934,8 +934,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     std::optional<LibraryNameSplitter> names;
     // Writes run in submission order on the store's writer; the dispatcher waits only when several are outstanding.
     std::deque<std::future<void>> writes;
+    // A write whose get() threw has given up its state; waiting on it again would throw out of this destructor.
     auto drainWrites = wil::scope_exit([&] {
-        for (auto& write : writes) write.wait();
+        for (auto& write : writes)
+            if (write.valid()) write.wait();
     });
     const auto submit = [&](std::function<void(sqlite::Database&)> work) {
         writes.push_back(store_.write(std::move(work)));

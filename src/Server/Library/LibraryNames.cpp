@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cwctype>
 #include <map>
-#include <stdexcept>
 #include <unordered_map>
 
 #include "Common/util/Text.h"
@@ -48,13 +47,7 @@ std::wstring_view trimmed(std::wstring_view s) {
 std::string keyOf(std::wstring_view name) {
     const auto text = trimmed(name);
     if (text.empty()) return {};
-    int count = NormalizeString(NormalizationKC, text.data(), int(text.size()), nullptr, 0);
-    if (count <= 0) throw std::runtime_error("cannot normalize a library name");
-    std::wstring folded(size_t(count), L'\0');
-    count = NormalizeString(NormalizationKC, text.data(), int(text.size()), folded.data(), count);
-    if (count <= 0) throw std::runtime_error("cannot normalize a library name");
-    folded.resize(size_t(count));
-    return toUtf8(folded);
+    return toUtf8(normalizeKc(text));
 }
 
 // Whether `word`, in lowercase ASCII, starts at s[i] in any case.

@@ -17,6 +17,9 @@ class Database;
 }
 class LibraryStore;
 
+// NFKC. What Windows will not normalize, unpaired surrogates and noncharacters such as a byte-swapped BOM left in a tag,
+// is dropped first.
+std::wstring normalizeKc(std::wstring_view text);
 std::string normalizeLibrarySearch(std::string_view text);
 // What a name sorts by: its sort tag, unless the tag is empty, only question marks or holds two in a row, which is text
 // a wrong encoding lost.

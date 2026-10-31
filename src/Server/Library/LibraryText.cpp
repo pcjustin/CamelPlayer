@@ -38,17 +38,52 @@ std::string converterConfig() {
     return toUtf8((std::filesystem::path(executable).parent_path() / L"opencc" / L"t2s.json").wstring());
 }
 
+std::wstring withoutNoncharacters(std::wstring_view text) {
+    std::wstring out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        const wchar_t c = text[i];
+        if (IS_HIGH_SURROGATE(c) && i + 1 < text.size() && IS_LOW_SURROGATE(text[i + 1])) {
+            const char32_t point = 0x10000 + ((char32_t(c) - 0xD800) << 10) + (char32_t(text[i + 1]) - 0xDC00);
+            if ((point & 0xFFFE) != 0xFFFE) out.append(text.substr(i, 2));
+            ++i;
+            continue;
+        }
+        const bool unpaired = IS_HIGH_SURROGATE(c) || IS_LOW_SURROGATE(c);
+        const bool noncharacter = (c >= 0xFDD0 && c <= 0xFDEF) || c >= 0xFFFE;
+        if (unpaired || noncharacter) continue;
+        out.push_back(c);
+    }
+    return out;
+}
+
 } // namespace
+
+std::wstring normalizeKc(std::wstring_view text) {
+    std::wstring source(text);
+    for (bool cleaned = false; !source.empty(); cleaned = true) {
+        // The first call only estimates; a too small buffer is answered with a better estimate.
+        int size = NormalizeString(NormalizationKC, source.data(), int(source.size()), nullptr, 0);
+        while (size > 0) {
+            std::wstring out(size_t(size), L'\0');
+            const int count = NormalizeString(NormalizationKC, source.data(), int(source.size()), out.data(), size);
+            if (count > 0) {
+                out.resize(size_t(count));
+                return out;
+            }
+            if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) break;
+            size = std::max(-count, size * 2);
+        }
+        if (cleaned) break;
+        source = withoutNoncharacters(source);
+    }
+    // Searching and grouping by the text as it is beats losing the track.
+    return source;
+}
 
 std::string normalizeLibrarySearch(std::string_view text) {
     if (text.empty()) return {};
-    auto wide = toWide(std::string(text));
-    int count = NormalizeString(NormalizationKC, wide.data(), int(wide.size()), nullptr, 0);
-    if (count <= 0) throw std::runtime_error("cannot normalize library Unicode");
-    std::wstring normalized(size_t(count), L'\0');
-    count = NormalizeString(NormalizationKC, wide.data(), int(wide.size()), normalized.data(), count);
-    if (count <= 0) throw std::runtime_error("cannot normalize library Unicode");
-    normalized.resize(size_t(count));
+    auto normalized = normalizeKc(toWide(std::string(text)));
     normalized = map(map(normalized, LCMAP_HIRAGANA), LCMAP_LOWERCASE);
     thread_local opencc::SimpleConverter converter(converterConfig());
     return converter.Convert(toUtf8(normalized));

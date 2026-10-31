@@ -116,6 +116,22 @@ TEST_F(LibraryScannerTest, TagValuesLoseSurroundingBlanksAndBlankValuesAreSkippe
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM track_values WHERE field='composer'"), 0);
 }
 
+TEST_F(LibraryScannerTest, TagsHoldingNoncharactersAreIndexed) {
+    const auto file = audio();
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("TITLE", TagLib::StringList(TagLib::String("Ti\xEF\xBF\xBEtle", TagLib::String::UTF8)));
+        values.insert("ARTIST", TagLib::StringList(TagLib::String("Art\xEF\xB7\x90ist", TagLib::String::UTF8)));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE title_norm='title' AND artist_norm='artist'"), 1);
+}
+
 TEST_F(LibraryScannerTest, ReadsTagsValuesFormatAndEmbeddedCoverAndSkipsUnchangedMetadata) {
     const auto file = audio();
     {
@@ -269,7 +285,7 @@ TEST_F(LibraryScannerTest, FlacMetadataDoesNotOpenAPlaybackDecoder) {
     using namespace camel::audio;
     audio();
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::atomic<int> opens = 0;
     decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
@@ -303,7 +319,8 @@ TEST_F(LibraryScannerTest, FlacMetadataSkipsLargeArtworkAndRejectsTruncatedBlock
     const auto report = scanner.scan(scanner.addRoot(dir / "music"));
     EXPECT_TRUE(report.complete);
     EXPECT_EQ(report.diagnostics.size(), 1u);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE embedded_cover=1 AND title='Large cover' AND total_frames=88200"), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE embedded_cover=1 AND title='Large cover' AND total_frames=88200"),
+              1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
 }
 
@@ -341,8 +358,10 @@ TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWith
         EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, fs::file_size(path) / 2);
         EXPECT_EQ(estimated, !header);
         const auto exact = openDecoder(DecoderKind::Mpg123, path)->info().totalFrames;
-        if (header) EXPECT_EQ(info.totalFrames, exact);
-        else EXPECT_NEAR(double(info.totalFrames), double(exact), exact * 0.02);
+        if (header)
+            EXPECT_EQ(info.totalFrames, exact);
+        else
+            EXPECT_NEAR(double(info.totalFrames), double(exact), exact * 0.02);
         EXPECT_EQ(info.sampleRate, 44100u);
         EXPECT_EQ(info.channels, 2u);
         EXPECT_EQ(info.bitsPerSample, 24u);
@@ -352,7 +371,8 @@ TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWith
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks t JOIN files f ON f.id=t.file_id "
-                           "WHERE f.path LIKE '%plain.mp3' AND t.length_estimated=1"), 1);
+                           "WHERE f.path LIKE '%plain.mp3' AND t.length_estimated=1"),
+              1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE length_estimated=1"), 1);
     const auto plain = count(store, "SELECT id FROM files WHERE path LIKE '%plain.mp3'");
     const auto revision = count(store, "SELECT value FROM library_revision WHERE id=1");
@@ -404,7 +424,9 @@ TEST_F(LibraryScannerTest, AnAllTagsRereadKeepsIdentityAndFingerprint) {
     };
     const std::string tagged = title();
     const auto file = count(store, "SELECT id FROM files WHERE kind='audio'");
-    store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Stale'; UPDATE files SET content_hash=zeroblob(32)"); })
+    store
+        .write(
+            [](sqlite::Database& db) { db.exec("UPDATE tracks SET title='Stale'; UPDATE files SET content_hash=zeroblob(32)"); })
         .get();
     ASSERT_TRUE(scanner.scan(root).complete);
     EXPECT_EQ(title(), "Stale"); // an unchanged file is not read again
@@ -461,11 +483,11 @@ TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
     ASSERT_NE(found, bytes.end());
     const auto offset = size_t(found - bytes.begin());
     ASSERT_GE(offset, 4u);
-    const uint32_t size = (uint32_t(uint8_t(bytes[offset-4])) << 24) | (uint32_t(uint8_t(bytes[offset-3])) << 16) |
-                          (uint32_t(uint8_t(bytes[offset-2])) << 8) | uint8_t(bytes[offset-1]);
+    const uint32_t size = (uint32_t(uint8_t(bytes[offset - 4])) << 24) | (uint32_t(uint8_t(bytes[offset - 3])) << 16) |
+                          (uint32_t(uint8_t(bytes[offset - 2])) << 8) | uint8_t(bytes[offset - 1]);
     ASSERT_GE(size, 8u);
     ASSERT_LE(offset - 4 + size, bytes.size());
-    std::fill(bytes.begin() + offset + 4, bytes.begin() + offset - 4 + size, 0);
+    std::fill(found + 4, found - 4 + std::ptrdiff_t(size), 0);
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output.write(bytes.data(), std::streamsize(bytes.size()));
     output.close();
@@ -479,10 +501,10 @@ TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
 TEST_F(LibraryScannerTest, CueSheetsAreIgnoredAndEachFileIsOneTrack) {
     const auto source = audio();
     std::ofstream(source.parent_path() / "disc.cue") << "FILE \"one.flac\" WAVE\n"
-                                                       "  TRACK 01 AUDIO\n"
-                                                       "    INDEX 01 00:00:00\n"
-                                                       "  TRACK 02 AUDIO\n"
-                                                       "    INDEX 01 00:01:00\n";
+                                                        "  TRACK 01 AUDIO\n"
+                                                        "    INDEX 01 00:00:00\n"
+                                                        "  TRACK 02 AUDIO\n"
+                                                        "    INDEX 01 00:01:00\n";
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
     const auto report = scanner.scan(scanner.addRoot(dir / "music"));
@@ -580,7 +602,7 @@ TEST_F(LibraryScannerTest, SlowDirectoryDoesNotBlockCompletedWorkers) {
     auto decoder = camel::audio::openDecoder(camel::audio::DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
     auto& registry = camel::audio::decoderRegistry();
     const auto id = camel::audio::decoderId(camel::audio::DecoderKind::Sndfile);
-    const auto opener = registry.find(id)->open;
+    const auto opener = registry.find(id).value().open;
     auto restore = wil::scope_exit([&] { registry.setOpener(id, opener); });
     std::promise<void> release, started;
     auto gate = release.get_future().share();
@@ -616,12 +638,15 @@ TEST_F(LibraryScannerTest, SlowFileDoesNotBlockPublishingOtherFilesInTheSameDire
     using namespace camel::audio;
     using namespace camel::audio::testaudio;
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::promise<void> started, release;
     const auto gate = release.get_future().share();
     decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
-        if (path.filename() == "slow.wav") { started.set_value(); gate.wait(); }
+        if (path.filename() == "slow.wav") {
+            started.set_value();
+            gate.wait();
+        }
         return original(path, format, bits);
     });
     const auto folder = dir / "music" / "album";
@@ -632,7 +657,9 @@ TEST_F(LibraryScannerTest, SlowFileDoesNotBlockPublishingOtherFilesInTheSameDire
     const auto root = scanner.addRoot(dir / "music");
     auto job = std::async(std::launch::async, [&] { return scanner.scan(root); });
     bool released = false;
-    auto unblock = wil::scope_exit([&] { if (!released) release.set_value(); });
+    auto unblock = wil::scope_exit([&] {
+        if (!released) release.set_value();
+    });
     EXPECT_EQ(started.get_future().wait_for(std::chrono::seconds(8)), std::future_status::ready);
     EXPECT_TRUE(waitFor([&] { return count(store) >= 500; }));
     release.set_value();
@@ -651,7 +678,7 @@ TEST_F(LibraryScannerTest, FingerprintsDeferDuringAScanAndResumeAfterItFinishes)
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::promise<void> started, release;
     const auto gate = release.get_future().share();
@@ -663,7 +690,9 @@ TEST_F(LibraryScannerTest, FingerprintsDeferDuringAScanAndResumeAfterItFinishes)
     writeWav(folder / "slow.wav", makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
     auto job = std::async(std::launch::async, [&] { return scanner.scan(root); });
     bool released = false;
-    auto unblock = wil::scope_exit([&] { if (!released) release.set_value(); });
+    auto unblock = wil::scope_exit([&] {
+        if (!released) release.set_value();
+    });
     EXPECT_EQ(started.get_future().wait_for(std::chrono::seconds(8)), std::future_status::ready);
     const auto deferred = scanner.fingerprint(root);
     EXPECT_FALSE(deferred.complete);
@@ -770,7 +799,7 @@ TEST_F(LibraryScannerTest, PeriodicScanRunsWithoutANotification) {
 TEST_F(LibraryScannerTest, AReachableRootIsOnlineBeforeItsScanFinishes) {
     using namespace camel::audio;
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::atomic<bool> release = false;
     decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
@@ -794,7 +823,7 @@ TEST_F(LibraryScannerTest, AReachableRootIsOnlineBeforeItsScanFinishes) {
 TEST_F(LibraryScannerTest, AlbumsAppearWithEachBatchOfAFirstScan) {
     using namespace camel::audio;
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::atomic<bool> release = false;
     decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
@@ -804,7 +833,8 @@ TEST_F(LibraryScannerTest, AlbumsAppearWithEachBatchOfAFirstScan) {
     const auto signal = testaudio::makeSignal({"short", 44100, 16, 2, 0.01});
     fs::create_directories(dir / "music" / "first");
     fs::create_directories(dir / "music" / "late");
-    for (int i = 0; i < 500; ++i) testaudio::writeWav(dir / "music" / "first" / (std::to_string(i) + ".wav"), signal, 44100, 16, 2);
+    for (int i = 0; i < 500; ++i)
+        testaudio::writeWav(dir / "music" / "first" / (std::to_string(i) + ".wav"), signal, 44100, 16, 2);
     testaudio::writeWav(dir / "music" / "late" / "late.wav", signal, 44100, 16, 2);
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
@@ -828,7 +858,7 @@ TEST_F(LibraryScannerTest, AlbumsAppearWithEachBatchOfAFirstScan) {
 TEST_F(LibraryScannerTest, AnotherRootIsAddedAndScannedWhileALongScanRuns) {
     using namespace camel::audio;
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::atomic<bool> release = false;
     decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
@@ -873,14 +903,15 @@ TEST_F(LibraryScannerTest, AnUnchangedTrackWithoutAnAlbumIsGroupedByTheNextScan)
 TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcurrency) {
     using namespace camel::audio;
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));
-    const auto original = decoderRegistry().find("sndfile")->open;
+    const auto original = decoderRegistry().find("sndfile").value().open;
     auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
     std::atomic<int> active = 0, maximum = 0;
     decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
         const auto workers = ++active;
         auto done = wil::scope_exit([&] { --active; });
         int previous = maximum.load();
-        while (workers > previous && !maximum.compare_exchange_weak(previous, workers)) {}
+        while (workers > previous && !maximum.compare_exchange_weak(previous, workers)) {
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(75));
         return original(path, format, bits);
     });
@@ -897,8 +928,10 @@ TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcur
         }
         maximum = 0;
         ASSERT_TRUE(scanner.scan(root).complete);
-        if (playing) EXPECT_EQ(maximum.load(), 1);
-        else EXPECT_GT(maximum.load(), 1);
+        if (playing)
+            EXPECT_EQ(maximum.load(), 1);
+        else
+            EXPECT_GT(maximum.load(), 1);
         EXPECT_LE(maximum.load(), 4);
         playing = false;
     }

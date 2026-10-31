@@ -7,6 +7,7 @@
 #include "Server/Library/LibraryStore.h"
 #include "Server/Library/LibraryBrowse.h"
 #include "TestUtil.h"
+#include "Server/Library/LibraryNames.h"
 #include "Server/Library/LibraryText.h"
 
 using namespace camel::server;
@@ -17,6 +18,27 @@ TEST(LibraryText, MatchesTraditionalSimplifiedKanaWidthAndCase) {
     EXPECT_EQ(normalizeLibrarySearch("カタカナ"), normalizeLibrarySearch("かたかな"));
     EXPECT_EQ(normalizeLibrarySearch("Café"), normalizeLibrarySearch("Cafe\xcc\x81"));
     EXPECT_TRUE(normalizeLibrarySearch("").empty());
+}
+
+TEST(LibraryText, NormalizesTextWindowsRejectsOrExpandsBeyondItsEstimate) {
+    // U+FFFE (a byte-swapped BOM left in a tag), U+FDD0 and U+2FFFF are noncharacters NormalizeString refuses.
+    EXPECT_EQ(normalizeLibrarySearch("ab\xef\xbf\xbe"
+                                     "c"),
+              normalizeLibrarySearch("abc"));
+    EXPECT_EQ(normalizeLibrarySearch("ab\xef\xb7\x90"
+                                     "c\xf0\xaf\xbf\xbf"),
+              normalizeLibrarySearch("abc"));
+    EXPECT_EQ(normalizeKc(L"a\xD800"
+                          L"b\xDC00"),
+              L"ab");
+    std::wstring squares, expanded;
+    for (wchar_t c = 0x3300; c < 0x3358; ++c) squares += c; // each square folds to up to five katakana
+    for (wchar_t c : squares) expanded += normalizeKc(std::wstring(1, c));
+    EXPECT_EQ(normalizeKc(squares), expanded);
+    EXPECT_GT(expanded.size(), squares.size() * 3);
+    EXPECT_EQ(libraryNameKey("ab\xef\xbf\xbe"
+                             "c"),
+              libraryNameKey("abc"));
 }
 
 TEST(LibraryText, SupportsStrokeAndBopomofoWithVersionedKeys) {
