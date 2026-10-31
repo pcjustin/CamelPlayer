@@ -83,6 +83,11 @@ inline uint64_t secondsToFrames(double seconds, uint32_t rate) {
     return uint64_t(std::round(frames));
 }
 
+// The DSP nodes whose order the user sets (docs/Plan.md §5.9), EQ -> crossfeed -> convolution by default.
+enum class DspNode : uint8_t { Eq = 1, Crossfeed, Convolution };
+using DspOrder = std::array<DspNode, 3>;
+inline constexpr DspOrder kDefaultDspOrder{DspNode::Eq, DspNode::Crossfeed, DspNode::Convolution};
+
 // Errors carry a category the UI can turn into a localized message, plus a technical detail string.
 enum class ErrorCode {
     FileOpen,

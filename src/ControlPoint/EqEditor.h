@@ -18,8 +18,7 @@ public:
     using Changed = std::function<void(const camel::EqSettings&, bool final)>;
 
     EqEditor(winrt::Microsoft::UI::Xaml::Controls::Canvas curve, winrt::Microsoft::UI::Xaml::Controls::StackPanel rows,
-             winrt::Microsoft::UI::Xaml::Controls::TextBlock headroom, winrt::Microsoft::UI::Xaml::Controls::Button addBand,
-             Changed changed);
+             winrt::Microsoft::UI::Xaml::Controls::Button addBand, Changed changed);
 
     // Shows `eq`, drawn at `rateHz` (the playing output rate, else 48 kHz).
     void show(const camel::EqSettings& eq, uint32_t rateHz);
@@ -48,7 +47,6 @@ private:
 
     winrt::Microsoft::UI::Xaml::Controls::Canvas curve_;
     winrt::Microsoft::UI::Xaml::Controls::StackPanel rows_;
-    winrt::Microsoft::UI::Xaml::Controls::TextBlock headroom_;
     winrt::Microsoft::UI::Xaml::Controls::Button addBand_;
     Changed changed_;
     std::vector<Row> rowControls_;

@@ -233,14 +233,51 @@ typedef struct CamelEqBandV1 {
     double q;
 } CamelEqBandV1;
 
-// What an EQ setting does at a rate: whether it changes the signal, and its preamp (0 dB or less).
-typedef struct CamelEqSummaryV1 {
+// Headphone crossfeed (bs2b): the cut-off of the feed to the other ear, 300 to 2000 Hz, and how much lower it is at
+// low frequencies, 1 to 15 dB.
+typedef struct CamelCrossfeedV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t cutoff_hz;
+    uint32_t reserved;
+    double feed_db;
+} CamelCrossfeedV1;
+
+// An impulse response at one rate: interleaved 64-bit float frames, 1 channel for both outputs, 2 for left and right,
+// or 4 for true stereo (left to left, left to right, right to left, right to right).
+typedef struct CamelImpulseResponseV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t channels;
+    uint32_t rate_hz;
+    uint64_t frames;
+    const double* samples;
+} CamelImpulseResponseV1;
+
+// A prepared impulse response, shared by every engine and analysis that uses it.
+typedef struct CamelImpulse CamelImpulse;
+
+enum { CAMEL_DSP_NODE_EQ = 1, CAMEL_DSP_NODE_CROSSFEED = 2, CAMEL_DSP_NODE_CONVOLUTION = 3 };
+
+// The DSP chain: `order` names each node once; crossfeed and convolution are off while their pointers are null.
+typedef struct CamelDspV1 {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t order[3];
+    uint32_t band_count;
+    const CamelEqBandV1* bands;
+    const CamelCrossfeedV1* crossfeed;
+    const CamelImpulse* impulse;
+} CamelDspV1;
+
+// What a DSP setting does at a rate: whether it changes the signal, and the chain's preamp (0 dB or less).
+typedef struct CamelDspSummaryV1 {
     uint32_t struct_size;
     uint32_t abi_version;
     uint32_t active;
     uint32_t reserved;
     double preamp_db;
-} CamelEqSummaryV1;
+} CamelDspSummaryV1;
 
 typedef struct CamelFlacIntegrityV1 {
     uint32_t struct_size;
@@ -279,14 +316,18 @@ CamelEngineStatus camel_engine_report_audible_position_v1(CamelEngine* engine, c
 CamelEngineStatus camel_engine_prefill_v1(CamelEngine* engine, uint64_t frame_limit, uint64_t* frames_prefilled);
 // The DSP stage: decoded frames to device bytes until the short device ring is full; a worker of its own calls it.
 CamelEngineStatus camel_engine_process_v1(CamelEngine* engine, uint64_t* frames_processed);
-// Any number of bands, none to turn the EQ off; heard within the DSP lead, crossfaded. Bands that cannot change the
-// signal are skipped, and an EQ without any keeps playback bit-perfect.
-CamelEngineStatus camel_engine_set_eq_v1(CamelEngine* engine, const CamelEqBandV1* bands, uint32_t count);
-// Samples the EQ sent above full scale since the engine was created.
-CamelEngineStatus camel_engine_get_eq_clipped_v1(CamelEngine* engine, uint64_t* clipped);
-// Without an engine: each channel's level at each frequency (preamp included), whether the setting acts, its preamp.
-CamelEngineStatus camel_eq_analyze_v1(const CamelEqBandV1* bands, uint32_t count, uint32_t rate_hz, const double* frequencies,
-                                      uint32_t points, double* left_db, double* right_db, CamelEqSummaryV1* summary);
+// Prepares an impulse response for convolution at its rate, once; release it with camel_impulse_destroy_v1.
+CamelEngineStatus camel_impulse_create_v1(const CamelImpulseResponseV1* impulse, CamelImpulse** out);
+CamelEngineStatus camel_impulse_destroy_v1(CamelImpulse* impulse);
+// The DSP chain; heard within the DSP lead, faded in. A chain with nothing that changes the signal keeps playback
+// bit-perfect. An impulse response must be at the engine's rate.
+CamelEngineStatus camel_engine_set_dsp_v1(CamelEngine* engine, const CamelDspV1* dsp);
+// Samples the chain sent above full scale since the engine was created.
+CamelEngineStatus camel_engine_get_dsp_clipped_v1(CamelEngine* engine, uint64_t* clipped);
+// Without an engine, on a stereo device: the level the EQ's bands give each channel at each frequency, whether the
+// chain acts and its preamp.
+CamelEngineStatus camel_dsp_analyze_v1(const CamelDspV1* dsp, uint32_t rate_hz, const double* frequencies, uint32_t points,
+                                       double* left_db, double* right_db, CamelDspSummaryV1* summary);
 CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
                                                uint64_t* frames_read);
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "Engine/decode/DecoderHost.h"
-#include "Engine/Equalizer.h"
+#include "Engine/Dsp.h"
 #include "Common/util/Text.h"
 
 namespace camel::audio {
@@ -162,10 +162,9 @@ RustSession::Prefill RustSession::prefill(uint64_t& frames) {
     }
 }
 
-void RustSession::setEq(const EqSettings& eq) {
-    const auto bands = engineBands(eq);
-    if (const auto status = camel_engine_set_eq_v1(engine_, bands.data(), uint32_t(bands.size())); status != CAMEL_ENGINE_OK)
-        throw engineError("EQ", status);
+void RustSession::setDsp(const DspChain& chain) {
+    const auto abi = chain.abi();
+    if (const auto status = camel_engine_set_dsp_v1(engine_, &abi); status != CAMEL_ENGINE_OK) throw engineError("DSP", status);
 }
 
 uint64_t RustSession::process() {

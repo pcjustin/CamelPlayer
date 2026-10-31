@@ -358,7 +358,7 @@ TEST_F(EngineStateTest, InactiveBackendSettingsDoNotRestartPlayback) {
     EXPECT_EQ(probe.creations, 1);
 }
 
-TEST_F(EngineStateTest, TheEqChangesThePathWithoutReopeningAndStaysBitPerfectWhileFlat) {
+TEST_F(EngineStateTest, TheDspChainChangesThePathWithoutReopeningAndStaysBitPerfectWhileFlat) {
     open();
     const auto plan = [&] { return engine->snapshot().plan.value_or(OutputPlan{}); };
     ASSERT_EQ(plan().state, PipelineState::BitPerfect);
@@ -366,15 +366,28 @@ TEST_F(EngineStateTest, TheEqChangesThePathWithoutReopeningAndStaysBitPerfectWhi
     settings.eq.enabled = true;
     engine->applySettings(settings);
     engine->waitIdle();
-    EXPECT_FALSE(plan().eq);
+    EXPECT_TRUE(plan().dsp.empty());
     EXPECT_EQ(plan().state, PipelineState::BitPerfect);
     settings.eq.bands[2].gainDb = -4.5;
     engine->applySettings(settings);
     engine->waitIdle();
-    EXPECT_TRUE(plan().eq);
+    EXPECT_EQ(plan().dsp, std::vector{DspNode::Eq});
     EXPECT_EQ(plan().state, PipelineState::Processed);
     ASSERT_EQ(pull(4096), 4096u);
+    // Crossfeed joins in the order set; the path lists both.
+    settings.crossfeed.enabled = true;
+    settings.dspOrder = {DspNode::Crossfeed, DspNode::Eq, DspNode::Convolution};
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_EQ(plan().dsp, (std::vector{DspNode::Crossfeed, DspNode::Eq}));
+    ASSERT_EQ(pull(4096), 4096u);
+    // A response that cannot be read leaves convolution off rather than stopping playback.
+    settings.convolution = {true, "C:/no such folder/room.wav"};
+    engine->applySettings(settings);
+    engine->waitIdle();
+    EXPECT_EQ(plan().dsp, (std::vector{DspNode::Crossfeed, DspNode::Eq}));
     settings.eq.enabled = false;
+    settings.crossfeed.enabled = false;
     engine->applySettings(settings);
     engine->waitIdle();
     EXPECT_EQ(plan().state, PipelineState::BitPerfect);

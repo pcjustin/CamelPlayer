@@ -148,43 +148,59 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
 }
 
 /// # Safety
-/// `engine` must be live and `bands` must point to `count` readable V1 bands.
+/// See `camel_audio_engine::camel_impulse_create_v1`.
 #[no_mangle]
-pub unsafe extern "C" fn camel_engine_set_eq_v1(
-    engine: *mut camel_audio_engine::CamelEngine,
-    bands: *const camel_audio_engine::CamelEqBandV1,
-    count: u32,
+pub unsafe extern "C" fn camel_impulse_create_v1(
+    impulse: *const camel_audio_engine::CamelImpulseResponseV1,
+    out: *mut *mut camel_audio_engine::CamelImpulse,
 ) -> i32 {
-    unsafe { camel_audio_engine::camel_engine_set_eq_v1(engine, bands, count) }
+    unsafe { camel_audio_engine::camel_impulse_create_v1(impulse, out) }
+}
+
+/// # Safety
+/// See `camel_audio_engine::camel_impulse_destroy_v1`.
+#[no_mangle]
+pub unsafe extern "C" fn camel_impulse_destroy_v1(
+    impulse: *mut camel_audio_engine::CamelImpulse,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_impulse_destroy_v1(impulse) }
+}
+
+/// # Safety
+/// See `camel_audio_engine::camel_engine_set_dsp_v1`.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_set_dsp_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    dsp: *const camel_audio_engine::CamelDspV1,
+) -> i32 {
+    unsafe { camel_audio_engine::camel_engine_set_dsp_v1(engine, dsp) }
 }
 
 /// # Safety
 /// `engine` must be live and `clipped` writable.
 #[no_mangle]
-pub unsafe extern "C" fn camel_engine_get_eq_clipped_v1(
+pub unsafe extern "C" fn camel_engine_get_dsp_clipped_v1(
     engine: *mut camel_audio_engine::CamelEngine,
     clipped: *mut u64,
 ) -> i32 {
-    unsafe { camel_audio_engine::camel_engine_get_eq_clipped_v1(engine, clipped) }
+    unsafe { camel_audio_engine::camel_engine_get_dsp_clipped_v1(engine, clipped) }
 }
 
 /// # Safety
-/// See `camel_audio_engine::camel_eq_analyze_v1`.
+/// See `camel_audio_engine::camel_dsp_analyze_v1`.
 #[no_mangle]
-pub unsafe extern "C" fn camel_eq_analyze_v1(
-    bands: *const camel_audio_engine::CamelEqBandV1,
-    count: u32,
+pub unsafe extern "C" fn camel_dsp_analyze_v1(
+    dsp: *const camel_audio_engine::CamelDspV1,
     rate_hz: u32,
     frequencies: *const f64,
     points: u32,
     left_db: *mut f64,
     right_db: *mut f64,
-    summary: *mut camel_audio_engine::CamelEqSummaryV1,
+    summary: *mut camel_audio_engine::CamelDspSummaryV1,
 ) -> i32 {
     unsafe {
-        camel_audio_engine::camel_eq_analyze_v1(
-            bands,
-            count,
+        camel_audio_engine::camel_dsp_analyze_v1(
+            dsp,
             rate_hz,
             frequencies,
             points,

@@ -5,14 +5,18 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 mod convert;
+mod convolver;
+mod crossfeed;
 mod decoder_host;
 mod dsd;
 mod dsd2pcm;
+mod dsp;
 mod eq;
+mod fft;
 mod packing;
 mod resample;
 mod ring;
@@ -207,10 +211,57 @@ pub struct CamelEqBandV1 {
     pub q: f64,
 }
 
-/// What an EQ setting does at a rate: `active` 1 when it changes the signal, and the preamp it applies (0 or less).
+/// Headphone crossfeed (bs2b): the cut-off of the feed to the other ear, 300 to 2000 Hz, and how much lower it is
+/// at low frequencies, 1 to 15 dB.
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct CamelEqSummaryV1 {
+pub struct CamelCrossfeedV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub cutoff_hz: u32,
+    pub reserved: u32,
+    pub feed_db: f64,
+}
+
+/// An impulse response at one rate: `frames` interleaved frames of `channels` 64-bit float samples, 1 channel for
+/// both outputs, 2 for left and right, or 4 for true stereo (left to left, left to right, right to left, right to
+/// right).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelImpulseResponseV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub channels: u32,
+    pub rate_hz: u32,
+    pub frames: u64,
+    pub samples: *const f64,
+}
+
+/// A prepared impulse response, shared by every engine and analysis that uses it.
+pub struct CamelImpulse(Arc<convolver::ImpulseResponse>);
+
+pub const DSP_NODE_EQ: u32 = dsp::NODE_EQ;
+pub const DSP_NODE_CROSSFEED: u32 = dsp::NODE_CROSSFEED;
+pub const DSP_NODE_CONVOLUTION: u32 = dsp::NODE_CONVOLUTION;
+
+/// The DSP chain (docs/Plan.md §5.9): `order` names each node once; `band_count` EQ bands at `bands`; crossfeed and
+/// convolution are off while their pointers are null.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelDspV1 {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub order: [u32; 3],
+    pub band_count: u32,
+    pub bands: *const CamelEqBandV1,
+    pub crossfeed: *const CamelCrossfeedV1,
+    pub impulse: *const CamelImpulse,
+}
+
+/// What a DSP setting does at a rate: `active` 1 when it changes the signal, and the chain's preamp (0 or less).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CamelDspSummaryV1 {
     pub struct_size: u32,
     pub abi_version: u32,
     pub active: u32,
@@ -486,8 +537,10 @@ struct Stage {
     segments: std::collections::VecDeque<Segment>,
     // Decoding reached the end of the last track with nothing queued.
     stream_ended: bool,
-    // Global for the device: its filters keep their state across tracks, so gapless playback stays seamless.
-    eq: eq::Equalizer,
+    // Global for the device: its nodes keep their state across tracks, so gapless playback stays seamless.
+    dsp: dsp::Dsp,
+    // Frames of the chain's tail still to play after the last track, once it is reached.
+    tail_left: Option<usize>,
 }
 
 // What queries report about the source. Decoder I/O holds `source` for its whole duration, so queries read this
@@ -533,6 +586,8 @@ impl CamelEngine {
         let mut stage = self.stage.lock().unwrap();
         stage.segments.clear();
         stage.stream_ended = false;
+        stage.dsp.reset();
+        stage.tail_left = None;
         self.source_ring.clear();
         self.ring.clear();
         self.written_frames.store(0, Ordering::Release);
@@ -553,10 +608,12 @@ impl CamelEngine {
         let Stage {
             segments,
             stream_ended,
-            eq,
+            dsp,
+            tail_left,
         } = &mut *stage;
         let mut written = 0;
         let status = loop {
+            let last = segments.len() == 1;
             let Some(segment) = segments.front_mut() else {
                 break Ok(());
             };
@@ -612,7 +669,7 @@ impl CamelEngine {
                         .map(|b| i32::from_le_bytes(*b))
                         .collect()
                 };
-                if let Err(status) = segment.converter.convert(&samples, frames as usize, eq) {
+                if let Err(status) = segment.converter.convert(&samples, frames as usize, dsp) {
                     break Err(status);
                 }
                 segment.read += frames;
@@ -621,10 +678,26 @@ impl CamelEngine {
             if segment.ended {
                 if !segment.converter.finished() {
                     // The resampler's tail belongs to this track and plays before any queued one.
-                    if let Err(status) = segment.converter.finish(eq) {
+                    if let Err(status) = segment.converter.finish(dsp) {
                         break Err(status);
                     }
                     continue;
+                }
+                if *stream_ended && last {
+                    // After the last track the chain's tail plays out, such as a convolution's reverberation.
+                    let left =
+                        *tail_left.get_or_insert(if dsp.active() { dsp.tail_frames() } else { 0 });
+                    if left > 0 {
+                        if space == 0 {
+                            break Ok(());
+                        }
+                        let frames = left.min(space as usize).min(MAX_PREFILL_FRAMES as usize);
+                        if let Err(status) = segment.converter.drain(frames, dsp) {
+                            break Err(status);
+                        }
+                        *tail_left = Some(left - frames);
+                        continue;
+                    }
                 }
                 segments.pop_front();
                 continue;
@@ -768,7 +841,8 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     stage: Mutex::new(Stage {
                         segments: std::collections::VecDeque::new(),
                         stream_ended: false,
-                        eq: eq::Equalizer::new(rate_hz, format.channel_count as usize),
+                        dsp: dsp::Dsp::new(rate_hz, format.channel_count as usize),
+                        tail_left: None,
                     }),
                     render_gate: RenderGate::default(),
                     prefill_gate: TryGate::default(),
@@ -1861,27 +1935,115 @@ unsafe fn eq_bands(bands: *const CamelEqBandV1, count: u32) -> Result<Vec<eq::Ba
     Ok(out)
 }
 
+// The DSP settings at `dsp`, or the reason they cannot be read.
+unsafe fn dsp_settings(dsp: *const CamelDspV1) -> Result<dsp::Settings, i32> {
+    if dsp.is_null() {
+        return Err(ENGINE_E_INVALID_ARGUMENT);
+    }
+    let dsp = &*dsp;
+    if dsp.abi_version != ABI_VERSION {
+        return Err(ENGINE_E_ABI_MISMATCH);
+    }
+    if dsp.struct_size < std::mem::size_of::<CamelDspV1>() as u32 {
+        return Err(ENGINE_E_STRUCT_SIZE);
+    }
+    let crossfeed = if dsp.crossfeed.is_null() {
+        None
+    } else {
+        let c = &*dsp.crossfeed;
+        if c.abi_version != ABI_VERSION {
+            return Err(ENGINE_E_ABI_MISMATCH);
+        }
+        if c.struct_size < std::mem::size_of::<CamelCrossfeedV1>() as u32 {
+            return Err(ENGINE_E_STRUCT_SIZE);
+        }
+        Some(crossfeed::Params {
+            cutoff_hz: c.cutoff_hz,
+            feed_db: c.feed_db,
+        })
+    };
+    Ok(dsp::Settings {
+        order: dsp.order,
+        bands: eq_bands(dsp.bands, dsp.band_count)?,
+        crossfeed,
+        impulse: (!dsp.impulse.is_null()).then(|| (*dsp.impulse).0.clone()),
+    })
+}
+
 /// # Safety
-/// `engine` must be live and `bands` must point to `count` readable V1 bands (any pointer when `count` is 0).
+/// `impulse` must point to a readable V1 impulse response whose samples are readable, and `out` must be writable.
 ///
-/// Sets the EQ: any number of bands, none to turn it off. Bands that cannot change the signal are skipped, and an EQ
-/// left without any is bypassed, keeping playback bit-perfect. The change crossfades and is heard within the DSP lead.
-pub unsafe extern "C" fn camel_engine_set_eq_v1(
+/// Prepares an impulse response for convolution at its rate; the work of splitting it is done here, once. The handle
+/// is released with `camel_impulse_destroy_v1`, and engines using it keep what they need.
+pub unsafe extern "C" fn camel_impulse_create_v1(
+    impulse: *const CamelImpulseResponseV1,
+    out: *mut *mut CamelImpulse,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if impulse.is_null() || out.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        *out = ptr::null_mut();
+        let ir = &*impulse;
+        if ir.abi_version != ABI_VERSION {
+            return ENGINE_E_ABI_MISMATCH;
+        }
+        if ir.struct_size < std::mem::size_of::<CamelImpulseResponseV1>() as u32 {
+            return ENGINE_E_STRUCT_SIZE;
+        }
+        let Some(values) = (ir.frames as usize).checked_mul(ir.channels as usize) else {
+            return ENGINE_E_INVALID_ARGUMENT;
+        };
+        if ir.samples.is_null() || values == 0 {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let samples = std::slice::from_raw_parts(ir.samples, values);
+        match convolver::ImpulseResponse::new(samples, ir.channels as usize, ir.rate_hz) {
+            Some(prepared) => {
+                *out = Box::into_raw(Box::new(CamelImpulse(Arc::new(prepared))));
+                ENGINE_OK
+            }
+            None => ENGINE_E_INVALID_ARGUMENT,
+        }
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
+/// # Safety
+/// `impulse` must be null or a handle from `camel_impulse_create_v1` not yet destroyed.
+pub unsafe extern "C" fn camel_impulse_destroy_v1(impulse: *mut CamelImpulse) -> i32 {
+    if !impulse.is_null() {
+        drop(Box::from_raw(impulse));
+    }
+    ENGINE_OK
+}
+
+/// # Safety
+/// `engine` must be live and `dsp` must point to a readable V1 setting whose pointers are null or readable.
+///
+/// Sets the DSP chain. Bands that cannot change the signal are skipped, and a chain left without anything that changes
+/// it is bypassed, keeping playback bit-perfect. An impulse response must be at the engine's rate. The change fades in
+/// and is heard within the DSP lead.
+pub unsafe extern "C" fn camel_engine_set_dsp_v1(
     engine: *mut CamelEngine,
-    bands: *const CamelEqBandV1,
-    count: u32,
+    dsp: *const CamelDspV1,
 ) -> i32 {
     match catch_unwind(AssertUnwindSafe(|| {
         if engine.is_null() {
             return ENGINE_E_INVALID_ARGUMENT;
         }
-        match eq_bands(bands, count) {
-            Ok(bands) => {
-                (&*engine).stage.lock().unwrap().eq.set(&bands);
-                ENGINE_OK
-            }
-            Err(status) => status,
+        let settings = match dsp_settings(dsp) {
+            Ok(settings) => settings,
+            Err(status) => return status,
+        };
+        let engine = &*engine;
+        if !settings.valid(engine.output_format.rate_hz) {
+            return ENGINE_E_INVALID_ARGUMENT;
         }
+        engine.stage.lock().unwrap().dsp.set(settings);
+        ENGINE_OK
     })) {
         Ok(status) => status,
         Err(_) => ENGINE_E_PANIC,
@@ -1891,8 +2053,9 @@ pub unsafe extern "C" fn camel_engine_set_eq_v1(
 /// # Safety
 /// `engine` must be live and `clipped` writable.
 ///
-/// The samples the EQ has sent above full scale since the engine was created; the final quantization clips them.
-pub unsafe extern "C" fn camel_engine_get_eq_clipped_v1(
+/// The samples the DSP chain has sent above full scale since the engine was created; the final quantization clips
+/// them.
+pub unsafe extern "C" fn camel_engine_get_dsp_clipped_v1(
     engine: *mut CamelEngine,
     clipped: *mut u64,
 ) -> i32 {
@@ -1900,7 +2063,7 @@ pub unsafe extern "C" fn camel_engine_get_eq_clipped_v1(
         if engine.is_null() || clipped.is_null() {
             return ENGINE_E_INVALID_ARGUMENT;
         }
-        *clipped = (&*engine).stage.lock().unwrap().eq.clipped();
+        *clipped = (&*engine).stage.lock().unwrap().dsp.clipped();
         ENGINE_OK
     })) {
         Ok(status) => status,
@@ -1909,20 +2072,19 @@ pub unsafe extern "C" fn camel_engine_get_eq_clipped_v1(
 }
 
 /// # Safety
-/// `bands` must point to `count` readable V1 bands; `frequencies`, `left_db` and `right_db` to `points` values each
-/// (any pointers when `points` is 0); `summary` to a writable V1 summary.
+/// `dsp` must point to a readable V1 setting whose pointers are null or readable; `frequencies`, `left_db` and
+/// `right_db` to `points` values each (any pointers when `points` is 0); `summary` to a writable V1 summary.
 ///
-/// Analyzes an EQ setting at `rate_hz` without an engine, for the response curve: the level each channel gets at
-/// each frequency (preamp included), whether the setting changes the signal and the preamp it applies.
-pub unsafe extern "C" fn camel_eq_analyze_v1(
-    bands: *const CamelEqBandV1,
-    count: u32,
+/// Analyzes a DSP setting at `rate_hz` on a stereo device without an engine: the level the EQ's bands give each
+/// channel at each frequency, for its response curve, whether the chain changes the signal and the preamp it needs.
+pub unsafe extern "C" fn camel_dsp_analyze_v1(
+    dsp: *const CamelDspV1,
     rate_hz: u32,
     frequencies: *const f64,
     points: u32,
     left_db: *mut f64,
     right_db: *mut f64,
-    summary: *mut CamelEqSummaryV1,
+    summary: *mut CamelDspSummaryV1,
 ) -> i32 {
     match catch_unwind(AssertUnwindSafe(|| {
         if summary.is_null()
@@ -1935,26 +2097,29 @@ pub unsafe extern "C" fn camel_eq_analyze_v1(
         if summary.abi_version != ABI_VERSION {
             return ENGINE_E_ABI_MISMATCH;
         }
-        if summary.struct_size < std::mem::size_of::<CamelEqSummaryV1>() as u32 {
+        if summary.struct_size < std::mem::size_of::<CamelDspSummaryV1>() as u32 {
             return ENGINE_E_STRUCT_SIZE;
         }
-        let bands = match eq_bands(bands, count) {
-            Ok(bands) => bands,
+        let settings = match dsp_settings(dsp) {
+            Ok(settings) => settings,
             Err(status) => return status,
         };
-        let rate = f64::from(rate_hz);
-        let preamp = eq::preamp_db(&bands, rate, 2);
-        summary.active = u32::from(eq::acts(&bands, rate));
+        if !settings.valid(rate_hz) {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        let analysis = dsp::analyze(&settings, rate_hz, 2);
+        summary.active = u32::from(analysis.active);
         summary.reserved = 0;
-        summary.preamp_db = preamp;
+        summary.preamp_db = analysis.preamp_db;
         let points = points as usize;
         if points > 0 {
+            let rate = f64::from(rate_hz);
             let frequencies = std::slice::from_raw_parts(frequencies, points);
             let left = std::slice::from_raw_parts_mut(left_db, points);
             let right = std::slice::from_raw_parts_mut(right_db, points);
             for (i, &f) in frequencies.iter().enumerate() {
-                left[i] = eq::response_db(&bands, rate, 0, f) + preamp;
-                right[i] = eq::response_db(&bands, rate, 1, f) + preamp;
+                left[i] = eq::response_db(&settings.bands, rate, 0, f);
+                right[i] = eq::response_db(&settings.bands, rate, 1, f);
             }
         }
         ENGINE_OK
@@ -2351,8 +2516,38 @@ mod tests {
         }
     }
 
-    // The mock track played through a 24-bit 48 kHz device with `bands` as the EQ, as 32-bit containers.
-    fn play_with_eq(bands: &[CamelEqBandV1]) -> Vec<i32> {
+    fn dsp_setting(
+        bands: &[CamelEqBandV1],
+        crossfeed: Option<&CamelCrossfeedV1>,
+        impulse: *const CamelImpulse,
+    ) -> CamelDspV1 {
+        CamelDspV1 {
+            struct_size: std::mem::size_of::<CamelDspV1>() as u32,
+            abi_version: ABI_VERSION,
+            order: dsp::DEFAULT_ORDER,
+            band_count: bands.len() as u32,
+            bands: bands.as_ptr(),
+            crossfeed: crossfeed.map_or(ptr::null(), |c| c as *const _),
+            impulse,
+        }
+    }
+
+    fn impulse(samples: &[f64], channels: u32, rate_hz: u32) -> *mut CamelImpulse {
+        let ir = CamelImpulseResponseV1 {
+            struct_size: std::mem::size_of::<CamelImpulseResponseV1>() as u32,
+            abi_version: ABI_VERSION,
+            channels,
+            rate_hz,
+            frames: samples.len() as u64 / u64::from(channels),
+            samples: samples.as_ptr(),
+        };
+        let mut out = ptr::null_mut();
+        assert_eq!(unsafe { camel_impulse_create_v1(&ir, &mut out) }, ENGINE_OK);
+        out
+    }
+
+    // The mock track played through a 24-bit 48 kHz device with `setting`, `frames` frames as 32-bit containers.
+    fn play_with_dsp(setting: &CamelDspV1, frames: usize) -> Vec<i32> {
         let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
         cfg.format.rate_hz = 48_000;
         let mut engine = ptr::null_mut();
@@ -2361,7 +2556,7 @@ mod tests {
             ENGINE_OK
         );
         assert_eq!(
-            unsafe { camel_engine_set_eq_v1(engine, bands.as_ptr(), bands.len() as u32) },
+            unsafe { camel_engine_set_dsp_v1(engine, setting) },
             ENGINE_OK
         );
         assert_eq!(load_mock_source(engine), ENGINE_OK);
@@ -2370,18 +2565,21 @@ mod tests {
             ENGINE_OK
         );
         prefill_until_end(engine);
-        let mut output = [0u8; 32];
-        let request = render_request(4, &mut output);
+        let mut output = vec![0u8; frames * 8];
+        let request = render_request(frames as u64, &mut output);
         let mut result = render_result();
         unsafe { camel_engine_render_v1(engine, &request, &mut result) };
-        assert_eq!(result.units_rendered, 4);
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
-        output
+        output[..result.units_rendered as usize * 8]
             .as_chunks::<4>()
             .0
             .iter()
             .map(|b| i32::from_le_bytes(*b) >> 8)
             .collect()
+    }
+
+    fn play_with_eq(bands: &[CamelEqBandV1]) -> Vec<i32> {
+        play_with_dsp(&dsp_setting(bands, None, ptr::null()), 4)
     }
 
     #[test]
@@ -2408,8 +2606,12 @@ mod tests {
         );
         // Quantized once at 24 bits, not at the source's 16.
         assert!(processed.iter().any(|s| s % 256 != 0), "{processed:?}");
-        let mut summary = CamelEqSummaryV1 {
-            struct_size: std::mem::size_of::<CamelEqSummaryV1>() as u32,
+    }
+
+    #[test]
+    fn the_analysis_gives_the_bands_curve_and_the_chains_preamp() {
+        let mut summary = CamelDspSummaryV1 {
+            struct_size: std::mem::size_of::<CamelDspSummaryV1>() as u32,
             abi_version: ABI_VERSION,
             active: 0,
             reserved: 0,
@@ -2418,25 +2620,110 @@ mod tests {
         let band = [eq_band(eq::KIND_PEAKING, 1000.0, 6.0, true)];
         let frequencies = [1000.0, 20.0];
         let (mut left, mut right) = ([0.0; 2], [0.0; 2]);
+        let analyze = |setting: &CamelDspV1,
+                       summary: &mut CamelDspSummaryV1,
+                       left: &mut [f64; 2],
+                       right: &mut [f64; 2]| unsafe {
+            camel_dsp_analyze_v1(
+                setting,
+                48_000,
+                frequencies.as_ptr(),
+                2,
+                left.as_mut_ptr(),
+                right.as_mut_ptr(),
+                summary,
+            )
+        };
+        let setting = dsp_setting(&band, None, ptr::null());
         assert_eq!(
-            unsafe {
-                camel_eq_analyze_v1(
-                    band.as_ptr(),
-                    1,
-                    48_000,
-                    frequencies.as_ptr(),
-                    2,
-                    left.as_mut_ptr(),
-                    right.as_mut_ptr(),
-                    &mut summary,
-                )
-            },
+            analyze(&setting, &mut summary, &mut left, &mut right),
             ENGINE_OK
         );
         assert_eq!(summary.active, 1);
         assert!((summary.preamp_db + 6.0).abs() < 1e-6);
-        // The boost is cancelled by the preamp at its centre, and the rest of the range sits 6 dB lower.
-        assert!(left[0].abs() < 1e-6 && (right[1] + 6.0).abs() < 0.01);
+        assert!((left[0] - 6.0).abs() < 1e-6 && right[1].abs() < 0.01);
+
+        // A response that doubles the level adds 6 dB of headroom to the chain's, not to the curve.
+        let ir = impulse(&[2.0], 1, 48_000);
+        let setting = dsp_setting(&band, None, ir);
+        assert_eq!(
+            analyze(&setting, &mut summary, &mut left, &mut right),
+            ENGINE_OK
+        );
+        // With a response the headroom is searched on its frequency grid, which passes close to the band's centre.
+        assert!(
+            (summary.preamp_db + 6.0 + 20.0 * 2f64.log10()).abs() < 1e-3,
+            "{}",
+            summary.preamp_db
+        );
+        assert!((left[0] - 6.0).abs() < 1e-6);
+        // At another rate the response does not apply.
+        let other = unsafe {
+            camel_dsp_analyze_v1(
+                &setting,
+                44_100,
+                ptr::null(),
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut summary,
+            )
+        };
+        assert_eq!(other, ENGINE_E_INVALID_ARGUMENT);
+        assert_eq!(unsafe { camel_impulse_destroy_v1(ir) }, ENGINE_OK);
+    }
+
+    #[test]
+    fn crossfeed_and_convolution_process_and_the_tail_plays_after_the_last_track() {
+        let crossfeed = CamelCrossfeedV1 {
+            struct_size: std::mem::size_of::<CamelCrossfeedV1>() as u32,
+            abi_version: ABI_VERSION,
+            cutoff_hz: 700,
+            reserved: 0,
+            feed_db: 4.5,
+        };
+        let crossfed = play_with_dsp(&dsp_setting(&[], Some(&crossfeed), ptr::null()), 4);
+        assert_ne!(crossfed, vec![256, -256, 512, -512, 768, -768, 1024, -1024]);
+
+        // A half-level echo one frame later: the track's 4 frames plus 1 frame of tail.
+        let ir = impulse(&[0.5, 0.25], 1, 48_000);
+        let convolved = play_with_dsp(&dsp_setting(&[], None, ir), 8);
+        assert_eq!(convolved.len(), 10, "{convolved:?}");
+        let expect = [128, -128, 320, -320, 512, -512, 704, -704, 256, -256];
+        for (got, want) in convolved.iter().zip(expect) {
+            assert!((got - want).abs() <= 1, "{convolved:?}");
+        }
+        assert_eq!(unsafe { camel_impulse_destroy_v1(ir) }, ENGINE_OK);
+
+        // A response at another rate, a repeated node and a crossfeed out of range are refused.
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
+        cfg.format.rate_hz = 48_000;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let other = impulse(&[1.0], 1, 44_100);
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], None, other)) },
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        let mut repeated = dsp_setting(&[], None, ptr::null());
+        repeated.order = [dsp::NODE_EQ, dsp::NODE_EQ, dsp::NODE_CROSSFEED];
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &repeated) },
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        let wide = CamelCrossfeedV1 {
+            cutoff_hz: 5_000,
+            ..crossfeed
+        };
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], Some(&wide), ptr::null())) },
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        assert_eq!(unsafe { camel_impulse_destroy_v1(other) }, ENGINE_OK);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
     #[test]
@@ -2687,7 +2974,11 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelFlacIntegrityV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelEngineTimelineV1>(), 88);
         assert_eq!(std::mem::size_of::<CamelEqBandV1>(), 48);
-        assert_eq!(std::mem::size_of::<CamelEqSummaryV1>(), 24);
+        assert_eq!(std::mem::size_of::<CamelDspSummaryV1>(), 24);
+        assert_eq!(std::mem::size_of::<CamelCrossfeedV1>(), 24);
+        assert_eq!(std::mem::size_of::<CamelImpulseResponseV1>(), 32);
+        assert_eq!(std::mem::size_of::<CamelDspV1>(), 48);
+        assert_eq!(std::mem::offset_of!(CamelDspV1, bands), 24);
         assert_eq!(std::mem::offset_of!(CamelEqBandV1, frequency_hz), 24);
         assert_eq!(std::mem::offset_of!(CamelAudioFormatV1, channel_mask), 32);
         assert_eq!(std::mem::offset_of!(CamelEngineConfigV1, format), 16);

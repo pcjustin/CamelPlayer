@@ -17,6 +17,8 @@
 
 namespace camel::audio {
 
+struct DspChain;
+
 class RustSession {
 public:
     // Whether the Engine may resample, downmix or reduce depth, and with which soxr quality.
@@ -45,8 +47,9 @@ public:
     // DSP worker only: the device frames prepared, 0 when the device ring is full or nothing is decoded. Throws Error
     // when processing fails.
     uint64_t process();
-    // Heard within the DSP lead, crossfaded; an EQ that is off or flat keeps playback bit-perfect.
-    void setEq(const EqSettings& eq);
+    // Heard within the DSP lead, faded in; a chain with nothing that changes the signal keeps playback bit-perfect.
+    // Its impulse response must be at the output rate.
+    void setDsp(const DspChain& chain);
 
     struct Rendered {
         size_t frames = 0;

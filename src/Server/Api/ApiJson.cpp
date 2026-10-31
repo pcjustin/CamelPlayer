@@ -123,6 +123,8 @@ constexpr Names<Md5State, 4> kMd5States = {{Md5State::Unavailable, "unavailable"
                                            {Md5State::Failed, "failed"}};
 constexpr Names<DsdPath, 4> kDsdPaths = {
     {DsdPath::None, "none"}, {DsdPath::Native, "native"}, {DsdPath::Dop, "dop"}, {DsdPath::Pcm, "pcm"}};
+constexpr Names<DspNode, 3> kDspNodes = {
+    {DspNode::Eq, "eq"}, {DspNode::Crossfeed, "crossfeed"}, {DspNode::Convolution, "convolution"}};
 
 Backend backendFrom(const json& v) {
     Backend b{};
@@ -220,6 +222,12 @@ DeviceFormat deviceFormatFrom(const json& j) {
             enumFrom(field(j, "type"), kSampleTypes, "sample type")};
 }
 
+json dspJson(const std::vector<DspNode>& nodes) {
+    json out = json::array();
+    for (const auto node : nodes) out.push_back(nameOf(node, kDspNodes));
+    return out;
+}
+
 json toJson(const OutputPlan& p) {
     return {{"format", toJson(p.format)},
             {"duplicate", p.duplicate},
@@ -229,7 +237,7 @@ json toJson(const OutputPlan& p) {
             {"reduce", p.reduce},
             {"dsd", nameOf(p.dsd, kDsdPaths)},
             {"shared", p.shared},
-            {"eq", p.eq},
+            {"dsp", dspJson(p.dsp)},
             {"state", nameOf(p.state, kPipelineStates)}};
 }
 
@@ -243,7 +251,7 @@ OutputPlan planFrom(const json& j) {
     p.reduce = value<bool>(j, "reduce");
     p.dsd = enumFrom(field(j, "dsd"), kDsdPaths, "DSD path");
     p.shared = value<bool>(j, "shared");
-    p.eq = value<bool>(j, "eq");
+    for (const auto& node : array(j, "dsp")) p.dsp.push_back(enumFrom(node, kDspNodes, "DSP node"));
     p.state = enumFrom(field(j, "state"), kPipelineStates, "pipeline state");
     return p;
 }

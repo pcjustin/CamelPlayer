@@ -66,6 +66,9 @@ struct SettingsDto {
     std::string skippedVersion;
     HotkeySettings hotkeys;
     EqSettings eq;
+    CrossfeedSettings crossfeed;
+    ConvolutionSettings convolution;
+    audio::DspOrder dspOrder = audio::kDefaultDspOrder;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };

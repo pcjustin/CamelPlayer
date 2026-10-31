@@ -75,16 +75,24 @@ While raw DSD plays, the **DSD** or **DoP** badge shows that volume and every ot
 
 **Convert to PCM** turns DSD into PCM at the **DSD to PCM sample rate** (88.2, 176.4 or 352.8 kHz) for DACs without DSD support. If you keep native or DoP output, **When the device takes neither native DSD nor DoP** decides what happens when the device refuses it: skip the file and tell you (default), or convert it to PCM. DSDIFF files compressed with DST are not supported.
 
-## Equalizer
+## DSP: equalizer, crossfeed and convolution
 
-Settings › DSP holds a parametric EQ. Turn on **Parametric EQ** to apply it. It starts with five flat bands: a low shelf at 100 Hz, peaking bands at 400 Hz, 1 kHz and 4 kHz, and a high shelf at 10 kHz.
+Settings › DSP holds three kinds of processing, all off by default: a parametric EQ, headphone crossfeed and convolution with an impulse response. They work in the order shown under **Order**, EQ → crossfeed → convolution by default, so a room or headphone correction sits nearest the speakers or headphones. Use the arrows to move one, and **Restore default order** to go back. The order changes the sound only where left and right are treated differently, such as EQ bands for one channel or a true-stereo response, next to crossfeed.
+
+One preamp covers the whole chain: it is lowered automatically by the largest boost of everything that is on, so nothing clips, and the line at the top of the card shows by how much. Corrections that cancel each other cost no level.
+
+**Parametric EQ.** It starts with five flat bands: a low shelf at 100 Hz, peaking bands at 400 Hz, 1 kHz and 4 kHz, and a high shelf at 10 kHz.
 
 - Drag a numbered point on the curve to change its band's frequency and gain, and turn the mouse wheel over it to change its Q. The rows under the curve take exact values, the filter type (peaking, low or high shelf, low or high pass, band pass, notch or all pass), the channels (both, left or right) and, for low and high pass, a slope of 6 to 48 dB per octave. **Add band** adds bands up to ten, and a band's check box turns it off without removing it.
-- The preamp is lowered automatically by the largest boost so the EQ never clips; the line under the curve shows by how much.
 - **Save as preset…** names the current bands, and the preset list switches between them. **Import…** reads an Equalizer APO configuration or an AutoEq ParametricEQ.txt file as a new preset named after the file, and **Export…** writes the bands in the Equalizer APO format. **Reset** goes back to the five flat bands; saved presets stay.
-- The **EQ** button in the player bar turns the EQ on or off, switches presets and opens Settings › DSP. It is highlighted while the EQ changes the sound.
 
-Changes are heard within about a quarter of a second, without a gap. While the EQ acts, the badge shows **Processed**, the signal path lists the EQ, and its output is dithered once to the device's bit depth. While the EQ is off or every band is flat, playback stays bit-perfect. Raw DSD (native or DoP) bypasses the EQ; convert DSD to PCM to equalize it.
+**Crossfeed** (for headphones) sends some of each channel to the other ear, as speakers do, using bs2b. **Default** is 700 Hz and 4.5 dB, **Chu Moy** 700 Hz and 6 dB, **Jan Meier** 650 Hz and 9.5 dB. **Custom** takes a cut-off of 300–2000 Hz and a feed of 1–15 dB; a lower feed sends more to the other ear.
+
+**Convolution** applies an impulse response, such as a room correction filter. **Choose impulse response…** takes a .wav that is mono (used for both channels), stereo, or 4-channel true stereo (left to left, left to right, right to left, right to right), or a .zip holding one such .wav per sample rate. The rate that plays is taken from the .zip; when it is missing, the nearest rate is converted and cached. A response may have up to 1,048,576 samples per channel at the playing rate. The card shows the file's channels, length and rates.
+
+The **DSP** button in the player bar turns each of the three on or off, switches EQ presets and opens Settings › DSP. It is highlighted while the chain changes the sound.
+
+Changes are heard within about a quarter of a second, without a gap. While the chain acts, the badge shows **Processed**, the signal path lists each step, and the output is dithered once to the device's bit depth. While nothing changes the signal, playback stays bit-perfect. After the last track, the end of a convolution's response plays out. Raw DSD (native or DoP) bypasses the chain; convert DSD to PCM to process it.
 
 ## Common problems
 

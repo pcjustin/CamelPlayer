@@ -19,7 +19,7 @@
 #include <thread>
 
 #include "Engine/decode/FormatProbe.h"
-#include "Engine/Equalizer.h"
+#include "Engine/Dsp.h"
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
 #include "OutputBridge/OutputBridge.h"
@@ -287,23 +287,37 @@ public:
         }
     }
 
-    // `plan` as the EQ leaves it: processed while the EQ changes the signal; raw DSD bypasses it.
-    OutputPlan withEq(OutputPlan plan) const {
-        plan.eq =
-            plan.dsd != DsdPath::Native && plan.dsd != DsdPath::Dop && analyzeEq(settings_.eq, plan.format.sampleRate).active;
-        if (plan.eq) plan.state = PipelineState::Processed;
+    // The DSP chain for `plan`'s output, with the impulse response at its rate; nothing for raw DSD, which bypasses it.
+    // A response that cannot be used leaves convolution off.
+    DspChain chainFor(const OutputPlan& plan) const {
+        if (plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop) return dspChain(Settings{}, nullptr);
+        Impulse impulse;
+        if (settings_.convolution.enabled && !settings_.convolution.file.empty()) {
+            try {
+                impulse = loadImpulse(toWide(settings_.convolution.file), plan.format.sampleRate).impulse;
+            } catch (const ImpulseError& e) {
+                log::warn("impulse response: %s", e.what());
+            }
+        }
+        return dspChain(settings_, std::move(impulse));
+    }
+
+    // `plan` as the DSP chain leaves it: processed while a node changes the signal.
+    OutputPlan withDsp(OutputPlan plan) const {
+        plan.dsp = actingNodes(chainFor(plan), plan.format.sampleRate, plan.format.channels);
+        if (!plan.dsp.empty()) plan.state = PipelineState::Processed;
         return plan;
     }
 
-    // The EQ changes without reopening anything: the Engine crossfades to it, and the path shows it.
-    void applyEq() {
+    // The chain changes without reopening anything: the Engine fades to it, and the path shows it.
+    void applyDsp() {
         if (!active_ || !rust_) return;
         try {
-            rust_->setEq(settings_.eq);
+            rust_->setDsp(chainFor(negotiated_));
         } catch (const Error& e) {
             log::warn("engine: %s", e.what());
         }
-        plan_ = withEq(negotiated_);
+        plan_ = withDsp(negotiated_);
         std::lock_guard lock(snapMutex_);
         if (snap_.plan) snap_.plan = plan_;
     }
@@ -319,7 +333,8 @@ public:
              settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported) &&
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged || conversionChanged;
-        const bool eqChanged = settings_.eq != s.eq;
+        const bool dspChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
+                                settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -335,7 +350,7 @@ public:
         if ((outputChanged || decoderChanged) && wasActive) {
             startSession(pos, wasPlaying);
         } else {
-            if (eqChanged) applyEq();
+            if (dspChanged) applyDsp();
             publish();
         }
     }
@@ -697,7 +712,7 @@ private:
         }
         if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
         negotiated_ = *plan;
-        plan_ = withEq(negotiated_);
+        plan_ = withDsp(negotiated_);
         fmt_ = plan_.format;
         bpf_ = fmt_.bytesPerFrame();
         sourceRate_ = src.sampleRate;
@@ -707,7 +722,7 @@ private:
         try {
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
                                                   plan_.dsd, timing(settings_).predecodeSeconds);
-            rust_->setEq(settings_.eq);
+            rust_->setDsp(chainFor(plan_));
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;
             return fail(e, waitingForSource_ ? PlayState::Paused : PlayState::Stopped);
@@ -881,7 +896,7 @@ private:
             queued_.pop_front();
             file_ = next.file;
             negotiated_ = next.plan;
-            plan_ = withEq(negotiated_);
+            plan_ = withDsp(negotiated_);
             sourceRate_ = next.source.sampleRate;
             fileDecoder_ = next.requested;
             format_ = next.format;
@@ -1054,7 +1069,7 @@ private:
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;
     OutputPlan plan_;
-    OutputPlan negotiated_;         // plan_ before the EQ, which withEq() applies
+    OutputPlan negotiated_;         // plan_ before the DSP chain, which withDsp() applies
     std::string planAdjustment_;    // a fixed rate the device refused
     uint64_t outputGeneration_ = 0; // counts output devices opened; a new one starts in an unknown format
     struct Opened {

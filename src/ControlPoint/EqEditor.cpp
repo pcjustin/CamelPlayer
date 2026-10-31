@@ -12,7 +12,7 @@
 #include <cmath>
 
 #include "UiText.h"
-#include "Engine/Equalizer.h"
+#include "Engine/Dsp.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -75,9 +75,8 @@ ComboBox comboBox(std::initializer_list<hstring> items, int selected, double wid
 
 } // namespace
 
-EqEditor::EqEditor(Canvas curve, StackPanel rows, TextBlock headroom, Button addBand, Changed changed)
-    : curve_(std::move(curve)), rows_(std::move(rows)), headroom_(std::move(headroom)), addBand_(std::move(addBand)),
-      changed_(std::move(changed)) {
+EqEditor::EqEditor(Canvas curve, StackPanel rows, Button addBand, Changed changed)
+    : curve_(std::move(curve)), rows_(std::move(rows)), addBand_(std::move(addBand)), changed_(std::move(changed)) {
     frequencies_.resize(kCurvePoints);
     for (int i = 0; i < kCurvePoints; ++i)
         frequencies_[size_t(i)] = kLowHz * std::pow(kHighHz / kLowHz, double(i) / (kCurvePoints - 1));
@@ -389,13 +388,11 @@ void EqEditor::redraw() {
 
 void EqEditor::refresh() {
     if (!leftCurve_) return;
-    // The curve of the bands as they are set, also while the EQ is off.
+    // The bands' own response as they are set, also while the EQ is off; with the chain's preamp in it, a dragged
+    // point would move away from the pointer.
     auto shown = eq_;
     shown.enabled = true;
-    auto analysis = camel::audio::analyzeEq(shown, rateHz_, frequencies_);
-    // The bands' own response: with the preamp in it, a dragged point would move away from the pointer.
-    for (auto* db : {&analysis.leftDb, &analysis.rightDb})
-        for (auto& value : *db) value -= analysis.preampDb;
+    const auto analysis = camel::audio::analyzeDsp(camel::audio::eqChain(shown), rateHz_, frequencies_);
     const bool split = std::ranges::any_of(eq_.bands, [](const EqBand& b) { return b.enabled && b.channels != EqChannels::All; });
     const auto plot = [&](Shapes::Polyline const& line, const std::vector<double>& db, bool visible) {
         line.Points().Clear();
@@ -407,17 +404,6 @@ void EqEditor::refresh() {
     for (size_t i = 0; i < handles_.size() && i < eq_.bands.size(); ++i) {
         Canvas::SetLeft(handles_[i], xOf(eq_.bands[i].frequencyHz) - kHandle / 2);
         Canvas::SetTop(handles_[i], yOf(pointDb(i, analysis.leftDb)) - kHandle / 2);
-    }
-
-    const auto active = camel::audio::analyzeEq(eq_, rateHz_);
-    if (!eq_.enabled) {
-        headroom_.Text(tr(L"Eq_Off"));
-    } else if (!active.active) {
-        headroom_.Text(tr(L"Eq_Flat"));
-    } else {
-        wchar_t db[16];
-        swprintf_s(db, L"%.1f", -active.preampDb);
-        headroom_.Text(format(L"Eq_Headroom", {db}));
     }
 }
 

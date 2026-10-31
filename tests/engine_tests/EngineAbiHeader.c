@@ -17,7 +17,10 @@ typedef char CamelRenderResultV1Size[(sizeof(CamelRenderResultV1) == 32) ? 1 : -
 typedef char CamelEngineStateV1Size[(sizeof(CamelEngineStateV1) == 152) ? 1 : -1];
 typedef char CamelFlacIntegrityV1Size[(sizeof(CamelFlacIntegrityV1) == 32) ? 1 : -1];
 typedef char CamelEqBandV1Size[(sizeof(CamelEqBandV1) == 48) ? 1 : -1];
-typedef char CamelEqSummaryV1Size[(sizeof(CamelEqSummaryV1) == 24) ? 1 : -1];
+typedef char CamelDspSummaryV1Size[(sizeof(CamelDspSummaryV1) == 24) ? 1 : -1];
+typedef char CamelCrossfeedV1Size[(sizeof(CamelCrossfeedV1) == 24) ? 1 : -1];
+typedef char CamelImpulseResponseV1Size[(sizeof(CamelImpulseResponseV1) == 32) ? 1 : -1];
+typedef char CamelDspV1Size[(sizeof(CamelDspV1) == 48) ? 1 : -1];
 
 uint32_t camel_engine_abi_header_c_compiles(void) {
     return CAMEL_ENGINE_ABI_VERSION;

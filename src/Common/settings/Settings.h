@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Common/AudioFormat.h"
@@ -177,6 +178,30 @@ struct EqSettings {
     bool operator==(const EqSettings&) const = default;
 };
 
+// Headphone crossfeed (docs/Plan.md §5.9): bs2b, off by default. A preset sets the cut-off and feed; Custom uses the
+// values here.
+enum class CrossfeedPreset : uint8_t { Default, ChuMoy, JanMeier, Custom };
+
+struct CrossfeedSettings {
+    static constexpr uint32_t kMinCutoffHz = 300, kMaxCutoffHz = 2000;
+    static constexpr double kMinFeedDb = 1.0, kMaxFeedDb = 15.0;
+    bool enabled = false;
+    CrossfeedPreset preset = CrossfeedPreset::Default;
+    uint32_t cutoffHz = 700; // Custom
+    double feedDb = 4.5;     // Custom
+    bool operator==(const CrossfeedSettings&) const = default;
+};
+
+// The cut-off in Hz and the feed in dB that `crossfeed` uses: its preset's, or its own for Custom.
+std::pair<uint32_t, double> crossfeedValues(const CrossfeedSettings& crossfeed);
+
+// Convolution with an impulse response (docs/Plan.md §5.9), off by default: a .wav, or a .zip of .wav files by rate.
+struct ConvolutionSettings {
+    bool enabled = false;
+    std::string file; // UTF-8 path
+    bool operator==(const ConvolutionSettings&) const = default;
+};
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -204,12 +229,15 @@ struct Settings {
     std::string skippedVersion; // the release the automatic check no longer offers
     HotkeySettings hotkeys;
     EqSettings eq;
+    CrossfeedSettings crossfeed;
+    ConvolutionSettings convolution;
+    audio::DspOrder dspOrder = audio::kDefaultDspOrder;
     std::wstring lastFile;
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
-// decoders and the EQ, whose saved presets stay. Interface: language, close action, the tray notice, the first-run guide, the
-// hotkeys, the automatic update check, the online artist pictures and the folder tree. Each keeps the other group.
+// decoders and the DSP chain, whose saved EQ presets stay. Interface: language, close action, the tray notice, the first-run
+// guide, the hotkeys, the automatic update check, the online artist pictures and the folder tree. Each keeps the other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

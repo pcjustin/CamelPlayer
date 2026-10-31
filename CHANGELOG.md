@@ -4,7 +4,10 @@
 
 New features since 0.1.0:
 
-- **Parametric EQ** in Settings › DSP. It starts with five bands and the editor adds up to ten, with peaking, shelf, low and high pass (6 to 48 dB per octave), band pass, notch and all-pass filters, each on both channels or one. Drag a point on the response curve to change frequency and gain, and the mouse wheel to change Q. The preamp is lowered automatically so boosts never clip. Presets can be saved, Reset returns to the five flat bands, and Equalizer APO and AutoEq files can be imported and exported. The EQ button in the player bar turns it on or off and switches presets. Changes are heard within about a quarter of a second without a gap; while the EQ is off or flat, playback stays bit-perfect.
+- **Parametric EQ** in Settings › DSP. It starts with five bands and the editor adds up to ten, with peaking, shelf, low and high pass (6 to 48 dB per octave), band pass, notch and all-pass filters, each on both channels or one. Drag a point on the response curve to change frequency and gain, and the mouse wheel to change Q. Presets can be saved, Reset returns to the five flat bands, and Equalizer APO and AutoEq files can be imported and exported.
+- **Headphone crossfeed** (bs2b) with the Default, Chu Moy and Jan Meier presets or a custom cut-off and feed.
+- **Convolution** with an impulse response: a mono, stereo or true-stereo .wav, or a .zip with one per sample rate. A missing rate is converted and cached; responses up to 1,048,576 samples per channel run without latency, and after the last track their end plays out.
+- **The DSP chain:** EQ, crossfeed and convolution work in an order you can change, after one automatic preamp that keeps the whole chain from clipping. The DSP button in the player bar turns each on or off and switches EQ presets. Changes are heard within about a quarter of a second without a gap; while nothing changes the signal, playback stays bit-perfect.
 
 ## 0.1.0
 

@@ -14,6 +14,7 @@
 #include "GlobalHotkeys.h"
 #include "MediaControls.h"
 #include "EqEditor.h"
+#include "Engine/ImpulseResponse.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -92,7 +93,16 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqImportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqExportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnEqMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
+    void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
+    void OnDspRestoreOrderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnCrossfeedToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnCrossfeedPresetChanged(Windows::Foundation::IInspectable const&,
+                                  Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+    void OnCrossfeedValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
+                                 Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
+    void OnConvolutionToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnConvolutionChooseClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnConvolutionRemoveClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnUpdateInstallClick(Windows::Foundation::IInspectable const&,
                                                 Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -117,6 +127,11 @@ private:
     void showEq();
     void eqChanged(bool final);
     uint32_t eqRate() const; // the playing output rate, else 48 kHz
+    // The rest of the DSP card: crossfeed, convolution, the order and the chain's headroom.
+    void showDsp();
+    void showDspOrder();
+    void showDspSummary();
+    winrt::fire_and_forget loadConvolution();
     void populateDeviceLists(const camel::server::DeviceCatalog& devices);
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format that has integrated decoders.
@@ -176,6 +191,11 @@ private:
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer eqTimer_{nullptr};
     std::unique_ptr<ui::EqEditor> eqEditor_;
+    // The impulse response the DSP card shows, read for `impulseRate_`; `impulseLoads_` drops a superseded read.
+    camel::audio::Impulse impulse_;
+    std::string impulseFile_;
+    uint32_t impulseRate_ = 0;
+    uint64_t impulseLoads_ = 0;
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;

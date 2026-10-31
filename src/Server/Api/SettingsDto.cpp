@@ -29,6 +29,9 @@ SettingsDto settingsDto(const Settings& s) {
             s.skippedVersion,
             s.hotkeys,
             s.eq,
+            s.crossfeed,
+            s.convolution,
+            s.dspOrder,
             toUtf8(s.lastFile)};
 }
 
@@ -54,6 +57,9 @@ Settings nativeSettings(const SettingsDto& s) {
             s.skippedVersion,
             s.hotkeys,
             s.eq,
+            s.crossfeed,
+            s.convolution,
+            s.dspOrder,
             toWide(s.lastFileUtf8)};
 }
 

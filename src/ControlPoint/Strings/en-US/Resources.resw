@@ -516,9 +516,7 @@
   <data name="Settings_EqReset.Content" xml:space="preserve"><value>Reset</value></data>
   <data name="Settings_EqExport.Content" xml:space="preserve"><value>Export…</value></data>
   <data name="Settings_EqAddBand.Content" xml:space="preserve"><value>Add band</value></data>
-  <data name="Settings_EqNote.Text" xml:space="preserve"><value>Drag a numbered point to change its band's frequency and gain; the mouse wheel over a point changes its Q. The preamp is lowered automatically so boosts do not clip. While the EQ is off or every band is flat, playback stays bit-perfect. Import reads Equalizer APO configurations and AutoEq ParametricEQ.txt files.</value></data>
-  <data name="Eq_Button.ToolTipService.ToolTip" xml:space="preserve"><value>Equalizer</value></data>
-  <data name="Eq_Button.AutomationProperties.Name" xml:space="preserve"><value>Equalizer</value></data>
+  <data name="Settings_EqNote.Text" xml:space="preserve"><value>Drag a numbered point to change its band's frequency and gain; the mouse wheel over a point changes its Q. Import reads Equalizer APO configurations and AutoEq ParametricEQ.txt files.</value></data>
   <data name="Eq_Kind_Peaking" xml:space="preserve"><value>Peaking</value></data>
   <data name="Eq_Kind_LowShelf" xml:space="preserve"><value>Low shelf</value></data>
   <data name="Eq_Kind_HighShelf" xml:space="preserve"><value>High shelf</value></data>
@@ -537,15 +535,53 @@
   <data name="Eq_Column_Q" xml:space="preserve"><value>Q</value></data>
   <data name="Eq_Column_Slope" xml:space="preserve"><value>Slope (/oct)</value></data>
   <data name="Eq_RemoveBand" xml:space="preserve"><value>Remove band</value></data>
-  <data name="Eq_Off" xml:space="preserve"><value>The EQ is off.</value></data>
-  <data name="Eq_Flat" xml:space="preserve"><value>Every band is flat, so the signal passes unchanged.</value></data>
-  <data name="Eq_Headroom" xml:space="preserve"><value>Automatic preamp: −{0} dB, so boosts do not clip.</value></data>
   <data name="Eq_SaveTitle" xml:space="preserve"><value>Save EQ preset</value></data>
   <data name="Eq_PresetName" xml:space="preserve"><value>Name</value></data>
   <data name="Eq_Save" xml:space="preserve"><value>Save</value></data>
   <data name="Eq_ImportTitle" xml:space="preserve"><value>Import EQ</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>The file has no filters CamelPlayer can read. Choose an Equalizer APO configuration or an AutoEq ParametricEQ.txt file.</value></data>
-  <data name="Eq_MenuOn" xml:space="preserve"><value>EQ on</value></data>
-  <data name="Eq_MenuSettings" xml:space="preserve"><value>EQ settings…</value></data>
   <data name="SignalPath_Eq" xml:space="preserve"><value>parametric EQ</value></data>
+  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP: equalizer, crossfeed and convolution</value></data>
+  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP: equalizer, crossfeed and convolution</value></data>
+  <data name="Dsp_Off" xml:space="preserve"><value>Every DSP node is off, so playback stays bit-perfect.</value></data>
+  <data name="Dsp_Flat" xml:space="preserve"><value>Nothing in the chain changes the signal now, so playback stays bit-perfect.</value></data>
+  <data name="Dsp_Headroom" xml:space="preserve"><value>Automatic preamp for the whole chain: −{0} dB, so nothing clips.</value></data>
+  <data name="Dsp_NodeEq" xml:space="preserve"><value>Parametric EQ</value></data>
+  <data name="Dsp_NodeCrossfeed" xml:space="preserve"><value>Crossfeed</value></data>
+  <data name="Dsp_NodeConvolution" xml:space="preserve"><value>Convolution</value></data>
+  <data name="Dsp_MoveUp" xml:space="preserve"><value>Move up</value></data>
+  <data name="Dsp_MoveDown" xml:space="preserve"><value>Move down</value></data>
+  <data name="Dsp_MenuEqPresets" xml:space="preserve"><value>EQ presets</value></data>
+  <data name="Dsp_MenuSettings" xml:space="preserve"><value>DSP settings…</value></data>
+  <data name="Settings_DspOrder.Text" xml:space="preserve"><value>Order</value></data>
+  <data name="Settings_DspRestoreOrder.Content" xml:space="preserve"><value>Restore default order</value></data>
+  <data name="Settings_DspOrderNote.Text" xml:space="preserve"><value>The default order, EQ → crossfeed → convolution, puts a room or headphone correction nearest the speakers or headphones. The order changes the sound only where left and right are treated differently, such as EQ bands for one channel or a true-stereo response, next to crossfeed.</value></data>
+  <data name="Settings_Crossfeed.Header" xml:space="preserve"><value>Crossfeed</value></data>
+  <data name="Settings_Crossfeed.OnContent" xml:space="preserve"><value>Send some of each channel to the other ear, as speakers do (for headphones)</value></data>
+  <data name="Settings_Crossfeed.OffContent" xml:space="preserve"><value>Send some of each channel to the other ear, as speakers do (for headphones)</value></data>
+  <data name="Settings_CrossfeedPreset.Header" xml:space="preserve"><value>Preset</value></data>
+  <data name="Settings_CrossfeedCustom.Content" xml:space="preserve"><value>Custom</value></data>
+  <data name="Settings_CrossfeedCutoff.Header" xml:space="preserve"><value>Cut-off (Hz)</value></data>
+  <data name="Settings_CrossfeedFeed.Header" xml:space="preserve"><value>Feed (dB)</value></data>
+  <data name="Settings_CrossfeedNote.Text" xml:space="preserve"><value>bs2b crossfeed. Default is 700 Hz and 4.5 dB, Chu Moy 700 Hz and 6 dB, Jan Meier 650 Hz and 9.5 dB. Custom takes a cut-off of 300–2000 Hz and a feed of 1–15 dB; a lower feed sends more to the other ear.</value></data>
+  <data name="Settings_Convolution.Header" xml:space="preserve"><value>Convolution</value></data>
+  <data name="Settings_Convolution.OnContent" xml:space="preserve"><value>Apply the impulse response to playback</value></data>
+  <data name="Settings_Convolution.OffContent" xml:space="preserve"><value>Apply the impulse response to playback</value></data>
+  <data name="Settings_ConvolutionChoose.Content" xml:space="preserve"><value>Choose impulse response…</value></data>
+  <data name="Settings_ConvolutionRemove.Content" xml:space="preserve"><value>Remove</value></data>
+  <data name="Settings_ConvolutionNote.Text" xml:space="preserve"><value>A .wav impulse response, mono (both channels), stereo or 4-channel true stereo (LL, LR, RL, RR), or a .zip holding one per sample rate. A missing rate is converted from the nearest one and cached. Up to 1,048,576 samples per channel at the playing rate.</value></data>
+  <data name="Convolution_NoFile" xml:space="preserve"><value>No impulse response chosen.</value></data>
+  <data name="Convolution_Loading" xml:space="preserve"><value>Reading the impulse response…</value></data>
+  <data name="Convolution_Mono" xml:space="preserve"><value>Mono</value></data>
+  <data name="Convolution_Stereo" xml:space="preserve"><value>Stereo</value></data>
+  <data name="Convolution_TrueStereo" xml:space="preserve"><value>True stereo (4 channels)</value></data>
+  <data name="Convolution_Info" xml:space="preserve"><value>{0}, {1} samples ({2} s) at {3} kHz.</value></data>
+  <data name="Convolution_Rates" xml:space="preserve"><value>Rates in the file: {0} kHz.</value></data>
+  <data name="Convolution_Converted" xml:space="preserve"><value>Converted from {0} kHz and cached.</value></data>
+  <data name="Convolution_Unreadable" xml:space="preserve"><value>This file cannot be read as an impulse response.</value></data>
+  <data name="Convolution_Layout" xml:space="preserve"><value>An impulse response must have 1, 2 or 4 channels.</value></data>
+  <data name="Convolution_TooLong" xml:space="preserve"><value>This impulse response is too long: at most 1,048,576 samples per channel at the playing rate.</value></data>
+  <data name="Convolution_FileTypes" xml:space="preserve"><value>Impulse response (*.wav, *.zip)</value></data>
+  <data name="SignalPath_Crossfeed" xml:space="preserve"><value>crossfeed</value></data>
+  <data name="SignalPath_Convolution" xml:space="preserve"><value>convolution</value></data>
 </root>

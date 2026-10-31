@@ -9,13 +9,13 @@
 //! bits). Everything else — resampling, ITU-R BS.775 downmix, bit reduction and the decoded output of lossy sources —
 //! is processed in 64-bit float and quantized once at the end with TPDF dither. Raw DSD reaches a native DSD or DoP
 //! stream bit for bit (mono duplicated). DSD becomes PCM only with explicit permission: it is decimated to
-//! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once. While the EQ changes the
-//! signal, every PCM path runs in float through it and is quantized once at the device depth; raw DSD bypasses it.
+//! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once. While the DSP chain changes
+//! the signal, every PCM path runs in float through it and is quantized once at the device depth; raw DSD bypasses it.
 
 use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32};
 use crate::dsd::{put_dop_sample, DOP_MARKERS, DSD_SILENCE};
 use crate::dsd2pcm::{DsdDecimator, PCM_RATE};
-use crate::eq::Equalizer;
+use crate::dsp::Dsp;
 use crate::packing::pack_pcm;
 use crate::resample::Resampler;
 use crate::{
@@ -45,8 +45,8 @@ pub(crate) struct Converter {
     out_channels: usize,
     /// Depth of the final quantization: the source depth, or less when the device takes less.
     quantize_bits: u32,
-    /// Depth of the final quantization while the EQ acts: the device's (0 for float).
-    eq_bits: u32,
+    /// Depth of the final quantization while the DSP chain acts: the device's, 24 at most (0 for float).
+    dsp_bits: u32,
     matrix: Option<[Vec<f64>; 2]>,
     resampler: Option<Resampler>,
     dither: Tpdf,
@@ -143,7 +143,7 @@ impl Converter {
                 } else {
                     out.valid_bits.min(24)
                 },
-                eq_bits: Self::device_bits(out),
+                dsp_bits: Self::device_bits(out),
                 matrix: Some(downmix_matrix(in_channels).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?),
                 resampler,
                 dither: Tpdf(0x9E37_79B9_7F4A_7C15),
@@ -182,7 +182,7 @@ impl Converter {
                 out: *out,
                 out_channels,
                 quantize_bits: 0,
-                eq_bits: 0,
+                dsp_bits: 0,
                 matrix: None,
                 resampler: None,
                 dither: Tpdf(0),
@@ -250,7 +250,7 @@ impl Converter {
             out: *out,
             out_channels,
             quantize_bits,
-            eq_bits: Self::device_bits(out),
+            dsp_bits: Self::device_bits(out),
             matrix,
             resampler,
             dither: Tpdf(0x9E37_79B9_7F4A_7C15),
@@ -299,17 +299,17 @@ impl Converter {
     }
 
     /// Converts `frames` decoded frames (`samples` interleaved: right-aligned integers, or float32 bit patterns for a
-    /// float source) and appends the device bytes to the pending output. `eq` processes PCM while it acts.
+    /// float source) and appends the device bytes to the pending output. `dsp` processes PCM while it acts.
     pub(crate) fn convert(
         &mut self,
         samples: &[i32],
         frames: usize,
-        eq: &mut Equalizer,
+        dsp: &mut Dsp,
     ) -> Result<(), i32> {
         let input = &samples[..frames * self.in_channels];
-        if eq.active() && matches!(self.mode, Mode::Bypass | Mode::Duplicate | Mode::Widen) {
+        if dsp.active() && matches!(self.mode, Mode::Bypass | Mode::Duplicate | Mode::Widen) {
             let mut floats = self.to_device_channels(input);
-            return self.emit(&mut floats, eq);
+            return self.emit(&mut floats, dsp);
         }
         match self.mode {
             Mode::Bypass => self.pack(input, self.in_bits),
@@ -319,7 +319,7 @@ impl Converter {
             }
             Mode::Widen => {
                 let mut floats = self.to_device_channels(input);
-                self.emit(&mut floats, eq)
+                self.emit(&mut floats, dsp)
             }
             Mode::Dsd => {
                 for frame in input.chunks_exact(self.in_channels) {
@@ -350,17 +350,17 @@ impl Converter {
                     .expect("DSD to PCM has a decimator")
                     .process(input, frames, &mut decimated);
                 let mixed = self.mix_floats(&decimated);
-                self.resample_and_emit(mixed, eq)
+                self.resample_and_emit(mixed, dsp)
             }
             Mode::Process => {
                 let mixed = self.mix(input, frames);
-                self.resample_and_emit(mixed, eq)
+                self.resample_and_emit(mixed, dsp)
             }
         }
     }
 
     /// Ends the source: flushes the resampler's tail into the pending output. Further calls do nothing.
-    pub(crate) fn finish(&mut self, eq: &mut Equalizer) -> Result<(), i32> {
+    pub(crate) fn finish(&mut self, dsp: &mut Dsp) -> Result<(), i32> {
         if self.finished {
             return Ok(());
         }
@@ -374,21 +374,27 @@ impl Converter {
             resampler
                 .process(&[], &mut tail)
                 .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-            return self.emit(&mut tail, eq);
+            return self.emit(&mut tail, dsp);
         }
         Ok(())
     }
 
-    fn resample_and_emit(&mut self, mut mixed: Vec<f64>, eq: &mut Equalizer) -> Result<(), i32> {
+    /// Emits `frames` frames of the DSP chain's tail after the stream's end: silence through the chain.
+    pub(crate) fn drain(&mut self, frames: usize, dsp: &mut Dsp) -> Result<(), i32> {
+        let mut silence = vec![0.0; frames * self.out_channels];
+        self.emit(&mut silence, dsp)
+    }
+
+    fn resample_and_emit(&mut self, mut mixed: Vec<f64>, dsp: &mut Dsp) -> Result<(), i32> {
         match self.resampler.as_mut() {
             Some(resampler) => {
                 let mut resampled = Vec::new();
                 resampler
                     .process(&mixed, &mut resampled)
                     .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-                self.emit(&mut resampled, eq)
+                self.emit(&mut resampled, dsp)
             }
-            None => self.emit(&mut mixed, eq),
+            None => self.emit(&mut mixed, dsp),
         }
     }
 
@@ -440,20 +446,21 @@ impl Converter {
         out
     }
 
+    // Like any processed source: 24-bit at most, MSB-aligned in a 32-bit container.
     fn device_bits(out: &AudioFormat) -> u32 {
         if out.sample_format == SAMPLE_F32_LE {
             0
         } else {
-            out.valid_bits
+            out.valid_bits.min(24)
         }
     }
 
-    // The single final stage, after the EQ while it acts: float32 for a float device, else TPDF-dithered integers at
-    // `quantize_bits`, or at the device depth while the EQ acts.
-    fn emit(&mut self, floats: &mut [f64], eq: &mut Equalizer) -> Result<(), i32> {
-        let equalized = eq.active();
-        if equalized {
-            eq.process(floats);
+    // The single final stage, after the DSP chain while it acts: float32 for a float device, else TPDF-dithered
+    // integers at `quantize_bits`, or at the device depth while the chain acts.
+    fn emit(&mut self, floats: &mut [f64], dsp: &mut Dsp) -> Result<(), i32> {
+        let processed = dsp.active();
+        if processed {
+            dsp.process(floats);
         }
         if self.out.sample_format == SAMPLE_F32_LE {
             for &v in floats.iter() {
@@ -463,11 +470,11 @@ impl Converter {
             self.pending_frames += (floats.len() / self.out_channels) as u64;
             return Ok(());
         }
-        if !equalized && !matches!(self.mode, Mode::Process | Mode::DsdPcm) {
+        if !processed && !matches!(self.mode, Mode::Process | Mode::DsdPcm) {
             return Err(ENGINE_E_UNSUPPORTED_FORMAT);
         }
-        let bits = if equalized {
-            self.eq_bits
+        let bits = if processed {
+            self.dsp_bits
         } else {
             self.quantize_bits
         };
@@ -515,7 +522,7 @@ impl Converter {
 
 #[cfg(test)]
 mod tests {
-    use super::{Converter, Equalizer, Mode};
+    use super::{Converter, Dsp, Mode};
     use crate::decoder_host::{
         CamelSourceInfoV1, SAMPLE_ENCODING_FLOAT32, SAMPLE_ENCODING_INTEGER,
     };
@@ -524,9 +531,9 @@ mod tests {
         SAMPLE_F32_LE, SAMPLE_S16_LE, SAMPLE_S24_LE, SAMPLE_S32_LE,
     };
 
-    // An EQ that never acts, as when it is off.
-    fn flat() -> Equalizer {
-        Equalizer::new(48_000, 2)
+    // A DSP chain that never acts, as when every node is off.
+    fn flat() -> Dsp {
+        Dsp::new(48_000, 2)
     }
 
     fn source(rate: u32, channels: u32, bits: u32, float: bool) -> CamelSourceInfoV1 {
@@ -584,6 +591,27 @@ mod tests {
 
     fn converter(info: CamelSourceInfoV1, out: u32, rate: u32, allow: bool) -> Converter {
         Converter::new(&info, &device(out), rate, allow, false, QUALITY_HIGH).unwrap()
+    }
+
+    #[test]
+    fn an_acting_chain_dithers_to_24_bits_in_a_32_bit_device() {
+        let mut c = converter(source(48_000, 2, 24, false), SAMPLE_S32_LE, 48_000, false);
+        assert_eq!(c.mode, Mode::Bypass);
+        let mut dsp = Dsp::new(48_000, 2);
+        dsp.set(crate::dsp::Settings {
+            order: crate::dsp::DEFAULT_ORDER,
+            crossfeed: Some(crate::crossfeed::Params {
+                cutoff_hz: 700,
+                feed_db: 4.5,
+            }),
+            ..crate::dsp::Settings::default()
+        });
+        let samples = [1 << 20, -(1 << 20), 1 << 21, -(1 << 21)];
+        c.convert(&samples, 2, &mut dsp).unwrap();
+        let out = ints(c.pending(), 4);
+        assert_eq!(out.len(), 4);
+        assert!(out.iter().all(|s| s & 0xff == 0), "{out:?}");
+        assert_ne!(out, samples.map(|s| s << 8));
     }
 
     #[test]

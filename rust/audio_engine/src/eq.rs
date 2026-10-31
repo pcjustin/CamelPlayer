@@ -5,11 +5,12 @@
 //! Parametric EQ (docs/Plan.md §5.9): biquads from the RBJ Audio EQ Cookbook in 64-bit float, any number of bands.
 //!
 //! A band that cannot change the signal (off, a peak or shelf at 0 dB, or a frequency at or above Nyquist) is left
-//! out, and an EQ with no band left is bypassed entirely. The preamp lowers the level by the combined response's
-//! largest boost, so a steady signal never exceeds full scale. A changed setting crossfades from the old filters to
-//! the new ones over CROSSFADE_MS, so no change clicks.
+//! out, and an EQ with no band left is bypassed entirely. The DSP chain (dsp.rs) adds the headroom and crossfades
+//! changed settings.
 
 use std::f64::consts::PI;
+
+use crate::fft::Complex;
 
 pub(crate) const KIND_PEAKING: u32 = 1;
 pub(crate) const KIND_LOW_SHELF: u32 = 2;
@@ -23,10 +24,6 @@ pub(crate) const KIND_ALL_PASS: u32 = 8;
 pub(crate) const CHANNELS_ALL: u32 = 0;
 pub(crate) const CHANNELS_LEFT: u32 = 1;
 pub(crate) const CHANNELS_RIGHT: u32 = 2;
-
-const CROSSFADE_MS: f64 = 20.0;
-// The response is searched for its largest boost at this many log-spaced frequencies, and at each band's own.
-const RESPONSE_POINTS: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Band {
@@ -169,13 +166,14 @@ fn first_order(low: bool, w0: f64) -> [f64; 5] {
     }
 }
 
-fn magnitude(section: &[f64; 5], w: f64) -> f64 {
-    let (s1, c1) = w.sin_cos();
-    let (s2, c2) = (2.0 * w).sin_cos();
+// The complex response of one section at angular frequency `w`.
+fn section_response(section: &[f64; 5], w: f64) -> Complex {
     let [b0, b1, b2, a1, a2] = *section;
-    let (nr, ni) = (b0 + b1 * c1 + b2 * c2, -(b1 * s1 + b2 * s2));
-    let (dr, di) = (1.0 + a1 * c1 + a2 * c2, -(a1 * s1 + a2 * s2));
-    ((nr * nr + ni * ni) / (dr * dr + di * di)).sqrt()
+    let z1 = Complex::unit(-w);
+    let z2 = Complex::unit(-2.0 * w);
+    let numerator = Complex::new(b0, 0.0) + z1.scale(b1) + z2.scale(b2);
+    let denominator = Complex::new(1.0, 0.0) + z1.scale(a1) + z2.scale(a2);
+    numerator.div(denominator)
 }
 
 // Whether `bands` change the signal at `rate`.
@@ -183,34 +181,23 @@ pub(crate) fn acts(bands: &[Band], rate: f64) -> bool {
     bands.iter().any(|b| b.valid() && b.acts(rate))
 }
 
-// The level in dB that `bands` give `channel` at `frequency`, before the preamp.
-pub(crate) fn response_db(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> f64 {
+/// The complex response `bands` give `channel` at `frequency`.
+pub(crate) fn response(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> Complex {
     let w = 2.0 * PI * frequency / rate;
     bands
         .iter()
         .filter(|b| b.valid() && b.acts(rate) && b.applies_to(channel))
         .flat_map(|b| b.sections(rate))
-        .map(|s| 20.0 * magnitude(&s, w).log10())
-        .sum()
+        .fold(Complex::new(1.0, 0.0), |product, s| {
+            product * section_response(&s, w)
+        })
 }
 
-// The preamp in dB (0 or less) that keeps the combined response of every channel at or below 0 dB.
-pub(crate) fn preamp_db(bands: &[Band], rate: f64, channels: usize) -> f64 {
-    let nyquist = rate / 2.0;
-    let low: f64 = 10.0;
-    let high = nyquist * 0.999;
-    let mut frequencies: Vec<f64> = (0..RESPONSE_POINTS)
-        .map(|i| low * (high / low).powf(i as f64 / (RESPONSE_POINTS - 1) as f64))
-        .collect();
-    frequencies.extend(bands.iter().map(|b| b.frequency).filter(|&f| f < nyquist));
-    let peak = (0..channels)
-        .flat_map(|c| frequencies.iter().map(move |&f| (c, f)))
-        .map(|(c, f)| response_db(bands, rate, c, f))
-        .fold(0.0, f64::max);
-    -peak
+/// The level in dB that `bands` give `channel` at `frequency`.
+pub(crate) fn response_db(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> f64 {
+    20.0 * response(bands, rate, channel, frequency).norm().log10()
 }
 
-#[derive(Clone)]
 struct Section {
     coefficients: [f64; 5],
     channel_mask: Vec<bool>,
@@ -218,21 +205,16 @@ struct Section {
     state: Vec<[f64; 2]>,
 }
 
-#[derive(Clone, Default)]
-struct Chain {
-    gain: f64,
+/// The EQ's filters for one rate and channel count; no section at all when no band changes the signal.
+#[derive(Default)]
+pub(crate) struct EqNode {
     sections: Vec<Section>,
 }
 
-impl Chain {
-    fn new(bands: &[Band], rate: f64, channels: usize) -> Self {
-        let acting: Vec<&Band> = bands.iter().filter(|b| b.valid() && b.acts(rate)).collect();
-        if acting.is_empty() {
-            return Chain::default();
-        }
-        let owned: Vec<Band> = acting.iter().map(|&&b| b).collect();
+impl EqNode {
+    pub(crate) fn new(bands: &[Band], rate: f64, channels: usize) -> Self {
         let mut sections = Vec::new();
-        for band in &acting {
+        for band in bands.iter().filter(|b| b.valid() && b.acts(rate)) {
             let mask: Vec<bool> = (0..channels).map(|c| band.applies_to(c)).collect();
             for coefficients in band.sections(rate) {
                 sections.push(Section {
@@ -242,116 +224,50 @@ impl Chain {
                 });
             }
         }
-        Chain {
-            gain: 10f64.powf(preamp_db(&owned, rate, channels) / 20.0),
-            sections,
-        }
+        EqNode { sections }
     }
 
-    fn is_identity(&self) -> bool {
+    pub(crate) fn is_identity(&self) -> bool {
         self.sections.is_empty()
     }
 
-    fn process(&mut self, frame: &mut [f64]) {
-        if self.is_identity() {
-            return;
-        }
-        for (channel, sample) in frame.iter_mut().enumerate() {
-            let mut x = *sample * self.gain;
-            for section in &mut self.sections {
-                if !section.channel_mask[channel] {
-                    continue;
-                }
-                let [b0, b1, b2, a1, a2] = section.coefficients;
-                let s = &mut section.state[channel];
-                let y = b0 * x + s[0];
-                s[0] = b1 * x - a1 * y + s[1];
-                s[1] = b2 * x - a2 * y;
-                x = y;
-            }
-            *sample = x;
+    pub(crate) fn reset(&mut self) {
+        for section in &mut self.sections {
+            section.state.fill([0.0; 2]);
         }
     }
 
-    // Takes over the state of `old`'s sections where the band layout matches, so a small change starts warm.
-    fn adopt_state(&mut self, old: &Chain) {
+    /// Filters interleaved frames of `channels` in place.
+    pub(crate) fn process(&mut self, samples: &mut [f64], channels: usize) {
+        if self.is_identity() {
+            return;
+        }
+        for frame in samples.chunks_exact_mut(channels) {
+            for (channel, sample) in frame.iter_mut().enumerate() {
+                let mut x = *sample;
+                for section in &mut self.sections {
+                    if !section.channel_mask[channel] {
+                        continue;
+                    }
+                    let [b0, b1, b2, a1, a2] = section.coefficients;
+                    let s = &mut section.state[channel];
+                    let y = b0 * x + s[0];
+                    s[0] = b1 * x - a1 * y + s[1];
+                    s[1] = b2 * x - a2 * y;
+                    x = y;
+                }
+                *sample = x;
+            }
+        }
+    }
+
+    /// Takes over the state of `old`'s sections where the band layout matches, so a small change starts warm.
+    pub(crate) fn adopt_state(&mut self, old: &EqNode) {
         if self.sections.len() != old.sections.len() {
             return;
         }
         for (new, old) in self.sections.iter_mut().zip(&old.sections) {
             new.state.clone_from(&old.state);
-        }
-    }
-}
-
-pub(crate) struct Equalizer {
-    rate: f64,
-    channels: usize,
-    current: Chain,
-    // The chain being faded out and the frames of the fade left.
-    previous: Option<(Chain, usize)>,
-    started: bool,
-    clipped: u64,
-}
-
-impl Equalizer {
-    pub(crate) fn new(rate: u32, channels: usize) -> Self {
-        Equalizer {
-            rate: f64::from(rate),
-            channels,
-            current: Chain::default(),
-            previous: None,
-            started: false,
-            clipped: 0,
-        }
-    }
-
-    /// Applies `bands` (empty: off). Once audio has passed, the change crossfades.
-    pub(crate) fn set(&mut self, bands: &[Band]) {
-        let mut chain = Chain::new(bands, self.rate, self.channels);
-        chain.adopt_state(&self.current);
-        let old = std::mem::replace(&mut self.current, chain);
-        if self.started && !(old.is_identity() && self.current.is_identity()) {
-            let frames = (self.rate * CROSSFADE_MS / 1000.0).round() as usize;
-            self.previous = Some((old, frames.max(1)));
-        }
-    }
-
-    /// Whether the EQ changes the signal now: false once it is off or flat and any fade has ended.
-    pub(crate) fn active(&self) -> bool {
-        !self.current.is_identity() || self.previous.is_some()
-    }
-
-    /// Samples the EQ sent above full scale, which the final quantization clips.
-    pub(crate) fn clipped(&self) -> u64 {
-        self.clipped
-    }
-
-    /// Processes interleaved frames of `channels` in place.
-    pub(crate) fn process(&mut self, samples: &mut [f64]) {
-        self.started = true;
-        if !self.active() {
-            return;
-        }
-        let mut dry = vec![0.0; self.channels];
-        for frame in samples.chunks_exact_mut(self.channels) {
-            if let Some((old, left)) = self.previous.as_mut() {
-                dry.copy_from_slice(frame);
-                old.process(&mut dry);
-                self.current.process(frame);
-                let total = (self.rate * CROSSFADE_MS / 1000.0).round().max(1.0);
-                let t = 1.0 - *left as f64 / total;
-                for (wet, &faded) in frame.iter_mut().zip(&dry) {
-                    *wet = faded + (*wet - faded) * t;
-                }
-                *left -= 1;
-                if *left == 0 {
-                    self.previous = None;
-                }
-            } else {
-                self.current.process(frame);
-            }
-            self.clipped += frame.iter().filter(|s| s.abs() > 1.0).count() as u64;
         }
     }
 }
@@ -371,8 +287,8 @@ mod tests {
         }
     }
 
-    // The level of a steady sine at `frequency` after `eq`, in dB.
-    fn measured_db(eq: &mut Equalizer, frequency: f64, rate: f64) -> f64 {
+    // The level of a steady sine at `frequency` after `node`, in dB.
+    fn measured_db(node: &mut EqNode, frequency: f64, rate: f64) -> f64 {
         let frames = rate as usize;
         let mut samples: Vec<f64> = (0..frames)
             .flat_map(|i| {
@@ -380,8 +296,8 @@ mod tests {
                 [v, v]
             })
             .collect();
-        eq.process(&mut samples);
-        // Skip the first half second: the filters settle and any fade ends.
+        node.process(&mut samples, 2);
+        // Skip the first half second: the filters settle.
         let tail = &samples[frames..];
         let rms =
             (tail.iter().step_by(2).map(|v| v * v).sum::<f64>() / (tail.len() / 2) as f64).sqrt();
@@ -438,12 +354,10 @@ mod tests {
             band(KIND_PEAKING, 1000.0, 6.0, 1.0),
             band(KIND_HIGH_SHELF, 8000.0, -3.0, 0.707),
         ];
-        let preamp = preamp_db(&bands, rate, 2);
         for f in [100.0, 1000.0, 3000.0, 12000.0] {
-            let mut eq = Equalizer::new(48_000, 2);
-            eq.set(&bands);
-            let expected = response_db(&bands, rate, 0, f) + preamp;
-            let measured = measured_db(&mut eq, f, rate);
+            let mut node = EqNode::new(&bands, rate, 2);
+            let expected = response_db(&bands, rate, 0, f);
+            let measured = measured_db(&mut node, f, rate);
             assert!(
                 (measured - expected).abs() < 0.05,
                 "{f} Hz: {measured} vs {expected}"
@@ -452,47 +366,21 @@ mod tests {
     }
 
     #[test]
-    fn the_preamp_removes_the_largest_boost_and_never_raises_the_level() {
-        let rate = 44_100.0;
-        let boost = [
-            band(KIND_PEAKING, 100.0, 8.0, 0.7),
-            band(KIND_PEAKING, 120.0, 4.0, 0.7),
-        ];
-        let preamp = preamp_db(&boost, rate, 2);
-        assert!(preamp < -8.0 && preamp > -12.5, "{preamp}");
-        assert_eq!(
-            preamp_db(&[band(KIND_PEAKING, 1000.0, -6.0, 1.0)], rate, 2),
-            0.0
+    fn bands_that_cannot_change_the_signal_leave_no_filter() {
+        let node = EqNode::new(
+            &[
+                band(KIND_PEAKING, 1000.0, 0.0, 1.0),
+                band(KIND_LOW_SHELF, 100.0, 0.0, 0.7),
+                band(KIND_HIGH_SHELF, 30_000.0, 6.0, 0.7), // above Nyquist at 44.1 kHz
+                band(KIND_PEAKING, f64::NAN, 3.0, 1.0),
+            ],
+            44_100.0,
+            2,
         );
-        let mut eq = Equalizer::new(44_100, 2);
-        eq.set(&boost);
-        let mut full: Vec<f64> = (0..44_100)
-            .flat_map(|i| {
-                let v = 0.99 * (2.0 * PI * 110.0 * i as f64 / rate).sin();
-                [v, v]
-            })
-            .collect();
-        eq.process(&mut full);
-        assert_eq!(eq.clipped(), 0);
-    }
-
-    #[test]
-    fn bands_that_cannot_change_the_signal_leave_it_bypassed() {
-        let rate = 44_100;
-        let mut eq = Equalizer::new(rate, 2);
-        eq.set(&[
-            band(KIND_PEAKING, 1000.0, 0.0, 1.0),
-            band(KIND_LOW_SHELF, 100.0, 0.0, 0.7),
-            band(KIND_HIGH_SHELF, 30_000.0, 6.0, 0.7), // above Nyquist at 44.1 kHz
-            band(KIND_PEAKING, f64::NAN, 3.0, 1.0),
-        ]);
-        assert!(!eq.active());
-        let mut samples = vec![0.5, -0.25, 0.125, 0.0];
-        eq.process(&mut samples);
-        assert_eq!(samples, [0.5, -0.25, 0.125, 0.0]);
-        let mut eq = Equalizer::new(96_000, 2);
-        eq.set(&[band(KIND_HIGH_SHELF, 30_000.0, 6.0, 0.7)]);
-        assert!(eq.active());
+        assert!(node.is_identity());
+        assert!(
+            !EqNode::new(&[band(KIND_HIGH_SHELF, 30_000.0, 6.0, 0.7)], 96_000.0, 2).is_identity()
+        );
     }
 
     #[test]
@@ -502,40 +390,13 @@ mod tests {
         left.channels = CHANNELS_LEFT;
         assert!((response_db(&[left], rate, 0, 1000.0) + 6.0).abs() < 1e-9);
         assert_eq!(response_db(&[left], rate, 1, 1000.0), 0.0);
-        let mut eq = Equalizer::new(48_000, 2);
-        eq.set(&[left]);
+        let mut node = EqNode::new(&[left], rate, 2);
         let mut samples: Vec<f64> = (0..4800)
             .flat_map(|i| [0.0, (i as f64 * 0.01).sin() * 0.5])
             .collect();
         let right: Vec<f64> = samples.iter().skip(1).step_by(2).copied().collect();
-        eq.process(&mut samples);
+        node.process(&mut samples, 2);
         let after: Vec<f64> = samples.iter().skip(1).step_by(2).copied().collect();
         assert_eq!(after, right);
-    }
-
-    #[test]
-    fn a_change_crossfades_without_a_jump() {
-        let rate = 48_000.0;
-        let mut eq = Equalizer::new(48_000, 2);
-        eq.set(&[band(KIND_PEAKING, 1000.0, -12.0, 1.0)]);
-        let sine = |i: usize| 0.5 * (2.0 * PI * 1000.0 * i as f64 / rate).sin();
-        let mut first: Vec<f64> = (0..4800).flat_map(|i| [sine(i), sine(i)]).collect();
-        eq.process(&mut first);
-        eq.set(&[band(KIND_PEAKING, 1000.0, 12.0, 1.0)]);
-        let mut second: Vec<f64> = (4800..9600).flat_map(|i| [sine(i), sine(i)]).collect();
-        eq.process(&mut second);
-        let joined: Vec<f64> = first.iter().chain(&second).step_by(2).copied().collect();
-        // A 1 kHz sine at 48 kHz moves at most about 0.13 x its amplitude per sample; a hard switch would jump.
-        let largest_step = joined
-            .windows(2)
-            .map(|w| (w[1] - w[0]).abs())
-            .fold(0.0, f64::max);
-        assert!(largest_step < 0.2, "{largest_step}");
-        // Turning it off fades out, then the EQ is bypassed.
-        eq.set(&[]);
-        assert!(eq.active());
-        let mut rest: Vec<f64> = (9600..14400).flat_map(|i| [sine(i), sine(i)]).collect();
-        eq.process(&mut rest);
-        assert!(!eq.active());
     }
 }

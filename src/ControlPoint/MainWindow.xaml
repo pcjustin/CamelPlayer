@@ -308,15 +308,22 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- The parametric EQ (docs/Plan.md §5.9): one global setting with presets; EqEditor draws the curve and the
-                             band rows. -->
+                        <!-- The DSP chain (docs/Plan.md §5.9), one global setting: EQ, crossfeed and convolution in the order set here,
+                             after one automatic preamp. EqEditor draws the EQ curve and band rows; the order rows are built in code. -->
                         <Border x:Name="DspCard" Style="{StaticResource SettingsCardStyle}">
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <FontIcon Glyph="&#xE7F6;" FontSize="20" />
                                     <TextBlock x:Uid="Settings_Dsp" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
-                                <ToggleSwitch x:Name="EqSwitch" x:Uid="Settings_Eq" Toggled="OnEqToggled" />
+                                <TextBlock x:Name="DspSummaryText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                                <TextBlock x:Uid="Settings_DspOrder" Style="{StaticResource GroupHeaderStyle}" />
+                                <StackPanel x:Name="DspOrderList" Spacing="4" />
+                                <Button x:Name="DspRestoreOrderButton" x:Uid="Settings_DspRestoreOrder" Click="OnDspRestoreOrderClick" />
+                                <TextBlock x:Uid="Settings_DspOrderNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                                <ToggleSwitch x:Name="EqSwitch" x:Uid="Settings_Eq" Margin="0,8,0,0" Toggled="OnEqToggled" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <ComboBox x:Name="EqPresetCombo" x:Uid="Settings_EqPreset" Width="240" SelectionChanged="OnEqPresetChanged" />
                                     <Button x:Uid="Settings_EqSavePreset" VerticalAlignment="Bottom" Click="OnEqSavePresetClick" />
@@ -329,12 +336,36 @@
                                 <Border CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
                                     <Canvas x:Name="EqCurve" Height="220" Background="Transparent" />
                                 </Border>
-                                <TextBlock x:Name="EqHeadroomText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled">
                                     <StackPanel x:Name="EqBands" Spacing="6" />
                                 </ScrollViewer>
                                 <Button x:Name="EqAddBandButton" x:Uid="Settings_EqAddBand" />
                                 <TextBlock x:Uid="Settings_EqNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                                <ToggleSwitch x:Name="CrossfeedSwitch" x:Uid="Settings_Crossfeed" Margin="0,8,0,0" Toggled="OnCrossfeedToggled" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <ComboBox x:Name="CrossfeedPresetCombo" x:Uid="Settings_CrossfeedPreset" Width="240"
+                                              SelectionChanged="OnCrossfeedPresetChanged">
+                                        <x:String>Default</x:String>
+                                        <x:String>Chu Moy</x:String>
+                                        <x:String>Jan Meier</x:String>
+                                        <ComboBoxItem x:Uid="Settings_CrossfeedCustom" />
+                                    </ComboBox>
+                                    <NumberBox x:Name="CrossfeedCutoffBox" x:Uid="Settings_CrossfeedCutoff" Width="150" Minimum="300" Maximum="2000"
+                                               SmallChange="10" LargeChange="100" SpinButtonPlacementMode="Compact" ValueChanged="OnCrossfeedValueChanged" />
+                                    <NumberBox x:Name="CrossfeedFeedBox" x:Uid="Settings_CrossfeedFeed" Width="150" Minimum="1" Maximum="15"
+                                               SmallChange="0.5" LargeChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnCrossfeedValueChanged" />
+                                </StackPanel>
+                                <TextBlock x:Uid="Settings_CrossfeedNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                                <ToggleSwitch x:Name="ConvolutionSwitch" x:Uid="Settings_Convolution" Margin="0,8,0,0" Toggled="OnConvolutionToggled" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Uid="Settings_ConvolutionChoose" Click="OnConvolutionChooseClick" />
+                                    <Button x:Name="ConvolutionRemoveButton" x:Uid="Settings_ConvolutionRemove" Click="OnConvolutionRemoveClick" />
+                                </StackPanel>
+                                <TextBlock x:Name="ConvolutionFileText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                <TextBlock x:Name="ConvolutionInfoText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Uid="Settings_ConvolutionNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </StackPanel>
                         </Border>
 
@@ -793,11 +824,11 @@
                     <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
                         <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
                     </Border>
-                    <!-- Turns the EQ on or off and switches presets; accented while the EQ changes the signal. -->
-                    <Button x:Name="EqButton" x:Uid="Eq_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center">
-                        <TextBlock x:Name="EqButtonText" Text="EQ" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
+                    <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
+                    <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center">
+                        <TextBlock x:Name="DspButtonText" Text="DSP" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
                         <Button.Flyout>
-                            <MenuFlyout x:Name="EqMenu" Placement="Top" Opening="OnEqMenuOpening" />
+                            <MenuFlyout x:Name="DspMenu" Placement="Top" Opening="OnDspMenuOpening" />
                         </Button.Flyout>
                     </Button>
                 </StackPanel>

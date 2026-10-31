@@ -155,6 +155,21 @@ static uint32_t fixedRateFrom(double rate) {
 static constexpr const char* kEqKindIds[] = {"peaking",  "lowShelf", "highShelf", "lowPass",
                                              "highPass", "bandPass", "notch",     "allPass"};
 static constexpr const char* kEqChannelIds[] = {"all", "left", "right"};
+static constexpr const char* kCrossfeedPresetIds[] = {"default", "chuMoy", "janMeier", "custom"};
+static constexpr const char* kDspNodeIds[] = {"eq", "crossfeed", "convolution"};
+
+std::pair<uint32_t, double> crossfeedValues(const CrossfeedSettings& crossfeed) {
+    switch (crossfeed.preset) {
+    case CrossfeedPreset::ChuMoy:
+        return {700, 6.0};
+    case CrossfeedPreset::JanMeier:
+        return {650, 9.5};
+    case CrossfeedPreset::Custom:
+        return {crossfeed.cutoffHz, crossfeed.feedDb};
+    default:
+        return {700, 4.5};
+    }
+}
 
 std::vector<EqBand> defaultEqBands() {
     return {{EqKind::LowShelf, EqChannels::All, 12, 100.0},
@@ -269,6 +284,13 @@ std::string toJson(const Settings& s) {
     json presets = json::array();
     for (const auto& p : s.eq.presets) presets.push_back({{"name", p.name}, {"bands", eqBandsJson(p.bands)}});
     j["eq"] = {{"enabled", s.eq.enabled}, {"bands", eqBandsJson(s.eq.bands)}, {"preset", s.eq.preset}, {"presets", presets}};
+    j["crossfeed"] = {{"enabled", s.crossfeed.enabled},
+                      {"preset", kCrossfeedPresetIds[int(s.crossfeed.preset)]},
+                      {"cutoff", s.crossfeed.cutoffHz},
+                      {"feed", s.crossfeed.feedDb}};
+    j["convolution"] = {{"enabled", s.convolution.enabled}, {"file", s.convolution.file}};
+    j["dspOrder"] = json::array();
+    for (const auto node : s.dspOrder) j["dspOrder"].push_back(kDspNodeIds[int(node) - 1]);
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = {{"device", s.wasapi.deviceId},
                    {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
@@ -397,6 +419,36 @@ Settings fromJson(const std::string& text) {
                 if (p.is_object() && p.contains("name") && p["name"].is_string() && !p["name"].get<std::string>().empty())
                     s.eq.presets.push_back(
                         {p["name"].get<std::string>(), eqBandsFrom(p.contains("bands") ? p["bands"] : json(), {})});
+    }
+    if (j.contains("crossfeed") && j["crossfeed"].is_object()) {
+        const json& c = j["crossfeed"];
+        const CrossfeedSettings defaults;
+        s.crossfeed.enabled = boolean(c, "enabled", false);
+        const auto preset = std::ranges::find(kCrossfeedPresetIds, str(c, "preset", "default"));
+        s.crossfeed.preset =
+            preset == std::end(kCrossfeedPresetIds) ? defaults.preset : CrossfeedPreset(preset - std::begin(kCrossfeedPresetIds));
+        if (c.contains("cutoff") && c["cutoff"].is_number_unsigned() &&
+            c["cutoff"].get<uint32_t>() >= CrossfeedSettings::kMinCutoffHz &&
+            c["cutoff"].get<uint32_t>() <= CrossfeedSettings::kMaxCutoffHz)
+            s.crossfeed.cutoffHz = c["cutoff"].get<uint32_t>();
+        if (c.contains("feed") && c["feed"].is_number() && c["feed"].get<double>() >= CrossfeedSettings::kMinFeedDb &&
+            c["feed"].get<double>() <= CrossfeedSettings::kMaxFeedDb)
+            s.crossfeed.feedDb = c["feed"].get<double>();
+    }
+    if (j.contains("convolution") && j["convolution"].is_object()) {
+        s.convolution.enabled = boolean(j["convolution"], "enabled", false);
+        s.convolution.file = str(j["convolution"], "file", "");
+    }
+    if (j.contains("dspOrder") && j["dspOrder"].is_array() && j["dspOrder"].size() == 3) {
+        audio::DspOrder order{};
+        for (size_t i = 0; i < 3; ++i) {
+            const auto& item = j["dspOrder"][i];
+            const auto id = std::ranges::find(kDspNodeIds, item.is_string() ? item.get<std::string>() : std::string());
+            order[i] = id == std::end(kDspNodeIds) ? audio::DspNode{} : audio::DspNode(id - std::begin(kDspNodeIds) + 1);
+        }
+        auto sorted = order;
+        std::ranges::sort(sorted);
+        if (sorted == audio::kDefaultDspOrder) s.dspOrder = order;
     }
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {

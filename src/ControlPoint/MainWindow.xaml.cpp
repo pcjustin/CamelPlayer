@@ -34,7 +34,7 @@
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "Common/Version.h"
-#include "Engine/Equalizer.h"
+#include "Engine/Dsp.h"
 #include "Server/Playback/DeviceMatch.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
@@ -56,6 +56,50 @@ std::filesystem::path programDirectory() {
     std::wstring executable(32768, L'\0');
     executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
     return std::filesystem::path(executable).parent_path();
+}
+
+// The resource key naming a DSP node.
+const wchar_t* dspNodeKey(DspNode node) {
+    switch (node) {
+    case DspNode::Eq:
+        return L"Dsp_NodeEq";
+    case DspNode::Crossfeed:
+        return L"Dsp_NodeCrossfeed";
+    default:
+        return L"Dsp_NodeConvolution";
+    }
+}
+
+std::wstring kilohertz(uint32_t rate) {
+    wchar_t text[16];
+    swprintf_s(text, L"%g", rate / 1000.0);
+    return text;
+}
+
+hstring impulseInfoText(const ImpulseInfo& info, uint32_t rate) {
+    const wchar_t* layout = info.channels == 1   ? L"Convolution_Mono"
+                            : info.channels == 2 ? L"Convolution_Stereo"
+                                                 : L"Convolution_TrueStereo";
+    wchar_t seconds[16];
+    swprintf_s(seconds, L"%.2f", double(info.frames) / rate);
+    std::wstring rates;
+    for (const auto r : info.rates) rates += (rates.empty() ? L"" : L", ") + kilohertz(r);
+    hstring text =
+        ui::format(L"Convolution_Info", {std::wstring(tr(layout)), std::to_wstring(info.frames), seconds, kilohertz(rate)}) +
+        L" " + ui::format(L"Convolution_Rates", {rates});
+    if (info.converted) text = text + L" " + ui::format(L"Convolution_Converted", {kilohertz(info.sourceRate)});
+    return text;
+}
+
+hstring impulseProblemText(ImpulseProblem problem) {
+    switch (problem) {
+    case ImpulseProblem::Layout:
+        return tr(L"Convolution_Layout");
+    case ImpulseProblem::TooLong:
+        return tr(L"Convolution_TooLong");
+    default:
+        return tr(L"Convolution_Unreadable");
+    }
 }
 
 // A dialog showing release notes or a changelog section as plain, selectable text.
@@ -209,7 +253,7 @@ void MainWindow::InitializeComponent() {
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
-    eqEditor_ = std::make_unique<ui::EqEditor>(EqCurve(), EqBands(), EqHeadroomText(), EqAddBandButton(),
+    eqEditor_ = std::make_unique<ui::EqEditor>(EqCurve(), EqBands(), EqAddBandButton(),
                                                [this](const camel::EqSettings&, bool final) { eqChanged(final); });
     Content().AddHandler(UIElement::PointerPressedEvent(),
                          box_value(Input::PointerEventHandler([this](auto&&, Input::PointerRoutedEventArgs const& e) {
@@ -463,7 +507,7 @@ void MainWindow::populateSettings() {
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     FolderTreeSwitch().IsOn(settings_.folderTree);
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
-    showEq();
+    showDsp();
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -596,6 +640,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.folderTree = FolderTreeSwitch().IsOn();
     settings_.eq.enabled = EqSwitch().IsOn();
     if (eqEditor_) settings_.eq.bands = eqEditor_->settings().bands;
+    settings_.crossfeed.enabled = CrossfeedSwitch().IsOn();
+    settings_.convolution.enabled = ConvolutionSwitch().IsOn();
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -898,7 +944,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
 
     // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
-    bool eqActive = false;
+    bool dspActive = false;
     const hstring decoder = ui::utf8(decoderName(s.decoder));
     if (s.output && s.source) {
         // A lossy source has no PCM depth of its own; its decoded output is passed on unchanged (docs/Plan.md §5.2).
@@ -943,8 +989,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_Resample") + rates;
         }
-        const hstring eq = plan.eq ? L" → " + tr(L"SignalPath_Eq") : hstring{};
-        if (plan.dsd != DsdPath::Pcm) path = path + eq;
+        hstring chain;
+        for (const auto node : plan.dsp)
+            chain = chain + L" → " +
+                    tr(node == DspNode::Eq          ? L"SignalPath_Eq"
+                       : node == DspNode::Crossfeed ? L"SignalPath_Crossfeed"
+                                                    : L"SignalPath_Convolution");
+        if (plan.dsd != DsdPath::Pcm) path = path + chain;
         if (plan.dsd == DsdPath::Dop)
             path = path + L" → DoP · " + tr(L"SignalPath_DspBypassed");
         else if (plan.dsd == DsdPath::Native)
@@ -955,23 +1006,25 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf(rates, 64, L" 352.8→%.1f kHz", s.output->sampleRate / 1000.0);
             path = path + L" → " + tr(L"SignalPath_DsdToPcm") + L" 352.8 kHz";
             if (plan.resample) path = path + L" → " + tr(L"SignalPath_Resample") + rates;
-            path = path + eq;
+            path = path + chain;
             if (plan.widen)
                 path = path + L" → float32";
             else
-                path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(validBits(s.output->type)) + L"-bit";
+                path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(std::min(validBits(s.output->type), 24u)) +
+                       L"-bit";
         } else if (plan.widen)
             path = path + L" → float32";
-        // The EQ output is quantized once, at the device depth.
-        else if (plan.eq)
-            path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(validBits(s.output->type)) + L"-bit";
+        // The chain's output is quantized once, at the device depth up to 24 bits.
+        else if (!plan.dsp.empty())
+            path =
+                path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
         else if (plan.reduce || plan.resample || plan.downmix || lossy)
             path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(plan.reduce ? 16 : s.source->bitsPerSample) +
                    L"-bit";
         else
             path = path + L" → " + tr(L"SignalPath_Pad") + L" " + to_hstring(s.source->bitsPerSample);
         SignalPathText().Text(path + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " + ui::utf8(s.outputMode));
-        eqActive = plan.eq;
+        dspActive = !plan.dsp.empty();
     } else {
         Lamp().Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
         setAnnounced(LampText(), tr(L"Lamp_Idle"));
@@ -980,7 +1033,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
         SignalPathText().Text(L"");
     }
-    EqButtonText().Foreground(themeBrush(eqActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush"));
+    DspButtonText().Foreground(themeBrush(dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush"));
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch.
     SignalNoteText().Text(BypassBadge().Visibility() == Visibility::Visible ? tr(L"Badge_DspBypassedTip") : hstring{});
 
@@ -2665,10 +2718,12 @@ void MainWindow::showEq() {
     EqDeletePresetButton().IsEnabled(selected >= 0);
     eqEditor_->show(settings_.eq, eqRate());
     populating_ = wasPopulating;
+    showDspSummary();
 }
 
 void MainWindow::eqChanged(bool final) {
     settings_.eq.bands = eqEditor_->settings().bands;
+    showDspSummary();
     if (final) {
         eqTimer_.Stop();
         settingsChanged();
@@ -2782,27 +2837,235 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
     CoTaskMemFree(path);
     auto shown = settings_.eq;
     shown.enabled = true;
-    const auto text = camel::formatEqualizerApo(settings_.eq.bands, camel::audio::analyzeEq(shown, eqRate()).preampDb);
+    const auto text = camel::formatEqualizerApo(settings_.eq.bands, analyzeDsp(eqChain(shown), eqRate()).preampDb);
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
     out.write(text.data(), std::streamsize(text.size()));
     if (!out) camel::log::warn("EQ export: cannot write %s", camel::toUtf8(file.wstring()).c_str());
 }
 
-// The playback-bar EQ button: on or off, the saved presets, and the DSP settings.
-void MainWindow::OnEqMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
-    auto items = EqMenu().Items();
-    items.Clear();
-    ToggleMenuFlyoutItem on;
-    on.Text(tr(L"Eq_MenuOn"));
-    on.IsChecked(settings_.eq.enabled);
-    on.Click([this](auto&&, auto&&) {
-        settings_.eq.enabled = !settings_.eq.enabled;
-        showEq();
-        settingsChanged();
+// The DSP card (docs/Plan.md §5.9): every node from settings_, the order rows and the chain's headroom.
+void MainWindow::showDsp() {
+    const bool wasPopulating = std::exchange(populating_, true);
+    CrossfeedSwitch().IsOn(settings_.crossfeed.enabled);
+    CrossfeedPresetCombo().SelectedIndex(int(settings_.crossfeed.preset));
+    const auto [cutoff, feed] = camel::crossfeedValues(settings_.crossfeed);
+    CrossfeedCutoffBox().Value(cutoff);
+    CrossfeedFeedBox().Value(feed);
+    const bool custom = settings_.crossfeed.preset == camel::CrossfeedPreset::Custom;
+    CrossfeedCutoffBox().IsEnabled(custom);
+    CrossfeedFeedBox().IsEnabled(custom);
+    const bool hasFile = !settings_.convolution.file.empty();
+    ConvolutionSwitch().IsOn(settings_.convolution.enabled && hasFile);
+    ConvolutionSwitch().IsEnabled(hasFile);
+    ConvolutionRemoveButton().IsEnabled(hasFile);
+    ConvolutionFileText().Text(hasFile ? ui::utf8(settings_.convolution.file) : tr(L"Convolution_NoFile"));
+    populating_ = wasPopulating;
+    showDspOrder();
+    showEq();
+    if (settings_.convolution.file != impulseFile_ || eqRate() != impulseRate_) loadConvolution();
+}
+
+void MainWindow::showDspOrder() {
+    auto rows = DspOrderList().Children();
+    rows.Clear();
+    const auto& order = settings_.dspOrder;
+    for (size_t i = 0; i < order.size(); ++i) {
+        Grid row;
+        row.ColumnSpacing(8);
+        for (const auto width : {GridLengthHelper::FromPixels(24), GridLengthHelper::FromPixels(200),
+                                 GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto}}) {
+            ColumnDefinition column;
+            column.Width(width);
+            row.ColumnDefinitions().Append(column);
+        }
+        TextBlock number;
+        number.Text(to_hstring(i + 1) + L".");
+        number.VerticalAlignment(VerticalAlignment::Center);
+        row.Children().Append(number);
+        TextBlock name;
+        name.Text(tr(dspNodeKey(order[i])));
+        name.VerticalAlignment(VerticalAlignment::Center);
+        Grid::SetColumn(name, 1);
+        row.Children().Append(name);
+        const auto move = [&](const wchar_t* glyph, const wchar_t* key, size_t to, int column) {
+            Button button;
+            button.Padding(ThicknessHelper::FromUniformLength(6));
+            FontIcon icon;
+            icon.Glyph(glyph);
+            icon.FontSize(12);
+            button.Content(icon);
+            button.IsEnabled(to < order.size());
+            ToolTipService::SetToolTip(button, box_value(tr(key)));
+            Automation::AutomationProperties::SetName(button, tr(key) + L" " + name.Text());
+            button.Click([this, from = i, to](auto&&, auto&&) {
+                std::swap(settings_.dspOrder[from], settings_.dspOrder[to]);
+                // The row's own click is still being handled; rebuild once it returns.
+                DispatcherQueue().TryEnqueue([this] { showDspOrder(); });
+                showDspSummary();
+                settingsChanged();
+            });
+            Grid::SetColumn(button, column);
+            row.Children().Append(button);
+        };
+        move(L"\xE70E", L"Dsp_MoveUp", i - 1, 2); // wraps past the end for the first row, which disables it
+        move(L"\xE70D", L"Dsp_MoveDown", i + 1, 3);
+        rows.Append(row);
+    }
+    DspRestoreOrderButton().IsEnabled(order != camel::audio::kDefaultDspOrder);
+}
+
+void MainWindow::showDspSummary() {
+    const uint32_t rate = eqRate();
+    const auto chain = camel::audio::dspChain(settings_.eq, settings_.crossfeed, settings_.convolution, settings_.dspOrder,
+                                              impulseRate_ == rate ? impulse_ : nullptr);
+    const bool anyOn = settings_.eq.enabled || settings_.crossfeed.enabled ||
+                       (settings_.convolution.enabled && !settings_.convolution.file.empty());
+    const auto analysis = camel::audio::analyzeDsp(chain, rate);
+    if (!anyOn) {
+        DspSummaryText().Text(tr(L"Dsp_Off"));
+    } else if (!analysis.active) {
+        DspSummaryText().Text(tr(L"Dsp_Flat"));
+    } else {
+        wchar_t db[16];
+        swprintf_s(db, L"%.1f", -analysis.preampDb);
+        DspSummaryText().Text(ui::format(L"Dsp_Headroom", {db}));
+    }
+}
+
+// Reads the impulse response for the playing rate off the UI thread, then shows what it holds.
+winrt::fire_and_forget MainWindow::loadConvolution() {
+    const auto file = settings_.convolution.file;
+    const uint32_t rate = eqRate();
+    const uint64_t load = ++impulseLoads_;
+    impulse_ = nullptr;
+    impulseFile_ = file;
+    impulseRate_ = rate;
+    ConvolutionInfoText().Text(file.empty() ? hstring{} : tr(L"Convolution_Loading"));
+    showDspSummary();
+    if (file.empty()) co_return;
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    camel::audio::LoadedImpulse loaded;
+    std::optional<camel::audio::ImpulseProblem> problem;
+    try {
+        loaded = camel::audio::loadImpulse(camel::toWide(file), rate);
+    } catch (const camel::audio::ImpulseError& e) {
+        problem = e.problem();
+        camel::log::warn("impulse response: %s", e.what());
+    }
+    queue.TryEnqueue([weak, load, rate, loaded, problem] {
+        auto self = weak.get();
+        if (!self || load != self->impulseLoads_) return;
+        self->impulse_ = loaded.impulse;
+        self->ConvolutionInfoText().Text(problem ? impulseProblemText(*problem) : impulseInfoText(loaded.info, rate));
+        self->showDspSummary();
     });
-    items.Append(on);
+}
+
+void MainWindow::OnDspRestoreOrderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settings_.dspOrder = camel::audio::kDefaultDspOrder;
+    showDspOrder();
+    showDspSummary();
+    settingsChanged();
+}
+
+void MainWindow::OnCrossfeedToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (populating_) return;
+    settings_.crossfeed.enabled = CrossfeedSwitch().IsOn();
+    showDspSummary();
+    settingsChanged();
+}
+
+void MainWindow::OnCrossfeedPresetChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
+    const int index = CrossfeedPresetCombo().SelectedIndex();
+    if (populating_ || index < 0) return;
+    const auto preset = camel::CrossfeedPreset(index);
+    if (preset == camel::CrossfeedPreset::Custom && settings_.crossfeed.preset != preset) {
+        // Custom starts from the preset it replaces.
+        std::tie(settings_.crossfeed.cutoffHz, settings_.crossfeed.feedDb) = camel::crossfeedValues(settings_.crossfeed);
+    }
+    settings_.crossfeed.preset = preset;
+    showDsp();
+    settingsChanged();
+}
+
+void MainWindow::OnCrossfeedValueChanged(NumberBox const&, NumberBoxValueChangedEventArgs const&) {
+    const double cutoff = CrossfeedCutoffBox().Value(), feed = CrossfeedFeedBox().Value();
+    if (populating_ || std::isnan(cutoff) || std::isnan(feed)) return;
+    settings_.crossfeed.cutoffHz = uint32_t(std::clamp(std::lround(cutoff), long(camel::CrossfeedSettings::kMinCutoffHz),
+                                                       long(camel::CrossfeedSettings::kMaxCutoffHz)));
+    settings_.crossfeed.feedDb =
+        std::clamp(std::round(feed * 10) / 10, camel::CrossfeedSettings::kMinFeedDb, camel::CrossfeedSettings::kMaxFeedDb);
+    showDspSummary();
+    settingsChanged();
+}
+
+void MainWindow::OnConvolutionToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (populating_) return;
+    settings_.convolution.enabled = ConvolutionSwitch().IsOn();
+    showDspSummary();
+    settingsChanged();
+}
+
+void MainWindow::OnConvolutionChooseClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
+    const hstring types = tr(L"Convolution_FileTypes");
+    const COMDLG_FILTERSPEC filter[] = {{types.c_str(), L"*.wav;*.zip"}};
+    dialog->SetFileTypes(1, filter);
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
+        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        return;
+    settings_.convolution.file = camel::toUtf8(path);
+    CoTaskMemFree(path);
+    settings_.convolution.enabled = true;
+    showDsp();
+    settingsChanged();
+}
+
+void MainWindow::OnConvolutionRemoveClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settings_.convolution = {};
+    showDsp();
+    settingsChanged();
+}
+
+// The playback-bar DSP button: each node on or off, the EQ presets, and the DSP settings.
+void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
+    auto items = DspMenu().Items();
+    items.Clear();
+    const auto toggle = [&](camel::audio::DspNode node, bool on, bool available, auto flip) {
+        ToggleMenuFlyoutItem item;
+        item.Text(tr(dspNodeKey(node)));
+        item.IsChecked(on);
+        item.IsEnabled(available);
+        item.Click([this, flip](auto&&, auto&&) {
+            flip();
+            showDsp();
+            settingsChanged();
+        });
+        items.Append(item);
+    };
+    for (const auto node : settings_.dspOrder) {
+        switch (node) {
+        case camel::audio::DspNode::Eq:
+            toggle(node, settings_.eq.enabled, true, [this] { settings_.eq.enabled = !settings_.eq.enabled; });
+            break;
+        case camel::audio::DspNode::Crossfeed:
+            toggle(node, settings_.crossfeed.enabled, true,
+                   [this] { settings_.crossfeed.enabled = !settings_.crossfeed.enabled; });
+            break;
+        case camel::audio::DspNode::Convolution:
+            toggle(node, settings_.convolution.enabled && !settings_.convolution.file.empty(),
+                   !settings_.convolution.file.empty(),
+                   [this] { settings_.convolution.enabled = !settings_.convolution.enabled; });
+            break;
+        }
+    }
     if (!settings_.eq.presets.empty()) {
-        items.Append(MenuFlyoutSeparator());
+        MenuFlyoutSubItem presets;
+        presets.Text(tr(L"Dsp_MenuEqPresets"));
         for (const auto& preset : settings_.eq.presets) {
             RadioMenuFlyoutItem item;
             item.Text(ui::utf8(preset.name));
@@ -2813,15 +3076,17 @@ void MainWindow::OnEqMenuOpening(Windows::Foundation::IInspectable const&, Windo
                 if (found == settings_.eq.presets.end()) return;
                 settings_.eq.bands = found->bands;
                 settings_.eq.preset = name;
-                showEq();
+                showDsp();
                 settingsChanged();
             });
-            items.Append(item);
+            presets.Items().Append(item);
         }
+        items.Append(MenuFlyoutSeparator());
+        items.Append(presets);
     }
     items.Append(MenuFlyoutSeparator());
     MenuFlyoutItem open;
-    open.Text(tr(L"Eq_MenuSettings"));
+    open.Text(tr(L"Dsp_MenuSettings"));
     open.Click([this](auto&&, auto&&) {
         returnToPage(L"settings");
         BringIntoViewOptions options;

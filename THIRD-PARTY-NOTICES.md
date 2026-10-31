@@ -45,6 +45,10 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 | RapidJSON | `rapidjson` | 2025-02-26#1 | MIT | linked | [Notice](third_party/licenses/native/rapidjson.txt) |
 | TCLAP | `tclap` | 1.2.5 | MIT | build only | [Notice](third_party/licenses/native/tclap.txt) |
 
+## Adapted code
+
+The headphone crossfeed (`rust/audio_engine/src/crossfeed.rs`) follows the filters of libbs2b by Boris Mikhaylov, used under the MIT license ([notice](third_party/licenses/adapted/libbs2b.txt)). No libbs2b code is linked.
+
 ## Rust components
 
 Locked in `rust/Cargo.lock` and linked into CamelPlayer.exe through the Rust Engine. Symphonia uses MPL-2.0 (full text in [MPL-2.0.txt](third_party/licenses/MPL-2.0.txt)). The other crates are used under their MIT option; `encoding_rs` also incorporates WHATWG data under BSD-3-Clause, whose COPYRIGHT and LICENSE-WHATWG are preserved with its MIT notice. Crate sources are at `https://static.crates.io/crates/<name>/<name>-<version>.crate` and match the checksums in Cargo.lock.
