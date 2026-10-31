@@ -78,6 +78,52 @@ std::optional<ArtworkCandidate> folderImage(const Path& path, const Cancellation
     return findFolderArtworkFile(path, token);
 }
 
+// The first frame of a picture WIC reads, or a WebP; null when it is neither or too large. `bytes` must outlive it.
+ComPtr<IWICBitmapSource> decode(IWICImagingFactory* factory, const std::vector<uint8_t>& bytes) {
+    ComPtr<IWICBitmapSource> source;
+    ComPtr<IWICStream> input;
+    check(factory->CreateStream(&input));
+    check(input->InitializeFromMemory(const_cast<uint8_t*>(bytes.data()), DWORD(bytes.size())));
+    ComPtr<IWICBitmapDecoder> decoder;
+    if (SUCCEEDED(factory->CreateDecoderFromStream(input.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder))) {
+        ComPtr<IWICBitmapFrameDecode> frame;
+        check(decoder->GetFrame(0, &frame));
+        source = frame;
+    } else {
+        int w = 0, h = 0;
+        if (!WebPGetInfo(bytes.data(), bytes.size(), &w, &h) || w <= 0 || h <= 0 || w > 16384 || h > 16384 ||
+            uint64_t(w) * h > 40000000)
+            return nullptr;
+        std::unique_ptr<uint8_t, decltype(&WebPFree)> rgba(WebPDecodeBGRA(bytes.data(), bytes.size(), &w, &h), WebPFree);
+        if (!rgba) return nullptr;
+        ComPtr<IWICBitmap> bitmap;
+        check(factory->CreateBitmapFromMemory(UINT(w), UINT(h), GUID_WICPixelFormat32bppBGRA, UINT(w * 4), UINT(w * h * 4),
+                                              rgba.get(), &bitmap));
+        // WIC copies the pixels into the bitmap.
+        source = bitmap;
+    }
+    UINT width = 0, height = 0;
+    check(source->GetSize(&width, &height));
+    if (!width || !height || width > 16384 || height > 16384 || uint64_t(width) * height > 40000000) return nullptr;
+    return source;
+}
+
+void encodeJpeg(IWICImagingFactory* factory, IWICBitmapSource* source, IWICStream* output) {
+    ComPtr<IWICFormatConverter> converter;
+    check(factory->CreateFormatConverter(&converter));
+    check(converter->Initialize(source, GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone, nullptr, 0,
+                                WICBitmapPaletteTypeCustom));
+    ComPtr<IWICBitmapEncoder> encoder;
+    check(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder));
+    check(encoder->Initialize(output, WICBitmapEncoderNoCache));
+    ComPtr<IWICBitmapFrameEncode> frame;
+    check(encoder->CreateNewFrame(&frame, nullptr));
+    check(frame->Initialize(nullptr));
+    check(frame->WriteSource(converter.Get(), nullptr));
+    check(frame->Commit());
+    check(encoder->Commit());
+}
+
 struct StoredCover {
     std::string key;
     bool embedded = false;
@@ -146,11 +192,46 @@ std::optional<StoredCover> folderCover(sqlite::Database& db, int64_t folder) {
 }
 } // namespace
 
+std::vector<uint8_t> squarePicture(const std::vector<uint8_t>& image, unsigned pixels) {
+    if (image.empty() || image.size() > kMaxArtworkBytes) throw std::invalid_argument("not a picture");
+    Apartment apartment;
+    ComPtr<IWICImagingFactory> factory;
+    check(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)));
+    const auto source = decode(factory.Get(), image);
+    if (!source) throw std::invalid_argument("not a picture");
+    UINT width = 0, height = 0;
+    check(source->GetSize(&width, &height));
+    const UINT side = std::min(width, height);
+    const WICRect square{INT((width - side) / 2), height > width ? 0 : INT((height - side) / 2), INT(side), INT(side)};
+    ComPtr<IWICBitmapClipper> clipper;
+    check(factory->CreateBitmapClipper(&clipper));
+    check(clipper->Initialize(source.Get(), &square));
+    const UINT size = std::min(side, pixels);
+    ComPtr<IWICBitmapScaler> scaler;
+    check(factory->CreateBitmapScaler(&scaler));
+    check(scaler->Initialize(clipper.Get(), size, size, WICBitmapInterpolationModeFant));
+    ComPtr<IStream> memory;
+    check(CreateStreamOnHGlobal(nullptr, TRUE, &memory));
+    ComPtr<IWICStream> output;
+    check(factory->CreateStream(&output));
+    check(output->InitializeFromIStream(memory.Get()));
+    encodeJpeg(factory.Get(), scaler.Get(), output.Get());
+    STATSTG stat{};
+    check(memory->Stat(&stat, STATFLAG_NONAME));
+    std::vector<uint8_t> jpeg(size_t(stat.cbSize.QuadPart));
+    check(memory->Seek({}, STREAM_SEEK_SET, nullptr));
+    ULONG read = 0;
+    check(memory->Read(jpeg.data(), ULONG(jpeg.size()), &read));
+    jpeg.resize(read);
+    return jpeg;
+}
+
 ArtworkCache::ArtworkCache(Path directory, uintmax_t maxBytes) : directory_(std::move(directory)), maxBytes_(maxBytes) {}
 
 std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, const ArtworkRequest& request,
                                                   const CancellationToken& token) {
     if (token.cancelled()) return {};
+    if (request.kind == ArtworkKind::Artist) return store ? artist(*store, request.name, token) : std::nullopt;
     if (store) {
         try {
             if (request.kind != ArtworkKind::Track) {
@@ -289,6 +370,35 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
     return generate(image, token, cover->key);
 }
 
+// The picture the library keeps for a name; its key follows the picture's last change.
+std::optional<ArtworkReference> ArtworkCache::artist(const LibraryStore& store, const std::string& name,
+                                                     const CancellationToken& token) {
+    try {
+        auto db = store.openReader();
+        auto row = db.prepare("SELECT changed FROM artist_pictures WHERE name=? AND (chosen IS NOT NULL OR found IS NOT NULL)");
+        if (!row.bind(1, name).step()) return std::nullopt;
+        const auto changed = row.integer(0);
+        Md5 md5;
+        md5.update(name.data(), name.size());
+        md5.update(&changed, sizeof(changed));
+        const auto key = "p" + toHex(md5.finish());
+        const auto target = directory_ / (key + "-" + std::to_string(kPixels) + ".jpg");
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(target, ec) && std::filesystem::file_size(target, ec) > 0) {
+            std::filesystem::last_write_time(target, std::filesystem::file_time_type::clock::now(), ec);
+            return ArtworkReference{key + "-" + std::to_string(kPixels), target};
+        }
+        auto picture = db.prepare("SELECT coalesce(chosen,found) FROM artist_pictures WHERE name=?");
+        if (!picture.bind(1, name).step() || picture.isNull(0)) return std::nullopt;
+        ArtworkCandidate image;
+        image.bytes = picture.blob(0);
+        std::lock_guard lock(mutex_);
+        return generate(image, token, key);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token) {
     std::vector<int64_t> albums;
     {
@@ -355,56 +465,22 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
     Apartment apartment;
     ComPtr<IWICImagingFactory> factory;
     check(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)));
-    ComPtr<IWICBitmapSource> source;
-    ComPtr<IWICStream> input;
-    check(factory->CreateStream(&input));
-    check(input->InitializeFromMemory(bytes.data(), DWORD(bytes.size())));
-    ComPtr<IWICBitmapDecoder> decoder;
-    if (SUCCEEDED(factory->CreateDecoderFromStream(input.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder))) {
-        ComPtr<IWICBitmapFrameDecode> frame;
-        check(decoder->GetFrame(0, &frame));
-        source = frame;
-    } else {
-        int w = 0, h = 0;
-        if (!WebPGetInfo(bytes.data(), bytes.size(), &w, &h) || w <= 0 || h <= 0 || w > 16384 || h > 16384 ||
-            uint64_t(w) * h > 40000000)
-            return {};
-        std::unique_ptr<uint8_t, decltype(&WebPFree)> rgba(WebPDecodeBGRA(bytes.data(), bytes.size(), &w, &h), WebPFree);
-        if (!rgba) return {};
-        ComPtr<IWICBitmap> bitmap;
-        check(factory->CreateBitmapFromMemory(UINT(w), UINT(h), GUID_WICPixelFormat32bppBGRA, UINT(w * 4), UINT(w * h * 4),
-                                              rgba.get(), &bitmap));
-        // WIC copies the pixels into the bitmap.
-        source = bitmap;
-    }
+    const auto source = decode(factory.Get(), bytes);
+    if (!source || token.cancelled()) return {};
     UINT width = 0, height = 0;
     check(source->GetSize(&width, &height));
-    if (!width || !height || width > 16384 || height > 16384 || uint64_t(width) * height > 40000000 || token.cancelled())
-        return {};
     const double scale = std::min(1.0, double(kPixels) / std::max(width, height));
     ComPtr<IWICBitmapScaler> scaler;
     check(factory->CreateBitmapScaler(&scaler));
     check(scaler->Initialize(source.Get(), std::max(1u, UINT(width * scale)), std::max(1u, UINT(height * scale)),
                              WICBitmapInterpolationModeFant));
-    ComPtr<IWICFormatConverter> converter;
-    check(factory->CreateFormatConverter(&converter));
-    check(converter->Initialize(scaler.Get(), GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone, nullptr, 0,
-                                WICBitmapPaletteTypeCustom));
     const auto temporary = Path(target.wstring() + L".tmp");
     auto cleanup = wil::scope_exit([&] { std::filesystem::remove(temporary, ec); });
     {
         ComPtr<IWICStream> output;
         check(factory->CreateStream(&output));
         check(output->InitializeFromFilename(temporary.c_str(), GENERIC_WRITE));
-        ComPtr<IWICBitmapEncoder> encoder;
-        check(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder));
-        check(encoder->Initialize(output.Get(), WICBitmapEncoderNoCache));
-        ComPtr<IWICBitmapFrameEncode> frame;
-        check(encoder->CreateNewFrame(&frame, nullptr));
-        check(frame->Initialize(nullptr));
-        check(frame->WriteSource(converter.Get(), nullptr));
-        check(frame->Commit());
-        check(encoder->Commit());
+        encodeJpeg(factory.Get(), scaler.Get(), output.Get());
     }
     if (token.cancelled()) return {};
     std::filesystem::rename(temporary, target);

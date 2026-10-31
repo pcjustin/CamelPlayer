@@ -6,7 +6,6 @@
 
 #include <windows.h>
 #include <bcrypt.h>
-#include <winhttp.h>
 #include <zlib.h>
 
 #include <nlohmann/json.hpp>
@@ -19,6 +18,7 @@
 #include <vector>
 
 #include "Common/util/Text.h"
+#include "Server/Support/Http.h"
 #include "Updater/UpdateFiles.h"
 
 namespace camel::server::update {
@@ -40,68 +40,21 @@ std::string versionText(const Version& v) {
     return std::to_string(v.major) + "." + std::to_string(v.minor) + "." + std::to_string(v.patch);
 }
 
-class Internet {
-public:
-    explicit Internet(HINTERNET handle) : handle_(handle) {
-        if (!handle_) throw std::runtime_error("network error " + std::to_string(GetLastError()));
-    }
-    ~Internet() { WinHttpCloseHandle(handle_); }
-    Internet(const Internet&) = delete;
-    Internet& operator=(const Internet&) = delete;
-    HINTERNET get() const { return handle_; }
-
-private:
-    HINTERNET handle_;
-};
-
 void fail(const char* what) {
     throw std::runtime_error(std::string(what) + " failed (" + std::to_string(GetLastError()) + ")");
 }
 
-// Streams the body of a GET to `sink`; `onLength` receives Content-Length (0 when the server sends none).
+// Streams the body of a successful GET to `sink`; `onLength` receives Content-Length (0 when the server sends none).
 void get(const std::string& url, const char* accept, const CancellationToken& token,
          const std::function<void(uint64_t)>& onLength, const std::function<void(const char*, size_t)>& sink) {
-    const std::wstring wide = toWide(url);
-    URL_COMPONENTS parts{};
-    parts.dwStructSize = sizeof(parts);
-    parts.dwHostNameLength = DWORD(-1);
-    parts.dwUrlPathLength = DWORD(-1);
-    parts.dwExtraInfoLength = DWORD(-1);
-    if (!WinHttpCrackUrl(wide.c_str(), DWORD(wide.size()), 0, &parts)) throw std::runtime_error("invalid URL: " + url);
-    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-    const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
-                              std::wstring(parts.lpszExtraInfo ? parts.lpszExtraInfo : L"", parts.dwExtraInfoLength);
-    const Internet session(
-        WinHttpOpen(L"CamelPlayer", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-    WinHttpSetTimeouts(session.get(), 10000, 10000, 15000, 30000);
-    const Internet connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
-    const Internet request(WinHttpOpenRequest(connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                              WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                              parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0));
-    const std::wstring headers = L"Accept: " + toWide(accept);
-    if (!WinHttpSendRequest(request.get(), headers.c_str(), DWORD(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-        !WinHttpReceiveResponse(request.get(), nullptr))
-        fail("HTTP request");
-    DWORD status = 0, size = sizeof(status);
-    WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                        &status, &size, WINHTTP_NO_HEADER_INDEX);
-    if (status == 404) throw NotFound();
-    if (status != 200) throw std::runtime_error("HTTP " + std::to_string(status));
-    wchar_t length[32] = {};
-    size = sizeof(length);
-    uint64_t total = 0;
-    if (WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX, length, &size,
-                            WINHTTP_NO_HEADER_INDEX))
-        total = _wcstoui64(length, nullptr, 10);
-    if (onLength) onLength(total);
-    std::vector<char> buffer(size_t{64} * 1024);
-    for (;;) {
-        if (token.cancelled()) throw std::runtime_error("cancelled");
-        DWORD read = 0;
-        if (!WinHttpReadData(request.get(), buffer.data(), DWORD(buffer.size()), &read)) fail("HTTP read");
-        if (read == 0) break;
-        sink(buffer.data(), read);
-    }
+    http::get(
+        url, accept, token,
+        [&](unsigned status, uint64_t length) {
+            if (status == 404) throw NotFound();
+            if (status != 200) throw std::runtime_error("HTTP " + std::to_string(status));
+            if (onLength) onLength(length);
+        },
+        sink);
 }
 
 uint32_t read16(const std::string& s, size_t at) {

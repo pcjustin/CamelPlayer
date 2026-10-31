@@ -80,6 +80,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnRemoveFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     // Automatic updates (docs/Plan.md §8.6).
     void OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnUpdateInstallClick(Windows::Foundation::IInspectable const&,
                                                 Microsoft::UI::Xaml::RoutedEventArgs const&);

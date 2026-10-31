@@ -18,10 +18,12 @@ struct LibraryView : LibraryViewT<LibraryView> {
     ~LibraryView() override { cancelArtwork(); }
     void InitializeComponent();
 
-    // The window supplies the Server, the command path its player bar follows, the playlist menu entries and how a
-    // smart list is saved as a playlist named after it.
+    // The window supplies the Server, the command path its player bar follows, the playlist menu entries, how a smart
+    // list is saved as a playlist named after it, its handle for file dialogs and where the answer to looking artist
+    // pictures up online goes.
     void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit,
-                ui::PlaylistMenu playlistMenu, std::function<void(ui::SourceFetch, std::string name)> savePlaylist);
+                ui::PlaylistMenu playlistMenu, std::function<void(ui::SourceFetch, std::string name)> savePlaylist,
+                std::function<HWND()> window, std::function<void(bool allow)> answerArtistPictures);
     // albums, artists, composers, genres, years, tracks, folders or a smart list (smart:added, smart:mostPlayed,
     // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:favoriteArtists, smart:neverPlayed); starts a
     // fresh navigation history.
@@ -87,6 +89,10 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnPlayListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnShuffleListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSaveListClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnChoosePictureClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRemovePictureClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnAllowPicturesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnRefusePicturesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
     struct ArtworkSlot {
@@ -98,6 +104,7 @@ private:
     void cancelArtwork();
     std::unordered_map<void*, ArtworkSlot> artworkSlots_;
     camel::server::CancellationToken detailArtwork_;
+    camel::server::CancellationToken pictureToken_; // the artist page's picture lookup
     enum class Mode { Albums, Groups, Tracks, AlbumDetail, Artist, Folders, Search };
     struct View {
         Mode mode = Mode::Albums;
@@ -168,6 +175,12 @@ private:
     void showAlbumFavorite(bool favorite);
     void showArtistFavorite(bool favorite);
     void showAlbumFormats(const std::vector<camel::server::LibraryAlbumFormat>& formats);
+    // The artist page's picture: what the library keeps, after a lookup when one is due. `allowed` waits until the
+    // Server has the answer the page just gave.
+    void loadArtistPicture(const std::string& name, bool allowed);
+    void showArtistPicture(const camel::server::ArtistPicture& picture);
+    // Runs `change` off the UI thread and shows the picture it returns; a failure shows `failure`, when set.
+    void changeArtistPicture(std::function<camel::server::ArtistPicture(camel::server::IServer&)> change, const wchar_t* failure);
     void showMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, Microsoft::UI::Xaml::FrameworkElement const& element,
                   Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const& e);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.
@@ -183,6 +196,8 @@ private:
     std::function<void()> leave_; // Back from a search that began outside the library pages
     std::function<void(bool)> backChanged_;
     std::function<void(ui::SourceFetch, std::string)> savePlaylist_;
+    std::function<HWND()> window_;
+    std::function<void(bool)> answerArtistPictures_;
     uint64_t generation_ = 0; // changes whenever another view opens
     camel::server::AlbumSort albumSort_ = camel::server::AlbumSort::Title;
     camel::server::TrackSort trackSort_ = camel::server::TrackSort::Title;

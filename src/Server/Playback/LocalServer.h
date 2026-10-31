@@ -49,6 +49,11 @@ public:
     LibraryGroupPage favoriteArtists(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                      const CancellationToken& token = {}) const override;
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token = {}) const override;
+    ArtistPicture artistPicture(const std::string& name, bool lookUp, const CancellationToken& token = {}) override;
+    ArtistPicture setArtistPicture(const std::string& name, const std::vector<uint8_t>& image) override;
+    ArtistPicture removeArtistPicture(const std::string& name) override;
+    ArtistPicture chooseArtistCandidate(const std::string& name, const std::string& mbid,
+                                        const CancellationToken& token = {}) override;
     LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const override;
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryRootInfo> libraryRoots() const override;

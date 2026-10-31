@@ -1,9 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -12,6 +9,7 @@
 #include <thread>
 
 #include "Common/util/Text.h"
+#include "FakeHttp.h"
 #include "Server/Support/Updates.h"
 #include "Server/Support/ZipWriter.h"
 #include "TestUtil.h"
@@ -33,73 +31,7 @@ std::string readText(const fs::path& file) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-// A minimal HTTP/1.1 server on 127.0.0.1 that stands in for the GitHub API and its release assets.
-class FakeGitHub {
-public:
-    FakeGitHub() {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
-        listener_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        EXPECT_EQ(bind(listener_, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
-        int length = sizeof(address);
-        getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length);
-        port_ = ntohs(address.sin_port);
-        listen(listener_, 8);
-        thread_ = std::thread([this] { serve(); });
-    }
-    ~FakeGitHub() {
-        closesocket(listener_);
-        thread_.join();
-        WSACleanup();
-    }
-    std::string base() const { return "http://127.0.0.1:" + std::to_string(port_); }
-    void route(const std::string& path, std::string body, int status = 200) {
-        std::lock_guard lock(mutex_);
-        routes_[path] = {status, std::move(body)};
-    }
-
-private:
-    void serve() {
-        for (;;) {
-            const SOCKET client = accept(listener_, nullptr, nullptr);
-            if (client == INVALID_SOCKET) return;
-            std::string request;
-            char buffer[4096];
-            while (request.find("\r\n\r\n") == std::string::npos) {
-                const int read = recv(client, buffer, sizeof(buffer), 0);
-                if (read <= 0) break;
-                request.append(buffer, size_t(read));
-            }
-            const auto start = request.find(' ') + 1;
-            const std::string path = request.substr(start, request.find(' ', start) - start);
-            std::pair<int, std::string> response{404, "{}"};
-            {
-                std::lock_guard lock(mutex_);
-                if (const auto found = routes_.find(path); found != routes_.end()) response = found->second;
-            }
-            const std::string head =
-                "HTTP/1.1 " + std::to_string(response.first) + (response.first == 200 ? " OK" : " Not Found") +
-                "\r\nContent-Length: " + std::to_string(response.second.size()) + "\r\nConnection: close\r\n\r\n";
-            const std::string whole = head + response.second;
-            for (size_t sent = 0; sent < whole.size();) {
-                const int n = send(client, whole.data() + sent, int(std::min<size_t>(whole.size() - sent, 1 << 16)), 0);
-                if (n <= 0) break;
-                sent += size_t(n);
-            }
-            shutdown(client, SD_SEND);
-            closesocket(client);
-        }
-    }
-
-    SOCKET listener_ = INVALID_SOCKET;
-    uint16_t port_ = 0;
-    std::thread thread_;
-    std::mutex mutex_;
-    std::map<std::string, std::pair<int, std::string>> routes_;
-};
+using FakeGitHub = testutil::FakeHttp;
 
 // Points the update check at `server` and the temp folder into build\testtmp for one test.
 class Redirected {

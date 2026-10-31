@@ -111,6 +111,10 @@ vcpkg host ports used while building the native libraries above. None is linked 
 | `vcpkg-tool-meson` | 1.9.0#10 | MIT (port scripts) AND Apache-2.0 (Meson) | [Notices](third_party/licenses/build-tools/vcpkg-tool-meson/) |
 | `yasm` | 1.3.0#8 | BSD-2-Clause AND BSD-3-Clause AND (Artistic-1.0 OR GPL-2.0-only OR LGPL-2.0-only) (bitvect) | [Notices](third_party/licenses/build-tools/yasm/) |
 
+## Online services
+
+Artist pictures are looked up online only while the user allows it (asked on the first artist page; Settings › Interface › Artist pictures). CamelPlayer then sends an artist's or composer's name to [MusicBrainz](https://musicbrainz.org), the artist's Wikidata item to [Wikidata](https://www.wikidata.org) and the picture's file name to [Wikimedia Commons](https://commons.wikimedia.org), identifying itself as `CamelPlayer/<version> (https://github.com/pcjustin/CamelPlayer)` and asking MusicBrainz at most once a second. MusicBrainz and Wikidata publish their data under CC0. A Commons picture keeps its own free license (public domain, CC0, CC BY or CC BY-SA): the artist page names its author and license and links to the file's page, which holds the full terms. Pictures are kept in the user's library database and are never part of a release. No account or key is involved.
+
 ## Source access and relinking
 
 The LGPL libraries (FFmpeg, libsndfile, mpg123, libsoxr, TagLib) are linked statically into CamelPlayer.exe; DSD Nexus is a separate DLL. Because CamelPlayer's complete source and build scripts are public, anyone can rebuild CamelPlayer against a modified version of any of them:

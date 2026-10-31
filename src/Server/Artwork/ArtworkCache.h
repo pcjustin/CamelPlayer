@@ -8,16 +8,21 @@
 #include "Server/Library/LibraryStore.h"
 
 namespace camel::server {
-enum class ArtworkKind { Album, Folder, Track };
+enum class ArtworkKind { Album, Folder, Track, Artist };
 struct ArtworkRequest {
     ArtworkKind kind = ArtworkKind::Album;
     int64_t id = 0;
     std::string path; // Track only: the current playback source, including files outside the library
+    std::string name; // Artist only: an artist's or composer's name
 };
 struct ArtworkReference {
     std::string key;
     std::filesystem::path path; // generated local thumbnail, never a music-library file
 };
+// A square JPEG of at most `pixels` from an image file's bytes: the middle of a wide picture, the top of a tall one.
+// Throws std::invalid_argument when the bytes are not a picture it can read.
+std::vector<uint8_t> squarePicture(const std::vector<uint8_t>& image, unsigned pixels);
+
 class ArtworkCache {
 public:
     // Every view shows covers from one size: at most 160 view pixels (the album details) up to 160 % scaling.
@@ -37,6 +42,7 @@ private:
     // is found without touching the music storage. nullopt when the library records no such cover.
     std::optional<ArtworkReference> stored(const LibraryStore& store, const ArtworkRequest& request,
                                            const CancellationToken& token);
+    std::optional<ArtworkReference> artist(const LibraryStore& store, const std::string& name, const CancellationToken& token);
     // A non-empty `key` names the thumbnail instead of a digest of the source.
     std::optional<ArtworkReference> generate(const ArtworkCandidate& image, const CancellationToken& token,
                                              const std::string& key = {});

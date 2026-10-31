@@ -91,6 +91,8 @@ std::optional<ArtworkCandidate> findFolderArtworkFile(const std::filesystem::pat
 // The same names in the parent folder when the album folder is a disc subfolder (CD1, Disc 2, 碟 3).
 std::unique_ptr<IArtworkProvider> makeParentFolderArtworkProvider();
 std::unique_ptr<IArtworkProvider> makeEmbeddedArtworkProvider();
+// A track's own picture of its lead artist or artist, for artist pictures (docs/Plan.md §7.4).
+std::unique_ptr<IArtworkProvider> makeEmbeddedArtistPictureProvider();
 // Local providers in the §7.4 order; online providers follow them.
 ArtworkChain localArtworkChain();
 

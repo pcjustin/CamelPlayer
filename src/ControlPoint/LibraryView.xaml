@@ -29,7 +29,19 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" MinWidth="56" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <!-- An artist's or composer's picture, over their initial (docs/Plan.md §7.4). -->
+                    <Border Width="32" Height="32" CornerRadius="16" Background="{x:Bind AvatarBrush, Mode=OneWay}"
+                            Visibility="{x:Bind HasAvatar, Mode=OneWay}">
+                        <Grid>
+                            <TextBlock Text="{x:Bind Initial, Mode=OneWay}" FontSize="14" FontWeight="SemiBold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Image x:Name="ArtistAvatar" Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
+                                   DataContextChanged="OnArtworkContextChanged" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
                 <TextBlock x:Name="SubtitleText" Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <!-- An album's track artists, each name a link; filled in code in place of the subtitle, and with the room of
@@ -139,9 +151,36 @@
                 <Border x:Name="DetailCoverFrame" CornerRadius="8" VerticalAlignment="Top" Margin="0,0,16,0" Visibility="Collapsed">
                     <Image x:Name="DetailCover" Width="160" Height="160" Stretch="Uniform" />
                 </Border>
+                <!-- An artist's or composer's picture, or their initial; the button opens the picture menu. -->
+                <Button x:Name="ArtistPictureButton" x:Uid="Library_ArtistPictureButton" Padding="0" Margin="0,0,20,0"
+                        CornerRadius="64" VerticalAlignment="Top" Visibility="Collapsed">
+                    <Border x:Name="ArtistPictureFrame" Width="128" Height="128" CornerRadius="64">
+                        <Grid>
+                            <TextBlock x:Name="ArtistInitial" FontSize="52" FontWeight="SemiBold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Image x:Name="ArtistPictureImage" Stretch="UniformToFill" />
+                        </Grid>
+                    </Border>
+                    <Button.Flyout>
+                        <MenuFlyout x:Name="ArtistPictureMenu" Placement="BottomEdgeAlignedLeft">
+                            <MenuFlyoutItem x:Uid="Library_ChoosePicture" Click="OnChoosePictureClick">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B9;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem x:Name="RemovePictureItem" x:Uid="Library_RemovePicture" Click="OnRemovePictureClick">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSubItem x:Name="PictureCandidates" x:Uid="Library_WhichArtist">
+                                <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE77B;" /></MenuFlyoutSubItem.Icon>
+                            </MenuFlyoutSubItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <!-- A Wikimedia Commons picture's author and license, linking to the file's page. -->
+                    <TextBlock x:Name="PictureCredit" Style="{StaticResource CaptionTextBlockStyle}" Margin="0,2,0,0" TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
                     <!-- Each format, bit depth and sample rate among the album's tracks (docs/Plan.md §8.2) -->
                     <StackPanel x:Name="AlbumFormats" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0" Visibility="Collapsed" />
                     <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
@@ -175,6 +214,14 @@
                                   Visibility="Collapsed">
                         <FontIcon x:Name="ArtistFavoriteIcon" Glyph="&#xE006;" FontSize="16" />
                     </ToggleButton>
+                    <!-- Asked once, on the first artist page opened; Settings has the same switch. -->
+                    <InfoBar x:Name="PictureConsent" x:Uid="Library_PictureConsent" IsClosable="False" Margin="0,12,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+                            <Button x:Uid="Library_AllowPictures" Style="{StaticResource AccentButtonStyle}" Click="OnAllowPicturesClick" />
+                            <Button x:Uid="Library_RefusePictures" Click="OnRefusePicturesClick" />
+                        </StackPanel>
+                    </InfoBar>
+                    <InfoBar x:Name="PictureError" x:Uid="Library_PictureError" Severity="Error" Margin="0,12,0,0" />
                     <StackPanel x:Name="ListActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
                         <Button Style="{StaticResource AccentButtonStyle}" Padding="16,6" Click="OnPlayListClick">
                             <StackPanel Orientation="Horizontal" Spacing="8">

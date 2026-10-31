@@ -1493,6 +1493,23 @@ LibraryGroupPage LocalServer::favoriteArtists(int64_t offset, int64_t limit, std
 std::optional<ArtworkReference> LocalServer::artwork(const ArtworkRequest& request, const CancellationToken& token) const {
     return impl_->artwork(request, token);
 }
+ArtistPicture LocalServer::artistPicture(const std::string& name, bool lookUp, const CancellationToken& token) {
+    if (!lookUp) return camel::server::artistPicture(impl_->library(), name);
+    const bool online = impl_->snapshot().settings.artistPictures == OnlineLookup::Allowed;
+    return lookUpArtistPicture(impl_->library(), name, online, {}, token);
+}
+ArtistPicture LocalServer::setArtistPicture(const std::string& name, const std::vector<uint8_t>& image) {
+    return camel::server::setArtistPicture(impl_->library(), name, image);
+}
+ArtistPicture LocalServer::removeArtistPicture(const std::string& name) {
+    return camel::server::removeArtistPicture(impl_->library(), name);
+}
+ArtistPicture LocalServer::chooseArtistCandidate(const std::string& name, const std::string& mbid,
+                                                 const CancellationToken& token) {
+    if (impl_->snapshot().settings.artistPictures != OnlineLookup::Allowed)
+        throw std::logic_error("online artist pictures are off");
+    return camel::server::chooseArtistCandidate(impl_->library(), name, mbid, {}, token);
+}
 
 LibraryAlbumDetail LocalServer::albumDetail(int64_t album, const CancellationToken& token) const {
     return camel::server::albumDetail(impl_->library(), album, token);

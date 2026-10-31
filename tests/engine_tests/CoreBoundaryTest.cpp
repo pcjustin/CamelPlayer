@@ -306,6 +306,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     settings.language = "zh-TW";
     settings.closeAction = CloseAction::Exit;
     settings.trayNoticeShown = settings.firstRunDone = true;
+    settings.artistPictures = OnlineLookup::Allowed;
     settings.lastFile = L"C:\\music\\a.flac";
 
     const auto playback = resetPlayback(settings);
@@ -317,12 +318,14 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_EQ(playback.language, "zh-TW");
     EXPECT_EQ(playback.closeAction, CloseAction::Exit);
     EXPECT_TRUE(playback.trayNoticeShown && playback.firstRunDone);
+    EXPECT_EQ(playback.artistPictures, OnlineLookup::Allowed);
     EXPECT_EQ(playback.lastFile, settings.lastFile);
 
     const auto ui = resetInterface(settings);
     EXPECT_EQ(ui.language, "");
     EXPECT_EQ(ui.closeAction, CloseAction::Tray);
     EXPECT_FALSE(ui.trayNoticeShown || ui.firstRunDone);
+    EXPECT_EQ(ui.artistPictures, OnlineLookup::Ask);
     EXPECT_EQ(ui.backend, Backend::Asio);
     EXPECT_EQ(ui.asio, settings.asio);
     EXPECT_TRUE(ui.convertWhenUnsupported);
@@ -334,6 +337,16 @@ TEST(SettingsBoundary, TheFirstRunGuideIsDueUntilFinishedOrSkipped) {
     settings.firstRunDone = true;
     EXPECT_TRUE(fromJson(toJson(settings)).firstRunDone);
     EXPECT_FALSE(fromJson(R"({"firstRunDone":"yes"})").firstRunDone);
+}
+
+TEST(SettingsBoundary, OnlineArtistPicturesAreAskedAboutUntilAnswered) {
+    EXPECT_EQ(Settings{}.artistPictures, OnlineLookup::Ask);
+    Settings settings;
+    for (const auto answer : {OnlineLookup::Allowed, OnlineLookup::Refused}) {
+        settings.artistPictures = answer;
+        EXPECT_EQ(fromJson(toJson(settings)).artistPictures, answer);
+    }
+    EXPECT_EQ(fromJson(R"({"artistPictures":"maybe"})").artistPictures, OnlineLookup::Ask);
 }
 
 TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {

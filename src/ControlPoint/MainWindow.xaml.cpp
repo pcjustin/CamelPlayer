@@ -258,7 +258,12 @@ void MainWindow::InitializeComponent() {
     };
     get_self<LibraryView>(Library())->attach(
         server_, [this](Command command) { submitCommand(std::move(command)); }, playlistMenu,
-        [this](ui::SourceFetch fetch, std::string name) { runPlaylistAction(std::move(fetch), std::nullopt, std::move(name)); });
+        [this](ui::SourceFetch fetch, std::string name) { runPlaylistAction(std::move(fetch), std::nullopt, std::move(name)); },
+        [this] { return Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()); },
+        [this](bool allow) {
+            settings_.artistPictures = allow ? camel::OnlineLookup::Allowed : camel::OnlineLookup::Refused;
+            applySettingsNow();
+        });
     get_self<PlaylistView>(Playlists())
         ->attach(server_,
                  {[this](Command command) { submitCommand(std::move(command)); }, [this] { refreshPlaylists(); },
@@ -447,6 +452,7 @@ void MainWindow::populateSettings() {
     AutoplaySwitch().IsOn(settings_.autoplay);
     QueueAutoplayItem().IsChecked(settings_.autoplay);
     AutoUpdateSwitch().IsOn(settings_.checkUpdates);
+    ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -571,6 +577,11 @@ void MainWindow::readSettingsFromUi() {
     settings_.convertDsdWhenUnsupported = idx(ConvertDsdCombo()) == 1;
     settings_.autoplay = AutoplaySwitch().IsOn();
     settings_.checkUpdates = AutoUpdateSwitch().IsOn();
+    // Off stays unanswered until it was on, so the artist page still asks.
+    if (ArtistPicturesSwitch().IsOn())
+        settings_.artistPictures = camel::OnlineLookup::Allowed;
+    else if (settings_.artistPictures == camel::OnlineLookup::Allowed)
+        settings_.artistPictures = camel::OnlineLookup::Refused;
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -2589,6 +2600,10 @@ void MainWindow::OnRefreshDevicesClick(Windows::Foundation::IInspectable const&,
 }
 
 void MainWindow::OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settingsChanged();
+}
+
+void MainWindow::OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
 }
 

@@ -121,6 +121,8 @@ uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format);
 enum class CloseAction : uint8_t { Tray, Exit };
 // The window's colours: the Windows app mode, or always light or dark.
 enum class Theme : uint8_t { System, Light, Dark };
+// A lookup on the internet the user is asked about once, where it is first needed.
+enum class OnlineLookup : uint8_t { Ask, Allowed, Refused };
 
 // A global hotkey as RegisterHotKey takes it: MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8 and a virtual-key code;
 // key 0 leaves the action without a hotkey.
@@ -161,14 +163,15 @@ struct Settings {
     bool firstRunDone = false;    // the first-run guide was finished or skipped
     bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)
     bool checkUpdates = true;     // automatic update checks at startup and daily (docs/Plan.md §8.6)
-    std::string skippedVersion;   // the release the automatic check no longer offers
+    OnlineLookup artistPictures = OnlineLookup::Ask; // from Wikimedia Commons (docs/Plan.md §7.4)
+    std::string skippedVersion;                      // the release the automatic check no longer offers
     HotkeySettings hotkeys;
     std::wstring lastFile;
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion
-// and decoders. Interface: language, close action, the tray notice, the first-run guide, the hotkeys and the automatic
-// update check. Each keeps the other group.
+// and decoders. Interface: language, close action, the tray notice, the first-run guide, the hotkeys, the automatic
+// update check and the online artist pictures. Each keeps the other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

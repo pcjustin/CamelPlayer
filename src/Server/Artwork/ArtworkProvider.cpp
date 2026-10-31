@@ -4,11 +4,13 @@
 
 #include "Server/Artwork/ArtworkProvider.h"
 
+#include <climits>
 #include <cwctype>
 #include <exception>
 #include <stdexcept>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <utility>
 #include <taglib/flacfile.h>
 #include <taglib/wavfile.h>
@@ -71,9 +73,12 @@ private:
     size_t budget_ = 64ull << 20;
     CancellationToken token_;
 };
+// The front cover, or with `artist` the picture of the lead artist or the artist (ID3 APIC and FLAC PICTURE types 7
+// and 8), the lead artist first.
 class EmbeddedProvider final : public IArtworkProvider {
 public:
-    std::string id() const override { return "embedded"; }
+    explicit EmbeddedProvider(bool artist) : artist_(artist) {}
+    std::string id() const override { return artist_ ? "embedded-artist" : "embedded"; }
     bool needsNetwork() const override { return false; }
     std::vector<ArtworkCandidate> find(const ArtworkQuery& query, const CancellationToken& token) override {
         const auto& path = query.firstTrack;
@@ -108,19 +113,30 @@ public:
         }
         }
         if (!file || !file->isValid()) return {};
-        const auto pictures = file->complexProperties("PICTURE");
-        for (const auto& picture : pictures) {
-            const auto type = picture.value("pictureType").toString();
-            if (type != "Front Cover" && !type.isEmpty()) continue;
+        std::optional<ArtworkCandidate> best;
+        int bestRank = INT_MAX;
+        for (const auto& picture : file->complexProperties("PICTURE")) {
+            const auto rank = rankOf(picture.value("pictureType").toString());
+            if (!rank || *rank >= bestRank) continue;
             const auto bytes = picture.value("data").toByteVector();
             if (bytes.isEmpty() || bytes.size() > kMaxArtworkBytes) continue;
-            ArtworkCandidate out;
-            out.source = "embedded";
-            out.bytes.assign(bytes.begin(), bytes.end());
-            return {std::move(out)};
+            best.emplace();
+            best->source = id();
+            best->bytes.assign(bytes.begin(), bytes.end());
+            bestRank = *rank;
         }
-        return {};
+        if (!best) return {};
+        return {std::move(*best)};
     }
+
+private:
+    // Lower wins; nothing for a picture of another kind.
+    std::optional<int> rankOf(const TagLib::String& type) const {
+        if (artist_) return type == "Lead Artist" ? std::optional(0) : type == "Artist" ? std::optional(1) : std::nullopt;
+        return type == "Front Cover" || type.isEmpty() ? std::optional(0) : std::nullopt;
+    }
+
+    bool artist_;
 };
 
 class FolderProvider final : public IArtworkProvider {
@@ -212,7 +228,11 @@ std::unique_ptr<IArtworkProvider> makeParentFolderArtworkProvider() {
 }
 
 std::unique_ptr<IArtworkProvider> makeEmbeddedArtworkProvider() {
-    return std::make_unique<EmbeddedProvider>();
+    return std::make_unique<EmbeddedProvider>(false);
+}
+
+std::unique_ptr<IArtworkProvider> makeEmbeddedArtistPictureProvider() {
+    return std::make_unique<EmbeddedProvider>(true);
 }
 
 ArtworkChain localArtworkChain() {

@@ -15,5 +15,8 @@ namespace CamelPlayer {
     Boolean HasMarks { get; }; // shows a track's heart
     Boolean IsFavorite { get; };
     String FavoriteGlyph { get; };
+    Boolean HasAvatar { get; }; // an artist or composer row: their picture, or their initial on AvatarBrush
+    String Initial { get; };
+    Microsoft.UI.Xaml.Media.Brush AvatarBrush { get; };
 }
 } // namespace CamelPlayer

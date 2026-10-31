@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "ArtistAvatar.h"
 #include "BrowseItem.g.h"
 
 namespace ui {
@@ -19,6 +20,7 @@ struct BrowseRow {
     bool marks = false;       // shows the track's favorite heart
     bool favorite = false;
     bool composer = false; // a group row naming a composer, which lists of favorite artists mix with artists
+    bool avatar = false;   // an artist or composer row, shown with their picture
 };
 
 } // namespace ui
@@ -38,6 +40,11 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     bool HasMarks() const { return row_.marks; }
     bool IsFavorite() const { return row_.favorite; }
     hstring FavoriteGlyph() const { return row_.favorite ? L"\xE00B" : L"\xE006"; }
+    bool HasAvatar() const { return row_.avatar; }
+    hstring Initial() const { return ui::initialOf(row_.title); }
+    Microsoft::UI::Xaml::Media::Brush AvatarBrush() const {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush(ui::avatarColor(row_.title));
+    }
     // What a screen reader announces for the tile or row.
     hstring ToString() const { return row_.subtitle.empty() ? row_.title : row_.title + L", " + row_.subtitle; }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {

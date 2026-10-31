@@ -9,14 +9,19 @@
 #include "LibraryView.g.cpp"
 #endif
 
+#include <shobjidl.h>
+
 #include <algorithm>
+#include <fstream>
 #include <limits>
 #include <random>
+#include <thread>
 #include <utility>
 
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
+#include "ArtistAvatar.h"
 #include "CardSize.h"
 #include "CreditText.h"
 #include "DialogPlacement.h"
@@ -106,6 +111,7 @@ ui::BrowsePage groupPage(const LibraryGroupPage& page, const Texts& texts, bool 
         out.rows.push_back({0, g.name, orUnknown(g.name, texts), g.albums ? counted(texts.albums, g.albums) : hstring{},
                             roles ? (composer ? texts.composer : texts.artist) : hstring{}, counted(texts.tracks, g.tracks)});
         out.rows.back().composer = composer;
+        out.rows.back().avatar = !g.name.empty() && (composer || g.field == LibraryGroupField::Artist);
     }
     return out;
 }
@@ -171,11 +177,14 @@ void LibraryView::InitializeComponent() {
 }
 
 void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu,
-                         std::function<void(ui::SourceFetch, std::string)> savePlaylist) {
+                         std::function<void(ui::SourceFetch, std::string)> savePlaylist, std::function<HWND()> window,
+                         std::function<void(bool)> answerArtistPictures) {
     server_ = std::move(server);
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
     savePlaylist_ = std::move(savePlaylist);
+    window_ = std::move(window);
+    answerArtistPictures_ = std::move(answerArtistPictures);
     if (playlistMenu_)
         playlistMenu_(AlbumMenu(), [this]() -> ui::SourceFetch {
             return [album = current_.album] { return std::vector<PlaylistSource>{{PlaylistSource::Kind::Album, album, {}, {}}}; };
@@ -401,6 +410,16 @@ void LibraryView::open(View view, bool push) {
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
     ArtistFavoriteButton().Visibility(view.mode == Mode::Artist ? Visibility::Visible : Visibility::Collapsed);
     showArtistFavorite(false);
+    const bool pictured = view.mode == Mode::Artist && view.filter && !view.filter->value.empty();
+    ArtistPictureButton().Visibility(pictured ? Visibility::Visible : Visibility::Collapsed);
+    ArtistPictureImage().Source(nullptr);
+    PictureCredit().Visibility(Visibility::Collapsed);
+    PictureConsent().IsOpen(false);
+    PictureError().IsOpen(false);
+    if (pictured) {
+        ArtistInitial().Text(ui::initialOf(view.title));
+        ArtistPictureFrame().Background(Media::SolidColorBrush(ui::avatarColor(view.title)));
+    }
     const auto heart = tr(view.field == LibraryGroupField::Composer ? L"Marks_FavoriteComposer" : L"Marks_FavoriteArtist");
     ToolTipService::SetToolTip(ArtistFavoriteButton(), box_value(heart));
     Automation::AutomationProperties::SetName(ArtistFavoriteButton(), heart);
@@ -614,6 +633,7 @@ void LibraryView::loadAlbumDetail() {
 
 void LibraryView::loadArtist() {
     artistTracks_.clear();
+    if (current_.filter && !current_.filter->value.empty()) loadArtistPicture(current_.filter->value, false);
     background([this, server = server_, filter = *current_.filter, texts = Texts{}] {
         auto page = std::make_shared<LibraryArtistPage>(server->artistPage(filter));
         std::vector<std::string> credits;
@@ -994,6 +1014,133 @@ void LibraryView::OnShuffleListClick(Windows::Foundation::IInspectable const&, R
 }
 
 // A playlist named after the list, holding what it lists now.
+void LibraryView::loadArtistPicture(const std::string& name, bool allowed) {
+    pictureToken_.cancel();
+    pictureToken_ = {};
+    if (!allowed) PictureConsent().IsOpen(server_->snapshot().settings.artistPictures == camel::OnlineLookup::Ask);
+    background([server = server_, name, token = pictureToken_, allowed, this] {
+        // The window applies the answer through the Server's command queue, a moment after the click.
+        for (int i = 0; allowed && i < 100 && server->snapshot().settings.artistPictures != camel::OnlineLookup::Allowed; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        auto picture = std::make_shared<ArtistPicture>(server->artistPicture(name, true, token));
+        return std::function<void()>([this, picture] { showArtistPicture(*picture); });
+    });
+}
+
+void LibraryView::showArtistPicture(const ArtistPicture& picture) {
+    if (!current_.filter) return;
+    const auto& name = current_.filter->value;
+    if (picture.chosen || picture.found)
+        ui::loadArtwork(ArtistPictureImage(), server_, {ArtworkKind::Artist, 0, {}, name}, pictureToken_);
+    else
+        ArtistPictureImage().Source(nullptr);
+
+    const auto credit = PictureCredit();
+    credit.Inlines().Clear();
+    const bool commons = !picture.chosen && picture.found && picture.source == "commons";
+    const auto add = [&](const std::string& text, const std::string& link) {
+        Documents::Run run;
+        run.Text(ui::utf8(text));
+        if (!link.empty()) {
+            try {
+                Documents::Hyperlink hyperlink;
+                hyperlink.NavigateUri(Windows::Foundation::Uri(ui::utf8(link)));
+                hyperlink.Inlines().Append(run);
+                credit.Inlines().Append(hyperlink);
+                return;
+            } catch (const hresult_error&) {
+                // An address Windows does not take shows as text.
+            }
+        }
+        credit.Inlines().Append(run);
+    };
+    if (commons) {
+        if (!picture.author.empty())
+            add(to_string(ui::format(L"Library_PictureBy", {std::wstring(ui::utf8(picture.author))})) + " · ", {});
+        if (!picture.license.empty()) {
+            add(picture.license, picture.licenseUrl);
+            add(" · ", {});
+        }
+        add("Wikimedia Commons", picture.page);
+    }
+    credit.Visibility(commons ? Visibility::Visible : Visibility::Collapsed);
+
+    RemovePictureItem().Visibility(picture.chosen ? Visibility::Visible : Visibility::Collapsed);
+    const auto candidates = PictureCandidates();
+    candidates.Items().Clear();
+    for (const auto& candidate : picture.candidates) {
+        RadioMenuFlyoutItem item;
+        item.Text(ui::utf8(candidate.description.empty() ? candidate.name : candidate.name + " — " + candidate.description));
+        item.IsChecked(candidate.mbid == picture.mbid);
+        item.Click([this, name, mbid = candidate.mbid](auto&&, auto&&) {
+            changeArtistPicture(
+                [name, mbid, token = pictureToken_](IServer& server) { return server.chooseArtistCandidate(name, mbid, token); },
+                L"Library_PictureLookupFailed");
+        });
+        candidates.Items().Append(item);
+    }
+    candidates.Visibility(!picture.chosen && picture.candidates.size() > 1 ? Visibility::Visible : Visibility::Collapsed);
+}
+
+void LibraryView::changeArtistPicture(std::function<ArtistPicture(IServer&)> change, const wchar_t* failure) {
+    PictureError().IsOpen(false);
+    background([server = server_, change = std::move(change), failure, this] {
+        std::shared_ptr<ArtistPicture> picture;
+        try {
+            picture = std::make_shared<ArtistPicture>(change(*server));
+        } catch (const std::exception& e) {
+            camel::log::warn("artist picture: %s", e.what());
+        }
+        return std::function<void()>([this, picture, failure] {
+            if (picture) {
+                showArtistPicture(*picture);
+            } else if (failure) {
+                PictureError().Message(tr(failure));
+                PictureError().IsOpen(true);
+            }
+        });
+    });
+}
+
+void LibraryView::OnChoosePictureClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!current_.filter || !window_) return;
+    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
+    constexpr COMDLG_FILTERSPEC kPictures[] = {{L"JPEG, PNG, WebP", L"*.jpg;*.jpeg;*.png;*.webp"}};
+    dialog->SetFileTypes(1, kPictures);
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(window_())) || FAILED(dialog->GetResult(item.put())) ||
+        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        return;
+    const std::filesystem::path file(path);
+    CoTaskMemFree(path);
+    changeArtistPicture(
+        [name = current_.filter->value, file](IServer& server) {
+            std::error_code ec;
+            if (std::filesystem::file_size(file, ec) > kMaxArtworkBytes || ec) throw std::invalid_argument("not a picture");
+            std::ifstream in(file, std::ios::binary);
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), {});
+            return server.setArtistPicture(name, bytes);
+        },
+        L"Library_PictureUnreadable");
+}
+
+void LibraryView::OnRemovePictureClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!current_.filter) return;
+    changeArtistPicture([name = current_.filter->value](IServer& server) { return server.removeArtistPicture(name); }, nullptr);
+}
+
+void LibraryView::OnAllowPicturesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    PictureConsent().IsOpen(false);
+    if (answerArtistPictures_) answerArtistPictures_(true);
+    if (current_.mode == Mode::Artist && current_.filter) loadArtistPicture(current_.filter->value, true);
+}
+
+void LibraryView::OnRefusePicturesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    PictureConsent().IsOpen(false);
+    if (answerArtistPictures_) answerArtistPictures_(false);
+}
+
 void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (!savePlaylist_) return;
     const auto title = current_.title;
@@ -1191,6 +1338,8 @@ winrt::fire_and_forget LibraryView::background(std::function<std::function<void(
 void LibraryView::cancelArtwork() {
     detailArtwork_.cancel();
     detailArtwork_ = {};
+    pictureToken_.cancel();
+    pictureToken_ = {};
     for (auto& [key, slot] : artworkSlots_) slot.token.cancel();
     artworkSlots_.clear();
 }
@@ -1204,6 +1353,10 @@ void LibraryView::loadRowArtwork(Image const& image) {
     const auto value = image.DataContext().try_as<CamelPlayer::BrowseItem>();
     if (!value) return;
     const auto& row = get_self<BrowseItem>(value)->row();
+    if (image.Name() == L"ArtistAvatar") {
+        if (row.avatar) ui::loadArtwork(image, server_, {ArtworkKind::Artist, 0, {}, row.value}, it->second.token);
+        return;
+    }
     const bool trackCover = image.Name() == L"TrackCover";
     if (!row.id || (image.Name() == L"FolderCover" && !row.folder) || (trackCover && row.folder)) return;
     const auto kind = row.folder ? ArtworkKind::Folder : trackCover ? ArtworkKind::Track : ArtworkKind::Album;

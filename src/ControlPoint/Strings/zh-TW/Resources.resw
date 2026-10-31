@@ -411,6 +411,22 @@
   <data name="Library_FavoritesOnly.Text" xml:space="preserve"><value>只顯示最愛</value></data>
   <data name="Library_RoleArtist" xml:space="preserve"><value>演出者</value></data>
   <data name="Library_RoleComposer" xml:space="preserve"><value>作曲家</value></data>
+  <data name="Library_ArtistPictureButton.AutomationProperties.Name" xml:space="preserve"><value>變更照片</value></data>
+  <data name="Library_ArtistPictureButton.ToolTipService.ToolTip" xml:space="preserve"><value>變更照片</value></data>
+  <data name="Library_ChoosePicture.Text" xml:space="preserve"><value>選擇照片…</value></data>
+  <data name="Library_RemovePicture.Text" xml:space="preserve"><value>移除照片</value></data>
+  <data name="Library_WhichArtist.Text" xml:space="preserve"><value>是哪一位？</value></data>
+  <data name="Library_PictureBy" xml:space="preserve"><value>照片：{0}</value></data>
+  <data name="Library_PictureConsent.Title" xml:space="preserve"><value>演出者照片</value></data>
+  <data name="Library_PictureConsent.Message" xml:space="preserve"><value>要從 Wikimedia Commons 查演出者和作曲家的照片嗎？只會把名字送到 MusicBrainz、Wikidata 和 Wikimedia Commons。</value></data>
+  <data name="Library_AllowPictures.Content" xml:space="preserve"><value>允許</value></data>
+  <data name="Library_RefusePictures.Content" xml:space="preserve"><value>先不要</value></data>
+  <data name="Library_PictureError.Title" xml:space="preserve"><value>沒有變更照片</value></data>
+  <data name="Library_PictureUnreadable" xml:space="preserve"><value>CamelPlayer 無法把這個檔案讀成圖片。</value></data>
+  <data name="Library_PictureLookupFailed" xml:space="preserve"><value>查不到這張照片，請稍後再試。</value></data>
+  <data name="Settings_ArtistPictures.Header" xml:space="preserve"><value>演出者照片</value></data>
+  <data name="Settings_ArtistPictures.OnContent" xml:space="preserve"><value>從 Wikimedia Commons 查演出者照片</value></data>
+  <data name="Settings_ArtistPictures.OffContent" xml:space="preserve"><value>從 Wikimedia Commons 查演出者照片</value></data>
   <data name="Nav_SmartAdded.Content" xml:space="preserve"><value>最近加入</value></data>
   <data name="Nav_SmartMostPlayed.Content" xml:space="preserve"><value>最常播放</value></data>
   <data name="Nav_SmartRecentlyPlayed.Content" xml:space="preserve"><value>最近播放</value></data>

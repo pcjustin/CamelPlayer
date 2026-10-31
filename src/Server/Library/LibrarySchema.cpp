@@ -432,6 +432,14 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
             db.exec("CREATE TABLE favorite_names (field TEXT NOT NULL CHECK (field IN ('artist', 'composer')), name TEXT NOT "
                     "NULL, added INTEGER NOT NULL, PRIMARY KEY (field, name)) WITHOUT ROWID;");
         },
+        // Artist pictures, one per name for an artist and a composer of that name: the user's own and one found in the
+        // library or online, with what the latest lookup found, kept like favorites through rescans and rebuilds.
+        [](sqlite::Database& db) {
+            db.exec("CREATE TABLE artist_pictures (name TEXT PRIMARY KEY, chosen BLOB, found BLOB, source TEXT, outcome TEXT "
+                    "CHECK (outcome IN ('found', 'none', 'ambiguous', 'failed')), online INTEGER NOT NULL DEFAULT 0, "
+                    "checked INTEGER, mbid TEXT, candidates TEXT, author TEXT, license TEXT, license_url TEXT, page TEXT, "
+                    "changed INTEGER NOT NULL DEFAULT 0);");
+        },
     };
     return migrations;
 }

@@ -411,6 +411,22 @@
   <data name="Library_FavoritesOnly.Text" xml:space="preserve"><value>Favorites only</value></data>
   <data name="Library_RoleArtist" xml:space="preserve"><value>Artist</value></data>
   <data name="Library_RoleComposer" xml:space="preserve"><value>Composer</value></data>
+  <data name="Library_ArtistPictureButton.AutomationProperties.Name" xml:space="preserve"><value>Change picture</value></data>
+  <data name="Library_ArtistPictureButton.ToolTipService.ToolTip" xml:space="preserve"><value>Change picture</value></data>
+  <data name="Library_ChoosePicture.Text" xml:space="preserve"><value>Choose picture…</value></data>
+  <data name="Library_RemovePicture.Text" xml:space="preserve"><value>Remove picture</value></data>
+  <data name="Library_WhichArtist.Text" xml:space="preserve"><value>Which artist is this?</value></data>
+  <data name="Library_PictureBy" xml:space="preserve"><value>Photo: {0}</value></data>
+  <data name="Library_PictureConsent.Title" xml:space="preserve"><value>Artist pictures</value></data>
+  <data name="Library_PictureConsent.Message" xml:space="preserve"><value>Look up pictures of artists and composers on Wikimedia Commons? Only their names are sent, to MusicBrainz, Wikidata and Wikimedia Commons.</value></data>
+  <data name="Library_AllowPictures.Content" xml:space="preserve"><value>Allow</value></data>
+  <data name="Library_RefusePictures.Content" xml:space="preserve"><value>Not now</value></data>
+  <data name="Library_PictureError.Title" xml:space="preserve"><value>Picture not changed</value></data>
+  <data name="Library_PictureUnreadable" xml:space="preserve"><value>CamelPlayer can't read this file as a picture.</value></data>
+  <data name="Library_PictureLookupFailed" xml:space="preserve"><value>The picture couldn't be looked up. Try again later.</value></data>
+  <data name="Settings_ArtistPictures.Header" xml:space="preserve"><value>Artist pictures</value></data>
+  <data name="Settings_ArtistPictures.OnContent" xml:space="preserve"><value>Look up artist pictures on Wikimedia Commons</value></data>
+  <data name="Settings_ArtistPictures.OffContent" xml:space="preserve"><value>Look up artist pictures on Wikimedia Commons</value></data>
   <data name="Nav_SmartAdded.Content" xml:space="preserve"><value>Recently added</value></data>
   <data name="Nav_SmartMostPlayed.Content" xml:space="preserve"><value>Most played</value></data>
   <data name="Nav_SmartRecentlyPlayed.Content" xml:space="preserve"><value>Recently played</value></data>

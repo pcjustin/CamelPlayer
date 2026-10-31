@@ -14,6 +14,7 @@
 #include "Engine/FormatRule.h"
 #include "Server/Playback/QueuePolicy.h"
 #include "Common/settings/Settings.h"
+#include "Server/Library/ArtistPictures.h"
 #include "Server/Library/LibraryBrowse.h"
 #include "Server/Library/LibraryViews.h"
 #include "Server/Library/PlayStatistics.h"
@@ -60,6 +61,7 @@ struct SettingsDto {
     bool firstRunDone = false;
     bool autoplay = true;
     bool checkUpdates = true;
+    OnlineLookup artistPictures = OnlineLookup::Ask;
     std::string skippedVersion;
     HotkeySettings hotkeys;
     std::string lastFileUtf8;
@@ -309,6 +311,17 @@ public:
     virtual LibraryGroupPage favoriteArtists(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                              const CancellationToken& token = {}) const = 0;
     virtual std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token = {}) const = 0;
+    // Artist pictures (docs/Plan.md §7.4), one per name for an artist and a composer of that name. With `lookUp` the
+    // name is looked up first when due (see lookUpArtistPicture), online only while the settings allow it; `token`
+    // stops that lookup.
+    virtual ArtistPicture artistPicture(const std::string& name, bool lookUp, const CancellationToken& token = {}) = 0;
+    // The user's own picture from an image file's bytes; throws std::invalid_argument when they are not a picture.
+    virtual ArtistPicture setArtistPicture(const std::string& name, const std::vector<uint8_t>& image) = 0;
+    virtual ArtistPicture removeArtistPicture(const std::string& name) = 0;
+    // Which of the MusicBrainz artists sharing the name it is; looks that artist's picture up. Throws when the settings
+    // do not allow online lookups or the lookup fails.
+    virtual ArtistPicture chooseArtistCandidate(const std::string& name, const std::string& mbid,
+                                                const CancellationToken& token = {}) = 0;
     virtual LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const = 0;
     virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
