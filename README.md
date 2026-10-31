@@ -34,7 +34,7 @@ The screenshots show a demo library with made-up albums and covers.
 ### Library
 
 - **Local folders and NAS shares**, several added at once, scanned in the background and followed as files change. Offline folders keep their tracks, and moved files keep their history, favorites and playlist entries.
-- **Browsing:** Home, an album wall sorted by title, artist, year or date added, artists, composers, genres, years, a sortable track list, album details by disc with format badges, and folder pages, all with covers. Album covers are sized so that every row fills the window.
+- **Browsing:** Home, an album wall sorted by title, artist, year or date added, artists, composers, genres, years, a sortable track list, album details by disc with format badges, and folder pages that play the whole folder and show each track's number and file name, all with covers. Album covers are sized so that every row fills the window.
 - **A jump bar** beside the album, artist, composer and genre lists goes straight to #, A–Z, kana or Han.
 - **A folder tree** in foobar2000's style, if you turn it on in Settings: folders open in place with their track counts, tracks show their file names, and the tree opens as you left it.
 - **Artist and composer pages:** their ten most played tracks, then their own albums and the albums they appear on, each with View all, so a singer's songs on someone else's album are one click away.

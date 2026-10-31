@@ -14,6 +14,7 @@ struct BrowseRow {
     int64_t id = 0;    // album, folder or track id
     std::string value; // group name, or the file path of a track
     winrt::hstring title, subtitle, detail, trailing;
+    winrt::hstring number, fileName; // a folder page track's album place and file
     bool folder = false;
     int64_t file = 0;         // a track's file, which playlists refer to
     bool unavailable = false; // a playlist entry whose file is missing or offline
@@ -36,6 +37,8 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring Subtitle() const { return row_.subtitle; }
     hstring Detail() const { return row_.detail; }
     hstring Trailing() const { return row_.trailing; }
+    hstring Number() const { return row_.number; }
+    hstring FileName() const { return row_.fileName; }
     bool IsFolder() const { return row_.folder; }
     bool IsTrack() const { return !row_.folder && row_.id != 0 && !row_.value.empty(); }
     bool IsUnavailable() const { return row_.unavailable; }

@@ -147,6 +147,16 @@ ui::BrowseRow albumTrackRow(const LibraryTrackRow& t, bool discs, bool oneArtist
     return row;
 }
 
+// A folder page track also shows its place on its album and, under its title, its file, as in Roon's folder browser.
+// The disc number leads where some of the folder's tracks are not on the first disc.
+ui::BrowseRow folderTrackRow(const LibraryTrackRow& t, bool discs, const Texts& texts) {
+    auto row = trackRow(t, texts);
+    if (t.number)
+        row.number = hstring((discs && t.disc ? std::to_wstring(t.disc) + L"-" : std::wstring{}) + std::to_wstring(t.number));
+    row.fileName = t.name.empty() ? hstring(std::filesystem::path(camel::toWide(t.path)).filename().wstring()) : ui::utf8(t.name);
+    return row;
+}
+
 // Ctrl- and Shift-clicks change the selection; they do not open or play.
 bool selecting() {
     return GetKeyState(VK_CONTROL) < 0 || GetKeyState(VK_SHIFT) < 0;
@@ -410,6 +420,8 @@ void LibraryView::open(View view, bool push) {
     AlbumFormats().Children().Clear();
     AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
+    FolderActions().Visibility(view.mode == Mode::Folders && view.folder && !folderTree_ ? Visibility::Visible
+                                                                                         : Visibility::Collapsed);
     ArtistFavoriteButton().Visibility(view.mode == Mode::Artist ? Visibility::Visible : Visibility::Collapsed);
     showArtistFavorite(false);
     const bool pictured = view.mode == Mode::Artist && view.filter && !view.filter->value.empty();
@@ -864,7 +876,8 @@ void LibraryView::loadFolder() {
                 row.folder = true;
                 items.Append(item(row));
             }
-            for (const auto& t : listing->tracks) items.Append(item(trackRow(t, texts)));
+            const bool discs = std::ranges::any_of(listing->tracks, [](const auto& t) { return t.disc > 1; });
+            for (const auto& t : listing->tracks) items.Append(item(folderTrackRow(t, discs, texts)));
             folderTracks_ = listing->tracks;
             FolderList().ItemsSource(items);
             restoreOffset();
@@ -1475,6 +1488,18 @@ void LibraryView::OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&,
 
 void LibraryView::OnPlayAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     playAlbum(current_.album);
+}
+
+void LibraryView::OnPlayFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (current_.folder) queueFolder(*current_.folder, false, true);
+}
+
+void LibraryView::OnPlayNextFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (current_.folder) queueFolder(*current_.folder, true);
+}
+
+void LibraryView::OnQueueFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (current_.folder) queueFolder(*current_.folder, false);
 }
 
 winrt::fire_and_forget LibraryView::background(std::function<std::function<void()>()> work) {

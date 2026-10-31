@@ -9,6 +9,8 @@ namespace CamelPlayer {
     String Subtitle { get; };
     String Detail { get; };
     String Trailing { get; }; // right-aligned: a duration or a count
+    String Number { get; };   // a folder page track's place on its album: "3", or "2-3" where discs differ
+    String FileName { get; }; // a folder page track's file, under its title
     Boolean IsFolder { get; };
     Boolean IsTrack { get; };
     Boolean IsUnavailable { get; };

@@ -165,6 +165,10 @@
   <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>Play album next</value></data>
   <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>Play album</value></data>
   <data name="Library_AlbumPlaybackOptions.Text" xml:space="preserve"><value>Album playback options</value></data>
+  <data name="Library_FolderPlaybackOptions.Text" xml:space="preserve"><value>Play</value></data>
+  <data name="Library_PlayFolder.Text" xml:space="preserve"><value>Play folder</value></data>
+  <data name="Library_PlayFolderNext.Text" xml:space="preserve"><value>Play folder next</value></data>
+  <data name="Library_QueueFolder.Text" xml:space="preserve"><value>Add folder to end of queue</value></data>
   <data name="Tip_Previous" xml:space="preserve"><value>Previous</value></data>
   <data name="Tip_Next" xml:space="preserve"><value>Next</value></data>
   <data name="Tip_Shuffle" xml:space="preserve"><value>Shuffle</value></data>

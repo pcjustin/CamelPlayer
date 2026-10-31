@@ -80,9 +80,11 @@
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </Grid>
+                <!-- A track: its place on its album, its title over its file name, artist, album and length. -->
                 <Grid ColumnSpacing="16" Visibility="{x:Bind IsTrack, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="Auto" MinWidth="28" />
                         <ColumnDefinition Width="3*" />
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="2*" />
@@ -93,12 +95,18 @@
                         <Image x:Name="TrackCover" Width="40" Height="40" Stretch="UniformToFill" Loaded="OnArtworkLoaded"
                                Unloaded="OnArtworkUnloaded" DataContextChanged="OnArtworkContextChanged" />
                     </Grid>
-                    <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                    <TextBlock Grid.Column="1" Text="{x:Bind Number, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                    <TextBlock Grid.Column="4" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="5" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </Grid>
             </Grid>
@@ -261,6 +269,28 @@
                         </Button>
                     </StackPanel>
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
+                    <!-- A folder plays with its subfolders, as its right-click menu one level up does. -->
+                    <Button x:Name="FolderActions" Style="{StaticResource AccentButtonStyle}" Padding="16,6" Margin="0,12,0,0"
+                            Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE768;" FontSize="14" />
+                            <TextBlock x:Uid="Library_FolderPlaybackOptions" />
+                            <FontIcon Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                <MenuFlyoutItem x:Uid="Library_PlayFolder" Click="OnPlayFolderClick">
+                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem x:Uid="Library_PlayFolderNext" Click="OnPlayNextFolderClick">
+                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE893;" /></MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem x:Uid="Library_QueueFolder" Click="OnQueueFolderClick">
+                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
                 </StackPanel>
             </Grid>
             <ComboBox x:Name="SortCombo" x:Uid="Library_SortCombo" Grid.Column="1" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
