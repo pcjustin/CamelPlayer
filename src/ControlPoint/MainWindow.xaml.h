@@ -146,12 +146,14 @@ private:
     void showVolume();
     void showReplayGain();
     void showCrossfade();
-    // One row of the signal path (docs/Plan.md §8.1): a step, what follows it and its state.
+    // One row of the signal path (docs/Plan.md §8.1): a step, what follows it, its state and the stage it belongs to.
     enum class PathState : uint8_t { BitPerfect, Lossless, Processed, Lossy, AtTrackChanges };
+    enum class PathStage : uint8_t { Source, Processing, Output };
     struct PathStep {
         hstring name;
         hstring detail;
         PathState state = PathState::BitPerfect;
+        PathStage stage = PathStage::Source;
         bool operator==(const PathStep&) const = default;
     };
     void showSignalPath(std::vector<PathStep> steps);

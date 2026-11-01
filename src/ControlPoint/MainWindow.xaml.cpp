@@ -992,7 +992,6 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             setAnnounced(LampText(), tr(L"Lamp_Lossy"));
             break;
         }
-        Lamp().Fill(themeBrush(lampColor_));
         // Source lossiness is its own field; a processed lossy file shows both (docs/Plan.md §5.2).
         SourceBadge().Visibility(lossy && plan.state != PipelineState::LossySource ? Visibility::Visible : Visibility::Collapsed);
         BypassBadge().Visibility(plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native ? Visibility::Visible
@@ -1004,11 +1003,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                (plan.dsd != DsdPath::None ? L""
                                 : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
                                                           : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
-        FormatText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
+        const hstring route = source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output));
+        FormatText().Text(route + L" · " + decoder);
+        PathRouteText().Text(route);
         // One row per step that changes or carries the signal, in the Engine's order (docs/Plan.md §8.1).
         std::vector<PathStep> steps;
+        PathStage stage = PathStage::Source;
         const auto add = [&](hstring name, hstring detail, PathState state) {
-            steps.push_back({std::move(name), std::move(detail), state});
+            steps.push_back({std::move(name), std::move(detail), state, stage});
         };
         wchar_t text[128];
         const uint32_t bits = s.source->bitsPerSample;
@@ -1024,6 +1026,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const PathState sourceState = lossy ? PathState::Lossy : PathState::BitPerfect;
         add(tr(L"SignalPath_File"), text, sourceState);
         add(tr(L"SignalPath_Decoder"), lossy ? decoder + L" · " + to_hstring(bits) + L"-bit PCM" : decoder, sourceState);
+        stage = PathStage::Processing;
         if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);
         if (plan.downmix) add(tr(L"SignalPath_Downmix"), to_hstring(s.source->channels) + L"→2 ch", PathState::Processed);
         if (plan.dsd == DsdPath::Pcm) add(tr(L"SignalPath_DsdToPcm"), L"352.8 kHz", PathState::Processed);
@@ -1061,6 +1064,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         // The chain's output is quantized once, at the device depth up to 24 bits.
         const hstring deviceDepth = to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
         const uint32_t container = bytesPerSample(s.output->type) * 8;
+        stage = PathStage::Output;
         if (plan.dsd == DsdPath::Dop)
             add(L"DoP", tr(L"SignalPath_DspBypassed"), PathState::BitPerfect);
         else if (plan.dsd == DsdPath::Native)
@@ -1076,7 +1080,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             add(tr(L"SignalPath_Dither"), to_hstring(bits) + L"-bit", PathState::Lossy);
         else if (container > bits)
             add(tr(L"SignalPath_Pad"), to_hstring(bits) + L"→" + to_hstring(container) + L"-bit", PathState::BitPerfect);
-        add(tr(L"SignalPath_Output"), ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)),
+        add(tr(L"SignalPath_Device"), ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)),
             plan.state == PipelineState::BitPerfect           ? PathState::BitPerfect
             : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
             : plan.state == PipelineState::LossySource        ? PathState::Lossy
@@ -1085,13 +1089,17 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         dspActive = processed;
     } else {
         lampColor_ = L"ControlStrongFillColorDisabledBrush";
-        Lamp().Fill(themeBrush(lampColor_));
         setAnnounced(LampText(), tr(L"Lamp_Idle"));
         SourceBadge().Visibility(Visibility::Collapsed);
         BypassBadge().Visibility(Visibility::Collapsed);
         FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
+        PathRouteText().Text(FormatText().Text());
         showSignalPath({});
     }
+    Lamp().Fill(themeBrush(lampColor_));
+    PathVerdictDot().Fill(themeBrush(lampColor_));
+    PathVerdictText().Text(LampText().Text());
+    Automation::AutomationProperties::SetName(LampButton(), LampText().Text());
     dspColor_ = dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush";
     DspButtonText().Foreground(themeBrush(dspColor_));
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch, with why the change into
@@ -1105,6 +1113,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         note += (note.empty() || note.ends_with(L'。') ? L"" : L" ") + std::wstring(reason);
     }
     SignalNoteText().Text(note);
+    SignalNoteText().Visibility(note.empty() ? Visibility::Collapsed : Visibility::Visible);
 
     // Errors: open the bar once per new problem so a dismissed bar stays closed
     if (s.revision != shownRevision_) {
@@ -1592,6 +1601,7 @@ void MainWindow::repaintTheme() {
     ui::setTheme(Content().as<FrameworkElement>().ActualTheme());
     StateIcon().Foreground(themeBrush(stateColor_));
     Lamp().Fill(themeBrush(lampColor_));
+    PathVerdictDot().Fill(themeBrush(lampColor_));
     DspButtonText().Foreground(themeBrush(dspColor_));
     if (playbackFavorite_) PlaybackFavoriteIcon().Foreground(themeBrush(L"AccentTextFillColorPrimaryBrush"));
     showSignalPath(std::exchange(shownPath_, {}));
@@ -2166,10 +2176,9 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     populateSettings();
 }
 
+// The lamp and the format line open the signal path in one place, over the right end of the bar.
 void MainWindow::OnFormatClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    const bool open = SignalPathPanel().Visibility() == Visibility::Collapsed;
-    SignalPathPanel().Visibility(open ? Visibility::Visible : Visibility::Collapsed);
-    FormatChevron().Glyph(open ? L"\xE70E" : L"\xE70D");
+    SignalPathFlyout().ShowAt(FormatButton());
 }
 
 void MainWindow::OnQueueToggleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -3029,47 +3038,131 @@ void MainWindow::showSignalPath(std::vector<PathStep> steps) {
     auto grid = SignalPathGrid();
     grid.Children().Clear();
     grid.RowDefinitions().Clear();
-    const auto caption = Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>();
-    for (int32_t row = 0; row < int32_t(shownPath_.size()); ++row) {
-        const auto& step = shownPath_[size_t(row)];
+    // With nothing playing, the verdict and the route stand alone.
+    const auto shown = shownPath_.empty() ? Visibility::Collapsed : Visibility::Visible;
+    PathDivider().Visibility(shown);
+    grid.Visibility(shown);
+    if (shownPath_.empty()) return;
+    const auto resources = Application::Current().Resources();
+    const auto body = resources.Lookup(box_value(L"BodyTextBlockStyle")).as<Style>();
+    const auto caption = resources.Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>();
+    const auto secondary = themeBrush(L"TextFillColorSecondaryBrush");
+    const auto rail = themeBrush(L"ControlStrongStrokeColorDefaultBrush");
+    // A body line is 20 px high; the 10 px dot sits in the middle of the first one.
+    constexpr double dotTop = 5;
+    constexpr double dotSize = 10;
+    int32_t row = 0;
+    const auto place = [&](FrameworkElement const& element, int32_t column, int32_t span) {
+        Grid::SetRow(element, row);
+        Grid::SetColumn(element, column);
+        Grid::SetColumnSpan(element, span);
+        grid.Children().Append(element);
+    };
+    const auto addRow = [&] {
         RowDefinition definition;
         definition.Height(GridLength{1, GridUnitType::Auto});
         grid.RowDefinitions().Append(definition);
-        const wchar_t* brush = step.state == PathState::BitPerfect ? L"SystemFillColorSuccessBrush"
-                               : step.state == PathState::Lossless ? L"SystemFillColorCautionBrush"
-                               : step.state == PathState::Lossy    ? L"SystemFillColorNeutralBrush"
-                                                                   : L"SystemFillColorCriticalBrush";
-        const wchar_t* state = step.state == PathState::BitPerfect  ? L"Lamp_BitPerfect"
-                               : step.state == PathState::Lossless  ? L"Lamp_Lossless"
-                               : step.state == PathState::Lossy     ? L"Lamp_Lossy"
-                               : step.state == PathState::Processed ? L"Lamp_Processed"
-                                                                    : L"SignalPath_StateAtTrackChanges";
-        // A ring marks a step that acts only when tracks change.
-        Shapes::Ellipse dot;
-        dot.Width(8);
-        dot.Height(8);
-        dot.VerticalAlignment(VerticalAlignment::Center);
-        if (step.state == PathState::AtTrackChanges) {
-            dot.Stroke(themeBrush(brush));
-            dot.StrokeThickness(1.5);
-        } else {
-            dot.Fill(themeBrush(brush));
+    };
+    for (const auto [stage, title] : {std::pair{PathStage::Source, L"SignalPath_StageSource"},
+                                      {PathStage::Processing, L"SignalPath_StageProcessing"},
+                                      {PathStage::Output, L"SignalPath_StageOutput"}}) {
+        addRow();
+        TextBlock heading;
+        heading.Style(caption);
+        heading.Text(tr(title));
+        heading.Foreground(secondary);
+        heading.Margin({0, row == 0 ? 0.0 : 12.0, 0, 6});
+        Automation::AutomationProperties::SetHeadingLevel(heading, Automation::Peers::AutomationHeadingLevel::Level2);
+        place(heading, 0, 3);
+        ++row;
+        std::vector<const PathStep*> members;
+        for (const auto& step : shownPath_)
+            if (step.stage == stage) members.push_back(&step);
+        // A stage without steps says so, beside a dashed rail.
+        if (members.empty()) {
+            addRow();
+            Shapes::Line dashes;
+            dashes.X1(dotSize / 2);
+            dashes.X2(dotSize / 2);
+            dashes.Y2(20);
+            dashes.Stroke(rail);
+            dashes.StrokeThickness(2);
+            Media::DoubleCollection pattern;
+            pattern.Append(2);
+            pattern.Append(2);
+            dashes.StrokeDashArray(pattern);
+            TextBlock text;
+            text.Style(body);
+            text.Text(tr(L"SignalPath_Unchanged"));
+            text.Foreground(secondary);
+            text.TextWrapping(TextWrapping::Wrap);
+            place(dashes, 0, 1);
+            place(text, 1, 2);
+            ++row;
+            continue;
         }
-        ToolTipService::SetToolTip(dot, box_value(tr(state)));
-        TextBlock name;
-        name.Style(caption);
-        name.Text(step.name);
-        Automation::AutomationProperties::SetName(name, step.name + L", " + tr(state));
-        TextBlock detail;
-        detail.Style(caption);
-        detail.Text(step.detail);
-        detail.TextWrapping(TextWrapping::Wrap);
-        detail.IsTextSelectionEnabled(true);
-        detail.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
-        for (const auto& [element, column] : {std::pair<FrameworkElement, int32_t>{dot, 0}, {name, 1}, {detail, 2}}) {
-            Grid::SetRow(element, row);
-            Grid::SetColumn(element, column);
-            grid.Children().Append(element);
+        for (size_t i = 0; i < members.size(); ++i) {
+            const auto& step = *members[i];
+            const bool last = i + 1 == members.size();
+            addRow();
+            const wchar_t* brush = step.state == PathState::BitPerfect ? L"SystemFillColorSuccessBrush"
+                                   : step.state == PathState::Lossless ? L"SystemFillColorCautionBrush"
+                                   : step.state == PathState::Lossy    ? L"SystemFillColorNeutralBrush"
+                                                                       : L"SystemFillColorCriticalBrush";
+            const wchar_t* state = step.state == PathState::BitPerfect  ? L"Lamp_BitPerfect"
+                                   : step.state == PathState::Lossless  ? L"Lamp_Lossless"
+                                   : step.state == PathState::Lossy     ? L"Lamp_Lossy"
+                                   : step.state == PathState::Processed ? L"Lamp_Processed"
+                                                                        : L"SignalPath_StateAtTrackChanges";
+            // The rail joins the dots of a stage and stops short of each dot, so a ring stays hollow.
+            Grid marker;
+            marker.Width(dotSize);
+            if (i > 0) {
+                Shapes::Rectangle above;
+                above.Width(2);
+                above.Height(dotTop);
+                above.VerticalAlignment(VerticalAlignment::Top);
+                above.Fill(rail);
+                marker.Children().Append(above);
+            }
+            if (!last) {
+                Shapes::Rectangle below;
+                below.Width(2);
+                below.Margin({0, dotTop + dotSize, 0, 0});
+                below.Fill(rail);
+                marker.Children().Append(below);
+            }
+            // A ring marks a step that acts only when tracks change.
+            Shapes::Ellipse dot;
+            dot.Width(dotSize);
+            dot.Height(dotSize);
+            dot.Margin({0, dotTop, 0, 0});
+            dot.VerticalAlignment(VerticalAlignment::Top);
+            if (step.state == PathState::AtTrackChanges) {
+                dot.Stroke(themeBrush(brush));
+                dot.StrokeThickness(2);
+            } else {
+                dot.Fill(themeBrush(brush));
+            }
+            ToolTipService::SetToolTip(dot, box_value(tr(state)));
+            marker.Children().Append(dot);
+            const Thickness gap{0, 0, 0, last ? 0.0 : 10.0};
+            TextBlock name;
+            name.Style(body);
+            name.Text(step.name);
+            name.Margin(gap);
+            Automation::AutomationProperties::SetName(name, step.name + L", " + tr(state));
+            TextBlock detail;
+            detail.Style(body);
+            detail.Text(step.detail);
+            detail.Margin(gap);
+            detail.TextWrapping(TextWrapping::Wrap);
+            detail.IsTextSelectionEnabled(true);
+            detail.Foreground(secondary);
+            place(marker, 0, 1);
+            place(name, 1, 1);
+            place(detail, 2, 1);
+            ++row;
         }
     }
 }
