@@ -644,4 +644,8 @@
   <data name="Settings_DspChain.Text" xml:space="preserve"><value>DSP processing</value></data>
   <data name="Settings_MoreInfo" xml:space="preserve"><value>Learn more</value></data>
   <data name="Settings_LessInfo" xml:space="preserve"><value>Show less</value></data>
+  <data name="Volume_Fixed" xml:space="preserve"><value>Fixed volume</value></data>
+  <data name="Volume_FixedNote.Text" xml:space="preserve"><value>Your DAC or amplifier sets the level, and playback stays bit‑perfect.</value></data>
+  <data name="Volume_Settings.Content" xml:space="preserve"><value>Volume settings…</value></data>
+  <data name="Volume_Level" xml:space="preserve"><value>Volume: {0}</value></data>
 </root>

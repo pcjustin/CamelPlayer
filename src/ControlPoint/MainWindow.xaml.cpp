@@ -832,7 +832,7 @@ void MainWindow::showScanProgress() {
     } else if (progress.scans) {
         text = tr(L"Library_Scanning");
         for (const auto& [marker, n] : {std::pair{L"{0}", progress.checked}, std::pair{L"{1}", progress.found}})
-            if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, 3, std::to_wstring(n));
+            if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, 3, ui::count(int64_t(n)));
     }
     if (text == shownScan_) return;
     shownScan_ = hstring(text);
@@ -1148,6 +1148,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
     SignalNoteText().Text(note);
     SignalNoteText().Visibility(note.empty() ? Visibility::Collapsed : Visibility::Visible);
+    std::wstring status =
+        std::wstring(StateText().Text()) + L"|" + std::wstring(LampText().Text()) + L"|" + std::wstring(BypassText().Text());
+    status += SourceBadge().Visibility() == Visibility::Visible ? L"|lossy" : L"";
+    status += BypassBadge().Visibility() == Visibility::Visible ? L"|bypass" : L"";
+    if (status != shownStatus_) {
+        shownStatus_ = std::move(status);
+        fitStatus();
+    }
 
     // Errors: open the bar once per new problem so a dismissed bar stays closed
     if (s.revision != shownRevision_) {
@@ -1832,6 +1840,23 @@ void MainWindow::showSearchResults(hstring const& query) {
     Home().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
+}
+
+// Opens Settings at `card`. A page just shown has no layout yet, so the card is scrolled to after the first pass that
+// gives it one.
+void MainWindow::showSettingsCard(FrameworkElement const& card) {
+    const auto bringIntoView = [card] {
+        BringIntoViewOptions options;
+        options.VerticalAlignmentRatio(0);
+        card.StartBringIntoView(options);
+    };
+    if (SettingsPanel().Visibility() == Visibility::Visible) return bringIntoView();
+    returnToPage(L"settings");
+    auto pending = std::make_shared<FrameworkElement::LayoutUpdated_revoker>();
+    *pending = card.LayoutUpdated(auto_revoke, [pending, bringIntoView](auto&&, auto&&) {
+        pending->revoke();
+        bringIntoView();
+    });
 }
 
 void MainWindow::returnToPage(hstring const& tag) {
@@ -2960,20 +2985,61 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
     if (!out) camel::log::warn("EQ export: cannot write %s", camel::toUtf8(file.wstring()).c_str());
 }
 
-// Software volume (docs/Plan.md §5.9): the mode on the DSP card, and the slider and mute in the playback bar while it
-// is Software.
+// Software volume (docs/Plan.md §5.9): the mode on the DSP card, and the playback bar's volume button, which opens the
+// slider and mute while it is Software and says who sets the level while it is Fixed.
 void MainWindow::showVolume() {
     const bool wasPopulating = std::exchange(populating_, true);
     const bool software = settings_.volume.mode == camel::VolumeMode::Software;
     VolumeModeCombo().SelectedIndex(software ? 1 : 0);
-    VolumePanel().Visibility(software ? Visibility::Visible : Visibility::Collapsed);
+    FixedVolumePanel().Visibility(software ? Visibility::Collapsed : Visibility::Visible);
+    SoftwareVolumePanel().Visibility(software ? Visibility::Visible : Visibility::Collapsed);
+    VolumeLock().Visibility(software ? Visibility::Collapsed : Visibility::Visible);
+    FixedVolumeTitle().Text(tr(L"Volume_Fixed"));
     VolumeSlider().Value(settings_.volume.db);
     MuteIcon().Glyph(settings_.volume.muted ? L"\xE74F" : L"\xE767");
     const auto mute = tr(settings_.volume.muted ? L"Volume_Unmute" : L"Volume_Mute");
     ToolTipService::SetToolTip(MuteButton(), box_value(mute));
     Automation::AutomationProperties::SetName(MuteButton(), mute);
     populating_ = wasPopulating;
+    showVolumeLevel();
     showDspSummary();
+}
+
+// The volume button's icon, name and the level above the slider follow the level as it moves.
+void MainWindow::showVolumeLevel() {
+    const auto& volume = settings_.volume;
+    wchar_t level[32];
+    swprintf_s(level, L"%.1f dB", volume.db);
+    VolumeText().Text(level);
+    hstring name;
+    if (volume.mode != camel::VolumeMode::Software) {
+        VolumeIcon().Glyph(L"\xE767");
+        name = tr(L"Volume_Fixed");
+    } else {
+        VolumeIcon().Glyph(volume.muted ? L"\xE74F" : volume.db > -10 ? L"\xE995" : volume.db > -30 ? L"\xE994" : L"\xE993");
+        name = ui::format(L"Volume_Level", {volume.muted ? std::wstring(tr(L"SignalPath_Muted")) : std::wstring(level)});
+    }
+    setBadgeTip(VolumeButton(), name, name);
+}
+
+void MainWindow::OnVolumeSettingsClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    VolumeFlyout().Hide();
+    showSettingsCard(VolumeCard());
+}
+
+void MainWindow::OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
+    fitStatus();
+}
+
+// The state badge and the lamp's words show only while every badge fits; the lamp's dot stays and opens the signal path.
+void MainWindow::fitStatus() {
+    StateBadge().Visibility(Visibility::Visible);
+    LampText().Visibility(Visibility::Visible);
+    StatusBadges().Measure({std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()});
+    const auto shown =
+        StatusBadges().DesiredSize().Width <= StatusArea().ActualWidth() ? Visibility::Visible : Visibility::Collapsed;
+    StateBadge().Visibility(shown);
+    LampText().Visibility(shown);
 }
 
 void MainWindow::showReplayGain() {
@@ -3025,12 +3091,14 @@ void MainWindow::OnVolumeModeChanged(Windows::Foundation::IInspectable const&, S
 void MainWindow::OnVolumeChanged(Windows::Foundation::IInspectable const&, Primitives::RangeBaseValueChangedEventArgs const& e) {
     if (populating_) return;
     settings_.volume.db = std::round(e.NewValue() * 2) / 2;
+    showVolumeLevel();
     showDspSummary();
     // A slider being dragged applies at most every 100 ms.
     if (!eqTimer_.IsRunning()) eqTimer_.Start();
 }
 
 void MainWindow::OnVolumeWheel(Windows::Foundation::IInspectable const&, Input::PointerRoutedEventArgs const& e) {
+    if (settings_.volume.mode != camel::VolumeMode::Software) return;
     // A notch moves 1 dB; one event may carry several notches, and a touchpad sends parts of one.
     volumeWheel_ += e.GetCurrentPoint(VolumeSlider()).Properties().MouseWheelDelta();
     const int notches = volumeWheel_ / WHEEL_DELTA;
@@ -3493,12 +3561,7 @@ void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Wind
     items.Append(MenuFlyoutSeparator());
     MenuFlyoutItem open;
     open.Text(tr(L"Dsp_MenuSettings"));
-    open.Click([this](auto&&, auto&&) {
-        returnToPage(L"settings");
-        BringIntoViewOptions options;
-        options.VerticalAlignmentRatio(0);
-        DspCard().StartBringIntoView(options);
-    });
+    open.Click([this](auto&&, auto&&) { showSettingsCard(DspCard()); });
     items.Append(open);
 }
 

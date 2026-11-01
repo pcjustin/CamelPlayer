@@ -99,6 +99,8 @@ struct MainWindow : MainWindowT<MainWindow> {
                          Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
     void OnVolumeWheel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
     void OnMuteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnVolumeSettingsClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnReplayGainChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnReplayGainValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
@@ -143,6 +145,8 @@ private:
     // The rest of the DSP card: crossfeed, convolution, the order and the chain's headroom.
     void showDsp();
     void showVolume();
+    void showVolumeLevel();
+    void fitStatus();
     void showReplayGain();
     void showCrossfade();
     void enableDependentFields();
@@ -179,6 +183,7 @@ private:
     void viewAll(winrt::hstring const& list, winrt::hstring const& title, ui::BrowseFetch fetch);
     void showSearchResults(winrt::hstring const& query);
     void returnToPage(winrt::hstring const& tag);
+    void showSettingsCard(Microsoft::UI::Xaml::FrameworkElement const& card);
     std::function<void()> openLibraryOverPage();
     void showSuggestions(const camel::server::LibrarySearchResults& results, winrt::hstring const& text);
     // What a suggestion opens; the list holds them in display order next to their items.
@@ -252,6 +257,7 @@ private:
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueMarks_ = UINT64_MAX;
     camel::server::RepeatMode shownRepeat_ = camel::server::RepeatMode::Off;
+    std::wstring shownStatus_; // the badges' texts when their fit was last checked
     // The playing track's library file and whether the playback bar shows it as a favorite.
     int64_t playbackFile_ = 0;
     bool playbackFavorite_ = false;

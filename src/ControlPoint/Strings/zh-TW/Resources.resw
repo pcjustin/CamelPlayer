@@ -644,4 +644,8 @@
   <data name="Settings_DspChain.Text" xml:space="preserve"><value>DSP 處理</value></data>
   <data name="Settings_MoreInfo" xml:space="preserve"><value>了解更多</value></data>
   <data name="Settings_LessInfo" xml:space="preserve"><value>收起</value></data>
+  <data name="Volume_Fixed" xml:space="preserve"><value>固定音量</value></data>
+  <data name="Volume_FixedNote.Text" xml:space="preserve"><value>由 DAC 或擴大機控制音量，播放維持 bit‑perfect。</value></data>
+  <data name="Volume_Settings.Content" xml:space="preserve"><value>音量設定…</value></data>
+  <data name="Volume_Level" xml:space="preserve"><value>音量：{0}</value></data>
 </root>

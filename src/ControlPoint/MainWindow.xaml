@@ -730,73 +730,12 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Slider x:Name="PositionSlider" x:Uid="Player_Position" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
                         VerticalAlignment="Center" ValueChanged="OnSliderValueChanged" />
-                <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" Text="0:00 / 0:00"
+                <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right"
+                           Text="0:00 / 0:00"
                            Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) at the end of the
-                     timeline, which leaves the bar two rows high; the lamp opens the signal path. -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="StateIcon" Glyph="&#xE71A;" FontSize="10" VerticalAlignment="Center" />
-                            <TextBlock x:Name="StateText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
-                                       AutomationProperties.LiveSetting="Polite" />
-                        </StackPanel>
-                    </Border>
-                    <!-- The lamp opens the signal path. -->
-                    <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Padding="8,2" MinHeight="0"
-                            CornerRadius="10" VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse x:Name="Lamp" Width="8" Height="8" VerticalAlignment="Center"
-                                     Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
-                            <TextBlock x:Name="LampText" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
-                        </StackPanel>
-                        <!-- The signal path floats above the bar: the verdict and the route, then the steps by stage. -->
-                        <Button.Flyout>
-                            <Flyout x:Name="SignalPathFlyout" Placement="TopEdgeAlignedRight">
-                                <StackPanel x:Uid="SignalPath_Panel" Width="380" Spacing="12">
-                                    <StackPanel Spacing="2">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Ellipse x:Name="PathVerdictDot" Width="10" Height="10" VerticalAlignment="Center" />
-                                            <TextBlock x:Name="PathVerdictText" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                        </StackPanel>
-                                        <TextBlock x:Name="PathRouteText" Style="{StaticResource CaptionTextBlockStyle}" Margin="18,0,0,0"
-                                                   TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    </StackPanel>
-                                    <Border x:Name="PathDivider" Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                            Visibility="Collapsed" />
-                                    <Grid x:Name="SignalPathGrid" ColumnSpacing="12" Visibility="Collapsed">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                    </Grid>
-                                    <TextBlock x:Name="SignalNoteText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
-                                               TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
-                    <Border x:Name="SourceBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
-                        <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" />
-                    </Border>
-                    <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
-                        <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
-                    </Border>
-                    <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
-                    <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center">
-                        <TextBlock x:Name="DspButtonText" Text="DSP" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
-                        <Button.Flyout>
-                            <MenuFlyout x:Name="DspMenu" Placement="Top" Opening="OnDspMenuOpening" />
-                        </Button.Flyout>
-                    </Button>
-                </StackPanel>
             </Grid>
             <Grid Grid.Row="2" ColumnSpacing="8" VerticalAlignment="Center">
                 <Grid.Resources>
@@ -902,16 +841,107 @@
                             <SymbolIcon x:Name="RepeatIcon" Symbol="RepeatAll" />
                         </ToggleButton>
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                        <!-- Software volume (docs/Plan.md §5.9), shown only when Settings › DSP chooses it. -->
-                        <StackPanel x:Name="VolumePanel" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Visibility="Collapsed">
-                            <Button x:Name="MuteButton" Click="OnMuteClick" Style="{StaticResource TransportButtonStyle}">
-                                <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" />
+                    <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) beside the
+                         volume; where they do not fit, the state badge and the lamp's words give way, and the lamp opens the
+                         signal path. The row makes buttons transparent, so these set the badge look themselves. -->
+                    <Grid x:Name="StatusArea" Grid.Column="1" SizeChanged="OnStatusAreaSizeChanged">
+                        <StackPanel x:Name="StatusBadges" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right"
+                                    VerticalAlignment="Center">
+                            <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon x:Name="StateIcon" Glyph="&#xE71A;" FontSize="10" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="StateText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                                               AutomationProperties.LiveSetting="Polite" />
+                                </StackPanel>
+                            </Border>
+                            <!-- The lamp opens the signal path. -->
+                            <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Padding="8,2" MinHeight="0"
+                                    CornerRadius="10" VerticalAlignment="Center"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse x:Name="Lamp" Width="8" Height="8" VerticalAlignment="Center"
+                                             Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
+                                    <TextBlock x:Name="LampText" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                                </StackPanel>
+                                <!-- The signal path floats above the bar: the verdict and the route, then the steps by stage. -->
+                                <Button.Flyout>
+                                    <Flyout x:Name="SignalPathFlyout" Placement="TopEdgeAlignedRight">
+                                        <StackPanel x:Uid="SignalPath_Panel" Width="380" Spacing="12">
+                                            <StackPanel Spacing="2">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Ellipse x:Name="PathVerdictDot" Width="10" Height="10" VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="PathVerdictText" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                                </StackPanel>
+                                                <TextBlock x:Name="PathRouteText" Style="{StaticResource CaptionTextBlockStyle}" Margin="18,0,0,0"
+                                                           TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </StackPanel>
+                                            <Border x:Name="PathDivider" Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                                    Visibility="Collapsed" />
+                                            <Grid x:Name="SignalPathGrid" ColumnSpacing="12" Visibility="Collapsed">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                            </Grid>
+                                            <TextBlock x:Name="SignalNoteText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
+                                                       TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
                             </Button>
-                            <Slider x:Name="VolumeSlider" x:Uid="Volume_Slider" Width="120" Minimum="-80" Maximum="0" StepFrequency="0.5"
-                                    SmallChange="1" LargeChange="6" VerticalAlignment="Center" ValueChanged="OnVolumeChanged"
-                                    PointerWheelChanged="OnVolumeWheel" />
+                            <Border x:Name="SourceBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
+                                <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Border>
+                            <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
+                                <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Border>
+                            <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
+                            <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}">
+                                <TextBlock x:Name="DspButtonText" Text="DSP" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
+                                <Button.Flyout>
+                                    <MenuFlyout x:Name="DspMenu" Placement="Top" Opening="OnDspMenuOpening" />
+                                </Button.Flyout>
+                            </Button>
                         </StackPanel>
+                    </Grid>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <!-- Volume (docs/Plan.md §5.9): fixed volume shows a lock and says who sets the level; software volume
+                             opens a vertical slider with mute, and the wheel over the button moves it 1 dB a notch. -->
+                        <Button x:Name="VolumeButton" Style="{StaticResource TransportButtonStyle}" PointerWheelChanged="OnVolumeWheel">
+                            <Grid>
+                                <FontIcon x:Name="VolumeIcon" Glyph="&#xE767;" />
+                                <FontIcon x:Name="VolumeLock" Glyph="&#xE72E;" FontSize="9" HorizontalAlignment="Right"
+                                          VerticalAlignment="Bottom" Margin="0,0,-6,-4" />
+                            </Grid>
+                            <Button.Flyout>
+                                <Flyout x:Name="VolumeFlyout" Placement="Top">
+                                    <Grid>
+                                        <StackPanel x:Name="FixedVolumePanel" Width="240" Spacing="4">
+                                            <TextBlock x:Name="FixedVolumeTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Uid="Volume_FixedNote" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <HyperlinkButton x:Uid="Volume_Settings" Padding="0" Margin="0,4,0,0" Click="OnVolumeSettingsClick" />
+                                        </StackPanel>
+                                        <StackPanel x:Name="SoftwareVolumePanel" Spacing="8" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="VolumeText" Style="{StaticResource CaptionTextBlockStyle}" HorizontalAlignment="Center" />
+                                            <Slider x:Name="VolumeSlider" x:Uid="Volume_Slider" Orientation="Vertical" Height="160" Minimum="-80"
+                                                    Maximum="0" StepFrequency="0.5" SmallChange="1" LargeChange="6" HorizontalAlignment="Center"
+                                                    ValueChanged="OnVolumeChanged" PointerWheelChanged="OnVolumeWheel" />
+                                            <Button x:Name="MuteButton" Click="OnMuteClick" Width="40" Height="40" Padding="0" CornerRadius="20"
+                                                    HorizontalAlignment="Center">
+                                                <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
                         <Button x:Name="PlaybackFavoriteButton" x:Uid="Marks_FavoriteButton" Click="OnPlaybackFavoriteClick" IsEnabled="False"
                                 Width="48" Height="48" Padding="0" CornerRadius="24" VerticalAlignment="Center">
                             <FontIcon x:Name="PlaybackFavoriteIcon" Glyph="&#xE006;" FontSize="20" />
