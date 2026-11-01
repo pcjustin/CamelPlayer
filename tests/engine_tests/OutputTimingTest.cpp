@@ -96,7 +96,7 @@ struct Rig {
 TEST(FixedRate, ResamplesPcmWithoutTheConvertSetting) {
     Settings settings;
     settings.wasapi.fixedRate = 48000;
-    ASSERT_FALSE(settings.convertWhenUnsupported);
+    settings.convertWhenUnsupported = false;
     const auto played =
         play(testutil::testFile("16-44.1k"), settings, [](const DeviceFormat& f) { return int32At(f, {44100, 48000}); });
     ASSERT_FALSE(played.ended.error) << played.ended.errorDetail;

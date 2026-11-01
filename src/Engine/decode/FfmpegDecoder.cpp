@@ -77,7 +77,7 @@ public:
         if (!info_.bitsPerSample) info_.bitsPerSample = uint32_t(av_get_bits_per_sample(ctx_->codec_id)); // 16-bit PCM
         const AVSampleFormat packed = av_get_packed_sample_fmt(ctx_->sample_fmt);
         lossy_ = (packed == AV_SAMPLE_FMT_FLT || packed == AV_SAMPLE_FMT_DBL) &&
-                 (ctx_->codec_id == AV_CODEC_ID_MP3 || ctx_->codec_id == AV_CODEC_ID_AAC);
+                 (ctx_->codec_id == AV_CODEC_ID_MP3 || ctx_->codec_id == AV_CODEC_ID_AAC || ctx_->codec_id == AV_CODEC_ID_DTS);
         if (lossy_) info_.bitsPerSample = lossyBits;
         if (st->duration > 0)
             info_.totalFrames = uint64_t(av_rescale_q(st->duration, st->time_base, AVRational{1, ctx_->sample_rate}));

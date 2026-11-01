@@ -1068,7 +1068,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                        s.source->sampleRate / 1000.0, bits, s.source->channels);
         const PathState sourceState = lossy ? PathState::Lossy : PathState::BitPerfect;
         add(tr(L"SignalPath_File"), text, sourceState);
-        add(tr(L"SignalPath_Decoder"), lossy ? decoder + L" · " + to_hstring(bits) + L"-bit PCM" : decoder, sourceState);
+        // Other WAVE decoders read a DTS-CD bitstream that FFmpeg's DTS decoder then decodes.
+        const hstring reader =
+            s.format == AudioFormat::Dts && s.decoder != DecoderKind::FFmpeg ? decoder + L" → FFmpeg DTS" : decoder;
+        add(tr(L"SignalPath_Decoder"), lossy ? reader + L" · " + to_hstring(bits) + L"-bit PCM" : reader, sourceState);
         stage = PathStage::Processing;
         if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);
         if (plan.downmix) add(tr(L"SignalPath_Downmix"), to_hstring(s.source->channels) + L"→2 ch", PathState::Processed);

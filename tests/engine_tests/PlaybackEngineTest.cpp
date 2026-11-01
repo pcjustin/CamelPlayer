@@ -885,6 +885,7 @@ TEST_F(EngineStateTest, ActiveBackendConfigurationChangeRecreatesOutput) {
 
 TEST_F(EngineStateTest, FixedContainerCannotTruncateSource) {
     settings.wasapi.sampleType = SampleType::Int16;
+    settings.convertWhenUnsupported = false;
     engine->applySettings(settings);
     open();
     EXPECT_EQ(probe.opens, 0);

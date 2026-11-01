@@ -85,7 +85,7 @@ hstring formatLabel(const LibraryAlbumFormat& f) {
         swprintf_s(rate, L"%lld kHz", static_cast<long long>(f.sampleRate / 1000));
     else
         swprintf_s(rate, L"%.1f kHz", double(f.sampleRate) / 1000.0);
-    static constexpr std::string_view kLossy[] = {"mp3", "aac", "m4a", "ogg", "vorbis", "opus", "wma"};
+    static constexpr std::string_view kLossy[] = {"mp3", "aac", "m4a", "ogg", "vorbis", "opus", "wma", "dts"};
     const bool lossy = std::ranges::find(kLossy, f.format) != std::end(kLossy);
     std::wstring text = name;
     if (f.sampleRate <= 0) return hstring(text);

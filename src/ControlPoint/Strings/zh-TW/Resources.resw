@@ -38,7 +38,7 @@
   <data name="Lamp_Processed" xml:space="preserve"><value>已處理</value></data>
   <data name="Settings_Convert.Header" xml:space="preserve"><value>裝置無法直接接受檔案格式時</value></data>
   <data name="Convert_Off" xml:space="preserve"><value>略過並通知我</value></data>
-  <data name="Convert_On" xml:space="preserve"><value>轉換（重新取樣、降混或降低位元深度）</value></data>
+  <data name="Convert_On" xml:space="preserve"><value>轉換（重新取樣、降混、降低位元深度或解碼 DTS）</value></data>
   <data name="Settings_ConvertDsd.Header" xml:space="preserve"><value>裝置不接受原生 DSD 也不接受 DoP 時</value></data>
   <data name="ConvertDsd_On" xml:space="preserve"><value>轉換為 PCM</value></data>
   <data name="Settings_DsdOutput.Header" xml:space="preserve"><value>DSD 輸出</value></data>

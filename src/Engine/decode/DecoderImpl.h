@@ -19,5 +19,7 @@ std::unique_ptr<IDecoder> openDrMp3(const std::filesystem::path& path, uint32_t 
 // Raw DSD: SourceInfo counts byte frames (DSD rate / 8) and reports 1 bit per sample; read() returns one byte
 // per channel per frame, oldest sample in the MSB.
 std::unique_ptr<IDecoder> openDsdNexus(const std::filesystem::path& path);
+// Decodes the DTS bitstream that `words`, a 16-bit stereo WAVE decoder, reads from a DTS-CD file.
+std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits);
 
 } // namespace camel::audio

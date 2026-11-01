@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <mutex>
 #include <optional>
@@ -132,6 +133,31 @@ std::string caseName(const ::testing::TestParamInfo<Case>& info) {
 
 INSTANTIATE_TEST_SUITE_P(Lossless, FormatDecoder, ::testing::ValuesIn(cases()), caseName);
 
+namespace {
+
+// 64-bit float PCM, which testaudio does not write.
+void writeFloat64Wav(const std::filesystem::path& path, const std::vector<int32_t>& samples24) {
+    std::string data;
+    for (const int32_t s : samples24) {
+        const double v = std::ldexp(double(s), -23);
+        data.append(reinterpret_cast<const char*>(&v), sizeof v);
+    }
+    std::string header = "RIFF";
+    const auto le = [&](uint64_t v, int bytes) {
+        for (int i = 0; i < bytes; i++) header += char(v >> (8 * i));
+    };
+    le(36 + data.size(), 4);
+    header += "WAVEfmt ";
+    // fmt size, IEEE float, channels, rate, byte rate, block align, bits
+    const std::pair<uint32_t, int> fields[] = {{16, 4}, {3, 2}, {2, 2}, {44100, 4}, {44100 * 16, 4}, {16, 2}, {64, 2}};
+    for (const auto& [value, bytes] : fields) le(value, bytes);
+    header += "data";
+    le(data.size(), 4);
+    std::ofstream(path, std::ios::binary) << header << data;
+}
+
+} // namespace
+
 TEST(FormatDecoderPolicy, RejectsOtherDepthsAndFloat) {
     const auto dir = testutil::tempDir();
     const testaudio::GenSpec spec{"depth", 44100, 16, 2, 0.2};
@@ -143,10 +169,11 @@ TEST(FormatDecoderPolicy, RejectsOtherDepthsAndFloat) {
     testaudio::writeWav(dir / "format-wav-8.wav", make(8), 44100, 8, 2);
     testaudio::writeWav(dir / "format-wav-32.wav", make(32), 44100, 32, 2);
     testaudio::writeWav(dir / "format-wav-f32.wav", make(24), 44100, 24, 2, true);
+    writeFloat64Wav(dir / "format-wav-f64.wav", make(24));
     testaudio::writeAiff(dir / "format-aiff-8.aiff", make(8), 44100, 8, 2);
     testaudio::writeAiff(dir / "format-aiff-32.aiff", make(32), 44100, 32, 2);
     for (const auto decoder : decodersFor(AudioFormat::Wav))
-        for (const char* name : {"format-wav-8.wav", "format-wav-32.wav", "format-wav-f32.wav"})
+        for (const char* name : {"format-wav-8.wav", "format-wav-32.wav", "format-wav-f32.wav", "format-wav-f64.wav"})
             expectRejected(decoder, dir / name);
     for (const auto decoder : decodersFor(AudioFormat::Aiff))
         for (const char* name : {"format-aiff-8.aiff", "format-aiff-32.aiff"}) expectRejected(decoder, dir / name);

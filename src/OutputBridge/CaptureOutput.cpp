@@ -39,7 +39,11 @@ public:
         thread_ = std::thread([this] { run(); });
     }
 
-    void start() override { running_ = true; }
+    void start() override {
+        if (opts_.starts && !opts_.starts(fmt_))
+            throw Error(ErrorCode::DriverError, "the capture device accepted " + describe(fmt_) + " but could not start it");
+        running_ = true;
+    }
     void pause() override { running_ = false; }
 
     void close() override {

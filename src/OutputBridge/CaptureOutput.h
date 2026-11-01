@@ -15,6 +15,9 @@ struct CaptureOptions {
     std::filesystem::path file;
     // Which formats the simulated device accepts; default: every integer layout at any rate.
     std::function<bool(const DeviceFormat&)> accepts;
+    // Which accepted formats it can also run; start() fails with DriverError for the others, as Chord ASIO does at
+    // 64 kHz. Default: all.
+    std::function<bool(const DeviceFormat&)> starts;
     // Pace the stream like a real device instead of running as fast as possible.
     bool realtime = false;
 };

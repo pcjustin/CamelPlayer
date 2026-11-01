@@ -111,7 +111,7 @@ const auto playing = [](const EngineSnapshot& s) { return s.state == PlayState::
 TEST(SharedMode, ConvertsToTheMixFormatWithoutTheConvertSetting) {
     Settings settings;
     settings.wasapi.shared = true;
-    ASSERT_FALSE(settings.convertWhenUnsupported);
+    settings.convertWhenUnsupported = false;
     Rig rig(settings);
     rig.device.accepts = [](const DeviceFormat& f) { return f == DeviceFormat{48000, 2, SampleType::Float32}; };
     rig.engine->openAndPlay(testutil::testFile("16-44.1k"));
@@ -127,6 +127,7 @@ TEST(SharedMode, ConvertsToTheMixFormatWithoutTheConvertSetting) {
 
     // The same mixer-only device in exclusive mode is not converted without permission.
     Settings exclusive;
+    exclusive.convertWhenUnsupported = false;
     Rig exclusiveRig(exclusive);
     exclusiveRig.device.accepts = rig.device.accepts;
     exclusiveRig.engine->openAndPlay(testutil::testFile("16-44.1k"));

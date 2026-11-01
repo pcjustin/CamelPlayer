@@ -217,20 +217,26 @@ TEST(SettingsBoundary, RegistryDefaultsFollowThePlan) {
     EXPECT_EQ(decodersFor(AudioFormat::Dsd).size(), 1u);
 }
 
-TEST(SettingsBoundary, ConversionIsOffByDefaultWithHighQualityResampling) {
-    EXPECT_FALSE(Settings{}.convertWhenUnsupported);
+TEST(SettingsBoundary, ConversionIsOnByDefaultWithHighQualityResampling) {
+    EXPECT_TRUE(Settings{}.convertWhenUnsupported);
     EXPECT_EQ(Settings{}.resampleQuality, ResampleQuality::High);
     Settings settings;
-    settings.convertWhenUnsupported = true;
+    settings.convertWhenUnsupported = false;
     for (const auto quality : {ResampleQuality::Quick, ResampleQuality::High, ResampleQuality::VeryHigh}) {
         settings.resampleQuality = quality;
         const auto back = fromJson(toJson(settings));
-        EXPECT_TRUE(back.convertWhenUnsupported);
+        EXPECT_FALSE(back.convertWhenUnsupported);
         EXPECT_EQ(back.resampleQuality, quality);
     }
-    const auto invalid = fromJson(R"({"convertWhenUnsupported":"yes","resampleQuality":"best"})");
-    EXPECT_FALSE(invalid.convertWhenUnsupported);
+    const auto invalid = fromJson(R"({"convertUnsupported":"no","resampleQuality":"best"})");
+    EXPECT_TRUE(invalid.convertWhenUnsupported);
     EXPECT_EQ(invalid.resampleQuality, ResampleQuality::High);
+}
+
+// The old key was written while conversion was off by default; it is ignored so that conversion starts on once.
+TEST(SettingsMigration, ConversionTurnsOnOnceForEarlierSettings) {
+    EXPECT_TRUE(fromJson(R"({"schema":3,"convertWhenUnsupported":false})").convertWhenUnsupported);
+    EXPECT_FALSE(fromJson(R"({"schema":3,"convertWhenUnsupported":true,"convertUnsupported":false})").convertWhenUnsupported);
 }
 
 TEST(SettingsBoundary, LossyOutputDepthDefaultsTo24AndAccepts16) {
@@ -302,7 +308,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     settings.asio.driverClsid = "{DAVE}";
     settings.asio.bufferSize = 2048;
     settings.wasapi.deviceId = "endpoint";
-    settings.convertWhenUnsupported = true;
+    settings.convertWhenUnsupported = false;
     settings.decoderByFormat[AudioFormat::Flac] = DecoderKind::DrFlac;
     settings.language = "zh-TW";
     settings.closeAction = CloseAction::Exit;
@@ -315,7 +321,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_EQ(playback.backend, Backend::Wasapi);
     EXPECT_EQ(playback.asio, AsioSettings{});
     EXPECT_EQ(playback.wasapi, WasapiSettings{});
-    EXPECT_FALSE(playback.convertWhenUnsupported);
+    EXPECT_TRUE(playback.convertWhenUnsupported);
     EXPECT_FALSE(playback.decoderByFormat[AudioFormat::Flac]);
     EXPECT_EQ(playback.language, "zh-TW");
     EXPECT_EQ(playback.closeAction, CloseAction::Exit);
@@ -332,7 +338,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_FALSE(ui.folderTree);
     EXPECT_EQ(ui.backend, Backend::Asio);
     EXPECT_EQ(ui.asio, settings.asio);
-    EXPECT_TRUE(ui.convertWhenUnsupported);
+    EXPECT_FALSE(ui.convertWhenUnsupported);
 }
 
 TEST(SettingsBoundary, TheFirstRunGuideIsDueUntilFinishedOrSkipped) {

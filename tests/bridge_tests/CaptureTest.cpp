@@ -133,6 +133,7 @@ INSTANTIATE_TEST_SUITE_P(Flac, CaptureEveryDecoder, ::testing::ValuesIn(decoders
 
 TEST(Capture, UnsupportedFormatIsReportedNotPlayed) {
     Settings s;
+    s.convertWhenUnsupported = false;
     CaptureOptions co;
     co.file = testutil::tempDir() / "never.raw";
     co.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int16; }; // 16-bit only device

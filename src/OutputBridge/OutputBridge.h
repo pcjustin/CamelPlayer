@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <vector>
 
 #include "OutputBridge/IOutput.h"
 
@@ -53,6 +54,9 @@ private:
     uint64_t generation_ = 0;
     std::optional<DeviceFormat> activeFormat_;
     bool opened_ = false;
+    bool started_ = false; // since the stream was opened
+    // Formats the device accepted but could not start, refused from then on (Chord ASIO at 64 and 1411.2 kHz).
+    std::vector<DeviceFormat> unstartable_;
 };
 
 } // namespace camel::audio

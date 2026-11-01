@@ -29,9 +29,13 @@ namespace {
 struct Device {
     std::vector<uint32_t> rates;
     std::vector<SampleType> types;
+    std::vector<uint32_t> unstartable{}; // accepted, but start() fails
     bool takes(const DeviceFormat& f) const {
         return std::find(rates.begin(), rates.end(), f.sampleRate) != rates.end() &&
                std::find(types.begin(), types.end(), f.type) != types.end();
+    }
+    bool starts(const DeviceFormat& f) const {
+        return std::find(unstartable.begin(), unstartable.end(), f.sampleRate) == unstartable.end();
     }
 };
 
@@ -70,6 +74,7 @@ Played play(const std::filesystem::path& file, const Device& device, bool conver
     CaptureOptions options;
     options.file = out;
     options.accepts = [&device](const DeviceFormat& f) { return device.takes(f); };
+    options.starts = [&device](const DeviceFormat& f) { return device.starts(f); };
     options.realtime = bool(during);
     Played played;
     {
@@ -133,6 +138,24 @@ TEST(Conversion, ResamplesToTheRateTheDeviceTakes) {
         noise += (double(played.samples[i]) - ideal[i]) * (double(played.samples[i]) - ideal[i]);
     }
     EXPECT_GT(10 * std::log10(signal / noise), 90.0);
+}
+
+// Chord's ASIO driver accepts 64 kHz but cannot start it; the rate then counts as one the device does not take.
+TEST(Conversion, ARateTheDeviceCannotStartIsConvertedOnlyWithPermission) {
+    const auto file = wav("64k", tone(64000, 2, 16, 0.5), 64000, 16, 2);
+    const Device device{{64000, 96000}, {SampleType::Int32}, {64000}};
+    const auto refused = play(file, device, false);
+    EXPECT_EQ(refused.snapshot.error, ErrorCode::FormatNotSupported);
+    EXPECT_NE(refused.snapshot.errorDetail.find("convert when unsupported"), std::string::npos) << refused.snapshot.errorDetail;
+    EXPECT_TRUE(refused.samples.empty());
+
+    const auto played = play(file, device, true);
+    ASSERT_FALSE(played.snapshot.error) << played.snapshot.errorDetail;
+    ASSERT_TRUE(played.plan);
+    EXPECT_EQ(played.plan->format.sampleRate, 96000u);
+    EXPECT_TRUE(played.plan->resample);
+    EXPECT_EQ(played.plan->state, PipelineState::Processed);
+    EXPECT_EQ(played.samples.size() / 2, 48000u);
 }
 
 TEST(Conversion, MonoIsDuplicatedBitForBit) {

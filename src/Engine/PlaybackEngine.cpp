@@ -116,6 +116,11 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
 DecoderKind chooseDecoder(AudioFormat format, std::optional<DecoderKind> requested, const Settings& s) {
     if (decodersFor(format).empty())
         throw Error(ErrorCode::UnsupportedStream, std::string(formatName(format)) + " is not supported yet");
+    // No device takes a DTS bitstream as PCM; decoding it is a conversion (docs/Plan.md §2).
+    if (format == AudioFormat::Dts && !s.convertWhenUnsupported)
+        throw Error(ErrorCode::FormatNotSupported,
+                    "DTS in a WAVE file has no bit-perfect format on any device; enable \"convert when unsupported\" to "
+                    "decode it");
     const DecoderKind decoder = requested.value_or(decoderFor(s.decoderByFormat, format));
     if (!supports(format, decoder))
         throw Error(ErrorCode::UnsupportedStream, std::string(decoderName(decoder)) + " cannot decode " + formatName(format));
@@ -892,6 +897,12 @@ private:
             try {
                 output_->start();
             } catch (const Error& e) {
+                // The driver accepted the format but cannot run it, and now refuses it: choose again, which converts
+                // only with permission (docs/Plan.md §5.3).
+                if (e.code() == ErrorCode::DriverError && plan_.dsd == DsdPath::None && !output_->supports(fmt_)) {
+                    log::warn("engine: %s; choosing another format", e.what());
+                    return startSession(startFrame, playNow, deviceChange);
+                }
                 if (plan_.dsd != DsdPath::Dop) throw;
                 // DoP is the user's choice; the other DSD paths stay their call (docs/Plan.md §5.3 item 4).
                 throw Error(e.code(), std::string(e.what()) + "; play this file as native DSD or DSD converted to PCM instead");

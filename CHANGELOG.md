@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Changed since 0.2.0:
+
+- **Conversion is on by default,** for earlier settings too: when a device does not take a file as it is, CamelPlayer resamples, downmixes, reduces the bit depth or decodes DTS, and the signal path shows it as processed. **Skip it and tell me** in Settings › Playback still plays bit-perfect only.
+
+Fixed since 0.2.0:
+
+- **DTS-CD files played as loud noise.** A WAV file that holds a DTS surround bitstream instead of PCM is now recognized by its content and never played as PCM. With conversion, the chosen WAV decoder reads it, FFmpeg's DTS decoder decodes it and it is downmixed to stereo; without, it is skipped as unsupported.
+- **A rate the driver offers but cannot run,** such as 64 kHz on Chord's ASIO driver, ended in a driver error. It now counts as a rate the device does not take: with conversion it is resampled, otherwise skipped as unsupported.
+
 ## 0.2.0
 
 Upgrading from 0.1.0: the first start moves the library to a newer format (schema 18) and keeps the old one as `library.db.v17.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.1.0 refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v17.bak` to `library.db`; what changed since the upgrade, such as plays, favorites and ReplayGain analysis, is lost that way. 0.1.0 reads the settings too, but keeps only those it knows, so the DSP, volume and Discord settings go when it saves.

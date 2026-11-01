@@ -252,8 +252,9 @@ struct Settings {
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
     PcmBitsByFormat pcmBitsByFormat;
-    // "Convert when unsupported" (docs/Plan.md §2, §5.3): resample, downmix or reduce depth instead of skipping.
-    bool convertWhenUnsupported = false;
+    // "Convert when unsupported" (docs/Plan.md §2, §5.3): resample, downmix, reduce depth or decode DTS instead of
+    // skipping. On by default; the signal path then shows the conversion, and turning it off plays bit-perfect only.
+    bool convertWhenUnsupported = true;
     ResampleQuality resampleQuality = ResampleQuality::High;
     // "Convert DSD when unsupported" (docs/Plan.md §5.3 item 4): DSD to PCM after native/DoP failed. Independent of
     // convertWhenUnsupported, which still governs rates, downmix and depth of the PCM it produces.

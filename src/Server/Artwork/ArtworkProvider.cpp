@@ -90,6 +90,7 @@ public:
             file = std::make_unique<TagLib::FLAC::File>(&stream, false);
             break;
         case audio::AudioFormat::Wav:
+        case audio::AudioFormat::Dts:
             file = std::make_unique<TagLib::RIFF::WAV::File>(&stream, false);
             break;
         case audio::AudioFormat::Aiff:

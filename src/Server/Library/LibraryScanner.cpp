@@ -202,6 +202,7 @@ Metadata metadata(const Path& path, int64_t fileSize) {
         file = std::make_unique<TagLib::FLAC::File>(&stream);
         break;
     case audio::AudioFormat::Wav:
+    case audio::AudioFormat::Dts:
         file = std::make_unique<TagLib::RIFF::WAV::File>(&stream);
         break;
     case audio::AudioFormat::Aiff:

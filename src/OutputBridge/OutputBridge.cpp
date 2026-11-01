@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <thread>
 #include <utility>
 
@@ -27,6 +28,7 @@ OutputBridge::~OutputBridge() {
 
 bool OutputBridge::supports(const DeviceFormat& format) {
     std::lock_guard lock(controlMutex_);
+    if (std::find(unstartable_.begin(), unstartable_.end(), format) != unstartable_.end()) return false;
     return output_->supports(format);
 }
 
@@ -53,12 +55,19 @@ void OutputBridge::open(const DeviceFormat& format, IRenderSource* source) {
     ++generation_;
     activeFormat_ = format;
     opened_ = true;
+    started_ = false;
 }
 
 void OutputBridge::start() {
     std::lock_guard lock(controlMutex_);
     if (!opened_) throw Error(ErrorCode::Other, "output bridge stream is not open");
-    output_->start();
+    try {
+        output_->start();
+    } catch (const Error& e) {
+        if (e.code() == ErrorCode::DriverError && !started_) unstartable_.push_back(*activeFormat_);
+        throw;
+    }
+    started_ = true;
 }
 
 void OutputBridge::pause() {

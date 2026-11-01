@@ -38,7 +38,7 @@
   <data name="Lamp_Processed" xml:space="preserve"><value>Processed</value></data>
   <data name="Settings_Convert.Header" xml:space="preserve"><value>When the device does not take a file as it is</value></data>
   <data name="Convert_Off" xml:space="preserve"><value>Skip it and tell me</value></data>
-  <data name="Convert_On" xml:space="preserve"><value>Convert it (resample, downmix or reduce depth)</value></data>
+  <data name="Convert_On" xml:space="preserve"><value>Convert it (resample, downmix, reduce depth or decode DTS)</value></data>
   <data name="Settings_ConvertDsd.Header" xml:space="preserve"><value>When the device takes neither native DSD nor DoP</value></data>
   <data name="ConvertDsd_On" xml:space="preserve"><value>Convert it to PCM</value></data>
   <data name="Settings_DsdOutput.Header" xml:space="preserve"><value>DSD output</value></data>

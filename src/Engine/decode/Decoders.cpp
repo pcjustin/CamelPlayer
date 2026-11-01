@@ -253,6 +253,15 @@ namespace {
 std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::path& path, AudioFormat format,
                                       uint32_t lossyBits) {
     if (format == AudioFormat::Dsd) return openAdapter(kind, path, 0); // raw DSD, not PCM
+    if (format == AudioFormat::Dts) {
+        // FFmpeg's WAVE reader finds the DTS stream and decodes it, but seeks only near the target, so it decodes from
+        // the start; the other WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly.
+        // One sample per word frame makes the data chunk's length exact.
+        if (kind != DecoderKind::FFmpeg) return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits);
+        auto d = std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Reopen, true);
+        if (!d->readsFloat()) throw Error(ErrorCode::UnsupportedStream, "FFmpeg did not find the DTS stream");
+        return d;
+    }
     std::unique_ptr<IDecoder> d;
     // mpg123 seeks exactly by itself; Symphonia lands on the target after warm-up; FFmpeg and dr_mp3 can land beside it
     // when they trim encoder delay, so they decode from the start.

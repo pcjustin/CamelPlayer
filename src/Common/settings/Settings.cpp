@@ -251,6 +251,7 @@ const PlaybackTiming& timing(const Settings& s) {
 }
 
 audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format) {
+    if (format == audio::AudioFormat::Dts) format = audio::AudioFormat::Wav; // DTS-CD is read by the WAVE decoder
     return choices[format].value_or(audio::defaultDecoder(format));
 }
 
@@ -270,7 +271,9 @@ std::string toJson(const Settings& s) {
     for (const auto format : audio::kAllFormats)
         if (const auto bits = s.pcmBitsByFormat[format]) pcmBits[audio::formatId(format)] = *bits;
     j["pcmBitsByFormat"] = pcmBits;
-    j["convertWhenUnsupported"] = s.convertWhenUnsupported;
+    // A new key: it was "convertWhenUnsupported" while off by default, which is ignored so that conversion starts on
+    // for everyone once; versions that know only the old key keep reading theirs.
+    j["convertUnsupported"] = s.convertWhenUnsupported;
     j["resampleQuality"] = resampleQualityId(s.resampleQuality);
     j["convertDsdWhenUnsupported"] = s.convertDsdWhenUnsupported;
     j["language"] = s.language;
@@ -393,7 +396,7 @@ Settings fromJson(const std::string& text) {
                 (bits.get<int64_t>() == 16 || bits.get<int64_t>() == 24))
                 s.pcmBitsByFormat[format] = uint32_t(bits.get<int64_t>());
         }
-    s.convertWhenUnsupported = boolean(j, "convertWhenUnsupported", false);
+    s.convertWhenUnsupported = boolean(j, "convertUnsupported", true);
     s.resampleQuality = resampleQualityFromId(str(j, "resampleQuality", "high"));
     s.convertDsdWhenUnsupported = boolean(j, "convertDsdWhenUnsupported", false);
     s.language = str(j, "language", "");
