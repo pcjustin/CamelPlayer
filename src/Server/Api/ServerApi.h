@@ -63,6 +63,7 @@ struct SettingsDto {
     bool checkUpdates = true;
     OnlineLookup artistPictures = OnlineLookup::Ask;
     bool folderTree = false;
+    DiscordSettings discord;
     std::string skippedVersion;
     HotkeySettings hotkeys;
     EqSettings eq;
@@ -268,6 +269,18 @@ struct DataRecovery {
     enum class Library : uint8_t { None, RestoredBackup, Rebuilt } library = Library::None;
 };
 
+enum class DiscordConnection : uint8_t { Off, Searching, Connected };
+enum class DiscordCover : uint8_t { Off, Downloading, Starting, Ready, Failed };
+struct DiscordStatus {
+    DiscordConnection connection = DiscordConnection::Off;
+    DiscordCover cover = DiscordCover::Off;
+    std::string coverError; // why the cloudflared download or start failed
+    bool operator==(const DiscordStatus&) const = default;
+};
+struct DiscordTexts {
+    std::string bitPerfect = "Bit-perfect", lossless = "Lossless conversion", processed = "Processed", lossy = "Lossy source";
+};
+
 class IServer {
 public:
     virtual ~IServer() = default;
@@ -355,6 +368,10 @@ public:
     virtual void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
                                        const std::string& appVersion) const = 0;
     virtual DataRecovery dataRecovery() const = 0;
+    // Discord Rich Presence (docs/Plan.md §8.4): how far the connection and the cover tunnel are.
+    virtual DiscordStatus discordStatus() const = 0;
+    // The path states' names in the app's language, for the activity's small image; the Server has no strings of its own.
+    virtual void setDiscordTexts(const DiscordTexts& texts) = 0;
 };
 
 // Throws NewerSettingsError or NewerLibraryError for data a newer CamelPlayer wrote, and MigrationError or another

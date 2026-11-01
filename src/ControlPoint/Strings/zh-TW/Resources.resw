@@ -648,4 +648,16 @@
   <data name="Volume_FixedNote.Text" xml:space="preserve"><value>由 DAC 或擴大機控制音量，播放維持 bit‑perfect。</value></data>
   <data name="Volume_Settings.Content" xml:space="preserve"><value>音量設定…</value></data>
   <data name="Volume_Level" xml:space="preserve"><value>音量：{0}</value></data>
+  <data name="Settings_Discord.Header" xml:space="preserve"><value>Discord</value></data>
+  <data name="Settings_Discord.OnContent" xml:space="preserve"><value>在 Discord 顯示播放狀態</value></data>
+  <data name="Settings_Discord.OffContent" xml:space="preserve"><value>在 Discord 顯示播放狀態</value></data>
+  <data name="Settings_DiscordCovers.OnContent" xml:space="preserve"><value>一併顯示封面</value></data>
+  <data name="Settings_DiscordCovers.OffContent" xml:space="preserve"><value>一併顯示封面</value></data>
+  <data name="Settings_DiscordCoversNote.Text" xml:space="preserve"><value>播放時，Discord 會顯示曲名、演出者、專輯、進度和訊號路徑狀態。Discord 只能從公開網址讀圖，所以封面會經由 Cloudflare 的匿名通道提供，通道只在播放時開啟；第一次開啟時會下載 cloudflared（約 55 MB）。</value></data>
+  <data name="Discord_Connected" xml:space="preserve"><value>已連線 Discord。</value></data>
+  <data name="Discord_Searching" xml:space="preserve"><value>找不到 Discord 桌面版，每 15 秒重試一次。</value></data>
+  <data name="Discord_CoverDownloading" xml:space="preserve"><value>正在下載 cloudflared…</value></data>
+  <data name="Discord_CoverStarting" xml:space="preserve"><value>封面通道準備中…</value></data>
+  <data name="Discord_CoverReady" xml:space="preserve"><value>封面通道已就緒。</value></data>
+  <data name="Discord_CoverFailed" xml:space="preserve"><value>封面通道無法使用：{0}</value></data>
 </root>

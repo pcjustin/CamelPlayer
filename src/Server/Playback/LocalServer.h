@@ -76,6 +76,8 @@ public:
     void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
                                const std::string& appVersion) const override;
     DataRecovery dataRecovery() const override;
+    DiscordStatus discordStatus() const override;
+    void setDiscordTexts(const DiscordTexts& texts) override;
     // How the settings passed in were obtained (openSettings).
     void setSettingsRecovery(SettingsRecovery recovery);
 

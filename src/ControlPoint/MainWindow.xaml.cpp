@@ -285,6 +285,8 @@ void MainWindow::InitializeComponent() {
 
     if (!server_) server_ = createLocalServer();
     settings_ = server_->snapshot().settings;
+    server_->setDiscordTexts({winrt::to_string(tr(L"Lamp_BitPerfect")), winrt::to_string(tr(L"Lamp_Lossless")),
+                              winrt::to_string(tr(L"Lamp_Processed")), winrt::to_string(tr(L"Lamp_Lossy"))});
     auto dq = DispatcherQueue();
     server_->setListener([dq, weak = get_weak()](const Event& event) {
         dq.TryEnqueue([weak, snapshot = event.snapshot] {
@@ -531,6 +533,9 @@ void MainWindow::populateSettings() {
     AutoUpdateSwitch().IsOn(settings_.checkUpdates);
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     FolderTreeSwitch().IsOn(settings_.folderTree);
+    DiscordSwitch().IsOn(settings_.discord.enabled);
+    DiscordCoversSwitch().IsOn(settings_.discord.covers);
+    DiscordCoversSwitch().IsEnabled(settings_.discord.enabled);
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     showDsp();
     showVolume();
@@ -666,6 +671,8 @@ void MainWindow::readSettingsFromUi() {
     else if (settings_.artistPictures == camel::OnlineLookup::Allowed)
         settings_.artistPictures = camel::OnlineLookup::Refused;
     settings_.folderTree = FolderTreeSwitch().IsOn();
+    settings_.discord.enabled = DiscordSwitch().IsOn();
+    settings_.discord.covers = DiscordCoversSwitch().IsOn();
     settings_.eq.enabled = EqSwitch().IsOn();
     if (eqEditor_) settings_.eq.bands = eqEditor_->settings().bands;
     settings_.crossfeed.enabled = CrossfeedSwitch().IsOn();
@@ -817,6 +824,7 @@ void MainWindow::refreshFromServer() {
     applySnapshot(server_->snapshot());
     showScanProgress();
     showLoudnessProgress();
+    showDiscordStatus();
 }
 
 void MainWindow::showScanProgress() {
@@ -2831,6 +2839,31 @@ void MainWindow::OnArtistPicturesToggled(Windows::Foundation::IInspectable const
 
 void MainWindow::OnFolderTreeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
+}
+
+void MainWindow::OnDiscordToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    DiscordCoversSwitch().IsEnabled(DiscordSwitch().IsOn());
+    settingsChanged();
+}
+
+// Whether Discord is reached and how far the cover tunnel is, so a missing activity can be explained.
+void MainWindow::showDiscordStatus() {
+    const auto status = server_->discordStatus();
+    std::wstring text;
+    if (status.connection == DiscordConnection::Connected)
+        text = std::wstring(tr(L"Discord_Connected"));
+    else if (status.connection == DiscordConnection::Searching)
+        text = std::wstring(tr(L"Discord_Searching"));
+    const wchar_t* cover = status.cover == DiscordCover::Downloading ? L"Discord_CoverDownloading"
+                           : status.cover == DiscordCover::Starting  ? L"Discord_CoverStarting"
+                           : status.cover == DiscordCover::Ready     ? L"Discord_CoverReady"
+                                                                     : nullptr;
+    if (cover) text += L" " + std::wstring(tr(cover));
+    if (status.cover == DiscordCover::Failed)
+        text += L" " + std::wstring(ui::format(L"Discord_CoverFailed", {std::wstring(ui::utf8(status.coverError))}));
+    if (DiscordStatusText().Text() == hstring(text)) return;
+    DiscordStatusText().Text(hstring(text));
+    DiscordStatusText().Visibility(text.empty() ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void MainWindow::OnEqToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

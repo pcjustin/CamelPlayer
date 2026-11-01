@@ -100,6 +100,12 @@ The **DSP** button in the player bar turns each of the three and crossfade on or
 
 Changes are heard within about a quarter of a second, without a gap. While the chain acts, the badge shows **Processed**, the signal path lists each step, and the output is dithered once to the device's bit depth. While nothing changes the signal, playback stays bit-perfect. After the last track, the end of a convolution's response plays out. Raw DSD (native or DoP) bypasses the chain; convert DSD to PCM to process it.
 
+## Discord
+
+Settings › Interface › **Show what's playing on Discord** puts the playing track on your Discord profile while the Discord desktop app runs: the title (also in your friends list), the artists, the album when you point at the picture, the progress bar, and a small dot for the signal path's state with its format, such as "FLAC 24-bit 96 kHz · Bit-perfect". Pausing or stopping clears it. The line under the switches says whether Discord was found; CamelPlayer looks again every 15 seconds, and the browser version of Discord cannot be reached. Discord shows it to others only while **Settings › Activity Privacy › Share your detected activities with others** is on there.
+
+**Also show the cover** shows the file's own cover instead of the CamelPlayer icon. Discord fetches pictures itself from a public address, so CamelPlayer serves the cover, resized to 512 pixels without its metadata, through an anonymous Cloudflare quick tunnel that runs while music plays and closes 10 minutes after it stops. The first time, CamelPlayer downloads cloudflared (about 55 MB) from Cloudflare's GitHub releases into its data folder and checks it before running it. Without a cover, or until the tunnel is ready, the CamelPlayer icon stands in.
+
 ## Common problems
 
 **A file is skipped with "The device cannot play this format bit-perfectly".** The device does not accept the file's sample rate, bit depth or channel count. Check that the right device is selected, try a different **Sample format**, or allow conversion (see above).

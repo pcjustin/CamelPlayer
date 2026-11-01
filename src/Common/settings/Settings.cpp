@@ -284,6 +284,7 @@ std::string toJson(const Settings& s) {
                           : s.artistPictures == OnlineLookup::Refused ? "refused"
                                                                       : "ask";
     j["folderTree"] = s.folderTree;
+    j["discord"] = {{"enabled", s.discord.enabled}, {"covers", s.discord.covers}};
     j["skippedVersion"] = s.skippedVersion;
     j["hotkeys"] = {{"playPause", {s.hotkeys.playPause.modifiers, s.hotkeys.playPause.key}},
                     {"previous", {s.hotkeys.previous.modifiers, s.hotkeys.previous.key}},
@@ -408,6 +409,10 @@ Settings fromJson(const std::string& text) {
                        : pictures == "refused" ? OnlineLookup::Refused
                                                : OnlineLookup::Ask;
     s.folderTree = boolean(j, "folderTree", false);
+    if (j.contains("discord") && j["discord"].is_object()) {
+        s.discord.enabled = boolean(j["discord"], "enabled", false);
+        s.discord.covers = boolean(j["discord"], "covers", false);
+    }
     s.skippedVersion = str(j, "skippedVersion", "");
     if (j.contains("hotkeys") && j["hotkeys"].is_object()) {
         const json& h = j["hotkeys"];
@@ -569,6 +574,7 @@ Settings resetPlayback(const Settings& s) {
     reset.checkUpdates = s.checkUpdates;
     reset.artistPictures = s.artistPictures;
     reset.folderTree = s.folderTree;
+    reset.discord = s.discord;
     reset.skippedVersion = s.skippedVersion;
     reset.eq.presets = s.eq.presets;
     reset.lastFile = s.lastFile;
@@ -587,6 +593,7 @@ Settings resetInterface(const Settings& s) {
     reset.checkUpdates = defaults.checkUpdates;
     reset.artistPictures = defaults.artistPictures;
     reset.folderTree = defaults.folderTree;
+    reset.discord = defaults.discord;
     return reset;
 }
 

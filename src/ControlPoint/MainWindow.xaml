@@ -495,6 +495,14 @@
                                 <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ToggleSwitch x:Name="AutoUpdateSwitch" x:Uid="Settings_AutoUpdate" Toggled="OnUpdateSwitchToggled" />
                                 <ToggleSwitch x:Name="ArtistPicturesSwitch" x:Uid="Settings_ArtistPictures" Toggled="OnArtistPicturesToggled" />
+                                <!-- Discord Rich Presence (docs/Plan.md §8.4); the cover goes out through a tunnel, so it has a switch
+                                     of its own, which waits for the first. -->
+                                <ToggleSwitch x:Name="DiscordSwitch" x:Uid="Settings_Discord" Toggled="OnDiscordToggled" />
+                                <ToggleSwitch x:Name="DiscordCoversSwitch" x:Uid="Settings_DiscordCovers" Toggled="OnDiscordToggled" />
+                                <TextBlock x:Uid="Settings_DiscordCoversNote" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="DiscordStatusText" TextWrapping="Wrap" Visibility="Collapsed"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ToggleSwitch x:Name="FolderTreeSwitch" x:Uid="Settings_FolderTree" Toggled="OnFolderTreeToggled" />
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
                                 <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"

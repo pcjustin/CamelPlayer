@@ -43,6 +43,7 @@ The screenshots show a demo library with made-up albums and covers.
 - **Artist pictures** on their page and beside their name in the Artists and Composers lists: a picture you choose, an `artist.jpg` in a folder named after them, or, if you allow it, a freely licensed one from Wikimedia Commons shown with its author and license. Without one, their initial stands in.
 - **Every name in a credit counts:** "Aimer with chelly" or "A feat. B" lists each artist on its own, and each name on an album page and in the player bar opens that artist.
 - **Search** from the title bar (Ctrl+F) with suggestions as you type, including Chinese and Japanese, whole and leading matches first.
+- **Discord**, once switched on: the playing track with its progress and the signal path's state on your profile, and its own cover if you allow a Cloudflare tunnel for it.
 
 ### Queue, playlists and favorites
 

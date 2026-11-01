@@ -648,4 +648,16 @@
   <data name="Volume_FixedNote.Text" xml:space="preserve"><value>Your DAC or amplifier sets the level, and playback stays bit‑perfect.</value></data>
   <data name="Volume_Settings.Content" xml:space="preserve"><value>Volume settings…</value></data>
   <data name="Volume_Level" xml:space="preserve"><value>Volume: {0}</value></data>
+  <data name="Settings_Discord.Header" xml:space="preserve"><value>Discord</value></data>
+  <data name="Settings_Discord.OnContent" xml:space="preserve"><value>Show what's playing on Discord</value></data>
+  <data name="Settings_Discord.OffContent" xml:space="preserve"><value>Show what's playing on Discord</value></data>
+  <data name="Settings_DiscordCovers.OnContent" xml:space="preserve"><value>Also show the cover</value></data>
+  <data name="Settings_DiscordCovers.OffContent" xml:space="preserve"><value>Also show the cover</value></data>
+  <data name="Settings_DiscordCoversNote.Text" xml:space="preserve"><value>Discord shows the title, artists, album, progress and the signal path's state while music plays. It reads images only from public addresses, so the cover goes out through an anonymous Cloudflare tunnel that runs only while music plays; the first time, cloudflared (about 55 MB) is downloaded.</value></data>
+  <data name="Discord_Connected" xml:space="preserve"><value>Connected to Discord.</value></data>
+  <data name="Discord_Searching" xml:space="preserve"><value>The Discord desktop app isn't running; trying again every 15 seconds.</value></data>
+  <data name="Discord_CoverDownloading" xml:space="preserve"><value>Downloading cloudflared…</value></data>
+  <data name="Discord_CoverStarting" xml:space="preserve"><value>Starting the cover tunnel…</value></data>
+  <data name="Discord_CoverReady" xml:space="preserve"><value>The cover tunnel is ready.</value></data>
+  <data name="Discord_CoverFailed" xml:space="preserve"><value>The cover tunnel failed: {0}</value></data>
 </root>

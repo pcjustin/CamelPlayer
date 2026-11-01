@@ -27,6 +27,7 @@
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "OutputBridge/DeviceWatcher.h"
+#include "Server/Integration/DiscordPresence.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/Loudness.h"
@@ -264,6 +265,24 @@ public:
         } else {
             sessionRestored_ = true;
         }
+        // Discord's cover comes from the file or its folder, as the playback bar's does, at 512 px; cloudflared lives in
+        // the data folder, so without one there are no covers.
+        discord_ = std::make_unique<DiscordPresence>(
+            settingsFile_.empty() ? std::filesystem::path() : settingsFile_.parent_path() / L"tools" / L"cloudflared.exe",
+            [](const std::string& path, const CancellationToken& token) -> std::vector<uint8_t> {
+                const std::filesystem::path file(toWide(path));
+                ArtworkQuery query;
+                query.albumFolder = file.parent_path();
+                query.firstTrack = file;
+                ArtworkChain chain;
+                chain.add(makeEmbeddedArtworkProvider());
+                chain.add(makeFolderArtworkProvider());
+                chain.add(makeParentFolderArtworkProvider());
+                const auto image = chain.first(query, token, false);
+                if (!image || image->bytes.empty()) return {};
+                return squarePicture(image->bytes, 512);
+            });
+        discord_->configure(settings_.discord);
         worker_ = std::thread([this] { run(); });
     }
 
@@ -282,6 +301,7 @@ public:
         }
         cv_.notify_one();
         if (worker_.joinable()) worker_.join();
+        discord_.reset(); // clears the activity
         if (library_) {
             library_->backupIfDue(); // for a day that never had an idle moment
             library_->close();
@@ -332,6 +352,11 @@ public:
             if (SUCCEEDED(initialized)) CoUninitialize();
         }
         server::writeDiagnosticBundle(file, input);
+    }
+
+    DiscordStatus discordStatus() const { return discord_ ? discord_->status() : DiscordStatus{}; }
+    void setDiscordTexts(const DiscordTexts& texts) {
+        if (discord_) discord_->setTexts(texts);
     }
 
     DataRecovery dataRecovery() const {
@@ -770,6 +795,7 @@ private:
                     settings_ = nativeSettings(*c.settings);
                     settings_.lastFile = lastFile;
                     engine_->applySettings(settings_);
+                    discord_->configure(settings_.discord);
                     shareLoudnessInputs();
                     // A queued track took the old gain and crossfade; it is queued again with the new ones. The playing
                     // one keeps its.
@@ -1329,6 +1355,7 @@ private:
                 log::warn("Server listener failed");
             }
         }
+        if (discord_) discord_->observe(event.snapshot);
     }
 
     void refreshDevices() {
@@ -1493,6 +1520,7 @@ private:
     } saved_;
     std::future<void> sessionWrite_;
     std::function<void(const Event&)> listener_;
+    std::unique_ptr<DiscordPresence> discord_;
     static constexpr std::chrono::seconds kDevicesSettle{1};
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
     std::thread worker_;
@@ -1666,6 +1694,12 @@ void LocalServer::writeDiagnosticBundle(const std::filesystem::path& file, bool 
 
 DataRecovery LocalServer::dataRecovery() const {
     return impl_->dataRecovery();
+}
+DiscordStatus LocalServer::discordStatus() const {
+    return impl_->discordStatus();
+}
+void LocalServer::setDiscordTexts(const DiscordTexts& texts) {
+    impl_->setDiscordTexts(texts);
 }
 void LocalServer::setSettingsRecovery(SettingsRecovery recovery) {
     impl_->settingsRecovery_ = recovery;

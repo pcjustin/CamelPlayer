@@ -82,6 +82,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     // Automatic updates (docs/Plan.md §8.6).
     void OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnDiscordToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnFolderTreeToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqPresetChanged(Windows::Foundation::IInspectable const&,
@@ -163,6 +164,7 @@ private:
     void showSignalPath(std::vector<PathStep> steps);
     void repaintTheme();
     void showLoudnessProgress();
+    void showDiscordStatus();
     void showDspOrder();
     void showDspSummary();
     winrt::fire_and_forget loadConvolution();
