@@ -28,6 +28,8 @@ const char* formatId(AudioFormat format) {
         return "dsd";
     case AudioFormat::Dts:
         return "dts";
+    case AudioFormat::Adpcm:
+        return "adpcm";
     }
     return "?";
 }
@@ -50,6 +52,8 @@ const char* formatName(AudioFormat format) {
         return "DSD";
     case AudioFormat::Dts:
         return "DTS";
+    case AudioFormat::Adpcm:
+        return "ADPCM";
     }
     return "?";
 }
@@ -83,7 +87,7 @@ DecoderKind defaultDecoder(AudioFormat format) {
 }
 
 bool isLossy(AudioFormat format) {
-    return format == AudioFormat::Aac || format == AudioFormat::Mp3 || format == AudioFormat::Dts;
+    return format == AudioFormat::Aac || format == AudioFormat::Mp3 || format == AudioFormat::Dts || format == AudioFormat::Adpcm;
 }
 
 } // namespace camel::audio

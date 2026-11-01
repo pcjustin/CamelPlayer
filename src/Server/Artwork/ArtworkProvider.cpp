@@ -91,6 +91,7 @@ public:
             break;
         case audio::AudioFormat::Wav:
         case audio::AudioFormat::Dts:
+        case audio::AudioFormat::Adpcm:
             file = std::make_unique<TagLib::RIFF::WAV::File>(&stream, false);
             break;
         case audio::AudioFormat::Aiff:

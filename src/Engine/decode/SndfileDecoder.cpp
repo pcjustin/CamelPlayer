@@ -142,6 +142,8 @@ public:
         if (!sf_) throw Error(ErrorCode::UnsupportedStream, std::string("sf_open_virtual: ") + sf_strerror(nullptr));
         switch (si.format & SF_FORMAT_SUBMASK) {
         case SF_FORMAT_PCM_16:
+        case SF_FORMAT_IMA_ADPCM: // 4-bit codes that decode to 16-bit samples
+        case SF_FORMAT_MS_ADPCM:
             info_.bitsPerSample = 16;
             break;
         case SF_FORMAT_PCM_24:

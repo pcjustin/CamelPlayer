@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+New since 0.2.0:
+
+- **ADPCM WAV files:** IMA and Microsoft ADPCM, whose 4-bit codes were refused before, play as exact 16-bit PCM, marked as a lossy source. Settings › Decoders has an ADPCM decoder of its own, libsndfile by default. Audio files an earlier version could not read are read again once by the first scan after an update, so ADPCM files already in a library folder appear.
+
 Changed since 0.2.0:
 
 - **Conversion is on by default,** for earlier settings too: when a device does not take a file as it is, CamelPlayer resamples, downmixes, reduces the bit depth or decodes DTS, and the signal path shows it as processed. **Skip it and tell me** in Settings › Playback still plays bit-perfect only.

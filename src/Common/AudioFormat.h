@@ -13,10 +13,11 @@
 namespace camel::audio {
 
 // Keyed by codec, not extension: M4A AAC and M4A ALAC are different formats. Dts is a DTS bitstream posing as PCM in a
-// WAVE file (DTS-CD), which a PCM decoder would play as noise.
-enum class AudioFormat : uint8_t { Flac, Alac, Wav, Aiff, Aac, Mp3, Dsd, Dts };
-constexpr AudioFormat kAllFormats[] = {AudioFormat::Flac, AudioFormat::Alac, AudioFormat::Wav, AudioFormat::Aiff,
-                                       AudioFormat::Aac,  AudioFormat::Mp3,  AudioFormat::Dsd, AudioFormat::Dts};
+// WAVE file (DTS-CD), which a PCM decoder would play as noise; Adpcm is IMA or Microsoft ADPCM in a WAVE file.
+enum class AudioFormat : uint8_t { Flac, Alac, Wav, Aiff, Aac, Mp3, Dsd, Dts, Adpcm };
+constexpr AudioFormat kAllFormats[] = {AudioFormat::Flac, AudioFormat::Alac, AudioFormat::Wav,
+                                       AudioFormat::Aiff, AudioFormat::Aac,  AudioFormat::Mp3,
+                                       AudioFormat::Dsd,  AudioFormat::Dts,  AudioFormat::Adpcm};
 
 const char* formatId(AudioFormat format);
 const char* formatName(AudioFormat format);
@@ -29,6 +30,7 @@ bool supports(AudioFormat format, DecoderKind decoder);
 DecoderKind defaultDecoder(AudioFormat format);
 
 // Lossy bitstreams have no source PCM depth; their decoded output is offered as 16- or 24-bit PCM (docs/Plan.md §3.1).
+// ADPCM decodes to exact 16-bit samples, which pass on unchanged.
 bool isLossy(AudioFormat format);
 
 } // namespace camel::audio

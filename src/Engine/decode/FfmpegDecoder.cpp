@@ -75,6 +75,8 @@ public:
         info_.channels = uint32_t(ctx_->ch_layout.nb_channels);
         info_.bitsPerSample = uint32_t(ctx_->bits_per_raw_sample ? ctx_->bits_per_raw_sample : st->codecpar->bits_per_raw_sample);
         if (!info_.bitsPerSample) info_.bitsPerSample = uint32_t(av_get_bits_per_sample(ctx_->codec_id)); // 16-bit PCM
+        // ADPCM's 4-bit codes decode to 16-bit samples.
+        if (ctx_->codec_id == AV_CODEC_ID_ADPCM_IMA_WAV || ctx_->codec_id == AV_CODEC_ID_ADPCM_MS) info_.bitsPerSample = 16;
         const AVSampleFormat packed = av_get_packed_sample_fmt(ctx_->sample_fmt);
         lossy_ = (packed == AV_SAMPLE_FMT_FLT || packed == AV_SAMPLE_FMT_DBL) &&
                  (ctx_->codec_id == AV_CODEC_ID_MP3 || ctx_->codec_id == AV_CODEC_ID_AAC || ctx_->codec_id == AV_CODEC_ID_DTS);

@@ -16,6 +16,7 @@
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
 #include "Common/DecoderRegistry.h"
+#include "Common/Version.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/decode/FormatProbe.h"
 #include "DsdFixture.h"
@@ -439,6 +440,33 @@ TEST_F(LibraryScannerTest, AnAllTagsRereadKeepsIdentityAndFingerprint) {
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_reread:%'"), 0);
 }
 
+// An audio file without a track is one an earlier version refused; a newer one may read it, such as ADPCM WAV files.
+TEST_F(LibraryScannerTest, AFileRefusedBeforeIsReadAgainOncePerVersion) {
+    audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_refused_read:%'"), 1);
+    const auto refuse = [&](const char* version) {
+        store
+            .write([&](sqlite::Database& db) {
+                db.exec("DELETE FROM tracks");
+                db.prepare("UPDATE app_state SET value=? WHERE key LIKE 'library_refused_read:%'")
+                    .bind(1, std::string(version))
+                    .run();
+            })
+            .get();
+    };
+    refuse("0.0.1");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
+
+    refuse(CAMEL_VERSION_STRING); // this version has read it already
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 0);
+}
+
 TEST_F(LibraryScannerTest, OneChangedFileDoesNotCountEveryTrackAsALibraryChange) {
     constexpr int kFolders = 4, kFiles = 5;
     for (int folder = 0; folder < kFolders; ++folder) {
@@ -558,6 +586,7 @@ TEST_F(LibraryScannerTest, ReadsEverySupportedContainer) {
     writeAac(folder / "aac.m4a", pcm, 44100, 16, 2, false);
     writeAac(folder / "adts.aac", pcm, 44100, 16, 2, true);
     testutil::writeMp3(folder / "mp3.mp3", pcm, 44100, 16, 2, true);
+    writeAdpcm(folder / "adpcm.wav", pcm, 44100, 2, false);
     const auto raw = dsdfixture::rawDsd(4096, 2);
     dsdfixture::writeFile(folder / "dsf.dsf", dsdfixture::dsf(raw, {}));
     dsdfixture::writeFile(folder / "dff.dff", dsdfixture::dff(raw, 2, dsdfixture::kDsd64, false));
@@ -566,8 +595,9 @@ TEST_F(LibraryScannerTest, ReadsEverySupportedContainer) {
     const auto report = scanner.scan(scanner.addRoot(dir / "music"));
     for (const auto& diagnostic : report.diagnostics) ADD_FAILURE() << diagnostic;
     EXPECT_TRUE(report.complete);
-    EXPECT_EQ(report.updated, 9);
-    EXPECT_EQ(count(store, "SELECT COUNT(DISTINCT format) FROM tracks"), 7);
+    EXPECT_EQ(report.updated, 10);
+    EXPECT_EQ(count(store, "SELECT COUNT(DISTINCT format) FROM tracks"), 8);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE format='adpcm' AND bits_per_sample=16"), 1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE format='dsd' AND sample_rate=2822400 "
                            "AND bits_per_sample=1 AND total_frames=32768"),
               2);

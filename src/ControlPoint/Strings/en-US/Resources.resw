@@ -28,6 +28,7 @@
   <data name="Settings_Decoder.Header" xml:space="preserve"><value>FLAC decoder</value></data>
   <data name="Settings_AlacDecoder.Header" xml:space="preserve"><value>ALAC decoder</value></data>
   <data name="Settings_WavDecoder.Header" xml:space="preserve"><value>WAV decoder</value></data>
+  <data name="Settings_AdpcmDecoder.Header" xml:space="preserve"><value>ADPCM decoder</value></data>
   <data name="Settings_AiffDecoder.Header" xml:space="preserve"><value>AIFF decoder</value></data>
   <data name="Settings_AacDecoder.Header" xml:space="preserve"><value>AAC decoder</value></data>
   <data name="Settings_AacBits.Header" xml:space="preserve"><value>AAC output depth</value></data>

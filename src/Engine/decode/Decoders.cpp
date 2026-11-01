@@ -253,6 +253,11 @@ namespace {
 std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::path& path, AudioFormat format,
                                       uint32_t lossyBits) {
     if (format == AudioFormat::Dsd) return openAdapter(kind, path, 0); // raw DSD, not PCM
+    // ADPCM decodes to exact 16-bit samples. FFmpeg can land beside a target in the last block, so it decodes from the
+    // start.
+    if (format == AudioFormat::Adpcm)
+        return kind == DecoderKind::FFmpeg ? std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Reopen, true)
+                                           : openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Dts) {
         // FFmpeg's WAVE reader finds the DTS stream and decodes it, but seeks only near the target, so it decodes from
         // the start; the other WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly.

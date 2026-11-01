@@ -1,6 +1,6 @@
 # CamelPlayer 使用說明
 
-CamelPlayer 是 Windows 上的音樂播放器，可播放 FLAC、ALAC、WAV、AIFF、AAC、MP3 和 DSD（DSF、DSDIFF）檔案，無損音樂以 bit-perfect 送到 DAC。本說明介紹安裝、介面導覽、選擇輸出方式、DSD 播放與常見問題。[English](UserGuide.md)
+CamelPlayer 是 Windows 上的音樂播放器，可播放 FLAC、ALAC、WAV（包括 ADPCM 和 DTS-CD）、AIFF、AAC、MP3 和 DSD（DSF、DSDIFF）檔案，無損音樂以 bit-perfect 送到 DAC。本說明介紹安裝、介面導覽、選擇輸出方式、DSD 播放與常見問題。[English](UserGuide.md)
 
 ## 安裝
 

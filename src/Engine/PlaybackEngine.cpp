@@ -430,7 +430,7 @@ public:
             next.decoder = chooseDecoder(next.format, requested, settings_);
             const auto opened = openDecoder(next.decoder, file, settings_.pcmBitsByFormat);
             next.source = opened->info();
-            lossy = opened->readsFloat();
+            lossy = opened->readsFloat() || isLossy(next.format);
         } catch (const Error&) {
             return std::nullopt; // reported when the file is opened normally
         }
@@ -773,7 +773,8 @@ private:
             snap_.output.reset();
             snap_.plan.reset();
         }
-        const bool lossy = dec->readsFloat();
+        // ADPCM decodes to exact 16-bit samples, which still come from a lossy source.
+        const bool lossy = dec->readsFloat() || isLossy(*format_);
         std::optional<OutputPlan> plan;
         planAdjustment_.clear();
         try {

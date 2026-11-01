@@ -41,6 +41,7 @@
 
 #include "Server/Library/LibraryIdentity.h"
 #include "Server/Library/LibraryText.h"
+#include "Common/Version.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Engine/decode/FormatProbe.h"
@@ -203,6 +204,7 @@ Metadata metadata(const Path& path, int64_t fileSize) {
         break;
     case audio::AudioFormat::Wav:
     case audio::AudioFormat::Dts:
+    case audio::AudioFormat::Adpcm:
         file = std::make_unique<TagLib::RIFF::WAV::File>(&stream);
         break;
     case audio::AudioFormat::Aiff:
@@ -564,7 +566,8 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
 Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                     const std::map<int64_t, library::Fingerprint>& hashSizes, const std::set<std::string>& pendingIdentity,
                     const std::set<std::string>& knownHashes, const std::set<TrustedIdentity>& trusted, bool reread,
-                    const CancellationToken& token, const std::function<bool()>& playbackActive) {
+                    const std::set<std::string>& refused, const CancellationToken& token,
+                    const std::function<bool()>& playbackActive) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     auto restore = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
     // Entries settled by the listing need no file access, so the alias check runs before the first file is opened.
@@ -595,7 +598,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 if (!directoryValid()) break;
                 entry.version = fileVersion(child);
             }
-            if (reread || old == known.end() || old->second != entry.version) {
+            if (reread || old == known.end() || old->second != entry.version || refused.contains(fileKey)) {
                 if (!directoryValid()) break;
                 if (type == "audio") entry.metadata = metadata(child, entry.version.size);
                 // Fingerprinted now, while the start of the file the tags came from is still in the storage's cache: a
@@ -907,6 +910,18 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         if (files.integer(7)) pendingIdentity.insert(files.text(0));
         if (files.integer(8)) knownHashes.insert(files.text(0));
     }
+    // A newer CamelPlayer may read audio files an earlier one refused, such as ADPCM WAV files, so a complete scan
+    // reads them again once per version.
+    const auto refusedKey = "library_refused_read:" + std::to_string(root);
+    std::set<std::string> refused;
+    auto refusedVersion = reader.prepare("SELECT value FROM app_state WHERE key=?");
+    refusedVersion.bind(1, refusedKey);
+    if (!partial && (!refusedVersion.step() || refusedVersion.text(0) != CAMEL_VERSION_STRING)) {
+        auto rows = reader.prepare("SELECT path FROM files f WHERE root_id=? AND available=1 AND kind='audio' AND "
+                                   "NOT EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id)");
+        rows.bind(1, root);
+        while (rows.step()) refused.insert(rows.text(0));
+    }
     // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist.
     std::map<int64_t, library::Fingerprint> hashSizes;
     auto fingerprints =
@@ -1052,8 +1067,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
                 if (!work.fileWork) return list(work.path, token, network, listedIds);
-                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, token,
-                                   playbackActive);
+                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, refused,
+                                   token, playbackActive);
             }));
         }
         const auto ready = std::find_if(active.begin(), active.end(), [](auto& job) {
@@ -1128,6 +1143,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 if (!partial) {
                     db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
                     db.prepare("DELETE FROM app_state WHERE key=?").bind(1, rereadKey).run();
+                    db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+                        .bind(1, refusedKey)
+                        .bind(2, std::string(CAMEL_VERSION_STRING))
+                        .run();
                     db.prepare(
                           "UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
                         .bind(1, root)

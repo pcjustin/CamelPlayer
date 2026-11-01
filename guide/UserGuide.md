@@ -1,6 +1,6 @@
 # CamelPlayer user guide
 
-CamelPlayer plays FLAC, ALAC, WAV, AIFF, AAC, MP3 and DSD (DSF and DSDIFF) files on Windows, sending lossless music to your DAC bit-perfect. This guide covers installing it, getting around, choosing how it reaches your DAC, DSD playback and common problems. [繁體中文版](UserGuide.zh-TW.md)
+CamelPlayer plays FLAC, ALAC, WAV (including ADPCM and DTS-CD), AIFF, AAC, MP3 and DSD (DSF and DSDIFF) files on Windows, sending lossless music to your DAC bit-perfect. This guide covers installing it, getting around, choosing how it reaches your DAC, DSD playback and common problems. [繁體中文版](UserGuide.zh-TW.md)
 
 ## Installing
 

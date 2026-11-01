@@ -635,10 +635,11 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
     populating_ = was;
 }
 
-std::array<std::pair<ComboBox, AudioFormat>, 6> MainWindow::decoderCombos() {
+std::array<std::pair<ComboBox, AudioFormat>, 7> MainWindow::decoderCombos() {
     return {{{DecoderCombo(), AudioFormat::Flac},
              {AlacDecoderCombo(), AudioFormat::Alac},
              {WavDecoderCombo(), AudioFormat::Wav},
+             {AdpcmDecoderCombo(), AudioFormat::Adpcm},
              {AiffDecoderCombo(), AudioFormat::Aiff},
              {AacDecoderCombo(), AudioFormat::Aac},
              {Mp3DecoderCombo(), AudioFormat::Mp3}}};
@@ -1122,7 +1123,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             add(tr(L"SignalPath_Dither"), deviceDepth, PathState::Processed);
         else if (plan.reduce || plan.resample || plan.downmix)
             add(tr(L"SignalPath_Dither"), to_hstring(plan.reduce ? 16 : bits) + L"-bit", PathState::Processed);
-        else if (lossy)
+        else if (lossy && s.format != AudioFormat::Adpcm) // ADPCM decodes to integers, which reach the device unchanged
             add(tr(L"SignalPath_Dither"), to_hstring(bits) + L"-bit", PathState::Lossy);
         else if (container > bits)
             add(tr(L"SignalPath_Pad"), to_hstring(bits) + L"→" + to_hstring(container) + L"-bit", PathState::BitPerfect);

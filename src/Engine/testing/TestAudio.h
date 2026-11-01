@@ -49,6 +49,9 @@ void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& sa
 // ADTS (no trim metadata). Throws std::runtime_error.
 void writeAac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
               uint32_t channels, bool adts, int64_t bitRate = 256000);
+// Encodes 16-bit `samples` as IMA or Microsoft ADPCM in a WAVE file with FFmpeg's encoder. Throws std::runtime_error.
+void writeAdpcm(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t channels,
+                bool microsoft);
 
 // Copies `src` to `dst` with one byte flipped at `fraction` of the file (a damaged frame).
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction = 0.5);

@@ -269,6 +269,8 @@ void encodeWithFfmpeg(const std::filesystem::path& path, const char* muxer, AVCo
                     reinterpret_cast<float*>(frame->data[c])[i] = float(std::ldexp(double(s), -int(bits - 1)));
                 else if (sampleFormat == AV_SAMPLE_FMT_S16P)
                     reinterpret_cast<int16_t*>(frame->data[c])[i] = int16_t(s);
+                else if (sampleFormat == AV_SAMPLE_FMT_S16)
+                    reinterpret_cast<int16_t*>(frame->data[0])[i * channels + c] = int16_t(s);
                 else
                     reinterpret_cast<int32_t*>(frame->data[c])[i] = int32_t(uint32_t(s) << (32 - bits)); // left-aligned
             }
@@ -295,6 +297,12 @@ void writeAac(const std::filesystem::path& path, const std::vector<int32_t>& sam
               uint32_t channels, bool adts, int64_t bitRate) {
     encodeWithFfmpeg(path, adts ? "adts" : "ipod", AV_CODEC_ID_AAC, AV_SAMPLE_FMT_FLTP, bitRate, samples, sampleRate, bits,
                      channels);
+}
+
+void writeAdpcm(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t channels,
+                bool microsoft) {
+    encodeWithFfmpeg(path, "wav", microsoft ? AV_CODEC_ID_ADPCM_MS : AV_CODEC_ID_ADPCM_IMA_WAV,
+                     microsoft ? AV_SAMPLE_FMT_S16 : AV_SAMPLE_FMT_S16P, 0, samples, sampleRate, 16, channels);
 }
 
 void writeCorrupted(const std::filesystem::path& src, const std::filesystem::path& dst, double fraction) {

@@ -62,25 +62,36 @@ bool tagIs(const uint8_t* p, const char* tag) {
     return std::memcmp(p, tag, 4) == 0;
 }
 
+// Where the payload of a WAVE file's first `id` chunk starts; nullopt when it is missing or a chunk before it is damaged.
+std::optional<uint64_t> waveChunk(const File& f, const char* id) {
+    for (uint64_t pos = 12; f.size() - pos >= 8;) {
+        uint8_t chunk[8];
+        if (!f.readAt(pos, chunk, sizeof chunk)) return std::nullopt;
+        if (tagIs(chunk, id)) return pos + 8;
+        const uint64_t size = le32(chunk + 4);
+        if (size > f.size() - pos - 8) return std::nullopt;
+        pos += 8 + size + (size & 1);
+    }
+    return std::nullopt;
+}
+
+// Microsoft (0x0002) and IMA (0x0011) ADPCM, whose 4-bit codes decode to 16-bit samples.
+bool adpcmWave(const File& f) {
+    const auto fmt = waveChunk(f, "fmt ");
+    uint8_t tag[2];
+    if (!fmt || !f.readAt(*fmt, tag, sizeof tag)) return false;
+    const unsigned formatTag = tag[0] | (unsigned(tag[1]) << 8);
+    return formatTag == 0x0002 || formatTag == 0x0011;
+}
+
 // DTS-CD stores a DTS bitstream as 16-bit PCM, usually packed 14 bits to a word, which a PCM decoder plays as loud
 // noise. The data chunk then starts with a DTS sync word (14- or 16-bit, either byte order) repeating every frame;
 // three at one spacing rule out PCM that happens to contain the pattern.
 bool dtsInWave(const File& f) {
-    uint64_t data = 0;
-    for (uint64_t pos = 12; f.size() - pos >= 8;) {
-        uint8_t chunk[8];
-        if (!f.readAt(pos, chunk, sizeof chunk)) return false;
-        if (tagIs(chunk, "data")) {
-            data = pos + 8;
-            break;
-        }
-        const uint64_t size = le32(chunk + 4);
-        if (size > f.size() - pos - 8) return false;
-        pos += 8 + size + (size & 1);
-    }
+    const auto data = waveChunk(f, "data");
     if (!data) return false;
-    std::string window(size_t(std::min<uint64_t>(32768, f.size() - data)), '\0');
-    if (!f.readAt(data, window.data(), window.size())) return false;
+    std::string window(size_t(std::min<uint64_t>(32768, f.size() - *data)), '\0');
+    if (!f.readAt(*data, window.data(), window.size())) return false;
     static constexpr std::string_view kSyncs[] = {
         {"\xFF\x1F\x00\xE8", 4}, {"\x1F\xFF\xE8\x00", 4}, {"\xFE\x7F\x01\x80", 4}, {"\x7F\xFE\x80\x01", 4}};
     const auto nextWord = [&](std::string_view sync, size_t from) {
@@ -224,7 +235,7 @@ std::optional<AudioFormat> builtinFormat(const std::filesystem::path& path) {
     if (!f.readAt(0, h, sizeof h)) unsupported("file is too short to identify");
     if (tagIs(h + 4, "ftyp")) return mp4Format(f);
     if (tagIs(h, "RIFF") || tagIs(h, "RF64")) {
-        if (tagIs(h + 8, "WAVE")) return dtsInWave(f) ? AudioFormat::Dts : AudioFormat::Wav;
+        if (tagIs(h + 8, "WAVE")) return adpcmWave(f) ? AudioFormat::Adpcm : dtsInWave(f) ? AudioFormat::Dts : AudioFormat::Wav;
         unsupported("RIFF file is not WAVE");
     }
     if (tagIs(h, "FORM")) {
