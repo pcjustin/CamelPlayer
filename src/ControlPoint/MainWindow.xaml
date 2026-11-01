@@ -349,6 +349,13 @@
                                 <TextBlock x:Name="LoudnessProgressText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock x:Uid="Settings_ReplayGainNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
+                                <TextBlock x:Uid="Settings_Crossfade" Style="{StaticResource GroupHeaderStyle}" />
+                                <ToggleSwitch x:Name="CrossfadeSwitch" x:Uid="Settings_CrossfadeSwitch" Toggled="OnCrossfadeToggled" />
+                                <NumberBox x:Name="CrossfadeSecondsBox" x:Uid="Settings_CrossfadeSeconds" Width="170" HorizontalAlignment="Left"
+                                           Minimum="1" Maximum="10" SmallChange="0.5" LargeChange="1" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnCrossfadeSecondsChanged" />
+                                <TextBlock x:Uid="Settings_CrossfadeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
                                 <TextBlock x:Uid="Settings_DspOrder" Style="{StaticResource GroupHeaderStyle}" />
                                 <StackPanel x:Name="DspOrderList" Spacing="4" />
                                 <Button x:Name="DspRestoreOrderButton" x:Uid="Settings_DspRestoreOrder" Click="OnDspRestoreOrderClick" />

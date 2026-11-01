@@ -510,6 +510,7 @@ void MainWindow::populateSettings() {
     showDsp();
     showVolume();
     showReplayGain();
+    showCrossfade();
     applyHotkeys();
 
     fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
@@ -657,6 +658,10 @@ void MainWindow::readSettingsFromUi() {
     rg.noValuePreampDb = preamp(ReplayGainNoValueBox().Value(), rg.noValuePreampDb);
     rg.preventClipping = ReplayGainClipSwitch().IsOn();
     rg.speed = LoudnessSpeedCombo().SelectedIndex() == 1 ? camel::AnalysisSpeed::Fast : camel::AnalysisSpeed::Throttled;
+    settings_.crossfade.enabled = CrossfadeSwitch().IsOn();
+    if (const double seconds = CrossfadeSecondsBox().Value(); !std::isnan(seconds))
+        settings_.crossfade.seconds =
+            std::clamp(std::round(seconds * 2) / 2, camel::CrossfadeSettings::kMinSeconds, camel::CrossfadeSettings::kMaxSeconds);
 
     const int dev = idx(WasapiDeviceCombo());
     if (shownDevicesRevision_ != 0)
@@ -1023,6 +1028,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             swprintf_s(db, L" %.1f dB", plan.volumeDb);
             chain = chain + L" → " + tr(L"SignalPath_Volume") + db;
         }
+        // Only track changes are mixed; between them the path is as shown.
+        if (plan.crossfadeSeconds > 0.0) {
+            swprintf_s(db, L" %.1f s", plan.crossfadeSeconds);
+            chain = chain + L" → " + tr(L"SignalPath_Crossfade") + db;
+        }
         const bool processed = !plan.dsp.empty() || plan.gainDb != 0.0 || plan.volumeDb != 0.0 || plan.muted;
         if (plan.dsd != DsdPath::Pcm) path = path + chain;
         if (plan.dsd == DsdPath::Dop)
@@ -1063,8 +1073,17 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         SignalPathText().Text(L"");
     }
     DspButtonText().Foreground(themeBrush(dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush"));
-    // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch.
-    SignalNoteText().Text(BypassBadge().Visibility() == Visibility::Visible ? tr(L"Badge_DspBypassedTip") : hstring{});
+    // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch, with why the change into
+    // the track did not crossfade.
+    std::wstring note = BypassBadge().Visibility() == Visibility::Visible ? std::wstring(tr(L"Badge_DspBypassedTip")) : L"";
+    if (const auto skip = s.plan ? s.plan->fadeSkip : camel::audio::FadeSkip::None; skip != camel::audio::FadeSkip::None) {
+        const hstring reason = tr(skip == camel::audio::FadeSkip::RawDsd   ? L"Crossfade_SkipRawDsd"
+                                  : skip == camel::audio::FadeSkip::Format ? L"Crossfade_SkipFormat"
+                                                                           : L"Crossfade_SkipNoPreload");
+        // A sentence after a full-width full stop needs no space.
+        note += (note.empty() || note.ends_with(L'。') ? L"" : L" ") + std::wstring(reason);
+    }
+    SignalNoteText().Text(note);
 
     // Errors: open the bar once per new problem so a dismissed bar stays closed
     if (s.revision != shownRevision_) {
@@ -2964,6 +2983,25 @@ void MainWindow::OnReplayGainToggled(Windows::Foundation::IInspectable const&, R
     settingsChanged();
 }
 
+void MainWindow::showCrossfade() {
+    const bool wasPopulating = std::exchange(populating_, true);
+    CrossfadeSwitch().IsOn(settings_.crossfade.enabled);
+    CrossfadeSecondsBox().Value(settings_.crossfade.seconds);
+    populating_ = wasPopulating;
+}
+
+void MainWindow::OnCrossfadeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (populating_) return;
+    settingsChanged();
+}
+
+void MainWindow::OnCrossfadeSecondsChanged(NumberBox const&, NumberBoxValueChangedEventArgs const&) {
+    if (populating_) return;
+    settingsChanged();
+    // A typed length shows as the half second it is kept at.
+    showCrossfade();
+}
+
 // The DSP card (docs/Plan.md §5.9): every node from settings_, the order rows and the chain's headroom.
 void MainWindow::showDsp() {
     const bool wasPopulating = std::exchange(populating_, true);
@@ -3202,7 +3240,16 @@ void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Wind
         });
         replayGain.Items().Append(item);
     }
+    ToggleMenuFlyoutItem crossfade;
+    crossfade.Text(tr(L"Settings_Crossfade/Text"));
+    crossfade.IsChecked(settings_.crossfade.enabled);
+    crossfade.Click([this](auto&&, auto&&) {
+        settings_.crossfade.enabled = !settings_.crossfade.enabled;
+        showCrossfade();
+        settingsChanged();
+    });
     items.Append(MenuFlyoutSeparator());
+    items.Append(crossfade);
     items.Append(replayGain);
     if (!settings_.eq.presets.empty()) {
         MenuFlyoutSubItem presets;

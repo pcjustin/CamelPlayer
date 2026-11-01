@@ -21,6 +21,10 @@ enum class PipelineState : uint8_t { BitPerfect, LosslessConversion, Processed, 
 // (docs/Plan.md §5.8).
 enum class DsdPath : uint8_t { None, Native, Dop, Pcm };
 
+// Why the change into a track did not crossfade while crossfade is on (docs/Plan.md §5.4): raw DSD on either side, a
+// format the open stream could not take, or no next track ready in time.
+enum class FadeSkip : uint8_t { None, RawDsd, Format, NoPreload };
+
 struct OutputPlan {
     DeviceFormat format;
     bool duplicate = false; // mono to both channels
@@ -34,6 +38,8 @@ struct OutputPlan {
     double gainDb = 0.0;      // the track's ReplayGain
     double volumeDb = 0.0;    // the software volume
     bool muted = false;
+    double crossfadeSeconds = 0.0; // the crossfade at track changes; 0 while off or for raw DSD
+    FadeSkip fadeSkip = FadeSkip::None;
     PipelineState state = PipelineState::BitPerfect;
     bool operator==(const OutputPlan&) const = default;
 };

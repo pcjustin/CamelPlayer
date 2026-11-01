@@ -90,6 +90,20 @@ ImpulseProblem problemOf(const std::filesystem::path& file, uint32_t rate) {
 
 } // namespace
 
+TEST(DspSettings, CrossfadeRoundTripsInHalfSecondsAndFallsBack) {
+    const Settings defaults;
+    EXPECT_FALSE(defaults.crossfade.enabled);
+    EXPECT_EQ(defaults.crossfade.seconds, 3.0);
+
+    Settings settings;
+    settings.crossfade = {true, 7.5};
+    EXPECT_EQ(fromJson(toJson(settings)).crossfade, settings.crossfade);
+    EXPECT_EQ(fromJson(R"({"crossfade":{"enabled":true,"seconds":2.2}})").crossfade, (CrossfadeSettings{true, 2.0}));
+    EXPECT_EQ(fromJson(R"({"crossfade":{"enabled":true,"seconds":30}})").crossfade.seconds, 3.0);
+    EXPECT_EQ(fromJson(R"({"crossfade":{"seconds":0.5}})").crossfade, CrossfadeSettings{});
+    EXPECT_EQ(resetPlayback(settings).crossfade, CrossfadeSettings{});
+}
+
 TEST(DspSettings, CrossfeedConvolutionAndOrderRoundTripAndFallBack) {
     const Settings defaults;
     EXPECT_FALSE(defaults.crossfeed.enabled);

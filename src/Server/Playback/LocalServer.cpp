@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <future>
@@ -765,12 +766,15 @@ private:
                 if (c.settings) {
                     const auto lastFile = settings_.lastFile;
                     const auto replayGain = settings_.replayGain;
+                    const auto crossfade = settings_.crossfade;
                     settings_ = nativeSettings(*c.settings);
                     settings_.lastFile = lastFile;
                     engine_->applySettings(settings_);
                     shareLoudnessInputs();
-                    // A queued track took the old gain; it is queued again with the new one. The playing one keeps its.
-                    if (settings_.replayGain != replayGain && !chain_.empty() && engine_->clearNext()) {
+                    // A queued track took the old gain and crossfade; it is queued again with the new ones. The playing
+                    // one keeps its.
+                    if ((settings_.replayGain != replayGain || settings_.crossfade != crossfade) && !chain_.empty() &&
+                        engine_->clearNext()) {
                         chain_.pop_back();
                         attempted_ = {};
                         checked_ = {};
@@ -994,7 +998,9 @@ private:
     }
 
     // Ends of the previous entry that are still pending belong to playback this call supersedes.
-    void startEntry(const QueuePosition& position, bool play) {
+    // `afterEnd`: the previous entry ended naturally. Changing to another entry otherwise is manual and crossfades while
+    // crossfade is on (docs/Plan.md §5.4); restarting the same entry does not.
+    void startEntry(const QueuePosition& position, bool play, bool afterEnd = false) {
         if (policy_.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
         restored_.reset();
         engine_->waitIdle();
@@ -1004,11 +1010,14 @@ private:
         chain_.clear();
         const auto& source = playable(position.entryId);
         const std::filesystem::path path(toWide(source.pathUtf8()));
+        const bool manualChange = !afterEnd && state_.queueEntryId && state_.queueEntryId != position.entryId;
         state_.track = source;
         state_.queueEntryId = position.entryId;
         settings_.lastFile = path.wstring();
-        if (play)
-            engine_->openAndPlay(path, source.decoder(), gainFor(position.entryId));
+        if (play && manualChange && settings_.crossfade.enabled)
+            engine_->crossfadeTo(path, source.decoder(), gainFor(position.entryId));
+        else if (play)
+            engine_->openAndPlay(path, source.decoder(), gainFor(position.entryId), afterEnd);
         else
             engine_->load(path, source.decoder(), gainFor(position.entryId));
         engine_->waitIdle(); // the next snapshot pairs this entry with its own playback state
@@ -1137,8 +1146,22 @@ private:
         attempted_ = attempt;
         const auto& source = playable(upcoming->entryId);
         if (source.decoder() != state_.track->decoder()) return;
-        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder(), gainFor(upcoming->entryId)))
+        const auto from = chain_.empty() ? state_.queueEntryId : chain_.back();
+        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder(), gainFor(upcoming->entryId),
+                               crossfadeMs(from, upcoming->entryId)))
             chain_.push_back(upcoming->entryId);
+    }
+
+    // The crossfade from one entry into the next (docs/Plan.md §5.4): none while an album plays in order, the next
+    // entry from the same album with shuffle off.
+    uint32_t crossfadeMs(uint64_t from, uint64_t to) const {
+        if (!settings_.crossfade.enabled) return 0;
+        const auto album = [this](uint64_t id) {
+            const auto at = std::ranges::find(entries_, id, &QueueEntry::id);
+            return at == entries_.end() ? int64_t{0} : at->albumId;
+        };
+        if (!policy_.shuffle() && album(from) != 0 && album(from) == album(to)) return 0;
+        return uint32_t(std::lround(settings_.crossfade.seconds * 1000.0));
     }
 
     // The ReplayGain of a queue entry from its library values (docs/Plan.md §5.9). Auto takes the album's while the
@@ -1188,9 +1211,9 @@ private:
             queueChanged_ = true;
         }
         if (const auto next = policy_.next(true))
-            startEntry(*next, true);
+            startEntry(*next, true, true);
         else if (const auto picked = autoplayAllowed() && appendAutoplay() ? policy_.next(true) : std::nullopt)
-            startEntry(*picked, true);
+            startEntry(*picked, true, true);
     }
 
     // Autoplay (docs/Plan.md §8.1): once the last entry plays, a random library track follows it, so it preloads

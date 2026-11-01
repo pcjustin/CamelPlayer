@@ -231,6 +231,14 @@ struct ReplayGainSettings {
     bool operator==(const ReplayGainSettings&) const = default;
 };
 
+// Crossfade (docs/Plan.md §5.4), off by default; an album played in order stays gapless.
+struct CrossfadeSettings {
+    static constexpr double kMinSeconds = 1.0, kMaxSeconds = 10.0;
+    bool enabled = false;
+    double seconds = 3.0; // in 0.5 s steps
+    bool operator==(const CrossfadeSettings&) const = default;
+};
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -263,6 +271,7 @@ struct Settings {
     audio::DspOrder dspOrder = audio::kDefaultDspOrder;
     VolumeSettings volume;
     ReplayGainSettings replayGain;
+    CrossfadeSettings crossfade;
     std::wstring lastFile;
 };
 

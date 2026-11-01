@@ -71,6 +71,7 @@ struct SettingsDto {
     audio::DspOrder dspOrder = audio::kDefaultDspOrder;
     VolumeSettings volume;
     ReplayGainSettings replayGain;
+    CrossfadeSettings crossfade;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };

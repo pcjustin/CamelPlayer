@@ -99,6 +99,27 @@ pub unsafe extern "C" fn camel_engine_clear_next_v1(
 }
 
 /// # Safety
+/// All pointers must reference valid V1 structures. Decoder callbacks must remain valid until the source is replaced or the Engine is destroyed.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
+    engine: *mut camel_audio_engine::CamelEngine,
+    command: *const camel_audio_engine::CamelCommandStampV1,
+    source: *const camel_audio_engine::CamelTrackSourceV1,
+    decoder_kind: u32,
+    decoder_host: *const camel_audio_engine::CamelDecoderHostV1,
+) -> i32 {
+    unsafe {
+        camel_audio_engine::camel_engine_crossfade_to_v1(
+            engine,
+            command,
+            source,
+            decoder_kind,
+            decoder_host,
+        )
+    }
+}
+
+/// # Safety
 /// `engine` must be live and both output pointers writable.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_transitions_v1(

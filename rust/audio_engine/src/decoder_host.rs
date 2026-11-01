@@ -120,6 +120,10 @@ pub(crate) struct DecoderSource {
     pub(crate) converter: Option<crate::convert::Converter>,
     /// The track's ReplayGain as a factor, 1 for none.
     pub(crate) gain: f64,
+    /// The crossfade into this track in milliseconds; 0 follows gaplessly.
+    pub(crate) crossfade_ms: u32,
+    /// The track may be converted to the open device format without the conversion setting.
+    pub(crate) convert: bool,
 }
 
 pub(crate) fn is_decoder_kind(decoder_kind: u32) -> bool {
@@ -150,6 +154,8 @@ impl DecoderSource {
             || source.has_end_frame > 1
             || source.reserved != 0
             || !source.gain_db.is_finite()
+            || source.crossfade_ms > crate::MAX_CROSSFADE_MS
+            || source.flags & !crate::TRACK_CONVERT != 0
         {
             return Err(crate::ENGINE_E_INVALID_ARGUMENT);
         }
@@ -258,6 +264,8 @@ impl DecoderSource {
             full_coverage_possible,
             converter: None,
             gain: 10f64.powf(source.gain_db / 20.0),
+            crossfade_ms: source.crossfade_ms,
+            convert: source.flags & crate::TRACK_CONVERT != 0,
         })
     }
 
@@ -376,6 +384,14 @@ impl DecoderSource {
 
     pub(crate) fn start_frame(&self) -> u64 {
         self.start_frame
+    }
+
+    /// Frames left to read before the track's end, or 0 when its length is unknown.
+    pub(crate) fn remaining_frames(&self) -> u64 {
+        match self.end_frame {
+            Some(end) => end.saturating_sub(self.position),
+            None => self.info.total_frames.saturating_sub(self.position),
+        }
     }
 
     pub(crate) fn integrity_status(&self) -> u32 {

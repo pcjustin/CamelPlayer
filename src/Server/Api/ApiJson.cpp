@@ -123,6 +123,8 @@ constexpr Names<Md5State, 4> kMd5States = {{Md5State::Unavailable, "unavailable"
                                            {Md5State::Failed, "failed"}};
 constexpr Names<DsdPath, 4> kDsdPaths = {
     {DsdPath::None, "none"}, {DsdPath::Native, "native"}, {DsdPath::Dop, "dop"}, {DsdPath::Pcm, "pcm"}};
+constexpr Names<FadeSkip, 4> kFadeSkips = {
+    {FadeSkip::None, "none"}, {FadeSkip::RawDsd, "rawDsd"}, {FadeSkip::Format, "format"}, {FadeSkip::NoPreload, "noPreload"}};
 constexpr Names<DspNode, 3> kDspNodes = {
     {DspNode::Eq, "eq"}, {DspNode::Crossfeed, "crossfeed"}, {DspNode::Convolution, "convolution"}};
 
@@ -241,6 +243,8 @@ json toJson(const OutputPlan& p) {
             {"gainDb", p.gainDb},
             {"volumeDb", p.volumeDb},
             {"muted", p.muted},
+            {"crossfadeSeconds", p.crossfadeSeconds},
+            {"fadeSkip", nameOf(p.fadeSkip, kFadeSkips)},
             {"state", nameOf(p.state, kPipelineStates)}};
 }
 
@@ -258,6 +262,8 @@ OutputPlan planFrom(const json& j) {
     p.gainDb = value<double>(j, "gainDb");
     p.volumeDb = value<double>(j, "volumeDb");
     p.muted = value<bool>(j, "muted");
+    p.crossfadeSeconds = value<double>(j, "crossfadeSeconds");
+    p.fadeSkip = enumFrom(field(j, "fadeSkip"), kFadeSkips, "crossfade skip");
     p.state = enumFrom(field(j, "state"), kPipelineStates, "pipeline state");
     return p;
 }

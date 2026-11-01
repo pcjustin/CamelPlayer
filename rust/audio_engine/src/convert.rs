@@ -356,13 +356,67 @@ impl Converter {
                     .expect("DSD to PCM has a decimator")
                     .process(input, frames, &mut decimated);
                 let mixed = self.mix_floats(&decimated);
-                self.resample_and_emit(mixed, dsp)
+                let mut resampled = self.resample(mixed)?;
+                self.emit(&mut resampled, dsp)
             }
             Mode::Process => {
                 let mixed = self.mix(input, frames);
-                self.resample_and_emit(mixed, dsp)
+                let mut resampled = self.resample(mixed)?;
+                self.emit(&mut resampled, dsp)
             }
         }
+    }
+
+    /// Whether the track can be mixed into a crossfade: every PCM path can, raw DSD cannot.
+    pub(crate) fn mixes(&self) -> bool {
+        !matches!(self.mode, Mode::Dsd | Mode::Dop)
+    }
+
+    /// Converts `frames` decoded frames as `convert` does, but returns them as device-rate float frames with the
+    /// track's gain, before the DSP chain, for a crossfade to mix.
+    pub(crate) fn floats(&mut self, samples: &[i32], frames: usize) -> Result<Vec<f64>, i32> {
+        let input = &samples[..frames * self.in_channels];
+        let mut floats = match self.mode {
+            Mode::Bypass | Mode::Duplicate | Mode::Widen => self.to_device_channels(input),
+            Mode::Process => {
+                let mixed = self.mix(input, frames);
+                self.resample(mixed)?
+            }
+            Mode::DsdPcm => {
+                let mut decimated = Vec::new();
+                self.decimator
+                    .as_mut()
+                    .expect("DSD to PCM has a decimator")
+                    .process(input, frames, &mut decimated);
+                let mixed = self.mix_floats(&decimated);
+                self.resample(mixed)?
+            }
+            Mode::Dsd | Mode::Dop => return Err(ENGINE_E_UNSUPPORTED_FORMAT),
+        };
+        self.apply_gain(&mut floats);
+        Ok(floats)
+    }
+
+    /// Ends the source like `finish`, returning the resampler's tail as `floats` does.
+    pub(crate) fn finish_floats(&mut self) -> Result<Vec<f64>, i32> {
+        let mut tail = Vec::new();
+        if self.finished {
+            return Ok(tail);
+        }
+        self.finished = true;
+        if let Some(resampler) = self.resampler.as_mut() {
+            resampler
+                .process(&[], &mut tail)
+                .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
+        }
+        self.apply_gain(&mut tail);
+        Ok(tail)
+    }
+
+    /// Appends mixed float frames, which carry each track's gain already, through the DSP chain to the pending output,
+    /// quantized as processed.
+    pub(crate) fn emit_mixed(&mut self, floats: &mut [f64], dsp: &mut Dsp) -> Result<(), i32> {
+        self.quantize(floats, dsp, true)
     }
 
     /// The converter with the track's ReplayGain as a factor.
@@ -402,16 +456,16 @@ impl Converter {
         self.emit(&mut silence, dsp)
     }
 
-    fn resample_and_emit(&mut self, mut mixed: Vec<f64>, dsp: &mut Dsp) -> Result<(), i32> {
+    fn resample(&mut self, mixed: Vec<f64>) -> Result<Vec<f64>, i32> {
         match self.resampler.as_mut() {
             Some(resampler) => {
                 let mut resampled = Vec::new();
                 resampler
                     .process(&mixed, &mut resampled)
                     .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-                self.emit(&mut resampled, dsp)
+                Ok(resampled)
             }
-            None => self.emit(&mut mixed, dsp),
+            None => Ok(mixed),
         }
     }
 
@@ -476,11 +530,19 @@ impl Converter {
     // integers at `quantize_bits`, or at the device depth while the chain acts.
     fn emit(&mut self, floats: &mut [f64], dsp: &mut Dsp) -> Result<(), i32> {
         let processed = self.processes(dsp);
+        self.apply_gain(floats);
+        self.quantize(floats, dsp, processed)
+    }
+
+    fn apply_gain(&self, floats: &mut [f64]) {
         if self.gain != 1.0 {
             for v in floats.iter_mut() {
                 *v *= self.gain;
             }
         }
+    }
+
+    fn quantize(&mut self, floats: &mut [f64], dsp: &mut Dsp, processed: bool) -> Result<(), i32> {
         if dsp.active() {
             dsp.process(floats);
         }

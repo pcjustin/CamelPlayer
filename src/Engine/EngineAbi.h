@@ -81,6 +81,10 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_FLAC_INTEGRITY_VERIFIED 2u
 #define CAMEL_FLAC_INTEGRITY_FAILED 3u
 
+// CamelTrackSourceV1.flags: the track may be converted to the open device format, DSD to PCM included, which a
+// crossfade permits.
+#define CAMEL_TRACK_CONVERT 1u
+
 #define CAMEL_RESAMPLE_QUICK 0u
 #define CAMEL_RESAMPLE_HIGH 1u
 #define CAMEL_RESAMPLE_VERY_HIGH 2u
@@ -132,7 +136,9 @@ typedef struct CamelTrackSourceV1 {
     uint64_t end_frame_exclusive;
     uint32_t has_end_frame;
     uint32_t reserved;
-    double gain_db; // the track's ReplayGain, applied before the DSP chain; 0 leaves it bit-perfect
+    double gain_db;        // the track's ReplayGain, applied before the DSP chain; 0 leaves it bit-perfect
+    uint32_t crossfade_ms; // the crossfade into this track, up to 10,000; 0 follows the previous one gaplessly
+    uint32_t flags;        // CAMEL_TRACK_CONVERT or 0
 } CamelTrackSourceV1;
 
 typedef struct CamelSourceInfoV1 {
@@ -304,6 +310,13 @@ CamelEngineStatus camel_engine_queue_next_flac_v1(CamelEngine* engine, const Cam
                                                   const CamelDecoderHostV1* decoder_host);
 // Discards the queued track; CAMEL_ENGINE_E_INVALID_STATE once decoding has already moved on to it.
 CamelEngineStatus camel_engine_clear_next_v1(CamelEngine* engine, const CamelCommandStampV1* command);
+// A manual change while playing: crossfades from where playback is into `source` over its crossfade_ms (nonzero),
+// discarding the rest of the playing track and any queued one; the new track becomes current at the fade.
+// CAMEL_ENGINE_E_INVALID_STATE when nothing plays that it can be mixed with, a boundary is still on its way to the
+// device or a crossfade plays; the caller loads the track instead.
+CamelEngineStatus camel_engine_crossfade_to_v1(CamelEngine* engine, const CamelCommandStampV1* command,
+                                               const CamelTrackSourceV1* source, uint32_t decoder_kind,
+                                               const CamelDecoderHostV1* decoder_host);
 // Queued tracks that became audible, the current track position, and whether a queued track still waits in the
 // slot (one more may be queued only when it does not). Safe on the output callback thread.
 CamelEngineStatus camel_engine_get_transitions_v1(CamelEngine* engine, uint64_t* transitions, uint64_t* track_position,

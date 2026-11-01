@@ -105,6 +105,9 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnReplayGainValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
                                   Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
     void OnReplayGainToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnCrossfadeToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnCrossfadeSecondsChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
+                                   Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
     void OnDspRestoreOrderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCrossfeedToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCrossfeedPresetChanged(Windows::Foundation::IInspectable const&,
@@ -142,6 +145,7 @@ private:
     void showDsp();
     void showVolume();
     void showReplayGain();
+    void showCrossfade();
     void showLoudnessProgress();
     void showDspOrder();
     void showDspSummary();

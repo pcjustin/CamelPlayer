@@ -615,4 +615,13 @@
   <data name="SignalPath_Muted" xml:space="preserve"><value>靜音</value></data>
   <data name="Dsp_OffLevelled" xml:space="preserve"><value>等化器、crossfeed 與卷積都已關閉；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
   <data name="Dsp_FlatLevelled" xml:space="preserve"><value>目前鏈上沒有任何處理改變訊號；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
+  <data name="Settings_Crossfade.Text" xml:space="preserve"><value>交叉淡化</value></data>
+  <data name="Settings_CrossfadeSwitch.OnContent" xml:space="preserve"><value>換曲時讓前後兩首重疊</value></data>
+  <data name="Settings_CrossfadeSwitch.OffContent" xml:space="preserve"><value>換曲時讓前後兩首重疊</value></data>
+  <data name="Settings_CrossfadeSeconds.Header" xml:space="preserve"><value>長度（秒）</value></data>
+  <data name="Settings_CrossfadeNote.Text" xml:space="preserve"><value>不論是自然播到下一首還是手動選曲，每次換曲都會重疊；依序播放的專輯維持無縫。暫停、停止、拖動進度和重播本曲立即生效。格式不同的曲目會整首轉成目前的格式，下次開始播放時裝置才回到各檔案本身的格式。原生 DSD 不交叉淡化。</value></data>
+  <data name="SignalPath_Crossfade" xml:space="preserve"><value>交叉淡化</value></data>
+  <data name="Crossfade_SkipRawDsd" xml:space="preserve"><value>原生 DSD 不交叉淡化。</value></data>
+  <data name="Crossfade_SkipFormat" xml:space="preserve"><value>這首沒有交叉淡化：前一首的串流無法接受它的格式。</value></data>
+  <data name="Crossfade_SkipNoPreload" xml:space="preserve"><value>這首沒有交叉淡化：它沒有及時準備好。</value></data>
 </root>

@@ -73,6 +73,8 @@ Snapshot fullSnapshot() {
     plan.gainDb = -6.5;
     plan.volumeDb = -20.0;
     plan.muted = true;
+    plan.crossfadeSeconds = 3.5;
+    plan.fadeSkip = FadeSkip::Format;
     plan.state = PipelineState::LossySource;
     p.plan = plan;
     p.md5 = Md5State::Verified;

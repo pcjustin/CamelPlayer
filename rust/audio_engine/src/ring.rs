@@ -34,6 +34,10 @@ impl SpscByteRing {
             .min(self.buffer.len())
     }
 
+    pub(crate) fn capacity(&self) -> usize {
+        self.buffer.len()
+    }
+
     pub(crate) fn writable(&self) -> usize {
         self.buffer.len().saturating_sub(self.readable())
     }

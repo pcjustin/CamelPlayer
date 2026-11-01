@@ -303,6 +303,7 @@ std::string toJson(const Settings& s) {
                        {"noValuePreamp", s.replayGain.noValuePreampDb},
                        {"preventClipping", s.replayGain.preventClipping},
                        {"analysis", s.replayGain.speed == AnalysisSpeed::Fast ? "fast" : "throttled"}};
+    j["crossfade"] = {{"enabled", s.crossfade.enabled}, {"seconds", s.crossfade.seconds}};
     j["dspOrder"] = json::array();
     for (const auto node : s.dspOrder) j["dspOrder"].push_back(kDspNodeIds[int(node) - 1]);
     j["lastFile"] = toUtf8(s.lastFile);
@@ -453,14 +454,14 @@ Settings fromJson(const std::string& text) {
         s.convolution.enabled = boolean(j["convolution"], "enabled", false);
         s.convolution.file = str(j["convolution"], "file", "");
     }
-    const auto decibels = [](const json& o, const char* k, double def, double low, double high) {
+    const auto bounded = [](const json& o, const char* k, double def, double low, double high) {
         return o.contains(k) && o[k].is_number() && o[k].get<double>() >= low && o[k].get<double>() <= high ? o[k].get<double>()
                                                                                                             : def;
     };
     if (j.contains("volume") && j["volume"].is_object()) {
         const json& v = j["volume"];
         s.volume.mode = str(v, "mode", "fixed") == "software" ? VolumeMode::Software : VolumeMode::Fixed;
-        s.volume.db = decibels(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
+        s.volume.db = bounded(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
         s.volume.muted = boolean(v, "muted", false);
     }
     if (j.contains("replayGain") && j["replayGain"].is_object()) {
@@ -468,11 +469,17 @@ Settings fromJson(const std::string& text) {
         const auto mode = std::ranges::find(kReplayGainModeIds, str(r, "mode", "off"));
         s.replayGain.mode =
             mode == std::end(kReplayGainModeIds) ? ReplayGainMode::Off : ReplayGainMode(mode - std::begin(kReplayGainModeIds));
-        s.replayGain.preampDb = decibels(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+        s.replayGain.preampDb = bounded(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
         s.replayGain.noValuePreampDb =
-            decibels(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+            bounded(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
         s.replayGain.preventClipping = boolean(r, "preventClipping", true);
         s.replayGain.speed = str(r, "analysis", "throttled") == "fast" ? AnalysisSpeed::Fast : AnalysisSpeed::Throttled;
+    }
+    if (j.contains("crossfade") && j["crossfade"].is_object()) {
+        const json& c = j["crossfade"];
+        s.crossfade.enabled = boolean(c, "enabled", false);
+        const double seconds = bounded(c, "seconds", 3.0, CrossfadeSettings::kMinSeconds, CrossfadeSettings::kMaxSeconds);
+        s.crossfade.seconds = std::round(seconds * 2.0) / 2.0;
     }
     if (j.contains("dspOrder") && j["dspOrder"].is_array() && j["dspOrder"].size() == 3) {
         audio::DspOrder order{};

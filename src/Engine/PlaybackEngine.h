@@ -61,7 +61,12 @@ public:
 
     // `decoder` overrides the per-format setting for this file; it must support the file's format. `gainDb` is its
     // ReplayGain, which the Server works out.
-    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
+    // `afterEnd`: the previous file ended naturally, so the path explains a crossfade that could not happen.
+    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0,
+                     bool afterEnd = false);
+    // A manual change (docs/Plan.md §5.4): crossfades from where a PCM stream plays into `file`, which becomes the
+    // current file at once and starts counting at its fade; otherwise opens it like openAndPlay.
+    void crossfadeTo(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
     // Selects a file without playing it (startup restore, docs/Plan.md §2); play() starts it.
     void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
     void play();
@@ -74,8 +79,10 @@ public:
     // ASIO only: opens the driver's control panel. Blocks until the driver returns.
     bool showControlPanel();
     // Gapless: queues the file that follows the current one. True when it will play without reopening the device,
-    // which needs the Rust Engine and the same negotiated output format.
-    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0);
+    // which needs the Rust Engine and the same negotiated output format; with crossfade on, another format is converted
+    // to it. `crossfadeMs` is the fade into the file, 0 to follow gaplessly.
+    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder = std::nullopt, double gainDb = 0.0,
+                   uint32_t crossfadeMs = 0);
     // Withdraws the queued file; false when it is already committed and becomes current at its boundary.
     bool clearNext();
     // Also withdraws already decoded successors, preserving the audible track and position.

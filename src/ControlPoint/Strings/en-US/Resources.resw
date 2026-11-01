@@ -615,4 +615,13 @@
   <data name="SignalPath_Muted" xml:space="preserve"><value>muted</value></data>
   <data name="Dsp_OffLevelled" xml:space="preserve"><value>EQ, crossfeed and convolution are off; the software volume or ReplayGain can still change the level.</value></data>
   <data name="Dsp_FlatLevelled" xml:space="preserve"><value>Nothing in the chain changes the signal now; the software volume or ReplayGain can still change the level.</value></data>
+  <data name="Settings_Crossfade.Text" xml:space="preserve"><value>Crossfade</value></data>
+  <data name="Settings_CrossfadeSwitch.OnContent" xml:space="preserve"><value>Overlap tracks as they change</value></data>
+  <data name="Settings_CrossfadeSwitch.OffContent" xml:space="preserve"><value>Overlap tracks as they change</value></data>
+  <data name="Settings_CrossfadeSeconds.Header" xml:space="preserve"><value>Length (seconds)</value></data>
+  <data name="Settings_CrossfadeNote.Text" xml:space="preserve"><value>Every change of track overlaps, whether the next one follows by itself or you pick another; an album played in order stays gapless. Pause, stop, seeking and restarting a track act at once. A track in another format is converted to the current one for all of its length, and the device takes each file's own format again when playback next starts. Raw DSD never crossfades.</value></data>
+  <data name="SignalPath_Crossfade" xml:space="preserve"><value>crossfade</value></data>
+  <data name="Crossfade_SkipRawDsd" xml:space="preserve"><value>Raw DSD does not crossfade.</value></data>
+  <data name="Crossfade_SkipFormat" xml:space="preserve"><value>This track did not crossfade: the stream before it could not take its format.</value></data>
+  <data name="Crossfade_SkipNoPreload" xml:space="preserve"><value>This track did not crossfade: it was not ready in time.</value></data>
 </root>

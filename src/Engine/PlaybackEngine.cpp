@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -210,13 +211,37 @@ public:
     bool writesSilence() const noexcept override { return rawDsd_.load(std::memory_order_acquire); }
 
     // ---- commands (control thread) ----
-    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
+    void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb, bool afterEnd) {
         resumeOnDefault_ = false;
         waitingForSource_ = false;
         file_ = file.wstring();
         fileDecoder_ = decoder;
         gainDb_ = gainDb;
+        fadeSkip_ = !afterEnd || !settings_.crossfade.enabled ? FadeSkip::None
+                    : refusedFile_ == file_                   ? refusedSkip_
+                                                              : FadeSkip::NoPreload;
+        refusedFile_.clear();
         startSession(0, true);
+    }
+
+    void crossfadeTo(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
+        const bool fades = settings_.crossfade.enabled && active_ && state_ == PlayState::Playing && !rawDsd_ &&
+                           !leadSilence_.load(std::memory_order_acquire);
+        const auto next = fades ? prepareNext(file, requested) : std::nullopt;
+        if (!next || !rust_->crossfadeTo(file, next->decoder, gainDb, {crossfadeMs(), next->convert})) {
+            if (fades)
+                log::info("engine: %s opens without a crossfade: %s", toUtf8(file.wstring()).c_str(),
+                          next ? "the stream is between tracks or crossfading" : "it cannot follow in the open format");
+            return openAndPlay(file, requested, gainDb, false);
+        }
+        resumeOnDefault_ = false;
+        waitingForSource_ = false;
+        queued_.clear();
+        manualTransition_ = rust_->transitions().count + 1;
+        heldUntil_.store(manualTransition_, std::memory_order_release);
+        fadeSkip_ = FadeSkip::None;
+        adopt({file.wstring(), next->source, next->format, requested, next->decoder, next->plan, gainDb});
+        publishQueue();
     }
 
     void load(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
@@ -305,13 +330,15 @@ public:
     }
 
     // `plan` as the track's ReplayGain and the DSP chain leave it: processed while either changes the signal. Raw DSD
-    // bypasses both.
+    // bypasses both, and crossfades.
     OutputPlan withDsp(OutputPlan plan) const {
         const bool raw = plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop;
         plan.dsp = actingNodes(chainFor(plan), plan.format.sampleRate, plan.format.channels);
         plan.gainDb = raw ? 0.0 : gainDb_;
         plan.muted = !raw && settings_.volume.mode == VolumeMode::Software && settings_.volume.muted;
         plan.volumeDb = raw || plan.muted ? 0.0 : volumeDb(settings_.volume);
+        plan.crossfadeSeconds = settings_.crossfade.enabled && !raw ? settings_.crossfade.seconds : 0.0;
+        plan.fadeSkip = settings_.crossfade.enabled && raw ? FadeSkip::RawDsd : fadeSkip_;
         if (!plan.dsp.empty() || plan.gainDb != 0.0 || plan.volumeDb != 0.0 || plan.muted) plan.state = PipelineState::Processed;
         return plan;
     }
@@ -324,6 +351,10 @@ public:
         } catch (const Error& e) {
             log::warn("engine: %s", e.what());
         }
+        refreshPlan();
+    }
+
+    void refreshPlan() {
         plan_ = withDsp(negotiated_);
         std::lock_guard lock(snapMutex_);
         if (snap_.plan) snap_.plan = plan_;
@@ -343,6 +374,7 @@ public:
         const bool dspChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
                                 settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder ||
                                 settings_.volume != s.volume;
+        const bool crossfadeChanged = settings_.crossfade != s.crossfade;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
@@ -358,36 +390,87 @@ public:
         if ((outputChanged || decoderChanged) && wasActive) {
             startSession(pos, wasPlaying);
         } else {
-            if (dspChanged) applyDsp();
+            if (dspChanged)
+                applyDsp();
+            else if (crossfadeChanged && active_)
+                refreshPlan();
             publish();
         }
     }
 
-    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
+    bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb, uint32_t fadeMs) {
         if (!active_ || rust_->transitions().nextQueued) return false;
+        const auto next = prepareNext(file, requested);
+        if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
+        queued_.push_back({file.wstring(), next->source, next->format, requested, next->decoder, next->plan, gainDb});
+        publishQueue();
+        return true;
+    }
+
+    struct Prepared {
         AudioFormat format{};
         DecoderKind decoder{};
         SourceInfo source;
+        OutputPlan plan;
+        bool convert = false; // to the open format, which crossfade permits
+    };
+
+    // `file` as it would follow in the open stream: in the same output format, or with crossfade on converted to it
+    // (docs/Plan.md §5.4). Nullopt when it cannot be opened or take that format; a format is remembered for the path.
+    std::optional<Prepared> prepareNext(const std::filesystem::path& file, std::optional<DecoderKind> requested) {
+        Prepared next;
         bool lossy = false;
         try {
-            format = probeFormat(file);
-            decoder = chooseDecoder(format, requested, settings_);
-            const auto opened = openDecoder(decoder, file, settings_.pcmBitsByFormat);
-            source = opened->info();
+            next.format = probeFormat(file);
+            next.decoder = chooseDecoder(next.format, requested, settings_);
+            const auto opened = openDecoder(next.decoder, file, settings_.pcmBitsByFormat);
+            next.source = opened->info();
             lossy = opened->readsFloat();
         } catch (const Error&) {
-            return false; // reported when the file is opened normally
+            return std::nullopt; // reported when the file is opened normally
         }
         std::optional<OutputPlan> plan;
         try {
-            plan = negotiate(source, lossy);
+            plan = negotiate(next.source, lossy);
         } catch (const Error&) {
-            return false; // the device question fails again when the file is opened normally
+            return std::nullopt; // the device question fails again when the file is opened normally
         }
-        if (!plan || plan->format != fmt_ || !rust_->queueNext(file, decoder, gainDb)) return false;
-        queued_.push_back({file.wstring(), source, format, requested, decoder, *plan, gainDb});
-        publishQueue();
-        return true;
+        if (!plan || plan->format != fmt_) {
+            plan = settings_.crossfade.enabled ? intoOpenFormat(next.source, lossy) : std::nullopt;
+            if (!plan) {
+                refusedFile_ = file.wstring();
+                refusedSkip_ = rawDsd_ || next.source.bitsPerSample == 1 ? FadeSkip::RawDsd : FadeSkip::Format;
+                return std::nullopt;
+            }
+            next.convert = true;
+        }
+        next.plan = *plan;
+        return next;
+    }
+
+    // `src` converted to the open stream's format; nullopt for a raw DSD stream, or DSD without permission to become PCM.
+    std::optional<OutputPlan> intoOpenFormat(const SourceInfo& src, bool lossy) const {
+        if (rawDsd_) return std::nullopt;
+        const auto open = [this](const DeviceFormat& f) { return f == fmt_; };
+        std::optional<OutputPlan> plan;
+        if (src.bitsPerSample != 1)
+            plan = negotiateOutput(src, lossy, fmt_.type, true, open, fmt_.sampleRate);
+        else if (dsdOutput(settings_) == DsdOutput::Pcm || settings_.convertDsdWhenUnsupported)
+            plan = negotiateDsdToPcm(src, fmt_.sampleRate, fmt_.type, true, open);
+        if (plan && plan_.shared) {
+            plan->shared = true;
+            plan->state = PipelineState::Processed;
+        }
+        return plan;
+    }
+
+    uint32_t crossfadeMs() const { return uint32_t(std::lround(settings_.crossfade.seconds * 1000.0)); }
+
+    // A crossfade holds a track's last seconds back until the next one is decoded behind them.
+    uint32_t predecodeSeconds() const {
+        const uint32_t configured = timing(settings_).predecodeSeconds;
+        if (!settings_.crossfade.enabled) return configured;
+        return std::max(configured, uint32_t(std::ceil(settings_.crossfade.seconds)) + 2);
     }
 
     bool clearNext() {
@@ -577,8 +660,10 @@ private:
 
     uint64_t currentPosition() const { return active_ ? sourcePosition() : position_; }
 
-    // The device consumes output frames; positions count source frames, which differ when the stream is resampled.
+    // The device consumes output frames; positions count source frames, which differ when the stream is resampled. A
+    // manual crossfade's file stays at its start until its fade is heard.
     uint64_t sourcePosition() const {
+        if (renderTransitions_.load(std::memory_order_acquire) < heldUntil_.load(std::memory_order_acquire)) return 0;
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
         const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
         return base_ + (in == out || !out ? consumed : (consumed * in + out / 2) / out);
@@ -729,7 +814,7 @@ private:
         stages_[3] = measure::now();
         try {
             rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
-                                                  plan_.dsd, timing(settings_).predecodeSeconds, plan_.gainDb);
+                                                  plan_.dsd, predecodeSeconds(), plan_.gainDb);
             rust_->setDsp(chainFor(plan_));
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;
@@ -746,6 +831,8 @@ private:
         stopDecode_ = false;
         renderTransitions_ = 0;
         handledTransitions_ = 0;
+        manualTransition_ = 0;
+        heldUntil_ = 0;
         transitionPending_ = false;
         {
             std::lock_guard lock(decodeErrMutex_);
@@ -894,34 +981,51 @@ private:
         snap_.nextSlotFree = false;
     }
 
+    struct Queued {
+        std::wstring file;
+        SourceInfo source;
+        AudioFormat format;
+        std::optional<DecoderKind> requested;
+        DecoderKind decoder;
+        OutputPlan plan;
+        double gainDb = 0.0;
+    };
+
     // Queued files are now audible: the last of them becomes the current file without reopening the device.
     void onTransition() {
         const uint64_t audible = renderTransitions_.load(std::memory_order_acquire);
         if (audible == handledTransitions_) return;
-        while (handledTransitions_ < audible && !queued_.empty()) {
+        while (handledTransitions_ < audible) {
             ++handledTransitions_;
+            // A manual crossfade made its file current when it was asked for.
+            if (handledTransitions_ == manualTransition_ || queued_.empty()) continue;
             const Queued next = queued_.front();
             queued_.pop_front();
-            file_ = next.file;
-            gainDb_ = next.gainDb;
-            negotiated_ = next.plan;
-            plan_ = withDsp(negotiated_);
-            sourceRate_ = next.source.sampleRate;
-            fileDecoder_ = next.requested;
-            format_ = next.format;
-            const auto& source = next.source;
+            fadeSkip_ = FadeSkip::None;
+            adopt(next);
             std::lock_guard lock(snapMutex_);
-            snap_.file = file_;
-            snap_.format = next.format;
-            snap_.decoder = next.decoder;
-            snap_.plan = plan_;
-            snap_.source = source;
-            snap_.md5.reset();
-            snap_.total = source.totalFrames;
             snap_.transitions++;
         }
-        handledTransitions_ = audible;
         publishQueue();
+    }
+
+    void adopt(const Queued& next) {
+        file_ = next.file;
+        gainDb_ = next.gainDb;
+        negotiated_ = next.plan;
+        plan_ = withDsp(negotiated_);
+        sourceRate_ = next.source.sampleRate;
+        fileDecoder_ = next.requested;
+        format_ = next.format;
+        const auto& source = next.source;
+        std::lock_guard lock(snapMutex_);
+        snap_.file = file_;
+        snap_.format = next.format;
+        snap_.decoder = next.decoder;
+        snap_.plan = plan_;
+        snap_.source = source;
+        snap_.md5.reset();
+        snap_.total = source.totalFrames;
     }
 
     void onEnded() {
@@ -1101,15 +1205,11 @@ private:
     std::atomic<bool> leadDone_{false};          // the silence is over; the control thread starts the Engine
     std::atomic<uint64_t> renderTransitions_{0}; // written by the output callback
     uint64_t handledTransitions_ = 0;
-    struct Queued {
-        std::wstring file;
-        SourceInfo source;
-        AudioFormat format;
-        std::optional<DecoderKind> requested;
-        DecoderKind decoder;
-        OutputPlan plan;
-        double gainDb = 0.0;
-    };
+    uint64_t manualTransition_ = 0;      // the transition that makes a manual crossfade's file audible
+    std::atomic<uint64_t> heldUntil_{0}; // its position stays 0 until that transition
+    FadeSkip fadeSkip_ = FadeSkip::None; // why the change into the current file did not crossfade
+    std::wstring refusedFile_;           // the last file that could not follow in the open format, and why
+    FadeSkip refusedSkip_ = FadeSkip::None;
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     std::thread decodeThread_, dspThread_;
     std::mutex decodeErrMutex_;
@@ -1131,9 +1231,14 @@ PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f, DeviceWatcher
     : impl_(std::make_unique<Impl>(s, std::move(f), std::move(w))) {}
 PlaybackEngine::~PlaybackEngine() = default;
 
-void PlaybackEngine::openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
+void PlaybackEngine::openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb,
+                                 bool afterEnd) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
-    impl_->post([this, fileCopy, decoder, gainDb] { impl_->openAndPlay(*fileCopy, decoder, gainDb); });
+    impl_->post([this, fileCopy, decoder, gainDb, afterEnd] { impl_->openAndPlay(*fileCopy, decoder, gainDb, afterEnd); });
+}
+void PlaybackEngine::crossfadeTo(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
+    auto fileCopy = std::make_shared<std::filesystem::path>(file);
+    impl_->post([this, fileCopy, decoder, gainDb] { impl_->crossfadeTo(*fileCopy, decoder, gainDb); });
 }
 void PlaybackEngine::load(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
     auto fileCopy = std::make_shared<std::filesystem::path>(file);
@@ -1166,8 +1271,10 @@ void PlaybackEngine::applySettings(const Settings& s) {
 bool PlaybackEngine::showControlPanel() {
     return impl_->call<bool>([this] { return impl_->showControlPanel(); });
 }
-bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb) {
-    return impl_->call<bool>([this, &file, decoder, gainDb] { return impl_->queueNext(file, decoder, gainDb); });
+bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb,
+                               uint32_t crossfadeMs) {
+    return impl_->call<bool>(
+        [this, &file, decoder, gainDb, crossfadeMs] { return impl_->queueNext(file, decoder, gainDb, crossfadeMs); });
 }
 bool PlaybackEngine::clearNext() {
     return impl_->call<bool>([this] { return impl_->clearNext(); });

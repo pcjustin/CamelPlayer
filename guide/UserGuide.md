@@ -77,13 +77,15 @@ While raw DSD plays, the **DSD** or **DoP** badge shows that volume and every ot
 
 ## DSP: equalizer, crossfeed and convolution
 
-Settings › DSP holds the volume, ReplayGain and three kinds of processing, all off by default: a parametric EQ, headphone crossfeed and convolution with an impulse response. They work in the order shown under **Order**, EQ → crossfeed → convolution by default, so a room or headphone correction sits nearest the speakers or headphones. Use the arrows to move one, and **Restore default order** to go back. The order changes the sound only where left and right are treated differently, such as EQ bands for one channel or a true-stereo response, next to crossfeed.
+Settings › DSP holds the volume, ReplayGain, crossfade and three kinds of processing, all off by default: a parametric EQ, headphone crossfeed and convolution with an impulse response. They work in the order shown under **Order**, EQ → crossfeed → convolution by default, so a room or headphone correction sits nearest the speakers or headphones. Use the arrows to move one, and **Restore default order** to go back. The order changes the sound only where left and right are treated differently, such as EQ bands for one channel or a true-stereo response, next to crossfeed.
 
 One preamp covers the whole chain: it is lowered automatically by the largest boost of everything that is on, so nothing clips, and the line at the top of the card shows by how much. Corrections that cancel each other cost no level.
 
 **Volume.** **Volume control** is **Fixed** by default: CamelPlayer sends the music at full level and your DAC or amplifier sets the volume. **Software** adds a volume slider (−80 to 0 dB; the mouse wheel moves 1 dB) and a mute button to the player bar. At 0 dB playback stays bit-perfect. The Windows volume and media keys keep controlling the system volume.
 
 **ReplayGain** plays music at an even loudness. **Track** levels each track, **Album** keeps the differences within an album, and **Auto** uses the album's value while the queue plays an album's tracks in order and the track's otherwise, including shuffle. **Preamp** adds to every value, **Without a value** applies to tracks that have none yet, and **Clipping prevention** lowers a gain that would push a track's peak over full scale. Values come from the files' ReplayGain tags; while ReplayGain is on, tracks without them are analyzed in the background (EBU R128), queued tracks first. **Throttled** analysis uses one thread and pauses while music plays from the same drive or share; **Fast** uses every core. The card shows how many tracks have a value. The results stay in the library and are never written to the files. A change applies from the next track.
+
+**Crossfade** overlaps two tracks as one fades out and the next fades in, for the **Length** you set (1 to 10 seconds, 3 by default). It happens at every change of track, when the next one follows by itself and when you press Previous or Next or play another track or album; an album played in order stays gapless. Pause, stop, seeking and restarting a track act at once. The fade takes at most half of a short track. A track in another format is converted to the format already playing for the whole track, so nothing reopens mid-track; the device takes each file's own format again when playback next starts. Raw DSD never crossfades, and the signal path panel says when a track could not.
 
 **Parametric EQ.** It starts with five flat bands: a low shelf at 100 Hz, peaking bands at 400 Hz, 1 kHz and 4 kHz, and a high shelf at 10 kHz.
 
@@ -94,7 +96,7 @@ One preamp covers the whole chain: it is lowered automatically by the largest bo
 
 **Convolution** applies an impulse response, such as a room correction filter. **Choose impulse response…** takes a .wav that is mono (used for both channels), stereo, or 4-channel true stereo (left to left, left to right, right to left, right to right), or a .zip holding one such .wav per sample rate. The rate that plays is taken from the .zip; when it is missing, the nearest rate is converted and cached. A response may have up to 1,048,576 samples per channel at the playing rate. The card shows the file's channels, length and rates.
 
-The **DSP** button in the player bar turns each of the three on or off, switches the ReplayGain mode and EQ presets and opens Settings › DSP. It is highlighted while the chain changes the sound.
+The **DSP** button in the player bar turns each of the three and crossfade on or off, switches the ReplayGain mode and EQ presets and opens Settings › DSP. It is highlighted while the chain changes the sound.
 
 Changes are heard within about a quarter of a second, without a gap. While the chain acts, the badge shows **Processed**, the signal path lists each step, and the output is dithered once to the device's bit depth. While nothing changes the signal, playback stays bit-perfect. After the last track, the end of a convolution's response plays out. Raw DSD (native or DoP) bypasses the chain; convert DSD to PCM to process it.
 

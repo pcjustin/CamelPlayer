@@ -82,13 +82,15 @@ Error engineError(const char* what, CamelEngineStatus status) {
 }
 
 // Borrows `utf8`, which must outlive the call that receives the source.
-CamelTrackSourceV1 trackSource(const std::string& utf8, double gainDb) {
+CamelTrackSourceV1 trackSource(const std::string& utf8, double gainDb, TrackFade fade = {}) {
     CamelTrackSourceV1 source{};
     source.struct_size = sizeof(source);
     source.abi_version = CAMEL_ENGINE_ABI_VERSION;
     source.path_utf8 = reinterpret_cast<const uint8_t*>(utf8.data());
     source.path_length_bytes = utf8.size();
     source.gain_db = gainDb;
+    source.crossfade_ms = fade.ms;
+    source.flags = fade.convert ? CAMEL_TRACK_CONVERT : 0;
     return source;
 }
 
@@ -206,11 +208,18 @@ void RustSession::reportAudible(uint64_t frame) {
     camel_engine_report_audible_position_v1(engine_, &command_, frame);
 }
 
-bool RustSession::queueNext(const std::filesystem::path& path, DecoderKind decoder, double gainDb) {
+bool RustSession::queueNext(const std::filesystem::path& path, DecoderKind decoder, double gainDb, TrackFade fade) {
     const auto utf8 = toUtf8(path.wstring());
-    const auto source = trackSource(utf8, gainDb);
+    const auto source = trackSource(utf8, gainDb, fade);
     const auto command = nextCommand();
     return camel_engine_queue_next_flac_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_) == CAMEL_ENGINE_OK;
+}
+
+bool RustSession::crossfadeTo(const std::filesystem::path& path, DecoderKind decoder, double gainDb, TrackFade fade) {
+    const auto utf8 = toUtf8(path.wstring());
+    const auto source = trackSource(utf8, gainDb, fade);
+    const auto command = nextCommand();
+    return camel_engine_crossfade_to_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_) == CAMEL_ENGINE_OK;
 }
 
 bool RustSession::clearNext() {

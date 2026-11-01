@@ -271,6 +271,71 @@ TEST_F(EngineStateTest, QueuedFileWithAnotherOutputFormatIsRefused) {
     EXPECT_EQ(engine->snapshot().queuedFiles, 0u);
 }
 
+TEST_F(EngineStateTest, WithCrossfadeAQueuedFileInAnotherFormatOverlapsAndIsConverted) {
+    settings.crossfade = {true, 1.0};
+    engine->applySettings(settings);
+    const auto next = testutil::generatedFile({"crossfade-next-16-44.1k", 44100, 16, 2, 2.0});
+    open();
+    ASSERT_TRUE(engine->queueNext(next, std::nullopt, 0.0, 1000));
+    for (int i = 0; i < 200 && !engine->snapshot().nextSlotFree; ++i) std::this_thread::sleep_for(5ms);
+    size_t frames = 0;
+    std::optional<OutputPlan> converted;
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (engine->snapshot().state != PlayState::Stopped && std::chrono::steady_clock::now() < deadline) {
+        frames += pull(4096);
+        engine->waitIdle();
+        const auto s = engine->snapshot();
+        if (s.transitions == 1 && s.plan) converted = s.plan;
+    }
+    const auto s = engine->snapshot();
+    EXPECT_FALSE(s.error) << s.errorDetail;
+    EXPECT_EQ(s.transitions, 1u);
+    ASSERT_TRUE(converted);
+    EXPECT_TRUE(converted->resample);
+    EXPECT_EQ(converted->crossfadeSeconds, 1.0);
+    EXPECT_EQ(probe.opens, 1);
+    // Two seconds at 96 kHz, then two at 44.1 kHz converted to 96 kHz, overlapping by one second.
+    EXPECT_NEAR(double(frames), 192000.0 + 192000.0 - 96000.0, 200.0);
+}
+
+TEST_F(EngineStateTest, AManualCrossfadeMakesTheFileCurrentAtOnceAndCountsItFromItsFade) {
+    settings.crossfade = {true, 1.0};
+    engine->applySettings(settings);
+    const auto next = testutil::generatedFile({"crossfade-manual-24-96k", 96000, 24, 2, 0.5});
+    open();
+    ASSERT_EQ(pull(9600), 9600u);
+    engine->crossfadeTo(next);
+    engine->waitIdle();
+    auto s = engine->snapshot();
+    EXPECT_EQ(s.file, next.wstring());
+    EXPECT_EQ(s.position, 0u);
+    EXPECT_EQ(s.total, 48000u);
+    // The Server picked the file itself: no queued file became audible.
+    EXPECT_EQ(s.transitions, 0u);
+    size_t frames = 0;
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (engine->snapshot().state != PlayState::Stopped && std::chrono::steady_clock::now() < deadline) {
+        frames += pull(4096);
+        engine->waitIdle();
+    }
+    s = engine->snapshot();
+    EXPECT_FALSE(s.error) << s.errorDetail;
+    EXPECT_EQ(s.transitions, 0u);
+    EXPECT_EQ(probe.opens, 1);
+    // The new file whole, after what the first one still had to play: the device ring's lead and at most the second
+    // it keeps while the new one starts decoding. The rest of its two seconds was dropped.
+    EXPECT_GT(frames, 48000u);
+    EXPECT_LT(frames, 48000u + 96000u + 96000u / 2);
+}
+
+TEST_F(EngineStateTest, AManualChangeWithoutCrossfadeReopensTheDevice) {
+    open();
+    ASSERT_EQ(pull(9600), 9600u);
+    engine->crossfadeTo(testutil::generatedFile({"crossfade-manual-24-96k", 96000, 24, 2, 0.5}));
+    engine->waitIdle();
+    EXPECT_EQ(probe.opens, 2);
+}
+
 // The player supports 16/24-bit sources only; other depths are reported and never reach the device.
 TEST_F(EngineStateTest, OtherBitDepthsAreRefusedWithoutOpeningTheDevice) {
     for (const auto& spec :

@@ -19,6 +19,13 @@ namespace camel::audio {
 
 struct DspChain;
 
+// How a track follows the one before it (docs/Plan.md §5.4): crossfaded over `ms`, or gaplessly for 0, and whether it
+// may be converted to the session's output format, which a crossfade permits.
+struct TrackFade {
+    uint32_t ms = 0;
+    bool convert = false;
+};
+
 class RustSession {
 public:
     // Whether the Engine may resample, downmix or reduce depth, and with which soxr quality.
@@ -65,7 +72,10 @@ public:
 
     // Gapless: the next track plays without reopening the device. False when it does not decode to this session's
     // output format or cannot be opened; playback then ends normally after the current track.
-    bool queueNext(const std::filesystem::path& path, DecoderKind decoder, double gainDb = 0.0);
+    bool queueNext(const std::filesystem::path& path, DecoderKind decoder, double gainDb = 0.0, TrackFade fade = {});
+    // A manual change while playing: crossfades from where playback is into `path`, which becomes current at the fade.
+    // False when the Engine cannot mix the two; the caller then opens the track instead.
+    bool crossfadeTo(const std::filesystem::path& path, DecoderKind decoder, double gainDb, TrackFade fade);
     // False once decoding has moved on to the queued track; it then becomes current at its boundary.
     bool clearNext();
 
