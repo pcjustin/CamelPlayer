@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 
 #include "Common/util/Text.h"
 #include "Server/Artwork/ArtworkCache.h"
@@ -195,7 +196,9 @@ TEST_F(ArtistPicturesTest, AsksNothingOnlineWhileOffAndKeepsWhatItFinds) {
     EXPECT_EQ(picture.page, "https://commons.wikimedia.org/wiki/File:Q1.jpg");
     const auto requests = web.requests();
     ASSERT_EQ(requests.size(), 5u);
-    for (const auto& request : requests) EXPECT_NE(request.find("User-Agent: CamelPlayer/"), std::string::npos) << request;
+    // The Server's own version, as MusicBrainz and Wikimedia ask; a Server built without CAMEL_VERSION sent its name.
+    const std::regex agent(R"(User-Agent: CamelPlayer/\d+\.\d+\.\d+ \()");
+    for (const auto& request : requests) EXPECT_TRUE(std::regex_search(request, agent)) << request;
 
     // Found pictures are kept: later visits ask nothing.
     EXPECT_EQ(lookUpArtistPicture(*store, "Amy", true, services, {}), picture);

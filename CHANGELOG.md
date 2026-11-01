@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 New since 0.2.0:
 
@@ -14,6 +14,8 @@ Fixed since 0.2.0:
 
 - **DTS-CD files played as loud noise.** A WAV file that holds a DTS surround bitstream instead of PCM is now recognized by its content and never played as PCM. With conversion, the chosen WAV decoder reads it, FFmpeg's DTS decoder decodes it and it is downmixed to stereo; without, it is skipped as unsupported.
 - **A rate the driver offers but cannot run,** such as 64 kHz on Chord's ASIO driver, ended in a driver error. It now counts as a rate the device does not take: with conversion it is resampled, otherwise skipped as unsupported.
+- **WASAPI polling could stop with an error** right after the device changed format: the Chord DAVE then reported room it did not yet grant. The next polls ask again.
+- **Online lookups named no version:** the update check, MusicBrainz and Wikimedia received "CamelPlayer/CAMEL_VERSION" as the User-Agent; they now receive CamelPlayer's version.
 
 ## 0.2.0
 

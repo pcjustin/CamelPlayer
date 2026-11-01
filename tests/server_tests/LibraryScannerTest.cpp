@@ -6,6 +6,7 @@
 
 #include <fstream>
 #include <algorithm>
+#include <regex>
 #include <thread>
 #include <wil/resource.h>
 
@@ -447,7 +448,10 @@ TEST_F(LibraryScannerTest, AFileRefusedBeforeIsReadAgainOncePerVersion) {
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_refused_read:%'"), 1);
+    // The Server records its own version, which a project without CAMEL_VERSION would spell as the macro's name.
+    auto stored = store.openReader().prepare("SELECT value FROM app_state WHERE key LIKE 'library_refused_read:%'");
+    ASSERT_TRUE(stored.step());
+    EXPECT_TRUE(std::regex_match(stored.text(0), std::regex(R"(\d+\.\d+\.\d+)"))) << stored.text(0);
     const auto refuse = [&](const char* version) {
         store
             .write([&](sqlite::Database& db) {

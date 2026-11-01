@@ -33,7 +33,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <!-- Same-process Server: API, queue and playback coordination; free of WinRT (docs/Plan.md §4) -->
-      <PreprocessorDefinitions>CAMEL_CORE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>CAMEL_CORE;CAMEL_VERSION=$(CamelVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

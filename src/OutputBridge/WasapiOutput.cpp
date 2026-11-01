@@ -250,7 +250,7 @@ private:
         }
         const UINT32 bpf = fmt_.bytesPerFrame();
         bool started = false, primed = false;
-        int timeouts = 0;
+        int timeouts = 0, tooLarge = 0;
         auto fill = [&](UINT32 frames) -> HRESULT {
             BYTE* p = nullptr;
             HRESULT hr = render->GetBuffer(frames, &p);
@@ -308,6 +308,13 @@ private:
                 if (FAILED(err)) break;
                 if (bufferFrames > pad) {
                     err = fill(bufferFrames - pad);
+                    // Just after the device changed format, the Chord DAVE can report room that GetBuffer does not
+                    // grant yet; the next wakes ask again, for about a second.
+                    if (err == AUDCLNT_E_BUFFER_TOO_LARGE && ++tooLarge < 200) {
+                        err = S_OK;
+                        continue;
+                    }
+                    tooLarge = 0;
                     if (FAILED(err)) break;
                 }
             }

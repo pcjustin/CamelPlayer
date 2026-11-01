@@ -1,8 +1,10 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0 and 0.2.0 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0 and 0.2.1 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0 or 0.2.1. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
+
+On 2026-11-01 and 2026-11-02, for 0.2.1, every C++ project was rebuilt from scratch in Release and Debug. A full Release run passed all 731 enabled C++ tests, including the 100k-track search latency target, and all 88 Rust Engine tests. A full Debug run passed 730 of 731, the latency test again failing only unoptimized (first page p95 102.6 ms, broad suggestions 481 ms). After the last change, a WASAPI fix that no automated test reaches, a second Release run passed 730: the test of a manual change during a crossfade reopened the device once under the full suite's load and passed 10 times out of 10 alone.
 
 On 2026-11-01, for 0.2.0, a full Release run passed all 715 enabled C++ tests, including the 100k-track search latency target, and all 88 Rust Engine tests. A full Debug run passed 714 of 715: unoptimized, the latency test measured a first-page p95 of 102.9 ms and a broad-suggestion p95 of 483 ms against its 100 ms target for optimized builds. 112 tests are disabled in ordinary runs because they play audio on named devices or scan a NAS.
 
@@ -26,6 +28,8 @@ What the decoding tests check:
 
 ## Hardware
 
+On 2026-11-02, before 0.2.1, all 97 hardware tests passed twice, in 189 and 190 seconds. Before that the WASAPI polling test had failed in 2 of 5 runs right after other tests switched the DAVE to another format: the driver reported room that GetBuffer did not grant yet, which 0.2.1 waits out. Five runs of the output parameter tests in a row then passed.
+
 On 2026-11-01, before 0.2.0, all 97 hardware tests passed again in 195 seconds on the same two devices, as they had on 2026-10-31 before 0.1.0 in 196 seconds: playback on every backend with each FLAC decoder, the other formats, DSD rates and DSD switching, device fallback, the output parameters and the Server's playback path.
 
 The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Server APIs on a Chord DAVE (WASAPI, ASIO and Kernel Streaming) and a built-in Cirrus codec (WASAPI and Kernel Streaming).
@@ -37,6 +41,13 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 - A separate DAVE run of the output parameters (polling buffer, MMCSS, fixed sample rate, silence after a DoP-to-PCM switch and release after a pause) passed 5/5.
 
 ## In the app
+
+Checked by hand on 2026-11-02 in the 0.2.1 Release build, on the owner's library and settings (ASIO on the Chord DAVE), which were restored afterwards:
+
+- The first scan by 0.2.1 read again, once, the audio files earlier versions had refused, and the ADPCM WAV files among them became tracks.
+- A DTS-CD album (DTS-ES 6.1 in WAV) played through the chosen WAV decoder and FFmpeg's DTS decoder, downmixed from 7 to 2 channels and shown as processed. With conversion switched off, every track was skipped as a format the device cannot play bit-perfectly.
+- A 16-bit 64 kHz FLAC that the DAVE's ASIO driver accepts but cannot start played at 96 kHz after the failed start, shown as resampled; without conversion it was reported unsupported.
+- IMA ADPCM WAV files played with conversion off as a lossy source, padded from 16 to 32 bits without dither, with libsndfile, FFmpeg and dr_wav in turn.
 
 Checked by hand on 2026-11-01 in a Release build, for 0.2.0:
 
