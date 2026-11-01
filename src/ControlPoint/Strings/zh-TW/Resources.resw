@@ -53,7 +53,7 @@
   <data name="SignalPath_Duplicate" xml:space="preserve"><value>單聲道複製到兩聲道</value></data>
   <data name="SignalPath_Downmix" xml:space="preserve"><value>降混</value></data>
   <data name="SignalPath_Resample" xml:space="preserve"><value>重新取樣</value></data>
-  <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF 抖動至</value></data>
+  <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF 抖動</value></data>
   <data name="SignalPath_DsdToPcm" xml:space="preserve"><value>DSD 轉 PCM</value></data>
   <data name="SignalPath_DspBypassed" xml:space="preserve"><value>略過 DSP</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>輸出裝置</value></data>
@@ -624,4 +624,10 @@
   <data name="Crossfade_SkipRawDsd" xml:space="preserve"><value>原生 DSD 不交叉淡化。</value></data>
   <data name="Crossfade_SkipFormat" xml:space="preserve"><value>這首沒有交叉淡化：前一首的串流無法接受它的格式。</value></data>
   <data name="Crossfade_SkipNoPreload" xml:space="preserve"><value>這首沒有交叉淡化：它沒有及時準備好。</value></data>
+  <data name="SignalPath_Decoder" xml:space="preserve"><value>解碼器</value></data>
+  <data name="SignalPath_Output" xml:space="preserve"><value>輸出</value></data>
+  <data name="SignalPath_NativeDsd" xml:space="preserve"><value>原生 DSD</value></data>
+  <data name="SignalPath_Float" xml:space="preserve"><value>整數轉浮點</value></data>
+  <data name="SignalPath_AtTrackChanges" xml:space="preserve"><value>換曲時 {0} 秒</value></data>
+  <data name="SignalPath_StateAtTrackChanges" xml:space="preserve"><value>換曲時處理</value></data>
 </root>

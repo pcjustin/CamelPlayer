@@ -914,7 +914,6 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         showPlayerArtist({});
         AlbumLinkText().Text(L"");
         AlbumLink().Visibility(Visibility::Collapsed);
-        SourceText().Text(L"");
     } else {
         const std::filesystem::path p(toWide(s.pathUtf8));
         TitleText().Text(currentEntry != snapshot.queue.entries.end() && !currentEntry->title.empty()
@@ -925,19 +924,6 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         AlbumLink().Visibility(currentEntry != snapshot.queue.entries.end() && !currentEntry->album.empty()
                                    ? Visibility::Visible
                                    : Visibility::Collapsed);
-        if (s.source) {
-            wchar_t buf[256];
-            if (s.format == AudioFormat::Dsd) // the decoder counts byte frames of eight DSD samples
-                swprintf(buf, 256, L"DSD%u · %.4f MHz · %u ch · %s", s.source->sampleRate * 8 / 44100,
-                         s.source->sampleRate * 8 / 1e6, s.source->channels, ui::formatTime(total).c_str());
-            else
-                swprintf(buf, 256, L"%s · %.1f kHz · %u ch · %s", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
-                         s.source->sampleRate / 1000.0, s.source->channels, ui::formatTime(total).c_str());
-            hstring text = buf;
-            if (s.format != AudioFormat::Dsd && (!s.format || !isLossy(*s.format)))
-                text = text + L" · " + to_hstring(s.source->bitsPerSample) + L"-bit";
-            SourceText().Text(text);
-        }
     }
 
     const bool marked = !s.pathUtf8.empty() && currentEntry != snapshot.queue.entries.end() && currentEntry->file;
@@ -1016,67 +1002,83 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                 : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
                                                           : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
         FormatText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)) + L" · " + decoder);
-        hstring path = tr(L"SignalPath_File") + L" → " + decoder;
-        if (plan.duplicate) path = path + L" → " + tr(L"SignalPath_Duplicate");
-        if (plan.downmix) path = path + L" → " + tr(L"SignalPath_Downmix") + L" " + to_hstring(s.source->channels) + L"→2";
-        if (plan.resample && plan.dsd != DsdPath::Pcm) {
-            wchar_t rates[64];
-            swprintf(rates, 64, L" %.1f→%.1f kHz", s.source->sampleRate / 1000.0, s.output->sampleRate / 1000.0);
-            path = path + L" → " + tr(L"SignalPath_Resample") + rates;
+        // One row per step that changes or carries the signal, in the Engine's order (docs/Plan.md §8.1).
+        std::vector<PathStep> steps;
+        const auto add = [&](hstring name, hstring detail, PathState state) {
+            steps.push_back({std::move(name), std::move(detail), state});
+        };
+        wchar_t text[128];
+        const uint32_t bits = s.source->bitsPerSample;
+        if (s.format == AudioFormat::Dsd) // the decoder counts byte frames of eight DSD samples
+            swprintf_s(text, L"DSD%u · %.4f MHz · %u ch", s.source->sampleRate * 8 / 44100, s.source->sampleRate * 8 / 1e6,
+                       s.source->channels);
+        else if (lossy)
+            swprintf_s(text, L"%s · %.1f kHz · %u ch", ui::utf8(formatName(*s.format)).c_str(), s.source->sampleRate / 1000.0,
+                       s.source->channels);
+        else
+            swprintf_s(text, L"%s · %.1f kHz · %u-bit · %u ch", ui::utf8(s.format ? formatName(*s.format) : "").c_str(),
+                       s.source->sampleRate / 1000.0, bits, s.source->channels);
+        const PathState sourceState = lossy ? PathState::Lossy : PathState::BitPerfect;
+        add(tr(L"SignalPath_File"), text, sourceState);
+        add(tr(L"SignalPath_Decoder"), lossy ? decoder + L" · " + to_hstring(bits) + L"-bit PCM" : decoder, sourceState);
+        if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);
+        if (plan.downmix) add(tr(L"SignalPath_Downmix"), to_hstring(s.source->channels) + L"→2 ch", PathState::Processed);
+        if (plan.dsd == DsdPath::Pcm) add(tr(L"SignalPath_DsdToPcm"), L"352.8 kHz", PathState::Processed);
+        if (plan.resample) {
+            // The decimator always produces 352.8 kHz; soxr then takes it to the output rate.
+            const double from = plan.dsd == DsdPath::Pcm ? 352.8 : s.source->sampleRate / 1000.0;
+            swprintf_s(text, L"%.1f→%.1f kHz", from, s.output->sampleRate / 1000.0);
+            add(tr(L"SignalPath_Resample"), text, PathState::Processed);
         }
-        // The track's ReplayGain, the chain's nodes in order, then the volume.
-        hstring chain;
-        wchar_t db[32];
-        if (plan.gainDb != 0.0) {
-            swprintf_s(db, L" %+.1f dB", plan.gainDb);
-            chain = chain + L" → " + tr(L"SignalPath_ReplayGain") + db;
-        }
-        for (const auto node : plan.dsp)
-            chain = chain + L" → " +
-                    tr(node == DspNode::Eq          ? L"SignalPath_Eq"
+        // The track's ReplayGain, the chain's nodes in order, then the volume; raw DSD bypasses them all.
+        const bool raw = plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native;
+        if (!raw) {
+            if (plan.gainDb != 0.0) {
+                swprintf_s(text, L"%+.1f dB", plan.gainDb);
+                add(tr(L"SignalPath_ReplayGain"), text, PathState::Processed);
+            }
+            for (const auto node : plan.dsp)
+                add(tr(node == DspNode::Eq          ? L"SignalPath_Eq"
                        : node == DspNode::Crossfeed ? L"SignalPath_Crossfeed"
-                                                    : L"SignalPath_Convolution");
-        if (plan.muted) {
-            chain = chain + L" → " + tr(L"SignalPath_Muted");
-        } else if (plan.volumeDb != 0.0) {
-            swprintf_s(db, L" %.1f dB", plan.volumeDb);
-            chain = chain + L" → " + tr(L"SignalPath_Volume") + db;
-        }
-        // Only track changes are mixed; between them the path is as shown.
-        if (plan.crossfadeSeconds > 0.0) {
-            swprintf_s(db, L" %.1f s", plan.crossfadeSeconds);
-            chain = chain + L" → " + tr(L"SignalPath_Crossfade") + db;
+                                                    : L"SignalPath_Convolution"),
+                    {}, PathState::Processed);
+            if (plan.muted) {
+                add(tr(L"SignalPath_Muted"), {}, PathState::Processed);
+            } else if (plan.volumeDb != 0.0) {
+                swprintf_s(text, L"%.1f dB", plan.volumeDb);
+                add(tr(L"SignalPath_Volume"), text, PathState::Processed);
+            }
+            // Only track changes are mixed; between them the path is as shown.
+            if (plan.crossfadeSeconds > 0.0) {
+                swprintf_s(text, L"%.1f", plan.crossfadeSeconds);
+                add(tr(L"SignalPath_Crossfade"), ui::format(L"SignalPath_AtTrackChanges", {text}), PathState::AtTrackChanges);
+            }
         }
         const bool processed = !plan.dsp.empty() || plan.gainDb != 0.0 || plan.volumeDb != 0.0 || plan.muted;
-        if (plan.dsd != DsdPath::Pcm) path = path + chain;
-        if (plan.dsd == DsdPath::Dop)
-            path = path + L" → DoP · " + tr(L"SignalPath_DspBypassed");
-        else if (plan.dsd == DsdPath::Native)
-            path = path + L" → DSD · " + tr(L"SignalPath_DspBypassed");
-        else if (plan.dsd == DsdPath::Pcm) {
-            // The decimator always produces 352.8 kHz; soxr then takes it to the output rate.
-            wchar_t rates[64];
-            swprintf(rates, 64, L" 352.8→%.1f kHz", s.output->sampleRate / 1000.0);
-            path = path + L" → " + tr(L"SignalPath_DsdToPcm") + L" 352.8 kHz";
-            if (plan.resample) path = path + L" → " + tr(L"SignalPath_Resample") + rates;
-            path = path + chain;
-            if (plan.widen)
-                path = path + L" → float32";
-            else
-                path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(std::min(validBits(s.output->type), 24u)) +
-                       L"-bit";
-        } else if (plan.widen)
-            path = path + L" → float32";
         // The chain's output is quantized once, at the device depth up to 24 bits.
-        else if (processed)
-            path =
-                path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
-        else if (plan.reduce || plan.resample || plan.downmix || lossy)
-            path = path + L" → " + tr(L"SignalPath_Dither") + L" " + to_hstring(plan.reduce ? 16 : s.source->bitsPerSample) +
-                   L"-bit";
-        else
-            path = path + L" → " + tr(L"SignalPath_Pad") + L" " + to_hstring(s.source->bitsPerSample);
-        SignalPathText().Text(path + L" → " + ui::utf8(sampleTypeName(s.output->type)) + L" → " + ui::utf8(s.outputMode));
+        const hstring deviceDepth = to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
+        const uint32_t container = bytesPerSample(s.output->type) * 8;
+        if (plan.dsd == DsdPath::Dop)
+            add(L"DoP", tr(L"SignalPath_DspBypassed"), PathState::BitPerfect);
+        else if (plan.dsd == DsdPath::Native)
+            add(tr(L"SignalPath_NativeDsd"), tr(L"SignalPath_DspBypassed"), PathState::BitPerfect);
+        else if (plan.widen)
+            add(tr(L"SignalPath_Float"), L"float32",
+                processed || plan.dsd == DsdPath::Pcm ? PathState::Processed : PathState::Lossless);
+        else if (processed || plan.dsd == DsdPath::Pcm)
+            add(tr(L"SignalPath_Dither"), deviceDepth, PathState::Processed);
+        else if (plan.reduce || plan.resample || plan.downmix)
+            add(tr(L"SignalPath_Dither"), to_hstring(plan.reduce ? 16 : bits) + L"-bit", PathState::Processed);
+        else if (lossy)
+            add(tr(L"SignalPath_Dither"), to_hstring(bits) + L"-bit", PathState::Lossy);
+        else if (container > bits)
+            add(tr(L"SignalPath_Pad"), to_hstring(bits) + L"→" + to_hstring(container) + L"-bit", PathState::BitPerfect);
+        add(tr(L"SignalPath_Output"), ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)),
+            plan.state == PipelineState::BitPerfect           ? PathState::BitPerfect
+            : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
+            : plan.state == PipelineState::LossySource        ? PathState::Lossy
+                                                              : PathState::Processed);
+        showSignalPath(std::move(steps));
         dspActive = processed;
     } else {
         Lamp().Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
@@ -1084,7 +1086,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         SourceBadge().Visibility(Visibility::Collapsed);
         BypassBadge().Visibility(Visibility::Collapsed);
         FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
-        SignalPathText().Text(L"");
+        showSignalPath({});
     }
     DspButtonText().Foreground(themeBrush(dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush"));
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch, with why the change into
@@ -3002,6 +3004,58 @@ void MainWindow::showCrossfade() {
     CrossfadeSwitch().IsOn(settings_.crossfade.enabled);
     CrossfadeSecondsBox().Value(settings_.crossfade.seconds);
     populating_ = wasPopulating;
+}
+
+// Rebuilds the signal path rows only when a step changed; snapshots arrive many times a second.
+void MainWindow::showSignalPath(std::vector<PathStep> steps) {
+    if (steps == shownPath_) return;
+    shownPath_ = std::move(steps);
+    auto grid = SignalPathGrid();
+    grid.Children().Clear();
+    grid.RowDefinitions().Clear();
+    const auto caption = Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>();
+    for (int32_t row = 0; row < int32_t(shownPath_.size()); ++row) {
+        const auto& step = shownPath_[size_t(row)];
+        RowDefinition definition;
+        definition.Height(GridLength{1, GridUnitType::Auto});
+        grid.RowDefinitions().Append(definition);
+        const wchar_t* brush = step.state == PathState::BitPerfect ? L"SystemFillColorSuccessBrush"
+                               : step.state == PathState::Lossless ? L"SystemFillColorCautionBrush"
+                               : step.state == PathState::Lossy    ? L"SystemFillColorNeutralBrush"
+                                                                   : L"SystemFillColorCriticalBrush";
+        const wchar_t* state = step.state == PathState::BitPerfect  ? L"Lamp_BitPerfect"
+                               : step.state == PathState::Lossless  ? L"Lamp_Lossless"
+                               : step.state == PathState::Lossy     ? L"Lamp_Lossy"
+                               : step.state == PathState::Processed ? L"Lamp_Processed"
+                                                                    : L"SignalPath_StateAtTrackChanges";
+        // A ring marks a step that acts only when tracks change.
+        Shapes::Ellipse dot;
+        dot.Width(8);
+        dot.Height(8);
+        dot.VerticalAlignment(VerticalAlignment::Center);
+        if (step.state == PathState::AtTrackChanges) {
+            dot.Stroke(themeBrush(brush));
+            dot.StrokeThickness(1.5);
+        } else {
+            dot.Fill(themeBrush(brush));
+        }
+        ToolTipService::SetToolTip(dot, box_value(tr(state)));
+        TextBlock name;
+        name.Style(caption);
+        name.Text(step.name);
+        Automation::AutomationProperties::SetName(name, step.name + L", " + tr(state));
+        TextBlock detail;
+        detail.Style(caption);
+        detail.Text(step.detail);
+        detail.TextWrapping(TextWrapping::Wrap);
+        detail.IsTextSelectionEnabled(true);
+        detail.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+        for (const auto& [element, column] : {std::pair<FrameworkElement, int32_t>{dot, 0}, {name, 1}, {detail, 2}}) {
+            Grid::SetRow(element, row);
+            Grid::SetColumn(element, column);
+            grid.Children().Append(element);
+        }
+    }
 }
 
 void MainWindow::OnCrossfadeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

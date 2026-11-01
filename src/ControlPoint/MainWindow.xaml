@@ -889,10 +889,13 @@
             </Grid>
             <StackPanel x:Name="SignalPathPanel" Grid.Row="4" Spacing="2" Padding="4,2,0,0" Visibility="Collapsed"
                         HorizontalAlignment="Right" MaxWidth="720">
-                <TextBlock x:Name="SourceText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock x:Name="SignalPathText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
-                           TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Grid x:Name="SignalPathGrid" ColumnSpacing="8" RowSpacing="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                </Grid>
                 <TextBlock x:Name="SignalNoteText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
                            TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>

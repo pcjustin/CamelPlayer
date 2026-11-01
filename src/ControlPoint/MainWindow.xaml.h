@@ -146,6 +146,15 @@ private:
     void showVolume();
     void showReplayGain();
     void showCrossfade();
+    // One row of the signal path (docs/Plan.md §8.1): a step, what follows it and its state.
+    enum class PathState : uint8_t { BitPerfect, Lossless, Processed, Lossy, AtTrackChanges };
+    struct PathStep {
+        hstring name;
+        hstring detail;
+        PathState state = PathState::BitPerfect;
+        bool operator==(const PathStep&) const = default;
+    };
+    void showSignalPath(std::vector<PathStep> steps);
     void showLoudnessProgress();
     void showDspOrder();
     void showDspSummary();
@@ -224,6 +233,7 @@ private:
     };
     std::optional<PlayRequest> lastPlay_;
     std::chrono::steady_clock::time_point lastPlayAt_;
+    std::vector<PathStep> shownPath_;
     int volumeWheel_ = 0;         // the part of a wheel notch not yet applied
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates

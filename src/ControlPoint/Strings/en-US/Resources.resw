@@ -50,10 +50,10 @@
   <data name="Quality_Quick" xml:space="preserve"><value>Quick</value></data>
   <data name="Quality_High" xml:space="preserve"><value>High</value></data>
   <data name="Quality_VeryHigh" xml:space="preserve"><value>Very high</value></data>
-  <data name="SignalPath_Duplicate" xml:space="preserve"><value>mono to both channels</value></data>
-  <data name="SignalPath_Downmix" xml:space="preserve"><value>downmix</value></data>
-  <data name="SignalPath_Resample" xml:space="preserve"><value>resample</value></data>
-  <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF dither to</value></data>
+  <data name="SignalPath_Duplicate" xml:space="preserve"><value>Mono to both channels</value></data>
+  <data name="SignalPath_Downmix" xml:space="preserve"><value>Downmix</value></data>
+  <data name="SignalPath_Resample" xml:space="preserve"><value>Resample</value></data>
+  <data name="SignalPath_Dither" xml:space="preserve"><value>TPDF dither</value></data>
   <data name="SignalPath_DsdToPcm" xml:space="preserve"><value>DSD to PCM</value></data>
   <data name="SignalPath_DspBypassed" xml:space="preserve"><value>DSP bypassed</value></data>
   <data name="Settings_Device.Header" xml:space="preserve"><value>Output device</value></data>
@@ -114,7 +114,7 @@
   <data name="Lamp_Idle" xml:space="preserve"><value>No output</value></data>
   <data name="Status_Idle" xml:space="preserve"><value>No stream open.</value></data>
   <data name="SignalPath_File" xml:space="preserve"><value>File</value></data>
-  <data name="SignalPath_Pad" xml:space="preserve"><value>integer zero padding</value></data>
+  <data name="SignalPath_Pad" xml:space="preserve"><value>Integer zero padding</value></data>
   <data name="Tip_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>Stop</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>Cannot open the file</value></data>
@@ -540,7 +540,7 @@
   <data name="Eq_Save" xml:space="preserve"><value>Save</value></data>
   <data name="Eq_ImportTitle" xml:space="preserve"><value>Import EQ</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>The file has no filters CamelPlayer can read. Choose an Equalizer APO configuration or an AutoEq ParametricEQ.txt file.</value></data>
-  <data name="SignalPath_Eq" xml:space="preserve"><value>parametric EQ</value></data>
+  <data name="SignalPath_Eq" xml:space="preserve"><value>Parametric EQ</value></data>
   <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP: ReplayGain, equalizer, crossfeed and convolution</value></data>
   <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP: ReplayGain, equalizer, crossfeed and convolution</value></data>
   <data name="Dsp_Off" xml:space="preserve"><value>Every DSP node is off, so playback stays bit-perfect.</value></data>
@@ -582,8 +582,8 @@
   <data name="Convolution_Layout" xml:space="preserve"><value>An impulse response must have 1, 2 or 4 channels.</value></data>
   <data name="Convolution_TooLong" xml:space="preserve"><value>This impulse response is too long: at most 1,048,576 samples per channel at the playing rate.</value></data>
   <data name="Convolution_FileTypes" xml:space="preserve"><value>Impulse response (*.wav, *.zip)</value></data>
-  <data name="SignalPath_Crossfeed" xml:space="preserve"><value>crossfeed</value></data>
-  <data name="SignalPath_Convolution" xml:space="preserve"><value>convolution</value></data>
+  <data name="SignalPath_Crossfeed" xml:space="preserve"><value>Crossfeed</value></data>
+  <data name="SignalPath_Convolution" xml:space="preserve"><value>Convolution</value></data>
   <data name="Settings_Volume.Text" xml:space="preserve"><value>Volume</value></data>
   <data name="Settings_VolumeMode.Header" xml:space="preserve"><value>Volume control</value></data>
   <data name="Settings_VolumeFixed.Content" xml:space="preserve"><value>Fixed (bit-perfect)</value></data>
@@ -611,8 +611,8 @@
   <data name="Loudness_Off" xml:space="preserve"><value>Turn ReplayGain on to analyze the rest in the background.</value></data>
   <data name="Loudness_Analyzing" xml:space="preserve"><value>Analyzing in the background…</value></data>
   <data name="SignalPath_ReplayGain" xml:space="preserve"><value>ReplayGain</value></data>
-  <data name="SignalPath_Volume" xml:space="preserve"><value>volume</value></data>
-  <data name="SignalPath_Muted" xml:space="preserve"><value>muted</value></data>
+  <data name="SignalPath_Volume" xml:space="preserve"><value>Volume</value></data>
+  <data name="SignalPath_Muted" xml:space="preserve"><value>Muted</value></data>
   <data name="Dsp_OffLevelled" xml:space="preserve"><value>EQ, crossfeed and convolution are off; the software volume or ReplayGain can still change the level.</value></data>
   <data name="Dsp_FlatLevelled" xml:space="preserve"><value>Nothing in the chain changes the signal now; the software volume or ReplayGain can still change the level.</value></data>
   <data name="Settings_Crossfade.Text" xml:space="preserve"><value>Crossfade</value></data>
@@ -620,8 +620,14 @@
   <data name="Settings_CrossfadeSwitch.OffContent" xml:space="preserve"><value>Overlap tracks as they change</value></data>
   <data name="Settings_CrossfadeSeconds.Header" xml:space="preserve"><value>Length (seconds)</value></data>
   <data name="Settings_CrossfadeNote.Text" xml:space="preserve"><value>Every change of track overlaps, whether the next one follows by itself or you pick another; an album played in order stays gapless. Pause, stop, seeking and restarting a track act at once. A track in another format is converted to the current one for all of its length, and the device takes each file's own format again when playback next starts. Raw DSD never crossfades.</value></data>
-  <data name="SignalPath_Crossfade" xml:space="preserve"><value>crossfade</value></data>
+  <data name="SignalPath_Crossfade" xml:space="preserve"><value>Crossfade</value></data>
   <data name="Crossfade_SkipRawDsd" xml:space="preserve"><value>Raw DSD does not crossfade.</value></data>
   <data name="Crossfade_SkipFormat" xml:space="preserve"><value>This track did not crossfade: the stream before it could not take its format.</value></data>
   <data name="Crossfade_SkipNoPreload" xml:space="preserve"><value>This track did not crossfade: it was not ready in time.</value></data>
+  <data name="SignalPath_Decoder" xml:space="preserve"><value>Decoder</value></data>
+  <data name="SignalPath_Output" xml:space="preserve"><value>Output</value></data>
+  <data name="SignalPath_NativeDsd" xml:space="preserve"><value>Native DSD</value></data>
+  <data name="SignalPath_Float" xml:space="preserve"><value>Integers to float</value></data>
+  <data name="SignalPath_AtTrackChanges" xml:space="preserve"><value>{0} s at track changes</value></data>
+  <data name="SignalPath_StateAtTrackChanges" xml:space="preserve"><value>Processed at track changes</value></data>
 </root>

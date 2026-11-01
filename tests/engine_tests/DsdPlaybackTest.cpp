@@ -154,6 +154,28 @@ TEST(DsdPlayback, DopCarriesRawDsdWithContinuousMarkersInEveryContainer) {
     }
 }
 
+// Raw DSD bypasses every PCM node (docs/Plan.md §5.9), even nodes that would change PCM.
+TEST(DsdPlayback, RawDsdPassesActingDspNodesBy) {
+    const Bytes raw = rawDsd(size_t(kDsd64Frames * 3 / 10), 2, 23);
+    Settings settings;
+    settings.eq.enabled = true;
+    settings.eq.bands.front().gainDb = 9.0;
+    settings.crossfeed.enabled = true;
+    settings.volume = {VolumeMode::Software, -20.0, false};
+    settings.crossfade = {true, 3.0};
+    const auto played =
+        play(dsfFile("dsp-bypass", raw), settings, [](const DeviceFormat& f) { return dopDevice(f, SampleType::Int24); });
+    ASSERT_FALSE(played.snapshot.error) << played.snapshot.errorDetail;
+    ASSERT_TRUE(played.plan);
+    EXPECT_EQ(played.plan->dsd, DsdPath::Dop);
+    EXPECT_EQ(played.plan->state, PipelineState::BitPerfect);
+    EXPECT_TRUE(played.plan->dsp.empty());
+    EXPECT_EQ(played.plan->volumeDb, 0.0);
+    EXPECT_EQ(played.plan->crossfadeSeconds, 0.0);
+    EXPECT_EQ(played.plan->fadeSkip, FadeSkip::RawDsd);
+    expectDop(played, raw);
+}
+
 TEST(DsdPlayback, NativeDsdIsTheRawStreamFollowedByIdlePattern) {
     const Bytes raw = rawDsd(size_t(kDsd64Frames * 3 / 10), 2, 22);
     Settings settings;
