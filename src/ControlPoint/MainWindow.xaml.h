@@ -214,6 +214,16 @@ private:
     std::string impulseFile_;
     uint32_t impulseRate_ = 0;
     uint64_t impulseLoads_ = 0;
+    // The last play request and when it came, so the second click of a double click does not play it again.
+    struct PlayRequest {
+        camel::server::CommandKind kind{};
+        uint64_t index = 0;
+        size_t count = 0;
+        std::string path;
+        bool operator==(const PlayRequest&) const = default;
+    };
+    std::optional<PlayRequest> lastPlay_;
+    std::chrono::steady_clock::time_point lastPlayAt_;
     int volumeWheel_ = 0;         // the part of a wheel notch not yet applied
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
