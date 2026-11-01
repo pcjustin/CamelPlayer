@@ -1,10 +1,12 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0 was checked beyond its ordinary automated tests: on audio hardware, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0 and 0.2.0 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
 
-On 2026-10-31 a full Release run passed all 661 enabled C++ tests, including the 100k-track search latency target, and all 47 Rust Engine tests. 112 tests are disabled in ordinary runs because they play audio on named devices or scan a NAS.
+On 2026-11-01, for 0.2.0, a full Release run passed all 715 enabled C++ tests, including the 100k-track search latency target, and all 88 Rust Engine tests. A full Debug run passed 714 of 715: unoptimized, the latency test measured a first-page p95 of 102.9 ms and a broad-suggestion p95 of 483 ms against its 100 ms target for optimized builds. 112 tests are disabled in ordinary runs because they play audio on named devices or scan a NAS.
+
+On 2026-10-31, for 0.1.0, a full Release run passed all 661 enabled C++ tests, including the latency target, and all 47 Rust Engine tests.
 
 Earlier targeted runs:
 
@@ -24,7 +26,7 @@ What the decoding tests check:
 
 ## Hardware
 
-On 2026-10-31, before the release, all 97 hardware tests passed again in 196 seconds on the same two devices: playback on every backend with each FLAC decoder, the other formats, DSD rates and DSD switching, device fallback, the output parameters and the Server's playback path.
+On 2026-11-01, before 0.2.0, all 97 hardware tests passed again in 195 seconds on the same two devices, as they had on 2026-10-31 before 0.1.0 in 196 seconds: playback on every backend with each FLAC decoder, the other formats, DSD rates and DSD switching, device fallback, the output parameters and the Server's playback path.
 
 The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Server APIs on a Chord DAVE (WASAPI, ASIO and Kernel Streaming) and a built-in Cirrus codec (WASAPI and Kernel Streaming).
 
@@ -33,6 +35,15 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 - Kernel Streaming has no native DSD, because Windows defines no Kernel Streaming DSD format, so it plays DSD as DoP or, when allowed, as PCM.
 - The Cirrus codec takes 24-in-32-bit samples up to 192 kHz, a container the DAVE refuses. It has no DSD mode, so it receives DSD only converted to PCM, never DoP or native DSD.
 - A separate DAVE run of the output parameters (polling buffer, MMCSS, fixed sample rate, silence after a DoP-to-PCM switch and release after a pause) passed 5/5.
+
+## In the app
+
+Checked by hand on 2026-11-01 in a Release build, for 0.2.0:
+
+- On the Chord DAVE, with ReplayGain, the parametric EQ, software volume, a 3-second crossfade and TPDF dither to 24 bits all on, the signal path listed every stage: ReplayGain −8.9 dB, the EQ, volume −6.0 dB, the crossfade and the dither.
+- Skipping to the next track crossfaded into it without reopening the device.
+- A DSD256 file played as native DSD showed Bit-perfect with nothing changing the signal, and noted that native DSD bypasses the DSP.
+- With Discord Rich Presence and its cover on, the owner's Discord profile showed the playing title, artists, album, progress and the Bit-perfect state over the file's own cover, served through the cloudflared tunnel; the friends list showed the title, and pausing cleared the activity. cloudflared was downloaded on first use, checked against its pinned SHA-256 before it ran, and ended with CamelPlayer.
 
 ## Library performance
 

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
+
+Upgrading from 0.1.0: the first start moves the library to a newer format (schema 18) and keeps the old one as `library.db.v17.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.1.0 refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v17.bak` to `library.db`; what changed since the upgrade, such as plays, favorites and ReplayGain analysis, is lost that way. 0.1.0 reads the settings too, but keeps only those it knows, so the DSP, volume and Discord settings go when it saves.
 
 New features since 0.1.0:
 
