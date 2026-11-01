@@ -22,6 +22,7 @@
         </Style>
         <Style x:Key="SectionHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
             <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
         </Style>
         <DataTemplate x:Key="CoverTemplate" x:DataType="local:BrowseItem">
             <StackPanel Width="{Binding Cover, Source={StaticResource HomeCards}}" Spacing="2" Margin="0,0,12,0">
@@ -80,7 +81,7 @@
             <StackPanel x:Name="HomePart" Spacing="12">
                 <!-- The library's size, not a listening statistic, so it sits under the title rather than among the cards. -->
                 <StackPanel>
-                    <TextBlock x:Uid="Home_Title" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock x:Uid="Home_Title" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level1" />
                     <TextBlock x:Name="LibraryCounts" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
@@ -134,7 +135,7 @@
 
             <StackPanel x:Name="ListeningPart" Spacing="12" Visibility="Collapsed">
                 <!-- The Listening page: a card picks the period that the chart, the most played and the history below show. -->
-                <TextBlock x:Uid="Home_Listening" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock x:Uid="Home_Listening" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level1" />
                 <Grid x:Name="Tiles" ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />

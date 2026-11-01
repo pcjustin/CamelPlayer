@@ -10,8 +10,17 @@ New features since 0.1.0:
 - **Software volume:** volume stays fixed by default, for a DAC or amplifier; software volume adds a slider (−80 to 0 dB) and mute to the player bar, and at 0 dB playback stays bit-perfect.
 - **ReplayGain:** Track, Album or Auto (album gain while the queue plays an album in order), with preamps for tracks with and without values and clipping prevention by peak. Values come from the files' tags; tracks without them are analyzed in the background (EBU R128 with libebur128) while ReplayGain is on, queued tracks first, throttled or fast, and the results stay in the library, never in the files.
 - **Crossfade** of 1 to 10 seconds, off by default: natural changes, Previous/Next and playing another track or album overlap with an equal-power fade, while an album played in order stays gapless. Pause, stop, seeking and restarting a track act at once. A track in another format is converted to the open one, so nothing reopens mid-track; raw DSD never crossfades.
-- **Signal path panel:** the format line or the bit-perfect lamp opens a panel above the player bar with the verdict and the route from the file's format to the device's, then one row per step in three stages, source, processing and output, each with the format after it and a colored dot for bit-perfect, lossless conversion, processed or lossy source. A processing stage with no steps says that nothing there changes the signal.
+- **Signal path panel:** the bit-perfect lamp opens a panel above the player bar with the verdict and the route from the file's format to the device's, then one row per step in three stages, source, processing and output, each with the format after it and a colored dot for bit-perfect, lossless conversion, processed or lossy source. A processing stage with no steps says that nothing there changes the signal.
 - **The DSP chain:** EQ, crossfeed and convolution work in an order you can change, after one automatic preamp that keeps the whole chain from clipping. The DSP button in the player bar turns each on or off and switches EQ presets. Changes are heard within about a quarter of a second without a gap; while nothing changes the signal, playback stays bit-perfect.
+
+Changed since 0.1.0:
+
+- **Search ranks results:** names that match whole come first, then names that start with the search, then names with a word that starts with it, then the rest. Artists always rank; tracks and albums rank when a search matches up to 2,000 tracks, and a broader one lists them by title as before.
+- **The Tracks list has column headers:** click Title, Artist, Album or Length to sort by it, and again to reverse it.
+- **Play on an album or folder page plays it at once;** the arrow beside it offers playing it next and adding it to the queue.
+- **The player bar is two rows high:** the time follows the timeline and the badges and the DSP button sit at its end. The format line is gone; the signal path panel shows the route.
+- **Settings › DSP is three cards,** Volume and ReplayGain, Crossfade, and DSP processing, and each long note shows its first sentence with Learn more.
+- Screen readers find the page titles and the settings cards as headings, and hear Play or Pause and the repeat mode as they are. Repeat is a toggle like Shuffle. Counts show digit grouping (70,715), album titles wrap to two lines, the player bar's cover has a tooltip, and the fields of crossfade and ReplayGain are disabled while those are off.
 
 Fixed since 0.1.0:
 

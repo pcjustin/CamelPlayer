@@ -27,7 +27,7 @@
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" MinWidth="56" />
+                    <ColumnDefinition Width="Auto" MinWidth="72" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <!-- An artist's or composer's picture, over their initial (docs/Plan.md §7.4). -->
@@ -61,7 +61,7 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
                             PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
-                    <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Padding="6,4" VerticalAlignment="Center"
+                    <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Width="32" Padding="6,4" VerticalAlignment="Center"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon Glyph="{x:Bind FavoriteGlyph, Mode=OneWay}" FontSize="14" />
                     </Button>
@@ -224,7 +224,43 @@
                     </Button.Flyout>
                 </Button>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                    <!-- The album and folder Play buttons are accent split buttons: the button plays, the arrow offers the rest. -->
+                    <StackPanel.Resources>
+                        <ResourceDictionary>
+                            <ResourceDictionary.ThemeDictionaries>
+                                <ResourceDictionary x:Key="Default">
+                                    <StaticResource x:Key="SplitButtonBackground" ResourceKey="AccentFillColorDefaultBrush" />
+                                    <StaticResource x:Key="SplitButtonBackgroundPointerOver" ResourceKey="AccentFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="SplitButtonBackgroundPressed" ResourceKey="AccentFillColorTertiaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForeground" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundPointerOver" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundPressed" ResourceKey="TextOnAccentFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundSecondary" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundSecondaryPressed" ResourceKey="TextOnAccentFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrush" ResourceKey="AccentControlElevationBorderBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrushPointerOver" ResourceKey="AccentControlElevationBorderBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrushPressed" ResourceKey="ControlFillColorTransparentBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrushDivider" ResourceKey="ControlStrokeColorOnAccentTertiaryBrush" />
+                                </ResourceDictionary>
+                                <ResourceDictionary x:Key="Light">
+                                    <StaticResource x:Key="SplitButtonBackground" ResourceKey="AccentFillColorDefaultBrush" />
+                                    <StaticResource x:Key="SplitButtonBackgroundPointerOver" ResourceKey="AccentFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="SplitButtonBackgroundPressed" ResourceKey="AccentFillColorTertiaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForeground" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundPointerOver" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundPressed" ResourceKey="TextOnAccentFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundSecondary" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                                    <StaticResource x:Key="SplitButtonForegroundSecondaryPressed" ResourceKey="TextOnAccentFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrush" ResourceKey="AccentControlElevationBorderBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrushPointerOver" ResourceKey="AccentControlElevationBorderBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrushPressed" ResourceKey="ControlFillColorTransparentBrush" />
+                                    <StaticResource x:Key="SplitButtonBorderBrushDivider" ResourceKey="ControlStrokeColorOnAccentTertiaryBrush" />
+                                </ResourceDictionary>
+                            </ResourceDictionary.ThemeDictionaries>
+                        </ResourceDictionary>
+                    </StackPanel.Resources>
+                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"
+                               MaxLines="2" AutomationProperties.HeadingLevel="Level1" />
                     <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
                     <!-- A Wikimedia Commons picture's author and license, linking to the file's page. -->
                     <TextBlock x:Name="PictureCredit" Style="{StaticResource CaptionTextBlockStyle}" Margin="0,2,0,0" TextWrapping="NoWrap"
@@ -232,17 +268,13 @@
                     <!-- Each format, bit depth and sample rate among the album's tracks (docs/Plan.md §8.2) -->
                     <StackPanel x:Name="AlbumFormats" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0" Visibility="Collapsed" />
                     <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
-                        <Button Style="{StaticResource AccentButtonStyle}" Padding="16,6">
+                        <SplitButton x:Uid="Library_PlayAlbum" Padding="16,6" Click="OnPlayAlbumClick">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE768;" FontSize="14" />
-                                <TextBlock x:Uid="Library_AlbumPlaybackOptions" />
-                                <FontIcon Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock x:Uid="Library_PlayButton" />
                             </StackPanel>
-                            <Button.Flyout>
+                            <SplitButton.Flyout>
                                 <MenuFlyout x:Name="AlbumMenu" Placement="BottomEdgeAlignedLeft">
-                                    <MenuFlyoutItem x:Uid="Library_PlayAlbum" Click="OnPlayAlbumClick">
-                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
-                                    </MenuFlyoutItem>
                                     <MenuFlyoutItem x:Uid="Library_PlayAlbumNext" Click="OnPlayNextAlbumClick">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE893;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
@@ -250,8 +282,8 @@
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
                                 </MenuFlyout>
-                            </Button.Flyout>
-                        </Button>
+                            </SplitButton.Flyout>
+                        </SplitButton>
                         <ToggleButton x:Name="AlbumFavoriteButton" x:Uid="Marks_AlbumFavoriteButton" Click="OnAlbumFavoriteClick"
                                       Padding="10,6">
                             <FontIcon x:Name="AlbumFavoriteIcon" Glyph="&#xE006;" FontSize="16" />
@@ -292,18 +324,14 @@
                     </StackPanel>
                     <BreadcrumbBar x:Name="FolderTrail" ItemClicked="OnTrailClicked" Visibility="Collapsed" Margin="0,4,0,0" />
                     <!-- A folder plays with its subfolders, as its right-click menu one level up does. -->
-                    <Button x:Name="FolderActions" Style="{StaticResource AccentButtonStyle}" Padding="16,6" Margin="0,12,0,0"
-                            Visibility="Collapsed">
+                    <SplitButton x:Name="FolderActions" x:Uid="Library_PlayFolder" Padding="16,6" Margin="0,12,0,0"
+                                 Visibility="Collapsed" Click="OnPlayFolderClick">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon Glyph="&#xE768;" FontSize="14" />
-                            <TextBlock x:Uid="Library_FolderPlaybackOptions" />
-                            <FontIcon Glyph="&#xE70D;" FontSize="10" VerticalAlignment="Center" />
+                            <TextBlock x:Uid="Library_PlayButton" />
                         </StackPanel>
-                        <Button.Flyout>
+                        <SplitButton.Flyout>
                             <MenuFlyout Placement="BottomEdgeAlignedLeft">
-                                <MenuFlyoutItem x:Uid="Library_PlayFolder" Click="OnPlayFolderClick">
-                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
-                                </MenuFlyoutItem>
                                 <MenuFlyoutItem x:Uid="Library_PlayFolderNext" Click="OnPlayNextFolderClick">
                                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE893;" /></MenuFlyoutItem.Icon>
                                 </MenuFlyoutItem>
@@ -311,8 +339,8 @@
                                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
                                 </MenuFlyoutItem>
                             </MenuFlyout>
-                        </Button.Flyout>
-                    </Button>
+                        </SplitButton.Flyout>
+                    </SplitButton>
                 </StackPanel>
             </Grid>
             <ComboBox x:Name="SortCombo" x:Uid="Library_SortCombo" Grid.Column="1" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnSortChanged" />
@@ -331,44 +359,159 @@
 
         <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" SizeChanged="OnAlbumGridSizeChanged" />
-        <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
-                  IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" SizeChanged="OnRowListSizeChanged"
-                  ContainerContentChanging="OnRowContainerContentChanging">
-            <ListView.Resources>
-                <ResourceDictionary>
-                    <ResourceDictionary.ThemeDictionaries>
-                        <ResourceDictionary x:Key="Default">
-                            <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
-                            <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
-                            <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
-                        </ResourceDictionary>
-                        <ResourceDictionary x:Key="Light">
-                            <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
-                            <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
-                            <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
-                        </ResourceDictionary>
-                    </ResourceDictionary.ThemeDictionaries>
-                </ResourceDictionary>
-            </ListView.Resources>
-            <ListView.Header>
-                <StackPanel>
-                    <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
-                    <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">
-                        <Grid ColumnSpacing="4">
+        <!-- The track list's column headers sort it as the sort list does: a header sorts by its column, again the other way. -->
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid x:Name="TrackColumns" Padding="16,0,12,6" ColumnSpacing="16" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition Width="Auto" MinWidth="72" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="TitleColumn" Grid.Column="0" Tag="0" Padding="0" MinWidth="0" Click="OnTrackColumnClick">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock x:Name="TitleColumnText" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon x:Name="TitleColumnArrow" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ArtistColumn" Grid.Column="1" Tag="1" Padding="0" MinWidth="0" Click="OnTrackColumnClick">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock x:Name="ArtistColumnText" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon x:Name="ArtistColumnArrow" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="AlbumColumn" Grid.Column="2" Tag="2" Padding="0" MinWidth="0" Click="OnTrackColumnClick">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock x:Name="AlbumColumnText" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon x:Name="AlbumColumnArrow" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="DurationColumn" Grid.Column="4" Tag="4" Padding="0" MinWidth="0" HorizontalAlignment="Right" Click="OnTrackColumnClick">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock x:Name="DurationColumnText" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon x:Name="DurationColumnArrow" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+            <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
+                      IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" SizeChanged="OnRowListSizeChanged"
+                      ContainerContentChanging="OnRowContainerContentChanging">
+                <ListView.Resources>
+                    <ResourceDictionary>
+                        <ResourceDictionary.ThemeDictionaries>
+                            <ResourceDictionary x:Key="Default">
+                                <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
+                            </ResourceDictionary>
+                            <ResourceDictionary x:Key="Light">
+                                <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="TextFillColorTertiaryBrush" />
+                            </ResourceDictionary>
+                        </ResourceDictionary.ThemeDictionaries>
+                    </ResourceDictionary>
+                </ListView.Resources>
+                <ListView.Header>
+                    <StackPanel>
+                        <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
+                        <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">
+                            <Grid ColumnSpacing="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SearchAlbumsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="albums-back" Click="OnSearchRowScroll" Padding="6">
+                                    <FontIcon Glyph="&#xE76B;" FontSize="12" />
+                                </Button>
+                                <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="albums-forward" Click="OnSearchRowScroll" Padding="6">
+                                    <FontIcon Glyph="&#xE76C;" FontSize="12" />
+                                </Button>
+                            </Grid>
+                            <GridView x:Name="SearchAlbums" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                                      IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
+                                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                      ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                                <GridView.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <ItemsStackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </GridView.ItemsPanel>
+                            </GridView>
+                            <Grid ColumnSpacing="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SearchArtistsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="artists-back" Click="OnSearchRowScroll" Padding="6">
+                                    <FontIcon Glyph="&#xE76B;" FontSize="12" />
+                                </Button>
+                                <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="artists-forward" Click="OnSearchRowScroll" Padding="6">
+                                    <FontIcon Glyph="&#xE76C;" FontSize="12" />
+                                </Button>
+                            </Grid>
+                            <ListView x:Name="SearchArtists" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnSearchArtistClick"
+                                      ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                      ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                                <ListView.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <ItemsStackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ListView.ItemsPanel>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:BrowseItem">
+                                        <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                Tag="artist" ContextRequested="OnCardContextRequested">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE77B;" FontSize="14" />
+                                                <TextBlock Text="{x:Bind Title, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <TextBlock x:Name="SearchTracksHeader" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" />
+                        </StackPanel>
+                        <!-- An artist's or composer's page (docs/Plan.md §8.2): their most played tracks above their albums. -->
+                        <Grid x:Name="ArtistTracksHeader" Padding="0,0,20,4" Visibility="Collapsed">
+                            <TextBlock x:Name="ArtistTracksTitle" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
+                            <HyperlinkButton x:Name="ArtistTracksAll" x:Uid="Home_ViewAll" Tag="tracks" Click="OnArtistViewAllClick"
+                                             HorizontalAlignment="Right" />
+                        </Grid>
+                    </StackPanel>
+                </ListView.Header>
+                <ListView.Footer>
+                    <StackPanel x:Name="ArtistAlbums" Spacing="8" Padding="0,16,20,8" Visibility="Collapsed">
+                        <Grid x:Name="ArtistOwnHeader" ColumnSpacing="4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SearchAlbumsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="albums-back" Click="OnSearchRowScroll" Padding="6">
+                            <TextBlock x:Name="ArtistOwnTitle" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="own-back" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76B;" FontSize="12" />
                             </Button>
-                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="albums-forward" Click="OnSearchRowScroll" Padding="6">
+                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="own-forward" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76C;" FontSize="12" />
                             </Button>
+                            <HyperlinkButton x:Name="ArtistOwnAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="own" Click="OnArtistViewAllClick" />
                         </Grid>
-                        <GridView x:Name="SearchAlbums" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                        <GridView x:Name="ArtistOwn" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
                                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                                   ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                   ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -378,107 +521,36 @@
                                 </ItemsPanelTemplate>
                             </GridView.ItemsPanel>
                         </GridView>
-                        <Grid ColumnSpacing="4">
+                        <Grid x:Name="ArtistGuestHeader" ColumnSpacing="4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SearchArtistsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="artists-back" Click="OnSearchRowScroll" Padding="6">
+                            <TextBlock x:Name="ArtistGuestTitle" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="guest-back" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76B;" FontSize="12" />
                             </Button>
-                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="artists-forward" Click="OnSearchRowScroll" Padding="6">
+                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="guest-forward" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76C;" FontSize="12" />
                             </Button>
+                            <HyperlinkButton x:Name="ArtistGuestAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="guest" Click="OnArtistViewAllClick" />
                         </Grid>
-                        <ListView x:Name="SearchArtists" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnSearchArtistClick"
+                        <GridView x:Name="ArtistGuest" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                                  IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                                   ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                   ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                            <ListView.ItemsPanel>
+                            <GridView.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <ItemsStackPanel Orientation="Horizontal" />
                                 </ItemsPanelTemplate>
-                            </ListView.ItemsPanel>
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="local:BrowseItem">
-                                    <Border Padding="12,6" CornerRadius="16" Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                            Tag="artist" ContextRequested="OnCardContextRequested">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon Glyph="&#xE77B;" FontSize="14" />
-                                            <TextBlock Text="{x:Bind Title, Mode=OneWay}" />
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                        <TextBlock x:Name="SearchTracksHeader" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            </GridView.ItemsPanel>
+                        </GridView>
                     </StackPanel>
-                    <!-- An artist's or composer's page (docs/Plan.md §8.2): their most played tracks above their albums. -->
-                    <Grid x:Name="ArtistTracksHeader" Padding="0,0,20,4" Visibility="Collapsed">
-                        <TextBlock x:Name="ArtistTracksTitle" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                        <HyperlinkButton x:Name="ArtistTracksAll" x:Uid="Home_ViewAll" Tag="tracks" Click="OnArtistViewAllClick"
-                                         HorizontalAlignment="Right" />
-                    </Grid>
-                </StackPanel>
-            </ListView.Header>
-            <ListView.Footer>
-                <StackPanel x:Name="ArtistAlbums" Spacing="8" Padding="0,16,20,8" Visibility="Collapsed">
-                    <Grid x:Name="ArtistOwnHeader" ColumnSpacing="4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="ArtistOwnTitle" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="own-back" Click="OnSearchRowScroll" Padding="6">
-                            <FontIcon Glyph="&#xE76B;" FontSize="12" />
-                        </Button>
-                        <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="own-forward" Click="OnSearchRowScroll" Padding="6">
-                            <FontIcon Glyph="&#xE76C;" FontSize="12" />
-                        </Button>
-                        <HyperlinkButton x:Name="ArtistOwnAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="own" Click="OnArtistViewAllClick" />
-                    </Grid>
-                    <GridView x:Name="ArtistOwn" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
-                              IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
-                              ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                              ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                        <GridView.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <ItemsStackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </GridView.ItemsPanel>
-                    </GridView>
-                    <Grid x:Name="ArtistGuestHeader" ColumnSpacing="4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="ArtistGuestTitle" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="guest-back" Click="OnSearchRowScroll" Padding="6">
-                            <FontIcon Glyph="&#xE76B;" FontSize="12" />
-                        </Button>
-                        <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="guest-forward" Click="OnSearchRowScroll" Padding="6">
-                            <FontIcon Glyph="&#xE76C;" FontSize="12" />
-                        </Button>
-                        <HyperlinkButton x:Name="ArtistGuestAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="guest" Click="OnArtistViewAllClick" />
-                    </Grid>
-                    <GridView x:Name="ArtistGuest" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
-                              IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
-                              ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                              ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                        <GridView.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <ItemsStackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </GridView.ItemsPanel>
-                    </GridView>
-                </StackPanel>
-            </ListView.Footer>
-        </ListView>
+                </ListView.Footer>
+            </ListView>
+        </Grid>
         <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />
         <ListView x:Name="FolderTree" Grid.Row="1" ItemTemplate="{StaticResource FolderTreeTemplate}" SelectionMode="Extended"

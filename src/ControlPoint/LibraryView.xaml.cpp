@@ -47,7 +47,7 @@ struct Texts {
 
 hstring counted(const hstring& format, int64_t n) {
     std::wstring text(format);
-    if (const auto at = text.find(L"{0}"); at != std::wstring::npos) text.replace(at, 3, std::to_wstring(n));
+    if (const auto at = text.find(L"{0}"); at != std::wstring::npos) text.replace(at, 3, ui::count(n));
     return hstring(text);
 }
 
@@ -544,9 +544,21 @@ void LibraryView::fillSortChoices() {
     for (const auto* key : keys) SortCombo().Items().Append(box_value(tr(key)));
     SortCombo().Visibility(keys.empty() ? Visibility::Collapsed : Visibility::Visible);
     if (!keys.empty()) SortCombo().SelectedIndex(selected);
-    DescendingToggle().Visibility(current_.mode == Mode::Tracks && !current_.smart && !current_.fetch ? Visibility::Visible
-                                                                                                      : Visibility::Collapsed);
+    const bool sortable = current_.mode == Mode::Tracks && !current_.smart && !current_.fetch;
+    DescendingToggle().Visibility(sortable ? Visibility::Visible : Visibility::Collapsed);
     DescendingToggle().IsChecked(descending_);
+    TrackColumns().Visibility(sortable ? Visibility::Visible : Visibility::Collapsed);
+    // The sorted column's header carries an arrow pointing the way it sorts.
+    const std::tuple<TextBlock, FontIcon, TrackSort, const wchar_t*> columns[] = {
+        {TitleColumnText(), TitleColumnArrow(), TrackSort::Title, L"Library_SortTitle"},
+        {ArtistColumnText(), ArtistColumnArrow(), TrackSort::Artist, L"Library_SortArtist"},
+        {AlbumColumnText(), AlbumColumnArrow(), TrackSort::Album, L"Library_SortAlbum"},
+        {DurationColumnText(), DurationColumnArrow(), TrackSort::Duration, L"Library_SortDuration"}};
+    for (const auto& [text, arrow, sort, key] : columns) {
+        text.Text(tr(key));
+        arrow.Glyph(descending_ ? L"\xE70D" : L"\xE70E");
+        arrow.Visibility(sort == trackSort_ ? Visibility::Visible : Visibility::Collapsed);
+    }
     populating_ = false;
 }
 
@@ -1101,7 +1113,7 @@ winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tr
     ContentDialog dialog;
     ui::placeDialog(dialog, XamlRoot());
     dialog.Title(box_value(tr(L"Library_ResetStatisticsTitle")));
-    dialog.Content(box_value(ui::format(L"Library_ResetStatisticsText", {std::to_wstring(tracks.size())})));
+    dialog.Content(box_value(ui::format(L"Library_ResetStatisticsText", {ui::count(int64_t(tracks.size()))})));
     dialog.PrimaryButtonText(tr(L"Library_ResetStatisticsPrimary"));
     dialog.CloseButtonText(tr(L"Playlist_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Close);
@@ -1503,11 +1515,11 @@ void LibraryView::OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&,
     queueAlbum(current_.album, true);
 }
 
-void LibraryView::OnPlayAlbumClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+void LibraryView::OnPlayAlbumClick(SplitButton const&, SplitButtonClickEventArgs const&) {
     playAlbum(current_.album);
 }
 
-void LibraryView::OnPlayFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+void LibraryView::OnPlayFolderClick(SplitButton const&, SplitButtonClickEventArgs const&) {
     if (current_.folder) queueFolder(*current_.folder, false, true);
 }
 
@@ -1786,6 +1798,13 @@ void LibraryView::OnSortChanged(Windows::Foundation::IInspectable const&, Select
 
 void LibraryView::OnDescendingClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     descending_ = DescendingToggle().IsChecked().Value();
+    open(current_, false);
+}
+
+void LibraryView::OnTrackColumnClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    const auto sort = TrackSort(std::stoi(std::wstring(unbox_value<hstring>(sender.as<Button>().Tag()))));
+    descending_ = sort == trackSort_ && !descending_;
+    trackSort_ = sort;
     open(current_, false);
 }
 

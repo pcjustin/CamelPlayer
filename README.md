@@ -27,7 +27,7 @@ The screenshots show a demo library with made-up albums and covers.
 - **Bit-perfect playback** of 16- and 24-bit lossless files through WASAPI exclusive, ASIO or Kernel Streaming, and WASAPI shared mode when other programs must play too.
 - **DSD** from DSF and DSDIFF files as native DSD on ASIO or as DoP on every backend, up to DSD512 where the device takes it.
 - **Nothing is converted without your permission.** When a device does not take a file as it is, CamelPlayer skips it and tells you, unless you allow resampling, downmixing to stereo, dither to a lower bit depth or DSD to PCM.
-- **The signal path on screen:** badges show bit-perfect, processed, lossy source or raw DSD playback, and the format line or the lamp opens the signal path in a panel above the player bar: the source, processing and output stages, one row per step with its format and a dot for its state.
+- **The signal path on screen:** badges show bit-perfect, processed, lossy source or raw DSD playback, and the lamp opens the signal path in a panel above the player bar: the source, processing and output stages, one row per step with its format and a dot for its state.
 - **DSP** in Settings › DSP: a parametric EQ (five bands to start, up to ten in the editor, eight filter types and per-channel bands on a draggable curve, presets, and Equalizer APO and AutoEq import and export), bs2b headphone crossfeed, and convolution with an impulse response from a mono, stereo or true-stereo .wav or a .zip with one per sample rate. Their order can be changed, one automatic preamp keeps the whole chain from clipping, and changes are heard within a quarter of a second without a gap. While nothing changes the signal, playback stays bit-perfect.
 - **Volume and ReplayGain:** volume stays fixed for your DAC or amplifier unless you choose software volume, which adds a slider and mute to the player bar. ReplayGain plays tracks or albums (or either, by what the queue plays) at an even loudness from their tags; tracks without tags are analyzed in the background with EBU R128 while ReplayGain is on, and the results stay in the library.
 - **Gapless playback** between tracks of the same format, and **crossfade** (1–10 s, off by default) at every other change of track, natural or chosen; an album played in order stays gapless.
@@ -42,7 +42,7 @@ The screenshots show a demo library with made-up albums and covers.
 - **Artist and composer pages:** their ten most played tracks, then their own albums and the albums they appear on, each with View all, so a singer's songs on someone else's album are one click away.
 - **Artist pictures** on their page and beside their name in the Artists and Composers lists: a picture you choose, an `artist.jpg` in a folder named after them, or, if you allow it, a freely licensed one from Wikimedia Commons shown with its author and license. Without one, their initial stands in.
 - **Every name in a credit counts:** "Aimer with chelly" or "A feat. B" lists each artist on its own, and each name on an album page and in the player bar opens that artist.
-- **Search** from the title bar (Ctrl+F) with suggestions as you type, including Chinese and Japanese.
+- **Search** from the title bar (Ctrl+F) with suggestions as you type, including Chinese and Japanese, whole and leading matches first.
 
 ### Queue, playlists and favorites
 

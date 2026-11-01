@@ -147,8 +147,7 @@ void PlaylistView::load() {
                 for (const auto& p : playlists_) {
                     ui::BrowseRow row{p.id, {}, ui::utf8(p.name)};
                     std::wstring count(tracks);
-                    if (const auto at = count.find(L"{0}"); at != std::wstring::npos)
-                        count.replace(at, 3, std::to_wstring(p.tracks));
+                    if (const auto at = count.find(L"{0}"); at != std::wstring::npos) count.replace(at, 3, ui::count(p.tracks));
                     row.trailing = hstring(count);
                     auto item = make<BrowseItem>();
                     get_self<BrowseItem>(item)->fill(row);
@@ -199,13 +198,13 @@ void PlaylistView::load() {
             revision_ = loaded->revision;
             HeaderTitle().Text(name_);
             const auto total = loaded->rows.size();
-            std::wstring detail(ui::format(L"Library_Tracks", {std::to_wstring(total)}));
+            std::wstring detail(ui::format(L"Library_Tracks", {ui::count(int64_t(total))}));
             if (loaded->durationMs) detail += L" · " + ui::formatTime(double(loaded->durationMs) / 1000.0);
             if (loaded->unavailable)
-                detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {std::to_wstring(loaded->unavailable)}));
+                detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {ui::count(loaded->unavailable)}));
             if (total > ui::PlaylistCollection::kShown)
                 detail +=
-                    L" · " + std::wstring(ui::format(L"Playlist_Listed", {std::to_wstring(ui::PlaylistCollection::kShown)}));
+                    L" · " + std::wstring(ui::format(L"Playlist_Listed", {ui::count(int64_t(ui::PlaylistCollection::kShown))}));
             HeaderDetail().Text(hstring(detail));
             entries_->reset(std::move(loaded->rows));
             EmptyText().Text(tr(L"Playlist_EmptyPlaylist"));
@@ -396,9 +395,9 @@ winrt::fire_and_forget PlaylistView::OnImportClick(Windows::Foundation::IInspect
             if (self->handlers_.notify) self->handlers_.notify(tr(L"Playlist_ImportFailed"), hstring(file.wstring()), true);
             return;
         }
-        std::wstring message(ui::format(L"Library_Tracks", {std::to_wstring(change->added)}));
+        std::wstring message(ui::format(L"Library_Tracks", {ui::count(change->added)}));
         if (change->skippedUnavailable)
-            message += L" · " + std::wstring(ui::format(L"Playlist_SkippedUrls", {std::to_wstring(change->skippedUnavailable)}));
+            message += L" · " + std::wstring(ui::format(L"Playlist_SkippedUrls", {ui::count(change->skippedUnavailable)}));
         if (self->handlers_.changed) self->handlers_.changed();
         if (self->handlers_.notify)
             self->handlers_.notify(ui::format(L"Playlist_Imported", {std::wstring(ui::utf8(change->name))}), hstring(message),

@@ -164,6 +164,27 @@ void setBadgeTip(FrameworkElement const& badge, hstring const& name, hstring con
     ToolTipService::SetToolTip(badge, tip.empty() ? nullptr : box_value(tip));
 }
 
+// A long settings note shows its first sentence and a link that shows the rest, and then hides it again.
+void foldNote(TextBlock const& note) {
+    const std::wstring whole(note.Text());
+    size_t end = whole.find(L'。');
+    end = std::min(end, whole.find(L". "));
+    if (end == std::wstring::npos || end + 2 >= whole.size()) return;
+    Documents::Run text;
+    Documents::Run label;
+    Documents::Hyperlink link;
+    link.Inlines().Append(label);
+    note.Inlines().Clear();
+    note.Inlines().Append(text);
+    note.Inlines().Append(link);
+    const auto show = [text, label, first = whole.substr(0, end + 1), whole](bool open) {
+        text.Text(hstring((open ? whole : first) + L" "));
+        label.Text(tr(open ? L"Settings_LessInfo" : L"Settings_MoreInfo"));
+    };
+    show(false);
+    link.Click([show, open = false](auto&&, auto&&) mutable { show(open = !open); });
+}
+
 std::vector<hstring> rateItems() {
     std::vector<hstring> items{tr(L"Rate_FollowFile")};
     for (uint32_t rate : kFixedRates) {
@@ -297,13 +318,16 @@ void MainWindow::InitializeComponent() {
         ToolTipService::SetToolTip(button, box_value(tr(key)));
         Automation::AutomationProperties::SetName(button, tr(key));
     };
-    setButtonTip(PlayPauseButton(), L"Tip_PlayPause");
+    setButtonTip(PlayPauseButton(), L"Tip_Play");
     setButtonTip(StopButton(), L"Tip_Stop");
     setButtonTip(PreviousButton(), L"Tip_Previous");
     setButtonTip(NextButton(), L"Tip_Next");
     setButtonTip(ShuffleButton(), L"Tip_Shuffle");
-    setButtonTip(RepeatButton(), L"Tip_Repeat");
+    setButtonTip(RepeatButton(), L"Tip_RepeatOff");
     setButtonTip(QueueToggleButton(), L"Tip_Queue");
+    for (const TextBlock note :
+         {VolumeNote(), ReplayGainNote(), CrossfadeNote(), DspOrderNote(), EqNote(), CrossfeedNote(), ConvolutionNote()})
+        foldNote(note);
 
     populateSettings();
     const ui::PlaylistMenu playlistMenu = [this](MenuFlyout const& menu, const std::function<ui::SourceFetch()>& selection) {
@@ -853,7 +877,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
     const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
 
-    PlayPauseIcon().Symbol(s.state == PlaybackState::Playing ? Symbol::Pause : Symbol::Play);
+    // The play button and the repeat button are named for what they do or show now.
+    if (const Symbol symbol = s.state == PlaybackState::Playing ? Symbol::Pause : Symbol::Play;
+        PlayPauseIcon().Symbol() != symbol) {
+        PlayPauseIcon().Symbol(symbol);
+        const hstring tip = tr(symbol == Symbol::Pause ? L"Tip_Pause" : L"Tip_Play");
+        setBadgeTip(PlayPauseButton(), tip, tip);
+    }
     if (!seekTimer_.IsRunning()) { // do not fight the user while they drag
         sliderUpdating_ = true;
         PositionSlider().Maximum(std::max(1.0, total));
@@ -869,8 +899,15 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     CoverButton().IsEnabled(hasTrack);
     PositionSlider().IsEnabled(hasTrack);
     ShuffleButton().IsChecked(snapshot.queue.shuffle);
-    RepeatIcon().Symbol(snapshot.queue.repeat == RepeatMode::One ? Symbol::RepeatOne : Symbol::RepeatAll);
-    RepeatIcon().Opacity(snapshot.queue.repeat == RepeatMode::Off ? 0.35 : 1.0);
+    RepeatButton().IsChecked(snapshot.queue.repeat != RepeatMode::Off);
+    if (snapshot.queue.repeat != shownRepeat_) {
+        shownRepeat_ = snapshot.queue.repeat;
+        RepeatIcon().Symbol(shownRepeat_ == RepeatMode::One ? Symbol::RepeatOne : Symbol::RepeatAll);
+        const hstring tip = tr(shownRepeat_ == RepeatMode::Off   ? L"Tip_RepeatOff"
+                               : shownRepeat_ == RepeatMode::One ? L"Tip_RepeatOne"
+                                                                 : L"Tip_RepeatAll");
+        setBadgeTip(RepeatButton(), tip, tip);
+    }
     if (camel::measure::measuring() && !queueShownMeasured_ && !snapshot.queue.entries.empty()) {
         queueShownMeasured_ = true;
         camel::log::info("measure: queue of %zu entries shown %.0f ms after process start", snapshot.queue.entries.size(),
@@ -883,9 +920,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const bool windowed = snapshot.queue.entries.size() > ui::QueueCollection::kShown;
         std::wstring count(tr(windowed ? L"Queue_CountWindowed" : L"Library_Tracks"));
         if (const auto at = count.find(L"{0}"); at != std::wstring::npos)
-            count.replace(at, 3, std::to_wstring(snapshot.queue.entries.size()));
+            count.replace(at, 3, ui::count(int64_t(snapshot.queue.entries.size())));
         if (const auto at = count.find(L"{1}"); at != std::wstring::npos)
-            count.replace(at, 3, std::to_wstring(ui::QueueCollection::kShown));
+            count.replace(at, 3, ui::count(int64_t(ui::QueueCollection::kShown)));
         QueueCountText().Text(count);
         QueueEmptyText().Visibility(snapshot.queue.entries.empty() ? Visibility::Visible : Visibility::Collapsed);
         std::vector<ui::QueueRow> rows;
@@ -1003,9 +1040,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                (plan.dsd != DsdPath::None ? L""
                                 : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
                                                           : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
-        const hstring route = source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output));
-        FormatText().Text(route + L" · " + decoder);
-        PathRouteText().Text(route);
+        PathRouteText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)));
         // One row per step that changes or carries the signal, in the Engine's order (docs/Plan.md §8.1).
         std::vector<PathStep> steps;
         PathStage stage = PathStage::Source;
@@ -1092,8 +1127,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         setAnnounced(LampText(), tr(L"Lamp_Idle"));
         SourceBadge().Visibility(Visibility::Collapsed);
         BypassBadge().Visibility(Visibility::Collapsed);
-        FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
-        PathRouteText().Text(FormatText().Text());
+        PathRouteText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
         showSignalPath({});
     }
     Lamp().Fill(themeBrush(lampColor_));
@@ -1634,7 +1668,7 @@ void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IIn
 void MainWindow::addSettingsLinks() {
     const std::pair<const wchar_t*, FrameworkElement> cards[] = {
         {L"Settings_Library/Text", LibraryCard()},   {L"Settings_Playback/Text", PlaybackCard()},
-        {L"Settings_Dsp/Text", DspCard()},           {L"Settings_Status/Text", StatusCard()},
+        {L"Settings_Dsp/Text", VolumeCard()},        {L"Settings_Status/Text", StatusCard()},
         {L"Settings_Decoders/Text", DecodersCard()}, {L"Settings_Interface/Text", InterfaceCard()},
         {L"Settings_Hotkeys/Text", HotkeysCard()},   {L"Reset_Title/Text", ResetCard()},
         {L"Settings_About/Text", AboutCard()},
@@ -2176,11 +2210,6 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     populateSettings();
 }
 
-// The lamp and the format line open the signal path in one place, over the right end of the bar.
-void MainWindow::OnFormatClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    SignalPathFlyout().ShowAt(FormatButton());
-}
-
 void MainWindow::OnQueueToggleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     queueOpen_ = !queueOpen_;
     updateQueuePanel();
@@ -2387,8 +2416,7 @@ winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSourc
         ContentDialog dialog;
         ui::placeDialog(dialog, ContentLayout().XamlRoot());
         dialog.Title(box_value(tr(L"Playlist_ConfirmTitle")));
-        std::wstring count = std::to_wstring(preview.tracks);
-        for (auto at = int64_t(count.size()) - 3; at > 0; at -= 3) count.insert(size_t(at), L",");
+        const std::wstring count = ui::count(preview.tracks);
         const int64_t minutes = preview.durationMs / 60'000;
         const std::wstring length =
             minutes < int64_t{24} * 60
@@ -2438,9 +2466,9 @@ winrt::fire_and_forget MainWindow::askNewPlaylist(ui::SourceFetch fetch) {
 }
 
 void MainWindow::showPlaylistChange(const PlaylistChange& change, bool created) {
-    std::wstring message(ui::format(L"Library_Tracks", {std::to_wstring(change.added)}));
+    std::wstring message(ui::format(L"Library_Tracks", {ui::count(change.added)}));
     if (const auto skipped = change.skippedUnavailable + change.skippedDuplicates + change.skippedExisting)
-        message += L" · " + std::wstring(ui::format(L"Playlist_Skipped", {std::to_wstring(skipped)}));
+        message += L" · " + std::wstring(ui::format(L"Playlist_Skipped", {ui::count(skipped)}));
     const std::wstring name(ui::utf8(change.name));
     if (!created && change.added == 0)
         showPlaylistNotice(ui::format(L"Playlist_NothingAddedTo", {name}), hstring(message), false, std::nullopt,
@@ -2957,8 +2985,18 @@ void MainWindow::showReplayGain() {
     ReplayGainClipSwitch().IsOn(rg.preventClipping);
     LoudnessSpeedCombo().SelectedIndex(rg.speed == camel::AnalysisSpeed::Fast ? 1 : 0);
     populating_ = wasPopulating;
+    enableDependentFields();
     showLoudnessProgress();
     showDspSummary();
+}
+
+// A feature's own fields are disabled while it is off, so what depends on what shows.
+void MainWindow::enableDependentFields() {
+    const bool replayGain = ReplayGainModeCombo().SelectedIndex() > 0;
+    for (const Control control : {Control(ReplayGainPreampBox()), Control(ReplayGainNoValueBox()),
+                                  Control(ReplayGainClipSwitch()), Control(LoudnessSpeedCombo())})
+        control.IsEnabled(replayGain);
+    CrossfadeSecondsBox().IsEnabled(CrossfadeSwitch().IsOn());
 }
 
 void MainWindow::showLoudnessProgress() {
@@ -2966,7 +3004,7 @@ void MainWindow::showLoudnessProgress() {
     const auto progress = server_->loudnessProgress();
     std::wstring text;
     if (progress.total > 0) {
-        text = ui::format(L"Loudness_Progress", {std::to_wstring(progress.analyzed), std::to_wstring(progress.total)});
+        text = ui::format(L"Loudness_Progress", {ui::count(progress.analyzed), ui::count(progress.total)});
         // A sentence after a full-width full stop needs no space.
         const std::wstring separator = text.ends_with(L'。') ? L"" : L" ";
         if (settings_.replayGain.mode == camel::ReplayGainMode::Off && progress.analyzed < progress.total)
@@ -3009,6 +3047,7 @@ void MainWindow::OnMuteClick(Windows::Foundation::IInspectable const&, RoutedEve
 
 void MainWindow::OnReplayGainChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
     if (populating_) return;
+    enableDependentFields();
     settingsChanged();
     showLoudnessProgress();
     showDspSummary();
@@ -3029,6 +3068,7 @@ void MainWindow::showCrossfade() {
     CrossfadeSwitch().IsOn(settings_.crossfade.enabled);
     CrossfadeSecondsBox().Value(settings_.crossfade.seconds);
     populating_ = wasPopulating;
+    enableDependentFields();
 }
 
 // Rebuilds the signal path rows only when a step changed; snapshots arrive many times a second.
@@ -3169,6 +3209,7 @@ void MainWindow::showSignalPath(std::vector<PathStep> steps) {
 
 void MainWindow::OnCrossfadeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (populating_) return;
+    enableDependentFields();
     settingsChanged();
 }
 

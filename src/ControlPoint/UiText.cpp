@@ -70,4 +70,10 @@ std::wstring formatTime(double seconds) {
     return buf;
 }
 
+std::wstring count(int64_t n) {
+    std::wstring text = std::to_wstring(n);
+    for (auto at = int64_t(text.size()) - 3; at > 0; at -= 3) text.insert(size_t(at), L",");
+    return text;
+}
+
 } // namespace ui

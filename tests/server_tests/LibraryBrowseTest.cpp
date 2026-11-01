@@ -23,18 +23,20 @@ TEST(LibraryBrowse, PagesSearchesCancelsAndRejectsStaleRevisions) {
     std::filesystem::remove_all(directory);
     LibraryStore store(directory);
     const auto emptyRevision = browseTracks(store, 0, 1).revision;
-    store.write([](sqlite::Database& db) {
-        db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
-                "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
-                "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
-                "VALUES(1,1,1,'C:/music/one.flac','audio',1,1);"
-                "INSERT INTO albums(id,folder_id,grouping_key,title,album_artist,added,title_norm,artist_norm) "
-                "VALUES(1,1,'album','Café album','Artist',0,'café album','artist');"
-                "INSERT INTO tracks(id,file_id,title,title_norm,title_sort,artist,artist_norm,album,album_norm,album_id) "
-                "VALUES(1,1,'Café orchestra','café orchestra',X'01','Artist','artist','Café album','café album',1);"
-                "INSERT INTO track_values(track_id,field,position,value,value_norm) "
-                "VALUES(1,'artist',0,'Artist','artist');");
-    }).get();
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
+                    "VALUES(1,1,1,'C:/music/one.flac','audio',1,1);"
+                    "INSERT INTO albums(id,folder_id,grouping_key,title,album_artist,added,title_norm,artist_norm) "
+                    "VALUES(1,1,'album','Café album','Artist',0,'café album','artist');"
+                    "INSERT INTO tracks(id,file_id,title,title_norm,title_sort,artist,artist_norm,album,album_norm,album_id) "
+                    "VALUES(1,1,'Café orchestra','café orchestra',X'01','Artist','artist','Café album','café album',1);"
+                    "INSERT INTO track_values(track_id,field,position,value,value_norm) "
+                    "VALUES(1,'artist',0,'Artist','artist');");
+        })
+        .get();
     EXPECT_EQ(emptyRevision, 0u);
     EXPECT_THROW(browseTracks(store, 0, 1, emptyRevision), std::runtime_error);
     auto first = browseTracks(store, 0, 1);
@@ -63,6 +65,45 @@ TEST(LibraryBrowse, PagesSearchesCancelsAndRejectsStaleRevisions) {
     EXPECT_THROW(browseTracks(store, 0, 501), std::invalid_argument);
 }
 
+// The whole name first, then its start, a word's start and anywhere else, ahead of the sort order (reversed here).
+TEST(LibraryBrowse, SearchRanksWholeNamesAndTheirStartsFirst) {
+    const auto directory = testutil::tempDir() / "library-browse-rank";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "WITH n(x) AS (VALUES(1),(2),(3),(4)) INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
+                    "SELECT x,1,1,'C:/music/'||x||'.flac','audio',1,1 FROM n;"
+                    "INSERT INTO albums(id,folder_id,grouping_key,title,added,title_norm,sort_key) VALUES"
+                    "(1,1,'1','Kayu album',0,'kayu album',X'01'),(2,1,'2','Best of ayu',0,'best of ayu',X'02'),"
+                    "(3,1,'3','ayu trance',0,'ayu trance',X'03'),(4,1,'4','Ayu',0,'ayu',X'04');"
+                    "INSERT INTO tracks(id,file_id,album_id,title,title_norm,title_sort,artist,artist_norm,artist_sort,album,"
+                    "album_norm) VALUES"
+                    "(1,1,1,'Kayu','kayu',X'01','Kayu','kayu',X'01','Kayu album','kayu album'),"
+                    "(2,2,2,'Best Ayu','best ayu',X'02','DJ Ayu','dj ayu',X'02','Best of ayu','best of ayu'),"
+                    "(3,3,3,'Ayu Trance','ayu trance',X'03','Ayumi','ayumi',X'03','ayu trance','ayu trance'),"
+                    "(4,4,4,'Ayu','ayu',X'04','Ayu','ayu',X'04','Ayu','ayu');");
+        })
+        .get();
+    const auto results = searchLibrary(store, "Ayu", 0, 10);
+    std::vector<std::string> tracks, albums;
+    for (const auto& track : results.tracks.tracks) tracks.push_back(track.title);
+    for (const auto& album : results.albums) albums.push_back(album.title);
+    EXPECT_EQ(tracks, (std::vector<std::string>{"Ayu", "Ayu Trance", "Best Ayu", "Kayu"}));
+    EXPECT_EQ(albums, (std::vector<std::string>{"Ayu", "ayu trance", "Best of ayu", "Kayu album"}));
+    EXPECT_EQ(results.artists, (std::vector<std::string>{"Ayu", "Ayumi", "DJ Ayu", "Kayu"}));
+    // One or two characters walk the tracks in title order, while albums and artists still rank.
+    const auto twoCharacters = searchLibrary(store, "ay", 0, 10);
+    std::vector<std::string> shortTracks, shortAlbums;
+    for (const auto& track : twoCharacters.tracks.tracks) shortTracks.push_back(track.title);
+    for (const auto& album : twoCharacters.albums) shortAlbums.push_back(album.title);
+    EXPECT_EQ(shortTracks, (std::vector<std::string>{"Kayu", "Best Ayu", "Ayu Trance", "Ayu"}));
+    EXPECT_EQ(shortAlbums, (std::vector<std::string>{"ayu trance", "Ayu", "Best of ayu", "Kayu album"}));
+    EXPECT_EQ(twoCharacters.artists, (std::vector<std::string>{"Ayumi", "Ayu", "DJ Ayu", "Kayu"}));
+}
+
 TEST(LocalServer, ExposesVersionedBrowseAndGroupedSearch) {
     const auto directory = testutil::tempDir() / "local-server-library-api";
     std::filesystem::remove_all(directory);
@@ -81,16 +122,18 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     const auto directory = testutil::tempDir() / "library-browse-100k";
     std::filesystem::remove_all(directory);
     LibraryStore store(directory);
-    store.write([](sqlite::Database& db) {
-        db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/corpus',0);"
-                "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/corpus');"
-                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) "
-                "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
-                "SELECT x,1,1,'C:/corpus/'||x||'.flac','audio',100,1 FROM n;"
-                "INSERT INTO tracks(id,file_id,title,title_norm,album,album_norm,artist,artist_norm,title_sort) "
-                "SELECT id,id,printf('Track %06d Café Orchestra',id),printf('track %06d café orchestra',id),"
-                "'Test Album','test album','Test Artist','test artist',printf('%06d',id) FROM files;");
-    }).get();
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/corpus',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/corpus');"
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) "
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
+                    "SELECT x,1,1,'C:/corpus/'||x||'.flac','audio',100,1 FROM n;"
+                    "INSERT INTO tracks(id,file_id,title,title_norm,album,album_norm,artist,artist_norm,title_sort) "
+                    "SELECT id,id,printf('Track %06d Café Orchestra',id),printf('track %06d café orchestra',id),"
+                    "'Test Album','test album','Test Artist','test artist',printf('%06d',id) FROM files;");
+        })
+        .get();
 
     const auto queryStart = Clock::now();
     for (int i = 0; i < 30; ++i) normalizeLibrarySearch("099999 Café Orchestra");

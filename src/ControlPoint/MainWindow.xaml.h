@@ -41,7 +41,6 @@ struct MainWindow : MainWindowT<MainWindow> {
     winrt::fire_and_forget OnDiagnosticBundleClick(Windows::Foundation::IInspectable const&,
                                                    Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnGuideClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnFormatClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueToggleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueClearClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnQueueSaveClick(Windows::Foundation::IInspectable const&,
@@ -146,6 +145,7 @@ private:
     void showVolume();
     void showReplayGain();
     void showCrossfade();
+    void enableDependentFields();
     // One row of the signal path (docs/Plan.md §8.1): a step, what follows it, its state and the stage it belongs to.
     enum class PathState : uint8_t { BitPerfect, Lossless, Processed, Lossy, AtTrackChanges };
     enum class PathStage : uint8_t { Source, Processing, Output };
@@ -251,6 +251,7 @@ private:
     uint64_t shownCommandId_ = 0;
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueMarks_ = UINT64_MAX;
+    camel::server::RepeatMode shownRepeat_ = camel::server::RepeatMode::Off;
     // The playing track's library file and whether the playback bar shows it as a favorite.
     int64_t playbackFile_ = 0;
     bool playbackFavorite_ = false;

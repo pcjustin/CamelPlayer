@@ -27,6 +27,14 @@ constexpr const char* kFtsTracks = " FROM tracks_fts JOIN tracks t ON t.id=track
                                    "JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
 constexpr const char* kVisible = " f.available=1 AND r.online=1 ";
 
+// How well a normalized name matches the normalized query in ?4: all of it, its start, the start of a word, elsewhere.
+// Results rank by it where every match is ordered anyway; a walk keeps the sort order, which ranking would have to read
+// in full (15,882 matches of "the" take about 200 ms to rank against under 1 ms walked).
+std::string rank(const std::string& name) {
+    return "CASE WHEN " + name + "=?4 THEN 0 WHEN substr(" + name + ",1,length(?4))=?4 THEN 1 WHEN instr(" + name +
+           ",' '||?4)>0 THEN 2 ELSE 3 END";
+}
+
 struct Search {
     enum class Plan { Browse, Like, Hits, Walk, Fts } plan = Plan::Browse;
     std::string text;    // normalized query, matched by instr in Walk
@@ -132,9 +140,13 @@ LibraryTrackPage tracks(sqlite::Database& db, const Search& search, int64_t offs
                                           "JOIN roots r ON r.id=f.root_id WHERE" +
                                           kTextMatch + "AND" + kVisibleTrack
                                     : columns + search.from() + " WHERE" + kVisible + search.filter();
-    auto rows = db.prepare(select + " ORDER BY t.title_sort,t.id LIMIT ?2 OFFSET ?3");
+    // Up to kHits matches rank by title; broader queries walk or page in title order.
+    const bool ranked = search.plan == Search::Plan::Hits;
+    auto rows =
+        db.prepare(select + " ORDER BY " + (ranked ? rank("t.title_norm") + "," : "") + "t.title_sort,t.id LIMIT ?2 OFFSET ?3");
     search.bind(rows);
     rows.bind(2, limit).bind(3, offset);
+    if (ranked) rows.bind(4, search.text);
     bool hasRow = rows.step();
     if (hasRow && windowTotal) result.total = rows.integer(6);
     if (totals && !(hasRow && windowTotal)) {
@@ -200,6 +212,8 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
         const std::string albumFilter =
             like ? " AND (t.album_norm LIKE ?1 ESCAPE '\\' OR t.artist_norm LIKE ?1 ESCAPE '\\') " : search.filter();
         const std::string albumFrom = std::string(search.from()) + "JOIN albums a ON a.id=t.album_id ";
+        // Albums of a broad query keep the order their walk reads them in, on every page.
+        const bool ranked = like || search.plan == Search::Plan::Hits;
         auto rows = db.prepare(
             search.plan == Search::Plan::Walk
                 ? std::string("SELECT a.id,coalesce(a.title,''),coalesce(a.album_artist,'') FROM albums a INDEXED BY "
@@ -207,12 +221,14 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
                               "JOIN roots r ON r.id=f.root_id WHERE t.album_id=a.id AND") +
                       kTextMatch + "AND" + kVisibleTrack + ") ORDER BY a.sort_key,a.id LIMIT ?2 OFFSET ?3"
                 : "SELECT id,title,artist FROM (SELECT a.id,coalesce(a.title,'') title,coalesce(a.album_artist,'') artist,"
-                  "a.sort_key" +
-                      albumFrom + "WHERE" + kVisible + albumFilter +
+                  "a.sort_key," +
+                      (ranked ? rank("a.title_norm") : std::string("0")) + " rank" + albumFrom + "WHERE" + kVisible +
+                      albumFilter +
                       " GROUP BY a.id) "
-                      "ORDER BY sort_key,id LIMIT ?2 OFFSET ?3");
+                      "ORDER BY rank,sort_key,id LIMIT ?2 OFFSET ?3");
         search.bind(rows);
         rows.bind(2, limit).bind(3, offset);
+        if (ranked) rows.bind(4, search.text);
         while (rows.step()) result.albums.push_back({rows.integer(0), rows.text(1), rows.text(2)});
         if (totals) {
             const auto all = search.counting();
@@ -243,12 +259,13 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
         }
         const std::string artistFrom =
             std::string(named.from()) + "LEFT JOIN track_values v ON v.track_id=t.id AND v.field='artist' ";
-        auto rows = db.prepare("SELECT name FROM (SELECT " + artist + " name,min(coalesce(v.sort_key,t.artist_sort)) sort_key" +
-                               artistFrom + "WHERE" + kVisible + artistFilter + " GROUP BY " + artist +
-                               ") ORDER BY sort_key,name LIMIT ?2 OFFSET ?3");
+        // Every matching artist is grouped anyway, so artists always rank.
+        auto rows =
+            db.prepare("SELECT name FROM (SELECT " + artist + " name,min(coalesce(v.sort_key,t.artist_sort)) sort_key," + "min(" +
+                       rank("coalesce(v.value_norm,t.artist_norm)") + ") rank" + artistFrom + "WHERE" + kVisible + artistFilter +
+                       " GROUP BY " + artist + ") ORDER BY rank,sort_key,name LIMIT ?2 OFFSET ?3");
         named.bind(rows);
-        rows.bind(2, limit).bind(3, offset);
-        if (search.plan == Search::Plan::Hits) rows.bind(4, search.text);
+        rows.bind(2, limit).bind(3, offset).bind(4, search.text);
         while (rows.step()) result.artists.push_back(rows.text(0));
         if (totals) {
             auto total = db.prepare("SELECT COUNT(DISTINCT " + artist + ")" + artistFrom + "WHERE" + kVisible + artistFilter);

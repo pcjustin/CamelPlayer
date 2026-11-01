@@ -115,7 +115,6 @@
   <data name="Status_Idle" xml:space="preserve"><value>No stream open.</value></data>
   <data name="SignalPath_File" xml:space="preserve"><value>File</value></data>
   <data name="SignalPath_Pad" xml:space="preserve"><value>Integer zero padding</value></data>
-  <data name="Tip_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
   <data name="Tip_Stop" xml:space="preserve"><value>Stop</value></data>
   <data name="Error_FileOpen" xml:space="preserve"><value>Cannot open the file</value></data>
   <data name="Error_UnsupportedStream" xml:space="preserve"><value>This file's format or encoding is not supported</value></data>
@@ -163,17 +162,16 @@
   <data name="Queue_SaveFailed" xml:space="preserve"><value>Could not save the queue as a playlist</value></data>
   <data name="Library_AddAlbum.Text" xml:space="preserve"><value>Add album to end of queue</value></data>
   <data name="Library_PlayAlbumNext.Text" xml:space="preserve"><value>Play album next</value></data>
-  <data name="Library_PlayAlbum.Text" xml:space="preserve"><value>Play album</value></data>
-  <data name="Library_AlbumPlaybackOptions.Text" xml:space="preserve"><value>Album playback options</value></data>
-  <data name="Library_FolderPlaybackOptions.Text" xml:space="preserve"><value>Play</value></data>
-  <data name="Library_PlayFolder.Text" xml:space="preserve"><value>Play folder</value></data>
+  <data name="Library_PlayAlbum.AutomationProperties.Name" xml:space="preserve"><value>Play album</value></data>
+  <data name="Library_PlayAlbum.ToolTipService.ToolTip" xml:space="preserve"><value>Play album</value></data>
+  <data name="Library_PlayFolder.AutomationProperties.Name" xml:space="preserve"><value>Play folder</value></data>
+  <data name="Library_PlayFolder.ToolTipService.ToolTip" xml:space="preserve"><value>Play folder</value></data>
   <data name="Library_PlayFolderNext.Text" xml:space="preserve"><value>Play folder next</value></data>
   <data name="Library_QueueFolder.Text" xml:space="preserve"><value>Add folder to end of queue</value></data>
   <data name="Tip_Previous" xml:space="preserve"><value>Previous</value></data>
   <data name="Tip_Next" xml:space="preserve"><value>Next</value></data>
   <data name="Tip_Shuffle" xml:space="preserve"><value>Shuffle</value></data>
   <data name="Tip_Queue" xml:space="preserve"><value>Queue</value></data>
-  <data name="Tip_Repeat" xml:space="preserve"><value>Repeat: off, one, or queue</value></data>
   <data name="Library_MenuPlayNow" xml:space="preserve"><value>Play now</value></data>
   <data name="Library_MenuPlayNext" xml:space="preserve"><value>Play next</value></data>
   <data name="Library_MenuAddQueue" xml:space="preserve"><value>Add to end of queue</value></data>
@@ -188,11 +186,9 @@
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
   <data name="Badge_Lossy.Text" xml:space="preserve"><value>Lossy source</value></data>
   <data name="Badge_DspBypassedTip" xml:space="preserve"><value>Raw DSD goes to the device unchanged; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>
-  <data name="SignalPath_Toggle.ToolTipService.ToolTip" xml:space="preserve"><value>Show the signal path</value></data>
   <data name="Library_SortCombo.AutomationProperties.Name" xml:space="preserve"><value>Sort by</value></data>
   <data name="Player_Position.AutomationProperties.Name" xml:space="preserve"><value>Playback position</value></data>
   <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>Open the playing album</value></data>
-  <data name="SignalPath_Toggle.AutomationProperties.Name" xml:space="preserve"><value>Show the signal path</value></data>
   <data name="Settings_Advanced.Header" xml:space="preserve"><value>Buffers and timing</value></data>
   <data name="Settings_Decoders.Text" xml:space="preserve"><value>Decoders</value></data>
   <data name="Status_Output.Text" xml:space="preserve"><value>Output format</value></data>
@@ -637,4 +633,15 @@
   <data name="SignalPath_Panel.AutomationProperties.Name" xml:space="preserve"><value>Signal path</value></data>
   <data name="SignalPath_Lamp.ToolTipService.ToolTip" xml:space="preserve"><value>Show the signal path</value></data>
   <data name="SignalPath_Lamp.AutomationProperties.HelpText" xml:space="preserve"><value>Show the signal path</value></data>
+  <data name="Tip_Play" xml:space="preserve"><value>Play</value></data>
+  <data name="Tip_Pause" xml:space="preserve"><value>Pause</value></data>
+  <data name="Tip_RepeatOff" xml:space="preserve"><value>Repeat: off</value></data>
+  <data name="Tip_RepeatOne" xml:space="preserve"><value>Repeat: this track</value></data>
+  <data name="Tip_RepeatAll" xml:space="preserve"><value>Repeat: the queue</value></data>
+  <data name="Player_Cover.ToolTipService.ToolTip" xml:space="preserve"><value>Open the playing album</value></data>
+  <data name="Library_PlayButton.Text" xml:space="preserve"><value>Play</value></data>
+  <data name="Settings_VolumeCard.Text" xml:space="preserve"><value>Volume and ReplayGain</value></data>
+  <data name="Settings_DspChain.Text" xml:space="preserve"><value>DSP processing</value></data>
+  <data name="Settings_MoreInfo" xml:space="preserve"><value>Learn more</value></data>
+  <data name="Settings_LessInfo" xml:space="preserve"><value>Show less</value></data>
 </root>

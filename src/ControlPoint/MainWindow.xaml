@@ -140,7 +140,7 @@
 
                 <!-- Pages of later versions (smart playlists) -->
                 <StackPanel x:Name="PlaceholderPanel" Spacing="8" Visibility="Collapsed">
-                    <TextBlock x:Name="PlaceholderTitle" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock x:Name="PlaceholderTitle" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level1" />
                     <TextBlock x:Uid="Placeholder_Text" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
 
@@ -152,7 +152,7 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <StackPanel MaxWidth="820" HorizontalAlignment="Left">
-                    <TextBlock x:Uid="Settings_Title" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock x:Uid="Settings_Title" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level1" />
                     <!-- Filled in from the card titles; one Tab stop, the arrow keys move along. -->
                     <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled"
                                   VerticalScrollBarVisibility="Disabled">
@@ -172,9 +172,11 @@
                             </Style>
                             <Style x:Key="CardHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
                                 <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
                             </Style>
                             <Style x:Key="GroupHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
                                 <Setter Property="Margin" Value="0,4,0,0" />
+                                <Setter Property="AutomationProperties.HeadingLevel" Value="Level3" />
                             </Style>
                             <Style x:Key="StatusLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
                                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -310,20 +312,20 @@
 
                         <!-- The DSP chain (docs/Plan.md §5.9), one global setting: EQ, crossfeed and convolution in the order set here,
                              after one automatic preamp. EqEditor draws the EQ curve and band rows; the order rows are built in code. -->
-                        <Border x:Name="DspCard" Style="{StaticResource SettingsCardStyle}">
+                        <!-- DSP settings in three cards: volume and ReplayGain, crossfade, and the processing chain. -->
+                        <Border x:Name="VolumeCard" Style="{StaticResource SettingsCardStyle}">
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <FontIcon Glyph="&#xE7F6;" FontSize="20" />
-                                    <TextBlock x:Uid="Settings_Dsp" Style="{StaticResource CardHeaderStyle}" />
+                                    <FontIcon Glyph="&#xE767;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_VolumeCard" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
-                                <TextBlock x:Name="DspSummaryText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock x:Uid="Settings_Volume" Style="{StaticResource GroupHeaderStyle}" />
                                 <ComboBox x:Name="VolumeModeCombo" x:Uid="Settings_VolumeMode" Width="240" SelectionChanged="OnVolumeModeChanged">
                                     <ComboBoxItem x:Uid="Settings_VolumeFixed" />
                                     <ComboBoxItem x:Uid="Settings_VolumeSoftware" />
                                 </ComboBox>
-                                <TextBlock x:Uid="Settings_VolumeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="VolumeNote" x:Uid="Settings_VolumeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock x:Uid="Settings_ReplayGain" Style="{StaticResource GroupHeaderStyle}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -347,19 +349,38 @@
                                     <ComboBoxItem x:Uid="Settings_LoudnessFast" />
                                 </ComboBox>
                                 <TextBlock x:Name="LoudnessProgressText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock x:Uid="Settings_ReplayGainNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="ReplayGainNote" x:Uid="Settings_ReplayGainNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
-                                <TextBlock x:Uid="Settings_Crossfade" Style="{StaticResource GroupHeaderStyle}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border x:Name="CrossfadeCard" Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE8D6;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Crossfade" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
                                 <ToggleSwitch x:Name="CrossfadeSwitch" x:Uid="Settings_CrossfadeSwitch" Toggled="OnCrossfadeToggled" />
                                 <NumberBox x:Name="CrossfadeSecondsBox" x:Uid="Settings_CrossfadeSeconds" Width="170" HorizontalAlignment="Left"
                                            Minimum="1" Maximum="10" SmallChange="0.5" LargeChange="1" SpinButtonPlacementMode="Compact"
                                            ValueChanged="OnCrossfadeSecondsChanged" />
-                                <TextBlock x:Uid="Settings_CrossfadeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="CrossfadeNote" x:Uid="Settings_CrossfadeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                            </StackPanel>
+                        </Border>
+
+                        <Border x:Name="DspCard" Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE7F6;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_DspChain" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <TextBlock x:Name="DspSummaryText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock x:Uid="Settings_DspOrder" Style="{StaticResource GroupHeaderStyle}" />
                                 <StackPanel x:Name="DspOrderList" Spacing="4" />
                                 <Button x:Name="DspRestoreOrderButton" x:Uid="Settings_DspRestoreOrder" Click="OnDspRestoreOrderClick" />
-                                <TextBlock x:Uid="Settings_DspOrderNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="DspOrderNote" x:Uid="Settings_DspOrderNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <ToggleSwitch x:Name="EqSwitch" x:Uid="Settings_Eq" Margin="0,8,0,0" Toggled="OnEqToggled" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -378,7 +399,7 @@
                                     <StackPanel x:Name="EqBands" Spacing="6" />
                                 </ScrollViewer>
                                 <Button x:Name="EqAddBandButton" x:Uid="Settings_EqAddBand" />
-                                <TextBlock x:Uid="Settings_EqNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="EqNote" x:Uid="Settings_EqNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <ToggleSwitch x:Name="CrossfeedSwitch" x:Uid="Settings_Crossfeed" Margin="0,8,0,0" Toggled="OnCrossfeedToggled" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -394,7 +415,7 @@
                                     <NumberBox x:Name="CrossfeedFeedBox" x:Uid="Settings_CrossfeedFeed" Width="150" Minimum="1" Maximum="15"
                                                SmallChange="0.5" LargeChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnCrossfeedValueChanged" />
                                 </StackPanel>
-                                <TextBlock x:Uid="Settings_CrossfeedNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="CrossfeedNote" x:Uid="Settings_CrossfeedNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <ToggleSwitch x:Name="ConvolutionSwitch" x:Uid="Settings_Convolution" Margin="0,8,0,0" Toggled="OnConvolutionToggled" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -403,7 +424,7 @@
                                 </StackPanel>
                                 <TextBlock x:Name="ConvolutionFileText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                                 <TextBlock x:Name="ConvolutionInfoText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock x:Uid="Settings_ConvolutionNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="ConvolutionNote" x:Uid="Settings_ConvolutionNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </StackPanel>
                         </Border>
 
@@ -607,7 +628,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" />
                             <TextBlock x:Name="QueueCountText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
@@ -703,18 +724,79 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <InfoBar x:Name="ErrorBar" Severity="Warning" IsOpen="False" IsClosable="True" />
-            <Grid Grid.Row="1" ColumnSpacing="8">
+            <Grid Grid.Row="1" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Slider x:Name="PositionSlider" x:Uid="Player_Position" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
                         VerticalAlignment="Center" ValueChanged="OnSliderValueChanged" />
-                <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right" Text="0:00 / 0:00"
+                <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" Text="0:00 / 0:00"
                            Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) at the end of the
+                     timeline, which leaves the bar two rows high; the lamp opens the signal path. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon x:Name="StateIcon" Glyph="&#xE71A;" FontSize="10" VerticalAlignment="Center" />
+                            <TextBlock x:Name="StateText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                                       AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                    </Border>
+                    <!-- The lamp opens the signal path. -->
+                    <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Padding="8,2" MinHeight="0"
+                            CornerRadius="10" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse x:Name="Lamp" Width="8" Height="8" VerticalAlignment="Center"
+                                     Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
+                            <TextBlock x:Name="LampText" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                        <!-- The signal path floats above the bar: the verdict and the route, then the steps by stage. -->
+                        <Button.Flyout>
+                            <Flyout x:Name="SignalPathFlyout" Placement="TopEdgeAlignedRight">
+                                <StackPanel x:Uid="SignalPath_Panel" Width="380" Spacing="12">
+                                    <StackPanel Spacing="2">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Ellipse x:Name="PathVerdictDot" Width="10" Height="10" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="PathVerdictText" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="PathRouteText" Style="{StaticResource CaptionTextBlockStyle}" Margin="18,0,0,0"
+                                                   TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Border x:Name="PathDivider" Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                            Visibility="Collapsed" />
+                                    <Grid x:Name="SignalPathGrid" ColumnSpacing="12" Visibility="Collapsed">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                    </Grid>
+                                    <TextBlock x:Name="SignalNoteText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
+                                               TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <Border x:Name="SourceBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
+                        <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </Border>
+                    <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
+                        <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </Border>
+                    <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
+                    <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center">
+                        <TextBlock x:Name="DspButtonText" Text="DSP" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
+                        <Button.Flyout>
+                            <MenuFlyout x:Name="DspMenu" Placement="Top" Opening="OnDspMenuOpening" />
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
             </Grid>
             <Grid Grid.Row="2" ColumnSpacing="8" VerticalAlignment="Center">
                 <Grid.Resources>
@@ -816,9 +898,9 @@
                         <Button x:Name="NextButton" Click="OnNextClick" Style="{StaticResource TransportButtonStyle}">
                             <SymbolIcon Symbol="Next" />
                         </Button>
-                        <Button x:Name="RepeatButton" Click="OnRepeatClick" Style="{StaticResource TransportButtonStyle}">
+                        <ToggleButton x:Name="RepeatButton" Click="OnRepeatClick" Style="{StaticResource TransportToggleStyle}">
                             <SymbolIcon x:Name="RepeatIcon" Symbol="RepeatAll" />
-                        </Button>
+                        </ToggleButton>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                         <!-- Software volume (docs/Plan.md §5.9), shown only when Settings › DSP chooses it. -->
@@ -840,80 +922,6 @@
                         </ToggleButton>
                     </StackPanel>
                 </Grid>
-            </Grid>
-            <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1), at the right so the
-                 cover and the track's three lines stand on their own. -->
-            <Grid Grid.Row="3" ColumnSpacing="8" HorizontalAlignment="Right">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="StateIcon" Glyph="&#xE71A;" FontSize="10" VerticalAlignment="Center" />
-                            <TextBlock x:Name="StateText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
-                                       AutomationProperties.LiveSetting="Polite" />
-                        </StackPanel>
-                    </Border>
-                    <!-- The lamp opens the signal path, like the format line. -->
-                    <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Click="OnFormatClick" Padding="8,2" MinHeight="0"
-                            CornerRadius="10" VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse x:Name="Lamp" Width="8" Height="8" VerticalAlignment="Center"
-                                     Fill="{ThemeResource ControlStrongFillColorDisabledBrush}" />
-                            <TextBlock x:Name="LampText" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
-                        </StackPanel>
-                    </Button>
-                    <Border x:Name="SourceBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
-                        <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" />
-                    </Border>
-                    <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
-                        <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
-                    </Border>
-                    <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
-                    <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center">
-                        <TextBlock x:Name="DspButtonText" Text="DSP" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
-                        <Button.Flyout>
-                            <MenuFlyout x:Name="DspMenu" Placement="Top" Opening="OnDspMenuOpening" />
-                        </Button.Flyout>
-                    </Button>
-                </StackPanel>
-                <HyperlinkButton x:Name="FormatButton" x:Uid="SignalPath_Toggle" Grid.Column="1" Click="OnFormatClick"
-                                 Padding="4,2" MinWidth="0" MaxWidth="420">
-                    <!-- The signal path floats above the bar: the verdict and the route, then the steps by stage. -->
-                    <FlyoutBase.AttachedFlyout>
-                        <Flyout x:Name="SignalPathFlyout" Placement="TopEdgeAlignedRight">
-                            <StackPanel x:Uid="SignalPath_Panel" Width="380" Spacing="12">
-                                <StackPanel Spacing="2">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Ellipse x:Name="PathVerdictDot" Width="10" Height="10" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="PathVerdictText" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    </StackPanel>
-                                    <TextBlock x:Name="PathRouteText" Style="{StaticResource CaptionTextBlockStyle}" Margin="18,0,0,0"
-                                               TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                                <Border x:Name="PathDivider" Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                        Visibility="Collapsed" />
-                                <Grid x:Name="SignalPathGrid" ColumnSpacing="12" Visibility="Collapsed">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                </Grid>
-                                <TextBlock x:Name="SignalNoteText" Style="{StaticResource CaptionTextBlockStyle}" IsTextSelectionEnabled="True"
-                                           TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            </StackPanel>
-                        </Flyout>
-                    </FlyoutBase.AttachedFlyout>
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock x:Name="FormatText" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis" />
-                        <FontIcon Glyph="&#xE70E;" FontSize="10" VerticalAlignment="Center" />
-                    </StackPanel>
-                </HyperlinkButton>
             </Grid>
         </Grid>
     </Grid>

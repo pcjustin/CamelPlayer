@@ -16,5 +16,6 @@ winrt::hstring format(const wchar_t* key, std::initializer_list<std::wstring> va
 winrt::hstring errorTitle(camel::audio::ErrorCode code);
 winrt::hstring utf8(const std::string& s);
 std::wstring formatTime(double seconds); // m:ss or h:mm:ss
+std::wstring count(int64_t n);           // 70,715
 
 } // namespace ui

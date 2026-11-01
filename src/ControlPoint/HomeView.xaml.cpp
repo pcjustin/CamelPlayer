@@ -43,7 +43,7 @@ hstring formatted(const wchar_t* key, std::initializer_list<int64_t> values) {
     int index = 0;
     for (const auto value : values) {
         const std::wstring marker = L"{" + std::to_wstring(index++) + L"}";
-        if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, marker.size(), std::to_wstring(value));
+        if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, marker.size(), ui::count(value));
     }
     return hstring(text);
 }
@@ -453,7 +453,7 @@ winrt::fire_and_forget HomeView::loadPeriod() {
         auto history = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
         for (const auto& h : stats.history) history.Append(item(historyRow(h)));
         self->HistoryList().ItemsSource(history);
-        self->HistoryHeader().Text(ui::format(L"Home_History", {std::to_wstring(stats.historyTotal)}));
+        self->HistoryHeader().Text(ui::format(L"Home_History", {ui::count(stats.historyTotal)}));
     });
 }
 
