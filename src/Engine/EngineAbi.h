@@ -311,9 +311,10 @@ CamelEngineStatus camel_engine_queue_next_flac_v1(CamelEngine* engine, const Cam
 // Discards the queued track; CAMEL_ENGINE_E_INVALID_STATE once decoding has already moved on to it.
 CamelEngineStatus camel_engine_clear_next_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 // A manual change while playing: crossfades from where playback is into `source` over its crossfade_ms (nonzero),
-// discarding the rest of the playing track and any queued one; the new track becomes current at the fade.
-// CAMEL_ENGINE_E_INVALID_STATE when nothing plays that it can be mixed with, a boundary is still on its way to the
-// device or a crossfade plays; the caller loads the track instead.
+// discarding the rest of the playing track and any queued one; the new track becomes current at the fade. During a
+// crossfade what it would still play fades out as one track. A boundary still on its way to the device is heard first,
+// so the new track's is the next transition. CAMEL_ENGINE_E_INVALID_STATE when nothing plays that it can be mixed with,
+// or that boundary is not heard within a second; the caller loads the track instead.
 CamelEngineStatus camel_engine_crossfade_to_v1(CamelEngine* engine, const CamelCommandStampV1* command,
                                                const CamelTrackSourceV1* source, uint32_t decoder_kind,
                                                const CamelDecoderHostV1* decoder_host);

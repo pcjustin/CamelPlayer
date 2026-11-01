@@ -231,7 +231,7 @@ public:
         if (!next || !rust_->crossfadeTo(file, next->decoder, gainDb, {crossfadeMs(), next->convert})) {
             if (fades)
                 log::info("engine: %s opens without a crossfade: %s", toUtf8(file.wstring()).c_str(),
-                          next ? "the stream is between tracks or crossfading" : "it cannot follow in the open format");
+                          next ? "the stream is between tracks" : "it cannot follow in the open format");
             return openAndPlay(file, requested, gainDb, false);
         }
         resumeOnDefault_ = false;

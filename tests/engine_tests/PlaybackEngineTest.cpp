@@ -328,6 +328,37 @@ TEST_F(EngineStateTest, AManualCrossfadeMakesTheFileCurrentAtOnceAndCountsItFrom
     EXPECT_LT(frames, 48000u + 96000u + 96000u / 2);
 }
 
+TEST_F(EngineStateTest, AManualChangeDuringACrossfadeFadesOutWhatPlaysWithoutReopening) {
+    settings.crossfade = {true, 1.0};
+    engine->applySettings(settings);
+    const auto second = testutil::generatedFile({"crossfade-second-24-96k", 96000, 24, 2, 2.0});
+    const auto third = testutil::generatedFile({"crossfade-third-24-96k", 96000, 24, 2, 0.5});
+    open();
+    ASSERT_EQ(pull(9600), 9600u);
+    engine->crossfadeTo(second);
+    engine->waitIdle();
+    // Past the device ring's lead the fade into the second file plays when the third one is chosen.
+    ASSERT_EQ(pull(48000), 48000u);
+    engine->crossfadeTo(third);
+    engine->waitIdle();
+    auto s = engine->snapshot();
+    EXPECT_EQ(s.file, third.wstring());
+    EXPECT_EQ(s.position, 0u);
+    size_t frames = 0;
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (engine->snapshot().state != PlayState::Stopped && std::chrono::steady_clock::now() < deadline) {
+        frames += pull(4096);
+        engine->waitIdle();
+    }
+    s = engine->snapshot();
+    EXPECT_FALSE(s.error) << s.errorDetail;
+    EXPECT_EQ(probe.opens, 1);
+    EXPECT_EQ(s.transitions, 0u);
+    // The third file whole, after what the mix still had to play.
+    EXPECT_GT(frames, 48000u);
+    EXPECT_LT(frames, 48000u + 96000u + 96000u / 2);
+}
+
 TEST_F(EngineStateTest, AManualChangeWithoutCrossfadeReopensTheDevice) {
     open();
     ASSERT_EQ(pull(9600), 9600u);

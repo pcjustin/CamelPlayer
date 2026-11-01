@@ -590,7 +590,8 @@ struct Stage {
 // A crossfade (docs/Plan.md §5.4). When it begins, the outgoing track's last source frames leave the source ring for
 // `held`, so the incoming track's frames behind them can be read; both are converted to float at the device rate, mixed
 // with equal-power gains, and go through the DSP chain and the final quantization once, in the incoming track's
-// converter.
+// converter. A change during a crossfade renders what that one would still play into `outgoing`, which then fades out as
+// one track.
 struct Fade {
     // Output frames.
     length: u64,
@@ -600,6 +601,35 @@ struct Fade {
     outgoing: Vec<f64>,
     outgoing_done: bool,
     incoming: Vec<f64>,
+    // The fade has not begun: `outgoing` plays on at its level until the incoming track has audio.
+    waiting: bool,
+}
+
+impl Fade {
+    // `frames` mixed frames of what both sides have, moving the fade on; past its end the incoming side plays at its own
+    // level. Frames a side no longer has are silent.
+    fn mix(&mut self, frames: usize, channels: usize) -> Vec<f64> {
+        let mut mixed = vec![0.0; frames * channels];
+        for (i, frame) in mixed.chunks_exact_mut(channels).enumerate() {
+            let progress = (self.done as f64 + i as f64 + 0.5) / self.length as f64;
+            let (out_gain, in_gain) = if progress >= 1.0 {
+                (0.0, 1.0)
+            } else {
+                let angle = progress * std::f64::consts::FRAC_PI_2;
+                (angle.cos(), angle.sin())
+            };
+            for (c, sample) in frame.iter_mut().enumerate() {
+                let k = i * channels + c;
+                *sample = self.outgoing.get(k).map_or(0.0, |v| v * out_gain)
+                    + self.incoming.get(k).map_or(0.0, |v| v * in_gain);
+            }
+        }
+        let used = frames * channels;
+        self.outgoing.drain(..used.min(self.outgoing.len()));
+        self.incoming.drain(..used.min(self.incoming.len()));
+        self.done += frames as u64;
+        mixed
+    }
 }
 
 enum FadeStep {
@@ -791,6 +821,7 @@ impl CamelEngine {
                     outgoing: Vec::new(),
                     outgoing_done: false,
                     incoming: Vec::new(),
+                    waiting: false,
                 });
                 continue;
             }
@@ -907,8 +938,8 @@ impl CamelEngine {
             .saturating_sub(MAX_PREFILL_FRAMES)
     }
 
-    // One step of the crossfade from the first segment into the second: writes the incoming track's pending output to
-    // the ring, or mixes what both tracks have into it.
+    // One step of the crossfade from the first segment into the second: writes either track's pending output to the ring,
+    // or mixes what both tracks have into the incoming one's.
     fn crossfade(
         &self,
         segments: &mut std::collections::VecDeque<Segment>,
@@ -920,71 +951,58 @@ impl CamelEngine {
             return Err(ENGINE_E_INVALID_STATE);
         };
         let space = (self.ring.writable() / bytes_per_frame) as u64;
-        let pending = incoming.converter.pending_frames();
-        if pending > 0 {
-            let frames = pending.min(space);
-            if frames == 0 {
-                return Ok(FadeStep::Wait);
+        // The outgoing track has output of its own left only after a change during a crossfade; it plays first.
+        for converter in [&mut outgoing.converter, &mut incoming.converter] {
+            let pending = converter.pending_frames();
+            if pending > 0 {
+                let frames = pending.min(space);
+                if frames == 0 {
+                    return Ok(FadeStep::Wait);
+                }
+                let bytes = frames as usize * bytes_per_frame;
+                if self.ring.write(&converter.pending()[..bytes]) != bytes {
+                    return Err(ENGINE_E_INVALID_STATE);
+                }
+                converter.consume(frames);
+                self.written_frames.fetch_add(frames, Ordering::AcqRel);
+                return Ok(FadeStep::Wrote(frames));
             }
-            let bytes = frames as usize * bytes_per_frame;
-            if self.ring.write(&incoming.converter.pending()[..bytes]) != bytes {
-                return Err(ENGINE_E_INVALID_STATE);
-            }
-            incoming.converter.consume(frames);
-            self.written_frames.fetch_add(frames, Ordering::AcqRel);
-            return Ok(FadeStep::Wrote(frames));
         }
         if fade.done >= fade.length {
             return Ok(FadeStep::Done);
+        }
+        let channels = self.format.channel_count as usize;
+        if fade.waiting {
+            let spare = ((fade.outgoing.len() / channels) as u64).saturating_sub(fade.length);
+            if incoming.frames > incoming.read || incoming.ended || spare == 0 {
+                // The incoming track starts at the fade, after the previous boundary.
+                if self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
+                    return Ok(FadeStep::Wait);
+                }
+                if let Some(start) = incoming.boundary_start.take() {
+                    self.boundary_start_frame.store(start, Ordering::Release);
+                    self.boundary_at.store(
+                        self.written_frames.load(Ordering::Acquire),
+                        Ordering::Release,
+                    );
+                }
+                fade.waiting = false;
+            } else {
+                let frames = spare.min(space).min(MAX_PREFILL_FRAMES) as usize;
+                if frames == 0 {
+                    return Ok(FadeStep::Wait);
+                }
+                let mut level: Vec<f64> = fade.outgoing.drain(..frames * channels).collect();
+                incoming.converter.emit_mixed(&mut level, dsp)?;
+                return Ok(FadeStep::Mixed);
+            }
         }
         let wanted = space.min(MAX_PREFILL_FRAMES).min(fade.length - fade.done) as usize;
         if wanted == 0 {
             return Ok(FadeStep::Wait);
         }
-        let channels = self.format.channel_count as usize;
-        while fade.outgoing.len() < wanted * channels && !fade.outgoing_done {
-            if fade.held_read < fade.held.len() {
-                let frame_bytes = outgoing.frame_bytes();
-                let left = ((fade.held.len() - fade.held_read) / frame_bytes) as u64;
-                let frames = outgoing
-                    .converter
-                    .input_frames_for(wanted as u64)
-                    .min(left)
-                    .min(MAX_PREFILL_FRAMES) as usize;
-                let end = fade.held_read + frames * frame_bytes;
-                let samples = sample_words(&fade.held[fade.held_read..end], outgoing.sample_bytes);
-                fade.held_read = end;
-                let floats = outgoing.converter.floats(&samples, frames)?;
-                fade.outgoing.extend(floats);
-            } else {
-                let tail = outgoing.converter.finish_floats()?;
-                fade.outgoing.extend(tail);
-                fade.outgoing_done = true;
-            }
-        }
-        while fade.incoming.len() < wanted * channels {
-            let available = incoming.frames - incoming.read;
-            if available > 0 {
-                let frames = incoming
-                    .converter
-                    .input_frames_for(wanted as u64)
-                    .min(available)
-                    .min(MAX_PREFILL_FRAMES);
-                let mut bytes = vec![0u8; frames as usize * incoming.frame_bytes()];
-                if self.source_ring.read(&mut bytes) != bytes.len() {
-                    return Err(ENGINE_E_INVALID_STATE);
-                }
-                let samples = sample_words(&bytes, incoming.sample_bytes);
-                let floats = incoming.converter.floats(&samples, frames as usize)?;
-                fade.incoming.extend(floats);
-                incoming.read += frames;
-            } else if incoming.ended && !incoming.converter.finished() {
-                let tail = incoming.converter.finish_floats()?;
-                fade.incoming.extend(tail);
-            } else {
-                break;
-            }
-        }
+        self.fill_outgoing(outgoing, fade, wanted)?;
+        self.fill_incoming(incoming, fade, wanted)?;
         // A track with nothing more to give is silent for the rest of the fade.
         let incoming_over =
             incoming.ended && incoming.read == incoming.frames && incoming.converter.finished();
@@ -1009,28 +1027,109 @@ impl CamelEngine {
         if frames == 0 {
             return Ok(FadeStep::Wait);
         }
-        let mut mixed = vec![0.0; frames * channels];
-        for (i, frame) in mixed.chunks_exact_mut(channels).enumerate() {
-            let angle = (fade.done as f64 + i as f64 + 0.5) / fade.length as f64
-                * std::f64::consts::FRAC_PI_2;
-            let (out_gain, in_gain) = (angle.cos(), angle.sin());
-            for (c, sample) in frame.iter_mut().enumerate() {
-                let k = i * channels + c;
-                *sample = fade.outgoing.get(k).map_or(0.0, |v| v * out_gain)
-                    + fade.incoming.get(k).map_or(0.0, |v| v * in_gain);
-            }
-        }
-        let used = frames * channels;
-        fade.outgoing.drain(..used.min(fade.outgoing.len()));
-        fade.incoming.drain(..used.min(fade.incoming.len()));
+        let mut mixed = fade.mix(frames, channels);
         incoming.converter.emit_mixed(&mut mixed, dsp)?;
-        fade.done += frames as u64;
         if fade.done >= fade.length && !fade.incoming.is_empty() {
             // What the incoming track converted past the fade plays at its own level.
             let mut rest = std::mem::take(&mut fade.incoming);
             incoming.converter.emit_mixed(&mut rest, dsp)?;
         }
         Ok(FadeStep::Mixed)
+    }
+
+    // Converts the outgoing track's held frames until `fade` has `frames` of them or the track is over.
+    fn fill_outgoing(
+        &self,
+        outgoing: &mut Segment,
+        fade: &mut Fade,
+        frames: usize,
+    ) -> Result<(), i32> {
+        let channels = self.format.channel_count as usize;
+        while fade.outgoing.len() < frames * channels && !fade.outgoing_done {
+            if fade.held_read < fade.held.len() {
+                let frame_bytes = outgoing.frame_bytes();
+                let left = ((fade.held.len() - fade.held_read) / frame_bytes) as u64;
+                let count = outgoing
+                    .converter
+                    .input_frames_for(frames as u64)
+                    .min(left)
+                    .min(MAX_PREFILL_FRAMES) as usize;
+                let end = fade.held_read + count * frame_bytes;
+                let samples = sample_words(&fade.held[fade.held_read..end], outgoing.sample_bytes);
+                fade.held_read = end;
+                let floats = outgoing.converter.floats(&samples, count)?;
+                fade.outgoing.extend(floats);
+            } else {
+                let tail = outgoing.converter.finish_floats()?;
+                fade.outgoing.extend(tail);
+                fade.outgoing_done = true;
+            }
+        }
+        Ok(())
+    }
+
+    // Converts the incoming track's decoded frames until `fade` has `frames` of them or no more wait in the source ring.
+    fn fill_incoming(
+        &self,
+        incoming: &mut Segment,
+        fade: &mut Fade,
+        frames: usize,
+    ) -> Result<(), i32> {
+        let channels = self.format.channel_count as usize;
+        while fade.incoming.len() < frames * channels {
+            let available = incoming.frames - incoming.read;
+            if available > 0 {
+                let count = incoming
+                    .converter
+                    .input_frames_for(frames as u64)
+                    .min(available)
+                    .min(MAX_PREFILL_FRAMES);
+                let mut bytes = vec![0u8; count as usize * incoming.frame_bytes()];
+                if self.source_ring.read(&mut bytes) != bytes.len() {
+                    return Err(ENGINE_E_INVALID_STATE);
+                }
+                let samples = sample_words(&bytes, incoming.sample_bytes);
+                let floats = incoming.converter.floats(&samples, count as usize)?;
+                fade.incoming.extend(floats);
+                incoming.read += count;
+            } else if incoming.ended && !incoming.converter.finished() {
+                let tail = incoming.converter.finish_floats()?;
+                fade.incoming.extend(tail);
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    // What the crossfade in `fade` would play next, up to `frames` frames as far as the tracks have them, as floats before
+    // the DSP chain; past its end the incoming track goes on at its own level. A fade still waiting plays its outgoing
+    // side.
+    fn render_fade(
+        &self,
+        outgoing: &mut Segment,
+        incoming: &mut Segment,
+        fade: &mut Fade,
+        frames: usize,
+    ) -> Result<Vec<f64>, i32> {
+        let channels = self.format.channel_count as usize;
+        if fade.waiting {
+            let mut rendered = std::mem::take(&mut fade.outgoing);
+            rendered.truncate(frames * channels);
+            return Ok(rendered);
+        }
+        let mut rendered = Vec::with_capacity(frames * channels);
+        while rendered.len() < frames * channels {
+            let step = (frames - rendered.len() / channels).min(MAX_PREFILL_FRAMES as usize);
+            self.fill_outgoing(outgoing, fade, step)?;
+            self.fill_incoming(incoming, fade, step)?;
+            let count = step.min(fade.incoming.len() / channels);
+            if count == 0 {
+                break;
+            }
+            rendered.extend(fade.mix(count, channels));
+        }
+        Ok(rendered)
     }
 
     // A converter for `source` to this engine's output format, or the reason none exists. A crossfade may permit the
@@ -2012,8 +2111,10 @@ pub unsafe extern "C" fn camel_engine_clear_next_v1(
 ///
 /// A manual change during playback (docs/Plan.md §5.4): keeps the next `crossfade_ms` of the playing track and a second
 /// more while `source` starts decoding, discards the rest and any queued track, and crossfades into `source`, which
-/// becomes current at the fade. Fails with `CAMEL_ENGINE_E_INVALID_STATE` when nothing plays that can be mixed with it,
-/// a boundary is still on its way to the device or a crossfade plays; the caller then loads the track instead.
+/// becomes current at the fade. During a crossfade what it would still play fades out as one track. A boundary still on
+/// its way to the device is heard first, so the new track's is the next transition. Fails with
+/// `CAMEL_ENGINE_E_INVALID_STATE` when nothing plays that can be mixed with it, or that boundary is not heard within a
+/// second; the caller then loads the track instead.
 pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -2049,6 +2150,15 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             Ok(converter) => converter,
             Err(status) => return status,
         };
+        if !converter.mixes() {
+            return ENGINE_E_INVALID_STATE;
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while engine.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY
+            && std::time::Instant::now() < deadline
+        {
+            thread::sleep(std::time::Duration::from_millis(2));
+        }
         if !operation_is_current(engine, epoch) {
             return ENGINE_E_NOT_READY;
         }
@@ -2058,43 +2168,83 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             return ENGINE_E_NOT_READY;
         }
         let mut stage = engine.stage.lock().unwrap();
+        if engine.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
+            return ENGINE_E_INVALID_STATE;
+        }
         let fade_in = engine.fade_frames(next.crossfade_ms);
-        if stage.fade.is_some() {
-            return ENGINE_E_INVALID_STATE;
+        let keep_frames = fade_in + engine.fade_frames(CUT_MARGIN_MS);
+        let next_length = engine.output_frames(next.remaining_frames(), next.info.sample_rate);
+        let Stage {
+            segments,
+            stream_ended,
+            tail_left,
+            fade,
+            ..
+        } = &mut *stage;
+        if let Some(mut playing) = fade.take() {
+            let [outgoing, incoming, ..] = segments.make_contiguous() else {
+                return ENGINE_E_INVALID_STATE;
+            };
+            let mix =
+                match engine.render_fade(outgoing, incoming, &mut playing, keep_frames as usize) {
+                    Ok(mix) => mix,
+                    Err(status) => {
+                        drop(stage);
+                        engine.fail_render(status);
+                        return status;
+                    }
+                };
+            // The track that was fading in stays first only to play out what it has already put out.
+            segments.pop_front();
+            segments.truncate(1);
+            let held = &mut segments[0];
+            held.frames = held.read;
+            held.ended = true;
+            engine.source_ring.clear();
+            let mut length = fade_in.min((mix.len() / engine.format.channel_count as usize) as u64);
+            if next_length > 0 {
+                length = length.min(next_length / 2);
+            }
+            *fade = Some(Fade {
+                length,
+                done: 0,
+                held: Vec::new(),
+                held_read: 0,
+                outgoing: mix,
+                outgoing_done: true,
+                incoming: Vec::new(),
+                waiting: true,
+            });
+        } else {
+            let Some(playing) = segments.front_mut() else {
+                return ENGINE_E_INVALID_STATE;
+            };
+            if !playing.converter.mixes() {
+                return ENGINE_E_INVALID_STATE;
+            }
+            let keep = playing
+                .converter
+                .input_frames_for(keep_frames)
+                .min(playing.frames - playing.read);
+            let mut kept = vec![0u8; keep as usize * playing.frame_bytes()];
+            if engine.source_ring.read(&mut kept) != kept.len() {
+                return ENGINE_E_INVALID_STATE;
+            }
+            engine.source_ring.clear();
+            if engine.source_ring.write(&kept) != kept.len() {
+                drop(stage);
+                engine.fail_render(ENGINE_E_INVALID_STATE);
+                return ENGINE_E_INVALID_STATE;
+            }
+            playing.frames = playing.read + keep;
+            playing.ended = true;
+            playing.cut = true;
+            segments.truncate(1);
         }
-        let Some(playing) = stage.segments.front_mut() else {
-            return ENGINE_E_INVALID_STATE;
-        };
-        if !playing.converter.mixes()
-            || !converter.mixes()
-            || engine.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY
-        {
-            return ENGINE_E_INVALID_STATE;
-        }
-        let keep = playing
-            .converter
-            .input_frames_for(fade_in + engine.fade_frames(CUT_MARGIN_MS))
-            .min(playing.frames - playing.read);
-        let mut kept = vec![0u8; keep as usize * playing.frame_bytes()];
-        if engine.source_ring.read(&mut kept) != kept.len() {
-            return ENGINE_E_INVALID_STATE;
-        }
-        engine.source_ring.clear();
-        if engine.source_ring.write(&kept) != kept.len() {
-            drop(stage);
-            engine.fail_render(ENGINE_E_INVALID_STATE);
-            return ENGINE_E_INVALID_STATE;
-        }
-        playing.frames = playing.read + keep;
-        playing.ended = true;
-        playing.cut = true;
-        stage.segments.truncate(1);
-        stage.stream_ended = false;
-        stage.tail_left = None;
+        *stream_ended = false;
+        *tail_left = None;
         let start = engine.output_frames(next.start_frame(), next.info.sample_rate);
-        stage
-            .segments
-            .push_back(Segment::new(converter, &next, Some(start), fade_in));
+        segments.push_back(Segment::new(converter, &next, Some(start), fade_in));
         drop(stage);
         *engine.next_source.lock().unwrap() = None;
         engine.next_occupied.store(false, Ordering::Release);
@@ -3550,19 +3700,26 @@ mod tests {
     }
 
     #[test]
-    fn a_manual_change_is_refused_while_a_crossfade_plays() {
-        let mut refused = None;
-        play_tones("8000:192000:48000", |engine, rendered| {
+    fn a_manual_change_during_a_crossfade_fades_out_what_it_would_play() {
+        let mut changed = false;
+        let mut boundaries = Vec::new();
+        let left = play_tones("8000:192000:48000", |engine, rendered| {
             if rendered == 0 {
                 assert_eq!(
                     queue_tone(engine, 3, "-4000:192000:48000", 1000, 0),
                     ENGINE_OK
                 );
             }
-            if refused.is_none() && transitions(engine).0 == 1 {
+            let (count, position, _) = transitions(engine);
+            if count as usize > boundaries.len() {
+                boundaries.push(rendered - position as usize);
+            }
+            // The second track's fade has begun and plays on when the third one is chosen.
+            if count == 1 && !changed {
+                changed = true;
                 let host = tone_host();
-                let source = tone_source("2000:4800:48000", 1000, 0);
-                refused = Some(unsafe {
+                let source = tone_source("2000:96000:48000", 1000, 0);
+                let status = unsafe {
                     camel_engine_crossfade_to_v1(
                         engine,
                         &command_stamp(4),
@@ -3570,10 +3727,21 @@ mod tests {
                         decoder_host::DECODER_FFMPEG,
                         &host,
                     )
-                });
+                };
+                assert_eq!(status, ENGINE_OK);
             }
         });
-        assert_eq!(refused, Some(ENGINE_E_INVALID_STATE));
+        // No cut anywhere: a step between neighbouring samples is a fade's and the dither's, never a jump.
+        let largest = left
+            .windows(2)
+            .map(|w| (i32::from(w[1]) - i32::from(w[0])).abs())
+            .max()
+            .unwrap();
+        assert!(largest < 16, "{largest}");
+        assert_eq!(boundaries.len(), 2);
+        let start = boundaries[1];
+        assert_eq!(left.len(), start + 96_000);
+        assert!(left[start + 48_000..].iter().all(|&v| v == 2000));
     }
 
     #[test]
