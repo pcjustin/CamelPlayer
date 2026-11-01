@@ -25,6 +25,7 @@
 #include "CardSize.h"
 #include "CreditText.h"
 #include "DialogPlacement.h"
+#include "ThemeBrush.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
 
@@ -187,6 +188,11 @@ void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Com
     server_ = std::move(server);
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
+    // The format badges are colored from code, so they follow a change of theme.
+    ActualThemeChanged([this](auto&&, auto&&) {
+        ui::setTheme(ActualTheme());
+        showAlbumFormats(albumFormats_);
+    });
     savePlaylist_ = std::move(savePlaylist);
     window_ = std::move(window);
     answerArtistPictures_ = std::move(answerArtistPictures);
@@ -1342,6 +1348,7 @@ void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, Rout
 }
 
 void LibraryView::showAlbumFormats(const std::vector<LibraryAlbumFormat>& formats) {
+    if (&formats != &albumFormats_) albumFormats_ = formats;
     AlbumFormats().Children().Clear();
     for (const auto& f : formats) {
         const auto label = formatLabel(f);
@@ -1351,8 +1358,8 @@ void LibraryView::showAlbumFormats(const std::vector<LibraryAlbumFormat>& format
         badge.CornerRadius({10, 10, 10, 10});
         badge.BorderThickness({1, 1, 1, 1});
         const auto resources = Application::Current().Resources();
-        badge.Background(resources.Lookup(box_value(L"ControlFillColorSecondaryBrush")).as<Media::Brush>());
-        badge.BorderBrush(resources.Lookup(box_value(L"ControlStrokeColorDefaultBrush")).as<Media::Brush>());
+        badge.Background(ui::themeBrush(L"ControlFillColorSecondaryBrush"));
+        badge.BorderBrush(ui::themeBrush(L"ControlStrokeColorDefaultBrush"));
         TextBlock text;
         text.Text(label);
         text.Style(resources.Lookup(box_value(L"CaptionTextBlockStyle")).as<Microsoft::UI::Xaml::Style>());

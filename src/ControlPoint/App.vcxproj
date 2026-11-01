@@ -89,6 +89,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="UiText.h" />
+    <ClInclude Include="ThemeBrush.h" />
     <ClInclude Include="DialogPlacement.h" />
     <ClInclude Include="CreditText.h" />
     <ClInclude Include="BrowseItem.h">
@@ -139,6 +140,7 @@
     </ClCompile>
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="UiText.cpp" />
+    <ClCompile Include="ThemeBrush.cpp" />
     <ClCompile Include="TrackMarks.cpp" />
     <ClCompile Include="EqEditor.cpp" />
     <ClCompile Include="TrayIcon.cpp" />

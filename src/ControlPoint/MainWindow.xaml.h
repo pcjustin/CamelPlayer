@@ -155,6 +155,7 @@ private:
         bool operator==(const PathStep&) const = default;
     };
     void showSignalPath(std::vector<PathStep> steps);
+    void repaintTheme();
     void showLoudnessProgress();
     void showDspOrder();
     void showDspSummary();
@@ -234,6 +235,10 @@ private:
     std::optional<PlayRequest> lastPlay_;
     std::chrono::steady_clock::time_point lastPlayAt_;
     std::vector<PathStep> shownPath_;
+    // The theme brushes the playback state shows now, painted again when the theme changes.
+    const wchar_t* stateColor_ = L"TextFillColorSecondaryBrush";
+    const wchar_t* lampColor_ = L"ControlStrongFillColorDisabledBrush";
+    const wchar_t* dspColor_ = L"TextFillColorPrimaryBrush";
     int volumeWheel_ = 0;         // the part of a wheel notch not yet applied
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates

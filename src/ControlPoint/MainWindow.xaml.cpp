@@ -26,6 +26,7 @@
 
 #include "CreditText.h"
 #include "DialogPlacement.h"
+#include "ThemeBrush.h"
 #include "UiText.h"
 #include "ArtworkLoader.h"
 #include "Common/settings/EqText.h"
@@ -45,6 +46,7 @@ using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace camel;
 using namespace camel::audio;
+using ui::themeBrush;
 using ui::tr;
 using namespace camel::server;
 
@@ -138,11 +140,6 @@ void fill(ComboBox const& combo, std::vector<hstring> const& items, int selected
 double numberOr(NumberBox const& box, double fallback) {
     double v = box.Value();
     return std::isnan(v) ? fallback : v;
-}
-
-// Theme brushes follow light, dark and high-contrast themes.
-Media::Brush themeBrush(const wchar_t* key) {
-    return Application::Current().Resources().TryLookup(box_value(key)).try_as<Media::Brush>();
 }
 
 // Output details arrive as one line of ", " and "; " separated clauses; the status area shows one per line.
@@ -248,8 +245,12 @@ void MainWindow::InitializeComponent() {
     ExtendsContentIntoTitleBar(true);
     SetTitleBar(AppTitleBar());
     AppWindow().TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
+    ui::setTheme(Content().as<FrameworkElement>().ActualTheme());
     colorCaptionButtons();
-    Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) { colorCaptionButtons(); });
+    Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) {
+        colorCaptionButtons();
+        repaintTheme();
+    });
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
@@ -959,7 +960,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             color = L"TextFillColorPrimaryBrush";
         }
         StateIcon().Glyph(glyph);
-        StateIcon().Foreground(themeBrush(color));
+        stateColor_ = color;
+        StateIcon().Foreground(themeBrush(stateColor_));
         setAnnounced(StateText(), tr(key));
         setBadgeTip(StateBadge(), tr(key), s.error ? ui::utf8(s.errorDetail) : hstring{});
     }
@@ -974,22 +976,23 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const OutputPlan plan = s.plan.value_or(OutputPlan{*s.output});
         switch (plan.state) {
         case PipelineState::BitPerfect:
-            Lamp().Fill(themeBrush(L"SystemFillColorSuccessBrush"));
+            lampColor_ = L"SystemFillColorSuccessBrush";
             setAnnounced(LampText(), tr(L"Lamp_BitPerfect"));
             break;
         case PipelineState::LosslessConversion:
-            Lamp().Fill(themeBrush(L"SystemFillColorCautionBrush"));
+            lampColor_ = L"SystemFillColorCautionBrush";
             setAnnounced(LampText(), tr(L"Lamp_Lossless"));
             break;
         case PipelineState::Processed:
-            Lamp().Fill(themeBrush(L"SystemFillColorCriticalBrush"));
+            lampColor_ = L"SystemFillColorCriticalBrush";
             setAnnounced(LampText(), tr(L"Lamp_Processed"));
             break;
         case PipelineState::LossySource:
-            Lamp().Fill(themeBrush(L"SystemFillColorNeutralBrush"));
+            lampColor_ = L"SystemFillColorNeutralBrush";
             setAnnounced(LampText(), tr(L"Lamp_Lossy"));
             break;
         }
+        Lamp().Fill(themeBrush(lampColor_));
         // Source lossiness is its own field; a processed lossy file shows both (docs/Plan.md §5.2).
         SourceBadge().Visibility(lossy && plan.state != PipelineState::LossySource ? Visibility::Visible : Visibility::Collapsed);
         BypassBadge().Visibility(plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native ? Visibility::Visible
@@ -1081,14 +1084,16 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         showSignalPath(std::move(steps));
         dspActive = processed;
     } else {
-        Lamp().Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
+        lampColor_ = L"ControlStrongFillColorDisabledBrush";
+        Lamp().Fill(themeBrush(lampColor_));
         setAnnounced(LampText(), tr(L"Lamp_Idle"));
         SourceBadge().Visibility(Visibility::Collapsed);
         BypassBadge().Visibility(Visibility::Collapsed);
         FormatText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
         showSignalPath({});
     }
-    DspButtonText().Foreground(themeBrush(dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush"));
+    dspColor_ = dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush";
+    DspButtonText().Foreground(themeBrush(dspColor_));
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch, with why the change into
     // the track did not crossfade.
     std::wstring note = BypassBadge().Visibility() == Visibility::Visible ? std::wstring(tr(L"Badge_DspBypassedTip")) : L"";
@@ -1278,7 +1283,7 @@ void MainWindow::showRoots(ListView const& list) {
         where.Text(hstring(location));
         where.TextTrimming(TextTrimming::CharacterEllipsis);
         where.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-        where.Foreground(Application::Current().Resources().Lookup(box_value(L"TextFillColorSecondaryBrush")).as<Media::Brush>());
+        where.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
         StackPanel lines;
         lines.VerticalAlignment(VerticalAlignment::Center);
         lines.Children().Append(name);
@@ -1492,8 +1497,7 @@ void MainWindow::showHotkeys() {
         status.Text(hotkeysTaken_[i] ? tr(L"Hotkey_Taken") : hstring{});
         status.TextWrapping(TextWrapping::Wrap);
         status.VerticalAlignment(VerticalAlignment::Center);
-        status.Foreground(
-            Application::Current().Resources().Lookup(box_value(L"SystemFillColorCautionBrush")).as<Media::Brush>());
+        status.Foreground(themeBrush(L"SystemFillColorCautionBrush"));
         Grid::SetColumn(status, 3);
         row.Children().Append(status);
         HotkeyRows().Children().Append(row);
@@ -1581,6 +1585,19 @@ void MainWindow::applyTheme() {
                                                         : ElementTheme::Default;
     const auto content = Content().as<FrameworkElement>();
     if (content.RequestedTheme() != theme) content.RequestedTheme(theme);
+}
+
+// Colors set from code take the theme's brushes again once the window shows another theme.
+void MainWindow::repaintTheme() {
+    ui::setTheme(Content().as<FrameworkElement>().ActualTheme());
+    StateIcon().Foreground(themeBrush(stateColor_));
+    Lamp().Fill(themeBrush(lampColor_));
+    DspButtonText().Foreground(themeBrush(dspColor_));
+    if (playbackFavorite_) PlaybackFavoriteIcon().Foreground(themeBrush(L"AccentTextFillColorPrimaryBrush"));
+    showSignalPath(std::exchange(shownPath_, {}));
+    showHotkeys();
+    showRoots(RootList());
+    if (eqEditor_) eqEditor_->repaint();
 }
 
 // The minimize, maximize and close buttons sit on our title bar, so they follow the app's light or dark theme.
@@ -2229,8 +2246,7 @@ void MainWindow::showPlaybackFavorite(bool favorite) {
     playbackFavorite_ = favorite;
     PlaybackFavoriteIcon().Glyph(favorite ? L"\xE00B" : L"\xE006");
     if (favorite)
-        PlaybackFavoriteIcon().Foreground(
-            Application::Current().Resources().Lookup(box_value(L"AccentTextFillColorPrimaryBrush")).as<Media::Brush>());
+        PlaybackFavoriteIcon().Foreground(themeBrush(L"AccentTextFillColorPrimaryBrush"));
     else
         PlaybackFavoriteIcon().ClearValue(IconElement::ForegroundProperty());
 }

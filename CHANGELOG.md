@@ -13,6 +13,10 @@ New features since 0.1.0:
 - **Signal path as a list:** the format line opens one row per step from the file through the decoder and each step that acts to the output, with the format after it and a colored dot for bit-perfect, lossless conversion, processed or lossy source.
 - **The DSP chain:** EQ, crossfeed and convolution work in an order you can change, after one automatic preamp that keeps the whole chain from clipping. The DSP button in the player bar turns each on or off and switches EQ presets. Changes are heard within about a quarter of a second without a gap; while nothing changes the signal, playback stays bit-perfect.
 
+Fixed since 0.1.0:
+
+- With a theme in Settings › Interface other than the Windows one, the colors the player sets itself (the playback state, the output lamp, the DSP button, the signal path dots, the EQ editor, Home's tiles and chart and an album's formats) followed Windows and could be unreadable. They now follow the app's theme and change with it.
+
 ## 0.1.0
 
 New features since 0.0.1:

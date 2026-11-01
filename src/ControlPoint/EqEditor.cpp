@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "ThemeBrush.h"
 #include "UiText.h"
 #include "Engine/Dsp.h"
 
@@ -33,7 +34,7 @@ constexpr const wchar_t* kChannelKeys[] = {L"Eq_Channels_All", L"Eq_Channels_Lef
 constexpr uint32_t kSlopes[] = {6, 12, 18, 24, 36, 48};
 
 Media::Brush brush(const wchar_t* key) {
-    return Application::Current().Resources().Lookup(box_value(key)).as<Media::Brush>();
+    return ui::themeBrush(key);
 }
 
 bool hasGain(EqKind kind) {
@@ -263,6 +264,11 @@ double EqEditor::pointDb(size_t band, const std::vector<double>& leftDb) const {
     // A point without a gain of its own sits on the curve.
     const double at = std::log(std::clamp(b.frequencyHz, kLowHz, kHighHz) / kLowHz) / std::log(kHighHz / kLowHz);
     return leftDb[size_t(std::lround(at * (kCurvePoints - 1)))];
+}
+
+void EqEditor::repaint() {
+    rebuildRows();
+    redraw();
 }
 
 void EqEditor::redraw() {

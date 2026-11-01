@@ -18,6 +18,7 @@
 #include "BrowseItem.h"
 #include "CardSize.h"
 #include "TrackMarks.h"
+#include "ThemeBrush.h"
 #include "UiText.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
@@ -203,6 +204,12 @@ struct PeriodData {
 void HomeView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     server_ = std::move(server);
     handlers_ = std::move(handlers);
+    // Colors set from code follow a change of theme.
+    ActualThemeChanged([this](auto&&, auto&&) {
+        ui::setTheme(ActualTheme());
+        showTiles();
+        drawChart();
+    });
     using namespace std::chrono_literals;
     changeTimer_ = DispatcherQueue().CreateTimer();
     changeTimer_.Interval(3s); // the library pages' pace
@@ -452,7 +459,7 @@ winrt::fire_and_forget HomeView::loadPeriod() {
 
 // The chosen card is outlined in the accent color; padding makes up for its wider border so its text stays put.
 void HomeView::showTiles() {
-    const auto accent = Application::Current().Resources().Lookup(box_value(L"AccentFillColorDefaultBrush")).as<Media::Brush>();
+    const auto accent = ui::themeBrush(L"AccentFillColorDefaultBrush");
     for (const auto& child : Tiles().Children()) {
         const auto tile = child.as<Border>();
         const bool chosen = unbox_value_or<hstring>(tile.Tag(), L"") == period_;
@@ -493,10 +500,9 @@ void HomeView::drawChart() {
     for (const auto& b : chart_.buckets) most = std::max(most, b.listenedMs);
     const double width = Chart().ActualWidth(), height = Chart().ActualHeight();
     if (width <= 0 || height <= 0) return;
-    const auto resource = [](const wchar_t* key) { return Application::Current().Resources().Lookup(box_value(key)); };
-    const auto accent = resource(L"AccentFillColorDefaultBrush").as<Media::Brush>();
-    const auto secondary = resource(L"TextFillColorSecondaryBrush").as<Media::Brush>();
-    const auto divider = resource(L"DividerStrokeColorDefaultBrush").as<Media::Brush>();
+    const auto accent = ui::themeBrush(L"AccentFillColorDefaultBrush");
+    const auto secondary = ui::themeBrush(L"TextFillColorSecondaryBrush");
+    const auto divider = ui::themeBrush(L"DividerStrokeColorDefaultBrush");
     const auto text = [&](std::wstring_view value) {
         TextBlock block;
         // The caption size, with a fixed line height: a block not yet shown measures its width but not its height.

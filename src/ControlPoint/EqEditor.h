@@ -23,6 +23,8 @@ public:
     // Shows `eq`, drawn at `rateHz` (the playing output rate, else 48 kHz).
     void show(const camel::EqSettings& eq, uint32_t rateHz);
     const camel::EqSettings& settings() const { return eq_; }
+    // Draws everything again in the window's current theme.
+    void repaint();
 
 private:
     // One band's controls, kept so a dragged point updates its row and a type change enables the right fields.
