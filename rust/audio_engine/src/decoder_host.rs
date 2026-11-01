@@ -124,6 +124,8 @@ pub(crate) struct DecoderSource {
     pub(crate) crossfade_ms: u32,
     /// The track may be converted to the open device format without the conversion setting.
     pub(crate) convert: bool,
+    /// Room reserved for the previous track's tail while it crossfades into this one.
+    pub(crate) held: Vec<u8>,
 }
 
 pub(crate) fn is_decoder_kind(decoder_kind: u32) -> bool {
@@ -266,6 +268,7 @@ impl DecoderSource {
             gain: 10f64.powf(source.gain_db / 20.0),
             crossfade_ms: source.crossfade_ms,
             convert: source.flags & crate::TRACK_CONVERT != 0,
+            held: Vec::new(),
         })
     }
 

@@ -278,8 +278,9 @@ pub(crate) struct Dsp {
     ramp_left: usize,
     started: bool,
     clipped: u64,
-    // Replaced convolvers, freed on the next change rather than in the DSP stage.
+    // Replaced convolvers and EQs, freed on the next change rather than in the DSP stage.
     retired: Vec<Convolver>,
+    retired_eq: Vec<EqNode>,
 }
 
 impl Dsp {
@@ -303,6 +304,7 @@ impl Dsp {
             started: false,
             clipped: 0,
             retired: Vec::with_capacity(4),
+            retired_eq: Vec::with_capacity(4),
         }
     }
 
@@ -319,6 +321,7 @@ impl Dsp {
     /// Applies `settings`, which must be valid for this rate. Once audio has passed, the change fades in.
     pub(crate) fn set(&mut self, settings: Settings) {
         self.retired.clear();
+        self.retired_eq.clear();
         let rate = f64::from(self.rate);
         let started = self.started;
         if settings.bands != self.settings.bands {
@@ -438,7 +441,9 @@ impl Dsp {
         for node in self.order {
             match node {
                 NODE_EQ => {
-                    self.eq.process(block, channels);
+                    if let Some(old) = self.eq.process(block, channels) {
+                        self.retired_eq.push(old);
+                    }
                 }
                 NODE_CROSSFEED => {
                     self.crossfeed.process(block, channels);

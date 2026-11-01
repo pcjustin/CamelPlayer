@@ -61,7 +61,25 @@ pub(crate) struct Converter {
     decimator: Option<DsdDecimator>,
     in_rate: u32,
     out_rate: u32,
+    scratch: Scratch,
 }
+
+// Working buffers, sized once so converting needs no heap.
+#[derive(Default)]
+struct Scratch {
+    words: Vec<i32>,
+    // Source frames as float, on the source's channels.
+    values: Vec<f64>,
+    // Mixed to the device's channels, before resampling.
+    mixed: Vec<f64>,
+    // Device-rate frames on the device's channels.
+    output: Vec<f64>,
+}
+
+// A resampler's flushed tail, beyond what one block produces.
+const RESAMPLER_FLUSH_FRAMES: usize = 8192;
+// The most channels a DSD stream carries to the device.
+const MAX_DSD_CHANNELS: usize = 8;
 
 /// Stereo downmix coefficients per source channel count, in WAVE/FLAC default order (ITU-R BS.775: centre and
 /// surrounds at -3 dB, LFE dropped). 7: L R C LFE Cs Ls Rs; 8: L R C LFE Lb Rb Ls Rs.
@@ -115,6 +133,19 @@ impl Converter {
         allow_dsd: bool,
         quality: u32,
     ) -> Result<Self, i32> {
+        let mut converter = Self::build(info, out, out_rate, allow, allow_dsd, quality)?;
+        converter.reserve();
+        Ok(converter)
+    }
+
+    fn build(
+        info: &CamelSourceInfoV1,
+        out: &AudioFormat,
+        out_rate: u32,
+        allow: bool,
+        allow_dsd: bool,
+        quality: u32,
+    ) -> Result<Self, i32> {
         let in_channels = info.channel_count as usize;
         let out_channels = out.channel_count as usize;
         let in_dsd = info.sample_encoding == SAMPLE_ENCODING_DSD;
@@ -159,6 +190,7 @@ impl Converter {
                 decimator: Some(decimator),
                 in_rate: info.sample_rate,
                 out_rate,
+                scratch: Scratch::default(),
             });
         }
         if in_dsd || out.stream_kind != AUDIO_PCM {
@@ -199,6 +231,7 @@ impl Converter {
                 decimator: None,
                 in_rate: info.sample_rate,
                 out_rate,
+                scratch: Scratch::default(),
             });
         }
         let in_float = info.sample_encoding == SAMPLE_ENCODING_FLOAT32;
@@ -267,6 +300,7 @@ impl Converter {
             decimator: None,
             in_rate: info.sample_rate,
             out_rate,
+            scratch: Scratch::default(),
         })
     }
 
@@ -312,20 +346,16 @@ impl Converter {
         dsp: &mut Dsp,
     ) -> Result<(), i32> {
         let input = &samples[..frames * self.in_channels];
-        if self.processes(dsp) && matches!(self.mode, Mode::Bypass | Mode::Duplicate | Mode::Widen)
-        {
-            let mut floats = self.to_device_channels(input);
-            return self.emit(&mut floats, dsp);
-        }
+        let processes = self.processes(dsp);
         match self.mode {
-            Mode::Bypass => self.pack(input, self.in_bits),
-            Mode::Duplicate => {
-                let stereo: Vec<i32> = input.iter().flat_map(|&s| [s, s]).collect();
-                self.pack(&stereo, self.in_bits)
-            }
-            Mode::Widen => {
-                let mut floats = self.to_device_channels(input);
-                self.emit(&mut floats, dsp)
+            Mode::Bypass if !processes => self.pack(input, self.in_bits),
+            Mode::Duplicate if !processes => {
+                let mut stereo = std::mem::take(&mut self.scratch.words);
+                stereo.clear();
+                stereo.extend(input.iter().flat_map(|&s| [s, s]));
+                let result = self.pack(&stereo, self.in_bits);
+                self.scratch.words = stereo;
+                result
             }
             Mode::Dsd => {
                 for frame in input.chunks_exact(self.in_channels) {
@@ -338,31 +368,26 @@ impl Converter {
             }
             Mode::Dop => {
                 for frame in input.chunks_exact(self.in_channels) {
-                    let bytes =
-                        (0..self.out_channels).map(|c| frame[c.min(self.in_channels - 1)] as u8);
+                    let mut bytes = [0u8; MAX_DSD_CHANNELS];
+                    for (c, byte) in bytes[..self.out_channels].iter_mut().enumerate() {
+                        *byte = frame[c.min(self.in_channels - 1)] as u8;
+                    }
                     if self.carry.is_empty() {
-                        self.carry.extend(bytes);
+                        self.carry.extend_from_slice(&bytes[..self.out_channels]);
                     } else {
-                        let second: Vec<u8> = bytes.collect();
-                        self.push_dop(&second);
+                        self.push_dop(&bytes[..self.out_channels]);
                     }
                 }
                 Ok(())
             }
-            Mode::DsdPcm => {
-                let mut decimated = Vec::new();
-                self.decimator
-                    .as_mut()
-                    .expect("DSD to PCM has a decimator")
-                    .process(input, frames, &mut decimated);
-                let mixed = self.mix_floats(&decimated);
-                let mut resampled = self.resample(mixed)?;
-                self.emit(&mut resampled, dsp)
-            }
-            Mode::Process => {
-                let mixed = self.mix(input, frames);
-                let mut resampled = self.resample(mixed)?;
-                self.emit(&mut resampled, dsp)
+            _ => {
+                let mut floats = std::mem::take(&mut self.scratch.output);
+                floats.clear();
+                let result = self
+                    .append_floats(input, frames, &mut floats)
+                    .and_then(|()| self.emit(&mut floats, dsp));
+                self.scratch.output = floats;
+                result
             }
         }
     }
@@ -372,45 +397,34 @@ impl Converter {
         !matches!(self.mode, Mode::Dsd | Mode::Dop)
     }
 
-    /// Converts `frames` decoded frames as `convert` does, but returns them as device-rate float frames with the
-    /// track's gain, before the DSP chain, for a crossfade to mix.
-    pub(crate) fn floats(&mut self, samples: &[i32], frames: usize) -> Result<Vec<f64>, i32> {
-        let input = &samples[..frames * self.in_channels];
-        let mut floats = match self.mode {
-            Mode::Bypass | Mode::Duplicate | Mode::Widen => self.to_device_channels(input),
-            Mode::Process => {
-                let mixed = self.mix(input, frames);
-                self.resample(mixed)?
-            }
-            Mode::DsdPcm => {
-                let mut decimated = Vec::new();
-                self.decimator
-                    .as_mut()
-                    .expect("DSD to PCM has a decimator")
-                    .process(input, frames, &mut decimated);
-                let mixed = self.mix_floats(&decimated);
-                self.resample(mixed)?
-            }
-            Mode::Dsd | Mode::Dop => return Err(ENGINE_E_UNSUPPORTED_FORMAT),
-        };
-        self.apply_gain(&mut floats);
-        Ok(floats)
+    /// Converts `frames` decoded frames as `convert` does, but appends them to `out` as device-rate float frames with
+    /// the track's gain, before the DSP chain, for a crossfade to mix.
+    pub(crate) fn floats(
+        &mut self,
+        samples: &[i32],
+        frames: usize,
+        out: &mut Vec<f64>,
+    ) -> Result<(), i32> {
+        let start = out.len();
+        self.append_floats(&samples[..frames * self.in_channels], frames, out)?;
+        self.apply_gain(&mut out[start..]);
+        Ok(())
     }
 
-    /// Ends the source like `finish`, returning the resampler's tail as `floats` does.
-    pub(crate) fn finish_floats(&mut self) -> Result<Vec<f64>, i32> {
-        let mut tail = Vec::new();
+    /// Ends the source like `finish`, appending the resampler's tail to `out` as `floats` does.
+    pub(crate) fn finish_floats(&mut self, out: &mut Vec<f64>) -> Result<(), i32> {
         if self.finished {
-            return Ok(tail);
+            return Ok(());
         }
         self.finished = true;
+        let start = out.len();
         if let Some(resampler) = self.resampler.as_mut() {
             resampler
-                .process(&[], &mut tail)
+                .process(&[], out)
                 .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
         }
-        self.apply_gain(&mut tail);
-        Ok(tail)
+        self.apply_gain(&mut out[start..]);
+        Ok(())
     }
 
     /// Appends mixed float frames, which carry each track's gain already, through the DSP chain to the pending output,
@@ -438,83 +452,117 @@ impl Converter {
         self.finished = true;
         if self.mode == Mode::Dop && !self.carry.is_empty() {
             // An odd final byte frame is completed with idle pattern; the stream stays whole DoP frames.
-            self.push_dop(&vec![DSD_SILENCE; self.out_channels]);
+            self.push_dop(&[DSD_SILENCE; MAX_DSD_CHANNELS][..self.out_channels]);
         }
-        if let Some(resampler) = self.resampler.as_mut() {
-            let mut tail = Vec::new();
-            resampler
-                .process(&[], &mut tail)
-                .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-            return self.emit(&mut tail, dsp);
-        }
-        Ok(())
+        let Some(resampler) = self.resampler.as_mut() else {
+            return Ok(());
+        };
+        let mut tail = std::mem::take(&mut self.scratch.output);
+        tail.clear();
+        let result = resampler
+            .process(&[], &mut tail)
+            .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)
+            .and_then(|()| self.emit(&mut tail, dsp));
+        self.scratch.output = tail;
+        result
     }
 
     /// Emits `frames` frames of the DSP chain's tail after the stream's end: silence through the chain.
     pub(crate) fn drain(&mut self, frames: usize, dsp: &mut Dsp) -> Result<(), i32> {
-        let mut silence = vec![0.0; frames * self.out_channels];
-        self.emit(&mut silence, dsp)
+        let mut silence = std::mem::take(&mut self.scratch.output);
+        silence.clear();
+        silence.resize(frames * self.out_channels, 0.0);
+        let result = self.emit(&mut silence, dsp);
+        self.scratch.output = silence;
+        result
     }
 
-    fn resample(&mut self, mixed: Vec<f64>) -> Result<Vec<f64>, i32> {
-        match self.resampler.as_mut() {
-            Some(resampler) => {
-                let mut resampled = Vec::new();
-                resampler
-                    .process(&mixed, &mut resampled)
-                    .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
-                Ok(resampled)
+    // Appends `frames` decoded frames to `out` as float frames on the device's channels at the device rate, before the
+    // track's gain.
+    fn append_floats(
+        &mut self,
+        input: &[i32],
+        frames: usize,
+        out: &mut Vec<f64>,
+    ) -> Result<(), i32> {
+        let mut values = std::mem::take(&mut self.scratch.values);
+        values.clear();
+        match self.mode {
+            Mode::Bypass | Mode::Duplicate | Mode::Widen => self.to_device_channels(input, out),
+            Mode::Process => {
+                let scale = if self.in_float {
+                    1.0
+                } else {
+                    1.0 / f64::from(1u32 << (self.in_bits - 1))
+                };
+                values.extend(input.iter().map(|&s| {
+                    if self.in_float {
+                        f64::from(f32::from_bits(s as u32))
+                    } else {
+                        f64::from(s) * scale
+                    }
+                }));
             }
-            None => Ok(mixed),
+            Mode::DsdPcm => {
+                self.decimator
+                    .as_mut()
+                    .expect("DSD to PCM has a decimator")
+                    .process(input, frames, &mut values);
+            }
+            Mode::Dsd | Mode::Dop => {
+                self.scratch.values = values;
+                return Err(ENGINE_E_UNSUPPORTED_FORMAT);
+            }
         }
+        let result = if matches!(self.mode, Mode::Process | Mode::DsdPcm) {
+            self.mix_and_resample(&values, out)
+        } else {
+            Ok(())
+        };
+        self.scratch.values = values;
+        result
+    }
+
+    // Mixes float frames of `in_channels` to stereo and resamples them where the rate changes, appending to `out`.
+    fn mix_and_resample(&mut self, values: &[f64], out: &mut Vec<f64>) -> Result<(), i32> {
+        if self.resampler.is_none() {
+            self.mix_floats(values, out);
+            return Ok(());
+        }
+        let mut mixed = std::mem::take(&mut self.scratch.mixed);
+        mixed.clear();
+        self.mix_floats(values, &mut mixed);
+        let result = self
+            .resampler
+            .as_mut()
+            .expect("checked above")
+            .process(&mixed, out)
+            .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT);
+        self.scratch.mixed = mixed;
+        result
     }
 
     // Integer source frames as float in [-1, 1) on the device's channels, a mono channel on both.
-    fn to_device_channels(&self, input: &[i32]) -> Vec<f64> {
+    fn to_device_channels(&self, input: &[i32], out: &mut Vec<f64>) {
         let scale = 1.0 / f64::from(1u32 << (self.in_bits - 1));
-        let mut floats = Vec::with_capacity(input.len() / self.in_channels * self.out_channels);
         for frame in input.chunks_exact(self.in_channels) {
             for c in 0..self.out_channels {
-                floats.push(f64::from(frame[c.min(self.in_channels - 1)]) * scale);
+                out.push(f64::from(frame[c.min(self.in_channels - 1)]) * scale);
             }
         }
-        floats
     }
 
-    // Source samples as float in [-1, 1), mixed to stereo.
-    fn mix(&self, input: &[i32], frames: usize) -> Vec<f64> {
-        let scale = if self.in_float {
-            1.0
-        } else {
-            1.0 / f64::from(1u32 << (self.in_bits - 1))
-        };
-        let value = |s: i32| {
-            if self.in_float {
-                f64::from(f32::from_bits(s as u32))
-            } else {
-                f64::from(s) * scale
-            }
-        };
-        let values: Vec<f64> = input[..frames * self.in_channels]
-            .iter()
-            .map(|&s| value(s))
-            .collect();
-        self.mix_floats(&values)
-    }
-
-    // Float frames of `in_channels`, mixed to stereo.
-    fn mix_floats(&self, input: &[f64]) -> Vec<f64> {
+    // Float frames of `in_channels`, mixed to stereo and appended to `out`.
+    fn mix_floats(&self, input: &[f64], out: &mut Vec<f64>) {
         let matrix = self
             .matrix
             .as_ref()
             .expect("processing has a channel matrix");
-        let mut out = Vec::with_capacity(input.len() / self.in_channels * 2);
         for frame in input.chunks_exact(self.in_channels) {
             for row in matrix {
                 out.push(frame.iter().zip(row).map(|(&s, &k)| s * k).sum());
             }
         }
-        out
     }
 
     // Like any processed source: 24-bit at most, MSB-aligned in a 32-bit container.
@@ -563,18 +611,19 @@ impl Converter {
             self.quantize_bits
         };
         let full = f64::from(1u32 << (bits - 1));
-        let integers: Vec<i32> = floats
-            .iter()
-            .map(|&v| {
-                let q = (v * full + self.dither.next()).round();
-                if q.is_nan() {
-                    0
-                } else {
-                    q.clamp(-full, full - 1.0) as i32
-                }
-            })
-            .collect();
-        self.pack(&integers, bits)
+        let mut integers = std::mem::take(&mut self.scratch.words);
+        integers.clear();
+        for &v in floats.iter() {
+            let q = (v * full + self.dither.next()).round();
+            integers.push(if q.is_nan() {
+                0
+            } else {
+                q.clamp(-full, full - 1.0) as i32
+            });
+        }
+        let result = self.pack(&integers, bits);
+        self.scratch.words = integers;
+        result
     }
 
     // One DoP frame from the carried byte frame and `second`. Render stamps the real markers.
@@ -601,6 +650,27 @@ impl Converter {
         self.pending.truncate(start + written);
         self.pending_frames += frames as u64;
         Ok(())
+    }
+
+    // Sizes the pending output and every working buffer for the largest block the DSP stage converts at once, the output
+    // it resamples to and a crossfade's mixed blocks, so converting needs no heap (docs/Plan.md §5.2).
+    fn reserve(&mut self) {
+        let block = crate::MAX_PREFILL_FRAMES as usize;
+        let output = self
+            .resampler
+            .as_ref()
+            .map_or(block, |r| r.output_capacity(block) + RESAMPLER_FLUSH_FRAMES)
+            + 3 * block;
+        let out_channels = self.out_channels.max(2);
+        self.pending.reserve_exact(output * self.bytes_per_frame);
+        self.carry.reserve_exact(out_channels);
+        let scratch = &mut self.scratch;
+        scratch.words.reserve_exact(output * out_channels);
+        scratch
+            .values
+            .reserve_exact(block * self.in_channels.max(out_channels));
+        scratch.mixed.reserve_exact(block * out_channels);
+        scratch.output.reserve_exact(output * out_channels);
     }
 }
 
