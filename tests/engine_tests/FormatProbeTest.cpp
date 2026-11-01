@@ -61,6 +61,12 @@ Bytes id3(size_t size) {
            char(size & 0x7f) + Bytes(size, '\0');
 }
 
+Bytes frames(const Bytes& header, size_t length, int count) {
+    Bytes out;
+    for (int i = 0; i < count; i++) out += header + Bytes(length - header.size(), '\0');
+    return out;
+}
+
 std::filesystem::path write(const std::string& name, const Bytes& bytes) {
     const auto path = testutil::tempDir() / ("probe-" + name);
     std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
@@ -105,6 +111,19 @@ TEST(FormatProbe, SeparatesMpegAudioFromAdtsAndChecksTheAacProfile) {
     EXPECT_EQ(probe("adts-lc", Bytes("\xFF\xF1\x50\x80", 4) + Bytes(16, '\0')), AudioFormat::Aac);
     expectUnsupported("adts-main", Bytes("\xFF\xF1\x10\x80", 4) + Bytes(16, '\0'));
     expectUnsupported("mp2", Bytes("\xFF\xFD\x90\x64", 4) + Bytes(16, '\0'));
+}
+
+// Taggers leave a second tag, padding or other bytes before the first frame; the frame after it confirms MPEG audio.
+TEST(FormatProbe, FindsMpegAudioPastStackedTagsPaddingAndOtherData) {
+    const Bytes layer3 = frames(Bytes("\xFF\xFB\x90\x64", 4), 417, 3); // MPEG-1 layer III, 128 kbit/s, 44.1 kHz
+    EXPECT_EQ(probe("id3-id3.mp3", id3(40) + id3(30) + layer3), AudioFormat::Mp3);
+    EXPECT_EQ(probe("id3-padding.mp3", id3(40) + Bytes(1011, '\0') + layer3), AudioFormat::Mp3);
+    Bytes other(929, '\0');
+    for (size_t i = 0; i < other.size(); i++) other[i] = char(0xA1 + i * 5 / 2 % 0x5E);
+    other.replace(100, 4, "\xFF\xFB\x90\x64"); // a header no frame follows
+    EXPECT_EQ(probe("id3-other.mp3", id3(40) + other + layer3), AudioFormat::Mp3);
+    expectUnsupported("id3-padding-mp2", id3(40) + Bytes(500, '\0') + frames(Bytes("\xFF\xFD\x90\x64", 4), 522, 3));
+    expectUnsupported("id3-lone-header", id3(40) + Bytes(64, '\0') + Bytes("\xFF\xFB\x90\x64", 4) + Bytes(600, '\0'));
 }
 
 TEST(FormatProbe, SeparatesM4aAlacFromAacLc) {

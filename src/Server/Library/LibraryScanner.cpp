@@ -107,6 +107,8 @@ using library::fileVersion;
 using TrustedIdentity = std::tuple<std::string, std::vector<uint8_t>, int64_t>;
 
 std::string kind(const Path& path) {
+    // macOS keeps a file's Finder data beside it as "._name" (AppleDouble) on file systems without forks, such as SMB.
+    if (path.filename().wstring().starts_with(L"._")) return {};
     const auto ext = lower(path.extension().wstring());
     if (ext == L".lrc") return "lrc";
     if (ext == L".jpg" || ext == L".jpeg" || ext == L".png" || ext == L".webp") return "image";

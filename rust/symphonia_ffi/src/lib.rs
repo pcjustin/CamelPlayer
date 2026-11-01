@@ -5,14 +5,17 @@
 //! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF, AAC and MP3 decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
+mod hidden_tags;
+
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use hidden_tags::HiddenTags;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{
     CodecParameters, Decoder, DecoderOptions, VerificationCheck, CODEC_TYPE_AAC, CODEC_TYPE_ALAC,
-    CODEC_TYPE_MP3,
+    CODEC_TYPE_MP3, CODEC_TYPE_NULL,
 };
 use symphonia::core::errors::Error;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
@@ -520,11 +523,11 @@ unsafe fn open_decoder(
     info: *mut SymInfo,
 ) -> i32 {
     let path = CStr::from_ptr(path).to_string_lossy().into_owned();
-    let file = match std::fs::File::open(&path) {
-        Ok(f) => f,
+    let source = match std::fs::File::open(&path).and_then(HiddenTags::new) {
+        Ok(s) => s,
         Err(_) => return SYM_E_IO,
     };
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mss = MediaSourceStream::new(Box::new(source), Default::default());
     let probed = match symphonia::default::get_probe().format(
         &Hint::new(),
         mss,
@@ -544,7 +547,12 @@ unsafe fn open_decoder(
         }
     };
     let format = probed.format;
-    let Some(track) = format.default_track() else {
+    // A music video's first track is its picture, which Symphonia gives no codec; its sound is the first one with one.
+    let Some(track) = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+    else {
         return SYM_E_FORMAT;
     };
     let mut params = track.codec_params.clone();

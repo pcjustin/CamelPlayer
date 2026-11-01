@@ -27,6 +27,9 @@ SourceInfo probeAacInfo(const std::filesystem::path& path);
 // streams do not, so decoders can only estimate it.
 bool lossyLengthDeclared(const std::filesystem::path& path);
 
+// Where an MP3 file's first frame starts: past its ID3v2 tags and any padding or other bytes left before the frame.
+uint64_t mpegAudioStart(const std::filesystem::path& path);
+
 // numSampleFrames of an AIFF/AIFC COMM chunk; nullopt when the file has none.
 std::optional<uint64_t> aiffSampleFrames(const std::filesystem::path& path);
 

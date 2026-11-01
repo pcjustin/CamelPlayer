@@ -10,6 +10,7 @@
 #include <dr_mp3.h>
 #pragma warning(pop)
 
+#include <cstdio>
 #include <vector>
 
 #include "Common/util/Text.h"
@@ -20,20 +21,28 @@ namespace {
 
 class DrMp3 final : public IDecoder {
 public:
-    DrMp3(const std::filesystem::path& path, uint32_t lossyBits) {
-        if (!drmp3_init_file_w(&mp3_, longPath(path).c_str(), nullptr))
-            throw Error(ErrorCode::FileOpen, "drmp3_init_file_w failed");
+    DrMp3(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) : start_(start) {
+        if (_wfopen_s(&file_, longPath(path).c_str(), L"rb") != 0 || !file_)
+            throw Error(ErrorCode::FileOpen, "dr_mp3: cannot open file");
+        if (!onSeek(this, 0, DRMP3_SEEK_SET) || !drmp3_init(&mp3_, onRead, onSeek, onTell, nullptr, this, nullptr)) {
+            std::fclose(file_);
+            throw Error(ErrorCode::FileOpen, "drmp3_init failed");
+        }
         info_.sampleRate = mp3_.sampleRate;
         info_.channels = mp3_.channels;
         info_.bitsPerSample = lossyBits;
         info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
         if (!info_.sampleRate || !info_.channels) {
             drmp3_uninit(&mp3_);
+            std::fclose(file_);
             throw Error(ErrorCode::UnsupportedStream, "dr_mp3: unexpected stream parameters");
         }
     }
 
-    ~DrMp3() override { drmp3_uninit(&mp3_); }
+    ~DrMp3() override {
+        drmp3_uninit(&mp3_);
+        std::fclose(file_);
+    }
     DrMp3(const DrMp3&) = delete;
     DrMp3& operator=(const DrMp3&) = delete;
 
@@ -56,6 +65,24 @@ public:
     }
 
 private:
+    // dr_mp3 reads the file from `start_` on, as if it began there.
+    static size_t onRead(void* self, void* out, size_t bytes) {
+        return std::fread(out, 1, bytes, static_cast<DrMp3*>(self)->file_);
+    }
+    static drmp3_bool32 onSeek(void* self, int offset, drmp3_seek_origin origin) {
+        auto* d = static_cast<DrMp3*>(self);
+        if (origin == DRMP3_SEEK_SET) return _fseeki64(d->file_, int64_t(d->start_) + offset, SEEK_SET) == 0;
+        return _fseeki64(d->file_, offset, origin == DRMP3_SEEK_CUR ? SEEK_CUR : SEEK_END) == 0;
+    }
+    static drmp3_bool32 onTell(void* self, drmp3_int64* cursor) {
+        auto* d = static_cast<DrMp3*>(self);
+        const int64_t at = _ftelli64(d->file_);
+        *cursor = at - int64_t(d->start_);
+        return at >= 0;
+    }
+
+    uint64_t start_;
+    std::FILE* file_ = nullptr;
     drmp3 mp3_{};
     SourceInfo info_;
     std::vector<float> buffer_;
@@ -63,8 +90,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openDrMp3(const std::filesystem::path& path, uint32_t lossyBits) {
-    return std::make_unique<DrMp3>(path, lossyBits);
+std::unique_ptr<IDecoder> openDrMp3(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
+    return std::make_unique<DrMp3>(path, lossyBits, start);
 }
 
 } // namespace camel::audio

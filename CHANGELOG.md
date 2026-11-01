@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Fixed since 0.2.1 (files an earlier version refused are read again once by the first scan after the update, so those below appear by themselves):
+
+- **MP3 files whose audio does not follow the tag at once** were refused: a second ID3 tag, padding or other bytes between the tags and the first frame. The first frame is now found past them.
+- **M4A files with a one-byte genre** were refused by Symphonia, the default AAC and ALAC decoder, because it reads the file's tags itself and gave up on that one. Symphonia now skips the tags, which CamelPlayer reads with TagLib anyway.
+- **MP4 videos:** Symphonia took the picture track for the sound and refused the file. The first track it can decode now plays, so the sound of a music video or concert video plays like a track.
+- **macOS `._` files** (AppleDouble files with Finder data, left beside the music on a NAS) counted as audio files that could not be read; the scan now passes them over.
+
 ## 0.2.1
 
 New since 0.2.0:

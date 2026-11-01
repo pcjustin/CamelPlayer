@@ -140,7 +140,8 @@ private:
 // Lossy decoders need a few frames of warm-up after a seek (MP3 bit reservoir, AAC MDCT overlap), and some land beside
 // the target when they also trim encoder delay. This seeks early, or reopens the file, and decodes and discards up to
 // the target, so a seek matches the linear decode exactly (docs/Plan.md §16.3).
-std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits);
+std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits,
+                                      uint64_t start = 0);
 
 class LossySeek final : public IDecoder {
 public:
@@ -149,9 +150,9 @@ public:
 
     // Without `lengthKnown` the decoder only estimates the length, which is then reported as unknown (0): the Engine
     // treats a nonzero length as exact.
-    LossySeek(DecoderKind kind, std::filesystem::path path, uint32_t lossyBits, Mode mode, bool lengthKnown)
-        : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), inner_(openAdapter(kind_, path_, lossyBits_)),
-          info_(inner_->info()), mode_(mode) {
+    LossySeek(DecoderKind kind, std::filesystem::path path, uint32_t lossyBits, Mode mode, bool lengthKnown, uint64_t start = 0)
+        : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), start_(start),
+          inner_(openAdapter(kind_, path_, lossyBits_, start_)), info_(inner_->info()), mode_(mode) {
         if (!lengthKnown) info_.totalFrames = 0;
     }
     const SourceInfo& info() const override { return info_; }
@@ -163,7 +164,7 @@ public:
         if (start)
             inner_->seek(start);
         else
-            inner_ = openAdapter(kind_, path_, lossyBits_);
+            inner_ = openAdapter(kind_, path_, lossyBits_, start_);
         std::vector<int32_t> scratch(size_t(4096) * info_.channels);
         for (uint64_t left = frame - start; left;) {
             const size_t got = inner_->read(scratch.data(), size_t(std::min<uint64_t>(left, 4096)));
@@ -176,6 +177,7 @@ private:
     DecoderKind kind_;
     std::filesystem::path path_;
     uint32_t lossyBits_;
+    uint64_t start_;
     std::unique_ptr<IDecoder> inner_;
     SourceInfo info_;
     Mode mode_;
@@ -223,10 +225,10 @@ size_t IDecoder::readFloat(float*, size_t) {
 
 namespace {
 
-std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits) {
+std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
     switch (kind) {
     case DecoderKind::FFmpeg:
-        return openFfmpeg(path, lossyBits);
+        return openFfmpeg(path, lossyBits, start);
     case DecoderKind::Symphonia:
         return openSymphonia(path, lossyBits);
     case DecoderKind::DrFlac:
@@ -238,7 +240,7 @@ std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::p
     case DecoderKind::Mpg123:
         return openMpg123(path, lossyBits);
     case DecoderKind::DrMp3:
-        return openDrMp3(path, lossyBits);
+        return openDrMp3(path, lossyBits, start);
     case DecoderKind::DsdNexus:
         return openDsdNexus(path);
     }
@@ -268,12 +270,16 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
         return d;
     }
     std::unique_ptr<IDecoder> d;
+    // FFmpeg and dr_mp3 find an MP3's LAME frame, which declares the encoder delay, only where they start reading; a
+    // second ID3 tag, padding or other bytes before the first frame would hide it.
+    const bool startAtFrame = format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3);
+    const uint64_t start = startAtFrame ? mpegAudioStart(path) : 0;
     // mpg123 seeks exactly by itself; Symphonia lands on the target after warm-up; FFmpeg and dr_mp3 can land beside it
     // when they trim encoder delay, so they decode from the start.
     if (isLossy(format) && kind != DecoderKind::Mpg123)
-        d = std::make_unique<LossySeek>(kind, path, lossyBits,
-                                        kind == DecoderKind::Symphonia ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
-                                        kind == DecoderKind::DrMp3 || lossyLengthDeclared(path)); // dr_mp3 counts every frame
+        d = std::make_unique<LossySeek>(
+            kind, path, lossyBits, kind == DecoderKind::Symphonia ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
+            kind == DecoderKind::DrMp3 || lossyLengthDeclared(path), start); // dr_mp3 counts every frame
     else
         d = openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Aac && kind == DecoderKind::Symphonia)

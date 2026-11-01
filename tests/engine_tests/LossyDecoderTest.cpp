@@ -124,6 +124,51 @@ int32_t maxDifference(const std::vector<int32_t>& a, const std::vector<int32_t>&
     return worst;
 }
 
+std::string readFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+std::filesystem::path writeFile(const std::string& name, const std::string& bytes) {
+    const auto path = testutil::tempDir() / ("lossy-" + name);
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+    return path;
+}
+
+std::string be32(uint32_t v) {
+    return {char(v >> 24), char(v >> 16), char(v >> 8), char(v)};
+}
+
+uint32_t be32At(const std::string& b, size_t at) {
+    return (uint32_t(uint8_t(b[at])) << 24) | (uint32_t(uint8_t(b[at + 1])) << 16) | (uint32_t(uint8_t(b[at + 2])) << 8) |
+           uint8_t(b[at + 3]);
+}
+
+// Changes the size of the box whose type is at `type` by `bytes`.
+void grow(std::string& b, size_t type, int64_t bytes) {
+    b.replace(type - 4, 4, be32(uint32_t(int64_t(be32At(b, type - 4)) + bytes)));
+}
+
+std::string id3(size_t size) {
+    return std::string("ID3\4\0\0", 6) + char((size >> 21) & 0x7f) + char((size >> 14) & 0x7f) + char((size >> 7) & 0x7f) +
+           char(size & 0x7f) + std::string(size, '\0');
+}
+
+// Where the movie box of FFmpeg's M4A starts; it follows the media data, so growing it moves no chunk offset.
+size_t movieBox(const std::string& m4a) {
+    const size_t type = m4a.rfind("moov");
+    EXPECT_NE(type, std::string::npos);
+    EXPECT_EQ(type - 4 + be32At(m4a, type - 4), m4a.size());
+    return type;
+}
+
+void expectSameSound(const std::filesystem::path& file, const std::filesystem::path& original) {
+    EXPECT_EQ(probeFormat(file), probeFormat(original)) << file.filename();
+    for (const auto kind : decodersFor(probeFormat(original)))
+        EXPECT_EQ(decodeAll(*openDecoder(kind, file)), decodeAll(*openDecoder(kind, original)))
+            << decoderName(kind) << " on " << file.filename();
+}
+
 using Case = std::tuple<size_t, DecoderKind>;
 
 std::vector<Case> cases() {
@@ -318,6 +363,75 @@ TEST(LossyDecoderPolicy, TrimmedMp3TracksAreGapless) {
     ASSERT_EQ(got.size(), expected.size());
     EXPECT_LE(maxDifference(got, expected), 1); // dithered once by the Engine
     std::filesystem::remove(out);
+}
+
+// Taggers leave a second tag, padding or other bytes before the first frame; every decoder finds the same audio, and
+// the LAME frame still declares its length.
+TEST(LossyDecoderPolicy, Mp3PastStackedTagsPaddingAndOtherDataDecodesTheSame) {
+    reference();
+    const auto original = path(kFixtures[2]);
+    const auto clean = readFile(original);
+    ASSERT_EQ(uint8_t(clean[0]), 0xFF) << "the fixture starts with its first frame";
+    std::string other(929, '\0');
+    for (size_t i = 0; i < other.size(); i++) other[i] = char(0xA1 + i * 5 / 2 % 0x5E);
+    for (const auto& [name, bytes] :
+         {std::pair{"stacked.mp3", id3(40) + id3(30) + clean}, std::pair{"padded.mp3", id3(40) + std::string(1011, '\0') + clean},
+          std::pair{"other.mp3", id3(40) + other + clean}}) {
+        const auto file = writeFile(name, bytes);
+        EXPECT_TRUE(lossyLengthDeclared(file)) << name;
+        bool estimated = true;
+        EXPECT_EQ(probeMp3Info(file, estimated).sampleRate, kRate) << name;
+        EXPECT_FALSE(estimated) << name;
+        expectSameSound(file, original);
+    }
+}
+
+// Some taggers store the iTunes genre as one byte of text; Symphonia read it as a number and refused the whole file.
+TEST(LossyDecoderPolicy, AMalformedMp4TagStopsNoDecoder) {
+    reference();
+    const auto original = path(kFixtures[0]);
+    auto m4a = readFile(original);
+    const size_t moov = movieBox(m4a);
+    const size_t udta = m4a.find("udta", moov), meta = m4a.find("meta", udta), ilst = m4a.find("ilst", meta);
+    ASSERT_NE(ilst, std::string::npos);
+    const std::string data = "data" + be32(1) + be32(0) + " ";
+    const std::string genre = be32(uint32_t(8 + 4 + data.size())) + "gnre" + be32(uint32_t(4 + data.size())) + data;
+    m4a.insert(ilst - 4 + be32At(m4a, ilst - 4), genre);
+    for (const size_t box : {moov, udta, meta, ilst}) grow(m4a, box, int64_t(genre.size()));
+    const auto file = writeFile("genre.m4a", m4a);
+    expectSameSound(file, original);
+    EXPECT_EQ(probeAacInfo(file), probeAacInfo(original));
+}
+
+// A music video's picture track comes first; its sound plays.
+TEST(LossyDecoderPolicy, AMusicVideoPlaysItsSound) {
+    reference();
+    const auto original = path(kFixtures[0]);
+    auto mp4 = readFile(original);
+    const size_t moov = movieBox(mp4);
+    const size_t trak = mp4.find("trak", moov);
+    ASSERT_NE(trak, std::string::npos);
+    // A copy of the sound track as a picture track: its own track ID, a video handler and a visual sample entry of a
+    // codec no decoder knows.
+    std::string video = mp4.substr(trak - 4, be32At(mp4, trak - 4));
+    const size_t tkhd = video.find("tkhd");
+    ASSERT_EQ(video[tkhd + 4], '\0') << "a version 0 track header";
+    video.replace(tkhd + 16, 4, be32(2)); // after the version, flags and two times
+    video.replace(video.find("soun"), 4, "vide");
+    const std::string visual = std::string(16, '\0') + std::string("\0\x10\0\x10", 4) + be32(0x480000) + be32(0x480000) +
+                               be32(0) + std::string("\0\1", 2) + std::string(32, '\0') + std::string("\0\x18\xFF\xFF", 4);
+    const std::string entry =
+        be32(uint32_t(16 + visual.size())) + "zzzz" + std::string(6, '\0') + std::string("\0\1", 2) + visual;
+    const std::string stsd = be32(uint32_t(16 + entry.size())) + "stsd" + be32(0) + be32(1) + entry;
+    const size_t oldStsd = video.find("stsd") - 4;
+    const int64_t change = int64_t(stsd.size()) - int64_t(be32At(video, oldStsd));
+    video.replace(oldStsd, be32At(video, oldStsd), stsd);
+    for (const char* box : {"trak", "mdia", "minf", "stbl"}) grow(video, video.find(box), change);
+    mp4.insert(trak - 4, video);
+    grow(mp4, moov, int64_t(video.size()));
+    const auto file = writeFile("video.mp4", mp4);
+    expectSameSound(file, original);
+    EXPECT_EQ(probeAacInfo(file), probeAacInfo(original));
 }
 
 // Local real-world samples (testdata/, not in Git): every registered decoder decodes the same length, within tolerance.

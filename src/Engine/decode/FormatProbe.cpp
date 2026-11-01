@@ -114,6 +114,67 @@ bool dtsInWave(const File& f) {
     throw Error(ErrorCode::UnsupportedStream, detail);
 }
 
+// Where the data after the ID3v2 tags at the start of the file begins; some taggers leave two tags in a row.
+uint64_t afterId3Tags(const File& f) {
+    uint64_t pos = 0;
+    for (uint8_t h[10]; f.readAt(pos, h, sizeof h) && h[0] == 'I' && h[1] == 'D' && h[2] == '3';)
+        pos += 10 +
+               ((uint64_t(h[6] & 0x7f) << 21) | (uint64_t(h[7] & 0x7f) << 14) | (uint64_t(h[8] & 0x7f) << 7) |
+                uint64_t(h[9] & 0x7f)) +
+               ((h[5] & 0x10) ? 10 : 0); // synchsafe size, optional footer
+    return pos;
+}
+
+bool frameSync(const uint8_t* h) {
+    return h[0] == 0xFF && (h[1] & 0xE0) == 0xE0;
+}
+
+// The length of the MPEG audio frame (layer I, II or III) whose header starts at `h`; 0 for anything else.
+uint32_t mpegFrameLength(const uint8_t* h) {
+    static constexpr uint16_t kBitrates[2][3][15] = {// kbit/s: MPEG-1, then MPEG-2 and 2.5; layers I to III
+                                                     {{0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448},
+                                                      {0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384},
+                                                      {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}},
+                                                     {{0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256},
+                                                      {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160},
+                                                      {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}}};
+    static constexpr uint32_t kRates[3] = {44100, 48000, 32000};
+    const unsigned version = (h[1] >> 3) & 3, layerBits = (h[1] >> 1) & 3, bitrateIndex = h[2] >> 4, rateIndex = (h[2] >> 2) & 3;
+    if (!frameSync(h) || version == 1 || layerBits == 0 || bitrateIndex == 0 || bitrateIndex == 15 || rateIndex == 3) return 0;
+    const bool mpeg1 = version == 3;
+    const unsigned layer = 4 - layerBits;
+    const uint32_t bitrate = kBitrates[mpeg1 ? 0 : 1][layer - 1][bitrateIndex] * 1000u;
+    const uint32_t rate = kRates[rateIndex] >> (mpeg1 ? 0 : version == 2 ? 1 : 2);
+    const uint32_t padding = (h[2] >> 1) & 1;
+    if (layer == 1) return (12 * bitrate / rate + padding) * 4;
+    return (layer == 3 && !mpeg1 ? 72 : 144) * bitrate / rate + padding;
+}
+
+// MPEG audio that padding or other data separates from the tags before it: the first frame header within 64 KiB
+// that the next frame's header confirms (same version, layer and sampling rate).
+std::optional<uint64_t> confirmedMpegFrame(const File& f, uint64_t pos) {
+    constexpr size_t kSearch = 64 * 1024, kLongestFrame = 2881;
+    if (pos >= f.size()) return std::nullopt;
+    std::string window(size_t(std::min<uint64_t>(kSearch + kLongestFrame + 4, f.size() - pos)), '\0');
+    if (!f.readAt(pos, window.data(), window.size())) return std::nullopt;
+    const auto* b = reinterpret_cast<const uint8_t*>(window.data());
+    for (size_t at = 0; at < kSearch && at + 4 <= window.size(); at++) {
+        const uint32_t length = mpegFrameLength(b + at);
+        if (!length || at + length + 4 > window.size()) continue;
+        const uint8_t* next = b + at + length;
+        if (mpegFrameLength(next) && (next[1] & 0xFE) == (b[at + 1] & 0xFE) && (next[2] & 0x0C) == (b[at + 2] & 0x0C))
+            return pos + at;
+    }
+    return std::nullopt;
+}
+
+uint64_t mpegStart(const File& f) {
+    const uint64_t pos = afterId3Tags(f);
+    uint8_t h[4];
+    if (!pos || (f.readAt(pos, h, sizeof h) && frameSync(h))) return pos;
+    return confirmedMpegFrame(f, pos).value_or(pos);
+}
+
 struct Box {
     uint64_t start = 0, end = 0; // payload range
     char type[5] = {};
@@ -244,15 +305,12 @@ std::optional<AudioFormat> builtinFormat(const std::filesystem::path& path) {
     }
     if (tagIs(h, "DSD ") || tagIs(h, "FRM8")) return AudioFormat::Dsd;
 
-    uint64_t pos = 0;
-    if (h[0] == 'I' && h[1] == 'D' && h[2] == '3') { // ID3v2: synchsafe size, optional footer
-        pos = 10 + ((uint64_t(h[6] & 0x7f) << 21) | (uint64_t(h[7] & 0x7f) << 14) | (uint64_t(h[8] & 0x7f) << 7) |
-                    uint64_t(h[9] & 0x7f));
-        if (h[5] & 0x10) pos += 10;
-        if (!f.readAt(pos, h, 4)) unsupported("file has an ID3 tag but no audio");
-    }
+    const uint64_t pos = afterId3Tags(f);
+    if (pos && !f.readAt(pos, h, 4)) unsupported("file has an ID3 tag but no audio");
     if (tagIs(h, "fLaC")) return AudioFormat::Flac;
-    if (h[0] == 0xFF && (h[1] & 0xE0) == 0xE0) {
+    if (pos && !frameSync(h))
+        if (const auto frame = confirmedMpegFrame(f, pos); !frame || !f.readAt(*frame, h, 4)) return std::nullopt;
+    if (frameSync(h)) {
         const unsigned layer = (h[1] >> 1) & 3;
         if (layer == 0 && (h[1] & 0x10)) { // ADTS: profile is the audio object type minus one
             if ((h[2] >> 6) != 1)
@@ -358,18 +416,16 @@ bool lossyLengthDeclared(const std::filesystem::path& path) {
     uint8_t h[10] = {};
     if (!f.readAt(0, h, sizeof h)) return false;
     if (tagIs(h + 4, "ftyp")) return true;
-    uint64_t pos = 0;
-    if (h[0] == 'I' && h[1] == 'D' && h[2] == '3')
-        pos = 10 +
-              ((uint64_t(h[6] & 0x7f) << 21) | (uint64_t(h[7] & 0x7f) << 14) | (uint64_t(h[8] & 0x7f) << 7) |
-               uint64_t(h[9] & 0x7f)) +
-              ((h[5] & 0x10) ? 10 : 0);
     // The first MPEG frame carries the header after its side information (at most 32 bytes in).
     uint8_t frame[4 + 32 + 4] = {};
-    if (!f.readAt(pos, frame, sizeof frame) || frame[0] != 0xFF || (frame[1] & 0xE0) != 0xE0) return false;
+    if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame)) return false;
     for (size_t i = 4; i + 4 <= sizeof frame; i++)
         if (tagIs(frame + i, "Xing") || tagIs(frame + i, "Info") || tagIs(frame + i, "VBRI")) return true;
     return false;
+}
+
+uint64_t mpegAudioStart(const std::filesystem::path& path) {
+    return mpegStart(File(path));
 }
 
 std::optional<EncoderTrim> mp4EncoderTrim(const std::filesystem::path& path, uint32_t sampleRate) {

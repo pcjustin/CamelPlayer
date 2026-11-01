@@ -85,7 +85,7 @@ CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Settin
 | ADPCM WAV (IMA, Microsoft) | libsndfile, FFmpeg, dr_wav | A lossy source decoded to exact 16-bit PCM. Symphonia 0.5.5 accumulates rounding errors in IMA ADPCM, so it is not offered. |
 | DTS-CD WAV | FFmpeg's DTS decoder | The decoder chosen for WAV reads the bitstream, which none of the others can decode. Played and downmixed only when conversion is allowed. |
 | ALAC | Symphonia, FFmpeg | |
-| AAC-LC | Symphonia, FFmpeg | Decoded to 24-bit PCM (16-bit as an option) with encoder delay and padding trimmed. |
+| AAC-LC | Symphonia, FFmpeg | Decoded to 24-bit PCM (16-bit as an option) with encoder delay and padding trimmed. The sound of an MP4 video plays as a track. |
 | MP3 | mpg123, FFmpeg, Symphonia, dr_mp3 | As AAC. A file that declares no length is listed with an estimate until it first plays. |
 | DSF, DSDIFF | DSD Nexus | Raw DSD; DST-compressed DSDIFF is not supported. |
 

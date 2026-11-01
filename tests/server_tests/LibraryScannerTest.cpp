@@ -530,6 +530,20 @@ TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
     EXPECT_EQ(count(store, "SELECT total_frames FROM tracks"), int64_t(expected.totalFrames));
 }
 
+// macOS leaves "._" files with Finder data beside the tracks it copies to a NAS; they are not music.
+TEST_F(LibraryScannerTest, AppleDoubleFilesAreNotAudio) {
+    const auto track = audio();
+    std::ofstream(track.parent_path() / ("._" + track.filename().string()), std::ios::binary)
+        << std::string("\0\5\x16\7\0\2\0\0Mac OS X        ", 24);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto report = scanner.scan(scanner.addRoot(dir / "music"));
+    ASSERT_TRUE(report.complete);
+    EXPECT_TRUE(report.diagnostics.empty());
+    EXPECT_EQ(count(store), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
+}
+
 TEST_F(LibraryScannerTest, CueSheetsAreIgnoredAndEachFileIsOneTrack) {
     const auto source = audio();
     std::ofstream(source.parent_path() / "disc.cue") << "FILE \"one.flac\" WAVE\n"

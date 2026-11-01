@@ -8,6 +8,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/log.h>
 }
@@ -50,10 +51,13 @@ std::string avErr(int e) {
 
 class FfmpegDecoder final : public IDecoder {
 public:
-    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits) {
+    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
         routeAvLog();
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
-        int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, nullptr);
+        AVDictionary* options = nullptr;
+        if (start) av_dict_set_int(&options, "skip_initial_bytes", int64_t(start), 0);
+        int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, &options);
+        av_dict_free(&options);
         if (e < 0) throw Error(ErrorCode::FileOpen, "avformat_open_input: " + avErr(e));
         e = avformat_find_stream_info(fmt_, nullptr);
         if (e < 0) fail(ErrorCode::UnsupportedStream, "avformat_find_stream_info: " + avErr(e));
@@ -253,8 +257,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits) {
-    return std::make_unique<FfmpegDecoder>(path, lossyBits);
+std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
+    return std::make_unique<FfmpegDecoder>(path, lossyBits, start);
 }
 
 } // namespace camel::audio
