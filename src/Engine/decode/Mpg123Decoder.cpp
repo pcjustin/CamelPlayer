@@ -10,12 +10,16 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "Common/util/Text.h"
@@ -34,6 +38,21 @@ struct ScanGate {
     bool stop = false;
 };
 
+std::mutex measuredMutex;
+std::vector<std::pair<std::wstring, uint64_t>> measured; // the latest last
+
+std::wstring measuredKey(const std::filesystem::path& path) {
+    return path.lexically_normal().wstring();
+}
+
+std::optional<uint64_t> measuredLength(const std::filesystem::path& path) {
+    const std::wstring key = measuredKey(path);
+    const std::scoped_lock lock(measuredMutex);
+    for (auto it = measured.rbegin(); it != measured.rend(); ++it)
+        if (_wcsicmp(it->first.c_str(), key.c_str()) == 0) return it->second;
+    return std::nullopt;
+}
+
 // One libmpg123 stream of the file, which mpg123 sees from byte `start` on.
 class Stream {
 public:
@@ -44,6 +63,14 @@ public:
         if (_wfopen_s(&file, longPath(path).c_str(), L"rb") != 0 || !file)
             throw Error(ErrorCode::FileOpen, "mpg123: cannot open file");
         file_.reset(file);
+        if (_fseeki64(file, 0, SEEK_END) == 0) {
+            const int64_t size = _ftelli64(file);
+            char tag[3] = {};
+            const bool id3v1 = size >= 128 && _fseeki64(file, size - 128, SEEK_SET) == 0 && std::fread(tag, 1, 3, file) == 3 &&
+                               std::memcmp(tag, "TAG", 3) == 0;
+            const int64_t end = size - (id3v1 ? 128 : 0);
+            audioEnd_ = end > int64_t(start_) ? uint64_t(end - int64_t(start_)) : 0;
+        }
         if (_fseeki64(file, int64_t(start_), SEEK_SET) != 0) throw Error(ErrorCode::FileOpen, "mpg123: cannot seek");
         int error = MPG123_OK;
         handle_.reset(mpg123_new(nullptr, &error));
@@ -70,6 +97,8 @@ public:
 
     mpg123_handle* mh() const { return handle_.get(); }
     bool atEnd() const { return std::feof(file_.get()) != 0; }
+    // Where the audio ends, from `start` on: before an ID3v1 tag.
+    uint64_t audioEnd() const { return audioEnd_; }
 
     [[noreturn]] void fail(ErrorCode code, const char* what) const {
         throw Error(code, std::string(what) + ": " + mpg123_strerror(handle_.get()));
@@ -106,6 +135,7 @@ private:
     }
 
     uint64_t start_;
+    uint64_t audioEnd_ = 0;
     ScanGate* gate_;
     // The handle goes first, then the file it reads.
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file_{nullptr, &std::fclose};
@@ -119,14 +149,17 @@ public:
     // until the scan has passed its target. Otherwise (library scans) the length stays mpg123's estimate.
     // mpg123 would decode a VBRI frame, which holds no sound, so it sees the file from the frame after it.
     Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool measure)
-        : start_(audioAfterVbriFrame(path)), stream_(std::make_unique<Stream>(path, start_)) {
+        : path_(path), start_(audioAfterVbriFrame(path)), stream_(std::make_unique<Stream>(path, start_)),
+          measured_(measuredLength(path)) {
         info_.sampleRate = uint32_t(stream_->rate);
         info_.channels = uint32_t(stream_->channels);
         info_.bitsPerSample = lossyBits;
-        // mpg123 reads a Xing/Info header but not VBRI, whose VBR stream it would estimate from the first bitrate.
+        // mpg123 reads a Xing/Info header but not VBRI, whose VBR stream it would estimate from the first bitrate; a
+        // length measured before knows better than either.
         const int64_t length = mpg123_length64(stream_->mh());
         const uint64_t vbri = vbriSamples(path);
-        estimate_ = vbri ? vbri : length > 0 ? uint64_t(length) : 0;
+        vbri_ = vbri != 0;
+        estimate_ = measured_ ? *measured_ : vbri ? vbri : length > 0 ? uint64_t(length) : 0;
         if (measure)
             scan_ = std::thread([this, path] { scanMain(path); });
         else
@@ -158,8 +191,9 @@ public:
     size_t readFloat(float* dst, size_t frames) override {
         if (!frames || ended_) return 0;
         if (scanDone_.load(std::memory_order_acquire)) finishScan();
-        // The stream ends at the exact length even where its LAME frame claims more.
-        if (info_.totalFrames)
+        // The stream ends at the exact length even where its LAME frame claims more; after an estimated seek, where its
+        // audio does.
+        if (info_.totalFrames && !estimated_)
             frames = position_ < info_.totalFrames ? size_t(std::min<uint64_t>(frames, info_.totalFrames - position_)) : 0;
         size_t bytes = 0;
         while (!bytes && !ended_ && frames) {
@@ -168,9 +202,9 @@ public:
             const bool cutShort = result == MPG123_ERR && mpg123_errcode(stream_->mh()) == MPG123_ERR_READER && stream_->atEnd();
             if ((result == MPG123_DONE || cutShort) && !bytes) {
                 // The unscanned stream may stop where its LAME frame says, short of the audio; the scan knows.
-                if (continueScanned()) continue;
+                if (!estimated_ && continueScanned()) continue;
                 // The scan counted the cut frame: it plays as silence, so the length holds.
-                if (cutShort && position_ < info_.totalFrames) {
+                if (cutShort && !estimated_ && position_ < info_.totalFrames) {
                     const size_t silent = size_t(std::min<uint64_t>(frames, info_.totalFrames - position_));
                     std::fill_n(dst, silent * info_.channels, 0.0f);
                     position_ += silent;
@@ -187,19 +221,37 @@ public:
     }
 
     void seek(uint64_t frame) override {
-        // The scan's index lands a seek exactly without reading the file up to it a second time: lent while the scan
-        // runs, or with the scanned stream once it has ended.
-        if (!lendScanIndex(frame)) {
-            finishScan(true);
-            if (scanned_) stream_ = std::move(scanned_);
+        // The scan's index lands a seek exactly without reading the file up to it a second time: with the scanned
+        // stream once the scan has ended, or lent while it runs once it covers the target. A seek the scan has not
+        // reached goes at once to where the target is estimated to be, which only a CBR stream knows exactly.
+        estimated_ = false;
+        bool guessed = false;
+        if (scanDone_.load(std::memory_order_acquire) || !scan_.joinable()) {
+            useScanned();
+        } else if (!lendScanIndex(frame)) {
+            bool exact = false;
+            guessed = estimateIndex(exact);
+            estimated_ = guessed && !exact;
         }
-        if (mpg123_seek64(stream_->mh(), int64_t(frame), SEEK_SET) != int64_t(frame))
-            stream_->fail(ErrorCode::SeekFailed, "mpg123_seek64");
+        if (mpg123_seek64(stream_->mh(), int64_t(frame), SEEK_SET) != int64_t(frame)) {
+            // An estimate the stream does not bear out, such as one past its end, gives way to the scan.
+            if (!guessed) stream_->fail(ErrorCode::SeekFailed, "mpg123_seek64");
+            estimated_ = false;
+            useScanned();
+            if (mpg123_seek64(stream_->mh(), int64_t(frame), SEEK_SET) != int64_t(frame))
+                stream_->fail(ErrorCode::SeekFailed, "mpg123_seek64");
+        }
         position_ = frame;
         ended_ = false;
     }
 
 private:
+    // Waits for the scan and plays its stream, which knows every frame.
+    void useScanned() {
+        finishScan(true);
+        if (scanned_) stream_ = std::move(scanned_);
+    }
+
     void scanMain(const std::filesystem::path& path) {
         try {
             auto scanning = std::make_unique<Stream>(path, start_, &gate_);
@@ -223,32 +275,75 @@ private:
         gate_.changed.notify_all();
     }
 
-    // While the scan runs: waits until its index covers `frame`, then gives the playing stream a copy. False once the
-    // scan has ended, whose stream then serves the seek.
+    // While the scan runs: gives the playing stream a copy of its index if it covers `frame`.
     bool lendScanIndex(uint64_t frame) {
         const int64_t samplesPerFrame = mpg123_spf(stream_->mh());
         if (samplesPerFrame <= 0) return false;
         // Past the target by a few frames for the encoder delay and the frames decoded before it.
         const uint64_t needed = frame / uint64_t(samplesPerFrame) + 8;
-        while (!scanDone_.load(std::memory_order_acquire)) {
-            std::vector<int64_t> offsets;
-            int64_t step = 0;
-            {
-                std::unique_lock lock(gate_.mutex);
-                gate_.pauseWanted = true;
-                gate_.changed.wait(lock, [this] { return gate_.paused || scanDone_.load(std::memory_order_acquire); });
-                int64_t* index = nullptr;
-                size_t fill = 0;
-                if (gate_.paused && scanning_ && mpg123_index64(scanning_->mh(), &index, &step, &fill) == MPG123_OK)
-                    offsets.assign(index, index + fill);
-                gate_.pauseWanted = false;
-            }
-            gate_.changed.notify_all();
-            if (step > 0 && offsets.size() > 1 && uint64_t(offsets.size() - 1) * uint64_t(step) >= needed)
-                return mpg123_set_index64(stream_->mh(), offsets.data(), step, offsets.size()) == MPG123_OK;
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::vector<int64_t> offsets;
+        int64_t step = 0;
+        {
+            std::unique_lock lock(gate_.mutex);
+            gate_.pauseWanted = true;
+            gate_.changed.wait(lock, [this] { return gate_.paused || scanDone_.load(std::memory_order_acquire); });
+            int64_t* index = nullptr;
+            size_t fill = 0;
+            if (gate_.paused && scanning_ && mpg123_index64(scanning_->mh(), &index, &step, &fill) == MPG123_OK)
+                offsets.assign(index, index + fill);
+            gate_.pauseWanted = false;
         }
-        return false;
+        gate_.changed.notify_all();
+        return step > 0 && offsets.size() > 1 && uint64_t(offsets.size() - 1) * uint64_t(step) >= needed &&
+               mpg123_set_index64(stream_->mh(), offsets.data(), step, offsets.size()) == MPG123_OK;
+    }
+
+    // Gives the playing stream an index of where its frames are estimated to start: from the frame size where it holds
+    // for every frame, from a Xing table, or else in proportion to the length. `exact` for a CBR stream, as its Info
+    // frame or its measured length shows. False when the stream gives nothing to estimate from.
+    bool estimateIndex(bool& exact) {
+        mpg123_handle* mh = stream_->mh();
+        int64_t* own = nullptr;
+        int64_t ownStep = 0;
+        size_t ownFill = 0;
+        mpg123_frameinfo2 frame{};
+        const int64_t samplesPerFrame = mpg123_spf(mh);
+        if (mpg123_index64(mh, &own, &ownStep, &ownFill) != MPG123_OK || !ownFill || mpg123_info2(mh, &frame) != MPG123_OK ||
+            frame.rate <= 0 || frame.bitrate <= 0 || samplesPerFrame <= 0)
+            return false;
+        const auto first = double(own[0]); // where mpg123 found its first frame
+        const double audio = double(stream_->audioEnd()) - first;
+        const double slots = frame.layer == 1 ? 48000.0 : frame.layer == 3 && frame.version != MPG123_1_0 ? 72000.0 : 144000.0;
+        const double frameBytes = slots * frame.bitrate / double(frame.rate);
+        const uint64_t estimated = estimate_ ? (estimate_ + uint64_t(samplesPerFrame) - 1) / uint64_t(samplesPerFrame) : 0;
+        const bool noVbrHeader = frame.vbr == MPG123_CBR && !vbri_;
+        const bool fits = measured_ && estimated && std::abs(audio / double(estimated) - frameBytes) <= frameBytes * 0.005;
+        const bool cbr = noVbrHeader && (fits || (!measured_ && lossyLengthDeclared(path_)));
+        // Without a header or a measured length, the frame size is the best guess there is.
+        const bool bySize = cbr || (noVbrHeader && !measured_);
+        if (!bySize && !toc_) toc_ = xingToc(path_);
+        const double frames = bySize ? audio / frameBytes : toc_ ? double(toc_->frames) : double(estimated);
+        if (frames < 1 || audio <= 0) return false;
+        constexpr int64_t kStep = 16;   // frames read forward from an entry to the target
+        constexpr double kMargin = 2.0; // before the estimate, which a CBR frame size rounds by at most a byte
+        std::vector<int64_t> offsets(size_t(frames / double(kStep)) + 1);
+        for (size_t i = 0; i < offsets.size(); i++) {
+            const double k = double(i) * double(kStep);
+            double at = first + audio * k / frames;
+            if (bySize) {
+                at = first + k * frameBytes;
+            } else if (toc_) {
+                // Percent of the frames to the table's 256ths of the bytes from the Xing frame on, between entries.
+                const double percent = std::min(99.999, 100.0 * k / frames);
+                const auto entry = size_t(percent);
+                const double from = toc_->toc[entry];
+                const double to = entry + 1 < toc_->toc.size() ? toc_->toc[entry + 1] : 256.0;
+                at = (from + (to - from) * (percent - double(entry))) / 256.0 * toc_->bytes;
+            }
+            offsets[i] = i ? std::max(int64_t(first), int64_t(at - kMargin)) : int64_t(first);
+        }
+        exact = cbr;
+        return mpg123_set_index64(mh, offsets.data(), kStep, offsets.size()) == MPG123_OK;
     }
 
     // Takes the scan's exact length, waiting for the scan when `wait` is set.
@@ -270,8 +365,13 @@ private:
         return true;
     }
 
+    std::filesystem::path path_;
     uint64_t start_;
     std::unique_ptr<Stream> stream_;
+    std::optional<uint64_t> measured_;
+    std::optional<XingToc> toc_; // read at the first seek that needs it
+    bool vbri_ = false;
+    bool estimated_ = false;          // positions since the last seek are estimates
     std::unique_ptr<Stream> scanned_; // written by the scan thread before scanDone_; read after joining it
     ScanGate gate_;
     Stream* scanning_ = nullptr; // the scan's stream while it scans, guarded by gate_.mutex
@@ -288,6 +388,15 @@ private:
 
 std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t lossyBits) {
     return std::make_unique<Mpg123Decoder>(path, lossyBits, true);
+}
+
+void rememberMeasuredLength(const std::filesystem::path& path, uint64_t frames) {
+    constexpr size_t kKept = 8;
+    const std::wstring key = measuredKey(path);
+    const std::scoped_lock lock(measuredMutex);
+    std::erase_if(measured, [&](const auto& e) { return _wcsicmp(e.first.c_str(), key.c_str()) == 0; });
+    measured.emplace_back(key, frames);
+    if (measured.size() > kKept) measured.erase(measured.begin());
 }
 
 SourceInfo probeMp3Info(const std::filesystem::path& path, bool& estimated) {

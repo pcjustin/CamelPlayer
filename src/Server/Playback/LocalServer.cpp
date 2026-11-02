@@ -1036,6 +1036,7 @@ private:
         chain_.clear();
         const auto& source = playable(position.entryId);
         const std::filesystem::path path(toWide(source.pathUtf8()));
+        shareMeasuredLength(position.entryId);
         const bool manualChange = !afterEnd && state_.queueEntryId && state_.queueEntryId != position.entryId;
         state_.track = source;
         state_.queueEntryId = position.entryId;
@@ -1149,6 +1150,13 @@ private:
         if (playback.transitions != seenTransitions_) return; // committed on the next pass
         if (playback.queuedFiles == 0) chain_.clear();        // a restarted stream forgets queued files
         if (!playback.output || !state_.queueEntryId || !state_.track) return;
+        // Opening the next file while mpg123 scans this one would wait behind the scan's reads, and this thread with it,
+        // which holds back every command: it waits for the scan, or for the last seconds of the track.
+        if (playback.decoder == audio::DecoderKind::Mpg123 && playback.source && !playback.source->totalFrames) {
+            constexpr uint64_t kLastSeconds = 20;
+            const uint64_t left = playback.total > playback.position ? playback.total - playback.position : 0;
+            if (left > kLastSeconds * playback.source->sampleRate) return;
+        }
         // Predicting copies the policy, which is costly for a large queue; it is redone only when its inputs changed.
         const QueueCheck check{policy_.revision(), state_.queueEntryId, {chain_.begin(), chain_.end()}, playback.nextSlotFree};
         if (check == checked_) return;
@@ -1173,6 +1181,7 @@ private:
         const auto& source = playable(upcoming->entryId);
         if (source.decoder() != state_.track->decoder()) return;
         const auto from = chain_.empty() ? state_.queueEntryId : chain_.back();
+        shareMeasuredLength(upcoming->entryId);
         if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder(), gainFor(upcoming->entryId),
                                crossfadeMs(from, upcoming->entryId)))
             chain_.push_back(upcoming->entryId);
@@ -1188,6 +1197,20 @@ private:
         };
         if (!policy_.shuffle() && album(from) != 0 && album(from) == album(to)) return 0;
         return uint32_t(std::lround(settings_.crossfade.seconds * 1000.0));
+    }
+
+    // The length mpg123 measured when the entry's MP3 last played, which it shows at once and places early seeks by.
+    void shareMeasuredLength(uint64_t entryId) {
+        const auto at = std::ranges::find(entries_, entryId, &QueueEntry::id);
+        if (at == entries_.end() || !at->file || !libraryReader_) return;
+        try {
+            auto row = libraryReader_->prepare(
+                "SELECT total_frames FROM tracks WHERE file_id=? AND format='mp3' AND length_estimated=0 AND total_frames>0");
+            if (row.bind(1, at->file).step())
+                audio::rememberMeasuredLength(toWide(at->source.pathUtf8()), uint64_t(row.integer(0)));
+        } catch (const std::exception& e) {
+            log::warn("Measured length: %s", e.what());
+        }
     }
 
     // The ReplayGain of a queue entry from its library values (docs/Plan.md §5.9). Auto takes the album's while the

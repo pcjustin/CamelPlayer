@@ -13,7 +13,7 @@
 namespace testutil {
 
 void writeMp3(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
-              uint32_t channels, bool lameTag) {
+              uint32_t channels, bool lameTag, bool vbr) {
     if ((bits != 16 && bits != 24) || (channels != 1 && channels != 2) || samples.size() % channels)
         throw std::invalid_argument("MP3 test files take 16/24-bit mono or stereo samples");
     const std::unique_ptr<lame_global_flags, decltype(&lame_close)> lame(lame_init(), lame_close);
@@ -22,8 +22,8 @@ void writeMp3(const std::filesystem::path& path, const std::vector<int32_t>& sam
     lame_set_out_samplerate(lame.get(), int(sampleRate));
     lame_set_num_channels(lame.get(), int(channels));
     lame_set_mode(lame.get(), channels == 1 ? MONO : JOINT_STEREO);
-    lame_set_VBR(lame.get(), vbr_off);
-    lame_set_brate(lame.get(), 320);
+    lame_set_VBR(lame.get(), vbr ? vbr_default : vbr_off);
+    if (!vbr) lame_set_brate(lame.get(), 320);
     lame_set_quality(lame.get(), 2);
     lame_set_bWriteVbrTag(lame.get(), lameTag ? 1 : 0);
     if (lame_init_params(lame.get()) < 0) throw std::runtime_error("lame_init_params failed");

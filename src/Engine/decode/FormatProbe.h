@@ -4,6 +4,7 @@
 
 // Identifies a file's container and codec from its contents; the extension is ignored (docs/Plan.md §3.1).
 #pragma once
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -33,6 +34,15 @@ uint64_t vbriSamples(const std::filesystem::path& path);
 
 // Where an MP3's audio starts after its VBRI frame, which holds no sound; 0 without one.
 uint64_t audioAfterVbriFrame(const std::filesystem::path& path);
+
+// What an MP3's Xing (VBR) frame declares, when it declares all three: the frames after it, the bytes from it on, and
+// for each percent of the frames, where they start in 256ths of those bytes.
+struct XingToc {
+    uint32_t frames = 0;
+    uint32_t bytes = 0;
+    std::array<uint8_t, 100> toc{};
+};
+std::optional<XingToc> xingToc(const std::filesystem::path& path);
 
 // Where an MP3 file's first frame starts: past its ID3v2 tags and any padding or other bytes left before the frame.
 uint64_t mpegAudioStart(const std::filesystem::path& path);

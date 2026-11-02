@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <mutex>
 #include <numbers>
@@ -133,6 +134,26 @@ std::filesystem::path writeFile(const std::string& name, const std::string& byte
     const auto path = testutil::tempDir() / ("lossy-" + name);
     std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
     return path;
+}
+
+// Two minutes of LAME's VBR of noise that turns loud and quiet every second, so its frames differ in size; the scan of
+// so long a file has not covered its end right after it opens.
+std::filesystem::path vbrMp3(bool lameTag) {
+    static std::once_flag once;
+    const auto tagged = testutil::tempDir() / "lossy-vbr.mp3";
+    const auto untagged = testutil::tempDir() / "lossy-vbr-notag.mp3";
+    std::call_once(once, [&] {
+        std::vector<int32_t> pcm(size_t(kRate) * 120 * kChannels);
+        uint32_t seed = 1;
+        for (size_t i = 0; i < pcm.size(); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            const int32_t noise = int32_t(seed >> 9) - (1 << 22); // within 24 bits
+            pcm[i] = (i / kChannels / kRate) % 2 ? noise / 4 : noise / 64;
+        }
+        testutil::writeMp3(tagged, pcm, kRate, kBits, kChannels, true, true);
+        testutil::writeMp3(untagged, pcm, kRate, kBits, kChannels, false, true);
+    });
+    return lameTag ? tagged : untagged;
 }
 
 std::string be32(uint32_t v) {
@@ -442,7 +463,8 @@ TEST(LossyDecoderPolicy, AnMp3SeekRightAfterOpeningIsExact) {
     }
     EXPECT_EQ(buffer, std::vector<int32_t>(all.begin() + std::ptrdiff_t(target * kChannels),
                                            all.begin() + std::ptrdiff_t((target + 4096) * kChannels)));
-    EXPECT_EQ(decoder->info().totalFrames, all.size() / kChannels);
+    decodeAll(*decoder);
+    EXPECT_EQ(decoder->info().totalFrames, all.size() / kChannels); // measured by then
 }
 
 // The Engine shows the LAME frame's length first and the exact one once the scan knows it; the track plays in full.
@@ -514,13 +536,12 @@ TEST(LossyDecoderPolicy, Mpg123EndsAtALastFrameCutShort) {
     std::filesystem::remove(out);
 }
 
-// A seek before the scan of a long file has ended lands exactly where a linear decode does.
-TEST(LossyDecoderPolicy, Mpg123SeeksExactlyBeforeItsScanEnds) {
-    reference();
-    const auto plain = readFile(path(kFixtures[3]));
-    std::string joined;
-    for (int i = 0; i < 60; i++) joined += plain;
-    const auto file = writeFile("long.mp3", joined);
+// A CBR seek before the scan of a long file has reached it lands at once exactly where a linear decode does.
+TEST(LossyDecoderPolicy, Mpg123SeeksACbrMp3ExactlyBeforeItsScanEnds) {
+    std::vector<int32_t> pcm;
+    for (int i = 0; i < 20; i++) pcm.insert(pcm.end(), reference().begin(), reference().end());
+    const auto file = testutil::tempDir() / "lossy-long.mp3";
+    testutil::writeMp3(file, pcm, kRate, kBits, kChannels, true);
     const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
     for (const uint64_t target : {all.size() / kChannels / 2 + 777, all.size() / kChannels - 5000}) {
         auto decoder = openDecoder(DecoderKind::Mpg123, file);
@@ -534,6 +555,37 @@ TEST(LossyDecoderPolicy, Mpg123SeeksExactlyBeforeItsScanEnds) {
         EXPECT_EQ(buffer, std::vector<int32_t>(all.begin() + std::ptrdiff_t(target * kChannels),
                                                all.begin() + std::ptrdiff_t((target + 4096) * kChannels)))
             << target;
+    }
+}
+
+// A VBR seek the scan has not reached lands at once, near the target: by the Xing table, or in proportion to the length
+// measured before, which also shows as the length at once.
+TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
+    for (const bool lameTag : {true, false}) {
+        const auto file = vbrMp3(lameTag);
+        const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+        const uint64_t total = all.size() / kChannels;
+        if (!lameTag) rememberMeasuredLength(file, total);
+        const uint64_t target = total * 9 / 10;
+        auto decoder = openDecoder(DecoderKind::Mpg123, file);
+        if (!lameTag) EXPECT_EQ(decoder->estimatedFrames(), total);
+        decoder->seek(target);
+        const auto rest = decodeAll(*decoder);
+        // Where the audio after the seek lies in the linear decode, past the frames that warm the decoder up.
+        constexpr size_t kSkip = 4096, kWindow = 1024;
+        ASSERT_GT(rest.size(), (kSkip + kWindow) * kChannels);
+        std::optional<int64_t> lag;
+        for (int64_t d = -int64_t(kRate); d <= int64_t(kRate) && !lag; d++) {
+            const int64_t at = int64_t(target + kSkip) + d;
+            if (at < 0 || (uint64_t(at) + kWindow) * kChannels > all.size()) continue;
+            if (std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels),
+                           rest.begin() + std::ptrdiff_t((kSkip + kWindow) * kChannels),
+                           all.begin() + std::ptrdiff_t(at * kChannels)))
+                lag = d;
+        }
+        ASSERT_TRUE(lag) << (lameTag ? "Xing table" : "measured length") << ": not within a second of the target";
+        std::printf("VBR seek by its %s: %lld frames off\n", lameTag ? "Xing table" : "measured length",
+                    static_cast<long long>(*lag));
     }
 }
 
