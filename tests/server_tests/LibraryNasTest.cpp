@@ -53,8 +53,9 @@ fs::path nasIndex() {
 }
 
 wil::unique_handle openDirectory(const fs::path& path) {
-    return wil::unique_handle(CreateFileW(path.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                          nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+    return wil::unique_handle(CreateFileW(path.c_str(), FILE_LIST_DIRECTORY,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                          FILE_FLAG_BACKUP_SEMANTICS, nullptr));
 }
 
 fs::path localRun(const char* name) {
@@ -98,8 +99,10 @@ Json machine() {
 #else
     constexpr const char* configuration = "Release";
 #endif
-    return {{"build_configuration", configuration}, {"processor_count", system.dwNumberOfProcessors},
-            {"physical_memory_bytes", memory.ullTotalPhys}, {"available_memory_bytes", memory.ullAvailPhys}};
+    return {{"build_configuration", configuration},
+            {"processor_count", system.dwNumberOfProcessors},
+            {"physical_memory_bytes", memory.ullTotalPhys},
+            {"available_memory_bytes", memory.ullAvailPhys}};
 }
 
 bool waitFor(const std::function<bool()>& check) {
@@ -124,8 +127,8 @@ Json scan(LibraryStore& store, LibraryScanner& scanner, int64_t root, const char
     auto nextReport = start + std::chrono::seconds(5);
     while (job.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
         if (!firstBatchSeconds) {
-            const auto sql = "SELECT COUNT(*) FROM files WHERE root_id=" + std::to_string(root) +
-                             " AND last_seen>" + std::to_string(generation);
+            const auto sql = "SELECT COUNT(*) FROM files WHERE root_id=" + std::to_string(root) + " AND last_seen>" +
+                             std::to_string(generation);
             firstBatchFiles = count(store, sql.c_str());
             if (firstBatchFiles > 0) firstBatchSeconds = std::chrono::duration<double>(Clock::now() - start).count();
         }
@@ -144,8 +147,7 @@ Json scan(LibraryStore& store, LibraryScanner& scanner, int64_t root, const char
     memory.cb = sizeof(memory);
     GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
     Json diagnostics = Json::array();
-    for (size_t i = 0; i < std::min<size_t>(result.diagnostics.size(), 20); ++i)
-        diagnostics.push_back(result.diagnostics[i]);
+    for (size_t i = 0; i < std::min<size_t>(result.diagnostics.size(), 20); ++i) diagnostics.push_back(result.diagnostics[i]);
     Json out{{"complete", result.complete},
              {"online", result.online},
              {"root_error", result.rootError},
@@ -285,9 +287,8 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     LibraryScanner scanner(store);
     const auto id = scanner.addRoot(root);
     ASSERT_EQ(scanner.addRoot(root / L"."), id);
-    Json report{{"environment", machine()},
-                {"root", camel::toUtf8(root.wstring())},
-                {"local_index", camel::toUtf8(local.wstring())}};
+    Json report{
+        {"environment", machine()}, {"root", camel::toUtf8(root.wstring())}, {"local_index", camel::toUtf8(local.wstring())}};
     report["full"] = scan(store, scanner, id, "full");
     std::ofstream(local / "report.json") << report.dump(2);
     report["files"] = count(store);
@@ -361,15 +362,18 @@ TEST(LibraryNas, DISABLED_ProfileDirectoryStages) {
     measure("find_first_file", [](const fs::path& folder) {
         WIN32_FIND_DATAW data{};
         size_t entries = 0;
-        wil::unique_hfind find(FindFirstFileExW((folder / L"*").c_str(), FindExInfoBasic, &data, FindExSearchNameMatch,
-                                                nullptr, FIND_FIRST_EX_LARGE_FETCH));
-        if (find) do ++entries; while (FindNextFileW(find.get(), &data));
+        wil::unique_hfind find(FindFirstFileExW((folder / L"*").c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr,
+                                                FIND_FIRST_EX_LARGE_FETCH));
+        if (find) do
+                ++entries;
+            while (FindNextFileW(find.get(), &data));
         return entries;
     });
     measure("single_handle_listing", [](const fs::path& folder) {
         const auto directory = openDirectory(folder);
         std::wstring final(32768, L'\0');
-        if (!GetFinalPathNameByHandleW(directory.get(), final.data(), DWORD(final.size()), FILE_NAME_NORMALIZED)) return size_t(0);
+        if (!GetFinalPathNameByHandleW(directory.get(), final.data(), DWORD(final.size()), FILE_NAME_NORMALIZED))
+            return size_t(0);
         const auto entries = library::directoryEntries(directory.get(), {});
         return entries ? entries->size() : 0;
     });
@@ -467,9 +471,18 @@ TEST(LibraryNas, DISABLED_ProfileMp3MetadataLengthPaths) {
         const auto seconds = std::chrono::duration<double>(Clock::now() - start).count();
         GetProcessIoCounters(GetCurrentProcess(), &after);
         EXPECT_EQ(estimated, !declared);
-        const auto exact = camel::audio::openDecoder(camel::audio::DecoderKind::Mpg123, path)->info().totalFrames;
-        samples.push_back({{"path", rows.text(0)}, {"declared", declared}, {"seconds", seconds},
-                           {"frames", info.totalFrames}, {"exact_frames", exact},
+        const auto exact = [&] { // playback learns the exact length by the end of the file
+            auto decoder = camel::audio::openDecoder(camel::audio::DecoderKind::Mpg123, path);
+            std::vector<int32_t> samples(size_t(4096) * decoder->info().channels);
+            while (decoder->read(samples.data(), 4096)) {
+            }
+            return decoder->info().totalFrames;
+        }();
+        samples.push_back({{"path", rows.text(0)},
+                           {"declared", declared},
+                           {"seconds", seconds},
+                           {"frames", info.totalFrames},
+                           {"exact_frames", exact},
                            {"read_bytes", after.ReadTransferCount - before.ReadTransferCount},
                            {"read_operations", after.ReadOperationCount - before.ReadOperationCount}});
         std::cout << samples.back().dump() << std::endl;
@@ -495,8 +508,7 @@ TEST(LibraryNas, DISABLED_LocalSsdFirstFullScanOfOneHundredThousandTracks) {
     });
     const auto fixture = testutil::testFile("16-44.1k");
     const int64_t sourceCount = (trackCount + linksPerSource - 1) / linksPerSource;
-    for (int64_t i = 0; i < sourceCount; ++i)
-        fs::copy_file(fixture, sources / (std::to_string(i) + ".flac"));
+    for (int64_t i = 0; i < sourceCount; ++i) fs::copy_file(fixture, sources / (std::to_string(i) + ".flac"));
 
     const auto setupStart = Clock::now();
     for (int64_t i = 0; i < trackCount; ++i) {
@@ -533,7 +545,10 @@ TEST(LibraryNas, DISABLED_MappedDriveAndExtendedPathsUseTheSameShareKey) {
     ASSERT_NE(drives, 0u);
     std::wstring device;
     for (wchar_t letter = L'Z'; letter >= L'D'; --letter) {
-        if (!(drives & (1u << (letter - L'A')))) { device = std::wstring(1, letter) + L":"; break; }
+        if (!(drives & (1u << (letter - L'A')))) {
+            device = std::wstring(1, letter) + L":";
+            break;
+        }
     }
     ASSERT_FALSE(device.empty());
     std::wstring remote = share.wstring();
@@ -586,9 +601,8 @@ TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop)
         camel::audio::OutputStatus status() const override { return {"NAS test", 256, "No hardware"}; }
     };
     {
-        LocalServer server(camel::Settings{}, local / "db" / "settings.json", [](const camel::Settings&) {
-            return std::make_unique<PassiveOutput>();
-        });
+        LocalServer server(camel::Settings{}, local / "db" / "settings.json",
+                           [](const camel::Settings&) { return std::make_unique<PassiveOutput>(); });
         for (const auto release : {CommandKind::Pause, CommandKind::Stop}) {
             Command play;
             play.kind = CommandKind::OpenAndPlay;
@@ -611,9 +625,11 @@ TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop)
     for (const auto* name : {"track.flac", "pause.lrc", "stop.lrc"}) ASSERT_TRUE(fs::remove(fixture / name));
     ASSERT_TRUE(fs::remove(fixture));
     EXPECT_FALSE(fs::exists(fixture));
-    std::ofstream(local / "report.json") << Json{{"passed", !::testing::Test::HasFailure()},
-                                                 {"pause_releases_fingerprints", true}, {"stop_releases_fingerprints", true},
-                                                 {"nas_fixture_removed", true}}.dump(2);
+    std::ofstream(local / "report.json") << Json{
+        {"passed", !::testing::Test::HasFailure()},
+        {"pause_releases_fingerprints", true},
+        {"stop_releases_fingerprints", true},
+        {"nas_fixture_removed", true}}.dump(2);
 }
 
 TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
@@ -656,15 +672,21 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
             ASSERT_TRUE(scanner.scan(sourceRoot).complete);
             const auto original = count(store, "SELECT id FROM files WHERE available=1");
             const auto track = count(store, "SELECT id FROM tracks");
-            store.write([=](sqlite::Database& db) {
-                db.prepare("INSERT INTO stats(file_id,rating,favorite,play_count,last_played) VALUES(?,5,1,17,123)")
-                    .bind(1, original).run();
-                db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
-                db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
-                    .bind(1, original).run();
-                db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,?,'Kept')")
-                    .bind(1, original).bind(2, camel::toUtf8(source.wstring())).run();
-            }).get();
+            store
+                .write([=](sqlite::Database& db) {
+                    db.prepare("INSERT INTO stats(file_id,rating,favorite,play_count,last_played) VALUES(?,5,1,17,123)")
+                        .bind(1, original)
+                        .run();
+                    db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
+                    db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
+                        .bind(1, original)
+                        .run();
+                    db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,?,'Kept')")
+                        .bind(1, original)
+                        .bind(2, camel::toUtf8(source.wstring()))
+                        .run();
+                })
+                .get();
             if (scenario == "duplicate") {
                 fs::copy_file(source, sourceFolder / "duplicate.flac");
                 ASSERT_TRUE(scanner.scan(sourceRoot).complete);
@@ -674,8 +696,10 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
             ASSERT_TRUE(digest);
             fs::copy_file(source, target);
             ASSERT_EQ(library::fileDigest(target, library::fileVersion(target), {}, {}), digest);
-            if (scenario == "offline-source") fs::rename(sourceFolder, fs::path(offline));
-            else if (scenario != "live-copy") ASSERT_TRUE(fs::remove(source));
+            if (scenario == "offline-source")
+                fs::rename(sourceFolder, fs::path(offline));
+            else if (scenario != "live-copy")
+                ASSERT_TRUE(fs::remove(source));
             const auto report = scanner.scan(targetRoot);
             ASSERT_TRUE(report.complete);
             const bool verified = scenario == "verified";
@@ -686,8 +710,11 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
             if (verified) {
                 EXPECT_EQ(arrival.integer(0), original);
                 EXPECT_EQ(count(store, "SELECT id FROM tracks WHERE file_id IN (SELECT file_id FROM stats)"), track);
-                EXPECT_EQ(count(store, "SELECT COUNT(*) FROM queue JOIN files ON files.id=queue.file_id WHERE queue.path=files.path"), 1);
-            } else EXPECT_NE(arrival.integer(0), original);
+                EXPECT_EQ(
+                    count(store, "SELECT COUNT(*) FROM queue JOIN files ON files.id=queue.file_id WHERE queue.path=files.path"),
+                    1);
+            } else
+                EXPECT_NE(arrival.integer(0), original);
             EXPECT_EQ(count(store, "SELECT file_id FROM playlist_items"), original);
             EXPECT_EQ(count(store, "SELECT file_id FROM queue WHERE entry_id=77"), original);
             EXPECT_EQ(count(store, "SELECT rating FROM stats"), 5);
@@ -695,16 +722,19 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
             EXPECT_EQ(count(store, "SELECT play_count FROM stats"), 17);
             EXPECT_EQ(count(store, "SELECT last_played FROM stats"), 123);
             if (scenario == "offline-source") fs::rename(fs::path(offline), sourceFolder);
-            results.push_back({{"direction", toNas ? "local-to-NAS" : "NAS-to-local"}, {"scenario", scenario},
-                               {"moved", report.moved}, {"original_file_id", original}, {"arrival_file_id", arrival.integer(0)},
+            results.push_back({{"direction", toNas ? "local-to-NAS" : "NAS-to-local"},
+                               {"scenario", scenario},
+                               {"moved", report.moved},
+                               {"original_file_id", original},
+                               {"arrival_file_id", arrival.integer(0)},
                                {"source_storage", camel::toUtf8(library::storageKey(sourceFolder))},
                                {"target_storage", camel::toUtf8(library::storageKey(targetFolder))}});
         }
     }
     ASSERT_TRUE(fs::remove(remote));
     EXPECT_FALSE(fs::exists(remote));
-    std::ofstream(local / "report.json") << Json{{"cases", results}, {"passed", !::testing::Test::HasFailure()},
-                                                 {"nas_fixture_removed", true}}.dump(2);
+    std::ofstream(local / "report.json")
+        << Json{{"cases", results}, {"passed", !::testing::Test::HasFailure()}, {"nas_fixture_removed", true}}.dump(2);
 }
 
 TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {

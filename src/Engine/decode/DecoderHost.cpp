@@ -128,6 +128,12 @@ void closeDecoderHost(void*, void* opaque) noexcept {
     delete static_cast<DecoderHandle*>(opaque);
 }
 
+int32_t lengthDecoderHost(void*, void* opaque, uint64_t* totalFrames) noexcept {
+    if (!opaque || !totalFrames) return CAMEL_DECODER_HOST_E_FORMAT;
+    *totalFrames = static_cast<DecoderHandle*>(opaque)->decoder->info().totalFrames;
+    return CAMEL_DECODER_HOST_OK;
+}
+
 } // namespace
 
 CamelDecoderHostV1 makeDecoderHostV1(const PcmBitsByFormat* pcmBits) {
@@ -137,7 +143,8 @@ CamelDecoderHostV1 makeDecoderHostV1(const PcmBitsByFormat* pcmBits) {
             openDecoderHost,
             readDecoderHost,
             seekDecoderHost,
-            closeDecoderHost};
+            closeDecoderHost,
+            lengthDecoderHost};
 }
 
 uint32_t abiDecoder(std::string_view decoder) {

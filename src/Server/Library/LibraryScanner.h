@@ -41,7 +41,8 @@ public:
         : store_(store), playbackActive_(std::move(playbackActive)), playingSource_(std::move(playingSource)) {}
     int64_t addRoot(const std::filesystem::path& path);
     void removeRoot(int64_t root);
-    // Queues replacing a scan-time length estimate with the exact length playback measured; exact rows are unchanged.
+    // Queues replacing a track's length with the exact one playback measured, where the scan estimated it or a header
+    // declared another; a row that already holds it is not written.
     void recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames);
     // With `folders` (inside the root), only those subtrees are listed and reconciled: what a change notification named.
     // A folder that no longer exists just loses its files. The root's last complete scan time is left as it was.

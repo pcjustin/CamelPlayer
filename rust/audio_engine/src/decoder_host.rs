@@ -70,6 +70,9 @@ pub type DecoderReadV1 = unsafe extern "C" fn(
 pub type DecoderSeekV1 =
     unsafe extern "C" fn(context: *mut c_void, decoder: *mut c_void, frame: u64) -> i32;
 pub type DecoderCloseV1 = unsafe extern "C" fn(context: *mut c_void, decoder: *mut c_void);
+/// The source's length in frames as the decoder knows it now: 0 while it does not.
+pub type DecoderLengthV1 =
+    unsafe extern "C" fn(context: *mut c_void, decoder: *mut c_void, total_frames: *mut u64) -> i32;
 
 #[repr(C)]
 pub struct CamelDecoderHostV1 {
@@ -80,6 +83,8 @@ pub struct CamelDecoderHostV1 {
     pub read: Option<DecoderReadV1>,
     pub seek: Option<DecoderSeekV1>,
     pub close: Option<DecoderCloseV1>,
+    /// Asked while a source opened without its length plays; None when no decoder learns one later.
+    pub length: Option<DecoderLengthV1>,
 }
 
 #[derive(Clone, Copy)]
@@ -89,6 +94,7 @@ pub(crate) struct DecoderHost {
     read: DecoderReadV1,
     seek: DecoderSeekV1,
     close: DecoderCloseV1,
+    length: Option<DecoderLengthV1>,
 }
 
 impl DecoderHost {
@@ -99,6 +105,7 @@ impl DecoderHost {
             read: host.read?,
             seek: host.seek?,
             close: host.close?,
+            length: host.length,
         })
     }
 
@@ -327,6 +334,7 @@ impl DecoderSource {
             return Err(crate::ENGINE_E_DECODE);
         }
         if frames_read == 0 {
+            self.learn_length();
             if self.info.total_frames != 0 && self.position != self.info.total_frames {
                 self.integrity_status = FLAC_INTEGRITY_FAILED;
                 return Err(crate::ENGINE_E_DECODE);
@@ -341,11 +349,33 @@ impl DecoderSource {
             return Err(crate::ENGINE_E_DECODE);
         };
         self.position = position;
+        self.learn_length();
         if self.info.total_frames != 0 && self.position > self.info.total_frames {
             self.integrity_status = FLAC_INTEGRITY_FAILED;
             return Err(crate::ENGINE_E_DECODE);
         }
         Ok(frames_read)
+    }
+
+    /// A decoder may open without the source's length and learn it while it plays, as mpg123 does from its scan of an
+    /// MP3; from then on the length bounds reads and seeks like one known at open. A length short of the frames
+    /// already read is not believed.
+    fn learn_length(&mut self) {
+        if self.info.total_frames != 0 {
+            return;
+        }
+        let Some(length) = self.host.length else {
+            return;
+        };
+        let mut total = 0;
+        let status =
+            unsafe { length(self.host.context(), self.decoder as *mut c_void, &mut total) };
+        if status == HOST_OK
+            && total >= self.position
+            && self.end_frame.is_none_or(|end| end <= total)
+        {
+            self.info.total_frames = total;
+        }
     }
 
     pub(crate) fn can_seek(&self, frame: u64) -> bool {
@@ -423,7 +453,7 @@ fn map_host_status(status: i32) -> i32 {
 }
 
 const _: () = assert!(std::mem::size_of::<CamelSourceInfoV1>() == 56);
-const _: () = assert!(std::mem::size_of::<CamelDecoderHostV1>() == 48);
+const _: () = assert!(std::mem::size_of::<CamelDecoderHostV1>() == 56);
 
 #[cfg(test)]
 mod tests {

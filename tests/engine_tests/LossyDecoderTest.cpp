@@ -386,6 +386,92 @@ TEST(LossyDecoderPolicy, Mp3PastStackedTagsPaddingAndOtherDataDecodesTheSame) {
     }
 }
 
+// The LAME file followed by the frames of the one without a LAME frame: the LAME frame declares too few.
+std::filesystem::path shortDeclaredMp3() {
+    reference();
+    return writeFile("short-declared.mp3", readFile(path(kFixtures[2])) + readFile(path(kFixtures[3])));
+}
+
+// mpg123 opens without scanning the file: the length counts once the scan in the background knows it, and the LAME
+// frame's is the estimate until then.
+TEST(LossyDecoderPolicy, Mp3LengthIsLearnedWhilePlaying) {
+    const auto source = reference();
+    auto decoder = openDecoder(DecoderKind::Mpg123, path(kFixtures[2]));
+    EXPECT_EQ(decoder->info().totalFrames, 0u);
+    EXPECT_EQ(decoder->estimatedFrames(), source.size() / kChannels);
+    const auto got = decodeAll(*decoder);
+    EXPECT_EQ(got.size(), source.size());
+    EXPECT_EQ(decoder->info().totalFrames, source.size() / kChannels);
+}
+
+// A file that holds more than its LAME frame declares plays to its end, and its length is what it holds.
+TEST(LossyDecoderPolicy, AnMp3DeclaringTooFewFramesPlaysToItsEnd) {
+    const auto file = shortDeclaredMp3();
+    const uint64_t appended = decodeAll(*openDecoder(DecoderKind::Mpg123, path(kFixtures[3]))).size() / kChannels;
+    auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    const uint64_t declared = decoder->estimatedFrames();
+    const uint64_t frames = decodeAll(*decoder).size() / kChannels;
+    EXPECT_EQ(decoder->info().totalFrames, frames);
+    EXPECT_NEAR(double(frames), double(declared + appended), 3 * 1152.0); // delay and padding meet in the middle
+}
+
+// Cut short after encoding, the file holds less than its LAME frame declares: its length is what is there.
+TEST(LossyDecoderPolicy, AnMp3DeclaringTooManyFramesEndsWhereItsAudioDoes) {
+    reference();
+    const auto file = testutil::tempDir() / "lossy-truncated.mp3";
+    testaudio::writeTruncated(path(kFixtures[2]), file, 0.7);
+    auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    const uint64_t declared = decoder->estimatedFrames();
+    const uint64_t frames = decodeAll(*decoder).size() / kChannels;
+    EXPECT_LT(frames, declared);
+    EXPECT_EQ(decoder->info().totalFrames, frames);
+}
+
+// A seek waits for the scan and lands exactly where a linear decode does.
+TEST(LossyDecoderPolicy, AnMp3SeekRightAfterOpeningIsExact) {
+    reference();
+    const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, path(kFixtures[2])));
+    const uint64_t target = all.size() / kChannels / 2 + 777;
+    auto decoder = openDecoder(DecoderKind::Mpg123, path(kFixtures[2]));
+    decoder->seek(target);
+    std::vector<int32_t> buffer(size_t(4096) * kChannels);
+    for (size_t got = 0; got < 4096;) {
+        const size_t n = decoder->read(buffer.data() + got * kChannels, 4096 - got);
+        ASSERT_GT(n, 0u);
+        got += n;
+    }
+    EXPECT_EQ(buffer, std::vector<int32_t>(all.begin() + std::ptrdiff_t(target * kChannels),
+                                           all.begin() + std::ptrdiff_t((target + 4096) * kChannels)));
+    EXPECT_EQ(decoder->info().totalFrames, all.size() / kChannels);
+}
+
+// The Engine shows the LAME frame's length first and the exact one once the scan knows it; the track plays in full.
+TEST(LossyDecoderPolicy, TheEngineLearnsAnMp3sLengthWhileItPlays) {
+    const auto file = shortDeclaredMp3();
+    const auto expected = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+    const auto out = testutil::tempDir() / "lossy-learned.raw";
+    CaptureOptions options;
+    options.file = out;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true; // the control loop takes the length while the track plays
+    {
+        PlaybackEngine engine(Settings{}, [&](const Settings&) { return createCaptureOutput(options); });
+        engine.openAndPlay(file);
+        engine.waitIdle();
+        ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
+        const auto snapshot = engine.snapshot();
+        ASSERT_FALSE(snapshot.error) << snapshot.errorDetail;
+        ASSERT_TRUE(snapshot.source);
+        EXPECT_EQ(snapshot.source->totalFrames, expected.size() / kChannels);
+        EXPECT_EQ(snapshot.total, expected.size() / kChannels);
+    }
+    std::ifstream in(out, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    EXPECT_EQ(bytes.size() / 4, expected.size());
+    std::filesystem::remove(out);
+}
+
 // Some taggers store the iTunes genre as one byte of text; Symphonia read it as a number and refused the whole file.
 TEST(LossyDecoderPolicy, AMalformedMp4TagStopsNoDecoder) {
     reference();

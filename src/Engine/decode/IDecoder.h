@@ -21,7 +21,10 @@ class IDecoder {
 public:
     virtual ~IDecoder() = default;
 
+    // info().totalFrames is exact, or 0 while unknown. A decoder that learns the length while it plays (mpg123 scans an
+    // MP3 in the background) updates it, and estimatedFrames() is the length to show until then (0 for none).
     virtual const SourceInfo& info() const = 0;
+    virtual uint64_t estimatedFrames() const { return 0; }
 
     // Reads up to `frames` frames into `dst` (frames * channels values), interleaved and right-aligned
     // to info().bitsPerSample. Returns the number of frames read; 0 means end of stream.

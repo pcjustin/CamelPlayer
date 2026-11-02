@@ -23,9 +23,12 @@ SourceInfo probeMp3Info(const std::filesystem::path& path, bool& estimated);
 // Reads AAC container timing without decoding or seeking through encoder priming.
 SourceInfo probeAacInfo(const std::filesystem::path& path);
 
-// Whether a lossy file declares its length: an MP4 container, or an MP3 Xing/Info/VBRI header. Raw ADTS and plain MP3
-// streams do not, so decoders can only estimate it.
+// Whether a lossy file declares its length: an MP4 container, or an MP3 Xing/Info header. Raw ADTS and plain MP3
+// streams do not, so decoders can only estimate it; nor does Fraunhofer's VBRI header, which mpg123 does not read.
 bool lossyLengthDeclared(const std::filesystem::path& path);
+
+// The samples an MP3's VBRI header counts, 0 without one: an estimate, frames times samples a frame.
+uint64_t vbriSamples(const std::filesystem::path& path);
 
 // Where an MP3 file's first frame starts: past its ID3v2 tags and any padding or other bytes left before the frame.
 uint64_t mpegAudioStart(const std::filesystem::path& path);

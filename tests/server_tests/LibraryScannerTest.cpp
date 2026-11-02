@@ -359,7 +359,12 @@ TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWith
         ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &after));
         EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, fs::file_size(path) / 2);
         EXPECT_EQ(estimated, !header);
-        const auto exact = openDecoder(DecoderKind::Mpg123, path)->info().totalFrames;
+        // Playback learns the exact length by the end of the file.
+        auto decoder = openDecoder(DecoderKind::Mpg123, path);
+        std::vector<int32_t> buffer(size_t(4096) * 2);
+        while (decoder->read(buffer.data(), 4096)) {
+        }
+        const auto exact = decoder->info().totalFrames;
         if (header)
             EXPECT_EQ(info.totalFrames, exact);
         else
@@ -383,10 +388,16 @@ TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWith
     store.write([](sqlite::Database&) {}).get();
     const auto corrected = "SELECT total_frames FROM tracks WHERE length_estimated=0 AND file_id=" + std::to_string(plain);
     EXPECT_EQ(count(store, corrected.c_str()), 441000);
-    EXPECT_GT(count(store, "SELECT value FROM library_revision WHERE id=1"), revision);
-    scanner.recordExactLength(plain, 44100, 7);
+    const auto recorded = count(store, "SELECT value FROM library_revision WHERE id=1");
+    EXPECT_GT(recorded, revision);
+    scanner.recordExactLength(plain, 44100, 441000);
     store.write([](sqlite::Database&) {}).get();
-    EXPECT_EQ(count(store, corrected.c_str()), 441000);
+    EXPECT_EQ(count(store, "SELECT value FROM library_revision WHERE id=1"), recorded); // nothing written again
+    // A header can declare a length the stream does not hold; what playback measured replaces it.
+    const auto tagged = count(store, "SELECT id FROM files WHERE path LIKE '%tagged.mp3'");
+    scanner.recordExactLength(tagged, 44100, 441001);
+    store.write([](sqlite::Database&) {}).get();
+    EXPECT_EQ(count(store, ("SELECT total_frames FROM tracks WHERE file_id=" + std::to_string(tagged)).c_str()), 441001);
 }
 
 TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResumesAfterFailure) {

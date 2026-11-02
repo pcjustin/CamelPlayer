@@ -1070,7 +1070,7 @@ private:
         persist();
     }
 
-    // mpg123 scans the whole stream when playback opens it, so its length replaces a scan-time estimate.
+    // mpg123 scans the whole stream while it plays, so its length, once known, replaces a scan-time estimate.
     void recordPlaybackLength() {
         if (!library_ || !state_.queueEntryId) return;
         const auto binding = libraryEntries_.find(state_.queueEntryId);

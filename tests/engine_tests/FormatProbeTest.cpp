@@ -126,6 +126,27 @@ TEST(FormatProbe, FindsMpegAudioPastStackedTagsPaddingAndOtherData) {
     expectUnsupported("id3-lone-header", id3(40) + Bytes(64, '\0') + Bytes("\xFF\xFB\x90\x64", 4) + Bytes(600, '\0'));
 }
 
+// mpg123 reads a Xing/Info header's length but not a VBRI header's, so only the first is a declared length; the VBRI
+// frame count still gives the estimate.
+TEST(FormatProbe, OnlyXingAndInfoHeadersDeclareAnMp3sLength) {
+    const Bytes header("\xFF\xFB\x90\x64", 4); // MPEG-1 layer III, 128 kbit/s, 44.1 kHz: 417-byte frames
+    const auto first = [&](const Bytes& tag, size_t at, const Bytes& fields) {
+        Bytes frame = header + Bytes(413, '\0');
+        frame.replace(at, tag.size() + fields.size(), tag + fields);
+        return frame + frames(header, 417, 3);
+    };
+    for (const char* tag : {"Xing", "Info"}) {
+        const auto file = write(std::string("declared-") + tag + ".mp3", first(tag, 36, be32(3) + be32(4) + be32(1668)));
+        EXPECT_TRUE(lossyLengthDeclared(file)) << tag;
+        EXPECT_EQ(vbriSamples(file), 0u) << tag;
+    }
+    const Bytes vbri = Bytes("\0\1\0\0\0\x4b", 6) + be32(1668) + be32(4);
+    const auto file = write("declared-vbri.mp3", first("VBRI", 36, vbri));
+    EXPECT_FALSE(lossyLengthDeclared(file));
+    EXPECT_EQ(vbriSamples(file), 4u * 1152);
+    EXPECT_EQ(vbriSamples(write("plain.mp3", frames(header, 417, 4))), 0u);
+}
+
 TEST(FormatProbe, SeparatesM4aAlacFromAacLc) {
     EXPECT_EQ(probe("alac.m4a", mp4(soundEntry("alac", box("alac", Bytes(28, '\0'))))), AudioFormat::Alac);
     EXPECT_EQ(probe("aac.m4a", mp4(soundEntry("mp4a", esds(0x40, kAacLc)))), AudioFormat::Aac);

@@ -126,6 +126,12 @@ DecoderKind chooseDecoder(AudioFormat format, std::optional<DecoderKind> request
         throw Error(ErrorCode::UnsupportedStream, std::string(decoderName(decoder)) + " cannot decode " + formatName(format));
     return decoder;
 }
+
+// The length the player shows: the exact one, or an estimate while the decoder still measures it. The snapshot's
+// source keeps only the exact one, which the library records.
+uint64_t shownLength(const IDecoder& decoder) {
+    return decoder.info().totalFrames ? decoder.info().totalFrames : decoder.estimatedFrames();
+}
 } // namespace
 
 class PlaybackEngine::Impl final : public IRenderSource {
@@ -245,7 +251,7 @@ public:
         manualTransition_ = rust_->transitions().count + 1;
         heldUntil_.store(manualTransition_, std::memory_order_release);
         fadeSkip_ = FadeSkip::None;
-        adopt({file.wstring(), next->source, next->format, requested, next->decoder, next->plan, gainDb});
+        adopt({file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, gainDb});
         publishQueue();
     }
 
@@ -259,9 +265,12 @@ public:
         format_.reset();
         position_ = 0;
         std::optional<SourceInfo> source;
+        uint64_t total = 0;
         try {
             format_ = probeFormat(file);
-            source = openDecoder(chooseDecoder(*format_, decoder, settings_), file, settings_.pcmBitsByFormat)->info();
+            const auto opened = openDecoder(chooseDecoder(*format_, decoder, settings_), file, settings_.pcmBitsByFormat);
+            source = opened->info();
+            total = shownLength(*opened);
         } catch (const Error& e) {
             log::info("engine: %s is reported when playback starts (%s)", toUtf8(file_).c_str(), e.what());
         }
@@ -270,7 +279,7 @@ public:
             snap_.file = file_;
             snap_.source = source;
             snap_.md5.reset();
-            snap_.total = source ? source->totalFrames : 0;
+            snap_.total = total;
             snap_.format = format_;
             snap_.decoder = displayedDecoder(settings_);
             snap_.error.reset();
@@ -407,7 +416,8 @@ public:
         if (!active_ || rust_->transitions().nextQueued) return false;
         const auto next = prepareNext(file, requested);
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
-        queued_.push_back({file.wstring(), next->source, next->format, requested, next->decoder, next->plan, gainDb});
+        queued_.push_back(
+            {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, gainDb});
         publishQueue();
         return true;
     }
@@ -416,6 +426,7 @@ public:
         AudioFormat format{};
         DecoderKind decoder{};
         SourceInfo source;
+        uint64_t shown = 0; // shownLength()
         OutputPlan plan;
         bool convert = false; // to the open format, which crossfade permits
     };
@@ -430,6 +441,7 @@ public:
             next.decoder = chooseDecoder(next.format, requested, settings_);
             const auto opened = openDecoder(next.decoder, file, settings_.pcmBitsByFormat);
             next.source = opened->info();
+            next.shown = shownLength(*opened);
             lossy = opened->readsFloat() || isLossy(next.format);
         } catch (const Error&) {
             return std::nullopt; // reported when the file is opened normally
@@ -584,6 +596,7 @@ private:
                 reportAudible();
                 refreshNextSlot();
                 refreshMd5();
+                refreshTotal();
             }
             if (active_ && state_ == PlayState::Paused) releaseAfterPause();
         }
@@ -604,6 +617,22 @@ private:
             std::lock_guard lock(snapMutex_);
             if (snap_.md5 == md5) return;
             snap_.md5 = md5;
+        }
+        publish();
+    }
+
+    // A length the decoder learned while the track plays replaces the estimate. It is read between two counts of the
+    // Engine's transitions, which this thread has handled up to, so it belongs to the file the snapshot shows.
+    void refreshTotal() {
+        if (manualTransition_ > handledTransitions_) return; // the snapshot shows a file not heard yet
+        const uint64_t before = rust_->transitions().count;
+        const uint64_t total = rust_->totalFrames();
+        if (!total || before != handledTransitions_ || rust_->transitions().count != before) return;
+        {
+            std::lock_guard lock(snapMutex_);
+            if (!snap_.source || snap_.source->totalFrames == total) return;
+            snap_.source->totalFrames = total;
+            snap_.total = total;
         }
         publish();
     }
@@ -769,7 +798,7 @@ private:
             snap_.format = format_;
             snap_.decoder = decoder;
             snap_.source = src;
-            snap_.total = src.totalFrames;
+            snap_.total = shownLength(*dec);
             snap_.output.reset();
             snap_.plan.reset();
         }
@@ -809,7 +838,7 @@ private:
             position_ = deviceChange ? startFrame : 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), onDeviceFailure);
         }
-        if (startFrame && src.totalFrames && startFrame >= src.totalFrames) startFrame = 0;
+        if (const uint64_t shown = shownLength(*dec); startFrame && shown && startFrame >= shown) startFrame = 0;
         negotiated_ = *plan;
         plan_ = withDsp(negotiated_);
         fmt_ = plan_.format;
@@ -996,6 +1025,7 @@ private:
     struct Queued {
         std::wstring file;
         SourceInfo source;
+        uint64_t shown = 0; // shownLength()
         AudioFormat format;
         std::optional<DecoderKind> requested;
         DecoderKind decoder;
@@ -1037,7 +1067,7 @@ private:
         snap_.plan = plan_;
         snap_.source = source;
         snap_.md5.reset();
-        snap_.total = source.totalFrames;
+        snap_.total = next.shown;
     }
 
     void onEnded() {

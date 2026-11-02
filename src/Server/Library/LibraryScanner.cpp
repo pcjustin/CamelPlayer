@@ -1198,8 +1198,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
 
 void LibraryScanner::recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames) {
     store_.write([file, sampleRate, frames](sqlite::Database& db) {
-        db.prepare("UPDATE tracks SET total_frames=?,length_estimated=0 "
-                   "WHERE file_id=? AND length_estimated=1 AND sample_rate=?")
+        db.prepare("UPDATE tracks SET total_frames=?1,length_estimated=0 "
+                   "WHERE file_id=?2 AND sample_rate=?3 AND (length_estimated=1 OR total_frames IS NOT ?1)")
             .bind(1, int64_t(frames))
             .bind(2, file)
             .bind(3, int64_t(sampleRate))

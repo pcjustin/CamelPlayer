@@ -420,8 +420,17 @@ bool lossyLengthDeclared(const std::filesystem::path& path) {
     uint8_t frame[4 + 32 + 4] = {};
     if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame)) return false;
     for (size_t i = 4; i + 4 <= sizeof frame; i++)
-        if (tagIs(frame + i, "Xing") || tagIs(frame + i, "Info") || tagIs(frame + i, "VBRI")) return true;
+        if (tagIs(frame + i, "Xing") || tagIs(frame + i, "Info")) return true;
     return false;
+}
+
+uint64_t vbriSamples(const std::filesystem::path& path) {
+    const File f(path);
+    // The VBRI frame follows the header and 32 bytes of side information: version, delay, quality, bytes, frames.
+    uint8_t frame[36 + 18] = {};
+    if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame) || !tagIs(frame + 36, "VBRI")) return 0;
+    const bool mpeg1 = ((frame[1] >> 3) & 3) == 3;
+    return uint64_t(be32(frame + 36 + 14)) * (mpeg1 ? 1152 : 576);
 }
 
 uint64_t mpegAudioStart(const std::filesystem::path& path) {

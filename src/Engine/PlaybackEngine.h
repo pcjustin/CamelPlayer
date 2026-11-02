@@ -27,7 +27,7 @@ struct EngineSnapshot {
     PlayState state = PlayState::Stopped;
     std::wstring file;
     uint64_t position = 0; // frames handed to the device
-    uint64_t total = 0;
+    uint64_t total = 0;    // source->totalFrames, or an estimate while the decoder measures the length
     std::optional<SourceInfo> source;
     std::optional<AudioFormat> format;  // probed from the current file
     std::optional<DeviceFormat> output; // set while a stream is open

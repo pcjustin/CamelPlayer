@@ -7,12 +7,14 @@ Upgrading from 0.2.0 or 0.2.1: the first start adds an index of the artists to t
 Changed since 0.2.1:
 
 - **Suggestions for a word in many titles come at once:** the artists among them are looked up in an index of artists alone. With 100,000 tracks that all hold the word, the suggestions took 77–120 ms and now take about 7 ms.
+- **MP3s from a NAS start at once:** mpg123 read the whole file before the first sound to learn its exact length, which took 5–9 s over Wi-Fi. Playback now starts after the first frames, in under a second from the same NAS; the length shows as an estimate and becomes exact while the file plays. A seek right after the start waits until the file has been read.
 
 Fixed since 0.2.1 (files an earlier version refused are read again once by the first scan after the update, so those below appear by themselves):
 
 - **MP3 files whose audio does not follow the tag at once** were refused: a second ID3 tag, padding or other bytes between the tags and the first frame. The first frame is now found past them.
 - **M4A files with a one-byte genre** were refused by Symphonia, the default AAC and ALAC decoder, because it reads the file's tags itself and gave up on that one. Symphonia now skips the tags, which CamelPlayer reads with TagLib anyway.
 - **MP4 videos:** Symphonia took the picture track for the sound and refused the file. The first track it can decode now plays, so the sound of a music video or concert video plays like a track.
+- **MP3 lengths in the library could be wrong,** such as 1:29 for a 1:48 track whose VBRI header (written by Fraunhofer encoders) counts too few frames. A VBRI length now counts as an estimate, and any MP3 length that differs from the decoded one is corrected once the track has played to its end.
 - **macOS `._` files** (AppleDouble files with Finder data, left beside the music on a NAS) counted as audio files that could not be read; the scan now passes them over.
 
 ## 0.2.1

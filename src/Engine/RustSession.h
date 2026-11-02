@@ -89,6 +89,8 @@ public:
 
     // For the audible track, even while the decoder already reads the queued one.
     Md5State md5State() const noexcept;
+    // The audible track's length in source frames, 0 while unknown; a decoder may learn it while the track plays.
+    uint64_t totalFrames() const noexcept;
 
 private:
     CamelCommandStampV1 nextCommand();

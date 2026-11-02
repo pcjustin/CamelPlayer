@@ -242,6 +242,11 @@ Md5State RustSession::md5State() const noexcept {
     }
 }
 
+uint64_t RustSession::totalFrames() const noexcept {
+    CamelEngineStateV1 state{sizeof(CamelEngineStateV1), CAMEL_ENGINE_ABI_VERSION};
+    return camel_engine_get_state_v1(engine_, &state) == CAMEL_ENGINE_OK ? state.total_frames : 0;
+}
+
 RustSession::Transitions RustSession::transitions() const noexcept {
     Transitions result;
     uint32_t queued = 0;

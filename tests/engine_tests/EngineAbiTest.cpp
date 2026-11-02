@@ -15,7 +15,7 @@ static_assert(offsetof(CamelEngineConfigV1, prebuffer_ms) == 68);
 static_assert(sizeof(CamelCommandStampV1) == 32);
 static_assert(sizeof(CamelTrackSourceV1) == 64);
 static_assert(sizeof(CamelSourceInfoV1) == 56);
-static_assert(sizeof(CamelDecoderHostV1) == 48);
+static_assert(sizeof(CamelDecoderHostV1) == 56);
 static_assert(sizeof(CamelRenderRequestV1) == 32);
 static_assert(sizeof(CamelRenderResultV1) == 32);
 static_assert(sizeof(CamelEngineStateV1) == 152);

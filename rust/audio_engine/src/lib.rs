@@ -853,6 +853,16 @@ impl CamelEngine {
         self.pending_boundary.load(Ordering::Acquire)
     }
 
+    // The source being heard: the one decoding has moved past while a boundary is still to be rendered.
+    fn heard_view(&self) -> Option<SourceView> {
+        let finished = if self.boundary_pending() {
+            *self.finished_view.lock().unwrap()
+        } else {
+            None
+        };
+        finished.or_else(|| self.view())
+    }
+
     // The DSP stage: converts decoded frames into device bytes until `ring` is full or no decoded frames wait.
     // Returns the device frames written.
     fn pump(&self) -> Result<u64, i32> {
@@ -1917,6 +1927,10 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             }
             if let Some(segment) = stage.segments.back_mut() {
                 segment.frames += frames_read;
+                // A length the decoder learned while playing: the crossfade out of the track can now start in time.
+                if segment.expected == 0 && source.info.total_frames != 0 {
+                    segment.expected = segment.frames + source.remaining_frames();
+                }
             }
             // Counted in device frames, like every position.
             *frames_prefilled = engine
@@ -2075,7 +2089,7 @@ pub unsafe extern "C" fn camel_engine_get_state_v1(
         state.last_error_code = engine.render_error.load(Ordering::Acquire);
         state.command = command;
         state.position_frames = engine.submitted_position.load(Ordering::Acquire);
-        state.total_frames = source.map_or(0, |s| s.info.total_frames);
+        state.total_frames = engine.heard_view().map_or(0, |s| s.info.total_frames);
         state.has_source = u32::from(source.is_some());
         state.reserved = 0;
         state.source_format = source.map_or(empty_format(), |s| source_audio_format(&s.info));
@@ -2113,7 +2127,7 @@ pub unsafe extern "C" fn camel_engine_get_timeline_v1(
         timeline.decoded_position_frames = source.map_or(0, |s| s.decoded_position);
         timeline.submitted_position_frames = engine.submitted_position.load(Ordering::Acquire);
         timeline.audible_position_frames = engine.audible_position.load(Ordering::Acquire);
-        timeline.total_frames = source.map_or(0, |s| s.info.total_frames);
+        timeline.total_frames = engine.heard_view().map_or(0, |s| s.info.total_frames);
         timeline.has_source = u32::from(source.is_some());
         timeline.reserved2 = 0;
         ENGINE_OK
@@ -2175,12 +2189,7 @@ pub unsafe extern "C" fn camel_engine_get_flac_integrity_v1(
             return ENGINE_E_STRUCT_SIZE;
         }
         let engine = &*engine;
-        let finished = if engine.boundary_pending() {
-            *engine.finished_view.lock().unwrap()
-        } else {
-            None
-        };
-        let Some(source) = finished.or_else(|| engine.view()) else {
+        let Some(source) = engine.heard_view() else {
             integrity.status = FLAC_INTEGRITY_UNAVAILABLE;
             integrity.has_reference_md5 = 0;
             integrity.total_frames = 0;
@@ -3111,6 +3120,7 @@ mod tests {
             read: Some(mock_read),
             seek: Some(mock_seek),
             close: Some(mock_close),
+            length: None,
         }
     }
 
@@ -3123,6 +3133,7 @@ mod tests {
             read: Some(mock_read),
             seek: Some(mock_seek),
             close: Some(mock_close),
+            length: None,
         }
     }
 
@@ -3135,6 +3146,7 @@ mod tests {
             read: Some(blocking_read),
             seek: Some(blocking_seek),
             close: Some(blocking_close),
+            length: None,
         }
     }
 
@@ -3147,6 +3159,7 @@ mod tests {
             read: Some(mock_read),
             seek: Some(mock_seek),
             close: Some(mock_close),
+            length: None,
         }
     }
 
@@ -3196,6 +3209,14 @@ mod tests {
     }
 
     fn load_mock_source_with_gain(engine: *mut CamelEngine, gain_db: f64) -> i32 {
+        load_source_with_host(engine, &mock_host(), gain_db)
+    }
+
+    fn load_source_with_host(
+        engine: *mut CamelEngine,
+        host: &CamelDecoderHostV1,
+        gain_db: f64,
+    ) -> i32 {
         let path = b"mock.flac";
         let command = CamelCommandStampV1 {
             struct_size: std::mem::size_of::<CamelCommandStampV1>() as u32,
@@ -3217,14 +3238,13 @@ mod tests {
             crossfade_ms: 0,
             flags: 0,
         };
-        let host = mock_host();
         unsafe {
             camel_engine_load_flac_v1(
                 engine,
                 &command,
                 &source,
                 decoder_host::DECODER_FFMPEG,
-                &host,
+                host,
             )
         }
     }
@@ -3681,6 +3701,7 @@ mod tests {
             read: Some(tone_read),
             seek: Some(tone_seek),
             close: Some(tone_close),
+            length: None,
         }
     }
 
@@ -4388,7 +4409,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<CamelCommandStampV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 64);
         assert_eq!(std::mem::size_of::<CamelSourceInfoV1>(), 56);
-        assert_eq!(std::mem::size_of::<CamelDecoderHostV1>(), 48);
+        assert_eq!(std::mem::size_of::<CamelDecoderHostV1>(), 56);
         assert_eq!(std::mem::size_of::<CamelRenderRequestV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelRenderResultV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelEngineStateV1>(), 152);
@@ -4544,6 +4565,89 @@ mod tests {
         );
         assert_eq!(state.position_frames, 4);
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    // The mock's four frames, told once a read has passed `LATE_LENGTH_AFTER` frames, as mpg123 does when its scan of an
+    // MP3 ends; `LATE_LENGTH_TOLD` is what it tells.
+    static LATE_LENGTH_AFTER: AtomicU64 = AtomicU64::new(0);
+    static LATE_LENGTH_TOLD: AtomicU64 = AtomicU64::new(0);
+
+    unsafe extern "C" fn late_length(
+        _: *mut c_void,
+        opaque: *mut c_void,
+        total_frames: *mut u64,
+    ) -> i32 {
+        let decoder = &*opaque.cast::<MockDecoder>();
+        *total_frames = if decoder.position as u64 > LATE_LENGTH_AFTER.load(Ordering::Relaxed) {
+            LATE_LENGTH_TOLD.load(Ordering::Relaxed)
+        } else {
+            0
+        };
+        0
+    }
+
+    fn total_frames(engine: *mut CamelEngine) -> u64 {
+        let mut timeline = CamelEngineTimelineV1 {
+            struct_size: std::mem::size_of::<CamelEngineTimelineV1>() as u32,
+            abi_version: ABI_VERSION,
+            playback_state: PLAYBACK_EMPTY,
+            reserved: 0,
+            command: command_stamp(0),
+            decoded_position_frames: 0,
+            submitted_position_frames: 0,
+            audible_position_frames: 0,
+            total_frames: 0,
+            has_source: 0,
+            reserved2: 0,
+        };
+        assert_eq!(
+            unsafe { camel_engine_get_timeline_v1(engine, &mut timeline) },
+            ENGINE_OK
+        );
+        timeline.total_frames
+    }
+
+    // Opened without its length, the source learns it while it plays and still ends cleanly; a length short of what
+    // was already read is not believed.
+    #[test]
+    fn a_length_learned_while_playing_becomes_the_sources() {
+        for (told, expected) in [(4, 4), (1, 0)] {
+            LATE_LENGTH_AFTER.store(1, Ordering::Relaxed);
+            LATE_LENGTH_TOLD.store(told, Ordering::Relaxed);
+            let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+            let mut engine = ptr::null_mut();
+            assert_eq!(
+                unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+                ENGINE_OK
+            );
+            let mut metadata = MockMetadata {
+                total_frames: 0,
+                has_md5: 0,
+                md5: [0; 16],
+            };
+            let mut host = mock_host_with_metadata(&mut metadata);
+            host.length = Some(late_length);
+            assert_eq!(load_source_with_host(engine, &host, 0.0), ENGINE_OK);
+            assert_eq!(total_frames(engine), 0);
+
+            let play = command_stamp(2);
+            assert_eq!(unsafe { camel_engine_play_v1(engine, &play) }, ENGINE_OK);
+            let mut frames_prefilled = 0;
+            assert_eq!(
+                unsafe { camel_engine_prefill_v1(engine, 2, &mut frames_prefilled) },
+                ENGINE_OK
+            );
+            assert_eq!(total_frames(engine), expected, "told {told}");
+            let mut status = ENGINE_OK;
+            for _ in 0..8 {
+                status = unsafe { camel_engine_prefill_v1(engine, 4, &mut frames_prefilled) };
+                if status != ENGINE_OK {
+                    break;
+                }
+            }
+            assert_eq!(status, ENGINE_END, "told {told}");
+            assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        }
     }
 
     #[test]
@@ -5372,6 +5476,7 @@ mod tests {
             read: Some(dsd_read),
             seek: Some(dsd_seek),
             close: Some(dsd_close),
+            length: None,
         };
         let path = b"mock.dsf";
         let source = CamelTrackSourceV1 {

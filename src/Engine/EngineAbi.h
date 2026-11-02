@@ -159,6 +159,8 @@ typedef int32_t (*CamelDecoderOpenV1)(void* context, uint32_t decoder_kind, cons
 typedef int32_t (*CamelDecoderReadV1)(void* context, void* decoder, int32_t* output, uint64_t frames, uint64_t* frames_read);
 typedef int32_t (*CamelDecoderSeekV1)(void* context, void* decoder, uint64_t frame);
 typedef void (*CamelDecoderCloseV1)(void* context, void* decoder);
+// The source's length in frames as the decoder knows it now, 0 while it does not.
+typedef int32_t (*CamelDecoderLengthV1)(void* context, void* decoder, uint64_t* total_frames);
 
 typedef struct CamelDecoderHostV1 {
     uint32_t struct_size;
@@ -168,6 +170,8 @@ typedef struct CamelDecoderHostV1 {
     CamelDecoderReadV1 read;
     CamelDecoderSeekV1 seek;
     CamelDecoderCloseV1 close;
+    // Asked while a source opened without its length plays; NULL when no decoder learns one later.
+    CamelDecoderLengthV1 length;
 } CamelDecoderHostV1;
 
 typedef struct CamelRenderRequestV1 {

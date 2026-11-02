@@ -1238,7 +1238,13 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
     std::filesystem::create_directories(dir / "music");
     const auto path = dir / "music" / "plain.mp3";
     testutil::writeMp3(path, testaudio::makeSignal({"short", 44100, 16, 2, 2.0}), 44100, 16, 2, false);
-    const auto exact = openDecoder(DecoderKind::Mpg123, path)->info().totalFrames;
+    const auto exact = [&] {
+        auto decoder = openDecoder(DecoderKind::Mpg123, path);
+        std::vector<int32_t> samples(size_t(4096) * 2);
+        while (decoder->read(samples.data(), 4096)) {
+        }
+        return decoder->info().totalFrames;
+    }();
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
     ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
@@ -1251,7 +1257,17 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
         return store.openReader().scalar("SELECT COUNT(*) FROM tracks WHERE length_estimated=0 AND total_frames=" +
                                          std::to_string(exact)) == 1;
     };
-    while (!corrected() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(20ms);
+    // mpg123 learns the length while the file plays, so the device keeps taking audio.
+    while (!corrected() && std::chrono::steady_clock::now() < end) {
+        {
+            std::lock_guard lock(probe.renderMutex);
+            if (probe.source) {
+                std::vector<uint8_t> bytes(480 * probe.format.bytesPerFrame());
+                probe.source->render(bytes.data(), 480);
+            }
+        }
+        std::this_thread::sleep_for(20ms);
+    }
     EXPECT_TRUE(corrected());
     send(command(CommandKind::Stop));
     server.reset();
