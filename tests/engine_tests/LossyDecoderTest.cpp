@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
@@ -234,6 +235,8 @@ TEST_P(LossyDecoder, MatchesTheSourceWithinTolerance) {
 TEST_P(LossyDecoder, SeekMatchesTheLinearDecode) {
     const auto [index, kind] = GetParam();
     const auto& fixture = kFixtures[index];
+    if (kind == DecoderKind::FFmpeg && fixture.format == AudioFormat::Mp3)
+        GTEST_SKIP() << "FFmpeg seeks an MP3 near the target (FfmpegSeeksAnMp3AtOnceNearTheTarget)";
     reference();
     auto linear = openDecoder(kind, path(fixture));
     const auto all = decodeAll(*linear);
@@ -586,6 +589,37 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
         ASSERT_TRUE(lag) << (lameTag ? "Xing table" : "measured length") << ": not within a second of the target";
         std::printf("VBR seek by its %s: %lld frames off\n", lameTag ? "Xing table" : "measured length",
                     static_cast<long long>(*lag));
+    }
+}
+
+// FFmpeg seeks an MP3 at once, without reading the file up to the target: near it, by its Xing table or else its size
+// and its length, which one measured before makes better.
+TEST(LossyDecoderPolicy, FfmpegSeeksAnMp3AtOnceNearTheTarget) {
+    reference();
+    const std::pair<std::filesystem::path, const char*> files[] = {{path(kFixtures[2]), "Info CBR"},
+                                                                   {path(kFixtures[3]), "CBR without a header"},
+                                                                   {vbrMp3(true), "Xing VBR"},
+                                                                   {vbrMp3(false), "VBR without a header"}};
+    for (const auto& [file, name] : files) {
+        const auto all = decodeAll(*openDecoder(DecoderKind::FFmpeg, file));
+        const uint64_t target = all.size() / kChannels * 9 / 10;
+        if (file == vbrMp3(false)) rememberMeasuredLength(file, all.size() / kChannels); // scales the seek
+        auto decoder = openDecoder(DecoderKind::FFmpeg, file);
+        decoder->seek(target);
+        const auto rest = decodeAll(*decoder);
+        constexpr size_t kSkip = 4096, kWindow = 1024;
+        ASSERT_GT(rest.size(), (kSkip + kWindow) * kChannels) << name;
+        std::optional<int64_t> lag;
+        for (int64_t d = 0; d <= int64_t(kRate) && !lag; d = d > 0 ? -d : 1 - d) {
+            const int64_t at = int64_t(target + kSkip) + d;
+            if (at < 0 || (uint64_t(at) + kWindow) * kChannels > all.size()) continue;
+            if (std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels),
+                           rest.begin() + std::ptrdiff_t((kSkip + kWindow) * kChannels),
+                           all.begin() + std::ptrdiff_t(at * kChannels)))
+                lag = d;
+        }
+        ASSERT_TRUE(lag) << name << ": not within a second of the target";
+        std::printf("FFmpeg seek in %s: %lld frames off\n", name, static_cast<long long>(*lag));
     }
 }
 

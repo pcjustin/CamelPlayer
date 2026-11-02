@@ -144,8 +144,8 @@ private:
 // Lossy decoders need a few frames of warm-up after a seek (MP3 bit reservoir, AAC MDCT overlap), and some land beside
 // the target when they also trim encoder delay. This seeks early, or reopens the file, and decodes and discards up to
 // the target, so a seek matches the linear decode exactly (docs/Plan.md §16.3).
-std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits,
-                                      uint64_t start = 0);
+std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits, uint64_t start = 0,
+                                      bool fastSeek = false);
 
 class LossySeek final : public IDecoder {
 public:
@@ -158,7 +158,7 @@ public:
     LossySeek(DecoderKind kind, std::filesystem::path path, AudioFormat format, uint32_t lossyBits, Mode mode, bool lengthKnown,
               uint64_t start = 0)
         : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), start_(start),
-          inner_(openAdapter(kind_, path_, lossyBits_, start_)), info_(inner_->info()), mode_(mode) {
+          inner_(openAdapter(kind_, path_, lossyBits_, start_, mode == Mode::Preroll)), info_(inner_->info()), mode_(mode) {
         if (lengthKnown) return;
         estimate_ = info_.totalFrames;
         info_.totalFrames = 0;
@@ -177,7 +177,7 @@ public:
         if (start)
             inner_->seek(start);
         else
-            inner_ = openAdapter(kind_, path_, lossyBits_, start_);
+            inner_ = openAdapter(kind_, path_, lossyBits_, start_, mode_ == Mode::Preroll);
         std::vector<int32_t> scratch(size_t(4096) * info_.channels);
         for (uint64_t left = frame - start; left;) {
             const size_t got = inner_->read(scratch.data(), size_t(std::min<uint64_t>(left, 4096)));
@@ -247,10 +247,11 @@ size_t IDecoder::readFloat(float*, size_t) {
 
 namespace {
 
-std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
+std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits, uint64_t start,
+                                      bool fastSeek) {
     switch (kind) {
     case DecoderKind::FFmpeg:
-        return openFfmpeg(path, lossyBits, start);
+        return openFfmpeg(path, lossyBits, start, fastSeek);
     case DecoderKind::Symphonia:
         return openSymphonia(path, lossyBits);
     case DecoderKind::DrFlac:
@@ -300,13 +301,15 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
     const bool startAtFrame =
         format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3 || kind == DecoderKind::Minimp3);
     const uint64_t start = startAtFrame ? mpegAudioStart(path) : 0;
-    // mpg123 seeks exactly by itself; Symphonia and minimp3 land on the target after warm-up; FFmpeg and dr_mp3 can land
-    // beside it when they trim encoder delay, so they decode from the start. Only mpg123 measures an MP3's length; the others'
-    // can differ from what they decode, even when a header declares it.
+    // mpg123 seeks exactly by itself; Symphonia and minimp3 land on the target after warm-up; FFmpeg seeks an MP3 at once,
+    // near the target, and warms up the same way; otherwise FFmpeg and dr_mp3 can land beside it when they trim encoder
+    // delay, so they decode from the start. Only mpg123 measures an MP3's length; the others' can differ from what they
+    // decode, even when a header declares it.
+    const bool preroll = kind == DecoderKind::Symphonia || kind == DecoderKind::Minimp3 ||
+                         (kind == DecoderKind::FFmpeg && format == AudioFormat::Mp3);
     if (isLossy(format) && kind != DecoderKind::Mpg123)
         d = std::make_unique<LossySeek>(kind, path, format, lossyBits,
-                                        kind == DecoderKind::Symphonia || kind == DecoderKind::Minimp3 ? LossySeek::Mode::Preroll
-                                                                                                       : LossySeek::Mode::Reopen,
+                                        preroll ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
                                         format != AudioFormat::Mp3 && lossyLengthDeclared(path), start);
     else
         d = openAdapter(kind, path, lossyBits);

@@ -45,14 +45,6 @@ std::wstring measuredKey(const std::filesystem::path& path) {
     return path.lexically_normal().wstring();
 }
 
-std::optional<uint64_t> measuredLength(const std::filesystem::path& path) {
-    const std::wstring key = measuredKey(path);
-    const std::scoped_lock lock(measuredMutex);
-    for (auto it = measured.rbegin(); it != measured.rend(); ++it)
-        if (_wcsicmp(it->first.c_str(), key.c_str()) == 0) return it->second;
-    return std::nullopt;
-}
-
 // One libmpg123 stream of the file, which mpg123 sees from byte `start` on.
 class Stream {
 public:
@@ -388,6 +380,14 @@ private:
 
 std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t lossyBits) {
     return std::make_unique<Mpg123Decoder>(path, lossyBits, true);
+}
+
+std::optional<uint64_t> measuredLength(const std::filesystem::path& path) {
+    const std::wstring key = measuredKey(path);
+    const std::scoped_lock lock(measuredMutex);
+    for (auto it = measured.rbegin(); it != measured.rend(); ++it)
+        if (_wcsicmp(it->first.c_str(), key.c_str()) == 0) return it->second;
+    return std::nullopt;
 }
 
 void rememberMeasuredLength(const std::filesystem::path& path, uint64_t frames) {

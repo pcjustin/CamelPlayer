@@ -51,11 +51,12 @@ std::string avErr(int e) {
 
 class FfmpegDecoder final : public IDecoder {
 public:
-    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
+    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start, bool fastSeek) {
         routeAvLog();
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
         AVDictionary* options = nullptr;
         if (start) av_dict_set_int(&options, "skip_initial_bytes", int64_t(start), 0);
+        if (fastSeek) av_dict_set(&options, "fflags", "fastseek", 0); // read when the file opens, as the Xing table is
         int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, &options);
         av_dict_free(&options);
         if (e < 0) throw Error(ErrorCode::FileOpen, "avformat_open_input: " + avErr(e));
@@ -65,6 +66,10 @@ public:
         stream_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
         if (stream_ < 0 || !codec) fail(ErrorCode::UnsupportedStream, "no audio stream");
         AVStream* st = fmt_->streams[stream_];
+        // A length measured before scales a fast seek better than FFmpeg's estimate from the first frames.
+        if (fastSeek && st->codecpar->sample_rate > 0)
+            if (const auto measured = measuredLength(path))
+                st->duration = av_rescale_q(int64_t(*measured), AVRational{1, st->codecpar->sample_rate}, st->time_base);
         // The float decoders keep full precision until the single quantization below.
         if (st->codecpar->codec_id == AV_CODEC_ID_MP3) codec = avcodec_find_decoder_by_name("mp3float");
         if (st->codecpar->codec_id == AV_CODEC_ID_AAC) codec = avcodec_find_decoder_by_name("aac");
@@ -257,8 +262,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) {
-    return std::make_unique<FfmpegDecoder>(path, lossyBits, start);
+std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start, bool fastSeek) {
+    return std::make_unique<FfmpegDecoder>(path, lossyBits, start, fastSeek);
 }
 
 } // namespace camel::audio

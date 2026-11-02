@@ -5,12 +5,17 @@
 // Constructors of the concrete decoders; only Decoders.cpp calls these. `lossyBits` (16 or 24) is the depth lossy
 // streams are quantized to; lossless streams keep their source depth.
 #pragma once
+#include <optional>
+
 #include "Engine/decode/IDecoder.h"
 
 namespace camel::audio {
 
 // `start` is where FFmpeg and dr_mp3 begin reading the file: an MP3's first frame (FormatProbe.h, mpegAudioStart).
-std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start = 0);
+// With `fastSeek` FFmpeg seeks an MP3 at once, near the target, by its Xing table or its size and length, instead of
+// reading the file up to it.
+std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start = 0,
+                                     bool fastSeek = false);
 std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path, uint32_t lossyBits);
 std::unique_ptr<IDecoder> openDrFlac(const std::filesystem::path& path);
 std::unique_ptr<IDecoder> openSndfile(const std::filesystem::path& path);
@@ -21,6 +26,8 @@ std::unique_ptr<IDecoder> openMinimp3(const std::filesystem::path& path, uint32_
 // Raw DSD: SourceInfo counts byte frames (DSD rate / 8) and reports 1 bit per sample; read() returns one byte
 // per channel per frame, oldest sample in the MSB.
 std::unique_ptr<IDecoder> openDsdNexus(const std::filesystem::path& path);
+// The length an MP3 was measured at when it last played (IDecoder.h, rememberMeasuredLength).
+std::optional<uint64_t> measuredLength(const std::filesystem::path& path);
 // Decodes the DTS bitstream that `words`, a 16-bit stereo WAVE decoder, reads from a DTS-CD file.
 std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits);
 
