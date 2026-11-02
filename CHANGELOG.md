@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Upgrading from 0.2.0 or 0.2.1: the first start adds an index of the artists to the library (schema 19), which takes a second or two, and keeps the old library as `library.db.v18.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.2.x refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v18.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
+
+Changed since 0.2.1:
+
+- **Suggestions for a word in many titles come at once:** the artists among them are looked up in an index of artists alone. With 100,000 tracks that all hold the word, the suggestions took 77–120 ms and now take about 7 ms.
+
 Fixed since 0.2.1 (files an earlier version refused are read again once by the first scan after the update, so those below appear by themselves):
 
 - **MP3 files whose audio does not follow the tag at once** were refused: a second ID3 tag, padding or other bytes between the tags and the first frame. The first frame is now found past them.

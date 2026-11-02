@@ -104,6 +104,48 @@ TEST(LibraryBrowse, SearchRanksWholeNamesAndTheirStartsFirst) {
     EXPECT_EQ(twoCharacters.artists, (std::vector<std::string>{"Ayumi", "Ayu", "DJ Ayu", "Kayu"}));
 }
 
+// A word over 2,000 titles hold walks the tracks; the artists still come from every visible track whose artist holds
+// it, ranked, with each name a shared credit lists, and follow later changes.
+TEST(LibraryBrowse, ArtistsOfABroadSearchComeFromTheArtistIndex) {
+    const auto directory = testutil::tempDir() / "library-browse-broad-artists";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2105) "
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
+                    "SELECT x,1,1,'C:/music/'||x||'.flac','audio',1,1 FROM n;"
+                    "INSERT INTO tracks(id,file_id,title,title_norm,title_sort,artist,artist_norm,artist_sort) "
+                    "SELECT id,id,'Orchestra piece','orchestra piece',printf('%06d',id),'Nobody','nobody',X'09' FROM files "
+                    "WHERE id<=2100;"
+                    "INSERT INTO tracks(id,file_id,title,title_norm,title_sort,artist,artist_norm,artist_sort) VALUES"
+                    "(2101,2101,'Song','song',X'01','Orchestra','orchestra',X'03'),"
+                    "(2102,2102,'Song','song',X'01','Orchestra of Lyon','orchestra of lyon',X'04'),"
+                    "(2103,2103,'Song','song',X'01','Tokyo Orchestra','tokyo orchestra',X'05'),"
+                    "(2104,2104,'Song','song',X'01','Aimer with Tokyo Orchestra','aimer with tokyo orchestra',X'01'),"
+                    "(2105,2105,'Song','song',X'01','Hidden Orchestra','hidden orchestra',X'02');"
+                    "INSERT INTO track_values(track_id,field,position,value,value_norm,sort_key) VALUES"
+                    "(2104,'artist',0,'Aimer','aimer',X'01'),(2104,'artist',1,'Tokyo Orchestra','tokyo orchestra',X'05');"
+                    "UPDATE files SET available=0 WHERE id=2105;");
+        })
+        .get();
+    const auto results = searchLibrary(store, "Orchestra", 0, 10);
+    EXPECT_EQ(results.tracks.total, 2104);
+    EXPECT_EQ(results.artists, (std::vector<std::string>{"Orchestra", "Orchestra of Lyon", "Tokyo Orchestra", "Aimer"}));
+    EXPECT_EQ(results.totalArtists, 4);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("UPDATE tracks SET artist='Lyon Strings',artist_norm='lyon strings' WHERE id=2102;"
+                    "DELETE FROM tracks WHERE id=2101;");
+        })
+        .get();
+    const auto changed = searchLibrary(store, "Orchestra", 0, 10);
+    EXPECT_EQ(changed.artists, (std::vector<std::string>{"Tokyo Orchestra", "Aimer"}));
+    EXPECT_EQ(changed.totalArtists, 2);
+}
+
 TEST(LocalServer, ExposesVersionedBrowseAndGroupedSearch) {
     const auto directory = testutil::tempDir() / "local-server-library-api";
     std::filesystem::remove_all(directory);

@@ -25,6 +25,8 @@ constexpr const char* kTextMatch =
 constexpr const char* kTracks = " FROM tracks t JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
 constexpr const char* kFtsTracks = " FROM tracks_fts JOIN tracks t ON t.id=tracks_fts.rowid "
                                    "JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
+constexpr const char* kArtistFtsTracks = " FROM track_artists_fts JOIN tracks t ON t.id=track_artists_fts.rowid "
+                                         "JOIN files f ON f.id=t.file_id JOIN roots r ON r.id=f.root_id ";
 constexpr const char* kVisible = " f.available=1 AND r.online=1 ";
 
 // How well a normalized name matches the normalized query in ?4: all of it, its start, the start of a word, elsewhere.
@@ -244,6 +246,7 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
     {
         const std::string artist = "coalesce(nullif(v.value,''),t.artist,'')";
         Search named = search;
+        const char* artistTracks = named.from();
         std::string artistFilter;
         switch (search.plan) {
         case Search::Plan::Like:
@@ -253,12 +256,13 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
             artistFilter = search.filter() + " AND instr(coalesce(t.artist_norm,t.artist,''),?4)>0 ";
             break;
         default:
+            // The artists' own index: the tracks' index would read every title holding the word to find the few artists.
             named.plan = Search::Plan::Fts;
-            named.phrase = "artist_norm : " + search.phrase;
-            artistFilter = named.filter();
+            artistTracks = kArtistFtsTracks;
+            artistFilter = " AND track_artists_fts MATCH ?1 ";
         }
         const std::string artistFrom =
-            std::string(named.from()) + "LEFT JOIN track_values v ON v.track_id=t.id AND v.field='artist' ";
+            std::string(artistTracks) + "LEFT JOIN track_values v ON v.track_id=t.id AND v.field='artist' ";
         // Every matching artist is grouped anyway, so artists always rank.
         auto rows =
             db.prepare("SELECT name FROM (SELECT " + artist + " name,min(coalesce(v.sort_key,t.artist_sort)) sort_key," + "min(" +

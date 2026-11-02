@@ -446,6 +446,24 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
             db.exec("ALTER TABLE tracks ADD COLUMN rg_analysis_album_gain REAL;"
                     "ALTER TABLE tracks ADD COLUMN rg_analysis_album_peak REAL;");
         },
+        // Artists are searched in a trigram index of their own: in tracks_fts, a word every title holds made the artist
+        // search read all of those titles to find the few artists (58 of 77 ms for 100k tracks).
+        [](sqlite::Database& db) {
+            db.exec(
+                "CREATE VIRTUAL TABLE track_artists_fts USING fts5(artist_norm, content = 'tracks', content_rowid = 'id', "
+                "tokenize = 'trigram');"
+                "CREATE TRIGGER track_artists_fts_insert AFTER INSERT ON tracks BEGIN INSERT INTO "
+                "track_artists_fts(rowid,artist_norm) VALUES(new.id,coalesce(new.artist_norm,new.artist,'')); END;"
+                "CREATE TRIGGER track_artists_fts_update AFTER UPDATE ON tracks "
+                "WHEN old.artist IS NOT new.artist OR old.artist_norm IS NOT new.artist_norm "
+                "BEGIN INSERT INTO track_artists_fts(track_artists_fts,rowid,artist_norm) "
+                "VALUES('delete',old.id,coalesce(old.artist_norm,old.artist,''));"
+                "INSERT INTO track_artists_fts(rowid,artist_norm) VALUES(new.id,coalesce(new.artist_norm,new.artist,'')); END;"
+                "CREATE TRIGGER track_artists_fts_delete AFTER DELETE ON tracks BEGIN INSERT INTO "
+                "track_artists_fts(track_artists_fts,rowid,artist_norm) "
+                "VALUES('delete',old.id,coalesce(old.artist_norm,old.artist,'')); END;"
+                "INSERT INTO track_artists_fts(track_artists_fts) VALUES('rebuild');");
+        },
     };
     return migrations;
 }

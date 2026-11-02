@@ -31,7 +31,7 @@ std::filesystem::path freshDir(const char* name) {
 std::set<std::string> tables(Database& db) {
     std::set<std::string> out;
     auto s = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table') AND name NOT LIKE 'sqlite_%'"
-                        " AND name NOT LIKE 'tracks_fts_%'");
+                        " AND name NOT LIKE 'tracks_fts_%' AND name NOT LIKE 'track_artists_fts_%'");
     while (s.step()) out.insert(s.text(0));
     return out;
 }
@@ -73,11 +73,12 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_TRUE(store.report().created);
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 18);
+    EXPECT_EQ(db.userVersion(), 19);
     EXPECT_EQ(tables(db),
-              (std::set<std::string>{"albums", "app_state", "artist_pictures", "change_log", "covers", "favorite_names", "files",
-                                     "folders", "library_revision", "play_events", "playlist_items", "playlists", "queue",
-                                     "roots", "stats", "track_tags", "track_values", "tracks", "tracks_fts"}));
+              (std::set<std::string>{
+                  "albums",  "app_state",         "artist_pictures", "change_log",     "covers",    "favorite_names", "files",
+                  "folders", "library_revision",  "play_events",     "playlist_items", "playlists", "queue",          "roots",
+                  "stats",   "track_artists_fts", "track_tags",      "track_values",   "tracks",    "tracks_fts"}));
     auto mode = db.prepare("PRAGMA journal_mode");
     ASSERT_TRUE(mode.step());
     EXPECT_EQ(mode.text(0), "wal");
@@ -128,7 +129,7 @@ TEST(LibraryStore, UpgradesV1WithoutInventingFingerprintsOrChangingHistory) {
     EXPECT_EQ(store.report().migratedFrom, 1);
     EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 18);
+    EXPECT_EQ(db.userVersion(), 19);
     EXPECT_EQ(db.scalar("SELECT rating FROM stats JOIN files ON files.id=stats.file_id WHERE files.path='C:/music/old.flac'"), 5);
     EXPECT_EQ(db.scalar("SELECT play_count FROM stats"), 17);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL AND created=0 AND volume_key IS NULL"), 1);
@@ -168,7 +169,7 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
     LibraryStore store(dir);
     EXPECT_EQ(store.report().migratedFrom, 11);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 18);
+    EXPECT_EQ(db.userVersion(), 19);
     for (const char* table : {"tracks", "stats", "play_events", "playlist_items", "queue"})
         EXPECT_EQ(db.scalar(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name LIKE 'cue%'"), 0)
             << table;
@@ -190,6 +191,46 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
             EXPECT_EQ(w.scalar("SELECT COUNT(*) FROM tracks_fts WHERE tracks_fts MATCH 'renamed'"), 1);
         })
         .get();
+}
+
+// Schema 19 indexes the artists apart; the tracks already in the library are indexed, and the index follows changes.
+TEST(LibraryStore, UpgradesV18ByIndexingTheArtistsOfEveryTrack) {
+    const auto dir = freshDir("upgrade-v18");
+    {
+        LibraryStore store(dir, std::vector<Migration>(libraryMigrations().begin(), libraryMigrations().begin() + 18));
+        store
+            .write([](Database& db) {
+                addTrack(db, "C:/music/kept.flac", "Kept");
+                db.exec("UPDATE tracks SET artist='Tokyo Orchestra',artist_norm='tokyo orchestra'");
+            })
+            .get();
+    }
+    LibraryStore store(dir);
+    EXPECT_EQ(store.report().migratedFrom, 18);
+    EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v18.bak"));
+    const auto artist = [&](const std::string& query) {
+        auto db = store.openReader();
+        auto count = db.prepare("SELECT COUNT(*) FROM track_artists_fts WHERE track_artists_fts MATCH ?");
+        count.bind(1, query);
+        return count.step() ? count.integer(0) : -1;
+    };
+    EXPECT_EQ(artist("orchestra"), 1);
+    EXPECT_EQ(artist("kept"), 0); // the title is not an artist
+    store.write([](Database& w) { w.exec("UPDATE tracks SET artist='Lyon Strings',artist_norm='lyon strings'"); }).get();
+    EXPECT_EQ(artist("orchestra"), 0);
+    EXPECT_EQ(artist("strings"), 1);
+    store.write([](Database& w) { addTrack(w, "C:/music/new.flac", "New"); }).get();
+    store
+        .write(
+            [](Database& w) { w.exec("UPDATE tracks SET artist='New Orchestra',artist_norm='new orchestra' WHERE title='New'"); })
+        .get();
+    EXPECT_EQ(artist("orchestra"), 1);
+    store.write([](Database& w) { w.exec("DELETE FROM tracks WHERE title='New'"); }).get();
+    EXPECT_EQ(artist("orchestra"), 0);
+    // Compares the index with the tracks it was built from.
+    EXPECT_NO_THROW(
+        store.write([](Database& w) { w.exec("INSERT INTO track_artists_fts(track_artists_fts) VALUES('integrity-check')"); })
+            .get());
 }
 
 TEST(LibraryStore, WriterRunsEachJobInOneTransaction) {
@@ -224,10 +265,10 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-        EXPECT_EQ(store.report().migratedFrom, 18);
+        EXPECT_EQ(store.report().migratedFrom, 19);
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 19);
-        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v18.bak"));
+        EXPECT_EQ(db.userVersion(), 20);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v19.bak"));
     }
     const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
                                        db.exec("CREATE TABLE half (x INTEGER)");
@@ -237,7 +278,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 19);
+        EXPECT_EQ(db.userVersion(), 20);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
@@ -322,12 +363,12 @@ TEST(LibraryStore, KeepsTheNewestThreeBackups) {
         LibraryStore store(dir);
     }
     std::vector<Migration> extra;
-    for (int v = 18; v <= 22; v++) {
+    for (int v = 19; v <= 23; v++) {
         extra.push_back(addTable("t" + std::to_string(v)));
         LibraryStore store(dir, withExtra(extra));
     }
     EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
-    for (int v : {20, 21, 22}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+    for (int v : {21, 22, 23}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
 }
 
 TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
@@ -338,7 +379,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-    } // writes library.db.v18.bak
+    } // writes library.db.v19.bak
     std::filesystem::remove(dir / "library.db-wal");
     std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'x');
     {
@@ -348,7 +389,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
         auto db = store.openReader();
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
-        EXPECT_EQ(db.userVersion(), 19); // the backup was migrated again
+        EXPECT_EQ(db.userVersion(), 20); // the backup was migrated again
     }
     for (const auto& e : std::filesystem::directory_iterator(dir))
         if (e.path().extension() == ".bak") std::filesystem::remove(e.path());
