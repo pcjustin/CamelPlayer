@@ -157,6 +157,23 @@ std::filesystem::path vbrMp3(bool lameTag) {
     return lameTag ? tagged : untagged;
 }
 
+// Silence, then loud noise, with a Xing table: its bytes do not follow the time, so only the table places a seek near
+// its target.
+std::filesystem::path quietThenLoudMp3() {
+    static std::once_flag once;
+    const auto file = testutil::tempDir() / "lossy-quiet-loud.mp3";
+    std::call_once(once, [&] {
+        std::vector<int32_t> pcm(size_t(kRate) * 60 * kChannels);
+        uint32_t seed = 1;
+        for (size_t i = pcm.size() / 2; i < pcm.size(); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            pcm[i] = (int32_t(seed >> 9) - (1 << 22)) / 4;
+        }
+        testutil::writeMp3(file, pcm, kRate, kBits, kChannels, true, true);
+    });
+    return file;
+}
+
 std::string be32(uint32_t v) {
     return {char(v >> 24), char(v >> 16), char(v >> 8), char(v)};
 }
@@ -235,8 +252,8 @@ TEST_P(LossyDecoder, MatchesTheSourceWithinTolerance) {
 TEST_P(LossyDecoder, SeekMatchesTheLinearDecode) {
     const auto [index, kind] = GetParam();
     const auto& fixture = kFixtures[index];
-    if (kind == DecoderKind::FFmpeg && fixture.format == AudioFormat::Mp3)
-        GTEST_SKIP() << "FFmpeg seeks an MP3 near the target (FfmpegSeeksAnMp3AtOnceNearTheTarget)";
+    if ((kind == DecoderKind::FFmpeg || kind == DecoderKind::Symphonia) && fixture.format == AudioFormat::Mp3)
+        GTEST_SKIP() << decoderName(kind) << " seeks an MP3 near the target (SeekAnMp3AtOnceNearTheTarget)";
     reference();
     auto linear = openDecoder(kind, path(fixture));
     const auto all = decodeAll(*linear);
@@ -592,35 +609,37 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
     }
 }
 
-// FFmpeg seeks an MP3 at once, without reading the file up to the target: near it, by its Xing table or else its size
-// and its length, which one measured before makes better.
-TEST(LossyDecoderPolicy, FfmpegSeeksAnMp3AtOnceNearTheTarget) {
+// FFmpeg and Symphonia seek an MP3 at once, without reading the file up to the target: near it, by its Xing table or
+// else its size and its length, which one measured before makes better.
+TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
     reference();
     const std::pair<std::filesystem::path, const char*> files[] = {{path(kFixtures[2]), "Info CBR"},
                                                                    {path(kFixtures[3]), "CBR without a header"},
                                                                    {vbrMp3(true), "Xing VBR"},
+                                                                   {quietThenLoudMp3(), "Xing VBR, silent then loud"},
                                                                    {vbrMp3(false), "VBR without a header"}};
-    for (const auto& [file, name] : files) {
-        const auto all = decodeAll(*openDecoder(DecoderKind::FFmpeg, file));
-        const uint64_t target = all.size() / kChannels * 9 / 10;
-        if (file == vbrMp3(false)) rememberMeasuredLength(file, all.size() / kChannels); // scales the seek
-        auto decoder = openDecoder(DecoderKind::FFmpeg, file);
-        decoder->seek(target);
-        const auto rest = decodeAll(*decoder);
-        constexpr size_t kSkip = 4096, kWindow = 1024;
-        ASSERT_GT(rest.size(), (kSkip + kWindow) * kChannels) << name;
-        std::optional<int64_t> lag;
-        for (int64_t d = 0; d <= int64_t(kRate) && !lag; d = d > 0 ? -d : 1 - d) {
-            const int64_t at = int64_t(target + kSkip) + d;
-            if (at < 0 || (uint64_t(at) + kWindow) * kChannels > all.size()) continue;
-            if (std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels),
-                           rest.begin() + std::ptrdiff_t((kSkip + kWindow) * kChannels),
-                           all.begin() + std::ptrdiff_t(at * kChannels)))
-                lag = d;
+    for (const auto kind : {DecoderKind::FFmpeg, DecoderKind::Symphonia})
+        for (const auto& [file, name] : files) {
+            const auto all = decodeAll(*openDecoder(kind, file));
+            const uint64_t target = all.size() / kChannels * 9 / 10;
+            if (file == vbrMp3(false)) rememberMeasuredLength(file, all.size() / kChannels); // scales the seek
+            auto decoder = openDecoder(kind, file);
+            decoder->seek(target);
+            const auto rest = decodeAll(*decoder);
+            constexpr size_t kSkip = 4096, kWindow = 1024;
+            ASSERT_GT(rest.size(), (kSkip + kWindow) * kChannels) << decoderName(kind) << ", " << name;
+            std::optional<int64_t> lag;
+            for (int64_t d = 0; d <= int64_t(kRate) && !lag; d = d > 0 ? -d : 1 - d) {
+                const int64_t at = int64_t(target + kSkip) + d;
+                if (at < 0 || (uint64_t(at) + kWindow) * kChannels > all.size()) continue;
+                if (std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels),
+                               rest.begin() + std::ptrdiff_t((kSkip + kWindow) * kChannels),
+                               all.begin() + std::ptrdiff_t(at * kChannels)))
+                    lag = d;
+            }
+            EXPECT_TRUE(lag) << decoderName(kind) << ", " << name << ": not within a second of the target";
+            if (lag) std::printf("%s seek in %s: %lld frames off\n", decoderName(kind), name, static_cast<long long>(*lag));
         }
-        ASSERT_TRUE(lag) << name << ": not within a second of the target";
-        std::printf("FFmpeg seek in %s: %lld frames off\n", name, static_cast<long long>(*lag));
-    }
 }
 
 // Only mpg123 measures an MP3's length. The other decoders offer their estimate, or the probe's, and count what they

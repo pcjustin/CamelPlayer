@@ -452,6 +452,14 @@ std::optional<XingToc> xingToc(const std::filesystem::path& path) {
     return std::nullopt;
 }
 
+double XingToc::byteShare(double share) const {
+    const double percent = std::min(99.999, 100.0 * share);
+    const auto entry = size_t(percent);
+    const double from = toc[entry];
+    const double to = entry + 1 < toc.size() ? toc[entry + 1] : 256.0;
+    return (from + (to - from) * (percent - double(entry))) / 256.0;
+}
+
 uint64_t audioAfterVbriFrame(const std::filesystem::path& path) {
     const File f(path);
     const uint64_t start = mpegStart(f);

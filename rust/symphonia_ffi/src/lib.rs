@@ -370,6 +370,8 @@ pub struct SymInfo {
     pub md5: [u8; 16],
     /// Nonzero for lossy codecs: sym_read returns float32 bit patterns instead of integers.
     pub is_float: u32,
+    /// Nonzero for MP3: sym_seek lands near the frame, at the byte position in proportion to it in total_frames.
+    pub coarse_seek: u32,
 }
 
 pub struct SymDecoder {
@@ -381,6 +383,8 @@ pub struct SymDecoder {
     bits: u32,
     lossy: bool,
     gapless: bool,
+    /// An MP3 seeks at once, near the target, instead of reading every frame up to it.
+    coarse: bool,
     /// Decoded, interleaved, right-aligned samples not yet handed out.
     pending: Vec<i32>,
     pending_pos: usize,
@@ -608,6 +612,7 @@ unsafe fn open_decoder(
     if channels == 0 || bits == 0 || bits > 32 {
         return SYM_E_UNSUPPORTED;
     }
+    let coarse = params.codec == CODEC_ID_MP3;
     let (has_md5, md5) = match params.verification_check {
         Some(VerificationCheck::Md5(m)) => (1, m),
         _ => (0, [0u8; 16]),
@@ -620,6 +625,7 @@ unsafe fn open_decoder(
         has_md5,
         md5,
         is_float: u32::from(lossy),
+        coarse_seek: u32::from(coarse),
     };
     let dec = Box::new(SymDecoder {
         format,
@@ -629,6 +635,7 @@ unsafe fn open_decoder(
         bits,
         lossy,
         gapless,
+        coarse,
         pending: Vec::new(),
         pending_pos: 0,
         skip_frames: 0,
@@ -687,7 +694,7 @@ unsafe fn read_frames(d: &mut SymDecoder, dst: *mut i32, frames: usize, read: *m
     }
 }
 
-/// Seeks so the next read starts exactly at `frame`.
+/// Seeks so the next read starts exactly at `frame`, or for an MP3 near it.
 ///
 /// # Safety
 /// `dec` must be a live exclusive handle with no concurrent calls.
@@ -701,7 +708,11 @@ pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
 
 fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
     let seeked = match d.format.seek(
-        SeekMode::Accurate,
+        if d.coarse {
+            SeekMode::Coarse
+        } else {
+            SeekMode::Accurate
+        },
         SeekTo::Timestamp {
             ts: Timestamp::from(i64::try_from(frame).unwrap_or(i64::MAX)),
             track_id: d.track_id,

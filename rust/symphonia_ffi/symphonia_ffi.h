@@ -30,7 +30,8 @@ typedef struct SymInfo {
     uint64_t total_frames;
     uint32_t has_md5;
     uint8_t md5[16];
-    uint32_t is_float; // lossy codecs: sym_read returns float32 bit patterns
+    uint32_t is_float;    // lossy codecs: sym_read returns float32 bit patterns
+    uint32_t coarse_seek; // MP3: sym_seek lands near the frame, at the byte position in proportion to it in total_frames
 } SymInfo;
 
 // Lossy streams (AAC, MP3) report `lossyBits` (16 or 24) as their depth and read as float32 bit patterns.

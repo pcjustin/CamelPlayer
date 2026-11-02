@@ -325,12 +325,7 @@ private:
             if (bySize) {
                 at = first + k * frameBytes;
             } else if (toc_) {
-                // Percent of the frames to the table's 256ths of the bytes from the Xing frame on, between entries.
-                const double percent = std::min(99.999, 100.0 * k / frames);
-                const auto entry = size_t(percent);
-                const double from = toc_->toc[entry];
-                const double to = entry + 1 < toc_->toc.size() ? toc_->toc[entry + 1] : 256.0;
-                at = (from + (to - from) * (percent - double(entry))) / 256.0 * toc_->bytes;
+                at = toc_->byteShare(k / frames) * toc_->bytes;
             }
             offsets[i] = i ? std::max(int64_t(first), int64_t(at - kMargin)) : int64_t(first);
         }

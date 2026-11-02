@@ -6,8 +6,10 @@
 #include "Engine/decode/DecoderImpl.h"
 #include "Engine/decode/FormatProbe.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 #include "symphonia_ffi.h"
@@ -19,7 +21,7 @@ namespace {
 
 class SymphoniaDecoder final : public IDecoder {
 public:
-    SymphoniaDecoder(const std::filesystem::path& path, uint32_t lossyBits) {
+    SymphoniaDecoder(const std::filesystem::path& path, uint32_t lossyBits) : path_(path) {
         SymInfo si{};
         int32_t r = sym_open(toUtf8(longPath(path)).c_str(), lossyBits, &dec_, &si);
         if (r == SYM_E_IO) throw Error(ErrorCode::FileOpen, "symphonia: cannot open file");
@@ -29,6 +31,12 @@ public:
         info_.channels = si.channels;
         info_.bitsPerSample = si.bits_per_sample;
         info_.totalFrames = si.total_frames;
+        symphoniaFrames_ = si.total_frames;
+        coarse_ = si.coarse_seek != 0;
+        // Where no header declares an MP3's length, Symphonia estimates it from the first frames; one measured before is
+        // the length to show, and places a seek better.
+        if (coarse_ && si.total_frames)
+            if (const auto measured = measuredLength(path)) info_.totalFrames = *measured;
         float_ = si.is_float != 0;
         if (si.has_md5) {
             std::array<uint8_t, 16> m;
@@ -58,10 +66,23 @@ public:
     }
 
     void seek(uint64_t frame) override {
-        if (sym_seek(dec_, frame) != SYM_OK) throw Error(ErrorCode::SeekFailed, "symphonia: " + lastError());
+        if (sym_seek(dec_, coarse_ ? byPosition(frame) : frame) != SYM_OK)
+            throw Error(ErrorCode::SeekFailed, "symphonia: " + lastError());
     }
 
 private:
+    // Symphonia seeks an MP3 to the byte position in proportion to the frame asked for in its own length: the frame whose
+    // position is where `frame` lies, by the Xing table, or else in proportion to the length shown.
+    uint64_t byPosition(uint64_t frame) {
+        if (!info_.totalFrames || !symphoniaFrames_) return frame;
+        if (!tocRead_) {
+            toc_ = xingToc(path_);
+            tocRead_ = true;
+        }
+        const double share = std::min(1.0, double(frame) / double(info_.totalFrames));
+        return uint64_t((toc_ ? toc_->byteShare(share) : share) * double(symphoniaFrames_));
+    }
+
     // Integers, or float32 bit patterns for a lossy stream.
     size_t readRaw(int32_t* dst, size_t frames) {
         size_t got = 0;
@@ -75,8 +96,13 @@ private:
         return buf;
     }
 
+    std::filesystem::path path_;
     SymDecoder* dec_ = nullptr;
     SourceInfo info_;
+    uint64_t symphoniaFrames_ = 0; // the length Symphonia places a seek by
+    bool coarse_ = false;
+    std::optional<XingToc> toc_; // read at the first seek
+    bool tocRead_ = false;
     bool float_ = false;
     std::vector<int32_t> raw_;
 };

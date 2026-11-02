@@ -41,6 +41,8 @@ struct XingToc {
     uint32_t frames = 0;
     uint32_t bytes = 0;
     std::array<uint8_t, 100> toc{};
+    // The share of the bytes where `share` of the frames starts, between the table's entries.
+    double byteShare(double share) const;
 };
 std::optional<XingToc> xingToc(const std::filesystem::path& path);
 

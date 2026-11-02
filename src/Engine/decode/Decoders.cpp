@@ -301,10 +301,10 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
     const bool startAtFrame =
         format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3 || kind == DecoderKind::Minimp3);
     const uint64_t start = startAtFrame ? mpegAudioStart(path) : 0;
-    // mpg123 seeks exactly by itself; Symphonia and minimp3 land on the target after warm-up; FFmpeg seeks an MP3 at once,
-    // near the target, and warms up the same way; otherwise FFmpeg and dr_mp3 can land beside it when they trim encoder
-    // delay, so they decode from the start. Only mpg123 measures an MP3's length; the others' can differ from what they
-    // decode, even when a header declares it.
+    // mpg123 seeks exactly by itself; minimp3, and Symphonia outside MP3, land on the target after warm-up; FFmpeg and
+    // Symphonia seek an MP3 at once, near the target, and warm up the same way; otherwise FFmpeg and dr_mp3 can land
+    // beside it when they trim encoder delay, so they decode from the start. Only mpg123 measures an MP3's length; the
+    // others' can differ from what they decode, even when a header declares it.
     const bool preroll = kind == DecoderKind::Symphonia || kind == DecoderKind::Minimp3 ||
                          (kind == DecoderKind::FFmpeg && format == AudioFormat::Mp3);
     if (isLossy(format) && kind != DecoderKind::Mpg123)
