@@ -472,6 +472,56 @@ TEST(LossyDecoderPolicy, TheEngineLearnsAnMp3sLengthWhileItPlays) {
     std::filesystem::remove(out);
 }
 
+// Only mpg123 measures an MP3's length. The other decoders offer their estimate, or the probe's, and count what they
+// decode once they reach the end, even when a header declares the length: it can differ from what they decode.
+TEST(LossyDecoderPolicy, OtherMp3DecodersEstimateTheLengthUntilTheEnd) {
+    const auto& source = reference();
+    for (const auto& fixture : {kFixtures[2], kFixtures[3]})
+        for (const auto kind : decodersFor(AudioFormat::Mp3)) {
+            if (kind == DecoderKind::Mpg123) continue;
+            auto decoder = openDecoder(kind, path(fixture));
+            EXPECT_EQ(decoder->info().totalFrames, 0u) << decoderName(kind) << " on " << fixture.name;
+            EXPECT_NEAR(double(decoder->estimatedFrames()), double(source.size() / kChannels), 3 * 1152.0)
+                << decoderName(kind) << " on " << fixture.name;
+            const uint64_t frames = decodeAll(*decoder).size() / kChannels;
+            EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind) << " on " << fixture.name;
+        }
+}
+
+// The first frame's side info is that of a real file's first frame, which counts more bits than the frame holds:
+// Symphonia refused the whole file, and dr_mp3 drops the frame while counting it.
+TEST(LossyDecoderPolicy, AnMp3FrameThatDoesNotDecodePlaysToItsEnd) {
+    reference();
+    auto mp3 = readFile(path(kFixtures[3]));
+    const std::string side("\x00\x00\x0f\xff\x00\x69\x00\x00\x00\x01\xf1\x20\x0d\x20\x00\x00\x00\x00\x00\x01\xa4\x00\x00\x00"
+                           "\x00\x00\x00\x34\x80\x00\x00\x00",
+                           32);
+    mp3.replace(4, side.size(), side); // after the header of a frame without CRC
+    const auto file = writeFile("undecodable-frame.mp3", mp3);
+    const auto mpg123 = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+    for (const auto kind : decodersFor(AudioFormat::Mp3)) {
+        const auto expected = decodeAll(*openDecoder(kind, file));
+        if (kind == DecoderKind::Symphonia) EXPECT_EQ(expected.size(), mpg123.size()) << "silence as long as the frame";
+        const auto out = testutil::tempDir() / "lossy-undecodable.raw";
+        Settings settings;
+        settings.decoderByFormat[AudioFormat::Mp3] = kind;
+        CaptureOptions options;
+        options.file = out;
+        options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+        {
+            PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
+            engine.openAndPlay(file);
+            engine.waitIdle();
+            ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
+            const auto snapshot = engine.snapshot();
+            ASSERT_FALSE(snapshot.error) << decoderName(kind) << ": " << snapshot.errorDetail;
+            EXPECT_EQ(snapshot.total, expected.size() / kChannels) << decoderName(kind);
+        }
+        EXPECT_EQ(std::filesystem::file_size(out) / 4, expected.size()) << decoderName(kind);
+        std::filesystem::remove(out);
+    }
+}
+
 // Some taggers store the iTunes genre as one byte of text; Symphonia read it as a number and refused the whole file.
 TEST(LossyDecoderPolicy, AMalformedMp4TagStopsNoDecoder) {
     reference();

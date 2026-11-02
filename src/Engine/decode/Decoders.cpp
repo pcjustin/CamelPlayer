@@ -148,17 +148,26 @@ public:
     enum class Mode : uint8_t { Preroll, Reopen };
     static constexpr uint64_t kPreroll = 4608; // four MP3 frames, four and a half AAC frames
 
-    // Without `lengthKnown` the decoder only estimates the length, which is then reported as unknown (0): the Engine
-    // treats a nonzero length as exact.
-    LossySeek(DecoderKind kind, std::filesystem::path path, uint32_t lossyBits, Mode mode, bool lengthKnown, uint64_t start = 0)
+    // Without `lengthKnown` the decoder's length is only an estimate, as a header can count frames the decoder does not
+    // decode: it is reported as unknown (0), since the Engine treats a nonzero length as exact, and becomes the frames
+    // decoded once a read reaches the end. An MP3 decoder that cannot estimate gets the probe's estimate.
+    LossySeek(DecoderKind kind, std::filesystem::path path, AudioFormat format, uint32_t lossyBits, Mode mode, bool lengthKnown,
+              uint64_t start = 0)
         : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), start_(start),
           inner_(openAdapter(kind_, path_, lossyBits_, start_)), info_(inner_->info()), mode_(mode) {
-        if (!lengthKnown) info_.totalFrames = 0;
+        if (lengthKnown) return;
+        estimate_ = info_.totalFrames;
+        info_.totalFrames = 0;
+        if (!estimate_ && format == AudioFormat::Mp3) {
+            bool estimated = true;
+            estimate_ = probeMp3Info(path_, estimated).totalFrames;
+        }
     }
     const SourceInfo& info() const override { return info_; }
-    size_t read(int32_t* dst, size_t frames) override { return inner_->read(dst, frames); }
+    uint64_t estimatedFrames() const override { return estimate_; }
+    size_t read(int32_t* dst, size_t frames) override { return counted(inner_->read(dst, frames), frames); }
     bool readsFloat() const override { return inner_->readsFloat(); }
-    size_t readFloat(float* dst, size_t frames) override { return inner_->readFloat(dst, frames); }
+    size_t readFloat(float* dst, size_t frames) override { return counted(inner_->readFloat(dst, frames), frames); }
     void seek(uint64_t frame) override {
         const uint64_t start = mode_ == Mode::Preroll && frame > kPreroll ? frame - kPreroll : 0;
         if (start)
@@ -171,9 +180,16 @@ public:
             if (!got) throw Error(ErrorCode::SeekFailed, "seek target is past the end");
             left -= got;
         }
+        position_ = frame;
     }
 
 private:
+    size_t counted(size_t got, size_t asked) {
+        position_ += got;
+        if (!got && asked && !info_.totalFrames) info_.totalFrames = position_;
+        return got;
+    }
+
     DecoderKind kind_;
     std::filesystem::path path_;
     uint32_t lossyBits_;
@@ -181,6 +197,8 @@ private:
     std::unique_ptr<IDecoder> inner_;
     SourceInfo info_;
     Mode mode_;
+    uint64_t estimate_ = 0;
+    uint64_t position_ = 0;
 };
 
 // Removes the encoder delay and padding an MP4 declares, for a decoder that does not (Symphonia 0.5.5 ignores both the
@@ -258,14 +276,15 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
     // ADPCM decodes to exact 16-bit samples. FFmpeg can land beside a target in the last block, so it decodes from the
     // start.
     if (format == AudioFormat::Adpcm)
-        return kind == DecoderKind::FFmpeg ? std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Reopen, true)
-                                           : openAdapter(kind, path, lossyBits);
+        return kind == DecoderKind::FFmpeg
+                   ? std::make_unique<LossySeek>(kind, path, format, lossyBits, LossySeek::Mode::Reopen, true)
+                   : openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Dts) {
         // FFmpeg's WAVE reader finds the DTS stream and decodes it, but seeks only near the target, so it decodes from
         // the start; the other WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly.
         // One sample per word frame makes the data chunk's length exact.
         if (kind != DecoderKind::FFmpeg) return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits);
-        auto d = std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Reopen, true);
+        auto d = std::make_unique<LossySeek>(kind, path, format, lossyBits, LossySeek::Mode::Reopen, true);
         if (!d->readsFloat()) throw Error(ErrorCode::UnsupportedStream, "FFmpeg did not find the DTS stream");
         return d;
     }
@@ -275,11 +294,12 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
     const bool startAtFrame = format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3);
     const uint64_t start = startAtFrame ? mpegAudioStart(path) : 0;
     // mpg123 seeks exactly by itself; Symphonia lands on the target after warm-up; FFmpeg and dr_mp3 can land beside it
-    // when they trim encoder delay, so they decode from the start.
+    // when they trim encoder delay, so they decode from the start. Only mpg123 measures an MP3's length; the others'
+    // can differ from what they decode, even when a header declares it.
     if (isLossy(format) && kind != DecoderKind::Mpg123)
-        d = std::make_unique<LossySeek>(
-            kind, path, lossyBits, kind == DecoderKind::Symphonia ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
-            kind == DecoderKind::DrMp3 || lossyLengthDeclared(path), start); // dr_mp3 counts every frame
+        d = std::make_unique<LossySeek>(kind, path, format, lossyBits,
+                                        kind == DecoderKind::Symphonia ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
+                                        format != AudioFormat::Mp3 && lossyLengthDeclared(path), start);
     else
         d = openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Aac && kind == DecoderKind::Symphonia)

@@ -15,6 +15,8 @@ Fixed since 0.2.1 (files an earlier version refused are read again once by the f
 - **M4A files with a one-byte genre** were refused by Symphonia, the default AAC and ALAC decoder, because it reads the file's tags itself and gave up on that one. Symphonia now skips the tags, which CamelPlayer reads with TagLib anyway.
 - **MP4 videos:** Symphonia took the picture track for the sound and refused the file. The first track it can decode now plays, so the sound of a music video or concert video plays like a track.
 - **MP3 lengths in the library could be wrong,** such as 1:29 for a 1:48 track whose VBRI header (written by Fraunhofer encoders) counts too few frames. A VBRI length now counts as an estimate, and any MP3 length that differs from the decoded one is corrected once the track has played to its end.
+- **Symphonia refused whole MP3 files** at a frame it could not decode, such as a first frame whose side information counts more bits than it holds. Such an AAC or MP3 frame now plays as silence of its length, as with the other decoders.
+- **With FFmpeg, Symphonia or dr_mp3 chosen for MP3,** a track could end in an error and skip to the next instead of a gapless change, as when dr_mp3 decodes fewer frames than it counts; and FFmpeg showed 0:00 and could not seek in an MP3 without a Xing or Info header. Their length now shows as an estimate and becomes exact at the track's end, and dr_mp3 no longer reads a whole file without such a header before it starts.
 - **macOS `._` files** (AppleDouble files with Finder data, left beside the music on a NAS) counted as audio files that could not be read; the scan now passes them over.
 
 ## 0.2.1

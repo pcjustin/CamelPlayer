@@ -375,6 +375,7 @@ pub struct SymDecoder {
     channels: usize,
     /// Output depth: the source depth, or the configured depth for lossy codecs.
     bits: u32,
+    lossy: bool,
     /// Decoded, interleaved, right-aligned samples not yet handed out.
     pending: Vec<i32>,
     pending_pos: usize,
@@ -473,6 +474,15 @@ impl SymDecoder {
                 Ok(buf) => {
                     let out = interleave(buf, self.channels, self.bits)?;
                     self.set_pending(out);
+                    return Ok(true);
+                }
+                // A lossy packet that does not decode, such as an MP3 frame whose side information counts more bits
+                // than it holds, plays as silence of its length and decoding goes on, as in other decoders; the
+                // length and every later position stay as they were.
+                Err(Error::DecodeError(_)) if self.lossy => {
+                    let trimmed = u64::from(packet.trim_start) + u64::from(packet.trim_end);
+                    let frames = packet.dur.saturating_sub(trimmed) as usize;
+                    self.set_pending(vec![0; frames * self.channels]);
                     return Ok(true);
                 }
                 Err(e) => {
@@ -625,6 +635,7 @@ unsafe fn open_decoder(
         track_id,
         channels,
         bits,
+        lossy,
         pending: Vec::new(),
         pending_pos: 0,
         skip_frames: 0,

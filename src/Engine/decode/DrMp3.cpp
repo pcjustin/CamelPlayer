@@ -31,7 +31,8 @@ public:
         info_.sampleRate = mp3_.sampleRate;
         info_.channels = mp3_.channels;
         info_.bitsPerSample = lossyBits;
-        info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
+        // Without a Xing/Info header dr_mp3 would read the whole file to count its frames.
+        if (mp3_.totalPCMFrameCount != DRMP3_UINT64_MAX) info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
         if (!info_.sampleRate || !info_.channels) {
             drmp3_uninit(&mp3_);
             std::fclose(file_);
