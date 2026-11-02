@@ -27,8 +27,12 @@ SourceInfo probeAacInfo(const std::filesystem::path& path);
 // streams do not, so decoders can only estimate it; nor does Fraunhofer's VBRI header, which mpg123 does not read.
 bool lossyLengthDeclared(const std::filesystem::path& path);
 
-// The samples an MP3's VBRI header counts, 0 without one: an estimate, frames times samples a frame.
+// The samples of the frames an MP3's VBRI header counts after its own, 0 without one: an estimate, frames times samples
+// a frame.
 uint64_t vbriSamples(const std::filesystem::path& path);
+
+// Where an MP3's audio starts after its VBRI frame, which holds no sound; 0 without one.
+uint64_t audioAfterVbriFrame(const std::filesystem::path& path);
 
 // Where an MP3 file's first frame starts: past its ID3v2 tags and any padding or other bytes left before the frame.
 uint64_t mpegAudioStart(const std::filesystem::path& path);

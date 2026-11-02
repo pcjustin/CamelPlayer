@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -22,16 +24,27 @@
 namespace camel::audio {
 namespace {
 
-// One libmpg123 stream of the file. Once `stop` is set its reads fail, which ends a scan no one waits for any more.
+// Holds a scanning stream at its next read, so another thread can read its seek index; `stop` fails its reads, which
+// ends a scan no one waits for any more.
+struct ScanGate {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool pauseWanted = false;
+    bool paused = false;
+    bool stop = false;
+};
+
+// One libmpg123 stream of the file, which mpg123 sees from byte `start` on.
 class Stream {
 public:
-    Stream(const std::filesystem::path& path, const std::atomic<bool>* stop = nullptr) : stop_(stop) {
+    Stream(const std::filesystem::path& path, uint64_t start, ScanGate* gate = nullptr) : start_(start), gate_(gate) {
         static std::once_flag once;
         std::call_once(once, [] { mpg123_init(); });
         std::FILE* file = nullptr;
         if (_wfopen_s(&file, longPath(path).c_str(), L"rb") != 0 || !file)
             throw Error(ErrorCode::FileOpen, "mpg123: cannot open file");
         file_.reset(file);
+        if (_fseeki64(file, int64_t(start_), SEEK_SET) != 0) throw Error(ErrorCode::FileOpen, "mpg123: cannot seek");
         int error = MPG123_OK;
         handle_.reset(mpg123_new(nullptr, &error));
         if (!handle_) throw Error(ErrorCode::Other, std::string("mpg123_new: ") + mpg123_plain_strerror(error));
@@ -56,6 +69,7 @@ public:
     Stream& operator=(const Stream&) = delete;
 
     mpg123_handle* mh() const { return handle_.get(); }
+    bool atEnd() const { return std::feof(file_.get()) != 0; }
 
     [[noreturn]] void fail(ErrorCode code, const char* what) const {
         throw Error(code, std::string(what) + ": " + mpg123_strerror(handle_.get()));
@@ -68,17 +82,31 @@ private:
     static int readFile(void* handle, void* buffer, size_t bytes, size_t* got) {
         auto* stream = static_cast<Stream*>(handle);
         *got = 0;
-        if (stream->stop_ && stream->stop_->load(std::memory_order_relaxed)) return -1;
+        if (ScanGate* gate = stream->gate_) {
+            std::unique_lock lock(gate->mutex);
+            if (gate->pauseWanted) {
+                gate->paused = true;
+                gate->changed.notify_all();
+                gate->changed.wait(lock, [gate] { return !gate->pauseWanted || gate->stop; });
+                gate->paused = false;
+            }
+            if (gate->stop) return -1;
+        }
         *got = std::fread(buffer, 1, bytes, stream->file_.get());
         return std::ferror(stream->file_.get()) ? -1 : 0;
     }
 
     static int64_t seekFile(void* handle, int64_t offset, int origin) {
-        std::FILE* file = static_cast<Stream*>(handle)->file_.get();
-        return _fseeki64(file, offset, origin) == 0 ? _ftelli64(file) : -1;
+        auto* stream = static_cast<Stream*>(handle);
+        std::FILE* file = stream->file_.get();
+        const int64_t start = int64_t(stream->start_);
+        if (_fseeki64(file, origin == SEEK_SET ? start + offset : offset, origin) != 0) return -1;
+        const int64_t at = _ftelli64(file) - start;
+        return at >= 0 ? at : -1;
     }
 
-    const std::atomic<bool>* stop_;
+    uint64_t start_;
+    ScanGate* gate_;
     // The handle goes first, then the file it reads.
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file_{nullptr, &std::fclose};
     std::unique_ptr<mpg123_handle, decltype(&mpg123_delete)> handle_{nullptr, &mpg123_delete};
@@ -87,9 +115,11 @@ private:
 class Mpg123Decoder final : public IDecoder {
 public:
     // `measure`: playback. The exact length and seek index cost a scan of the whole file, seconds from a network
-    // share, so a second stream scans while this one plays; the length counts from when it is known, and seeks wait
-    // for it. Otherwise (library scans) the length stays mpg123's estimate.
-    Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool measure) : stream_(std::make_unique<Stream>(path)) {
+    // share, so a second stream scans while this one plays; the length counts from when it is known, and a seek waits
+    // until the scan has passed its target. Otherwise (library scans) the length stays mpg123's estimate.
+    // mpg123 would decode a VBRI frame, which holds no sound, so it sees the file from the frame after it.
+    Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool measure)
+        : start_(audioAfterVbriFrame(path)), stream_(std::make_unique<Stream>(path, start_)) {
         info_.sampleRate = uint32_t(stream_->rate);
         info_.channels = uint32_t(stream_->channels);
         info_.bitsPerSample = lossyBits;
@@ -104,7 +134,11 @@ public:
     }
 
     ~Mpg123Decoder() override {
-        stop_.store(true, std::memory_order_relaxed);
+        {
+            const std::scoped_lock lock(gate_.mutex);
+            gate_.stop = true;
+        }
+        gate_.changed.notify_all();
         if (scan_.joinable()) scan_.join();
     }
     Mpg123Decoder(const Mpg123Decoder&) = delete;
@@ -130,11 +164,20 @@ public:
         size_t bytes = 0;
         while (!bytes && !ended_ && frames) {
             const int result = mpg123_read(stream_->mh(), dst, frames * info_.channels * sizeof(float), &bytes);
-            if (result == MPG123_DONE && !bytes) {
+            // A last frame that the end of the file, or an ID3v1 tag, cuts short ends the stream.
+            const bool cutShort = result == MPG123_ERR && mpg123_errcode(stream_->mh()) == MPG123_ERR_READER && stream_->atEnd();
+            if ((result == MPG123_DONE || cutShort) && !bytes) {
                 // The unscanned stream may stop where its LAME frame says, short of the audio; the scan knows.
                 if (continueScanned()) continue;
+                // The scan counted the cut frame: it plays as silence, so the length holds.
+                if (cutShort && position_ < info_.totalFrames) {
+                    const size_t silent = size_t(std::min<uint64_t>(frames, info_.totalFrames - position_));
+                    std::fill_n(dst, silent * info_.channels, 0.0f);
+                    position_ += silent;
+                    return silent;
+                }
                 ended_ = true;
-            } else if (result != MPG123_OK && result != MPG123_DONE) {
+            } else if (result != MPG123_OK && result != MPG123_DONE && !(cutShort && bytes)) {
                 stream_->fail(ErrorCode::DecodeFailed, "mpg123_read");
             }
         }
@@ -144,9 +187,12 @@ public:
     }
 
     void seek(uint64_t frame) override {
-        // The scanned stream's index lands a seek exactly without reading the file up to it a second time.
-        finishScan(true);
-        if (scanned_) stream_ = std::move(scanned_);
+        // The scan's index lands a seek exactly without reading the file up to it a second time: lent while the scan
+        // runs, or with the scanned stream once it has ended.
+        if (!lendScanIndex(frame)) {
+            finishScan(true);
+            if (scanned_) stream_ = std::move(scanned_);
+        }
         if (mpg123_seek64(stream_->mh(), int64_t(frame), SEEK_SET) != int64_t(frame))
             stream_->fail(ErrorCode::SeekFailed, "mpg123_seek64");
         position_ = frame;
@@ -156,12 +202,53 @@ public:
 private:
     void scanMain(const std::filesystem::path& path) {
         try {
-            auto scanned = std::make_unique<Stream>(path, &stop_);
-            if (mpg123_scan(scanned->mh()) == MPG123_OK) scanned_ = std::move(scanned);
+            auto scanning = std::make_unique<Stream>(path, start_, &gate_);
+            {
+                const std::scoped_lock lock(gate_.mutex);
+                scanning_ = scanning.get();
+            }
+            const bool scanned = mpg123_scan(scanning->mh()) == MPG123_OK;
+            {
+                const std::scoped_lock lock(gate_.mutex);
+                scanning_ = nullptr;
+            }
+            if (scanned) scanned_ = std::move(scanning);
         } catch (const Error&) {
             // The playing stream goes on with its length unknown.
         }
-        scanDone_.store(true, std::memory_order_release);
+        {
+            const std::scoped_lock lock(gate_.mutex);
+            scanDone_.store(true, std::memory_order_release);
+        }
+        gate_.changed.notify_all();
+    }
+
+    // While the scan runs: waits until its index covers `frame`, then gives the playing stream a copy. False once the
+    // scan has ended, whose stream then serves the seek.
+    bool lendScanIndex(uint64_t frame) {
+        const int64_t samplesPerFrame = mpg123_spf(stream_->mh());
+        if (samplesPerFrame <= 0) return false;
+        // Past the target by a few frames for the encoder delay and the frames decoded before it.
+        const uint64_t needed = frame / uint64_t(samplesPerFrame) + 8;
+        while (!scanDone_.load(std::memory_order_acquire)) {
+            std::vector<int64_t> offsets;
+            int64_t step = 0;
+            {
+                std::unique_lock lock(gate_.mutex);
+                gate_.pauseWanted = true;
+                gate_.changed.wait(lock, [this] { return gate_.paused || scanDone_.load(std::memory_order_acquire); });
+                int64_t* index = nullptr;
+                size_t fill = 0;
+                if (gate_.paused && scanning_ && mpg123_index64(scanning_->mh(), &index, &step, &fill) == MPG123_OK)
+                    offsets.assign(index, index + fill);
+                gate_.pauseWanted = false;
+            }
+            gate_.changed.notify_all();
+            if (step > 0 && offsets.size() > 1 && uint64_t(offsets.size() - 1) * uint64_t(step) >= needed)
+                return mpg123_set_index64(stream_->mh(), offsets.data(), step, offsets.size()) == MPG123_OK;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return false;
     }
 
     // Takes the scan's exact length, waiting for the scan when `wait` is set.
@@ -183,9 +270,11 @@ private:
         return true;
     }
 
+    uint64_t start_;
     std::unique_ptr<Stream> stream_;
     std::unique_ptr<Stream> scanned_; // written by the scan thread before scanDone_; read after joining it
-    std::atomic<bool> stop_{false};
+    ScanGate gate_;
+    Stream* scanning_ = nullptr; // the scan's stream while it scans, guarded by gate_.mutex
     std::atomic<bool> scanDone_{false};
     std::thread scan_;
     SourceInfo info_;

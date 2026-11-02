@@ -472,6 +472,71 @@ TEST(LossyDecoderPolicy, TheEngineLearnsAnMp3sLengthWhileItPlays) {
     std::filesystem::remove(out);
 }
 
+// A VBRI frame (Fraunhofer encoders) holds no sound: mpg123 plays what follows it, and its frame count, which includes
+// itself, gives the estimate.
+TEST(LossyDecoderPolicy, Mpg123SkipsAVbriFrame) {
+    reference();
+    const auto plain = readFile(path(kFixtures[3]));
+    const auto expected = decodeAll(*openDecoder(DecoderKind::Mpg123, path(kFixtures[3])));
+    std::string vbri = plain.substr(0, 4) + std::string(1044 - 4, '\0');
+    vbri[2] = char(vbri[2] & ~0x02); // no padding: 1044 bytes at 320 kbit/s and 44.1 kHz
+    const uint32_t frames = uint32_t(expected.size() / kChannels / 1152) + 1;
+    vbri.replace(36, 18, "VBRI" + std::string("\0\1\0\0\0\x4b", 6) + be32(uint32_t(plain.size())) + be32(frames));
+    const auto file = writeFile("vbri.mp3", vbri + plain);
+    auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    EXPECT_EQ(decoder->estimatedFrames(), expected.size() / kChannels);
+    EXPECT_EQ(decodeAll(*decoder), expected);
+    EXPECT_EQ(decodeAll(*openDecoder(DecoderKind::FFmpeg, file)).size(), expected.size());
+}
+
+// A last frame cut short, here by an ID3v1 tag written over the end of the file, ends the stream without an error,
+// and its missing part plays as silence up to the length the scan counted.
+TEST(LossyDecoderPolicy, Mpg123EndsAtALastFrameCutShort) {
+    reference();
+    const auto plain = readFile(path(kFixtures[3]));
+    const auto file = writeFile("cut-last-frame.mp3", plain.substr(0, plain.size() - 300) + "TAG" + std::string(125, '\0'));
+    std::vector<int32_t> decoded;
+    EXPECT_NO_THROW(decoded = decodeAll(*openDecoder(DecoderKind::Mpg123, file)));
+    EXPECT_GT(decoded.size(), size_t(0));
+    const auto out = testutil::tempDir() / "lossy-cut-last-frame.raw";
+    CaptureOptions options;
+    options.file = out;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    {
+        PlaybackEngine engine(Settings{}, [&](const Settings&) { return createCaptureOutput(options); });
+        engine.openAndPlay(file);
+        engine.waitIdle();
+        ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
+        const auto snapshot = engine.snapshot();
+        ASSERT_FALSE(snapshot.error) << snapshot.errorDetail;
+        EXPECT_EQ(std::filesystem::file_size(out) / 4 / kChannels, snapshot.total);
+    }
+    std::filesystem::remove(out);
+}
+
+// A seek before the scan of a long file has ended lands exactly where a linear decode does.
+TEST(LossyDecoderPolicy, Mpg123SeeksExactlyBeforeItsScanEnds) {
+    reference();
+    const auto plain = readFile(path(kFixtures[3]));
+    std::string joined;
+    for (int i = 0; i < 60; i++) joined += plain;
+    const auto file = writeFile("long.mp3", joined);
+    const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+    for (const uint64_t target : {all.size() / kChannels / 2 + 777, all.size() / kChannels - 5000}) {
+        auto decoder = openDecoder(DecoderKind::Mpg123, file);
+        decoder->seek(target);
+        std::vector<int32_t> buffer(size_t(4096) * kChannels);
+        for (size_t got = 0; got < 4096;) {
+            const size_t n = decoder->read(buffer.data() + got * kChannels, 4096 - got);
+            ASSERT_GT(n, 0u);
+            got += n;
+        }
+        EXPECT_EQ(buffer, std::vector<int32_t>(all.begin() + std::ptrdiff_t(target * kChannels),
+                                               all.begin() + std::ptrdiff_t((target + 4096) * kChannels)))
+            << target;
+    }
+}
+
 // Only mpg123 measures an MP3's length. The other decoders offer their estimate, or the probe's, and count what they
 // decode once they reach the end, even when a header declares the length: it can differ from what they decode.
 TEST(LossyDecoderPolicy, OtherMp3DecodersEstimateTheLengthUntilTheEnd) {

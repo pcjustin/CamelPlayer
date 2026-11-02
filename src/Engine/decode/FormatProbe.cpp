@@ -430,7 +430,17 @@ uint64_t vbriSamples(const std::filesystem::path& path) {
     uint8_t frame[36 + 18] = {};
     if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame) || !tagIs(frame + 36, "VBRI")) return 0;
     const bool mpeg1 = ((frame[1] >> 3) & 3) == 3;
-    return uint64_t(be32(frame + 36 + 14)) * (mpeg1 ? 1152 : 576);
+    const uint32_t frames = be32(frame + 36 + 14); // the VBRI frame counts itself
+    return uint64_t(frames ? frames - 1 : 0) * (mpeg1 ? 1152 : 576);
+}
+
+uint64_t audioAfterVbriFrame(const std::filesystem::path& path) {
+    const File f(path);
+    const uint64_t start = mpegStart(f);
+    uint8_t frame[40] = {};
+    if (!f.readAt(start, frame, sizeof frame) || !tagIs(frame + 36, "VBRI")) return 0;
+    const uint32_t length = mpegFrameLength(frame);
+    return length ? start + length : 0;
 }
 
 uint64_t mpegAudioStart(const std::filesystem::path& path) {
