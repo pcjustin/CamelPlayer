@@ -1,0 +1,7 @@
+{
+  "name": "minimp3",
+  "version-date": "2026-07-27",
+  "description": "minimp3 and minimp3_ex, header-only MP3 decoding",
+  "homepage": "https://github.com/lieff/minimp3",
+  "license": "CC0-1.0"
+}

@@ -98,6 +98,7 @@ struct Builtins {
         builtin(DecoderKind::DrWav, {"wav", "aiff", "dts", "adpcm"});
         builtin(DecoderKind::Mpg123, {"mp3"});
         builtin(DecoderKind::DrMp3, {"mp3"});
+        builtin(DecoderKind::Minimp3, {"mp3"});
         builtin(DecoderKind::DsdNexus, {"dsd"});
         for (const char* format : {"flac", "wav", "aiff", "dts", "adpcm"}) r.setDefault(format, decoderId(DecoderKind::Sndfile));
         for (const char* format : {"alac", "aac"}) r.setDefault(format, decoderId(DecoderKind::Symphonia));

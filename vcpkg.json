@@ -15,6 +15,7 @@
     "drlibs",
     "libflac",
     "mpg123",
+    "minimp3",
     "mp3lame",
     "soxr",
     "libebur128",

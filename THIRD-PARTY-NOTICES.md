@@ -32,6 +32,7 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 | nlohmann-json | `nlohmann-json` | 3.12.0#2 | MIT | linked | [Notice](third_party/licenses/native/nlohmann-json.txt) |
 | GoogleTest | `gtest` | 1.18.0 | BSD-3-Clause | tests only | [Notice](third_party/licenses/native/gtest.txt) |
 | mpg123 | `mpg123` | 1.33.7#1 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/mpg123.txt) |
+| minimp3 | `minimp3` | 2026-07-27 | CC0-1.0 | linked | [Notice](third_party/licenses/native/minimp3.txt) |
 | LAME | `mp3lame` | 3.100#17 | LGPL-2.0-only | tests only | [Notice](third_party/licenses/native/mp3lame.txt) |
 | libsoxr | `soxr` | 0.1.3#9 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/soxr.txt) |
 | libebur128 | `libebur128` | 1.2.6#3 | MIT | linked | [Notice](third_party/licenses/native/libebur128.txt) |

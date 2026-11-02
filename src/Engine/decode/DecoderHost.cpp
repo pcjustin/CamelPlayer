@@ -45,7 +45,8 @@ constexpr std::pair<uint32_t, DecoderKind> kBuiltinNumbers[] = {
     {CAMEL_DECODER_FFMPEG, DecoderKind::FFmpeg},  {CAMEL_DECODER_SYMPHONIA, DecoderKind::Symphonia},
     {CAMEL_DECODER_DR_FLAC, DecoderKind::DrFlac}, {CAMEL_DECODER_SNDFILE, DecoderKind::Sndfile},
     {CAMEL_DECODER_DR_WAV, DecoderKind::DrWav},   {CAMEL_DECODER_MPG123, DecoderKind::Mpg123},
-    {CAMEL_DECODER_DR_MP3, DecoderKind::DrMp3},   {CAMEL_DECODER_DSD_NEXUS, DecoderKind::DsdNexus}};
+    {CAMEL_DECODER_DR_MP3, DecoderKind::DrMp3},   {CAMEL_DECODER_DSD_NEXUS, DecoderKind::DsdNexus},
+    {CAMEL_DECODER_MINIMP3, DecoderKind::Minimp3}};
 
 std::string decoderFor(uint32_t number) {
     for (const auto& [n, kind] : kBuiltinNumbers)

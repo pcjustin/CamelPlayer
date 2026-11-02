@@ -59,7 +59,7 @@ TEST(DecoderRegistry, BuiltInIdsOrderAndDefaultsAreUnchanged) {
     for (const char* format : {"wav", "aiff"})
         EXPECT_EQ(ids(format), (std::vector<std::string>{"ffmpeg", "symphonia", "sndfile", "drwav"})) << format;
     EXPECT_EQ(ids("aac"), (std::vector<std::string>{"ffmpeg", "symphonia"}));
-    EXPECT_EQ(ids("mp3"), (std::vector<std::string>{"ffmpeg", "symphonia", "mpg123", "drmp3"}));
+    EXPECT_EQ(ids("mp3"), (std::vector<std::string>{"ffmpeg", "symphonia", "mpg123", "drmp3", "minimp3"}));
     EXPECT_EQ(ids("dsd"), (std::vector<std::string>{"dsdnexus"}));
     EXPECT_TRUE(ids("opus").empty());
     EXPECT_EQ(defaultDecoder(AudioFormat::Flac), DecoderKind::Sndfile);
@@ -102,6 +102,7 @@ TEST(DecoderRegistry, AbiNumbersKeepBuiltInsAndNumberRegisteredDecoders) {
     EXPECT_EQ(abiDecoder("ffmpeg"), CAMEL_DECODER_FFMPEG);
     EXPECT_EQ(abiDecoder("sndfile"), CAMEL_DECODER_SNDFILE);
     EXPECT_EQ(abiDecoder("dsdnexus"), CAMEL_DECODER_DSD_NEXUS);
+    EXPECT_EQ(abiDecoder("minimp3"), CAMEL_DECODER_MINIMP3);
     EXPECT_EQ(abiDecoder("no-such-decoder"), 0u);
     const char* alias = registerAlias();
     EXPECT_EQ(abiDecoder(alias), CAMEL_DECODER_REGISTERED_BASE + *decoderRegistry().indexOf(alias));

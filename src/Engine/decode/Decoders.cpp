@@ -34,6 +34,8 @@ const char* decoderName(DecoderKind k) {
         return "dr_mp3";
     case DecoderKind::DsdNexus:
         return "DSD Nexus";
+    case DecoderKind::Minimp3:
+        return "minimp3";
     }
     return "?";
 }
@@ -56,6 +58,8 @@ const char* decoderId(DecoderKind k) {
         return "drmp3";
     case DecoderKind::DsdNexus:
         return "dsdnexus";
+    case DecoderKind::Minimp3:
+        return "minimp3";
     }
     return "?";
 }
@@ -261,6 +265,8 @@ std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::p
         return openDrMp3(path, lossyBits, start);
     case DecoderKind::DsdNexus:
         return openDsdNexus(path);
+    case DecoderKind::Minimp3:
+        return openMinimp3(path, lossyBits, start);
     }
     throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
 }
@@ -289,16 +295,18 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
         return d;
     }
     std::unique_ptr<IDecoder> d;
-    // FFmpeg and dr_mp3 find an MP3's LAME frame, which declares the encoder delay, only where they start reading; a
-    // second ID3 tag, padding or other bytes before the first frame would hide it.
-    const bool startAtFrame = format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3);
+    // FFmpeg, dr_mp3 and minimp3 find an MP3's LAME frame, which declares the encoder delay, only where they start
+    // reading; a second ID3 tag, padding or other bytes before the first frame would hide it.
+    const bool startAtFrame =
+        format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3 || kind == DecoderKind::Minimp3);
     const uint64_t start = startAtFrame ? mpegAudioStart(path) : 0;
-    // mpg123 seeks exactly by itself; Symphonia lands on the target after warm-up; FFmpeg and dr_mp3 can land beside it
-    // when they trim encoder delay, so they decode from the start. Only mpg123 measures an MP3's length; the others'
+    // mpg123 seeks exactly by itself; Symphonia and minimp3 land on the target after warm-up; FFmpeg and dr_mp3 can land
+    // beside it when they trim encoder delay, so they decode from the start. Only mpg123 measures an MP3's length; the others'
     // can differ from what they decode, even when a header declares it.
     if (isLossy(format) && kind != DecoderKind::Mpg123)
         d = std::make_unique<LossySeek>(kind, path, format, lossyBits,
-                                        kind == DecoderKind::Symphonia ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
+                                        kind == DecoderKind::Symphonia || kind == DecoderKind::Minimp3 ? LossySeek::Mode::Preroll
+                                                                                                       : LossySeek::Mode::Reopen,
                                         format != AudioFormat::Mp3 && lossyLengthDeclared(path), start);
     else
         d = openAdapter(kind, path, lossyBits);
