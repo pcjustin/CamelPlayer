@@ -41,17 +41,17 @@
                    },
                    {
                        "name":  "drlibs",
-                       "version":  "2026-03-03",
+                       "version":  "2026-10-30",
                        "license":  "Unlicense OR MIT-0",
                        "role":  "runtime or verification",
-                       "port_source":  "git+https://github.com/microsoft/vcpkg@bbc590aa326d0ba7fcd8049936488474d670bcf0",
+                       "port_source":  "NOASSERTION",
                        "sources":  [
                                        {
-                                           "location":  "git+https://github.com/mackron/dr_libs@fa931f3285ced10ace628f7f1ac951e1951e7ea6",
+                                           "location":  "git+https://github.com/mackron/dr_libs@35b5c392cc15456736c440a68dbe073178bbffe0",
                                            "checksums":  [
                                                              {
                                                                  "algorithm":  "SHA512",
-                                                                 "checksumValue":  "a1422ac827334d9e4adcbb7bc9b51244659c1c6e07b8e5ab3af2b82c5ac4842c4fb54a6a19d02e287eb2a8c3f470f556b2d111e23f10cae83a7ffb4e36ebc04f"
+                                                                 "checksumValue":  "410cb81ecf1a7d8d93ec272244bd00fa7c64d405f2d0d1c8756e522d6faab94b4aacbcb3448c40fc0a055e69f1675f4f314b2d2f0dda9d3c2d5a6437837891c6"
                                                              }
                                                          ]
                                        }
@@ -498,18 +498,18 @@
                ],
     "rust":  [
                  {
-                     "name":  "arrayvec",
-                     "version":  "0.7.8",
-                     "license":  "MIT OR Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/arrayvec/arrayvec-0.7.8.crate",
-                     "notice":  "licenses/rust/arrayvec-0.7.8/"
+                     "name":  "autocfg",
+                     "version":  "1.5.1",
+                     "license":  "Apache-2.0 OR MIT",
+                     "source_archive":  "https://static.crates.io/crates/autocfg/autocfg-1.5.1.crate",
+                     "notice":  "licenses/rust/autocfg-1.5.1/"
                  },
                  {
                      "name":  "bitflags",
-                     "version":  "1.3.2",
-                     "license":  "MIT/Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/bitflags/bitflags-1.3.2.crate",
-                     "notice":  "licenses/rust/bitflags-1.3.2/"
+                     "version":  "2.13.2",
+                     "license":  "MIT OR Apache-2.0",
+                     "source_archive":  "https://static.crates.io/crates/bitflags/bitflags-2.13.2.crate",
+                     "notice":  "licenses/rust/bitflags-2.13.2/"
                  },
                  {
                      "name":  "bytemuck",
@@ -517,27 +517,6 @@
                      "license":  "Zlib OR Apache-2.0 OR MIT",
                      "source_archive":  "https://static.crates.io/crates/bytemuck/bytemuck-1.25.2.crate",
                      "notice":  "licenses/rust/bytemuck-1.25.2/"
-                 },
-                 {
-                     "name":  "cfg-if",
-                     "version":  "1.0.5",
-                     "license":  "MIT OR Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/cfg-if/cfg-if-1.0.5.crate",
-                     "notice":  "licenses/rust/cfg-if-1.0.5/"
-                 },
-                 {
-                     "name":  "core_detect",
-                     "version":  "1.0.0",
-                     "license":  "MIT/Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/core_detect/core_detect-1.0.0.crate",
-                     "notice":  "licenses/rust/core_detect-1.0.0/"
-                 },
-                 {
-                     "name":  "encoding_rs",
-                     "version":  "0.8.42",
-                     "license":  "(Apache-2.0 OR MIT) AND BSD-3-Clause",
-                     "source_archive":  "https://static.crates.io/crates/encoding_rs/encoding_rs-0.8.42.crate",
-                     "notice":  "licenses/rust/encoding_rs-0.8.42/"
                  },
                  {
                      "name":  "extended",
@@ -561,109 +540,109 @@
                      "notice":  "licenses/rust/log-0.4.34/"
                  },
                  {
-                     "name":  "multiversion_no_op",
-                     "version":  "1.0.0",
-                     "license":  "Apache-2.0 OR MIT",
-                     "source_archive":  "https://static.crates.io/crates/multiversion_no_op/multiversion_no_op-1.0.0.crate",
-                     "notice":  "licenses/rust/multiversion_no_op-1.0.0/"
+                     "name":  "num-complex",
+                     "version":  "0.4.6",
+                     "license":  "MIT OR Apache-2.0",
+                     "source_archive":  "https://static.crates.io/crates/num-complex/num-complex-0.4.6.crate",
+                     "notice":  "licenses/rust/num-complex-0.4.6/"
                  },
                  {
-                     "name":  "rustversion",
-                     "version":  "1.0.23",
+                     "name":  "num-traits",
+                     "version":  "0.2.19",
                      "license":  "MIT OR Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/rustversion/rustversion-1.0.23.crate",
-                     "notice":  "licenses/rust/rustversion-1.0.23/"
+                     "source_archive":  "https://static.crates.io/crates/num-traits/num-traits-0.2.19.crate",
+                     "notice":  "licenses/rust/num-traits-0.2.19/"
                  },
                  {
-                     "name":  "scopeguard",
-                     "version":  "1.2.0",
+                     "name":  "regex-lite",
+                     "version":  "0.1.9",
                      "license":  "MIT OR Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/scopeguard/scopeguard-1.2.0.crate",
-                     "notice":  "licenses/rust/scopeguard-1.2.0/"
+                     "source_archive":  "https://static.crates.io/crates/regex-lite/regex-lite-0.1.9.crate",
+                     "notice":  "licenses/rust/regex-lite-0.1.9/"
                  },
                  {
-                     "name":  "simdutf8",
-                     "version":  "0.1.5",
+                     "name":  "smallvec",
+                     "version":  "1.16.4",
                      "license":  "MIT OR Apache-2.0",
-                     "source_archive":  "https://static.crates.io/crates/simdutf8/simdutf8-0.1.5.crate",
-                     "notice":  "licenses/rust/simdutf8-0.1.5/"
+                     "source_archive":  "https://static.crates.io/crates/smallvec/smallvec-1.16.4.crate",
+                     "notice":  "licenses/rust/smallvec-1.16.4/"
                  },
                  {
                      "name":  "symphonia",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia/symphonia-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia/symphonia-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-0.6.1/"
                  },
                  {
                      "name":  "symphonia-bundle-flac",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-bundle-flac/symphonia-bundle-flac-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-bundle-flac-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-bundle-flac/symphonia-bundle-flac-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-bundle-flac-0.6.1/"
                  },
                  {
                      "name":  "symphonia-bundle-mp3",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-bundle-mp3/symphonia-bundle-mp3-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-bundle-mp3-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-bundle-mp3/symphonia-bundle-mp3-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-bundle-mp3-0.6.1/"
                  },
                  {
                      "name":  "symphonia-codec-aac",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-aac/symphonia-codec-aac-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-codec-aac-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-aac/symphonia-codec-aac-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-codec-aac-0.6.1/"
                  },
                  {
                      "name":  "symphonia-codec-alac",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-alac/symphonia-codec-alac-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-codec-alac-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-alac/symphonia-codec-alac-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-codec-alac-0.6.1/"
                  },
                  {
                      "name":  "symphonia-codec-pcm",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-pcm/symphonia-codec-pcm-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-codec-pcm-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-codec-pcm/symphonia-codec-pcm-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-codec-pcm-0.6.1/"
+                 },
+                 {
+                     "name":  "symphonia-common",
+                     "version":  "0.6.1",
+                     "license":  "MPL-2.0",
+                     "source_archive":  "https://static.crates.io/crates/symphonia-common/symphonia-common-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-common-0.6.1/"
                  },
                  {
                      "name":  "symphonia-core",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-core/symphonia-core-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-core-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-core/symphonia-core-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-core-0.6.1/"
                  },
                  {
                      "name":  "symphonia-format-isomp4",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-format-isomp4/symphonia-format-isomp4-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-format-isomp4-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-format-isomp4/symphonia-format-isomp4-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-format-isomp4-0.6.1/"
                  },
                  {
                      "name":  "symphonia-format-riff",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-format-riff/symphonia-format-riff-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-format-riff-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-format-riff/symphonia-format-riff-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-format-riff-0.6.1/"
                  },
                  {
                      "name":  "symphonia-metadata",
-                     "version":  "0.5.5",
+                     "version":  "0.6.1",
                      "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-metadata/symphonia-metadata-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-metadata-0.5.5/"
-                 },
-                 {
-                     "name":  "symphonia-utils-xiph",
-                     "version":  "0.5.5",
-                     "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-utils-xiph/symphonia-utils-xiph-0.5.5.crate",
-                     "notice":  "licenses/rust/symphonia-utils-xiph-0.5.5/"
+                     "source_archive":  "https://static.crates.io/crates/symphonia-metadata/symphonia-metadata-0.6.1.crate",
+                     "notice":  "licenses/rust/symphonia-metadata-0.6.1/"
                  },
                  {
                      "name":  "Rust standard library",

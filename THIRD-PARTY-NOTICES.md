@@ -22,7 +22,7 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 |---|---|---|---|---|---|
 | FFmpeg (avcodec, avformat, swresample) | `ffmpeg` | 9.0.2#1 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/ffmpeg.txt) |
 | libsndfile | `libsndfile` | 1.2.2#2 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/libsndfile.txt) |
-| dr_flac / dr_wav / dr_mp3 | `drlibs` | 2026-03-03 | Unlicense OR MIT-0 | linked | [Notice](third_party/licenses/native/drlibs.txt) |
+| dr_flac / dr_wav / dr_mp3 | `drlibs` | 2026-10-30 | Unlicense OR MIT-0 | linked | [Notice](third_party/licenses/native/drlibs.txt) |
 | libFLAC | `libflac` | 1.5.0 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libflac.txt) |
 | libogg | `libogg` | 1.3.6#1 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libogg.txt) |
 | libvorbis | `libvorbis` | 1.3.7#4 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libvorbis.txt) |
@@ -53,34 +53,31 @@ The headphone crossfeed (`rust/audio_engine/src/crossfeed.rs`) follows the filte
 
 ## Rust components
 
-Locked in `rust/Cargo.lock` and linked into CamelPlayer.exe through the Rust Engine. Symphonia uses MPL-2.0 (full text in [MPL-2.0.txt](third_party/licenses/MPL-2.0.txt)). The other crates are used under their MIT option; `encoding_rs` also incorporates WHATWG data under BSD-3-Clause, whose COPYRIGHT and LICENSE-WHATWG are preserved with its MIT notice. Crate sources are at `https://static.crates.io/crates/<name>/<name>-<version>.crate` and match the checksums in Cargo.lock.
+Locked in `rust/Cargo.lock` and linked into CamelPlayer.exe through the Rust Engine. Symphonia uses MPL-2.0 (full text in [MPL-2.0.txt](third_party/licenses/MPL-2.0.txt)). The other crates are used under their MIT option. Crate sources are at `https://static.crates.io/crates/<name>/<name>-<version>.crate` and match the checksums in Cargo.lock.
 
 | Crate | Version | License | Text |
 |---|---|---|---|
-| `arrayvec` | 0.7.8 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/arrayvec-0.7.8/) |
-| `bitflags` | 1.3.2 | MIT/Apache-2.0 | [Notices](third_party/licenses/rust/bitflags-1.3.2/) |
+| `autocfg` | 1.5.1 | Apache-2.0 OR MIT | [Notices](third_party/licenses/rust/autocfg-1.5.1/) |
+| `bitflags` | 2.13.2 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/bitflags-2.13.2/) |
 | `bytemuck` | 1.25.2 | Zlib OR Apache-2.0 OR MIT | [Notices](third_party/licenses/rust/bytemuck-1.25.2/) |
-| `cfg-if` | 1.0.5 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/cfg-if-1.0.5/) |
-| `core_detect` | 1.0.0 | MIT/Apache-2.0 | [Notices](third_party/licenses/rust/core_detect-1.0.0/) |
-| `encoding_rs` | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause | [Notices](third_party/licenses/rust/encoding_rs-0.8.42/) |
 | `extended` | 0.1.0 | MIT | [Notices](third_party/licenses/rust/extended-0.1.0/) |
 | `lazy_static` | 1.5.1 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/lazy_static-1.5.1/) |
 | `log` | 0.4.34 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/log-0.4.34/) |
-| `multiversion_no_op` | 1.0.0 | Apache-2.0 OR MIT | [Notices](third_party/licenses/rust/multiversion_no_op-1.0.0/) |
-| `rustversion` | 1.0.23 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/rustversion-1.0.23/) |
-| `scopeguard` | 1.2.0 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/scopeguard-1.2.0/) |
-| `simdutf8` | 0.1.5 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/simdutf8-0.1.5/) |
-| `symphonia` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-0.5.5/) |
-| `symphonia-bundle-flac` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-bundle-flac-0.5.5/) |
-| `symphonia-bundle-mp3` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-bundle-mp3-0.5.5/) |
-| `symphonia-codec-aac` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-aac-0.5.5/) |
-| `symphonia-codec-alac` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-alac-0.5.5/) |
-| `symphonia-codec-pcm` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-pcm-0.5.5/) |
-| `symphonia-core` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-core-0.5.5/) |
-| `symphonia-format-isomp4` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-format-isomp4-0.5.5/) |
-| `symphonia-format-riff` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-format-riff-0.5.5/) |
-| `symphonia-metadata` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-metadata-0.5.5/) |
-| `symphonia-utils-xiph` | 0.5.5 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-utils-xiph-0.5.5/) |
+| `num-complex` | 0.4.6 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/num-complex-0.4.6/) |
+| `num-traits` | 0.2.19 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/num-traits-0.2.19/) |
+| `regex-lite` | 0.1.9 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/regex-lite-0.1.9/) |
+| `smallvec` | 1.16.4 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/smallvec-1.16.4/) |
+| `symphonia` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-0.6.1/) |
+| `symphonia-bundle-flac` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-bundle-flac-0.6.1/) |
+| `symphonia-bundle-mp3` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-bundle-mp3-0.6.1/) |
+| `symphonia-codec-aac` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-aac-0.6.1/) |
+| `symphonia-codec-alac` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-alac-0.6.1/) |
+| `symphonia-codec-pcm` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-pcm-0.6.1/) |
+| `symphonia-common` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-common-0.6.1/) |
+| `symphonia-core` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-core-0.6.1/) |
+| `symphonia-format-isomp4` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-format-isomp4-0.6.1/) |
+| `symphonia-format-riff` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-format-riff-0.6.1/) |
+| `symphonia-metadata` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-metadata-0.6.1/) |
 | `Rust standard library` | 1.99.1 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust-runtime/) |
 
 ## Microsoft components

@@ -12,6 +12,8 @@ Changed since 0.2.1:
 
 - **Suggestions for a word in many titles come at once:** the artists among them are looked up in an index of artists alone. With 100,000 tracks that all hold the word, the suggestions took 77–120 ms and now take about 7 ms.
 - **MP3s from a NAS start at once:** mpg123 read the whole file before the first sound to learn its exact length, which took 5–9 s over Wi-Fi. Playback now starts after the first frames, in under a second from the same NAS; the length shows as an estimate and becomes exact while the file plays. A seek right after the start waits until the file has been read.
+- **Symphonia 0.6.1,** the default decoder for AAC and ALAC, replaces 0.5.5. With Symphonia chosen for MP3, frames that 0.5.5 could not decode now play: in one measured album they had played as silence, 0.7 s in a track. An MP3 without a Xing or Info header also plays to its last frame: Symphonia's estimate of its length no longer cuts it short.
+- **dr_flac 0.13.4, dr_wav 0.14.6 and dr_mp3 0.7.4** replace 0.13.3, 0.14.5 and 0.7.3, with fixes for malformed FLAC metadata and block sizes, 32-bit FLAC, and AIFF sample rates.
 
 Fixed since 0.2.1 (files an earlier version refused are read again once by the first scan after the update, so those below appear by themselves):
 
