@@ -244,6 +244,19 @@ TEST(ReleaseAfterPause, NeverWhenZero) {
     rig.engine->stop();
 }
 
+// The library's background work reads the playing storage only while the engine is ahead (docs/Plan.md §7.7).
+TEST(OutputTiming, PlaybackIsAheadOnlyWhilePlayingWithAudioDecoded) {
+    Rig rig(Settings{});
+    rig.engine->openAndPlay(testutil::testFile("16-44.1k"));
+    ASSERT_TRUE(waitFor(*rig.engine, [](const EngineSnapshot& s) { return playing(s) && s.ahead; }));
+    rig.engine->pause();
+    rig.engine->waitIdle();
+    EXPECT_FALSE(rig.engine->snapshot().ahead);
+    rig.engine->stop();
+    rig.engine->waitIdle();
+    EXPECT_FALSE(rig.engine->snapshot().ahead);
+}
+
 TEST(OutputTiming, TimingChangesDoNotReopenTheDevice) {
     Rig rig(Settings{});
     rig.engine->openAndPlay(testutil::testFile("16-44.1k"));

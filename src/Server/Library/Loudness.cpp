@@ -124,25 +124,6 @@ std::optional<Measured> measure(const std::filesystem::path& file, const Decoder
     return out;
 }
 
-// The storage a path lives on: its drive, or the server and share of a network path.
-std::wstring storageOf(const std::filesystem::path& path) {
-    std::wstring text = path.wstring();
-    for (const auto* prefix : {L"\\\\?\\UNC\\", L"\\\\?\\"}) {
-        if (text.size() >= wcslen(prefix) && _wcsnicmp(text.c_str(), prefix, wcslen(prefix)) == 0) {
-            text = (wcslen(prefix) == 8 ? L"\\\\" : L"") + text.substr(wcslen(prefix));
-            break;
-        }
-    }
-    size_t end = 2;
-    if (text.starts_with(L"\\\\")) {
-        const auto server = text.find(L'\\', 2);
-        end = server == std::wstring::npos ? text.size() : std::min(text.find(L'\\', server + 1), text.size());
-    }
-    text.resize(std::min(end, text.size()));
-    std::ranges::transform(text, text.begin(), ::towlower);
-    return text;
-}
-
 constexpr const char* kNeedsAnalysis =
     "f.available=1 AND coalesce(t.format,'')<>'DSD' AND (coalesce(t.rg_track_gain,t.rg_analysis_gain) IS NULL OR "
     "(t.album_id IS NOT NULL AND coalesce(t.rg_album_gain,t.rg_analysis_album_gain) IS NULL))";
@@ -275,13 +256,15 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 continue;
             }
             const bool throttled = settings.speed == AnalysisSpeed::Throttled;
-            const auto storage = storageOf(album.front().path);
-            // Throttled analysis leaves the storage to playback: it waits while the same drive or share plays.
+            // Playback comes first (docs/Plan.md §7.7): the analysis waits while the engine is not ahead on the same
+            // storage, and goes on with one thread while anything plays; an album begun with more starts again with one.
+            // Throttled analysis waits while anything plays.
+            const auto full = backgroundPace(options_.playback(), album.front().path) == BackgroundPace::Full;
+            const unsigned threads = throttled || !full ? 1u : std::max(1u, std::thread::hardware_concurrency());
             const auto yield = [&] {
                 if (stop.stop_requested() || options_.settings().mode == ReplayGainMode::Off) return true;
-                if (!throttled) return false;
-                const auto playing = options_.playingSource();
-                return !playing.empty() && storageOf(playing) == storage;
+                const auto pace = backgroundPace(options_.playback(), album.front().path);
+                return pace == BackgroundPace::Wait || (pace == BackgroundPace::One && (throttled || threads > 1));
             };
             running_ = !yield();
             if (!running_) continue;
@@ -296,7 +279,6 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 measuringFiles_ = ids;
             }
             // Each track's value is kept as it is measured; the album's once every track is.
-            const unsigned threads = throttled ? 1u : std::max(1u, std::thread::hardware_concurrency());
             const bool complete =
                 measuring_->run(options_.decoders(), threads, yield, [&](size_t i, const std::optional<Loudness>& track) {
                     if (!track) {

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iostream>
 #include <optional>
+#include <ranges>
 #include <thread>
 #include <psapi.h>
 
@@ -134,7 +135,8 @@ Json scan(LibraryStore& store, LibraryScanner& scanner, int64_t root, const char
         }
         if (Clock::now() >= nextReport) {
             std::cout << phase << ": " << count(store) << " published files, "
-                      << std::chrono::duration<double>(Clock::now() - start).count() << " s" << std::endl;
+                      << std::chrono::duration<double>(Clock::now() - start).count() << " s" << '\n'
+                      << std::flush;
             nextReport = Clock::now() + std::chrono::seconds(5);
         }
     }
@@ -168,7 +170,7 @@ Json scan(LibraryStore& store, LibraryScanner& scanner, int64_t root, const char
              {"cache_condition", std::string(phase).find("full") != std::string::npos
                                      ? "fresh local index; Windows and NAS server caches were not flushed"
                                      : "same process and SMB session after full scan"}};
-    std::cout << phase << ": " << out.dump() << std::endl;
+    std::cout << phase << ": " << out.dump() << '\n' << std::flush;
     return out;
 }
 
@@ -211,7 +213,7 @@ Json fingerprint(LibraryStore& store, LibraryScanner& scanner, int64_t root) {
                  {"database_bytes", fileBytes(store.path())},
                  {"cache_condition", "same process and SMB session after full and incremental scans"}};
         std::ofstream(reportPath) << out.dump(2);
-        std::cout << "fingerprint: " << out.dump() << std::endl;
+        std::cout << "fingerprint: " << out.dump() << '\n' << std::flush;
         return out;
     };
     while (job.wait_for(std::chrono::seconds(5)) != std::future_status::ready) snapshot("running", nullptr);
@@ -238,7 +240,7 @@ TEST(LibraryNas, DISABLED_UniqueFingerprintsPreserveMoveHistory) {
     fs::copy_file(testutil::testFile("16-44.1k"), old);
     ASSERT_TRUE(library::fileVersion(old).volumeKey.empty());
     const auto local = localRun("identity");
-    std::cout << "Local identity results: " << camel::toUtf8(local.wstring()) << std::endl;
+    std::cout << "Local identity results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
     LibraryStore store(local);
     LibraryScanner scanner(store);
     const auto id = scanner.addRoot(fixture);
@@ -282,7 +284,7 @@ TEST(LibraryNas, DISABLED_UniqueFingerprintsPreserveMoveHistory) {
 TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     const auto root = nasRoot();
     const auto local = localRun("read-only");
-    std::cout << "Local results: " << camel::toUtf8(local.wstring()) << std::endl;
+    std::cout << "Local results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
     LibraryStore store(local);
     LibraryScanner scanner(store);
     const auto id = scanner.addRoot(root);
@@ -311,7 +313,7 @@ TEST(LibraryNas, DISABLED_ReadOnlyFullAndIncrementalScan) {
     EXPECT_FALSE(scanner.scan(id, token).complete);
     EXPECT_EQ(count(store), report["files_after_incremental"].get<int64_t>());
     std::ofstream(local / "report.json") << report.dump(2);
-    std::cout << "Summary: " << report["formats"].dump() << ", " << report["tracks"] << " tracks" << std::endl;
+    std::cout << "Summary: " << report["formats"].dump() << ", " << report["tracks"] << " tracks" << '\n' << std::flush;
     EXPECT_TRUE(report["full"]["online"].get<bool>());
     EXPECT_TRUE(report["full"]["complete"].get<bool>());
     EXPECT_GT(report["full"]["seen"].get<int64_t>(), 0);
@@ -356,7 +358,7 @@ TEST(LibraryNas, DISABLED_ProfileDirectoryStages) {
         stages[stage] = {{"seconds", std::chrono::duration<double>(Clock::now() - start).count()},
                          {"thread_cpu_seconds", threadCpu() - cpu},
                          {"entries", entries}};
-        std::cout << stage << ": " << stages[stage].dump() << std::endl;
+        std::cout << stage << ": " << stages[stage].dump() << '\n' << std::flush;
     };
     measure("canonical", [](const fs::path& folder) { return size_t(!canonicalLibraryPath(folder).empty()); });
     measure("find_first_file", [](const fs::path& folder) {
@@ -423,7 +425,7 @@ TEST(LibraryNas, DISABLED_ProfileFlacMetadataStages) {
             });
         }
         ++files;
-        std::cout << files << " files: " << timings.dump() << std::endl;
+        std::cout << files << " files: " << timings.dump() << '\n' << std::flush;
     }
     EXPECT_EQ(files, 48u);
     std::ofstream(store.path().parent_path() / "metadata-profile.json") << timings.dump(2);
@@ -447,7 +449,7 @@ TEST(LibraryNas, DISABLED_DirectoryVersionsMatchDirectFileQueries) {
         ++files;
     }
     ASSERT_GT(files, 0u);
-    std::cout << "Matched " << files << " directory identities in " << camel::toUtf8(path.wstring()) << std::endl;
+    std::cout << "Matched " << files << " directory identities in " << camel::toUtf8(path.wstring()) << '\n' << std::flush;
 }
 
 TEST(LibraryNas, DISABLED_ProfileMp3MetadataLengthPaths) {
@@ -462,7 +464,7 @@ TEST(LibraryNas, DISABLED_ProfileMp3MetadataLengthPaths) {
         const bool declared = camel::audio::lossyLengthDeclared(path);
         auto& selected = declared ? declaredCount : scannedCount;
         if (selected >= 2) continue;
-        std::cout << "MP3 profile: " << rows.text(0) << ", declared=" << declared << std::endl;
+        std::cout << "MP3 profile: " << rows.text(0) << ", declared=" << declared << '\n' << std::flush;
         IO_COUNTERS before{}, after{};
         GetProcessIoCounters(GetCurrentProcess(), &before);
         const auto start = Clock::now();
@@ -485,7 +487,7 @@ TEST(LibraryNas, DISABLED_ProfileMp3MetadataLengthPaths) {
                            {"exact_frames", exact},
                            {"read_bytes", after.ReadTransferCount - before.ReadTransferCount},
                            {"read_operations", after.ReadOperationCount - before.ReadOperationCount}});
-        std::cout << samples.back().dump() << std::endl;
+        std::cout << samples.back().dump() << '\n' << std::flush;
         std::ofstream(store.path().parent_path() / "mp3-profile.json") << samples.dump(2);
         ++selected;
     }
@@ -536,7 +538,7 @@ TEST(LibraryNas, DISABLED_LocalSsdFirstFullScanOfOneHundredThousandTracks) {
         EXPECT_EQ(report["tracks"], trackCount);
         EXPECT_LE(report["full"]["seconds"].get<double>(), 900.0);
     }
-    std::cout << "Local 100k scan report: " << camel::toUtf8(local.wstring()) << std::endl;
+    std::cout << "Local 100k scan report: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
 }
 
 TEST(LibraryNas, DISABLED_MappedDriveAndExtendedPathsUseTheSameShareKey) {
@@ -568,11 +570,12 @@ TEST(LibraryNas, DISABLED_MappedDriveAndExtendedPathsUseTheSameShareKey) {
     ASSERT_EQ(WNetCancelConnection2W(device.c_str(), 0, FALSE), NO_ERROR);
     cleanup.release();
     wchar_t result[32768]{};
-    DWORD size = DWORD(std::size(result));
+    auto size = DWORD(std::size(result));
     EXPECT_EQ(WNetGetConnectionW(device.c_str(), result, &size), ERROR_NOT_CONNECTED);
 }
 
-TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop) {
+// The passive device takes nothing, so the engine stays ahead and fingerprints of the same share go on meanwhile.
+TEST(LibraryNas, DISABLED_ServerPlaybackOnNasLetsFingerprintsGoOnWhileAhead) {
     const auto share = nasRoot();
     const auto fixture = share / (L".camelplayer-nas-test-playback-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
                                   std::to_wstring(GetTickCount64()));
@@ -584,7 +587,7 @@ TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop)
         fs::remove(fixture, error);
     });
     const auto local = localRun("playback-gate");
-    std::cout << "NAS playback results: " << camel::toUtf8(local.wstring()) << std::endl;
+    std::cout << "NAS playback results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
     fs::copy_file(testutil::testFile("16-44.1k"), fixture / "track.flac");
     LibraryStore store(local / "db");
     LibraryScanner scanner(store);
@@ -612,14 +615,15 @@ TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop)
             ASSERT_EQ(server.snapshot().playback.state, PlaybackState::Playing);
             const bool pause = release == CommandKind::Pause;
             std::ofstream(fixture / (pause ? "pause.lrc" : "stop.lrc")) << (pause ? "lyrics" : "different lyrics");
-            ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL") == 1; }));
-            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-            EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL"), 1);
+            ASSERT_TRUE(waitFor([&] {
+                return count(store, "SELECT COUNT(*) FROM files WHERE available=1") == (pause ? 2 : 3) &&
+                       count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL") == 0;
+            }));
+            EXPECT_EQ(server.snapshot().playback.state, PlaybackState::Playing);
             Command command;
             command.kind = release;
             server.submit(command);
             server.waitIdle();
-            ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NULL") == 0; }));
         }
     }
     for (const auto* name : {"track.flac", "pause.lrc", "stop.lrc"}) ASSERT_TRUE(fs::remove(fixture / name));
@@ -627,8 +631,7 @@ TEST(LibraryNas, DISABLED_ServerPlaybackOnNasDefersFingerprintsUntilPauseOrStop)
     EXPECT_FALSE(fs::exists(fixture));
     std::ofstream(local / "report.json") << Json{
         {"passed", !::testing::Test::HasFailure()},
-        {"pause_releases_fingerprints", true},
-        {"stop_releases_fingerprints", true},
+        {"fingerprints_during_playback", true},
         {"nas_fixture_removed", true}}.dump(2);
 }
 
@@ -639,7 +642,7 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
     ASSERT_EQ(remote.parent_path(), share);
     ASSERT_TRUE(fs::create_directory(remote));
     const auto local = localRun("cross-volume");
-    std::cout << "Cross-volume results: " << camel::toUtf8(local.wstring()) << std::endl;
+    std::cout << "Cross-volume results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
     Json results = Json::array();
     for (const bool toNas : {true, false}) {
         for (const std::string scenario : {"verified", "no-fingerprint", "duplicate", "live-copy", "offline-source"}) {
@@ -751,13 +754,13 @@ TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {
     auto cleanup = wil::scope_exit([&] {
         std::error_code error;
         if (fs::exists(offline, error) && !fs::exists(root, error)) fs::rename(offline, root, error);
-        for (auto p = created.rbegin(); p != created.rend(); ++p) fs::remove(*p, error);
+        for (auto& path : std::views::reverse(created)) fs::remove(path, error);
         if (fs::exists(root, error) || fs::exists(offline, error))
-            std::cerr << "NAS fixture cleanup incomplete: " << camel::toUtf8(root.wstring()) << std::endl;
+            std::cerr << "NAS fixture cleanup incomplete: " << camel::toUtf8(root.wstring()) << '\n' << std::flush;
     });
     fs::create_directory(root / L"監控");
     const auto local = localRun("changes");
-    std::cout << "Local results: " << camel::toUtf8(local.wstring()) << std::endl;
+    std::cout << "Local results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
     LibraryStore store(local);
     LibraryScanner scanner(store);
     scanner.addRoot(root);
@@ -768,20 +771,20 @@ TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; }));
     fs::copy_file(testutil::testFile("16-44.1k"), root / "one.flac");
     ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
-    std::cout << "NAS create detection (notifications with 2 s polling fallback): passed" << std::endl;
+    std::cout << "NAS create detection (notifications with 2 s polling fallback): passed" << '\n' << std::flush;
     {
         TagLib::FLAC::File tags((root / "one.flac").c_str());
         tags.tag()->setTitle("NAS updated title");
         ASSERT_TRUE(tags.save());
     }
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM tracks WHERE title='NAS updated title'") == 1; }));
-    std::cout << "NAS metadata refresh (notifications with 2 s polling fallback): passed" << std::endl;
+    std::cout << "NAS metadata refresh (notifications with 2 s polling fallback): passed" << '\n' << std::flush;
     fs::rename(root / "one.flac", root / L"監控" / "renamed.flac");
     ASSERT_TRUE(waitFor([&] {
         return count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE '%renamed.flac'") == 1 &&
                count(store) == 1;
     }));
-    std::cout << "NAS recursive rename detection: passed" << std::endl;
+    std::cout << "NAS recursive rename detection: passed" << '\n' << std::flush;
 
     wil::unique_handle directory(CreateFileW(root.c_str(), FILE_LIST_DIRECTORY,
                                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
@@ -824,19 +827,158 @@ TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {
     const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
     EXPECT_TRUE((ok && bytes == 0) || error == ERROR_NOTIFY_ENUM_DIR) << "bytes=" << bytes << " error=" << error;
     ASSERT_TRUE(waitFor([&] { return count(store) == kEvents + 1; }));
-    std::cout << "NAS notification overflow and monitor convergence: passed" << std::endl;
+    std::cout << "NAS notification overflow and monitor convergence: passed" << '\n' << std::flush;
     fs::rename(root, offline);
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots") == 0; }));
     EXPECT_EQ(count(store), kEvents + 1);
     fs::rename(offline, root);
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots") == 1; }));
     EXPECT_EQ(count(store), kEvents + 1);
-    std::cout << "NAS directory unavailability and reconnection: passed" << std::endl;
+    std::cout << "NAS directory unavailability and reconnection: passed" << '\n' << std::flush;
     fs::remove(root / L"監控" / "renamed.flac");
     ASSERT_TRUE(waitFor([&] { return count(store) == kEvents; }));
-    std::cout << "NAS delete detection: passed" << std::endl;
+    std::cout << "NAS delete detection: passed" << '\n' << std::flush;
     std::ofstream(local / "report.json") << Json{{"events", kEvents},       {"overflow_bytes", bytes},
                                                  {"overflow_error", error}, {"available_files", count(store)},
                                                  {"poll_seconds", 2},       {"passed", !::testing::Test::HasFailure()}}
                                                 .dump(2);
+}
+
+// Playback from the NAS while Settings › Rebuild library reads it again (docs/Plan.md §7.7): how long a start, a track
+// change, a seek and the Server's answers take, first idle and then during the rebuild, and the underruns meanwhile.
+// CAMEL_PLAYBACK_DATA names a data folder whose library holds the NAS (library.db and settings.json); a copy is used.
+TEST(LibraryNas, DISABLED_PlaybackDuringARebuildAnswersAsWhenIdle) {
+    using namespace std::chrono_literals;
+    wchar_t data[32768]{};
+    const DWORD length = GetEnvironmentVariableW(L"CAMEL_PLAYBACK_DATA", data, DWORD(std::size(data)));
+    ASSERT_TRUE(length && length < std::size(data)) << "set CAMEL_PLAYBACK_DATA to a data folder with a NAS library";
+    const auto local = localRun("playback-rebuild");
+    std::cout << "playback results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
+    sqlite::Database(fs::path(data) / "library.db", sqlite::Database::Mode::ReadOnly).backupTo(local / "library.db");
+    fs::copy_file(fs::path(data) / "settings.json", local / "settings.json");
+    std::vector<TrackSource> album;
+    {
+        sqlite::Database db(local / "library.db", sqlite::Database::Mode::ReadOnly);
+        auto pick = db.prepare("SELECT t.album_id FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.available=1 AND "
+                               "t.format='flac' AND t.sample_rate=44100 AND t.album_id IS NOT NULL GROUP BY t.album_id "
+                               "HAVING COUNT(*)>=8 ORDER BY t.album_id LIMIT 1");
+        ASSERT_TRUE(pick.step());
+        auto rows = db.prepare("SELECT f.path FROM tracks t JOIN files f ON f.id=t.file_id WHERE t.album_id=? "
+                               "ORDER BY t.disc_number,t.track_number LIMIT 8");
+        rows.bind(1, pick.integer(0));
+        while (rows.step()) album.emplace_back(rows.text(0));
+    }
+    std::cout << "album: " << album.front().pathUtf8() << '\n' << std::flush;
+    auto recovery = camel::SettingsRecovery::None;
+    LocalServer server(camel::openSettings(local / "settings.json", recovery), local / "settings.json");
+    const auto timed = [](const std::function<bool()>& done) {
+        const auto start = Clock::now();
+        while (!done()) {
+            if (Clock::now() - start > 20s) return -1.0;
+            std::this_thread::sleep_for(1ms);
+        }
+        return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+    };
+    const auto command = [](CommandKind kind) {
+        Command c;
+        c.kind = kind;
+        return c;
+    };
+    // The startup scan of the NAS ends first.
+    std::this_thread::sleep_for(3s);
+    ASSERT_TRUE(waitFor([&] { return server.libraryScanProgress().scans == 0; }));
+    uint64_t underruns = 0;
+    const auto round = [&](size_t track) {
+        Json out;
+        server.submit(command(CommandKind::Stop));
+        timed([&] { return server.snapshot().playback.state == PlaybackState::Stopped; });
+        Command replace = command(CommandKind::QueueReplace);
+        replace.sources = album;
+        replace.index = track;
+        server.submit(replace);
+        out["start_ms"] = timed([&] {
+            const auto s = server.snapshot();
+            return s.playback.state == PlaybackState::Playing && s.playback.position > 0;
+        });
+        std::this_thread::sleep_for(3s);
+        const auto total = server.snapshot().playback.total;
+        Command seek = command(CommandKind::Seek);
+        seek.frame = total / 2;
+        server.submit(seek);
+        out["seek_ms"] = timed([&] { return server.snapshot().playback.position > total / 2; });
+        std::this_thread::sleep_for(3s);
+        underruns += server.snapshot().playback.underruns;
+        const auto entry = server.snapshot().queueEntryId;
+        server.submit(command(CommandKind::Next));
+        out["next_ms"] = timed([&] {
+            const auto s = server.snapshot();
+            return s.queueEntryId != entry && s.playback.state == PlaybackState::Playing && s.playback.position > 0;
+        });
+        std::this_thread::sleep_for(3s);
+        server.submit(command(CommandKind::Pause));
+        out["pause_ms"] = timed([&] { return server.snapshot().playback.state == PlaybackState::Paused; });
+        server.submit(command(CommandKind::Play));
+        out["play_ms"] = timed([&] { return server.snapshot().playback.state == PlaybackState::Playing; });
+        const auto entries = server.snapshot().queue.entries.size();
+        Command add = command(CommandKind::QueueAdd);
+        add.sources = {album.front()};
+        server.submit(add);
+        out["queue_ms"] = timed([&] { return server.snapshot().queue.entries.size() > entries; });
+        Command settings = command(CommandKind::ApplySettings);
+        settings.settings = server.snapshot().settings;
+        auto start = Clock::now();
+        server.submit(settings);
+        server.waitIdle();
+        out["settings_ms"] = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+        start = Clock::now();
+        server.browseAlbums(AlbumSort::Title, std::nullopt, 0, 60, std::nullopt);
+        out["albums_ms"] = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+        start = Clock::now();
+        server.searchLibrary("love", 0, 3, std::nullopt, {}, false);
+        out["search_ms"] = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+        std::this_thread::sleep_for(2s);
+        underruns += server.snapshot().playback.underruns;
+        std::cout << out.dump() << '\n' << std::flush;
+        return out;
+    };
+    const auto median = [](const Json& rounds, const char* key) {
+        std::vector<double> values;
+        for (const auto& r : rounds) values.push_back(r[key].get<double>());
+        std::sort(values.begin(), values.end());
+        return values[values.size() / 2];
+    };
+    const char* const keys[] = {"start_ms", "seek_ms",     "next_ms",   "pause_ms", "play_ms",
+                                "queue_ms", "settings_ms", "albums_ms", "search_ms"};
+    Json report{{"album", album.front().pathUtf8()}, {"machine", machine()}};
+    for (const bool rebuilding : {false, true}) {
+        if (rebuilding) {
+            server.rereadLibrary();
+            ASSERT_TRUE(waitFor([&] { return server.libraryScanProgress().scans > 0; }));
+        }
+        underruns = 0;
+        const auto checked = server.libraryScanProgress().checked;
+        const auto start = Clock::now();
+        Json rounds = Json::array();
+        for (size_t track = 0; track < 5; ++track) rounds.push_back(round(track));
+        // Then one track plays on through the rebuild.
+        server.submit(command(CommandKind::Stop));
+        Command replace = command(CommandKind::QueueReplace);
+        replace.sources = album;
+        replace.index = 6;
+        server.submit(replace);
+        std::this_thread::sleep_for(90s);
+        underruns += server.snapshot().playback.underruns;
+        Json phase{{"rounds", rounds},
+                   {"underruns", underruns},
+                   {"seconds", std::chrono::duration<double>(Clock::now() - start).count()},
+                   {"scan_files_checked", server.libraryScanProgress().checked - checked},
+                   {"scanning_at_end", server.libraryScanProgress().scans > 0}};
+        for (const auto* key : keys) phase["median"][key] = median(rounds, key);
+        std::cout << (rebuilding ? "rebuild: " : "idle: ") << phase["median"].dump() << " underruns " << underruns << '\n'
+                  << std::flush;
+        report[rebuilding ? "rebuild" : "idle"] = phase;
+    }
+    server.submit(command(CommandKind::Stop));
+    server.waitIdle();
+    std::ofstream(local / "report.json") << report.dump(2);
 }

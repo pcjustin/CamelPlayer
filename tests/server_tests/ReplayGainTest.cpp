@@ -208,7 +208,7 @@ TEST(Loudness, TheAnalyzerCountsTracksOnlyWhileItsProgressIsRead) {
         })
         .get();
     LoudnessAnalyzer analyzer(store, {[] { return ReplayGainSettings{}; }, [] { return DecoderByFormat{}; },
-                                      [] { return std::vector<int64_t>{}; }, [] { return std::filesystem::path{}; }});
+                                      [] { return std::vector<int64_t>{}; }, [] { return PlaybackReads{}; }});
     std::this_thread::sleep_for(std::chrono::milliseconds(2500));
     EXPECT_EQ(analyzer.progress().total, 0);
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);

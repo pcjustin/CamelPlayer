@@ -607,7 +607,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                     const std::map<int64_t, library::Fingerprint>& hashSizes, const std::set<std::string>& pendingIdentity,
                     const std::set<std::string>& knownHashes, const std::set<TrustedIdentity>& trusted, bool reread,
                     const std::set<std::string>& readAgain, const std::set<std::string>& lengthMarkedExact,
-                    const CancellationToken& token, const std::function<bool()>& playbackActive) {
+                    const CancellationToken& token, const std::function<BackgroundPace()>& pace) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     auto restore = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
     // Entries settled by the listing need no file access, so the alias check runs before the first file is opened.
@@ -624,6 +624,11 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
         }
         return !aliasError;
     };
+    // A file is read only while playback leaves its storage a turn; fingerprints wait for it to stop.
+    const auto waitTurn = [&] {
+        while (pace() == BackgroundPace::Wait && !token.cancelled()) Sleep(20);
+    };
+    const std::function<bool()> busy = [&] { return pace() != BackgroundPace::Full; };
     for (auto& entry : out.files) {
         if (token.cancelled()) {
             out.complete = false;
@@ -636,6 +641,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
             const auto old = known.find(fileKey);
             if (!entry.listedVersion || (old != known.end() && !old->second.created && old->second.index.size() == 8)) {
                 if (!directoryValid()) break;
+                waitTurn();
                 entry.version = fileVersion(child);
             }
             bool read = reread || old == known.end() || old->second != entry.version || readAgain.contains(fileKey);
@@ -645,15 +651,16 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
             }
             if (read) {
                 if (!directoryValid()) break;
+                waitTurn();
                 if (type == "audio") entry.metadata = metadata(child, entry.version.size);
                 // Fingerprinted now, while the start of the file the tags came from is still in the storage's cache: a
                 // later pass read each file from a NAS disk again, the slowest part of building a library. The
                 // fingerprint also confirms the version; during playback it is left to that pass. Images get none: a
                 // cover is chosen again by every scan, so following its moves keeps nothing.
-                if (type != "image" && (!playbackActive || !playbackActive())) {
+                if (type != "image" && !busy()) {
                     const auto kind =
                         hashSizes.contains(entry.version.size) ? hashSizes.at(entry.version.size) : library::Fingerprint::Sampled;
-                    entry.digest = library::fileDigest(child, entry.version, token, playbackActive, kind);
+                    entry.digest = library::fileDigest(child, entry.version, token, busy, kind);
                 }
                 if (type == "audio" && !entry.digest && fileVersion(child) != entry.version)
                     throw std::runtime_error("file changed during metadata read");
@@ -664,7 +671,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 hashSizes.contains(entry.version.size) &&
                 !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
                 if (!directoryValid()) break;
-                entry.digest = library::fileDigest(child, entry.version, token, playbackActive, hashSizes.at(entry.version.size));
+                entry.digest = library::fileDigest(child, entry.version, token, busy, hashSizes.at(entry.version.size));
                 if (!entry.digest) {
                     out.deferred = true;
                     throw std::runtime_error("fingerprint deferred while cancelled or playing");
@@ -862,15 +869,10 @@ std::mutex& LibraryScanner::rootLock(int64_t root) {
     return *mutex;
 }
 
-std::function<bool()> LibraryScanner::playbackGate(const Path& root) const {
-    const auto storage = library::storageKey(root);
-    return [this, storage] {
-        if (playbackActive_ && playbackActive_()) return true;
-        if (!playingSource_) return false;
-        const auto source = playingSource_();
-        if (source.empty()) return false;
-        const auto playingStorage = library::storageKey(source);
-        return storage.empty() || playingStorage.empty() || storage == playingStorage;
+std::function<BackgroundPace()> LibraryScanner::pace(const Path& root) const {
+    return [this, root] {
+        const auto pace = backgroundPace(playback_ ? playback_() : PlaybackReads{}, root);
+        return pace == BackgroundPace::Full && coversShown_ && coversShown_() ? BackgroundPace::One : pace;
     };
 }
 
@@ -955,7 +957,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     const bool network = isNetworkPath(path);
     const unsigned idleWorkers = network ? 16u : 4u;
     std::atomic<ListedIds> listedIds = ListedIds::Unknown;
-    const auto playbackActive = playbackGate(path);
+    const auto pace = this->pace(path);
     std::vector<Path> subtrees;
     for (const auto& folder : folders)
         if (contains(path, folder) && folder != path) subtrees.push_back(folder);
@@ -1152,14 +1154,21 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         });
     };
     while ((!pending.empty() || !active.empty()) && !token.cancelled()) {
-        while (!pending.empty() && active.size() < (playbackActive() ? 1u : idleWorkers)) {
+        const auto turn = pace();
+        while (!pending.empty() && active.size() < (turn == BackgroundPace::Full  ? idleWorkers
+                                                    : turn == BackgroundPace::One ? 1u
+                                                                                  : 0u)) {
             auto work = std::move(pending.front());
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
                 if (!work.fileWork) return list(work.path, token, network, listedIds);
                 return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, readAgain,
-                                   lengthMarkedExact, token, playbackActive);
+                                   lengthMarkedExact, token, pace);
             }));
+        }
+        if (active.empty()) { // playback is not ahead on this storage
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            continue;
         }
         const auto ready = std::find_if(active.begin(), active.end(), [](auto& job) {
             return job.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
@@ -1328,9 +1337,9 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
     auto db = store_.openReader();
     auto rootRow = db.prepare("SELECT path FROM roots WHERE id=? AND removed IS NULL");
     if (!rootRow.bind(1, root).step()) return report;
-    const auto playing = playbackGate(Path(toWide(rootRow.text(0))));
+    const auto pace = this->pace(Path(toWide(rootRow.text(0))));
     const bool network = isNetworkPath(Path(toWide(rootRow.text(0))));
-    const auto backgroundBlocked = [this, playing] { return store_.activeScans_.load() != 0 || playing(); };
+    const auto backgroundBlocked = [this, pace] { return store_.activeScans_.load() != 0 || pace() == BackgroundPace::Wait; };
     rootRow.reset();
     if (token.cancelled() || backgroundBlocked()) return report;
     const bool background = bool(SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN));
@@ -1387,7 +1396,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         digests.clear();
     };
     // On a NAS each file mostly waits for network round trips (7.5 files a second one by one), so sixteen are hashed at
-    // once there, as the scan reads them; four on a local disk.
+    // once there, as the scan reads them; four on a local disk; one while playback or covers share the time.
     struct Result {
         std::optional<std::vector<uint8_t>> digest;
         std::string error;
@@ -1400,7 +1409,7 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         const size_t count = std::min(kBatch, pending.size() - first);
         std::vector<Result> results(count);
         std::atomic<size_t> next = 0;
-        const int threads = network ? 16 : 4;
+        const int threads = pace() != BackgroundPace::Full ? 1 : network ? 16 : 4;
         std::vector<std::future<void>> workers;
         workers.reserve(threads);
         for (int i = 0; i < threads; ++i)
@@ -1434,23 +1443,31 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
 class LibraryMonitor::Impl {
 public:
     Impl(LibraryStore& store, const Options& options)
-        : store_(store), scanner_(store, options.playbackActive, options.playingSource), options_(options) {
+        : store_(store), scanner_(store, options.coversShown, options.playback), options_(options) {
         if (options.offlineInterval.count() <= 0 || options.coalesce.count() < 0 || options.pollInterval.count() < 0)
             throw std::invalid_argument("invalid library monitor interval");
         worker_ = std::jthread([this](const std::stop_token& stop) { run(stop); });
         fingerprints_ = std::jthread([this](const std::stop_token& stop) {
+            // Each pass reads every file row; once every root is done, the next waits until the library changes. The
+            // connection stays open, as its data_version counts the commits of the others.
+            auto db = store_.openReader();
+            std::optional<int64_t> settled;
             while (!stop.stop_requested()) {
                 try {
+                    const auto version = db.scalar("PRAGMA data_version");
                     std::vector<int64_t> ids;
-                    {
-                        auto db = store_.openReader();
+                    if (version != settled) {
                         auto roots = db.prepare("SELECT id FROM roots WHERE removed IS NULL AND online=1");
                         while (roots.step()) ids.push_back(roots.integer(0));
                     }
+                    bool complete = version != settled;
                     for (const auto id : ids) {
                         if (stop.stop_requested()) break;
-                        scanner_.fingerprint(id, token_);
+                        // Files that failed are tried again once the library changes.
+                        const auto report = scanner_.fingerprint(id, token_);
+                        complete = (report.complete || !report.diagnostics.empty()) && complete;
                     }
+                    if (complete) settled = version;
                 } catch (const std::exception& e) {
                     log::warn("library fingerprints: %s", e.what());
                 }
@@ -1477,7 +1494,7 @@ private:
         Clock::time_point due, lastPoll;
         bool pending = false;
         bool deferred = false;
-        std::function<bool()> playbackActive;
+        std::function<BackgroundPace()> pace;
         Path root;
         // Folders the notifications named since the last scan; a full scan when they cannot say (overflow, failure,
         // a change at the root itself, startup, polling).
@@ -1574,7 +1591,7 @@ private:
                         if (!watches.contains(id) || !watches.at(id)->pending) {
                             watches.erase(id);
                             auto watch = std::make_unique<Watch>();
-                            watch->playbackActive = scanner_.playbackGate(path);
+                            watch->pace = scanner_.pace(path);
                             watch->directory =
                                 openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
                             watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
@@ -1600,7 +1617,7 @@ private:
                 for (auto& [id, ptr] : watches) {
                     auto& watch = *ptr;
                     if (rescan) watch.due = Clock::now(), watch.full = true;
-                    if (watch.deferred && !watch.playbackActive()) {
+                    if (watch.deferred && watch.pace() == BackgroundPace::Full) {
                         watch.deferred = false;
                         watch.due = Clock::now();
                         watch.full = true;

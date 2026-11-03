@@ -548,6 +548,11 @@ public:
         if (active_) {
             s.position = sourcePosition();
             s.underruns = underruns_.load(std::memory_order_relaxed);
+            const auto sinceFull =
+                std::chrono::steady_clock::now().time_since_epoch().count() - fullAt_.load(std::memory_order_relaxed);
+            s.ahead = s.state == PlayState::Playing &&
+                      (decodeDone_.load(std::memory_order_acquire) ||
+                       sinceFull < std::chrono::steady_clock::duration(std::chrono::milliseconds(250)).count());
         }
         return s;
     }
@@ -885,6 +890,7 @@ private:
         base_ = startFrame;
         consumed_ = 0;
         prefilled_ = 0;
+        fullAt_ = 0;
         underruns_ = 0;
         decodeDone_ = false;
         ended_ = false;
@@ -990,6 +996,7 @@ private:
                     continue;
                 }
                 if (result == RustSession::Prefill::Full) {
+                    fullAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
                     Sleep(5);
                     continue;
                 }
@@ -1295,6 +1302,7 @@ private:
     // shared with the decode / output threads
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
+    std::atomic<int64_t> fullAt_{0}; // steady_clock ticks when the decoder last found its ring full
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
     std::atomic<bool> rawDsd_{false};            // the open stream is DoP or native DSD
     std::atomic<uint64_t> leadSilence_{0};       // frames of format-change silence still to play

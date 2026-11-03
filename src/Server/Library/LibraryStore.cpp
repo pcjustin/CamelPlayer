@@ -15,6 +15,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "Server/Library/LibraryIdentity.h"
 
 #pragma comment(lib, "shlwapi.lib")
 
@@ -95,6 +96,15 @@ void configure(sqlite::Database& db) {
 }
 
 } // namespace
+
+BackgroundPace backgroundPace(const PlaybackReads& reads, const std::filesystem::path& storage) {
+    if (reads.files.empty()) return BackgroundPace::Full;
+    const auto key = library::storageKey(storage);
+    for (const auto& file : reads.files)
+        if (const auto playing = library::storageKey(file); key.empty() || playing.empty() || key == playing)
+            return reads.ahead ? BackgroundPace::One : BackgroundPace::Wait;
+    return BackgroundPace::One;
+}
 
 bool isNetworkPath(const std::filesystem::path& path) {
     const std::wstring text = std::filesystem::absolute(path).wstring();

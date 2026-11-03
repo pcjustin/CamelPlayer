@@ -67,8 +67,8 @@ public:
     struct Options {
         std::function<ReplayGainSettings()> settings;
         std::function<DecoderByFormat()> decoders;
-        std::function<std::vector<int64_t>()> queued;         // file ids of the current and upcoming queue entries
-        std::function<std::filesystem::path()> playingSource; // the file playing now; empty when none
+        std::function<std::vector<int64_t>()> queued; // file ids of the current and upcoming queue entries
+        std::function<PlaybackReads()> playback;
     };
 
     LoudnessAnalyzer(LibraryStore& store, Options options);

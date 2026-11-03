@@ -37,6 +37,9 @@ struct EngineSnapshot {
     DecoderKind decoder = DecoderKind::Sndfile; // for the current file; FLAC's choice before a file is known
     OutputStatus outputStatus;
     uint64_t underruns = 0;
+    // Playing with the decode ring full a moment ago or the files decoded to their end, so other reads from its storage
+    // cannot starve it (docs/Plan.md §7.7).
+    bool ahead = false;
     std::optional<ErrorCode> error; // last problem, shown until the next successful start
     std::string errorDetail;
     uint64_t trackEnds = 0;    // increments when a playback attempt ends on its own: natural end or a stopping failure

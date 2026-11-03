@@ -40,10 +40,11 @@ struct FingerprintReport {
 // Internal Server service; LibraryStore must outlive it. Public browse/command DTOs arrive in M3-R07.
 class LibraryScanner {
 public:
-    // The playback callback must be thread-safe; monitor scan workers and fingerprinting may call it concurrently.
-    explicit LibraryScanner(LibraryStore& store, std::function<bool()> playbackActive = {},
-                            std::function<std::filesystem::path()> playingSource = {})
-        : store_(store), playbackActive_(std::move(playbackActive)), playingSource_(std::move(playingSource)) {}
+    // The callbacks must be thread-safe; monitor scan workers and fingerprinting may call them concurrently.
+    // `coversShown`: the window reads covers, so work drops to one worker; `playback`: what playback reads now.
+    explicit LibraryScanner(LibraryStore& store, std::function<bool()> coversShown = {},
+                            std::function<PlaybackReads()> playback = {})
+        : store_(store), coversShown_(std::move(coversShown)), playback_(std::move(playback)) {}
     int64_t addRoot(const std::filesystem::path& path);
     // Takes the folder out of the library at once, then queues deleting it (see deleteRemovedRoots); the future is ready
     // once the database is compacted.
@@ -63,9 +64,9 @@ public:
 private:
     friend class LibraryMonitor;
     LibraryStore& store_;
-    std::function<bool()> playbackActive_;
-    std::function<std::filesystem::path()> playingSource_;
-    std::function<bool()> playbackGate(const std::filesystem::path& root) const;
+    std::function<bool()> coversShown_;
+    std::function<PlaybackReads()> playback_;
+    std::function<BackgroundPace()> pace(const std::filesystem::path& root) const;
     std::mutex& rootLock(int64_t root);
 };
 
@@ -82,8 +83,8 @@ public:
         std::chrono::milliseconds networkPollInterval{std::chrono::hours(6)}; // shares; zero disables polling
         std::chrono::milliseconds offlineInterval{std::chrono::seconds(60)};
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
-        std::function<bool()> playbackActive;
-        std::function<std::filesystem::path()> playingSource;
+        std::function<bool()> coversShown;
+        std::function<PlaybackReads()> playback;
     };
     explicit LibraryMonitor(LibraryStore& store);
     LibraryMonitor(LibraryStore& store, const Options& options);

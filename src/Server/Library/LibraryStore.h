@@ -50,6 +50,16 @@ struct LoudnessProgress {
     bool running = false; // an album is being analyzed now
 };
 
+// What playback reads now, for background work to give way to (docs/Plan.md §7.7).
+struct PlaybackReads {
+    std::vector<std::filesystem::path> files; // the playing file and the prepared next one; none while nothing plays
+    bool ahead = false;                       // the engine holds enough decoded audio for other reads of their storage
+};
+// How background work on `storage` goes while playback reads as `reads`: at full speed, with one worker, or waiting
+// until the engine is ahead again.
+enum class BackgroundPace : uint8_t { Full, One, Wait };
+BackgroundPace backgroundPace(const PlaybackReads& reads, const std::filesystem::path& storage);
+
 class LibraryStore {
 public:
     struct OpenReport {

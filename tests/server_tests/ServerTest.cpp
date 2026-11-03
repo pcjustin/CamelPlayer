@@ -97,7 +97,7 @@ protected:
     }
 };
 
-TEST_F(ServerTest, LibraryFingerprintingFollowsActualPlaybackState) {
+TEST_F(ServerTest, LibraryWorkGoesOnWhilePlaybackIsAhead) {
     const auto dir = testutil::tempDir() / "server-library-playback";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -116,18 +116,12 @@ TEST_F(ServerTest, LibraryFingerprintingFollowsActualPlaybackState) {
     };
     ASSERT_TRUE(waitFor(
         [&] { return store.openReader().scalar("SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL").value() == 1; }));
-    for (const auto release : {CommandKind::Pause, CommandKind::Stop}) {
-        send(select());
-        const auto file = dir / "music" / (release == CommandKind::Pause ? "pause.lrc" : "stop.lrc");
-        std::ofstream(file) << (release == CommandKind::Pause ? "lyrics" : "different lyrics");
-        ASSERT_TRUE(waitFor(
-            [&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 1; }));
-        std::this_thread::sleep_for(1200ms);
-        EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value(), 1);
-        send(command(release));
-        ASSERT_TRUE(waitFor(
-            [&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL").value() == 0; }));
-    }
+    // The engine holds its ring full while the device takes nothing, so work on the same disk goes on, one file at a time.
+    send(select());
+    std::ofstream(dir / "music" / "lyrics.lrc") << "lyrics";
+    ASSERT_TRUE(waitFor(
+        [&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL").value() == 1; }));
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
     server.reset();
 }
 

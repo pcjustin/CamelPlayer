@@ -195,16 +195,12 @@ public:
             LibraryScanner(*library_).deleteRemovedRoots();
             libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
-            // Covers being shown take the storage first: scans drop to one worker and fingerprints wait meanwhile.
-            options.playbackActive = [this] {
+            // Covers being shown take the storage first: scans and fingerprints drop to one worker meanwhile.
+            options.coversShown = [this] {
                 return std::chrono::steady_clock::now().time_since_epoch().count() <
                        artworkUntil_.load(std::memory_order_relaxed);
             };
-            options.playingSource = [this] {
-                const auto snapshot = engine_->snapshot();
-                return snapshot.state == audio::PlayState::Playing ? std::filesystem::path(snapshot.file)
-                                                                   : std::filesystem::path{};
-            };
+            options.playback = [this] { return playbackReads(); };
             libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
             // Album-wall thumbnails are made ahead of display, only while nothing plays, scans or shows covers.
             coverWarmer_ = std::jthread([this](std::stop_token stop) {
@@ -249,11 +245,7 @@ public:
                 std::lock_guard lock(loudnessMutex_);
                 return queuedFiles_;
             };
-            loudness.playingSource = [this] {
-                const auto snapshot = engine_->snapshot();
-                return snapshot.state == audio::PlayState::Playing ? std::filesystem::path(snapshot.file)
-                                                                   : std::filesystem::path{};
-            };
+            loudness.playback = [this] { return playbackReads(); };
             loudness_ = std::make_unique<LoudnessAnalyzer>(*library_, std::move(loudness));
         }
         if (library_ && [&] {
@@ -1219,9 +1211,26 @@ private:
         if (source.decoder() != state_.track->decoder()) return;
         const auto from = chain_.empty() ? state_.queueEntryId : chain_.back();
         shareLibraryLength(upcoming->entryId);
-        if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder(), gainFor(upcoming->entryId),
-                               crossfadeMs(from, upcoming->entryId)))
+        const std::filesystem::path file(toWide(source.pathUtf8()));
+        if (engine_->queueNext(file, source.decoder(), gainFor(upcoming->entryId), crossfadeMs(from, upcoming->entryId))) {
             chain_.push_back(upcoming->entryId);
+            std::lock_guard lock(readsMutex_);
+            queuedRead_ = file;
+        }
+    }
+
+    // What playback reads, for the library's background work (docs/Plan.md §7.7): any thread may ask.
+    PlaybackReads playbackReads() const {
+        const auto playback = engine_->snapshot();
+        PlaybackReads reads;
+        if (playback.state != audio::PlayState::Playing) return reads;
+        reads.files.emplace_back(playback.file);
+        if (playback.queuedFiles) {
+            std::lock_guard lock(readsMutex_);
+            reads.files.push_back(queuedRead_);
+        }
+        reads.ahead = playback.ahead;
+        return reads;
     }
 
     // The crossfade from one entry into the next (docs/Plan.md §5.4): none while an album plays in order, the next
@@ -1521,6 +1530,8 @@ private:
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
     int64_t libraryDeletions_ = -1; // entries whose files left the library leave the queue
+    mutable std::mutex readsMutex_;
+    std::filesystem::path queuedRead_; // the file last queued in the engine to follow
     std::chrono::steady_clock::time_point availabilityChecked_;
     struct LibraryEntry {
         std::wstring path;

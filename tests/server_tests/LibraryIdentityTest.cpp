@@ -7,6 +7,8 @@
 
 #include <atomic>
 #include <fstream>
+#include <future>
+#include <optional>
 #include <thread>
 
 #include "Server/Library/LibraryIdentity.h"
@@ -259,21 +261,48 @@ TEST_F(LibraryIdentityTest, LiveCopiesAndHardLinksDoNotStealIdentityEvenAfterThe
     EXPECT_EQ(id(store, "link.lrc"), link);
 }
 
+TEST(BackgroundPace, WorkOnThePlayingStorageReadsOnlyWhilePlaybackIsAhead) {
+    const fs::path share = L"\\\\TACHIKOMA\\Music";
+    EXPECT_EQ(backgroundPace({}, share), BackgroundPace::Full);
+    EXPECT_EQ(backgroundPace({{share / "a.flac"}, false}, share), BackgroundPace::Wait);
+    EXPECT_EQ(backgroundPace({{share / "a.flac"}, true}, share), BackgroundPace::One);
+    EXPECT_EQ(backgroundPace({{L"C:\\Music\\a.flac"}, false}, share), BackgroundPace::One);
+    // The prepared next file counts like the playing one.
+    EXPECT_EQ(backgroundPace({{L"C:\\Music\\a.flac", share / "b.flac"}, false}, share), BackgroundPace::Wait);
+}
+
+TEST_F(LibraryIdentityTest, AScanWaitingForPlaybackCompletesOnceItStops) {
+    file("a.lrc");
+    file("b.lrc", "b");
+    LibraryStore store(dir / "db");
+    std::atomic<bool> playing = true;
+    LibraryScanner scanner(store, {}, [&] { return playing ? PlaybackReads{{music / "playing.flac"}, false} : PlaybackReads{}; });
+    const auto root = scanner.addRoot(music);
+    auto scan = std::async(std::launch::async, [&] { return scanner.scan(root); });
+    EXPECT_EQ(scan.wait_for(std::chrono::milliseconds(500)), std::future_status::timeout);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 0);
+    playing = false;
+    EXPECT_TRUE(scan.get().complete);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE available=1"), 2);
+}
+
 TEST_F(LibraryIdentityTest, PlaybackSourceGatesOnlyTheSameStorage) {
     const auto source = file("old.lrc");
-    fs::path playing = source;
+    PlaybackReads playing{{source}, true};
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store, {}, [&] { return playing; });
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
+    playing.ahead = false;
     EXPECT_FALSE(scanner.fingerprint(root).complete);
-    playing = L"\\\\TACHIKOMA\\Music\\track.flac";
+    playing.files = {L"\\\\TACHIKOMA\\Music\\track.flac"};
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
-    playing = source;
+    playing = {{source}, true};
     file("second.lrc", "second bytes");
     ASSERT_TRUE(scanner.scan(root).complete);
+    playing.ahead = false;
     EXPECT_FALSE(scanner.fingerprint(root).complete);
-    playing.clear();
+    playing = {};
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
     EXPECT_EQ(library::storageKey(source), library::storageKey(music));
     EXPECT_FALSE(library::storageKey(source).empty());
@@ -465,14 +494,16 @@ TEST_F(LibraryIdentityTest, RemovingRootCancelsRunningScanWithoutCancellingOther
 
 TEST_F(LibraryIdentityTest, FingerprintsYieldCancelValidateVersionsAndInvalidateOnEdits) {
     const auto source = file("old.lrc");
-    bool playing = true;
+    // Playback of a file beside it, ahead or not.
+    std::optional<bool> ahead = true;
     LibraryStore store(dir / "db");
-    LibraryScanner scanner(store, [&] { return playing; });
+    LibraryScanner scanner(store, {}, [&] { return ahead ? PlaybackReads{{music / "playing.flac"}, *ahead} : PlaybackReads{}; });
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
+    ahead = false;
     EXPECT_FALSE(scanner.fingerprint(root).complete);
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 0);
-    playing = false;
+    ahead.reset();
     CancellationToken cancelled;
     cancelled.cancel();
     EXPECT_FALSE(scanner.fingerprint(root, cancelled).complete);
@@ -487,10 +518,10 @@ TEST_F(LibraryIdentityTest, FingerprintsYieldCancelValidateVersionsAndInvalidate
     file("old.lrc", "xyz");
     fs::last_write_time(source, fs::last_write_time(source) + std::chrono::seconds(2));
     EXPECT_THROW(library::fileDigest(source, expected, {}, {}), std::runtime_error);
-    playing = true;
+    ahead = true;
     EXPECT_TRUE(scanner.scan(root).complete);
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 0);
-    playing = false;
+    ahead.reset();
     EXPECT_EQ(scanner.fingerprint(root).hashed, 1);
 }
 
@@ -694,14 +725,17 @@ TEST_F(LibraryIdentityTest, LegacySchemaUpgradePreservesVerifiedCurrentPathIdent
     EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
 }
 
-TEST_F(LibraryIdentityTest, MonitorFingerprintsInTheBackgroundAndHonorsPlaybackGate) {
+TEST_F(LibraryIdentityTest, MonitorScansOnlyWhilePlaybackIsAheadAndFingerprintsAfter) {
     file("old.lrc");
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
     scanner.addRoot(music);
-    std::atomic<bool> playing{true};
+    // A file beside it plays, first with the engine short of audio, then ahead, then it stops.
+    std::atomic<int> playing{1};
     LibraryMonitor::Options options;
-    options.playbackActive = [&] { return playing.load(); };
+    options.playback = [&] {
+        return playing.load() ? PlaybackReads{{music / "playing.flac"}, playing.load() == 2} : PlaybackReads{};
+    };
     LibraryMonitor monitor(store, options);
     auto wait = [&](const std::function<bool()>& check) {
         const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -711,9 +745,11 @@ TEST_F(LibraryIdentityTest, MonitorFingerprintsInTheBackgroundAndHonorsPlaybackG
         }
         return false;
     };
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 0);
+    playing = 2;
     ASSERT_TRUE(wait([&] { return scalar(store, "SELECT COUNT(*) FROM files WHERE available=1") == 1; }));
-    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 0);
-    playing = false;
+    playing = 0;
     EXPECT_TRUE(wait([&] { return scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL") == 1; }));
 }
 
@@ -736,7 +772,7 @@ TEST_F(LibraryIdentityTest, MonitorRetriesDeferredMoveMatchingAfterPlaybackWitho
     EXPECT_EQ(id(store, "old.lrc"), original);
     LibraryMonitor::Options options;
     options.pollInterval = std::chrono::milliseconds(0);
-    options.playbackActive = [&] { return playing.load(); };
+    options.coversShown = [&] { return playing.load(); };
     store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
     LibraryMonitor monitor(store, options);
     const auto scanned = std::chrono::steady_clock::now() + std::chrono::seconds(5);
