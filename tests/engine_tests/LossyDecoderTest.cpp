@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// AAC-LC and MP3 through every registered decoder (docs/Plan.md §3.1, §12): lossy, so the encoded source PCM is the
+// AAC-LC through Symphonia and MP3 through mpg123 (docs/Plan.md §3.1, §12): lossy, so the encoded source PCM is the
 // reference with declared tolerances. Files that declare encoder delay and padding must decode to exactly the source
 // frames at lag 0; files without trim metadata are only required to decode consistently.
 #include <gtest/gtest.h>
@@ -36,15 +36,13 @@ namespace {
 constexpr uint32_t kRate = 44100, kBits = 24, kChannels = 2;
 constexpr double kSeconds = 3.0;
 
-// Tolerances (docs/Plan.md §12). Measured: SNR 54.5 dB for AAC-LC at 256 kbit/s and 76 dB for MP3 at 320 kbit/s; the
-// largest difference between two decoders of one file was 361 LSB (dr_mp3 against FFmpeg, about -87 dBFS).
+// Tolerances (docs/Plan.md §12). Measured: SNR 54.5 dB for AAC-LC at 256 kbit/s and 76 dB for MP3 at 320 kbit/s.
 constexpr double kMinSnrDb = 45.0;
-constexpr int32_t kDecoderAgreement = 1 << 10; // about -78 dBFS between two decoders of the same file
-constexpr int32_t kSeekAgreement = 0;          // a seek against the linear decode of the same decoder: exact
+constexpr int32_t kSeekAgreement = 0; // a seek against the linear decode of the same decoder: exact
 
 // Two inharmonic, slowly modulated tones: no period short enough to make the lag search ambiguous.
 std::vector<int32_t> signal(double amplitude = 1.0) {
-    const size_t frames = size_t(kSeconds * kRate);
+    const auto frames = size_t(kSeconds * kRate);
     std::vector<int32_t> out(frames * kChannels);
     const double full = std::ldexp(1.0, int(kBits) - 1) - 1;
     for (size_t i = 0; i < frames; i++)
@@ -158,23 +156,6 @@ std::filesystem::path vbrMp3(bool lameTag) {
     return lameTag ? tagged : untagged;
 }
 
-// Silence, then loud noise, with a Xing table: its bytes do not follow the time, so only the table places a seek near
-// its target.
-std::filesystem::path quietThenLoudMp3() {
-    static std::once_flag once;
-    const auto file = testutil::tempDir() / "lossy-quiet-loud.mp3";
-    std::call_once(once, [&] {
-        std::vector<int32_t> pcm(size_t(kRate) * 60 * kChannels);
-        uint32_t seed = 1;
-        for (size_t i = pcm.size() / 2; i < pcm.size(); i++) {
-            seed = seed * 1664525u + 1013904223u;
-            pcm[i] = (int32_t(seed >> 9) - (1 << 22)) / 4;
-        }
-        testutil::writeMp3(file, pcm, kRate, kBits, kChannels, true, true);
-    });
-    return file;
-}
-
 std::string be32(uint32_t v) {
     return {char(v >> 24), char(v >> 16), char(v >> 8), char(v)};
 }
@@ -258,8 +239,6 @@ TEST_P(LossyDecoder, MatchesTheSourceWithinTolerance) {
 TEST_P(LossyDecoder, SeekMatchesTheLinearDecode) {
     const auto [index, kind] = GetParam();
     const auto& fixture = kFixtures[index];
-    if (kind != DecoderKind::Mpg123 && fixture.format == AudioFormat::Mp3)
-        GTEST_SKIP() << decoderName(kind) << " seeks an MP3 near the target (SeekAnMp3AtOnceNearTheTarget)";
     reference();
     auto linear = openDecoder(kind, path(fixture));
     const auto all = decodeAll(*linear);
@@ -284,42 +263,7 @@ TEST_P(LossyDecoder, SeekMatchesTheLinearDecode) {
     EXPECT_LE(worst, kSeekAgreement);
 }
 
-TEST_P(LossyDecoder, SixteenBitOptionQuantizesTheSameDecode) {
-    const auto [index, kind] = GetParam();
-    const auto& fixture = kFixtures[index];
-    reference();
-    PcmBitsByFormat sixteen;
-    sixteen[fixture.format] = 16;
-    auto narrow = openDecoder(kind, path(fixture), sixteen);
-    EXPECT_EQ(narrow->info().bitsPerSample, 16u);
-    const auto got16 = decodeAll(*narrow);
-    const auto got24 = decodeAll(*openDecoder(kind, path(fixture)));
-    ASSERT_EQ(got16.size(), got24.size());
-    for (size_t i = 0; i < got16.size(); i++) {
-        ASSERT_GE(got16[i], -32768);
-        ASSERT_LE(got16[i], 32767);
-        ASSERT_LE(std::abs(got16[i] * 256 - got24[i]), 256) << "sample " << i;
-    }
-}
-
 INSTANTIATE_TEST_SUITE_P(Lossy, LossyDecoder, ::testing::ValuesIn(cases()), caseName);
-
-TEST(LossyDecoderPolicy, DecodersOfAFileAgree) {
-    reference();
-    for (const auto& fixture : kFixtures) {
-        std::optional<std::vector<int32_t>> first;
-        for (const auto kind : decodersFor(fixture.format)) {
-            const auto got = decodeAll(*openDecoder(kind, path(fixture)));
-            if (!first) {
-                first = got;
-                continue;
-            }
-            const int32_t difference = maxDifference(*first, got);
-            EXPECT_EQ(got.size(), first->size()) << decoderName(kind) << " on " << fixture.name;
-            EXPECT_LE(difference, kDecoderAgreement) << decoderName(kind) << " on " << fixture.name;
-        }
-    }
-}
 
 // Decoded overs clip to full scale instead of wrapping around.
 TEST(LossyDecoderPolicy, OversClipInsteadOfWrapping) {
@@ -421,9 +365,9 @@ TEST(LossyDecoderPolicy, Mp3PastStackedTagsPaddingAndOtherDataDecodesTheSame) {
     ASSERT_EQ(uint8_t(clean[0]), 0xFF) << "the fixture starts with its first frame";
     std::string other(929, '\0');
     for (size_t i = 0; i < other.size(); i++) other[i] = char(0xA1 + i * 5 / 2 % 0x5E);
-    for (const auto& [name, bytes] :
-         {std::pair{"stacked.mp3", id3(40) + id3(30) + clean}, std::pair{"padded.mp3", id3(40) + std::string(1011, '\0') + clean},
-          std::pair{"other.mp3", id3(40) + other + clean}}) {
+    for (const auto& [name, bytes] : {std::pair{"stacked.mp3", id3(40).append(id3(30)).append(clean)},
+                                      std::pair{"padded.mp3", id3(40).append(1011, '\0').append(clean)},
+                                      std::pair{"other.mp3", id3(40).append(other).append(clean)}}) {
         const auto file = writeFile(name, bytes);
         EXPECT_TRUE(lossyLengthDeclared(file)) << name;
         bool estimated = true;
@@ -442,7 +386,7 @@ std::filesystem::path shortDeclaredMp3() {
 // mpg123 opens without scanning the file: the length counts once the scan in the background knows it, and the LAME
 // frame's is the estimate until then.
 TEST(LossyDecoderPolicy, Mp3LengthIsLearnedWhilePlaying) {
-    const auto source = reference();
+    const auto& source = reference();
     auto decoder = openDecoder(DecoderKind::Mpg123, path(kFixtures[2]));
     EXPECT_EQ(decoder->info().totalFrames, 0u);
     EXPECT_EQ(decoder->estimatedFrames(), source.size() / kChannels);
@@ -534,7 +478,6 @@ TEST(LossyDecoderPolicy, Mpg123SkipsAVbriFrame) {
     auto decoder = openDecoder(DecoderKind::Mpg123, file);
     EXPECT_EQ(decoder->estimatedFrames(), expected.size() / kChannels);
     EXPECT_EQ(decodeAll(*decoder), expected);
-    EXPECT_EQ(decodeAll(*openDecoder(DecoderKind::FFmpeg, file)).size(), expected.size());
 }
 
 // A last frame cut short, here by an ID3v1 tag written over the end of the file, ends the stream without an error,
@@ -603,7 +546,7 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
         constexpr size_t kSkip = 4096, kWindow = 1024;
         ASSERT_GT(rest.size(), (kSkip + kWindow) * kChannels);
         std::optional<int64_t> lag;
-        for (int64_t d = -int64_t(kRate); d <= int64_t(kRate) && !lag; d++) {
+        for (int64_t d = -int64_t(kRate); std::cmp_less_equal(d, kRate) && !lag; d++) {
             const int64_t at = int64_t(target + kSkip) + d;
             if (at < 0 || (uint64_t(at) + kWindow) * kChannels > all.size()) continue;
             if (std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels),
@@ -638,73 +581,17 @@ TEST(LossyDecoderPolicy, Mpg123HoldsItsLengthBackAfterAnEstimatedSeek) {
     EXPECT_EQ(decoder->info().totalFrames, total);
 }
 
-// The MP3 decoders other than mpg123 seek an MP3 at once, without reading the file up to the target: near it, by its
-// Xing table, also behind a large tag, or else its size and its length, which one measured before makes better. The
-// stream then plays all the audio after where it lands, which the declared length, counted from the target, could cut.
-TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
-    reference();
-    const std::pair<std::filesystem::path, const char*> files[] = {{path(kFixtures[2]), "Info CBR"},
-                                                                   {path(kFixtures[3]), "CBR without a header"},
-                                                                   {vbrMp3(true), "Xing VBR"},
-                                                                   {taggedVbrMp3(), "Xing VBR behind a 300 KB tag"},
-                                                                   {quietThenLoudMp3(), "Xing VBR, silent then loud"},
-                                                                   {vbrMp3(false), "VBR without a header"}};
-    for (const auto kind : {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrMp3, DecoderKind::Minimp3})
-        for (const auto& [file, name] : files) {
-            const auto all = decodeAll(*openDecoder(kind, file));
-            const uint64_t target = all.size() / kChannels * 9 / 10;
-            if (file == vbrMp3(false)) rememberLibraryLength(file, all.size() / kChannels, false); // scales the seek
-            auto decoder = openDecoder(kind, file);
-            decoder->seek(target);
-            const auto rest = decodeAll(*decoder);
-            constexpr size_t kSkip = 4096, kWindow = 1024;
-            ASSERT_GT(rest.size(), (kSkip + kWindow) * kChannels) << decoderName(kind) << ", " << name;
-            std::optional<int64_t> lag;
-            for (int64_t d = 0; d <= int64_t(kRate) && !lag; d = d > 0 ? -d : 1 - d) {
-                const int64_t at = int64_t(target + kSkip) + d;
-                if (at < 0 || (uint64_t(at) + kWindow) * kChannels > all.size()) continue;
-                if (std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels),
-                               rest.begin() + std::ptrdiff_t((kSkip + kWindow) * kChannels),
-                               all.begin() + std::ptrdiff_t(at * kChannels)))
-                    lag = d;
-            }
-            EXPECT_TRUE(lag) << decoderName(kind) << ", " << name << ": not within a second of the target";
-            if (!lag) continue;
-            std::printf("%s seek in %s: %lld frames off\n", decoderName(kind), name, static_cast<long long>(*lag));
-            EXPECT_GE(int64_t(rest.size() / kChannels), int64_t(all.size() / kChannels - target) - *lag)
-                << decoderName(kind) << ", " << name << ": ends before its audio does";
-        }
-}
-
-// Only mpg123 measures an MP3's length. The other decoders offer their estimate, or the probe's, and count what they
-// decode once they reach the end, even when a header declares the length: it can differ from what they decode.
-TEST(LossyDecoderPolicy, OtherMp3DecodersEstimateTheLengthUntilTheEnd) {
-    const auto& source = reference();
-    for (const auto& fixture : {kFixtures[2], kFixtures[3]})
-        for (const auto kind : decodersFor(AudioFormat::Mp3)) {
-            if (kind == DecoderKind::Mpg123) continue;
-            auto decoder = openDecoder(kind, path(fixture));
-            EXPECT_EQ(decoder->info().totalFrames, 0u) << decoderName(kind) << " on " << fixture.name;
-            EXPECT_NEAR(double(decoder->estimatedFrames()), double(source.size() / kChannels), 3 * 1152.0)
-                << decoderName(kind) << " on " << fixture.name;
-            const uint64_t frames = decodeAll(*decoder).size() / kChannels;
-            EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind) << " on " << fixture.name;
-        }
-}
-
-// The length the library knows, even one it estimated, is the one every MP3 decoder shows at once; what a decoder
-// decodes still replaces it at the end, so an estimate is not taken as exact.
-TEST(LossyDecoderPolicy, EveryMp3DecoderShowsTheLibrarysLength) {
+// The length the library knows, even one it estimated, is the one mpg123 shows at once; the length its scan measures
+// still replaces it, so an estimate is not taken as exact.
+TEST(LossyDecoderPolicy, Mpg123ShowsTheLibrarysLength) {
     const auto& source = reference();
     const auto file = writeFile("library-length.mp3", readFile(path(kFixtures[3])));
-    const uint64_t known = source.size() / kChannels + 5000; // no decoder's own estimate
+    const uint64_t known = source.size() / kChannels + 5000; // not mpg123's own estimate
     rememberLibraryLength(file, known, true);
-    for (const auto kind : decodersFor(AudioFormat::Mp3)) {
-        auto decoder = openDecoder(kind, file);
-        EXPECT_EQ(decoder->estimatedFrames(), known) << decoderName(kind);
-        const uint64_t frames = decodeAll(*decoder).size() / kChannels;
-        EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind);
-    }
+    auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    EXPECT_EQ(decoder->estimatedFrames(), known);
+    const uint64_t frames = decodeAll(*decoder).size() / kChannels;
+    EXPECT_EQ(decoder->info().totalFrames, frames);
 }
 
 // Without a header an MP3's length is estimated from its size; a tag before the first frame, which cover art makes
@@ -720,8 +607,8 @@ TEST(LossyDecoderPolicy, AnMp3sEstimatedLengthLeavesOutTheTagBeforeIt) {
     EXPECT_EQ(openDecoder(DecoderKind::Mpg123, tagged)->estimatedFrames(), expected);
 }
 
-// The first frame's side info is that of a real file's first frame, which counts more bits than the frame holds:
-// Symphonia refused the whole file, and dr_mp3 drops the frame while counting it.
+// The first frame's side info is that of a real file's first frame, which counts more bits than the frame holds; the
+// file still plays to its end.
 TEST(LossyDecoderPolicy, AnMp3FrameThatDoesNotDecodePlaysToItsEnd) {
     reference();
     auto mp3 = readFile(path(kFixtures[3]));
@@ -730,28 +617,22 @@ TEST(LossyDecoderPolicy, AnMp3FrameThatDoesNotDecodePlaysToItsEnd) {
                            32);
     mp3.replace(4, side.size(), side); // after the header of a frame without CRC
     const auto file = writeFile("undecodable-frame.mp3", mp3);
-    const auto mpg123 = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
-    for (const auto kind : decodersFor(AudioFormat::Mp3)) {
-        const auto expected = decodeAll(*openDecoder(kind, file));
-        if (kind == DecoderKind::Symphonia) EXPECT_EQ(expected.size(), mpg123.size()) << "silence as long as the frame";
-        const auto out = testutil::tempDir() / "lossy-undecodable.raw";
-        Settings settings;
-        settings.decoderByFormat[AudioFormat::Mp3] = kind;
-        CaptureOptions options;
-        options.file = out;
-        options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
-        {
-            PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
-            engine.openAndPlay(file);
-            engine.waitIdle();
-            ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
-            const auto snapshot = engine.snapshot();
-            ASSERT_FALSE(snapshot.error) << decoderName(kind) << ": " << snapshot.errorDetail;
-            EXPECT_EQ(snapshot.total, expected.size() / kChannels) << decoderName(kind);
-        }
-        EXPECT_EQ(std::filesystem::file_size(out) / 4, expected.size()) << decoderName(kind);
-        std::filesystem::remove(out);
+    const auto expected = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+    const auto out = testutil::tempDir() / "lossy-undecodable.raw";
+    CaptureOptions options;
+    options.file = out;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    {
+        PlaybackEngine engine(Settings{}, [&](const Settings&) { return createCaptureOutput(options); });
+        engine.openAndPlay(file);
+        engine.waitIdle();
+        ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
+        const auto snapshot = engine.snapshot();
+        ASSERT_FALSE(snapshot.error) << snapshot.errorDetail;
+        EXPECT_EQ(snapshot.total, expected.size() / kChannels);
     }
+    EXPECT_EQ(std::filesystem::file_size(out) / 4, expected.size());
+    std::filesystem::remove(out);
 }
 
 // Some taggers store the iTunes genre as one byte of text; Symphonia read it as a number and refused the whole file.
@@ -800,29 +681,4 @@ TEST(LossyDecoderPolicy, AMusicVideoPlaysItsSound) {
     const auto file = writeFile("video.mp4", mp4);
     expectSameSound(file, original);
     EXPECT_EQ(probeAacInfo(file), probeAacInfo(original));
-}
-
-// Local real-world samples (testdata/, not in Git): every registered decoder decodes the same length, within tolerance.
-TEST(LossyDecoderPolicy, RealSamplesAgreeAcrossDecoders) {
-    std::filesystem::path testdata;
-    for (auto d = std::filesystem::current_path(); !d.empty() && d != d.root_path(); d = d.parent_path())
-        if (std::filesystem::exists(d / "testdata")) {
-            testdata = d / "testdata";
-            break;
-        }
-    if (testdata.empty()) GTEST_SKIP() << "testdata/ not present";
-    for (const char* name : {"sample-6s.mp3", "Sample_BeeMoved_48kHz16bit.m4a"}) {
-        const auto file = testdata / name;
-        if (!std::filesystem::exists(file)) continue;
-        std::optional<std::vector<int32_t>> first;
-        for (const auto kind : decodersFor(probeFormat(file))) {
-            const auto got = decodeAll(*openDecoder(kind, file));
-            if (!first) {
-                first = got;
-                continue;
-            }
-            EXPECT_EQ(got.size(), first->size()) << decoderName(kind) << " on " << name;
-            EXPECT_LE(maxDifference(*first, got), kDecoderAgreement) << decoderName(kind) << " on " << name;
-        }
-    }
 }

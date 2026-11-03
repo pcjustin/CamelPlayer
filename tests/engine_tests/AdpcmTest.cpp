@@ -36,7 +36,7 @@ std::filesystem::path adpcmFile(bool microsoft) {
 }
 
 std::vector<int32_t> readAll(IDecoder& d) {
-    std::vector<int32_t> out, block(4096 * d.info().channels);
+    std::vector<int32_t> out, block(size_t(4096) * d.info().channels);
     while (const size_t got = d.read(block.data(), 4096))
         out.insert(out.end(), block.begin(), block.begin() + ptrdiff_t(got * d.info().channels));
     return out;
@@ -66,15 +66,11 @@ TEST_P(Adpcm, EveryDecoderReadsTheSameSamples) {
     }
 }
 
-TEST(AdpcmSettings, HasItsOwnDecoderChoice) {
+TEST(AdpcmSettings, PlaysWithLibsndfileWhateverWaveDecoderIsChosen) {
     DecoderByFormat choices;
-    choices[AudioFormat::Wav] = DecoderKind::Symphonia;
+    choices[AudioFormat::Wav] = DecoderKind::DrWav;
     EXPECT_EQ(decoderFor(choices, AudioFormat::Adpcm), DecoderKind::Sndfile);
-    choices[AudioFormat::Adpcm] = DecoderKind::DrWav;
-    EXPECT_EQ(decoderFor(choices, AudioFormat::Adpcm), DecoderKind::DrWav);
-    // Symphonia accumulates rounding errors in IMA ADPCM.
-    EXPECT_EQ(decodersFor(AudioFormat::Adpcm),
-              (std::vector<DecoderKind>{DecoderKind::FFmpeg, DecoderKind::Sndfile, DecoderKind::DrWav}));
+    EXPECT_EQ(decodersFor(AudioFormat::Adpcm), (std::vector<DecoderKind>{DecoderKind::Sndfile}));
 }
 
 TEST_P(Adpcm, EveryDecoderSeeksExactly) {
@@ -85,7 +81,7 @@ TEST_P(Adpcm, EveryDecoderSeeksExactly) {
         const auto d = openDecoder(kind, path);
         for (const uint64_t target : {uint64_t(0), uint64_t(1000), uint64_t(20000), whole.size() / 2 - 300}) {
             d->seek(target);
-            std::vector<int32_t> block(256 * 2);
+            std::vector<int32_t> block(size_t(256) * 2);
             ASSERT_EQ(d->read(block.data(), 256), 256u) << target;
             EXPECT_TRUE(std::equal(block.begin(), block.end(), whole.begin() + ptrdiff_t(target * 2))) << target;
         }

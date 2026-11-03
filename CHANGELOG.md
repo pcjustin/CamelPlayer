@@ -4,27 +4,25 @@
 
 Upgrading from 0.2.0 or 0.2.1: the first start adds an index of the artists to the library (schema 19), which takes a second or two, and keeps the old library as `library.db.v18.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.2.x refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v18.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
 
-New since 0.2.1:
-
-- **minimp3 as an MP3 decoder:** Settings › Decoders offers minimp3 for MP3 besides mpg123, FFmpeg, Symphonia and dr_mp3. It starts reading at the first frame, trims the encoder delay and padding a LAME frame declares, seeks exactly, and decodes the same number of frames as mpg123 on the files measured.
-
 Changed since 0.2.1:
 
+- **MP3 plays with mpg123 alone:** Settings › Decoders no longer offers FFmpeg, Symphonia or dr_mp3 for MP3. Measured from a NAS against them, mpg123 starts and seeks as quickly as the quickest, and it alone measures an MP3's exact length while it plays and then seeks exactly.
+- **AAC plays with Symphonia alone and ADPCM with libsndfile alone,** so Settings › Decoders lists only FLAC, ALAC, WAV and AIFF. A setting that named another decoder for MP3, AAC or ADPCM now plays with the one left.
+- **AAC and MP3 always decode to 24-bit PCM:** the 16-bit option is gone. A device that takes only 16-bit gets them reduced with dither when conversion is allowed, shown as processed.
 - **Suggestions for a word in many titles come at once:** the artists among them are looked up in an index of artists alone. With 100,000 tracks that all hold the word, the suggestions took 77–120 ms and now take about 7 ms.
-- **MP3s from a NAS start at once:** mpg123 read the whole file before the first sound to learn its exact length, which took 5–9 s over Wi-Fi. Playback now starts after the first frames, in under a second from the same NAS; the length shows as an estimate and becomes exact while the file plays. A seek before the whole file has been read waits only until the reading has passed its target: to the middle of a 55–68 MB file 3 s after its start, 10–13 s over Wi-Fi, where it waited for the whole file.
-- **Symphonia 0.6.1,** the default decoder for AAC and ALAC, replaces 0.5.5. With Symphonia chosen for MP3, frames that 0.5.5 could not decode now play: in one measured album they had played as silence, 0.7 s in a track. An MP3 without a Xing or Info header also plays to its last frame: Symphonia's estimate of its length no longer cuts it short.
-- **dr_flac 0.13.4, dr_wav 0.14.6 and dr_mp3 0.7.4** replace 0.13.3, 0.14.5 and 0.7.3, with fixes for malformed FLAC metadata and block sizes, 32-bit FLAC, and AIFF sample rates.
+- **MP3s from a NAS start and seek at once:** mpg123 read the whole file before the first sound to learn its exact length, which took 5–9 s over Wi-Fi. Playback now starts after the first frames, in under a second from the same NAS; the length the library knows shows at once and becomes exact while the file plays. A seek before the whole file has been read goes at once to where the target is estimated to be, by the Xing table or the length, and seeks land exactly once the file has been read: from the NAS a seek to 90 % right after the start plays within about half a second.
+- **Symphonia 0.6.1,** the decoder for AAC and the default for ALAC, replaces 0.5.5.
+- **dr_flac 0.13.4 and dr_wav 0.14.6** replace 0.13.3 and 0.14.5, with fixes for malformed FLAC metadata and block sizes, 32-bit FLAC, and AIFF sample rates.
 
 Fixed since 0.2.1 (files an earlier version refused are read again once by the first scan after the update, so those below appear by themselves):
 
 - **MP3 files whose audio does not follow the tag at once** were refused: a second ID3 tag, padding or other bytes between the tags and the first frame. The first frame is now found past them.
-- **M4A files with a one-byte genre** were refused by Symphonia, the default AAC and ALAC decoder, because it reads the file's tags itself and gave up on that one. Symphonia now skips the tags, which CamelPlayer reads with TagLib anyway.
+- **M4A files with a one-byte genre** were refused by Symphonia, the AAC decoder and the default for ALAC, because it reads the file's tags itself and gave up on that one. Symphonia now skips the tags, which CamelPlayer reads with TagLib anyway.
 - **MP4 videos:** Symphonia took the picture track for the sound and refused the file. The first track it can decode now plays, so the sound of a music video or concert video plays like a track.
-- **MP3s with a VBRI header** (written by Fraunhofer encoders) started with 26 ms of silence from mpg123, which decoded the VBRI frame as sound; they now start with their first audio frame, as with FFmpeg and Symphonia.
+- **MP3s with a VBRI header** (written by Fraunhofer encoders) started with 26 ms of silence from mpg123, which decoded the VBRI frame as sound; they now start with their first audio frame.
 - **An MP3 whose last frame is cut short,** such as by an ID3v1 tag written over the end of the file, ended in an error with mpg123 and skipped to the next track; it now ends normally.
-- **MP3 lengths in the library could be wrong,** such as 1:29 for a 1:48 track whose VBRI header (written by Fraunhofer encoders) counts too few frames. A VBRI length now counts as an estimate, and any MP3 length that differs from the decoded one is corrected once the track has played to its end.
-- **Symphonia refused whole MP3 files** at a frame it could not decode, such as a first frame whose side information counts more bits than it holds. Such an AAC or MP3 frame now plays as silence of its length, as with the other decoders.
-- **With FFmpeg, Symphonia or dr_mp3 chosen for MP3,** a track could end in an error and skip to the next instead of a gapless change, as when dr_mp3 decodes fewer frames than it counts; and FFmpeg showed 0:00 and could not seek in an MP3 without a Xing or Info header. Their length now shows as an estimate and becomes exact at the track's end, and dr_mp3 no longer reads a whole file without such a header before it starts.
+- **MP3 lengths in the library could be wrong,** such as 1:29 for a 1:48 track with a VBRI header, which was estimated from the file's size, or seconds too long for a file without a Xing or Info header, whose estimate counted the cover art in its tags as sound. The first scan after the update estimates such lengths again, from the VBRI header or from the sound alone, and any MP3 length that differs from the decoded one is corrected once the track has played.
+- **Symphonia refused a whole file** at an AAC frame it could not decode. Such a frame now plays as silence of its length.
 - **macOS `._` files** (AppleDouble files with Finder data, left beside the music on a NAS) counted as audio files that could not be read; the scan now passes them over.
 
 ## 0.2.1

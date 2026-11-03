@@ -522,8 +522,6 @@ void MainWindow::populateSettings() {
         const auto chosen = std::find(registered.begin(), registered.end(), decoderFor(settings_.decoderByFormat, format));
         fill(combo, names, int(chosen - registered.begin()));
     }
-    for (const auto& [combo, format] : pcmBitsCombos())
-        fill(combo, {L"24-bit", L"16-bit"}, pcmBitsFor(settings_.pcmBitsByFormat, format) == 16 ? 1 : 0);
     fill(ConvertCombo(), {tr(L"Convert_Off"), tr(L"Convert_On")}, settings_.convertWhenUnsupported ? 1 : 0);
     fill(ResampleQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
          int(settings_.resampleQuality));
@@ -635,18 +633,11 @@ void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
     populating_ = was;
 }
 
-std::array<std::pair<ComboBox, AudioFormat>, 7> MainWindow::decoderCombos() {
+std::array<std::pair<ComboBox, AudioFormat>, 4> MainWindow::decoderCombos() {
     return {{{DecoderCombo(), AudioFormat::Flac},
              {AlacDecoderCombo(), AudioFormat::Alac},
              {WavDecoderCombo(), AudioFormat::Wav},
-             {AdpcmDecoderCombo(), AudioFormat::Adpcm},
-             {AiffDecoderCombo(), AudioFormat::Aiff},
-             {AacDecoderCombo(), AudioFormat::Aac},
-             {Mp3DecoderCombo(), AudioFormat::Mp3}}};
-}
-
-std::array<std::pair<ComboBox, AudioFormat>, 2> MainWindow::pcmBitsCombos() {
-    return {{{AacBitsCombo(), AudioFormat::Aac}, {Mp3BitsCombo(), AudioFormat::Mp3}}};
+             {AiffDecoderCombo(), AudioFormat::Aiff}}};
 }
 
 void MainWindow::readSettingsFromUi() {
@@ -656,10 +647,6 @@ void MainWindow::readSettingsFromUi() {
         const auto registered = decodersFor(format);
         const DecoderKind chosen = registered[std::min<size_t>(idx(combo), registered.size() - 1)];
         if (chosen != decoderFor(settings_.decoderByFormat, format)) settings_.decoderByFormat[format] = chosen;
-    }
-    for (const auto& [combo, format] : pcmBitsCombos()) {
-        const uint32_t bits = idx(combo) == 1 ? 16 : 24;
-        if (bits != pcmBitsFor(settings_.pcmBitsByFormat, format)) settings_.pcmBitsByFormat[format] = bits;
     }
     settings_.convertWhenUnsupported = idx(ConvertCombo()) == 1;
     settings_.resampleQuality = ResampleQuality(std::min(idx(ResampleQualityCombo()), 2));

@@ -97,9 +97,11 @@ std::optional<SavedSession> loadSession(sqlite::Database& db) {
         while (rows.step()) {
             FrameRange range{uint64_t(rows.integer(1))};
             if (!rows.isNull(2)) range.endExclusive = uint64_t(rows.integer(2));
+            // A decoder since removed, such as dr_mp3, leaves the entry to the setting for its format.
             std::optional<audio::DecoderKind> decoder;
-            if (!rows.isNull(3) && uint64_t(rows.integer(3)) < std::size(audio::kAllDecoders))
-                decoder = audio::DecoderKind(rows.integer(3));
+            if (!rows.isNull(3))
+                for (const auto kind : audio::kAllDecoders)
+                    if (int64_t(kind) == rows.integer(3)) decoder = kind;
             session.entries.push_back({TrackSource(rows.text(0), range, decoder), rows.integer(4), rows.text(5)});
         }
         const auto count = session.entries.size();

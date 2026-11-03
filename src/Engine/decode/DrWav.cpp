@@ -20,16 +20,13 @@ public:
     explicit DrWav(const std::filesystem::path& path) {
         if (!drwav_init_file_w(&wav_, longPath(path).c_str(), nullptr))
             throw Error(ErrorCode::FileOpen, "drwav_init_file_w failed");
-        // ADPCM's 4-bit codes decode to 16-bit samples.
-        const bool adpcm =
-            wav_.translatedFormatTag == DR_WAVE_FORMAT_ADPCM || wav_.translatedFormatTag == DR_WAVE_FORMAT_DVI_ADPCM;
-        if (wav_.translatedFormatTag != DR_WAVE_FORMAT_PCM && !adpcm) {
+        if (wav_.translatedFormatTag != DR_WAVE_FORMAT_PCM) {
             drwav_uninit(&wav_);
-            throw Error(ErrorCode::UnsupportedStream, "dr_wav: only integer PCM and ADPCM are supported");
+            throw Error(ErrorCode::UnsupportedStream, "dr_wav: only integer PCM is supported");
         }
         info_.sampleRate = wav_.sampleRate;
         info_.channels = wav_.channels;
-        info_.bitsPerSample = adpcm ? 16 : wav_.bitsPerSample;
+        info_.bitsPerSample = wav_.bitsPerSample;
         info_.totalFrames = wav_.totalPCMFrameCount;
     }
 

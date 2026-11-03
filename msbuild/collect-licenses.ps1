@@ -12,7 +12,7 @@ $nativeLicenses = [ordered]@{
     ffmpeg = 'LGPL-2.1-or-later'; libsndfile = 'LGPL-2.1-or-later'; drlibs = 'Unlicense OR MIT-0'
     libflac = 'BSD-3-Clause'; libogg = 'BSD-3-Clause'; libvorbis = 'BSD-3-Clause'; opus = 'BSD-3-Clause'
     zlib = 'Zlib'; wil = 'MIT'; 'nlohmann-json' = 'MIT'; gtest = 'BSD-3-Clause'
-    mpg123 = 'LGPL-2.1-or-later'; minimp3 = 'CC0-1.0'; mp3lame = 'LGPL-2.0-only'; soxr = 'LGPL-2.1-or-later'
+    mpg123 = 'LGPL-2.1-or-later'; mp3lame = 'LGPL-2.0-only'; soxr = 'LGPL-2.1-or-later'
     'dsd-nexus' = 'LGPL-2.1-or-later'; sqlite3 = 'blessing'; taglib = 'LGPL-2.1-only OR MPL-1.1'; utfcpp = 'BSL-1.0'
     libwebp = 'BSD-3-Clause'; opencc = 'Apache-2.0'; 'marisa-trie' = 'BSD-2-Clause'; 'darts-clone' = 'BSD-2-Clause'; rapidjson = 'MIT'
     tclap = 'MIT'; libebur128 = 'MIT'

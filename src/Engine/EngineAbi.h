@@ -50,9 +50,8 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_DECODER_SNDFILE 4u
 #define CAMEL_DECODER_DR_WAV 5u
 #define CAMEL_DECODER_MPG123 6u
-#define CAMEL_DECODER_DR_MP3 7u
 #define CAMEL_DECODER_DSD_NEXUS 8u
-#define CAMEL_DECODER_MINIMP3 9u
+// 7 and 9 were dr_mp3 and minimp3, removed, and are not used again.
 // Numbers from here on select a decoder the host registered at runtime (host-defined; the Engine passes them through).
 #define CAMEL_DECODER_REGISTERED_BASE 0x10000u
 

@@ -42,11 +42,10 @@ int32_t mapError(const Error& error) {
 }
 
 constexpr std::pair<uint32_t, DecoderKind> kBuiltinNumbers[] = {
-    {CAMEL_DECODER_FFMPEG, DecoderKind::FFmpeg},  {CAMEL_DECODER_SYMPHONIA, DecoderKind::Symphonia},
-    {CAMEL_DECODER_DR_FLAC, DecoderKind::DrFlac}, {CAMEL_DECODER_SNDFILE, DecoderKind::Sndfile},
-    {CAMEL_DECODER_DR_WAV, DecoderKind::DrWav},   {CAMEL_DECODER_MPG123, DecoderKind::Mpg123},
-    {CAMEL_DECODER_DR_MP3, DecoderKind::DrMp3},   {CAMEL_DECODER_DSD_NEXUS, DecoderKind::DsdNexus},
-    {CAMEL_DECODER_MINIMP3, DecoderKind::Minimp3}};
+    {CAMEL_DECODER_FFMPEG, DecoderKind::FFmpeg},     {CAMEL_DECODER_SYMPHONIA, DecoderKind::Symphonia},
+    {CAMEL_DECODER_DR_FLAC, DecoderKind::DrFlac},    {CAMEL_DECODER_SNDFILE, DecoderKind::Sndfile},
+    {CAMEL_DECODER_DR_WAV, DecoderKind::DrWav},      {CAMEL_DECODER_MPG123, DecoderKind::Mpg123},
+    {CAMEL_DECODER_DSD_NEXUS, DecoderKind::DsdNexus}};
 
 std::string decoderFor(uint32_t number) {
     for (const auto& [n, kind] : kBuiltinNumbers)
@@ -56,15 +55,14 @@ std::string decoderFor(uint32_t number) {
     throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
 }
 
-int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint64_t pathLength, void** outDecoder,
+int32_t openDecoderHost(void*, uint32_t kind, const uint8_t* path, uint64_t pathLength, void** outDecoder,
                         CamelSourceInfoV1* info) noexcept {
     if (!path || !pathLength || pathLength > std::numeric_limits<size_t>::max() || !outDecoder || !info)
         return CAMEL_DECODER_HOST_E_FORMAT;
     *outDecoder = nullptr;
     try {
         const std::string_view utf8(reinterpret_cast<const char*>(path), static_cast<size_t>(pathLength));
-        const auto* pcmBits = static_cast<const PcmBitsByFormat*>(context);
-        auto decoder = openDecoder(decoderFor(kind), std::filesystem::path(toWide(utf8)), pcmBits ? *pcmBits : PcmBitsByFormat{});
+        auto decoder = openDecoder(decoderFor(kind), std::filesystem::path(toWide(utf8)));
         const auto& source = decoder->info();
         auto handle = std::make_unique<DecoderHandle>();
         handle->decoder = std::move(decoder);
@@ -137,15 +135,9 @@ int32_t lengthDecoderHost(void*, void* opaque, uint64_t* totalFrames) noexcept {
 
 } // namespace
 
-CamelDecoderHostV1 makeDecoderHostV1(const PcmBitsByFormat* pcmBits) {
-    return {sizeof(CamelDecoderHostV1),
-            CAMEL_ENGINE_ABI_VERSION,
-            const_cast<PcmBitsByFormat*>(pcmBits),
-            openDecoderHost,
-            readDecoderHost,
-            seekDecoderHost,
-            closeDecoderHost,
-            lengthDecoderHost};
+CamelDecoderHostV1 makeDecoderHostV1() {
+    return {sizeof(CamelDecoderHostV1), CAMEL_ENGINE_ABI_VERSION, nullptr, openDecoderHost, readDecoderHost, seekDecoderHost,
+            closeDecoderHost,           lengthDecoderHost};
 }
 
 uint32_t abiDecoder(std::string_view decoder) {

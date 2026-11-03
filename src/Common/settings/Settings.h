@@ -112,12 +112,9 @@ template <class T> struct PerFormat {
     bool operator==(const PerFormat&) const = default;
 };
 using DecoderByFormat = PerFormat<audio::DecoderKind>;
-using PcmBitsByFormat = PerFormat<uint32_t>; // lossy formats only: 16 or 24
 
 // Precondition: audio::decodersFor(format) is not empty.
 audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format);
-// The PCM depth a lossy format is decoded to; 24 unless set (docs/Plan.md §2).
-uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format);
 
 // What closing the main window does (docs/Plan.md §8.4).
 enum class CloseAction : uint8_t { Tray, Exit };
@@ -251,7 +248,6 @@ struct Settings {
 
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
-    PcmBitsByFormat pcmBitsByFormat;
     // "Convert when unsupported" (docs/Plan.md §2, §5.3): resample, downmix, reduce depth or decode DTS instead of
     // skipping. On by default; the signal path then shows the conversion, and turning it off plays bit-perfect only.
     bool convertWhenUnsupported = true;

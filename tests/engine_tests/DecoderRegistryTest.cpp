@@ -45,9 +45,9 @@ const char* registerAlias() {
 
 std::vector<int32_t> decodeAll(IDecoder& d) {
     std::vector<int32_t> out;
-    std::vector<int32_t> chunk(4096 * d.info().channels);
+    std::vector<int32_t> chunk(size_t(4096) * d.info().channels);
     while (const size_t frames = d.read(chunk.data(), 4096))
-        out.insert(out.end(), chunk.begin(), chunk.begin() + frames * d.info().channels);
+        out.insert(out.end(), chunk.begin(), chunk.begin() + ptrdiff_t(frames * d.info().channels));
     return out;
 }
 
@@ -58,8 +58,9 @@ TEST(DecoderRegistry, BuiltInIdsOrderAndDefaultsAreUnchanged) {
     EXPECT_EQ(ids("alac"), (std::vector<std::string>{"ffmpeg", "symphonia"}));
     for (const char* format : {"wav", "aiff"})
         EXPECT_EQ(ids(format), (std::vector<std::string>{"ffmpeg", "symphonia", "sndfile", "drwav"})) << format;
-    EXPECT_EQ(ids("aac"), (std::vector<std::string>{"ffmpeg", "symphonia"}));
-    EXPECT_EQ(ids("mp3"), (std::vector<std::string>{"ffmpeg", "symphonia", "mpg123", "drmp3", "minimp3"}));
+    EXPECT_EQ(ids("aac"), (std::vector<std::string>{"symphonia"}));
+    EXPECT_EQ(ids("mp3"), (std::vector<std::string>{"mpg123"}));
+    EXPECT_EQ(ids("adpcm"), (std::vector<std::string>{"sndfile"}));
     EXPECT_EQ(ids("dsd"), (std::vector<std::string>{"dsdnexus"}));
     EXPECT_TRUE(ids("opus").empty());
     EXPECT_EQ(defaultDecoder(AudioFormat::Flac), DecoderKind::Sndfile);
@@ -102,7 +103,8 @@ TEST(DecoderRegistry, AbiNumbersKeepBuiltInsAndNumberRegisteredDecoders) {
     EXPECT_EQ(abiDecoder("ffmpeg"), CAMEL_DECODER_FFMPEG);
     EXPECT_EQ(abiDecoder("sndfile"), CAMEL_DECODER_SNDFILE);
     EXPECT_EQ(abiDecoder("dsdnexus"), CAMEL_DECODER_DSD_NEXUS);
-    EXPECT_EQ(abiDecoder("minimp3"), CAMEL_DECODER_MINIMP3);
+    EXPECT_EQ(abiDecoder("mpg123"), CAMEL_DECODER_MPG123);
+    EXPECT_EQ(abiDecoder("minimp3"), 0u); // removed
     EXPECT_EQ(abiDecoder("no-such-decoder"), 0u);
     const char* alias = registerAlias();
     EXPECT_EQ(abiDecoder(alias), CAMEL_DECODER_REGISTERED_BASE + *decoderRegistry().indexOf(alias));

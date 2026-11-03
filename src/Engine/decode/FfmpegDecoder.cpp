@@ -8,7 +8,6 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/log.h>
 }
@@ -51,14 +50,10 @@ std::string avErr(int e) {
 
 class FfmpegDecoder final : public IDecoder {
 public:
-    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start, bool fastSeek) {
+    FfmpegDecoder(const std::filesystem::path& path, uint32_t lossyBits) {
         routeAvLog();
         std::string utf8 = toUtf8(std::filesystem::absolute(path).wstring());
-        AVDictionary* options = nullptr;
-        if (start) av_dict_set_int(&options, "skip_initial_bytes", int64_t(start), 0);
-        if (fastSeek) av_dict_set(&options, "fflags", "fastseek", 0); // read when the file opens, as the Xing table is
-        int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, &options);
-        av_dict_free(&options);
+        int e = avformat_open_input(&fmt_, utf8.c_str(), nullptr, nullptr);
         if (e < 0) throw Error(ErrorCode::FileOpen, "avformat_open_input: " + avErr(e));
         e = avformat_find_stream_info(fmt_, nullptr);
         if (e < 0) fail(ErrorCode::UnsupportedStream, "avformat_find_stream_info: " + avErr(e));
@@ -66,15 +61,6 @@ public:
         stream_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
         if (stream_ < 0 || !codec) fail(ErrorCode::UnsupportedStream, "no audio stream");
         AVStream* st = fmt_->streams[stream_];
-        // The library's length, measured or estimated, is the one to show, and scales a fast seek better than FFmpeg's
-        // estimate from the first frames.
-        if (fastSeek && st->codecpar->sample_rate > 0)
-            if (const auto known = libraryLength(path))
-                st->duration = av_rescale_q(int64_t(known->frames), AVRational{1, st->codecpar->sample_rate}, st->time_base);
-        // The float decoders keep full precision until the single quantization below.
-        if (st->codecpar->codec_id == AV_CODEC_ID_MP3) codec = avcodec_find_decoder_by_name("mp3float");
-        if (st->codecpar->codec_id == AV_CODEC_ID_AAC) codec = avcodec_find_decoder_by_name("aac");
-        if (!codec) fail(ErrorCode::UnsupportedStream, "no float decoder for this stream");
         ctx_ = avcodec_alloc_context3(codec);
         avcodec_parameters_to_context(ctx_, st->codecpar);
         e = avcodec_open2(ctx_, codec, nullptr);
@@ -85,11 +71,8 @@ public:
         info_.channels = uint32_t(ctx_->ch_layout.nb_channels);
         info_.bitsPerSample = uint32_t(ctx_->bits_per_raw_sample ? ctx_->bits_per_raw_sample : st->codecpar->bits_per_raw_sample);
         if (!info_.bitsPerSample) info_.bitsPerSample = uint32_t(av_get_bits_per_sample(ctx_->codec_id)); // 16-bit PCM
-        // ADPCM's 4-bit codes decode to 16-bit samples.
-        if (ctx_->codec_id == AV_CODEC_ID_ADPCM_IMA_WAV || ctx_->codec_id == AV_CODEC_ID_ADPCM_MS) info_.bitsPerSample = 16;
         const AVSampleFormat packed = av_get_packed_sample_fmt(ctx_->sample_fmt);
-        lossy_ = (packed == AV_SAMPLE_FMT_FLT || packed == AV_SAMPLE_FMT_DBL) &&
-                 (ctx_->codec_id == AV_CODEC_ID_MP3 || ctx_->codec_id == AV_CODEC_ID_AAC || ctx_->codec_id == AV_CODEC_ID_DTS);
+        lossy_ = (packed == AV_SAMPLE_FMT_FLT || packed == AV_SAMPLE_FMT_DBL) && ctx_->codec_id == AV_CODEC_ID_DTS;
         if (lossy_) info_.bitsPerSample = lossyBits;
         if (st->duration > 0)
             info_.totalFrames = uint64_t(av_rescale_q(st->duration, st->time_base, AVRational{1, ctx_->sample_rate}));
@@ -263,8 +246,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start, bool fastSeek) {
-    return std::make_unique<FfmpegDecoder>(path, lossyBits, start, fastSeek);
+std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits) {
+    return std::make_unique<FfmpegDecoder>(path, lossyBits);
 }
 
 } // namespace camel::audio

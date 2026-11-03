@@ -89,16 +89,15 @@ struct Builtins {
             r.add({decoderId(kind), decoderName(kind), std::move(formats), kind, {}});
         };
         // Registration order is the order settings list decoders in.
-        // DTS-CD is read by the WAVE decoders. Symphonia 0.5.5 accumulates rounding errors in IMA ADPCM, so it is left
-        // out of ADPCM.
-        builtin(DecoderKind::FFmpeg, {"flac", "alac", "wav", "aiff", "aac", "mp3", "dts", "adpcm"});
-        builtin(DecoderKind::Symphonia, {"flac", "alac", "wav", "aiff", "aac", "mp3", "dts"});
+        // DTS-CD is read by the WAVE decoders. AAC plays with Symphonia alone and ADPCM with libsndfile alone. MP3 plays
+        // with mpg123 alone, chosen from five MP3 decoders measured from a NAS: it alone measures an MP3's exact length
+        // while it plays, and seeks exactly once it has (docs/Plan.md §3.1).
+        builtin(DecoderKind::FFmpeg, {"flac", "alac", "wav", "aiff", "dts"});
+        builtin(DecoderKind::Symphonia, {"flac", "alac", "wav", "aiff", "aac", "dts"});
         builtin(DecoderKind::DrFlac, {"flac"});
         builtin(DecoderKind::Sndfile, {"flac", "wav", "aiff", "dts", "adpcm"});
-        builtin(DecoderKind::DrWav, {"wav", "aiff", "dts", "adpcm"});
+        builtin(DecoderKind::DrWav, {"wav", "aiff", "dts"});
         builtin(DecoderKind::Mpg123, {"mp3"});
-        builtin(DecoderKind::DrMp3, {"mp3"});
-        builtin(DecoderKind::Minimp3, {"mp3"});
         builtin(DecoderKind::DsdNexus, {"dsd"});
         for (const char* format : {"flac", "wav", "aiff", "dts", "adpcm"}) r.setDefault(format, decoderId(DecoderKind::Sndfile));
         for (const char* format : {"alac", "aac"}) r.setDefault(format, decoderId(DecoderKind::Symphonia));

@@ -35,12 +35,11 @@ public:
         bool allowDsd = false; // DSD to PCM
     };
 
-    // Loads `path` with `decoder` for output `format`, positioned at `startFrame`; lossy files, including queued ones,
-    // decode to the depth `pcmBits` sets. `dsd` makes the stream native DSD or DoP. The Engine predecodes up to
-    // `predecodeSeconds` (within its memory limit). `gainDb` is the track's ReplayGain. Throws Error on failure.
+    // Loads `path` with `decoder` for output `format`, positioned at `startFrame`. `dsd` makes the stream native DSD or
+    // DoP. The Engine predecodes up to `predecodeSeconds` (within its memory limit). `gainDb` is the track's ReplayGain.
+    // Throws Error on failure.
     RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                const PcmBitsByFormat& pcmBits, Conversion conversion, DsdPath dsd = DsdPath::None,
-                uint32_t predecodeSeconds = 10, double gainDb = 0.0);
+                Conversion conversion, DsdPath dsd = DsdPath::None, uint32_t predecodeSeconds = 10, double gainDb = 0.0);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;
@@ -96,7 +95,6 @@ private:
     CamelCommandStampV1 nextCommand();
 
     CamelEngine* engine_ = nullptr;
-    PcmBitsByFormat pcmBits_; // read by the decoder host; declared before host_, which points to it
     CamelDecoderHostV1 host_{};
     CamelCommandStampV1 command_{};
     bool raw_ = false;           // DoP or native DSD

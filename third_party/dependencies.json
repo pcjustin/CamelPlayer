@@ -230,25 +230,6 @@
                        "notice":  "licenses/native/mpg123.txt"
                    },
                    {
-                       "name":  "minimp3",
-                       "version":  "2026-07-27",
-                       "license":  "CC0-1.0",
-                       "role":  "runtime or verification",
-                       "port_source":  "NOASSERTION",
-                       "sources":  [
-                                       {
-                                           "location":  "git+https://github.com/lieff/minimp3@ea99364f61c14656440e8d77e9c233ccf3124633",
-                                           "checksums":  [
-                                                             {
-                                                                 "algorithm":  "SHA512",
-                                                                 "checksumValue":  "f05e513ccc2b4111609800676efe618addf7cbb82a91e69c8a6e5599e5b49cfcb225050b33eec39211eac35e2060b94a48d15af4db72546cacc1dfc916362dbc"
-                                                             }
-                                                         ]
-                                       }
-                                   ],
-                       "notice":  "licenses/native/minimp3.txt"
-                   },
-                   {
                        "name":  "mp3lame",
                        "version":  "3.100#17",
                        "license":  "LGPL-2.0-only",
@@ -580,13 +561,6 @@
                      "license":  "MPL-2.0",
                      "source_archive":  "https://static.crates.io/crates/symphonia-bundle-flac/symphonia-bundle-flac-0.6.1.crate",
                      "notice":  "licenses/rust/symphonia-bundle-flac-0.6.1/"
-                 },
-                 {
-                     "name":  "symphonia-bundle-mp3",
-                     "version":  "0.6.1",
-                     "license":  "MPL-2.0",
-                     "source_archive":  "https://static.crates.io/crates/symphonia-bundle-mp3/symphonia-bundle-mp3-0.6.1.crate",
-                     "notice":  "licenses/rust/symphonia-bundle-mp3-0.6.1/"
                  },
                  {
                      "name":  "symphonia-codec-aac",

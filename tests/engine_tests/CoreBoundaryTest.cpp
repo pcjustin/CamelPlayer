@@ -8,6 +8,8 @@
 #include <fstream>
 #include <limits>
 #include <numeric>
+#include <string>
+#include <tuple>
 
 #include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/FormatRule.h"
@@ -239,18 +241,10 @@ TEST(SettingsMigration, ConversionTurnsOnOnceForEarlierSettings) {
     EXPECT_FALSE(fromJson(R"({"schema":3,"convertWhenUnsupported":true,"convertUnsupported":false})").convertWhenUnsupported);
 }
 
-TEST(SettingsBoundary, LossyOutputDepthDefaultsTo24AndAccepts16) {
-    EXPECT_EQ(pcmBitsFor(PcmBitsByFormat{}, AudioFormat::Aac), 24u);
-    EXPECT_EQ(pcmBitsFor(PcmBitsByFormat{}, AudioFormat::Mp3), 24u);
-    const auto settings = fromJson(R"({"schema":3,"pcmBitsByFormat":{"aac":16,"mp3":24,"flac":16,"wav":24,"ogg":16}})");
-    PcmBitsByFormat expected;
-    expected[AudioFormat::Aac] = 16;
-    expected[AudioFormat::Mp3] = 24;
-    EXPECT_EQ(settings.pcmBitsByFormat, expected);
-    EXPECT_EQ(fromJson(toJson(settings)).pcmBitsByFormat, expected);
-    for (const char* json : {R"({"pcmBitsByFormat":{"aac":20}})", R"({"pcmBitsByFormat":{"mp3":"16"}})",
-                             R"({"pcmBitsByFormat":{"mp3":16.5}})", R"({"pcmBitsByFormat":[16]})"})
-        EXPECT_EQ(fromJson(json).pcmBitsByFormat, PcmBitsByFormat{}) << json;
+// AAC and MP3 decode to 24-bit; the 16-bit choice of earlier versions is dropped when settings are saved again.
+TEST(SettingsMigration, TheLossyOutputDepthChoiceIsDropped) {
+    const auto json = toJson(fromJson(R"({"schema":3,"pcmBitsByFormat":{"aac":16,"mp3":16}})"));
+    EXPECT_EQ(json.find("pcmBitsByFormat"), std::string::npos) << json;
 }
 
 TEST(SettingsBoundary, DecoderChoicesKeepOnlyIntegratedPairs) {
@@ -261,6 +255,19 @@ TEST(SettingsBoundary, DecoderChoicesKeepOnlyIntegratedPairs) {
     EXPECT_EQ(settings.decoderByFormat, expected);
     EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":{"flac":"mpg123"}})").decoderByFormat, DecoderByFormat{});
     EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":["flac"]})").decoderByFormat, DecoderByFormat{});
+    // MP3, AAC and ADPCM play with one decoder each: a choice made when there were others plays with it.
+    const std::tuple<const char*, const char*, DecoderKind> alone[] = {
+        {"mp3", "ffmpeg", DecoderKind::Mpg123},    {"mp3", "symphonia", DecoderKind::Mpg123},
+        {"mp3", "drmp3", DecoderKind::Mpg123},     {"mp3", "minimp3", DecoderKind::Mpg123},
+        {"aac", "ffmpeg", DecoderKind::Symphonia}, {"adpcm", "ffmpeg", DecoderKind::Sndfile},
+        {"adpcm", "drwav", DecoderKind::Sndfile}};
+    for (const auto& [format, decoder, kept] : alone) {
+        const auto chosen =
+            fromJson(std::string(R"({"schema":3,"decoderByFormat":{")") + format + R"(":")" + decoder + R"("}})").decoderByFormat;
+        AudioFormat parsed{};
+        ASSERT_TRUE(formatFromId(format, parsed));
+        EXPECT_EQ(decoderFor(chosen, parsed), kept) << format << " " << decoder;
+    }
 }
 
 TEST(SettingsMigration, RejectsFutureSchemaVersions) {
@@ -582,7 +589,7 @@ TEST(FlacStreamInfoBoundary, MissingAndTruncatedFilesAreRejectedWithoutMutatingO
     const auto file = caseFile(".flac");
     const auto valid = streamInfo();
     for (size_t size : {0u, 3u, 9u, 10u, 41u}) {
-        writeBytes(file, {valid.begin(), valid.begin() + size});
+        writeBytes(file, {valid.begin(), valid.begin() + ptrdiff_t(size)});
         EXPECT_FALSE(readFlacStreamInfo(file, result));
         EXPECT_EQ(result.sampleRate, 123u);
         EXPECT_EQ(result.totalFrames, 42u);

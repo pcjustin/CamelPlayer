@@ -22,7 +22,7 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 |---|---|---|---|---|---|
 | FFmpeg (avcodec, avformat, swresample) | `ffmpeg` | 9.0.2#1 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/ffmpeg.txt) |
 | libsndfile | `libsndfile` | 1.2.2#2 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/libsndfile.txt) |
-| dr_flac / dr_wav / dr_mp3 | `drlibs` | 2026-10-30 | Unlicense OR MIT-0 | linked | [Notice](third_party/licenses/native/drlibs.txt) |
+| dr_flac / dr_wav | `drlibs` | 2026-10-30 | Unlicense OR MIT-0 | linked | [Notice](third_party/licenses/native/drlibs.txt) |
 | libFLAC | `libflac` | 1.5.0 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libflac.txt) |
 | libogg | `libogg` | 1.3.6#1 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libogg.txt) |
 | libvorbis | `libvorbis` | 1.3.7#4 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libvorbis.txt) |
@@ -32,7 +32,6 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 | nlohmann-json | `nlohmann-json` | 3.12.0#2 | MIT | linked | [Notice](third_party/licenses/native/nlohmann-json.txt) |
 | GoogleTest | `gtest` | 1.18.0 | BSD-3-Clause | tests only | [Notice](third_party/licenses/native/gtest.txt) |
 | mpg123 | `mpg123` | 1.33.7#1 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/mpg123.txt) |
-| minimp3 | `minimp3` | 2026-07-27 | CC0-1.0 | linked | [Notice](third_party/licenses/native/minimp3.txt) |
 | LAME | `mp3lame` | 3.100#17 | LGPL-2.0-only | tests only | [Notice](third_party/licenses/native/mp3lame.txt) |
 | libsoxr | `soxr` | 0.1.3#9 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/soxr.txt) |
 | libebur128 | `libebur128` | 1.2.6#3 | MIT | linked | [Notice](third_party/licenses/native/libebur128.txt) |
@@ -69,7 +68,6 @@ Locked in `rust/Cargo.lock` and linked into CamelPlayer.exe through the Rust Eng
 | `smallvec` | 1.16.4 | MIT OR Apache-2.0 | [Notices](third_party/licenses/rust/smallvec-1.16.4/) |
 | `symphonia` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-0.6.1/) |
 | `symphonia-bundle-flac` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-bundle-flac-0.6.1/) |
-| `symphonia-bundle-mp3` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-bundle-mp3-0.6.1/) |
 | `symphonia-codec-aac` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-aac-0.6.1/) |
 | `symphonia-codec-alac` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-alac-0.6.1/) |
 | `symphonia-codec-pcm` | 0.6.1 | MPL-2.0 | [Notices](third_party/licenses/rust/symphonia-codec-pcm-0.6.1/) |

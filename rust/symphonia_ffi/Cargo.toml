@@ -14,4 +14,4 @@ crate-type = ["staticlib"]
 
 [dependencies]
 camel_audio_engine = { path = "../audio_engine" }
-symphonia = { version = "=0.6.1", default-features = false, features = ["flac", "wav", "aiff", "pcm", "isomp4", "alac", "aac", "mp3", "id3v1", "id3v2"] }
+symphonia = { version = "=0.6.1", default-features = false, features = ["flac", "wav", "aiff", "pcm", "isomp4", "alac", "aac", "id3v1", "id3v2"] }

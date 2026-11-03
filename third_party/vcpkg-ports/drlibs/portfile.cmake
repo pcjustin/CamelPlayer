@@ -10,5 +10,5 @@ vcpkg_from_github(
     HEAD_REF master
 )
 
-file(INSTALL "${SOURCE_PATH}/dr_flac.h" "${SOURCE_PATH}/dr_mp3.h" "${SOURCE_PATH}/dr_wav.h" DESTINATION "${CURRENT_PACKAGES_DIR}/include")
+file(INSTALL "${SOURCE_PATH}/dr_flac.h" "${SOURCE_PATH}/dr_wav.h" DESTINATION "${CURRENT_PACKAGES_DIR}/include")
 vcpkg_install_copyright(FILE_LIST "${SOURCE_PATH}/LICENSE")

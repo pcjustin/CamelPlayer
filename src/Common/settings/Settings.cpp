@@ -255,10 +255,6 @@ audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat
     return choices[format].value_or(audio::defaultDecoder(format));
 }
 
-uint32_t pcmBitsFor(const PcmBitsByFormat& choices, audio::AudioFormat format) {
-    return choices[format].value_or(24);
-}
-
 std::string toJson(const Settings& s) {
     json j;
     j["schema"] = Settings::kSchemaVersion;
@@ -267,10 +263,6 @@ std::string toJson(const Settings& s) {
     for (const auto format : audio::kAllFormats)
         if (const auto decoder = s.decoderByFormat[format]) decoders[audio::formatId(format)] = audio::decoderId(*decoder);
     j["decoderByFormat"] = decoders;
-    json pcmBits = json::object();
-    for (const auto format : audio::kAllFormats)
-        if (const auto bits = s.pcmBitsByFormat[format]) pcmBits[audio::formatId(format)] = *bits;
-    j["pcmBitsByFormat"] = pcmBits;
     // A new key: it was "convertWhenUnsupported" while off by default, which is ignored so that conversion starts on
     // for everyone once; versions that know only the old key keep reading theirs.
     j["convertUnsupported"] = s.convertWhenUnsupported;
@@ -389,13 +381,8 @@ Settings fromJson(const std::string& text) {
         for (const auto& [formatId, decoderId] : j["decoderByFormat"].items())
             if (decoderId.is_string()) choose(formatId, decoderId.get<std::string>());
     }
-    if (j.contains("pcmBitsByFormat") && j["pcmBitsByFormat"].is_object())
-        for (const auto& [formatId, bits] : j["pcmBitsByFormat"].items()) {
-            audio::AudioFormat format{};
-            if (audio::formatFromId(formatId, format) && audio::isLossy(format) && bits.is_number_integer() &&
-                (bits.get<int64_t>() == 16 || bits.get<int64_t>() == 24))
-                s.pcmBitsByFormat[format] = uint32_t(bits.get<int64_t>());
-        }
+    // "pcmBitsByFormat", the 16- or 24-bit choice for AAC and MP3 of earlier versions, is no longer read: a lossy stream
+    // decodes to 24-bit PCM.
     s.convertWhenUnsupported = boolean(j, "convertUnsupported", true);
     s.resampleQuality = resampleQualityFromId(str(j, "resampleQuality", "high"));
     s.convertDsdWhenUnsupported = boolean(j, "convertDsdWhenUnsupported", false);
@@ -490,15 +477,17 @@ Settings fromJson(const std::string& text) {
         s.crossfade.seconds = std::round(seconds * 2.0) / 2.0;
     }
     if (j.contains("dspOrder") && j["dspOrder"].is_array() && j["dspOrder"].size() == 3) {
-        audio::DspOrder order{};
-        for (size_t i = 0; i < 3; ++i) {
+        audio::DspOrder order = audio::kDefaultDspOrder;
+        bool known = true;
+        for (size_t i = 0; i < 3 && known; ++i) {
             const auto& item = j["dspOrder"][i];
             const auto id = std::ranges::find(kDspNodeIds, item.is_string() ? item.get<std::string>() : std::string());
-            order[i] = id == std::end(kDspNodeIds) ? audio::DspNode{} : audio::DspNode(id - std::begin(kDspNodeIds) + 1);
+            known = id != std::end(kDspNodeIds);
+            if (known) order[i] = audio::DspNode(id - std::begin(kDspNodeIds) + 1);
         }
         auto sorted = order;
         std::ranges::sort(sorted);
-        if (sorted == audio::kDefaultDspOrder) s.dspOrder = order;
+        if (known && sorted == audio::kDefaultDspOrder) s.dspOrder = order;
     }
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) {

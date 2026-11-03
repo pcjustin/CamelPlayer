@@ -30,12 +30,8 @@ const char* decoderName(DecoderKind k) {
         return "dr_wav";
     case DecoderKind::Mpg123:
         return "mpg123";
-    case DecoderKind::DrMp3:
-        return "dr_mp3";
     case DecoderKind::DsdNexus:
         return "DSD Nexus";
-    case DecoderKind::Minimp3:
-        return "minimp3";
     }
     return "?";
 }
@@ -54,12 +50,8 @@ const char* decoderId(DecoderKind k) {
         return "drwav";
     case DecoderKind::Mpg123:
         return "mpg123";
-    case DecoderKind::DrMp3:
-        return "drmp3";
     case DecoderKind::DsdNexus:
         return "dsdnexus";
-    case DecoderKind::Minimp3:
-        return "minimp3";
     }
     return "?";
 }
@@ -141,31 +133,25 @@ private:
     uint64_t position_ = 0;
 };
 
-// Lossy decoders need a few frames of warm-up after a seek (MP3 bit reservoir, AAC MDCT overlap), and some land beside
-// the target when they also trim encoder delay. This seeks early, or reopens the file, and decodes and discards up to
-// the target, so a seek matches the linear decode exactly (docs/Plan.md §16.3).
-std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits, uint64_t start = 0,
-                                      bool fastSeek = false);
+// Lossy decoders need a few frames of warm-up after a seek (the AAC MDCT overlap), and some land beside the target when
+// they also trim encoder delay. This seeks early, or reopens the file, and decodes and discards up to the target, so a
+// seek matches the linear decode exactly (docs/Plan.md §16.3).
+std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits);
 
 class LossySeek final : public IDecoder {
 public:
     enum class Mode : uint8_t { Preroll, Reopen };
-    static constexpr uint64_t kPreroll = 4608; // four MP3 frames, four and a half AAC frames
+    static constexpr uint64_t kPreroll = 4608; // four and a half AAC frames
 
     // Without `lengthKnown` the decoder's length is only an estimate, as a header can count frames the decoder does not
     // decode: it is reported as unknown (0), since the Engine treats a nonzero length as exact, and becomes the frames
-    // decoded once a read reaches the end. An MP3 decoder that cannot estimate gets the probe's estimate.
-    LossySeek(DecoderKind kind, std::filesystem::path path, AudioFormat format, uint32_t lossyBits, Mode mode, bool lengthKnown,
-              uint64_t start = 0)
-        : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), start_(start),
-          inner_(openAdapter(kind_, path_, lossyBits_, start_, mode == Mode::Preroll)), info_(inner_->info()), mode_(mode) {
+    // decoded once a read reaches the end.
+    LossySeek(DecoderKind kind, std::filesystem::path path, uint32_t lossyBits, Mode mode, bool lengthKnown)
+        : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), inner_(openAdapter(kind_, path_, lossyBits_)),
+          info_(inner_->info()), mode_(mode) {
         if (lengthKnown) return;
         estimate_ = info_.totalFrames;
         info_.totalFrames = 0;
-        if (!estimate_ && format == AudioFormat::Mp3) {
-            bool estimated = true;
-            estimate_ = probeMp3Info(path_, estimated).totalFrames;
-        }
     }
     const SourceInfo& info() const override { return info_; }
     uint64_t estimatedFrames() const override { return estimate_; }
@@ -177,7 +163,7 @@ public:
         if (start)
             inner_->seek(start);
         else
-            inner_ = openAdapter(kind_, path_, lossyBits_, start_, mode_ == Mode::Preroll);
+            inner_ = openAdapter(kind_, path_, lossyBits_);
         std::vector<int32_t> scratch(size_t(4096) * info_.channels);
         for (uint64_t left = frame - start; left;) {
             const size_t got = inner_->read(scratch.data(), size_t(std::min<uint64_t>(left, 4096)));
@@ -197,7 +183,6 @@ private:
     DecoderKind kind_;
     std::filesystem::path path_;
     uint32_t lossyBits_;
-    uint64_t start_;
     std::unique_ptr<IDecoder> inner_;
     SourceInfo info_;
     Mode mode_;
@@ -247,11 +232,10 @@ size_t IDecoder::readFloat(float*, size_t) {
 
 namespace {
 
-std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits, uint64_t start,
-                                      bool fastSeek) {
+std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits) {
     switch (kind) {
     case DecoderKind::FFmpeg:
-        return openFfmpeg(path, lossyBits, start, fastSeek);
+        return openFfmpeg(path, lossyBits);
     case DecoderKind::Symphonia:
         return openSymphonia(path, lossyBits);
     case DecoderKind::DrFlac:
@@ -262,12 +246,8 @@ std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::p
         return openDrWav(path);
     case DecoderKind::Mpg123:
         return openMpg123(path, lossyBits);
-    case DecoderKind::DrMp3:
-        return openDrMp3(path, lossyBits, start);
     case DecoderKind::DsdNexus:
         return openDsdNexus(path);
-    case DecoderKind::Minimp3:
-        return openMinimp3(path, lossyBits, start);
     }
     throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
 }
@@ -280,37 +260,21 @@ namespace {
 std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::path& path, AudioFormat format,
                                       uint32_t lossyBits) {
     if (format == AudioFormat::Dsd) return openAdapter(kind, path, 0); // raw DSD, not PCM
-    // ADPCM decodes to exact 16-bit samples. FFmpeg can land beside a target in the last block, so it decodes from the
-    // start.
-    if (format == AudioFormat::Adpcm)
-        return kind == DecoderKind::FFmpeg
-                   ? std::make_unique<LossySeek>(kind, path, format, lossyBits, LossySeek::Mode::Reopen, true)
-                   : openAdapter(kind, path, lossyBits);
+    // ADPCM decodes to exact 16-bit samples, which libsndfile seeks exactly.
+    if (format == AudioFormat::Adpcm) return openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Dts) {
         // FFmpeg's WAVE reader finds the DTS stream and decodes it, but seeks only near the target, so it decodes from
         // the start; the other WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly.
         // One sample per word frame makes the data chunk's length exact.
         if (kind != DecoderKind::FFmpeg) return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits);
-        auto d = std::make_unique<LossySeek>(kind, path, format, lossyBits, LossySeek::Mode::Reopen, true);
+        auto d = std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Reopen, true);
         if (!d->readsFloat()) throw Error(ErrorCode::UnsupportedStream, "FFmpeg did not find the DTS stream");
         return d;
     }
     std::unique_ptr<IDecoder> d;
-    // FFmpeg, dr_mp3 and minimp3 find an MP3's LAME frame, which declares the encoder delay, only where they start
-    // reading; a second ID3 tag, padding or other bytes before the first frame would hide it.
-    const bool startAtFrame =
-        format == AudioFormat::Mp3 && (kind == DecoderKind::FFmpeg || kind == DecoderKind::DrMp3 || kind == DecoderKind::Minimp3);
-    const uint64_t start = startAtFrame ? mpegAudioStart(path) : 0;
-    // mpg123 seeks exactly by itself; Symphonia outside MP3 lands on the target after warm-up; FFmpeg, Symphonia,
-    // dr_mp3 and minimp3 seek an MP3 at once, near the target, and warm up the same way; otherwise FFmpeg can land
-    // beside it when it trims encoder delay, so it decodes from the start. Only mpg123 measures an MP3's length; the
-    // others' can differ from what they decode, even when a header declares it.
-    const bool preroll = kind == DecoderKind::Symphonia || kind == DecoderKind::Minimp3 || kind == DecoderKind::DrMp3 ||
-                         (kind == DecoderKind::FFmpeg && format == AudioFormat::Mp3);
+    // mpg123 seeks an MP3 exactly by itself; Symphonia lands on an AAC target after warm-up.
     if (isLossy(format) && kind != DecoderKind::Mpg123)
-        d = std::make_unique<LossySeek>(kind, path, format, lossyBits,
-                                        preroll ? LossySeek::Mode::Preroll : LossySeek::Mode::Reopen,
-                                        format != AudioFormat::Mp3 && lossyLengthDeclared(path), start);
+        d = std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Preroll, lossyLengthDeclared(path));
     else
         d = openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Aac && kind == DecoderKind::Symphonia)
@@ -335,8 +299,9 @@ void registerBuiltinOpeners() {
 
 } // namespace
 
-std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path,
-                                      const PcmBitsByFormat& pcmBits) {
+std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path) {
+    // A lossy stream has no source depth; it decodes to 24-bit PCM (docs/Plan.md §3.1).
+    constexpr uint32_t kLossyBits = 24;
     registerBuiltinOpeners();
     const AudioFormat format = probeFormat(path);
     const std::string_view id = formatId(format);
@@ -344,7 +309,7 @@ std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::files
     if (!entry || !entry->open || std::find(entry->formats.begin(), entry->formats.end(), id) == entry->formats.end())
         throw Error(ErrorCode::UnsupportedStream,
                     (entry ? entry->name : std::string(decoder)) + " cannot decode " + formatName(format));
-    auto d = entry->open(path, id, format == AudioFormat::Dsd ? 0 : pcmBitsFor(pcmBits, format));
+    auto d = entry->open(path, id, format == AudioFormat::Dsd ? 0 : kLossyBits);
     if (format == AudioFormat::Dsd) return d;
     // The player supports 16/24-bit integer PCM sources only (docs/Plan.md §3.1).
     if (const auto bits = d->info().bitsPerSample; bits != 16 && bits != 24)
@@ -355,8 +320,8 @@ std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::files
     return d;
 }
 
-std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, const PcmBitsByFormat& pcmBits) {
-    return openDecoder(decoderId(kind), path, pcmBits);
+std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path) {
+    return openDecoder(decoderId(kind), path);
 }
 
 } // namespace camel::audio

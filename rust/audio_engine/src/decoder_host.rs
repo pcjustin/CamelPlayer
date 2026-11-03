@@ -12,9 +12,8 @@ pub const DECODER_DR_FLAC: u32 = 3;
 pub const DECODER_SNDFILE: u32 = 4;
 pub const DECODER_DR_WAV: u32 = 5;
 pub const DECODER_MPG123: u32 = 6;
-pub const DECODER_DR_MP3: u32 = 7;
+// 7 and 9 were dr_mp3 and minimp3, removed, and are not used again.
 pub const DECODER_DSD_NEXUS: u32 = 8;
-pub const DECODER_MINIMP3: u32 = 9;
 /// Numbers from here on select a decoder the host registered at runtime; the Engine passes them through.
 pub const DECODER_REGISTERED_BASE: u32 = 0x10000;
 
@@ -145,9 +144,7 @@ pub(crate) fn is_decoder_kind(decoder_kind: u32) -> bool {
             | DECODER_SNDFILE
             | DECODER_DR_WAV
             | DECODER_MPG123
-            | DECODER_DR_MP3
             | DECODER_DSD_NEXUS
-            | DECODER_MINIMP3
     ) || decoder_kind >= DECODER_REGISTERED_BASE
 }
 
@@ -463,8 +460,8 @@ mod tests {
 
     #[test]
     fn accepts_built_in_and_registered_decoder_numbers_only() {
-        for kind in DECODER_FFMPEG..=DECODER_MINIMP3 {
-            assert!(is_decoder_kind(kind), "{kind}");
+        for kind in DECODER_FFMPEG..=DECODER_DSD_NEXUS {
+            assert_eq!(is_decoder_kind(kind), kind != 7, "{kind}");
         }
         for kind in [
             DECODER_REGISTERED_BASE,
@@ -473,7 +470,7 @@ mod tests {
         ] {
             assert!(is_decoder_kind(kind), "{kind}");
         }
-        for kind in [0, DECODER_MINIMP3 + 1, DECODER_REGISTERED_BASE - 1] {
+        for kind in [0, 7, 9, DECODER_REGISTERED_BASE - 1] {
             assert!(!is_decoder_kind(kind), "{kind}");
         }
     }

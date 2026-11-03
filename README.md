@@ -82,11 +82,11 @@ CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Settin
 | --- | --- | --- |
 | FLAC | libsndfile, FFmpeg, Symphonia, dr_flac | Complete decodes verify the STREAMINFO MD5. |
 | WAV, AIFF | libsndfile, FFmpeg, Symphonia, dr_wav | |
-| ADPCM WAV (IMA, Microsoft) | libsndfile, FFmpeg, dr_wav | A lossy source decoded to exact 16-bit PCM. Symphonia 0.5.5 accumulates rounding errors in IMA ADPCM, so it is not offered. |
+| ADPCM WAV (IMA, Microsoft) | libsndfile | A lossy source decoded to exact 16-bit PCM. |
 | DTS-CD WAV | FFmpeg's DTS decoder | The decoder chosen for WAV reads the bitstream, which none of the others can decode. Played and downmixed only when conversion is allowed. |
 | ALAC | Symphonia, FFmpeg | |
-| AAC-LC | Symphonia, FFmpeg | Decoded to 24-bit PCM (16-bit as an option) with encoder delay and padding trimmed. The sound of an MP4 video plays as a track. |
-| MP3 | mpg123, FFmpeg, Symphonia, dr_mp3, minimp3 | As AAC. A file without a Xing or Info header is listed with an estimate until it first plays to its end; while it plays, the estimate becomes exact. |
+| AAC-LC | Symphonia | Decoded to 24-bit PCM with encoder delay and padding trimmed. The sound of an MP4 video plays as a track. |
+| MP3 | mpg123 | Decoded to 24-bit PCM with encoder delay and padding trimmed. A file without a Xing or Info header is listed with an estimate until it first plays to its end; while it plays, the estimate becomes exact. |
 | DSF, DSDIFF | DSD Nexus | Raw DSD; DST-compressed DSDIFF is not supported. |
 
 Files are recognized by their content, not their extension. Mono files are copied to both channels bit for bit, and only stereo output is produced; a surround file plays only when downmixing is allowed (ITU-R BS.775).

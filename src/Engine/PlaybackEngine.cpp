@@ -268,7 +268,7 @@ public:
         uint64_t total = 0;
         try {
             format_ = probeFormat(file);
-            const auto opened = openDecoder(chooseDecoder(*format_, decoder, settings_), file, settings_.pcmBitsByFormat);
+            const auto opened = openDecoder(chooseDecoder(*format_, decoder, settings_), file);
             source = opened->info();
             total = shownLength(*opened);
         } catch (const Error& e) {
@@ -376,15 +376,12 @@ public:
 
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
-        // A lossy file decodes to the configured depth, so changing it reopens the stream like a decoder change.
-        const bool lossyBitsChanged = format_ && isLossy(*format_) &&
-                                      pcmBitsFor(settings_.pcmBitsByFormat, *format_) != pcmBitsFor(s.pcmBitsByFormat, *format_);
         // A conversion setting reopens the stream only when the path it would choose differs.
         const bool conversionChanged =
             (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality ||
              settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported) &&
             active_ && !outputChanged && conversionPathChanges(s);
-        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || lossyBitsChanged || conversionChanged;
+        const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || conversionChanged;
         const bool dspChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
                                 settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder ||
                                 settings_.volume != s.volume;
@@ -439,7 +436,7 @@ public:
         try {
             next.format = probeFormat(file);
             next.decoder = chooseDecoder(next.format, requested, settings_);
-            const auto opened = openDecoder(next.decoder, file, settings_.pcmBitsByFormat);
+            const auto opened = openDecoder(next.decoder, file);
             next.source = opened->info();
             next.shown = shownLength(*opened);
             lossy = opened->readsFloat() || isLossy(next.format);
@@ -781,7 +778,7 @@ private:
             format_ = probeFormat(file_);
             stages_[0] = measure::now();
             decoder = chooseDecoder(*format_, fileDecoder_, settings_);
-            dec = openDecoder(decoder, file_, settings_.pcmBitsByFormat);
+            dec = openDecoder(decoder, file_);
             stages_[1] = measure::now();
         } catch (const Error& e) {
             {
@@ -848,8 +845,8 @@ private:
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         stages_[3] = measure::now();
         try {
-            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, settings_.pcmBitsByFormat, conversion(),
-                                                  plan_.dsd, predecodeSeconds(), plan_.gainDb);
+            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, conversion(), plan_.dsd, predecodeSeconds(),
+                                                  plan_.gainDb);
             rust_->setDsp(chainFor(plan_));
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;

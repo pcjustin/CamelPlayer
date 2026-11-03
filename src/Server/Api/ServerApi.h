@@ -47,7 +47,6 @@ private:
 struct SettingsDto {
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
-    PcmBitsByFormat pcmBitsByFormat;
     bool convertWhenUnsupported = true;
     ResampleQuality resampleQuality = ResampleQuality::High;
     bool convertDsdWhenUnsupported = false;

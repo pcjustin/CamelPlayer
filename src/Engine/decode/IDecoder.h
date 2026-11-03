@@ -13,7 +13,6 @@
 
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
-#include "Common/settings/Settings.h"
 
 namespace camel::audio {
 
@@ -40,17 +39,15 @@ public:
     virtual size_t readFloat(float* dst, size_t frames);
 };
 
-// Opens `path` with the chosen decoder. Lossy formats decode to the depth `pcmBits` sets for them (24 by default).
+// Opens `path` with the chosen decoder. Lossy formats decode to 24-bit PCM.
 // Throws Error (FileOpen / UnsupportedStream / DecodeFailed).
-std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, const PcmBitsByFormat& pcmBits = {});
+std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path);
 // The same for any decoder in decoderRegistry() by its ID (docs/Extension-points.md #1).
-std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path,
-                                      const PcmBitsByFormat& pcmBits = {});
+std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path);
 
 // The length, in frames, the library knows for an MP3: exact, as measured when it last played or declared by its
-// header, or `estimated` when it was scanned. It is the length every MP3 decoder shows until it knows better, and what
-// places a seek mpg123's scan has not reached yet, or another MP3 decoder's; only an exact one is taken as exact. Kept
-// for a few recent files.
+// header, or `estimated` when it was scanned. It is the length mpg123 shows until its scan measures it, and what places
+// a seek the scan has not reached yet; only an exact one is taken as exact. Kept for a few recent files.
 void rememberLibraryLength(const std::filesystem::path& path, uint64_t frames, bool estimated);
 
 } // namespace camel::audio

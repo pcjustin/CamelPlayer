@@ -170,10 +170,8 @@ private:
     winrt::fire_and_forget loadConvolution();
     void populateDeviceLists(const camel::server::DeviceCatalog& devices);
     void readSettingsFromUi(); // controls -> settings_
-    // One decoder selector per format that has integrated decoders.
-    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 7> decoderCombos();
-    // The output-depth selector of each lossy format.
-    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 2> pcmBitsCombos();
+    // One decoder selector per format with more than one integrated decoder.
+    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 4> decoderCombos();
     void settingsChanged();
     void updateBackendGroups();
     void refreshFromServer();

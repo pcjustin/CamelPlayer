@@ -597,7 +597,7 @@ TEST(ServerQueueCaptureTest, NaturalEndAdvancesAndSkipsTrackLocalFailures) {
         ASSERT_EQ(ids.size(), 3u);
         const auto deadline = std::chrono::steady_clock::now() + 20s;
         Snapshot s = server.snapshot();
-        while (!(s.queueEntryId == ids[2] && s.playback.state == PlaybackState::Stopped) &&
+        while ((s.queueEntryId != ids[2] || s.playback.state != PlaybackState::Stopped) &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(10ms);
             s = server.snapshot();
@@ -642,7 +642,7 @@ Snapshot playQueueToEnd(std::vector<TrackSource> sources, const std::filesystem:
     const auto ids = entryIds(server.snapshot());
     const auto deadline = std::chrono::steady_clock::now() + 30s;
     Snapshot s = server.snapshot();
-    while (!(s.queueEntryId == ids.back() && s.playback.state == PlaybackState::Stopped) &&
+    while ((s.queueEntryId != ids.back() || s.playback.state != PlaybackState::Stopped) &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(10ms);
         s = server.snapshot();
@@ -1007,7 +1007,7 @@ TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiv
         const auto at = text.find("\"position\":");
         return at == std::string::npos ? uint64_t(0) : std::stoull(text.substr(at + 11));
     };
-    ASSERT_TRUE(waitFor([&] { return saved() >= 48000u * 3; }, 8s));
+    ASSERT_TRUE(waitFor([&] { return saved() >= uint64_t(48000) * 3; }, 8s));
     EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
     send(command(CommandKind::Stop));
 }
@@ -1043,6 +1043,23 @@ TEST_F(LibraryPlaybackTest, AClearedQueueStaysEmptyInsteadOfReopeningTheLastFile
     server->waitIdle();
     EXPECT_TRUE(server->snapshot().queue.entries.empty());
     EXPECT_TRUE(server->snapshot().playback.pathUtf8.empty());
+}
+
+// An entry saved with a decoder since removed, such as dr_mp3 (6) or minimp3 (8), restores with the setting's decoder.
+TEST_F(LibraryPlaybackTest, AQueueSavedWithARemovedDecoderRestoresWithTheSetting) {
+    const auto a = testutil::generatedFile({"restore-removed-a", 48000, 16, 2, 0.3});
+    const auto b = testutil::generatedFile({"restore-removed-b", 48000, 16, 2, 0.3});
+    setUp({a, b});
+    send(queueReplace({TrackSource(track(a).pathUtf8(), {}, DecoderKind::DrFlac), track(b)}));
+    send(command(CommandKind::Stop));
+    server.reset();
+    store->write([](sqlite::Database& db) { db.exec("UPDATE queue SET decoder=6+2*(position>0)"); }).get();
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    server->waitIdle();
+    const auto s = server->snapshot();
+    ASSERT_EQ(s.queue.entries.size(), 2u);
+    for (const auto& entry : s.queue.entries) EXPECT_FALSE(entry.source.decoder());
 }
 
 TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLength) {
@@ -1183,7 +1200,7 @@ TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
     const auto pull = [&] {
         std::lock_guard lock(probe.renderMutex);
         if (!probe.source) return;
-        std::vector<uint8_t> bytes(4096 * probe.format.bytesPerFrame());
+        std::vector<uint8_t> bytes(size_t(4096) * probe.format.bytesPerFrame());
         const auto got = probe.source->render(bytes.data(), 4096);
         std::vector<int32_t> samples(got * probe.format.channels);
         unpackSamples(bytes.data(), samples.size(), 24, probe.format.type, samples.data());
@@ -1262,7 +1279,7 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
         {
             std::lock_guard lock(probe.renderMutex);
             if (probe.source) {
-                std::vector<uint8_t> bytes(480 * probe.format.bytesPerFrame());
+                std::vector<uint8_t> bytes(size_t(480) * probe.format.bytesPerFrame());
                 probe.source->render(bytes.data(), 480);
             }
         }
@@ -1291,7 +1308,7 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
         {
             std::lock_guard lock(probe.renderMutex);
             if (probe.source) {
-                std::vector<uint8_t> bytes(480 * probe.format.bytesPerFrame());
+                std::vector<uint8_t> bytes(size_t(480) * probe.format.bytesPerFrame());
                 probe.source->render(bytes.data(), 480);
             }
         }
@@ -1363,6 +1380,7 @@ TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
             return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
         });
         std::vector<TrackSource> sources;
+        sources.reserve(files.size());
         for (const auto& file : files) sources.emplace_back(toUtf8(file.wstring()));
         server.submit(queueReplace(sources));
         server.waitIdle();
@@ -1373,7 +1391,7 @@ TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
         server.submit(reorder);
         const auto deadline = std::chrono::steady_clock::now() + 30s;
         Snapshot s = server.snapshot();
-        while (!(s.queueEntryId == ids[2] && s.playback.state == PlaybackState::Stopped) &&
+        while ((s.queueEntryId != ids[2] || s.playback.state != PlaybackState::Stopped) &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(10ms);
             s = server.snapshot();
@@ -1407,7 +1425,7 @@ TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
         server.submit(seek);
         const auto deadline = std::chrono::steady_clock::now() + 30s;
         Snapshot s = server.snapshot();
-        while (!(s.queueEntryId == ids[1] && s.playback.state == PlaybackState::Stopped) &&
+        while ((s.queueEntryId != ids[1] || s.playback.state != PlaybackState::Stopped) &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(10ms);
             s = server.snapshot();
@@ -1417,7 +1435,7 @@ TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
     }
     EXPECT_EQ(opens.load(), 2); // the seek reopens; the next file then follows without another open
     const auto first = testaudio::referenceDecode(files[0]);
-    auto expected = std::vector<int32_t>(first.samples.begin() + 96000 * 3, first.samples.end());
+    auto expected = std::vector<int32_t>(first.samples.begin() + ptrdiff_t(96000) * 3, first.samples.end());
     const auto second = concatenatedReferences({files[1]});
     expected.insert(expected.end(), second.begin(), second.end());
     EXPECT_TRUE(capturedSamples(capture) == expected);

@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <thread>
 #include <utility>
@@ -38,11 +39,25 @@ struct ScanGate {
     bool stop = false;
 };
 
+// The length the library knows for an MP3 (IDecoder.h, rememberLibraryLength).
+struct LibraryLength {
+    uint64_t frames = 0;
+    bool estimated = false;
+};
+
 std::mutex libraryLengthsMutex;
 std::vector<std::pair<std::wstring, LibraryLength>> libraryLengths; // the latest last
 
 std::wstring libraryLengthKey(const std::filesystem::path& path) {
     return path.lexically_normal().wstring();
+}
+
+std::optional<LibraryLength> libraryLength(const std::filesystem::path& path) {
+    const std::wstring key = libraryLengthKey(path);
+    const std::scoped_lock lock(libraryLengthsMutex);
+    for (const auto& [stored, length] : std::views::reverse(libraryLengths))
+        if (_wcsicmp(stored.c_str(), key.c_str()) == 0) return length;
+    return std::nullopt;
 }
 
 // One libmpg123 stream of the file, which mpg123 sees from byte `start` on.
@@ -61,7 +76,7 @@ public:
             const bool id3v1 = size >= 128 && _fseeki64(file, size - 128, SEEK_SET) == 0 && std::fread(tag, 1, 3, file) == 3 &&
                                std::memcmp(tag, "TAG", 3) == 0;
             const int64_t end = size - (id3v1 ? 128 : 0);
-            audioEnd_ = end > int64_t(start_) ? uint64_t(end - int64_t(start_)) : 0;
+            audioEnd_ = std::cmp_greater(end, start_) ? uint64_t(end - int64_t(start_)) : 0;
         }
         if (_fseeki64(file, int64_t(start_), SEEK_SET) != 0) throw Error(ErrorCode::FileOpen, "mpg123: cannot seek");
         int error = MPG123_OK;
@@ -120,7 +135,7 @@ private:
     static int64_t seekFile(void* handle, int64_t offset, int origin) {
         auto* stream = static_cast<Stream*>(handle);
         std::FILE* file = stream->file_.get();
-        const int64_t start = int64_t(stream->start_);
+        const auto start = int64_t(stream->start_);
         if (_fseeki64(file, origin == SEEK_SET ? start + offset : offset, origin) != 0) return -1;
         const int64_t at = _ftelli64(file) - start;
         return at >= 0 ? at : -1;
@@ -381,14 +396,6 @@ private:
 
 std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t lossyBits) {
     return std::make_unique<Mpg123Decoder>(path, lossyBits, true);
-}
-
-std::optional<LibraryLength> libraryLength(const std::filesystem::path& path) {
-    const std::wstring key = libraryLengthKey(path);
-    const std::scoped_lock lock(libraryLengthsMutex);
-    for (auto it = libraryLengths.rbegin(); it != libraryLengths.rend(); ++it)
-        if (_wcsicmp(it->first.c_str(), key.c_str()) == 0) return it->second;
-    return std::nullopt;
 }
 
 void rememberLibraryLength(const std::filesystem::path& path, uint64_t frames, bool estimated) {

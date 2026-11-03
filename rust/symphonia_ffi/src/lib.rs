@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF, AAC and MP3 decoding for CamelPlayer (docs/Plan.md §16.3).
+//! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF and AAC decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
 mod hidden_tags;
@@ -15,7 +15,7 @@ use hidden_tags::HiddenTags;
 use symphonia::core::audio::conv::ConvertibleSample;
 use symphonia::core::audio::sample::i24;
 use symphonia::core::audio::GenericAudioBufferRef;
-use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_ALAC, CODEC_ID_MP3};
+use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_ALAC};
 use symphonia::core::codecs::audio::{
     AudioCodecParameters, AudioDecoder, AudioDecoderOptions, VerificationCheck, CODEC_ID_NULL_AUDIO,
 };
@@ -370,8 +370,6 @@ pub struct SymInfo {
     pub md5: [u8; 16],
     /// Nonzero for lossy codecs: sym_read returns float32 bit patterns instead of integers.
     pub is_float: u32,
-    /// Nonzero for MP3: sym_seek lands near the frame, at the byte position in proportion to it in total_frames.
-    pub coarse_seek: u32,
 }
 
 pub struct SymDecoder {
@@ -383,8 +381,6 @@ pub struct SymDecoder {
     bits: u32,
     lossy: bool,
     gapless: bool,
-    /// An MP3 seeks at once, near the target, instead of reading every frame up to it.
-    coarse: bool,
     /// Decoded, interleaved, right-aligned samples not yet handed out.
     pending: Vec<i32>,
     pending_pos: usize,
@@ -468,9 +464,8 @@ impl SymDecoder {
                     self.set_pending(out);
                     return Ok(true);
                 }
-                // A lossy packet that does not decode, such as an MP3 frame whose side information counts more bits
-                // than it holds, plays as silence of its length and decoding goes on, as in other decoders; the
-                // length and every later position stay as they were.
+                // A lossy packet that does not decode plays as silence of its length and decoding goes on, as in
+                // other decoders; the length and every later position stay as they were.
                 Err(Error::DecodeError(_)) if self.lossy => {
                     let trimmed = if self.gapless {
                         packet.trim_start.get() + packet.trim_end.get()
@@ -503,8 +498,8 @@ fn aac_config_rate(params: &AudioCodecParameters) -> Option<u32> {
     RATES.get(index).copied()
 }
 
-/// Opens `path` (UTF-8). On success stores a decoder handle in `out` and fills `info`. Lossy streams (AAC, MP3) are
-/// quantized to `lossy_bits` (16 or 24); encoder delay and padding are trimmed when the file declares them.
+/// Opens `path` (UTF-8). On success stores a decoder handle in `out` and fills `info`. AAC is quantized to
+/// `lossy_bits` (16 or 24); encoder delay and padding are trimmed when the file declares them.
 ///
 /// # Safety
 /// `path` must be NUL-terminated, and `out` and `info` must point to writable storage.
@@ -559,8 +554,8 @@ unsafe fn open_decoder(
     let mut params = params.clone();
     let track_id = track.id;
     let num_frames = track.num_frames;
-    // Delay and padding are trimmed only where the file declares them: without, an MP3's length is Symphonia's
-    // estimate from its bitrate, and trimming to it would drop the last frames.
+    // Delay and padding are trimmed only where the file declares them: without, the length is Symphonia's estimate
+    // from the bitrate, and trimming to it would drop the last frames.
     let gapless = track.delay.is_some() || track.padding.is_some();
     // The AAC decoder prefers the container's rate over the AudioSpecificConfig, but the ASC rate selects its
     // scale-factor band tables; an MP4 sample entry that disagrees would decode wrongly.
@@ -596,7 +591,7 @@ unsafe fn open_decoder(
         .or(params.channels.map(|c| c.count()))
         .or(aac_channels)
         .unwrap_or(0);
-    let lossy = params.codec == CODEC_ID_AAC || params.codec == CODEC_ID_MP3;
+    let lossy = params.codec == CODEC_ID_AAC;
     let bits = if lossy {
         lossy_bits
     } else {
@@ -612,7 +607,6 @@ unsafe fn open_decoder(
     if channels == 0 || bits == 0 || bits > 32 {
         return SYM_E_UNSUPPORTED;
     }
-    let coarse = params.codec == CODEC_ID_MP3;
     let (has_md5, md5) = match params.verification_check {
         Some(VerificationCheck::Md5(m)) => (1, m),
         _ => (0, [0u8; 16]),
@@ -625,7 +619,6 @@ unsafe fn open_decoder(
         has_md5,
         md5,
         is_float: u32::from(lossy),
-        coarse_seek: u32::from(coarse),
     };
     let dec = Box::new(SymDecoder {
         format,
@@ -635,7 +628,6 @@ unsafe fn open_decoder(
         bits,
         lossy,
         gapless,
-        coarse,
         pending: Vec::new(),
         pending_pos: 0,
         skip_frames: 0,
@@ -694,7 +686,7 @@ unsafe fn read_frames(d: &mut SymDecoder, dst: *mut i32, frames: usize, read: *m
     }
 }
 
-/// Seeks so the next read starts exactly at `frame`, or for an MP3 near it.
+/// Seeks so the next read starts exactly at `frame`.
 ///
 /// # Safety
 /// `dec` must be a live exclusive handle with no concurrent calls.
@@ -708,11 +700,7 @@ pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
 
 fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
     let seeked = match d.format.seek(
-        if d.coarse {
-            SeekMode::Coarse
-        } else {
-            SeekMode::Accurate
-        },
+        SeekMode::Accurate,
         SeekTo::Timestamp {
             ts: Timestamp::from(i64::try_from(frame).unwrap_or(i64::MAX)),
             track_id: d.track_id,

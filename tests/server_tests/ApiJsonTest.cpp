@@ -29,8 +29,7 @@ Command fullCommand() {
     c.source = TrackSource("C:/music/a.flac", {10, 2000}, DecoderKind::DrFlac);
     SettingsDto settings;
     settings.backend = Backend::Asio;
-    settings.decoderByFormat[AudioFormat::Mp3] = DecoderKind::DrMp3;
-    settings.pcmBitsByFormat[AudioFormat::Aac] = 16;
+    settings.decoderByFormat[AudioFormat::Mp3] = DecoderKind::Mpg123;
     settings.convertWhenUnsupported = true;
     settings.wasapi.fixedRate = 96000;
     settings.ks.mode = KsMode::Standard;

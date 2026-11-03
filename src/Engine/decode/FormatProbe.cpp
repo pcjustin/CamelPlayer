@@ -153,7 +153,7 @@ uint32_t mpegFrameLength(const uint8_t* h) {
 // MPEG audio that padding or other data separates from the tags before it: the first frame header within 64 KiB
 // that the next frame's header confirms (same version, layer and sampling rate).
 std::optional<uint64_t> confirmedMpegFrame(const File& f, uint64_t pos) {
-    constexpr size_t kSearch = 64 * 1024, kLongestFrame = 2881;
+    constexpr size_t kSearch = size_t(64) * 1024, kLongestFrame = 2881;
     if (pos >= f.size()) return std::nullopt;
     std::string window(size_t(std::min<uint64_t>(kSearch + kLongestFrame + 4, f.size() - pos)), '\0');
     if (!f.readAt(pos, window.data(), window.size())) return std::nullopt;
@@ -468,10 +468,6 @@ uint64_t mpegSoundStart(const std::filesystem::path& path) {
     uint8_t frame[40] = {};
     if (!f.readAt(start, frame, sizeof frame) || !tagIs(frame + 36, "VBRI")) return start;
     return start + mpegFrameLength(frame);
-}
-
-uint64_t mpegAudioStart(const std::filesystem::path& path) {
-    return mpegStart(File(path));
 }
 
 std::optional<EncoderTrim> mp4EncoderTrim(const std::filesystem::path& path, uint32_t sampleRate) {

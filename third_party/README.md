@@ -7,7 +7,6 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 | FFmpeg | `vcpkg.json` with a pinned baseline | `src/Engine/decode/FfmpegDecoder.cpp` |
 | dr_flac | vcpkg `drlibs` | `src/Engine/decode/DrFlac.cpp` |
 | dr_wav | vcpkg `drlibs` | `src/Engine/decode/DrWav.cpp` |
-| dr_mp3 | vcpkg `drlibs` | `src/Engine/decode/DrMp3.cpp` |
 | mpg123 | `vcpkg.json` with a pinned baseline | `src/Engine/decode/Mpg123Decoder.cpp` |
 | libsoxr | `vcpkg.json` with a pinned baseline | Resampling in the Rust Engine through `rust/audio_engine/src/resample.rs`; linked by the C++ executables |
 | SQLite (FTS5) | `vcpkg.json` with a pinned baseline | `library.db` in the Server through `src/Server/Library/Sqlite.cpp` |
@@ -21,4 +20,4 @@ The vcpkg installation is generated under `vcpkg_installed`; Cargo output is gen
 
 Keep upstream license files with vendored code. Collected notices for native, Rust and Microsoft dependencies are in `licenses`; exact versions and source locations are in `dependencies.json`. Refresh snapshots with `msbuild/collect-licenses.ps1` after restoring dependencies. See [the distribution guide](../THIRD-PARTY-NOTICES.md) for source-access obligations and the distribution status.
 
-Changing the production decoder selection is a separate decision from organizing dependency sources. The MVP currently retains all four decoder adapters and their dependencies for comparison.
+Changing the production decoder selection is a separate decision from organizing dependency sources. MP3 plays with mpg123 alone; the other formats keep their decoder adapters and dependencies for comparison.

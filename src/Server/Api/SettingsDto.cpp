@@ -10,7 +10,6 @@ namespace camel::server {
 SettingsDto settingsDto(const Settings& s) {
     return {s.backend,
             s.decoderByFormat,
-            s.pcmBitsByFormat,
             s.convertWhenUnsupported,
             s.resampleQuality,
             s.convertDsdWhenUnsupported,
@@ -42,7 +41,6 @@ SettingsDto settingsDto(const Settings& s) {
 Settings nativeSettings(const SettingsDto& s) {
     return {s.backend,
             s.decoderByFormat,
-            s.pcmBitsByFormat,
             s.convertWhenUnsupported,
             s.resampleQuality,
             s.convertDsdWhenUnsupported,
