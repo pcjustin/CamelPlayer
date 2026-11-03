@@ -7,6 +7,7 @@ Upgrading from 0.2.0 or 0.2.1: the first start adds an index of the artists to t
 Changed since 0.2.1:
 
 - **MP3 plays with mpg123 alone:** Settings › Decoders no longer offers FFmpeg, Symphonia or dr_mp3 for MP3. Measured from a NAS against them, mpg123 starts and seeks as quickly as the quickest, and it alone measures an MP3's exact length while it plays and then seeks exactly.
+- **An MP4 whose sound is MP3 is no longer listed:** mpg123 reads MP3 streams only, so the scan passes such a file over and playing one reports it as unsupported.
 - **AAC plays with Symphonia alone and ADPCM with libsndfile alone,** so Settings › Decoders lists only FLAC, ALAC, WAV and AIFF. A setting that named another decoder for MP3, AAC or ADPCM now plays with the one left.
 - **AAC and MP3 always decode to 24-bit PCM:** the 16-bit option is gone. A device that takes only 16-bit gets them reduced with dither when conversion is allowed, shown as processed.
 - **Suggestions for a word in many titles come at once:** the artists among them are looked up in an index of artists alone. With 100,000 tracks that all hold the word, the suggestions took 77–120 ms and now take about 7 ms.

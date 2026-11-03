@@ -158,11 +158,13 @@ TEST(FormatProbe, SeparatesM4aAlacFromAacLc) {
     EXPECT_EQ(probe("aac-mpeg2.m4a", mp4(soundEntry("mp4a", esds(0x67, kAacLc)))), AudioFormat::Aac);
     EXPECT_EQ(probe("aac-qt1.m4a", mp4(soundEntry("mp4a", box("wave", esds(0x40, kAacLc)), 1))), AudioFormat::Aac);
     EXPECT_EQ(probe("aac-qt2.m4a", mp4(soundEntry("mp4a", esds(0x40, kAacLc), 2))), AudioFormat::Aac);
-    EXPECT_EQ(probe("mp3.m4a", mp4(soundEntry("mp4a", esds(0x6B, Bytes(1, '\0'))))), AudioFormat::Mp3);
 }
 
 TEST(FormatProbe, RejectsUnsupportedProfilesCodecsAndDamagedContainers) {
     expectUnsupported("he-aac.m4a", mp4(soundEntry("mp4a", esds(0x40, kHeAac))));
+    // mpg123 reads MPEG audio streams only.
+    expectUnsupported("mp3.m4a", mp4(soundEntry("mp4a", esds(0x6B, Bytes(1, '\0')))));
+    expectUnsupported("mp3-mpeg2.mp4", mp4(soundEntry("mp4a", esds(0x69, Bytes(1, '\0')))));
     expectUnsupported("vorbis.m4a", mp4(soundEntry("mp4a", esds(0xDD, kAacLc))));
     expectUnsupported("opus.m4a", mp4(soundEntry("Opus", Bytes(8, '\0'))));
     expectUnsupported("video.m4a", mp4(soundEntry("alac", Bytes()), "vide"));

@@ -221,7 +221,8 @@ bool descriptor(const File& f, uint64_t& pos, uint64_t end, uint8_t tag, uint64_
     return false;
 }
 
-// The esds box selects the codec inside an mp4a sample entry: AAC-LC or MPEG audio.
+// The esds box selects the codec inside an mp4a sample entry: only AAC-LC is played. MPEG audio is refused, since
+// mpg123, the one MP3 decoder, reads MPEG audio streams only.
 AudioFormat esdsFormat(const File& f, const Box& esds) {
     uint64_t pos = esds.start + 4; // version and flags
     uint64_t length = 0;
@@ -239,7 +240,7 @@ AudioFormat esdsFormat(const File& f, const Box& esds) {
     if (!descriptor(f, pos, esds.end, 0x04, length) || length < 13) unsupported("MP4 audio has no decoder configuration");
     uint8_t objectType = 0;
     if (!f.readAt(pos, &objectType, 1)) unsupported("MP4 audio has no decoder configuration");
-    if (objectType == 0x69 || objectType == 0x6B) return AudioFormat::Mp3;
+    if (objectType == 0x69 || objectType == 0x6B) unsupported("MP3 in MP4 is not supported");
     if (objectType != 0x40 && objectType != 0x66 && objectType != 0x67 && objectType != 0x68)
         unsupported("MP4 audio object type " + std::to_string(objectType) + " is not supported");
     pos += 13;
