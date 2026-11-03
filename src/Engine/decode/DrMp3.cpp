@@ -4,13 +4,16 @@
 
 // MP3 through dr_mp3 (dr_libs, header-only), which trims LAME/Xing encoder delay and padding itself.
 #include "Engine/decode/DecoderImpl.h"
+#include "Engine/decode/FormatProbe.h"
 
 #pragma warning(push, 0)
 #define DR_MP3_IMPLEMENTATION
 #include <dr_mp3.h>
 #pragma warning(pop)
 
+#include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <vector>
 
 #include "Common/util/Text.h"
@@ -21,7 +24,7 @@ namespace {
 
 class DrMp3 final : public IDecoder {
 public:
-    DrMp3(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) : start_(start) {
+    DrMp3(const std::filesystem::path& path, uint32_t lossyBits, uint64_t start) : path_(path), start_(start) {
         if (_wfopen_s(&file_, longPath(path).c_str(), L"rb") != 0 || !file_)
             throw Error(ErrorCode::FileOpen, "dr_mp3: cannot open file");
         if (!onSeek(this, 0, DRMP3_SEEK_SET) || !drmp3_init(&mp3_, onRead, onSeek, onTell, nullptr, this, nullptr)) {
@@ -31,13 +34,21 @@ public:
         info_.sampleRate = mp3_.sampleRate;
         info_.channels = mp3_.channels;
         info_.bitsPerSample = lossyBits;
-        // Without a Xing/Info header dr_mp3 would read the whole file to count its frames.
-        if (mp3_.totalPCMFrameCount != DRMP3_UINT64_MAX) info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
         if (!info_.sampleRate || !info_.channels) {
             drmp3_uninit(&mp3_);
             std::fclose(file_);
             throw Error(ErrorCode::UnsupportedStream, "dr_mp3: unexpected stream parameters");
         }
+        // A length measured before is the one to show, and places a seek better. Without it or a Xing/Info header
+        // dr_mp3 would read the whole file to count its frames.
+        if (const auto measured = measuredLength(path))
+            info_.totalFrames = *measured;
+        else if (mp3_.totalPCMFrameCount != DRMP3_UINT64_MAX)
+            info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
+        // The first audio frame's header, which a Xing/Info frame before it would have cleared.
+        if (mp3_.decoder.header[0] == 0xFF)
+            frameBytes_ = (info_.sampleRate >= 32000 ? 144.0 : 72.0) * drmp3_hdr_bitrate_kbps(mp3_.decoder.header) * 1000.0 /
+                          info_.sampleRate;
     }
 
     ~DrMp3() override {
@@ -62,10 +73,41 @@ public:
     }
 
     void seek(uint64_t frame) override {
+        const bool estimated = estimateSeekPoint(frame);
+        drmp3_bind_seek_table(&mp3_, estimated ? 1 : 0, estimated ? &point_ : nullptr);
         if (!drmp3_seek_to_pcm_frame(&mp3_, frame)) throw Error(ErrorCode::SeekFailed, "drmp3_seek_to_pcm_frame failed");
     }
 
 private:
+    // Without a seek table dr_mp3 reads the file up to the target. The table's one point is where the frames from
+    // DRMP3_SEEK_LEADING_MP3_FRAMES before the target's, which dr_mp3 decodes to warm up, are estimated to start: by
+    // the Xing table, in proportion to the length, or else by the first frame's size, which is every frame's in CBR.
+    bool estimateSeekPoint(uint64_t frame) {
+        // A Layer III frame's samples: MPEG-1 is 32 kHz and up.
+        const uint64_t samples = info_.sampleRate >= 32000 ? 1152 : 576;
+        const uint64_t target = (frame + mp3_.delayInPCMFrames) / samples; // the MP3 frame that holds it
+        if (target <= DRMP3_SEEK_LEADING_MP3_FRAMES) return false;
+        // Halfway into the frame before, so as not to miss the start of the first.
+        const double from = double(target - DRMP3_SEEK_LEADING_MP3_FRAMES) - 0.5;
+        const auto begin = double(mp3_.streamStartOffset);
+        double at = 0;
+        if (info_.totalFrames) {
+            if (!tocRead_) {
+                toc_ = xingToc(path_);
+                tocRead_ = true;
+            }
+            const auto total = double(info_.totalFrames + mp3_.delayInPCMFrames + mp3_.paddingInPCMFrames);
+            const double share = std::min(1.0, from * double(samples) / total);
+            at = toc_ ? toc_->byteShare(share) * toc_->bytes : begin + share * (double(mp3_.streamLength) - begin);
+        } else if (frameBytes_ > 0) {
+            at = begin + from * frameBytes_;
+        } else {
+            return false;
+        }
+        point_ = {uint64_t(std::max(at, begin)), target * samples, DRMP3_SEEK_LEADING_MP3_FRAMES, 0};
+        return true;
+    }
+
     // dr_mp3 reads the file from `start_` on, as if it began there.
     static size_t onRead(void* self, void* out, size_t bytes) {
         return std::fread(out, 1, bytes, static_cast<DrMp3*>(self)->file_);
@@ -82,10 +124,15 @@ private:
         return at >= 0;
     }
 
+    std::filesystem::path path_;
     uint64_t start_;
     std::FILE* file_ = nullptr;
     drmp3 mp3_{};
     SourceInfo info_;
+    double frameBytes_ = 0;
+    std::optional<XingToc> toc_; // read at the first seek
+    bool tocRead_ = false;
+    drmp3_seek_point point_{};
     std::vector<float> buffer_;
 };
 
