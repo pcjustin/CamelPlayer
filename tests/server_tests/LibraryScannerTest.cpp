@@ -513,6 +513,44 @@ TEST_F(LibraryScannerTest, AnEstimatedMp3LengthIsEstimatedAgainOncePerVersion) {
     EXPECT_EQ(length(), estimate + 50000);
 }
 
+// An earlier version marked the estimated length of an MP3 with a VBRI header as exact, so a complete scan estimates it
+// again once per version; a length its header declares stays.
+TEST_F(LibraryScannerTest, AVbriLengthMarkedExactIsEstimatedAgainOncePerVersion) {
+    using namespace camel::audio::testaudio;
+    const auto album = dir / "music" / "album";
+    const auto pcm = makeSignal({"short", 44100, 16, 2, 3.0});
+    testutil::writeMp3(album / "info.mp3", pcm, 44100, 16, 2, true);
+    testutil::writeMp3(dir / "plain.mp3", pcm, 44100, 16, 2, false);
+    std::ifstream in(dir / "plain.mp3", std::ios::binary);
+    const std::string plain((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // A VBRI frame, as Fraunhofer encoders write: no padding, 1044 bytes at 320 kbit/s and 44.1 kHz.
+    std::string vbri = plain.substr(0, 4) + std::string(1044 - 4, '\0');
+    vbri[2] = char(vbri[2] & ~0x02);
+    vbri.replace(36, 18, "VBRI" + std::string("\0\1\0\0\0\x4b\0\0\0\0\0\0\0\x75", 14));
+    std::ofstream(album / "vbri.mp3", std::ios::binary) << vbri + plain;
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto length = [&](const std::string& name) {
+        return count(
+            store,
+            ("SELECT total_frames FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.path LIKE '%" + name + "'").c_str());
+    };
+    const auto estimate = length("vbri.mp3"), declared = length("info.mp3");
+    EXPECT_EQ(estimate, 116 * 1152); // the frames after the VBRI frame
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("UPDATE tracks SET total_frames=total_frames+50000,length_estimated=0;"
+                    "UPDATE app_state SET value='0.0.1' WHERE key LIKE 'library_refused_read:%'");
+        })
+        .get();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(length("vbri.mp3"), estimate);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE length_estimated=1"), 1);
+    EXPECT_EQ(length("info.mp3"), declared + 50000); // not read again
+}
+
 TEST_F(LibraryScannerTest, OneChangedFileDoesNotCountEveryTrackAsALibraryChange) {
     constexpr int kFolders = 4, kFiles = 5;
     for (int folder = 0; folder < kFolders; ++folder) {
