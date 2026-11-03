@@ -176,6 +176,7 @@ private:
     void updateBackendGroups();
     void refreshFromServer();
     void applySnapshot(const camel::server::Snapshot& snapshot);
+    bool movesOnlyThePosition(const camel::server::Snapshot& snapshot) const;
     void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
     // Selects the navigation item with this tag; its page opens through the selection handler.
@@ -220,6 +221,7 @@ private:
     camel::server::SettingsDto settings_;
     std::shared_ptr<camel::server::IServer> server_;
     camel::server::SnapshotCursor cursor_;
+    camel::server::Snapshot shown_; // the snapshot last applied
     std::vector<camel::server::DeviceInfo> wasapiDevices_, asioDrivers_, ksPins_;
     std::vector<camel::server::LibraryRootInfo> roots_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer uiTimer_{nullptr};
@@ -277,6 +279,8 @@ private:
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();
     void showFromTray();
+    // Hidden or minimized, the window stops refreshing what it shows.
+    void setRefreshing(bool refreshing);
     std::unique_ptr<ui::TrayIcon> tray_;
     // System integration (docs/Plan.md §8.4): media keys and the Windows media flyout, and global hotkeys.
     std::unique_ptr<ui::MediaControls> media_;
@@ -288,6 +292,7 @@ private:
     void submitKind(camel::server::CommandKind kind);
     bool exiting_ = false;
     bool inTray_ = false;
+    bool minimized_ = false;
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
     bool followDevice(camel::Backend previous);
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);

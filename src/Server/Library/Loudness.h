@@ -93,6 +93,7 @@ private:
     std::unique_ptr<AlbumMeasure> measuring_; // the album cut short last, with its files' ids
     std::vector<int64_t> measuringFiles_;
     std::atomic<int64_t> analyzed_ = 0, total_ = 0;
+    mutable std::atomic<int64_t> progressAsked_ = 0; // steady_clock ticks of the last progress() call
     std::atomic<bool> running_ = false;
     std::jthread thread_;
 };

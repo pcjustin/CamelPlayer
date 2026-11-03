@@ -5,13 +5,16 @@
 // ReplayGain (docs/Plan.md §5.9): its settings, the gain a track gets, and loudness analysis with libebur128.
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <functional>
 #include <limits>
 #include <numbers>
+#include <thread>
 
 #include "Common/settings/Settings.h"
+#include "Server/Library/LibraryStore.h"
 #include "Server/Library/Loudness.h"
 #include "Server/Playback/ReplayGain.h"
 #include "TestUtil.h"
@@ -188,4 +191,28 @@ TEST(Loudness, AnAlbumCutShortGoesOnWhereItStopped) {
     for (size_t i = 0; i < files.size(); ++i) EXPECT_DOUBLE_EQ(result.tracks[i]->gainDb, expected.tracks[i]->gainDb) << i;
     EXPECT_DOUBLE_EQ(result.album->gainDb, expected.album->gainDb);
     EXPECT_DOUBLE_EQ(result.album->peak, expected.album->peak);
+}
+
+// Counting reads every track of the library, so it waits until someone reads the progress (the Settings page).
+TEST(Loudness, TheAnalyzerCountsTracksOnlyWhileItsProgressIsRead) {
+    const auto directory = testutil::tempDir() / "loudness-count";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) "
+                    "VALUES(1,1,1,'C:/music/one.flac','audio',1,1,1);"
+                    "INSERT INTO tracks(id,file_id,title,format) VALUES(1,1,'One','FLAC');");
+        })
+        .get();
+    LoudnessAnalyzer analyzer(store, {[] { return ReplayGainSettings{}; }, [] { return DecoderByFormat{}; },
+                                      [] { return std::vector<int64_t>{}; }, [] { return std::filesystem::path{}; }});
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    EXPECT_EQ(analyzer.progress().total, 0);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (analyzer.progress().total == 0 && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(analyzer.progress().total, 1);
 }

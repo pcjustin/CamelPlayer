@@ -196,7 +196,7 @@ AlbumLoudness AlbumMeasure::result() const {
 }
 
 LoudnessAnalyzer::LoudnessAnalyzer(LibraryStore& store, Options options)
-    : store_(store), options_(std::move(options)), thread_([this](std::stop_token stop) { run(stop); }) {}
+    : store_(store), options_(std::move(options)), thread_([this](const std::stop_token& stop) { run(stop); }) {}
 
 LoudnessAnalyzer::~LoudnessAnalyzer() {
     thread_.request_stop();
@@ -204,6 +204,7 @@ LoudnessAnalyzer::~LoudnessAnalyzer() {
 }
 
 LoudnessProgress LoudnessAnalyzer::progress() const {
+    progressAsked_ = std::chrono::steady_clock::now().time_since_epoch().count();
     return {analyzed_.load(), total_.load(), running_.load()};
 }
 
@@ -256,7 +257,10 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
     while (!stop.stop_requested()) {
         for (int i = 0; i < 20 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(100ms);
         try {
-            if (std::chrono::steady_clock::now() - counted > 10s) {
+            // Counting reads every track, so it runs only while someone reads the progress.
+            const auto now = std::chrono::steady_clock::now();
+            const auto asked = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(progressAsked_.load()));
+            if (now - asked < 5s && now - counted > 10s) {
                 count();
                 counted = std::chrono::steady_clock::now();
             }

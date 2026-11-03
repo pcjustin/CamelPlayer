@@ -288,9 +288,12 @@ void MainWindow::InitializeComponent() {
     server_->setDiscordTexts({winrt::to_string(tr(L"Lamp_BitPerfect")), winrt::to_string(tr(L"Lamp_Lossless")),
                               winrt::to_string(tr(L"Lamp_Processed")), winrt::to_string(tr(L"Lamp_Lossy"))});
     auto dq = DispatcherQueue();
+    // The Server reports the position with every engine poll, 20 times a second; the 250 ms refresh shows it, so an event
+    // that moves only the position is left to it, and to nothing while the window is minimized or hidden.
     server_->setListener([dq, weak = get_weak()](const Event& event) {
-        dq.TryEnqueue([weak, snapshot = event.snapshot] {
-            if (auto self = weak.get()) self->applySnapshot(snapshot);
+        dq.TryEnqueue([weak, kind = event.kind, snapshot = event.snapshot] {
+            if (auto self = weak.get(); self && (kind == EventKind::CommandCompleted || !self->movesOnlyThePosition(snapshot)))
+                self->applySnapshot(snapshot);
         });
     });
     using namespace std::chrono_literals;
@@ -452,6 +455,13 @@ void MainWindow::InitializeComponent() {
         if (settings_.checkUpdates) checkForUpdates(false);
     });
     updateTimer_.Start();
+    AppWindow().Changed([this](auto&&, auto&&) {
+        const auto presenter = AppWindow().Presenter().try_as<Microsoft::UI::Windowing::OverlappedPresenter>();
+        const bool minimized = presenter && presenter.State() == Microsoft::UI::Windowing::OverlappedPresenterState::Minimized;
+        if (minimized == minimized_ || inTray_) return;
+        minimized_ = minimized;
+        setRefreshing(!minimized);
+    });
     AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& e) {
         if (exiting_ || settings_.closeAction == CloseAction::Exit) return;
         e.Cancel(true);
@@ -477,9 +487,7 @@ void MainWindow::InitializeComponent() {
 void MainWindow::hideToTray() {
     inTray_ = true;
     AppWindow().Hide();
-    uiTimer_.Stop();
-    get_self<LibraryView>(Library())->setActive(false);
-    get_self<HomeView>(Home())->setActive(false);
+    setRefreshing(false);
     if (server_ && server_->snapshot().playback.state == PlaybackState::Playing) {
         Command pause;
         pause.kind = CommandKind::Pause;
@@ -504,10 +512,17 @@ void MainWindow::showFromTray() {
         presenter.Restore();
     Activate();
     SetForegroundWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()));
-    if (!wasInTray) return;
+    if (wasInTray) setRefreshing(true);
+}
+
+void MainWindow::setRefreshing(bool refreshing) {
+    get_self<LibraryView>(Library())->setActive(refreshing);
+    get_self<HomeView>(Home())->setActive(refreshing);
+    if (!refreshing) {
+        uiTimer_.Stop();
+        return;
+    }
     uiTimer_.Start();
-    get_self<LibraryView>(Library())->setActive(true);
-    get_self<HomeView>(Home())->setActive(true);
     refreshFromServer();
 }
 
@@ -854,8 +869,18 @@ void MainWindow::submitCommand(Command command) {
     cursor_.expect(server_->submit(std::move(command)));
 }
 
+bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
+    const auto &now = snapshot.playback, &before = shown_.playback;
+    return snapshot.queueEntryId == shown_.queueEntryId && snapshot.queue.revision == shown_.queue.revision &&
+           snapshot.queue.marks == shown_.queue.marks && snapshot.queue.upcomingEntryId == shown_.queue.upcomingEntryId &&
+           snapshot.devices.revision == shown_.devices.revision && snapshot.commandError == shown_.commandError &&
+           now.revision == before.revision && now.state == before.state && now.pathUtf8 == before.pathUtf8 &&
+           now.total == before.total && now.underruns == before.underruns;
+}
+
 void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (!server_ || !cursor_.accept(snapshot)) return;
+    shown_ = snapshot;
     if (snapshot.devices.revision != shownDevicesRevision_) {
         shownDevicesRevision_ = snapshot.devices.revision;
         populateDeviceLists(snapshot.devices);
@@ -3090,7 +3115,7 @@ void MainWindow::enableDependentFields() {
 }
 
 void MainWindow::showLoudnessProgress() {
-    if (!server_) return;
+    if (!server_ || SettingsPanel().Visibility() != Visibility::Visible) return;
     const auto progress = server_->loudnessProgress();
     std::wstring text;
     if (progress.total > 0) {

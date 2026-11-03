@@ -19,6 +19,7 @@
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <windows.h>
 
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
@@ -557,6 +558,37 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
         ASSERT_TRUE(lag) << by << ": not within a second of the target";
         std::printf("VBR seek by its %s: %lld frames off\n", by, static_cast<long long>(*lag));
     }
+}
+
+// Where the library knows the exact length, a file played through is read once: the scan, a second reading of the
+// whole file, waits for a seek. A seek starts it and still lands where the linear decode does.
+TEST(LossyDecoderPolicy, Mpg123ReadsAnMp3OnceWhenTheLibraryKnowsItsLength) {
+    std::vector<int32_t> pcm;
+    for (int i = 0; i < 20; i++) pcm.insert(pcm.end(), reference().begin(), reference().end());
+    const auto file = testutil::tempDir() / "lossy-read-once.mp3";
+    testutil::writeMp3(file, pcm, kRate, kBits, kChannels, true);
+    const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+    const uint64_t total = all.size() / kChannels;
+    rememberLibraryLength(file, total, false);
+    const auto bytesRead = [] {
+        IO_COUNTERS io{};
+        GetProcessIoCounters(GetCurrentProcess(), &io);
+        return io.ReadTransferCount;
+    };
+    const uint64_t before = bytesRead();
+    auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    EXPECT_EQ(decoder->estimatedFrames(), total);
+    EXPECT_EQ(decodeAll(*decoder), all);
+    const auto read = double(bytesRead() - before);
+    const auto size = double(std::filesystem::file_size(file));
+    EXPECT_LT(read, size * 1.5) << read << " bytes read for a file of " << size;
+
+    const uint64_t target = total / 2 + 777;
+    decoder = openDecoder(DecoderKind::Mpg123, file);
+    decoder->seek(target);
+    const auto rest = decodeAll(*decoder);
+    ASSERT_EQ(rest.size(), all.size() - target * kChannels);
+    EXPECT_TRUE(std::equal(rest.begin(), rest.end(), all.begin() + std::ptrdiff_t(target * kChannels)));
 }
 
 // After a seek the scan had not reached, the positions count from the estimate, and the Engine holds the frames read

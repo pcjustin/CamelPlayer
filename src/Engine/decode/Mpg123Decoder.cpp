@@ -151,11 +151,13 @@ private:
 
 class Mpg123Decoder final : public IDecoder {
 public:
-    // `measure`: playback. The exact length and seek index cost a scan of the whole file, seconds from a network
-    // share, so a second stream scans while this one plays; the length counts from when it is known, and a seek waits
-    // until the scan has passed its target. Otherwise (library scans) the length stays mpg123's estimate, from the file
-    // alone. mpg123 sees the file from its first frame of sound: it would count the tags before it as audio when it
-    // estimates the length of a stream without a header, and decode a VBRI frame, which holds no sound.
+    // `measure`: playback. The exact length and seek index cost a scan of the whole file, seconds from a network share,
+    // so a second stream scans while this one plays; the length counts from when it is known, and a seek waits until
+    // the scan has passed its target. Where the library knows the exact length, that length stands in for the scan's
+    // and the scan waits for the first seek, so a file played through is read once. Otherwise (library scans) the
+    // length stays mpg123's estimate, from the file alone. mpg123 sees the file from its first frame of sound: it would
+    // count the tags before it as audio when it estimates the length of a stream without a header, and decode a VBRI
+    // frame, which holds no sound.
     Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool measure)
         : path_(path), start_(mpegSoundStart(path)), stream_(std::make_unique<Stream>(path, start_)),
           library_(measure ? libraryLength(path) : std::nullopt) {
@@ -168,10 +170,11 @@ public:
         const uint64_t vbri = vbriSamples(path);
         vbri_ = vbri != 0;
         estimate_ = library_ ? library_->frames : vbri ? vbri : length > 0 ? uint64_t(length) : 0;
-        if (measure)
-            scan_ = std::thread([this, path] { scanMain(path); });
-        else
+        deferScan_ = measure && library_ && !library_->estimated;
+        if (!measure)
             info_.totalFrames = estimate_;
+        else if (!deferScan_)
+            startScan();
     }
 
     ~Mpg123Decoder() override {
@@ -201,8 +204,8 @@ public:
         if (scanDone_.load(std::memory_order_acquire)) finishScan();
         // The stream ends at the exact length even where its LAME frame claims more; after an estimated seek, where its
         // audio does.
-        if (info_.totalFrames && !estimated_)
-            frames = position_ < info_.totalFrames ? size_t(std::min<uint64_t>(frames, info_.totalFrames - position_)) : 0;
+        const uint64_t exact = exactLength();
+        if (exact && !estimated_) frames = position_ < exact ? size_t(std::min<uint64_t>(frames, exact - position_)) : 0;
         size_t bytes = 0;
         while (!bytes && !ended_ && frames) {
             const int result = mpg123_read(stream_->mh(), dst, frames * info_.channels * sizeof(float), &bytes);
@@ -212,8 +215,8 @@ public:
                 // The unscanned stream may stop where its LAME frame says, short of the audio; the scan knows.
                 if (!estimated_ && continueScanned()) continue;
                 // The scan counted the cut frame: it plays as silence, so the length holds.
-                if (cutShort && !estimated_ && position_ < info_.totalFrames) {
-                    const size_t silent = size_t(std::min<uint64_t>(frames, info_.totalFrames - position_));
+                if (cutShort && !estimated_ && position_ < exact) {
+                    const size_t silent = size_t(std::min<uint64_t>(frames, exact - position_));
                     std::fill_n(dst, silent * info_.channels, 0.0f);
                     position_ += silent;
                     return silent;
@@ -234,9 +237,13 @@ public:
         // reached goes at once to where the target is estimated to be, which only a CBR stream knows exactly.
         estimated_ = false;
         bool guessed = false;
+        // A scan the seek starts covers nothing yet, so the seek does not wait for it to open the file; the start needs
+        // no index.
+        const bool scanStarting = deferScan_ && !scanStarted_ && frame > 0;
+        if (scanStarting) startScan();
         if (scanDone_.load(std::memory_order_acquire) || !scan_.joinable()) {
             useScanned();
-        } else if (!lendScanIndex(frame)) {
+        } else if (scanStarting || !lendScanIndex(frame)) {
             bool exact = false;
             guessed = estimateIndex(exact);
             estimated_ = guessed && !exact;
@@ -254,6 +261,14 @@ public:
     }
 
 private:
+    void startScan() {
+        scanStarted_ = true;
+        scan_ = std::thread([this] { scanMain(path_); });
+    }
+
+    // The scan's length once known; before it, the library's where it is exact.
+    uint64_t exactLength() const { return info_.totalFrames ? info_.totalFrames : deferScan_ && !scanStarted_ ? estimate_ : 0; }
+
     // Waits for the scan and plays its stream, which knows every frame.
     void useScanned() {
         finishScan(true);
@@ -362,8 +377,13 @@ private:
         if (!estimated_ && scannedLength_ && scannedLength_ >= position_) info_.totalFrames = scannedLength_;
     }
 
-    // At the end of the unscanned stream: continues from the scanned one at the same frame, if it holds more.
+    // At the end of the unscanned stream: continues from the scanned one at the same frame, if it holds more. A stream
+    // that reached the library's exact length needs no scan.
     bool continueScanned() {
+        if (deferScan_ && !scanStarted_) {
+            if (position_ >= estimate_) return false;
+            startScan();
+        }
         finishScan(true);
         if (!scanned_ || position_ >= info_.totalFrames ||
             mpg123_seek64(scanned_->mh(), int64_t(position_), SEEK_SET) != int64_t(position_))
@@ -378,6 +398,8 @@ private:
     std::optional<LibraryLength> library_;
     std::optional<XingToc> toc_; // read at the first seek that needs it
     bool vbri_ = false;
+    bool deferScan_ = false; // the library knows the exact length, so the scan waits for a seek
+    bool scanStarted_ = false;
     bool estimated_ = false;          // positions since the last seek are estimates
     std::unique_ptr<Stream> scanned_; // written by the scan thread before scanDone_; read after joining it
     ScanGate gate_;

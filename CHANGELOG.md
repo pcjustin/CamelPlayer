@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Changed since 0.2.2:
+
+- **Playback takes far less CPU:** the window followed the position 20 times a second and still did while minimized; it now shows it four times a second and stops while minimized, current again at once when restored. The ReplayGain analysis no longer reads the whole library every 10 seconds to count its progress, only while Settings shows it. Playing FLAC took 15–20 % of one core on a 2015 laptop and now takes 2–3 %.
+- **An MP3 from a NAS is read once:** where the library knows its exact length (from a Xing or Info header, or from playing the file before), mpg123 no longer reads the whole file a second time while it plays, nor the next track ahead of time. The first seek starts that reading, as the seek index needs it.
+
 ## 0.2.2
 
 Upgrading from 0.2.0 or 0.2.1: the first start adds an index of the artists to the library (schema 19), which takes a second or two, and keeps the old library as `library.db.v18.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.2.x refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v18.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
