@@ -257,8 +257,7 @@ TEST_P(LossyDecoder, MatchesTheSourceWithinTolerance) {
 TEST_P(LossyDecoder, SeekMatchesTheLinearDecode) {
     const auto [index, kind] = GetParam();
     const auto& fixture = kFixtures[index];
-    if ((kind == DecoderKind::FFmpeg || kind == DecoderKind::Symphonia || kind == DecoderKind::DrMp3) &&
-        fixture.format == AudioFormat::Mp3)
+    if (kind != DecoderKind::Mpg123 && fixture.format == AudioFormat::Mp3)
         GTEST_SKIP() << decoderName(kind) << " seeks an MP3 near the target (SeekAnMp3AtOnceNearTheTarget)";
     reference();
     auto linear = openDecoder(kind, path(fixture));
@@ -616,8 +615,8 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
     }
 }
 
-// FFmpeg, Symphonia and dr_mp3 seek an MP3 at once, without reading the file up to the target: near it, by its Xing
-// table, also behind a large tag, or else its size and its length, which one measured before makes better. The
+// The MP3 decoders other than mpg123 seek an MP3 at once, without reading the file up to the target: near it, by its
+// Xing table, also behind a large tag, or else its size and its length, which one measured before makes better. The
 // stream then plays all the audio after where it lands, which the declared length, counted from the target, could cut.
 TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
     reference();
@@ -627,7 +626,7 @@ TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
                                                                    {taggedVbrMp3(), "Xing VBR behind a 300 KB tag"},
                                                                    {quietThenLoudMp3(), "Xing VBR, silent then loud"},
                                                                    {vbrMp3(false), "VBR without a header"}};
-    for (const auto kind : {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrMp3})
+    for (const auto kind : {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrMp3, DecoderKind::Minimp3})
         for (const auto& [file, name] : files) {
             const auto all = decodeAll(*openDecoder(kind, file));
             const uint64_t target = all.size() / kChannels * 9 / 10;
