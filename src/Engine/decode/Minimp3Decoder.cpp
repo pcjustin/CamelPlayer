@@ -42,8 +42,8 @@ public:
         info_.channels = uint32_t(mp3_.info.channels);
         info_.bitsPerSample = lossyBits;
         info_.totalFrames = mp3_.samples / info_.channels;
-        // A length measured before is the one to show, and places a seek better.
-        if (const auto measured = measuredLength(path)) info_.totalFrames = *measured;
+        // The library's length, measured or estimated, is the one to show, and places a seek better.
+        if (const auto known = libraryLength(path)) info_.totalFrames = known->frames;
         declared_ = mp3_.detected_samples;
         // Without a Xing/Info frame, the first frame's size, which is every frame's in CBR.
         if (!mp3_.vbr_tag_found)

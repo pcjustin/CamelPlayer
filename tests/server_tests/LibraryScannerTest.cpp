@@ -482,6 +482,37 @@ TEST_F(LibraryScannerTest, AFileRefusedBeforeIsReadAgainOncePerVersion) {
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 0);
 }
 
+// A newer version may estimate the length of an MP3 without a header better, such as without the tag before its first
+// frame, so a complete scan estimates it again once per version.
+TEST_F(LibraryScannerTest, AnEstimatedMp3LengthIsEstimatedAgainOncePerVersion) {
+    using namespace camel::audio::testaudio;
+    testutil::writeMp3(dir / "music" / "album" / "plain.mp3", makeSignal({"short", 44100, 16, 2, 3.0}), 44100, 16, 2, false);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto length = [&] { return count(store, "SELECT total_frames FROM tracks WHERE length_estimated=1"); };
+    const auto estimate = length();
+    ASSERT_GT(estimate, 0);
+    const auto overestimate = [&](const char* version) {
+        store
+            .write([&](sqlite::Database& db) {
+                db.exec("UPDATE tracks SET total_frames=total_frames+50000");
+                db.prepare("UPDATE app_state SET value=? WHERE key LIKE 'library_refused_read:%'")
+                    .bind(1, std::string(version))
+                    .run();
+            })
+            .get();
+    };
+    overestimate("0.0.1");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(length(), estimate);
+
+    overestimate(CAMEL_VERSION_STRING); // this version has estimated it already
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(length(), estimate + 50000);
+}
+
 TEST_F(LibraryScannerTest, OneChangedFileDoesNotCountEveryTrackAsALibraryChange) {
     constexpr int kFolders = 4, kFiles = 5;
     for (int folder = 0; folder < kFolders; ++folder) {

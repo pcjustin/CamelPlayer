@@ -47,9 +47,10 @@ std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::p
 std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path,
                                       const PcmBitsByFormat& pcmBits = {});
 
-// The length, in frames, an MP3 was measured at when it last played (the library knows it): the length mpg123 shows
-// until its scan measures it again, and what places a seek its scan has not reached yet, or another MP3 decoder's. Kept
+// The length, in frames, the library knows for an MP3: exact, as measured when it last played or declared by its
+// header, or `estimated` when it was scanned. It is the length every MP3 decoder shows until it knows better, and what
+// places a seek mpg123's scan has not reached yet, or another MP3 decoder's; only an exact one is taken as exact. Kept
 // for a few recent files.
-void rememberMeasuredLength(const std::filesystem::path& path, uint64_t frames);
+void rememberLibraryLength(const std::filesystem::path& path, uint64_t frames, bool estimated);
 
 } // namespace camel::audio

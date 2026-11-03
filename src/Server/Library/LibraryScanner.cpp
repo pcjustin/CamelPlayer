@@ -568,7 +568,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
 Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                     const std::map<int64_t, library::Fingerprint>& hashSizes, const std::set<std::string>& pendingIdentity,
                     const std::set<std::string>& knownHashes, const std::set<TrustedIdentity>& trusted, bool reread,
-                    const std::set<std::string>& refused, const CancellationToken& token,
+                    const std::set<std::string>& readAgain, const CancellationToken& token,
                     const std::function<bool()>& playbackActive) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     auto restore = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
@@ -600,7 +600,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 if (!directoryValid()) break;
                 entry.version = fileVersion(child);
             }
-            if (reread || old == known.end() || old->second != entry.version || refused.contains(fileKey)) {
+            if (reread || old == known.end() || old->second != entry.version || readAgain.contains(fileKey)) {
                 if (!directoryValid()) break;
                 if (type == "audio") entry.metadata = metadata(child, entry.version.size);
                 // Fingerprinted now, while the start of the file the tags came from is still in the storage's cache: a
@@ -912,17 +912,19 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         if (files.integer(7)) pendingIdentity.insert(files.text(0));
         if (files.integer(8)) knownHashes.insert(files.text(0));
     }
-    // A newer CamelPlayer may read audio files an earlier one refused, such as ADPCM WAV files, so a complete scan
-    // reads them again once per version.
+    // A newer CamelPlayer may read audio files an earlier one refused, such as ADPCM WAV files, and estimate the length
+    // of an MP3 without a header better, so a complete scan reads them again once per version.
     const auto refusedKey = "library_refused_read:" + std::to_string(root);
-    std::set<std::string> refused;
+    std::set<std::string> readAgain;
     auto refusedVersion = reader.prepare("SELECT value FROM app_state WHERE key=?");
     refusedVersion.bind(1, refusedKey);
     if (!partial && (!refusedVersion.step() || refusedVersion.text(0) != CAMEL_VERSION_STRING)) {
         auto rows = reader.prepare("SELECT path FROM files f WHERE root_id=? AND available=1 AND kind='audio' AND "
-                                   "NOT EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id)");
+                                   "(NOT EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id) OR "
+                                   "EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id AND t.format='mp3' AND "
+                                   "t.length_estimated=1))");
         rows.bind(1, root);
-        while (rows.step()) refused.insert(rows.text(0));
+        while (rows.step()) readAgain.insert(rows.text(0));
     }
     // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist.
     std::map<int64_t, library::Fingerprint> hashSizes;
@@ -1069,7 +1071,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
                 if (!work.fileWork) return list(work.path, token, network, listedIds);
-                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, refused,
+                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, readAgain,
                                    token, playbackActive);
             }));
         }

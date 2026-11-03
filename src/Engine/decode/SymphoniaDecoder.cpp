@@ -33,10 +33,10 @@ public:
         info_.totalFrames = si.total_frames;
         symphoniaFrames_ = si.total_frames;
         coarse_ = si.coarse_seek != 0;
-        // Where no header declares an MP3's length, Symphonia estimates it from the first frames; one measured before is
-        // the length to show, and places a seek better.
+        // Where no header declares an MP3's length, Symphonia estimates it from the first frames; the library's, measured
+        // or estimated, is the length to show, and places a seek better.
         if (coarse_ && si.total_frames)
-            if (const auto measured = measuredLength(path)) info_.totalFrames = *measured;
+            if (const auto known = libraryLength(path)) info_.totalFrames = known->frames;
         float_ = si.is_float != 0;
         if (si.has_md5) {
             std::array<uint8_t, 16> m;

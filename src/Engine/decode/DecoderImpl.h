@@ -26,8 +26,12 @@ std::unique_ptr<IDecoder> openMinimp3(const std::filesystem::path& path, uint32_
 // Raw DSD: SourceInfo counts byte frames (DSD rate / 8) and reports 1 bit per sample; read() returns one byte
 // per channel per frame, oldest sample in the MSB.
 std::unique_ptr<IDecoder> openDsdNexus(const std::filesystem::path& path);
-// The length an MP3 was measured at when it last played (IDecoder.h, rememberMeasuredLength).
-std::optional<uint64_t> measuredLength(const std::filesystem::path& path);
+// The length the library knows for an MP3 (IDecoder.h, rememberLibraryLength).
+struct LibraryLength {
+    uint64_t frames = 0;
+    bool estimated = false;
+};
+std::optional<LibraryLength> libraryLength(const std::filesystem::path& path);
 // Decodes the DTS bitstream that `words`, a 16-bit stereo WAVE decoder, reads from a DTS-CD file.
 std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits);
 

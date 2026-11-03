@@ -39,10 +39,10 @@ public:
             std::fclose(file_);
             throw Error(ErrorCode::UnsupportedStream, "dr_mp3: unexpected stream parameters");
         }
-        // A length measured before is the one to show, and places a seek better. Without it or a Xing/Info header
-        // dr_mp3 would read the whole file to count its frames.
-        if (const auto measured = measuredLength(path))
-            info_.totalFrames = *measured;
+        // The library's length, measured or estimated, is the one to show, and places a seek better. Without it or a
+        // Xing/Info header dr_mp3 would read the whole file to count its frames.
+        if (const auto known = libraryLength(path))
+            info_.totalFrames = known->frames;
         else if (mp3_.totalPCMFrameCount != DRMP3_UINT64_MAX)
             info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
         declared_ = mp3_.totalPCMFrameCount;

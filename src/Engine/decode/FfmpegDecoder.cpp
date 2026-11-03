@@ -66,10 +66,11 @@ public:
         stream_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
         if (stream_ < 0 || !codec) fail(ErrorCode::UnsupportedStream, "no audio stream");
         AVStream* st = fmt_->streams[stream_];
-        // A length measured before scales a fast seek better than FFmpeg's estimate from the first frames.
+        // The library's length, measured or estimated, is the one to show, and scales a fast seek better than FFmpeg's
+        // estimate from the first frames.
         if (fastSeek && st->codecpar->sample_rate > 0)
-            if (const auto measured = measuredLength(path))
-                st->duration = av_rescale_q(int64_t(*measured), AVRational{1, st->codecpar->sample_rate}, st->time_base);
+            if (const auto known = libraryLength(path))
+                st->duration = av_rescale_q(int64_t(known->frames), AVRational{1, st->codecpar->sample_rate}, st->time_base);
         // The float decoders keep full precision until the single quantization below.
         if (st->codecpar->codec_id == AV_CODEC_ID_MP3) codec = avcodec_find_decoder_by_name("mp3float");
         if (st->codecpar->codec_id == AV_CODEC_ID_AAC) codec = avcodec_find_decoder_by_name("aac");

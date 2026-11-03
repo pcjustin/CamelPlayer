@@ -592,7 +592,7 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
         const bool measured = file == vbrMp3(false);
         const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
         const uint64_t total = all.size() / kChannels;
-        if (measured) rememberMeasuredLength(file, total);
+        if (measured) rememberLibraryLength(file, total, false);
         const uint64_t target = total * 9 / 10;
         auto decoder = openDecoder(DecoderKind::Mpg123, file);
         if (measured) EXPECT_EQ(decoder->estimatedFrames(), total);
@@ -630,7 +630,7 @@ TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
         for (const auto& [file, name] : files) {
             const auto all = decodeAll(*openDecoder(kind, file));
             const uint64_t target = all.size() / kChannels * 9 / 10;
-            if (file == vbrMp3(false)) rememberMeasuredLength(file, all.size() / kChannels); // scales the seek
+            if (file == vbrMp3(false)) rememberLibraryLength(file, all.size() / kChannels, false); // scales the seek
             auto decoder = openDecoder(kind, file);
             decoder->seek(target);
             const auto rest = decodeAll(*decoder);
@@ -667,6 +667,34 @@ TEST(LossyDecoderPolicy, OtherMp3DecodersEstimateTheLengthUntilTheEnd) {
             const uint64_t frames = decodeAll(*decoder).size() / kChannels;
             EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind) << " on " << fixture.name;
         }
+}
+
+// The length the library knows, even one it estimated, is the one every MP3 decoder shows at once; what a decoder
+// decodes still replaces it at the end, so an estimate is not taken as exact.
+TEST(LossyDecoderPolicy, EveryMp3DecoderShowsTheLibrarysLength) {
+    const auto& source = reference();
+    const auto file = writeFile("library-length.mp3", readFile(path(kFixtures[3])));
+    const uint64_t known = source.size() / kChannels + 5000; // no decoder's own estimate
+    rememberLibraryLength(file, known, true);
+    for (const auto kind : decodersFor(AudioFormat::Mp3)) {
+        auto decoder = openDecoder(kind, file);
+        EXPECT_EQ(decoder->estimatedFrames(), known) << decoderName(kind);
+        const uint64_t frames = decodeAll(*decoder).size() / kChannels;
+        EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind);
+    }
+}
+
+// Without a header an MP3's length is estimated from its size; a tag before the first frame, which cover art makes
+// hundreds of kilobytes, is not audio and adds nothing to it.
+TEST(LossyDecoderPolicy, AnMp3sEstimatedLengthLeavesOutTheTagBeforeIt) {
+    reference();
+    const auto plain = path(kFixtures[3]);
+    const auto tagged = writeFile("headerless-behind-tag.mp3", id3(300000) + readFile(plain));
+    bool estimated = false;
+    const uint64_t expected = probeMp3Info(plain, estimated).totalFrames;
+    EXPECT_TRUE(estimated);
+    EXPECT_EQ(probeMp3Info(tagged, estimated).totalFrames, expected);
+    EXPECT_EQ(openDecoder(DecoderKind::Mpg123, tagged)->estimatedFrames(), expected);
 }
 
 // The first frame's side info is that of a real file's first frame, which counts more bits than the frame holds:

@@ -1036,7 +1036,7 @@ private:
         chain_.clear();
         const auto& source = playable(position.entryId);
         const std::filesystem::path path(toWide(source.pathUtf8()));
-        shareMeasuredLength(position.entryId);
+        shareLibraryLength(position.entryId);
         const bool manualChange = !afterEnd && state_.queueEntryId && state_.queueEntryId != position.entryId;
         state_.track = source;
         state_.queueEntryId = position.entryId;
@@ -1181,7 +1181,7 @@ private:
         const auto& source = playable(upcoming->entryId);
         if (source.decoder() != state_.track->decoder()) return;
         const auto from = chain_.empty() ? state_.queueEntryId : chain_.back();
-        shareMeasuredLength(upcoming->entryId);
+        shareLibraryLength(upcoming->entryId);
         if (engine_->queueNext(std::filesystem::path(toWide(source.pathUtf8())), source.decoder(), gainFor(upcoming->entryId),
                                crossfadeMs(from, upcoming->entryId)))
             chain_.push_back(upcoming->entryId);
@@ -1199,17 +1199,18 @@ private:
         return uint32_t(std::lround(settings_.crossfade.seconds * 1000.0));
     }
 
-    // The length mpg123 measured when the entry's MP3 last played, which it shows at once and places early seeks by.
-    void shareMeasuredLength(uint64_t entryId) {
+    // The length the library knows for the entry's MP3, exact or estimated, which the MP3 decoders show at once and place
+    // early seeks by.
+    void shareLibraryLength(uint64_t entryId) {
         const auto at = std::ranges::find(entries_, entryId, &QueueEntry::id);
         if (at == entries_.end() || !at->file || !libraryReader_) return;
         try {
             auto row = libraryReader_->prepare(
-                "SELECT total_frames FROM tracks WHERE file_id=? AND format='mp3' AND length_estimated=0 AND total_frames>0");
+                "SELECT total_frames,length_estimated FROM tracks WHERE file_id=? AND format='mp3' AND total_frames>0");
             if (row.bind(1, at->file).step())
-                audio::rememberMeasuredLength(toWide(at->source.pathUtf8()), uint64_t(row.integer(0)));
+                audio::rememberLibraryLength(toWide(at->source.pathUtf8()), uint64_t(row.integer(0)), row.integer(1) != 0);
         } catch (const std::exception& e) {
-            log::warn("Measured length: %s", e.what());
+            log::warn("Library length: %s", e.what());
         }
     }
 

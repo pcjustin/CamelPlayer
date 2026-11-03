@@ -38,10 +38,10 @@ struct ScanGate {
     bool stop = false;
 };
 
-std::mutex measuredMutex;
-std::vector<std::pair<std::wstring, uint64_t>> measured; // the latest last
+std::mutex libraryLengthsMutex;
+std::vector<std::pair<std::wstring, LibraryLength>> libraryLengths; // the latest last
 
-std::wstring measuredKey(const std::filesystem::path& path) {
+std::wstring libraryLengthKey(const std::filesystem::path& path) {
     return path.lexically_normal().wstring();
 }
 
@@ -138,20 +138,21 @@ class Mpg123Decoder final : public IDecoder {
 public:
     // `measure`: playback. The exact length and seek index cost a scan of the whole file, seconds from a network
     // share, so a second stream scans while this one plays; the length counts from when it is known, and a seek waits
-    // until the scan has passed its target. Otherwise (library scans) the length stays mpg123's estimate.
-    // mpg123 would decode a VBRI frame, which holds no sound, so it sees the file from the frame after it.
+    // until the scan has passed its target. Otherwise (library scans) the length stays mpg123's estimate, from the file
+    // alone. mpg123 sees the file from its first frame of sound: it would count the tags before it as audio when it
+    // estimates the length of a stream without a header, and decode a VBRI frame, which holds no sound.
     Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool measure)
-        : path_(path), start_(audioAfterVbriFrame(path)), stream_(std::make_unique<Stream>(path, start_)),
-          measured_(measuredLength(path)) {
+        : path_(path), start_(mpegSoundStart(path)), stream_(std::make_unique<Stream>(path, start_)),
+          library_(measure ? libraryLength(path) : std::nullopt) {
         info_.sampleRate = uint32_t(stream_->rate);
         info_.channels = uint32_t(stream_->channels);
         info_.bitsPerSample = lossyBits;
-        // mpg123 reads a Xing/Info header but not VBRI, whose VBR stream it would estimate from the first bitrate; a
-        // length measured before knows better than either.
+        // mpg123 reads a Xing/Info header but not VBRI, whose VBR stream it would estimate from the first bitrate; the
+        // library's length knows better than either.
         const int64_t length = mpg123_length64(stream_->mh());
         const uint64_t vbri = vbriSamples(path);
         vbri_ = vbri != 0;
-        estimate_ = measured_ ? *measured_ : vbri ? vbri : length > 0 ? uint64_t(length) : 0;
+        estimate_ = library_ ? library_->frames : vbri ? vbri : length > 0 ? uint64_t(length) : 0;
         if (measure)
             scan_ = std::thread([this, path] { scanMain(path); });
         else
@@ -292,7 +293,8 @@ private:
 
     // Gives the playing stream an index of where its frames are estimated to start: from the frame size where it holds
     // for every frame, from a Xing table, or else in proportion to the length. `exact` for a CBR stream, as its Info
-    // frame or its measured length shows. False when the stream gives nothing to estimate from.
+    // frame or its measured length shows; a length the library estimated shows nothing. False when the stream gives
+    // nothing to estimate from.
     bool estimateIndex(bool& exact) {
         mpg123_handle* mh = stream_->mh();
         int64_t* own = nullptr;
@@ -308,11 +310,12 @@ private:
         const double slots = frame.layer == 1 ? 48000.0 : frame.layer == 3 && frame.version != MPG123_1_0 ? 72000.0 : 144000.0;
         const double frameBytes = slots * frame.bitrate / double(frame.rate);
         const uint64_t estimated = estimate_ ? (estimate_ + uint64_t(samplesPerFrame) - 1) / uint64_t(samplesPerFrame) : 0;
+        const bool measured = library_ && !library_->estimated;
         const bool noVbrHeader = frame.vbr == MPG123_CBR && !vbri_;
-        const bool fits = measured_ && estimated && std::abs(audio / double(estimated) - frameBytes) <= frameBytes * 0.005;
-        const bool cbr = noVbrHeader && (fits || (!measured_ && lossyLengthDeclared(path_)));
+        const bool fits = measured && estimated && std::abs(audio / double(estimated) - frameBytes) <= frameBytes * 0.005;
+        const bool cbr = noVbrHeader && (fits || (!measured && lossyLengthDeclared(path_)));
         // Without a header or a measured length, the frame size is the best guess there is.
-        const bool bySize = cbr || (noVbrHeader && !measured_);
+        const bool bySize = cbr || (noVbrHeader && !measured);
         if (!bySize && !toc_) toc_ = xingToc(path_);
         const double frames = bySize ? audio / frameBytes : toc_ ? double(toc_->frames) : double(estimated);
         if (frames < 1 || audio <= 0) return false;
@@ -355,7 +358,7 @@ private:
     std::filesystem::path path_;
     uint64_t start_;
     std::unique_ptr<Stream> stream_;
-    std::optional<uint64_t> measured_;
+    std::optional<LibraryLength> library_;
     std::optional<XingToc> toc_; // read at the first seek that needs it
     bool vbri_ = false;
     bool estimated_ = false;          // positions since the last seek are estimates
@@ -377,21 +380,21 @@ std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t
     return std::make_unique<Mpg123Decoder>(path, lossyBits, true);
 }
 
-std::optional<uint64_t> measuredLength(const std::filesystem::path& path) {
-    const std::wstring key = measuredKey(path);
-    const std::scoped_lock lock(measuredMutex);
-    for (auto it = measured.rbegin(); it != measured.rend(); ++it)
+std::optional<LibraryLength> libraryLength(const std::filesystem::path& path) {
+    const std::wstring key = libraryLengthKey(path);
+    const std::scoped_lock lock(libraryLengthsMutex);
+    for (auto it = libraryLengths.rbegin(); it != libraryLengths.rend(); ++it)
         if (_wcsicmp(it->first.c_str(), key.c_str()) == 0) return it->second;
     return std::nullopt;
 }
 
-void rememberMeasuredLength(const std::filesystem::path& path, uint64_t frames) {
+void rememberLibraryLength(const std::filesystem::path& path, uint64_t frames, bool estimated) {
     constexpr size_t kKept = 8;
-    const std::wstring key = measuredKey(path);
-    const std::scoped_lock lock(measuredMutex);
-    std::erase_if(measured, [&](const auto& e) { return _wcsicmp(e.first.c_str(), key.c_str()) == 0; });
-    measured.emplace_back(key, frames);
-    if (measured.size() > kKept) measured.erase(measured.begin());
+    const std::wstring key = libraryLengthKey(path);
+    const std::scoped_lock lock(libraryLengthsMutex);
+    std::erase_if(libraryLengths, [&](const auto& e) { return _wcsicmp(e.first.c_str(), key.c_str()) == 0; });
+    libraryLengths.emplace_back(key, LibraryLength{frames, estimated});
+    if (libraryLengths.size() > kKept) libraryLengths.erase(libraryLengths.begin());
 }
 
 SourceInfo probeMp3Info(const std::filesystem::path& path, bool& estimated) {

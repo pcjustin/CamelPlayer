@@ -144,10 +144,11 @@ TEST(FormatProbe, OnlyXingAndInfoHeadersDeclareAnMp3sLength) {
     const auto file = write("declared-vbri.mp3", first("VBRI", 36, vbri));
     EXPECT_FALSE(lossyLengthDeclared(file));
     EXPECT_EQ(vbriSamples(file), 3u * 1152); // the frames after the VBRI frame
-    EXPECT_EQ(audioAfterVbriFrame(file), 417u);
+    EXPECT_EQ(mpegSoundStart(file), 417u);
     const auto plain = write("plain.mp3", frames(header, 417, 4));
     EXPECT_EQ(vbriSamples(plain), 0u);
-    EXPECT_EQ(audioAfterVbriFrame(plain), 0u);
+    EXPECT_EQ(mpegSoundStart(plain), 0u);
+    EXPECT_EQ(mpegSoundStart(write("tagged-plain.mp3", id3(40) + frames(header, 417, 4))), 50u);
 }
 
 TEST(FormatProbe, SeparatesM4aAlacFromAacLc) {

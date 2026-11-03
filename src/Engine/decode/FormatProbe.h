@@ -32,8 +32,9 @@ bool lossyLengthDeclared(const std::filesystem::path& path);
 // a frame.
 uint64_t vbriSamples(const std::filesystem::path& path);
 
-// Where an MP3's audio starts after its VBRI frame, which holds no sound; 0 without one.
-uint64_t audioAfterVbriFrame(const std::filesystem::path& path);
+// Where an MP3's sound starts: at its first frame, past its tags and any other bytes before it, or at the frame after a
+// VBRI frame, which holds no sound.
+uint64_t mpegSoundStart(const std::filesystem::path& path);
 
 // What an MP3's Xing (VBR) frame declares, when it declares all three: the frames after it, the bytes from it on, and
 // for each percent of the frames, where they start in 256ths of those bytes. `at` is where the frame starts in the file,

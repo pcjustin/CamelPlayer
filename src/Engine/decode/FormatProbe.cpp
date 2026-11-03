@@ -462,13 +462,12 @@ double XingToc::byteShare(double share) const {
     return (from + (to - from) * (percent - double(entry))) / 256.0;
 }
 
-uint64_t audioAfterVbriFrame(const std::filesystem::path& path) {
+uint64_t mpegSoundStart(const std::filesystem::path& path) {
     const File f(path);
     const uint64_t start = mpegStart(f);
     uint8_t frame[40] = {};
-    if (!f.readAt(start, frame, sizeof frame) || !tagIs(frame + 36, "VBRI")) return 0;
-    const uint32_t length = mpegFrameLength(frame);
-    return length ? start + length : 0;
+    if (!f.readAt(start, frame, sizeof frame) || !tagIs(frame + 36, "VBRI")) return start;
+    return start + mpegFrameLength(frame);
 }
 
 uint64_t mpegAudioStart(const std::filesystem::path& path) {
