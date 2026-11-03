@@ -136,7 +136,7 @@ The executables are written to `build/<Configuration>/App/CamelPlayer.exe`, `bui
 
 The version comes from the `VERSION` file; the build puts it in the executable's file properties, Settings › About and `camelcli --version`. Change it before tagging a release on GitHub (tag `v` followed by the version).
 
-Each build also writes `build/compile_commands.json`, so clangd (for example in VS Code) applies the repository's `.clang-tidy` checks and `.clang-format` style to the C++ in `src/`. Diagnostics are fixed in the code or the check configuration, never suppressed with `NOLINT`. Rust code is kept clean with `cargo fmt` and `cargo clippy -- -D warnings`.
+Each build also writes `build/compile_commands.json`, so clangd (for example in VS Code) applies the repository's `.clang-tidy` checks, the Include Cleaner settings of `.clangd` (unused and missing includes) and the `.clang-format` style to the C++ in `src/`. `powershell -File msbuild\lsp-scan.ps1` runs the same clangd as a language server over the changed C++ files (or the files given with `-Files`) and prints what VS Code would show; every C++ change ends with this LSP scan reporting no clang-tidy or Include Cleaner diagnostics. Diagnostics are fixed in the code or the check configuration, never suppressed with `NOLINT` or `IWYU pragma` comments. Rust code is kept clean with `cargo fmt` and `cargo clippy -- -D warnings`.
 
 ## Testing
 
