@@ -747,6 +747,14 @@ Path canonicalLibraryPath(const Path& path) {
     return canonicalRoot(path);
 }
 
+Path spelledLibraryPath(const Path& path) {
+    std::wstring text = path.lexically_normal().make_preferred().wstring();
+    if (!text.starts_with(LR"(\\?\)")) text = text.starts_with(LR"(\\)") ? LR"(\\?\UNC\)" + text.substr(2) : LR"(\\?\)" + text;
+    Path result(lower(text));
+    while (result != result.root_path() && result.filename().empty()) result = result.parent_path();
+    return result;
+}
+
 int64_t LibraryScanner::addRoot(const Path& path) {
     const Path resolved = canonicalRoot(path);
     const DWORD attr = GetFileAttributesW(resolved.c_str());

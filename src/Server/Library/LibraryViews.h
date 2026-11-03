@@ -197,6 +197,9 @@ std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t fol
 
 // A stored root key as people write it: the volume or share's own spelling without the extended-length prefix.
 std::string libraryDisplayPath(const std::string& key);
+// A library file's path as the scan spelled it, from its root's display path and the names stored for its folders and
+// itself, without asking the file system; nullopt when the library does not hold the file.
+std::optional<std::string> libraryStoredPath(sqlite::Database& db, int64_t file);
 // Where a library folder is, as Roon shows it: a share as \\server\share\folder, a local folder as
 // "COMPUTER › [D:] volume label › folder".
 std::string libraryLocation(const std::string& key);

@@ -230,6 +230,25 @@ std::string libraryDisplayPath(const std::string& key) {
     return toUtf8(text);
 }
 
+std::optional<std::string> libraryStoredPath(sqlite::Database& db, int64_t file) {
+    auto row = db.prepare("SELECT f.name,f.folder_id,coalesce(r.display,'') FROM files f JOIN roots r ON r.id=f.root_id "
+                          "WHERE f.id=? AND f.name IS NOT NULL");
+    if (!row.bind(1, file).step() || row.text(2).empty()) return std::nullopt;
+    std::vector<std::string> names{row.text(0)};
+    // The root's own folder has no parent; its spelling is the root's display path.
+    auto folder = db.prepare("SELECT parent_id,name FROM folders WHERE id=?");
+    for (int64_t id = row.integer(1);;) {
+        folder.reset();
+        if (!folder.bind(1, id).step()) return std::nullopt;
+        if (folder.isNull(0)) break;
+        names.push_back(folder.text(1));
+        id = folder.integer(0);
+    }
+    std::string path = row.text(2);
+    for (const auto& name : std::views::reverse(names)) path += "\\" + name;
+    return path;
+}
+
 std::string libraryLocation(const std::string& key) {
     auto display = libraryDisplayPath(key);
     const std::wstring text = toWide(display);

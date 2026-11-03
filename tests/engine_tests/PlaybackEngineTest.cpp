@@ -359,12 +359,19 @@ TEST_F(EngineStateTest, AManualChangeDuringACrossfadeFadesOutWhatPlaysWithoutReo
     EXPECT_LT(frames, 48000u + 96000u + 96000u / 2);
 }
 
-TEST_F(EngineStateTest, AManualChangeWithoutCrossfadeReopensTheDevice) {
+// Without crossfade a manual change opens the file as usual, on the device already open in its format.
+TEST_F(EngineStateTest, AManualChangeWithoutCrossfadeOpensTheFileOnTheOpenDevice) {
     open();
     ASSERT_EQ(pull(9600), 9600u);
-    engine->crossfadeTo(testutil::generatedFile({"crossfade-manual-24-96k", 96000, 24, 2, 0.5}));
+    const auto next = testutil::generatedFile({"crossfade-manual-24-96k", 96000, 24, 2, 0.5});
+    engine->crossfadeTo(next);
     engine->waitIdle();
-    EXPECT_EQ(probe.opens, 2);
+    const auto s = engine->snapshot();
+    EXPECT_EQ(s.file, next.wstring());
+    EXPECT_EQ(s.state, PlayState::Playing);
+    EXPECT_EQ(s.position, 0u);
+    EXPECT_EQ(s.transitions, 0u);
+    EXPECT_EQ(probe.opens, 1);
 }
 
 // The player supports 16/24-bit sources only; other depths are reported and never reach the device.
@@ -745,7 +752,7 @@ TEST_F(EngineStateTest, LostSourcePausesWithoutEndingTheTrackAndRetriesAtTheSave
     public:
         Source(SourceInfo info, std::filesystem::path path, std::shared_ptr<std::atomic<bool>> interrupt)
             : info_(info), path_(std::move(path)), interrupt_(std::move(interrupt)) {
-            info_.totalFrames = 44100 * 60;
+            info_.totalFrames = uint64_t(44100) * 60;
         }
         const SourceInfo& info() const override { return info_; }
         size_t read(int32_t* dst, size_t frames) override {

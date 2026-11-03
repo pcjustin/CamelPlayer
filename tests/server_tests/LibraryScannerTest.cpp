@@ -15,6 +15,7 @@
 #include <taglib/tpropertymap.h>
 
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryViews.h"
 #include "Server/Library/LibraryText.h"
 #include "Common/DecoderRegistry.h"
 #include "Common/Version.h"
@@ -73,6 +74,45 @@ TEST_F(LibraryScannerTest, NormalizesAliasesAndOverlappingRootsInBothOrders) {
     EXPECT_THROW(scanner.scan(child), std::invalid_argument);
     EXPECT_THROW(scanner.addRoot(dir / "missing"), std::runtime_error);
     EXPECT_THROW(scanner.addRoot(dir / "music" / "album" / "one.flac"), std::invalid_argument);
+}
+
+// A queued library file is found by its spelling, without opening it on a share.
+TEST_F(LibraryScannerTest, ASpelledPathMatchesTheStoredKey) {
+    const auto file = audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    auto reader = store.openReader();
+    auto stored = reader.prepare("SELECT path FROM files WHERE kind='audio'");
+    ASSERT_TRUE(stored.step());
+    EXPECT_EQ(camel::toUtf8(spelledLibraryPath(file).wstring()), stored.text(0));
+    EXPECT_EQ(spelledLibraryPath(file), canonicalLibraryPath(file));
+    EXPECT_EQ(spelledLibraryPath(dir / "music" / "ALBUM" / ".." / "album" / "One.FLAC"), canonicalLibraryPath(file));
+    EXPECT_EQ(spelledLibraryPath(canonicalLibraryPath(file)), canonicalLibraryPath(file));
+    EXPECT_EQ(spelledLibraryPath(LR"(\\Tachikoma\Music/日本\A\..\B.mp3)"), fs::path(LR"(\\?\unc\tachikoma\music\日本\b.mp3)"));
+    EXPECT_EQ(spelledLibraryPath(L"C:/Music/A.flac"), fs::path(LR"(\\?\c:\music\a.flac)"));
+}
+
+// A queued library file shows under the spelling the scan stored, which is the one on disk, without asking the disk.
+TEST_F(LibraryScannerTest, AStoredPathKeepsTheOnDiskSpelling) {
+    const auto folder = dir / "music" / "Disc A" / "Live At Budokan";
+    fs::create_directories(folder);
+    fs::copy_file(testutil::testFile("16-44.1k"), folder / "01 Opening Theme.FLAC");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "Root Track.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    auto reader = store.openReader();
+    auto files = reader.prepare("SELECT id,path FROM files WHERE kind='audio'");
+    int checked = 0;
+    while (files.step()) {
+        const auto stored = libraryStoredPath(reader, files.integer(0));
+        ASSERT_TRUE(stored) << files.text(1);
+        EXPECT_EQ(*stored, libraryDisplayPath(files.text(1)));
+        ++checked;
+    }
+    EXPECT_EQ(checked, 2);
+    EXPECT_FALSE(libraryStoredPath(reader, 999999));
 }
 
 TEST_F(LibraryScannerTest, ACompactDateYieldsItsYear) {

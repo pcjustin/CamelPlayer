@@ -179,7 +179,19 @@ public:
     }
 
     // ---- IRenderSource (real-time thread) ----
+    // While a session replaces another on the open device, the device plays silence and never reaches the sessions.
     size_t render(uint8_t* dst, size_t frames) noexcept override {
+        rendering_.fetch_add(1);
+        size_t n = frames;
+        if (switching_.load())
+            memset(dst, 0, frames * bpf_);
+        else
+            n = renderSession(dst, frames);
+        rendering_.fetch_sub(1);
+        return n;
+    }
+
+    size_t renderSession(uint8_t* dst, size_t frames) noexcept {
         if (!rust_) return 0;
         if (uint64_t lead = leadSilence_.load(std::memory_order_acquire)) {
             // The whole request is silence; the paused Engine writes the DSD idle pattern with continuing DoP markers.
@@ -232,7 +244,7 @@ public:
                     : refusedFile_ == file_                   ? refusedSkip_
                                                               : FadeSkip::NoPreload;
         refusedFile_.clear();
-        startSession(0, true);
+        startSession(0, true, false, true);
     }
 
     void crossfadeTo(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
@@ -753,10 +765,18 @@ private:
     }
 
     // `deviceChange`: reopening after the Windows default changed; a device that cannot play pauses instead of ending the
-    // track, so the user can resume (docs/Plan.md §2).
-    void startSession(uint64_t startFrame, bool playNow, bool deviceChange = false) {
+    // track, so the user can resume (docs/Plan.md §2). `keepOutput`: a manual change, which plays on the open device when
+    // the new file takes its format.
+    void startSession(uint64_t startFrame, bool playNow, bool deviceChange = false, bool keepOutput = false) {
         const PlayState onDeviceFailure = deviceChange ? PlayState::Paused : PlayState::Stopped;
-        teardown();
+        teardown(keepOutput && playNow && !deviceChange);
+        // A session that fails before it plays leaves no device open behind its silence.
+        struct ReleaseKept {
+            Impl* engine;
+            ~ReleaseKept() {
+                if (engine->switching_) engine->closeOutput();
+            }
+        } releaseKept{this};
         const uint64_t session = ++session_;
         openedAt_ = measure::now();
         firstAudio_ = 0;
@@ -806,6 +826,14 @@ private:
         try {
             ensureOutput();
             plan = negotiate(src, lossy, &planAdjustment_);
+            // The open device plays on only in the PCM format it plays; any other choice is made with it closed, as a
+            // running device may refuse formats it would take.
+            if (switching_ && (!plan || !lastOpened_ || plan->dsd == DsdPath::Native || plan->dsd == DsdPath::Dop ||
+                               withDsp(*plan).format != lastOpened_->format)) {
+                closeOutput();
+                planAdjustment_.clear();
+                plan = negotiate(src, lossy, &planAdjustment_);
+            }
             stages_[2] = measure::now();
         } catch (const Error& e) {
             position_ = startFrame;
@@ -878,19 +906,25 @@ private:
         for (int i = 0; i < 600 && bufferedFrames() < startFrames && !decodeDone_; i++) Sleep(5);
         stages_[5] = measure::now();
 
-        output_->setErrorHandler([this, session](const Error& e) {
-            post([this, session, e] {
-                if (session == session_ && active_) onOutputError(e);
+        // The handlers report to the session the device plays for, which a kept device changes while it runs.
+        const bool kept = switching_;
+        outputSession_ = session;
+        if (!kept) {
+            output_->setErrorHandler([this](const Error& e) {
+                post([this, owner = outputSession_.load(), e] {
+                    if (owner == session_ && active_) onOutputError(e);
+                });
             });
-        });
-        output_->setRestartHandler([this, session] {
-            post([this, session] {
-                if (session == session_ && active_) onRestart();
+            output_->setRestartHandler([this] {
+                post([this, owner = outputSession_.load()] {
+                    if (owner == session_ && active_) onRestart();
+                });
             });
-        });
+        }
         rawDsd_.store(plan_.dsd == DsdPath::Native || plan_.dsd == DsdPath::Dop, std::memory_order_release);
         try {
-            output_->open(fmt_, this);
+            if (!kept) output_->open(fmt_, this);
+            outputOpen_ = true;
             stages_[6] = measure::now();
         } catch (const Error& e) {
             rawDsd_ = false;
@@ -922,7 +956,10 @@ private:
             playing_ = true;
             startRust();
             try {
-                output_->start();
+                if (kept)
+                    switching_ = false; // the running device reaches this session from its next request
+                else
+                    output_->start();
             } catch (const Error& e) {
                 // The driver accepted the format but cannot run it, and now refuses it: choose again, which converts
                 // only with permission (docs/Plan.md §5.3).
@@ -996,10 +1033,26 @@ private:
                 output_.reset();
             }
         }
+        outputOpen_ = false;
+        switching_ = false; // a closed device renders nothing
     }
 
-    void teardown() {
-        closeOutput();
+    // Whether the open device can play on into another session: a running PCM stream, which silence does not disturb, on
+    // the device instance that opened it.
+    bool canKeepOutput() const {
+        return output_ && outputOpen_ && state_ == PlayState::Playing && !rawDsd_.load(std::memory_order_acquire) &&
+               lastOpened_ && lastOpened_->generation == outputGeneration_;
+    }
+
+    // `keepOutput`: the device plays silence on while another session is prepared, which reuses it if it takes the
+    // same format; closing and reopening an ASIO driver costs about half a second at every manual change.
+    void teardown(bool keepOutput = false) {
+        if (keepOutput && canKeepOutput()) {
+            switching_ = true;
+            while (rendering_.load()) std::this_thread::yield();
+        } else {
+            closeOutput();
+        }
         rawDsd_ = false; // the output no longer renders
         leadSilence_ = 0;
         leadDone_ = false;
@@ -1204,6 +1257,10 @@ private:
     bool resumeOnDefault_ = false;           // the followed default was lost while playing
     bool waitingForSource_ = false;
     std::unique_ptr<OutputBridge> output_;
+    bool outputOpen_ = false;                // output_ holds an open stream
+    std::atomic<uint64_t> outputSession_{0}; // the session the open stream plays for
+    std::atomic<bool> switching_{false};     // the open stream plays silence while another session is prepared
+    std::atomic<int> rendering_{0};          // device requests inside render()
     std::unique_ptr<RustSession> rust_;
     std::wstring file_;
     std::optional<DecoderKind> fileDecoder_; // per-file override of the per-format setting

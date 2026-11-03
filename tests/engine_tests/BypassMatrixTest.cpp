@@ -178,3 +178,65 @@ TEST_P(BypassGapless, ASequenceConcatenatesBitExactlyThroughOneDeviceOpen) {
 
 INSTANTIATE_TEST_SUITE_P(Settings, BypassGapless, ::testing::ValuesIn(kVariants),
                          [](const auto& info) { return std::string(info.param.name); });
+
+namespace {
+
+// Plays `first`, and while it plays changes to `second` by hand; what reached the device after the change.
+Played changeWhilePlaying(const std::filesystem::path& first, const std::filesystem::path& second) {
+    const auto out = testutil::tempDir() / "bypass-manual-change.raw";
+    std::filesystem::remove(out);
+    CaptureOptions options;
+    options.file = out;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true;
+    Played played;
+    {
+        PlaybackEngine engine(configuredButOff(), [&](const Settings&) {
+            return std::make_unique<CountingOutput>(createCaptureOutput(options), played.opens);
+        });
+        engine.openAndPlay(first);
+        engine.waitIdle();
+        EXPECT_TRUE(engine.waitForState(PlayState::Playing, 10s));
+        std::this_thread::sleep_for(300ms);
+        engine.openAndPlay(second);
+        engine.waitIdle();
+        EXPECT_TRUE(engine.waitForState(PlayState::Stopped, 30s));
+        played.snapshot = engine.snapshot();
+    }
+    std::ifstream in(out, std::ios::binary | std::ios::ate);
+    const auto size = in ? size_t(in.tellg()) : 0;
+    std::vector<uint8_t> bytes(size);
+    in.seekg(0);
+    if (size) in.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(size));
+    in.close();
+    played.samples.resize(size / bytesPerSample(SampleType::Int32));
+    unpackSamples(bytes.data(), played.samples.size(), 24, SampleType::Int32, played.samples.data());
+    std::filesystem::remove(out);
+    return played;
+}
+
+bool endsWith(const std::vector<int32_t>& samples, const std::vector<int32_t>& tail) {
+    return samples.size() >= tail.size() && std::equal(tail.begin(), tail.end(), samples.end() - std::ptrdiff_t(tail.size()));
+}
+
+} // namespace
+
+// A manual change to a file in the open format keeps the device running, which closing and reopening an ASIO driver
+// would cost about half a second; the new file still reaches it bit for bit.
+TEST(BypassManualChange, ASameFormatChangePlaysOnTheOpenDevice) {
+    const auto first = testutil::testFile("24-96k");
+    const auto second = testutil::generatedFile({"manual-change-24-96k", 96000, 24, 2, 0.5});
+    const auto played = changeWhilePlaying(first, second);
+    EXPECT_FALSE(played.snapshot.error) << played.snapshot.errorDetail;
+    EXPECT_EQ(played.opens, 1);
+    EXPECT_TRUE(endsWith(played.samples, reference({second})));
+}
+
+TEST(BypassManualChange, AnotherFormatReopensTheDevice) {
+    const auto first = testutil::testFile("24-96k");
+    const auto second = testutil::generatedFile({"manual-change-24-48k", 48000, 24, 2, 0.5});
+    const auto played = changeWhilePlaying(first, second);
+    EXPECT_FALSE(played.snapshot.error) << played.snapshot.errorDetail;
+    EXPECT_EQ(played.opens, 2);
+    EXPECT_TRUE(endsWith(played.samples, reference({second})));
+}

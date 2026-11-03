@@ -16,6 +16,9 @@
 namespace camel::server {
 
 std::filesystem::path canonicalLibraryPath(const std::filesystem::path& path);
+// The library's key for `path` from its spelling alone: canonicalLibraryPath's result for a path the library gave out,
+// without opening the file, which costs a network round trip per file on a share.
+std::filesystem::path spelledLibraryPath(const std::filesystem::path& path);
 
 struct ScanReport {
     bool complete = false;

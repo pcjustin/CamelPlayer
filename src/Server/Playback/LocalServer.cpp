@@ -855,13 +855,23 @@ private:
             if (libraryReader_) {
                 try {
                     auto& binding = libraryEntries_[id];
-                    binding.path = canonicalLibraryPath(std::filesystem::path(toWide(source.pathUtf8()))).wstring();
+                    const std::filesystem::path given(toWide(source.pathUtf8()));
                     auto file = libraryReader_->prepare(
                         "SELECT f.id,coalesce(t.title,''),coalesce(t.artist,''),"
                         "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
                         "LEFT JOIN tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
                         "WHERE f.path=? AND f.available=1");
-                    if (file.bind(1, toUtf8(binding.path)).step()) {
+                    // A path the library gave out is found as spelled; resolving every entry on a share took seconds
+                    // for an album and held back the play command. Other spellings, such as a mapped drive, resolve.
+                    auto key = spelledLibraryPath(given).wstring();
+                    bool found = file.bind(1, toUtf8(key)).step();
+                    if (!found) {
+                        key = canonicalLibraryPath(given).wstring();
+                        file.reset();
+                        found = file.bind(1, toUtf8(key)).step();
+                    }
+                    binding.path = key;
+                    if (found) {
                         binding.file = file.integer(0);
                         auto& entry = entries.back();
                         entry.title = file.text(1);
@@ -1010,14 +1020,16 @@ private:
     }
 
     // Library sources arrive as lowercase index keys; the file opens and shows under its on-disk spelling, which is
-    // resolved once, when the entry is first opened, since a NAS lookup per queued track would stall large queues.
+    // set once, when the entry is first opened. The scan stored it, so a share is asked only for a file it did not: a
+    // NAS busy reading the playing file took most of a second to answer, before the next track could open.
     const TrackSource& playable(uint64_t id) {
         auto& queued = *std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == id; });
         const auto binding = libraryEntries_.find(id);
         if (binding != libraryEntries_.end() && binding->second.file && !binding->second.spelled) {
             binding->second.spelled = true;
-            queued.source =
-                TrackSource(libraryDisplayPath(queued.source.pathUtf8()), queued.source.range(), queued.source.decoder());
+            auto spelled = libraryReader_ ? libraryStoredPath(*libraryReader_, binding->second.file) : std::nullopt;
+            if (!spelled) spelled = libraryDisplayPath(queued.source.pathUtf8());
+            queued.source = TrackSource(*spelled, queued.source.range(), queued.source.decoder());
             queueChanged_ = true;
         }
         return queued.source;
