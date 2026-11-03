@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -613,6 +614,28 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
         ASSERT_TRUE(lag) << by << ": not within a second of the target";
         std::printf("VBR seek by its %s: %lld frames off\n", by, static_cast<long long>(*lag));
     }
+}
+
+// After a seek the scan had not reached, the positions count from the estimate, and the Engine holds the frames read
+// to the length a decoder reports: the exact one the scan learns meanwhile waits for a seek that lands exactly.
+TEST(LossyDecoderPolicy, Mpg123HoldsItsLengthBackAfterAnEstimatedSeek) {
+    const auto file = vbrMp3(true);
+    const uint64_t total = decodeAll(*openDecoder(DecoderKind::Mpg123, file)).size() / kChannels;
+    const uint64_t target = total * 9 / 10;
+    auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    decoder->seek(target);
+    std::vector<int32_t> buffer(size_t(4096) * kChannels);
+    uint64_t position = target + decoder->read(buffer.data(), 4096);
+    std::this_thread::sleep_for(std::chrono::seconds(1)); // the scan of the whole file ends meanwhile
+    while (const size_t n = decoder->read(buffer.data(), 4096)) {
+        position += n;
+        const uint64_t length = decoder->info().totalFrames;
+        ASSERT_TRUE(!length || position <= length) << position << " frames read past the length " << length;
+    }
+    EXPECT_TRUE(!decoder->info().totalFrames || decoder->info().totalFrames == position);
+    decoder->seek(target);
+    EXPECT_EQ(target + decodeAll(*decoder).size() / kChannels, total);
+    EXPECT_EQ(decoder->info().totalFrames, total);
 }
 
 // The MP3 decoders other than mpg123 seek an MP3 at once, without reading the file up to the target: near it, by its

@@ -336,13 +336,15 @@ private:
         return mpg123_set_index64(mh, offsets.data(), kStep, offsets.size()) == MPG123_OK;
     }
 
-    // Takes the scan's exact length, waiting for the scan when `wait` is set.
+    // Takes the scan's exact length, waiting for the scan when `wait` is set. After an estimated seek the position is
+    // itself an estimate, which the exact length would not bear out at the end, so the length waits for a seek that
+    // lands exactly.
     void finishScan(bool wait = false) {
-        if (!scan_.joinable() || (!wait && !scanDone_.load(std::memory_order_acquire))) return;
-        scan_.join();
-        if (!scanned_) return;
-        const int64_t length = mpg123_length64(scanned_->mh());
-        if (length > 0 && uint64_t(length) >= position_) info_.totalFrames = uint64_t(length);
+        if (scan_.joinable() && (wait || scanDone_.load(std::memory_order_acquire))) {
+            scan_.join();
+            if (scanned_) scannedLength_ = uint64_t(std::max<int64_t>(0, mpg123_length64(scanned_->mh())));
+        }
+        if (!estimated_ && scannedLength_ && scannedLength_ >= position_) info_.totalFrames = scannedLength_;
     }
 
     // At the end of the unscanned stream: continues from the scanned one at the same frame, if it holds more.
@@ -367,6 +369,7 @@ private:
     Stream* scanning_ = nullptr; // the scan's stream while it scans, guarded by gate_.mutex
     std::atomic<bool> scanDone_{false};
     std::thread scan_;
+    uint64_t scannedLength_ = 0; // the scan's exact length, once it has ended
     SourceInfo info_;
     uint64_t estimate_ = 0;
     uint64_t position_ = 0;
