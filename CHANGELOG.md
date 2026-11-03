@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 Upgrading from 0.2.0 or 0.2.1: the first start adds an index of the artists to the library (schema 19), which takes a second or two, and keeps the old library as `library.db.v18.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.2.x refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v18.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
 

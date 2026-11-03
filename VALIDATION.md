@@ -1,8 +1,10 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0 and 0.2.1 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0 or 0.2.1. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1 and 0.2.2 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0, 0.2.1 or 0.2.2. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
+
+On 2026-11-03, for 0.2.2, every C++ project and the Rust crates were rebuilt from scratch in Release and Debug. After the last change, a full Release run passed all 729 enabled C++ tests, including the 100k-track search latency target, and all 89 Rust Engine tests and 2 Symphonia bridge tests passed. A full Debug run passed 728 of 729, the latency test again failing only unoptimized (first page p95 107.3 ms).
 
 On 2026-11-01 and 2026-11-02, for 0.2.1, every C++ project was rebuilt from scratch in Release and Debug. A full Release run passed all 731 enabled C++ tests, including the 100k-track search latency target, and all 88 Rust Engine tests. A full Debug run passed 730 of 731, the latency test again failing only unoptimized (first page p95 102.6 ms, broad suggestions 481 ms). After the last change, a WASAPI fix that no automated test reaches, a second Release run passed 730: the test of a manual change during a crossfade reopened the device once under the full suite's load and passed 10 times out of 10 alone.
 
@@ -28,6 +30,8 @@ What the decoding tests check:
 
 ## Hardware
 
+On 2026-11-03, before 0.2.2, all 97 hardware tests passed twice on the release candidate, in 194 and 189 seconds, and once more in 194 seconds after manual track changes began to keep the device open.
+
 On 2026-11-02, before 0.2.1, all 97 hardware tests passed twice, in 189 and 190 seconds. Before that the WASAPI polling test had failed in 2 of 5 runs right after other tests switched the DAVE to another format: the driver reported room that GetBuffer did not grant yet, which 0.2.1 waits out. Five runs of the output parameter tests in a row then passed.
 
 On 2026-11-01, before 0.2.0, all 97 hardware tests passed again in 195 seconds on the same two devices, as they had on 2026-10-31 before 0.1.0 in 196 seconds: playback on every backend with each FLAC decoder, the other formats, DSD rates and DSD switching, device fallback, the output parameters and the Server's playback path.
@@ -41,6 +45,14 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 - A separate DAVE run of the output parameters (polling buffer, MMCSS, fixed sample rate, silence after a DoP-to-PCM switch and release after a pause) passed 5/5.
 
 ## In the app
+
+Checked by hand on 2026-11-03 in the 0.2.2 Release build, on a copy of the owner's library and settings (ASIO on the Chord DAVE, music on a NAS over Wi-Fi); the owner's own data was not touched:
+
+- Settings › Decoders lists only FLAC, ALAC, WAV and AIFF. Settings saved with minimp3 for MP3, FFmpeg for AAC, dr_wav for ADPCM and 16-bit lossy output played with mpg123, Symphonia and libsndfile, and were saved without the removed choices.
+- Files 0.2.1 refused played: MP3s behind stacked ID3 tags (a Mabinogi soundtrack) with mpg123, and an MP4 concert video whose first track is the picture with Symphonia. AAC and ALAC M4A files played with Symphonia, ALAC bit-perfect.
+- MP3s from the NAS started 0.6–0.9 s after the play request with mpg123 once the library scan that follows the start had ended, including Chronicle 2nd 01 and Musica 02, whose start had taken 9.4 and 5.2 s in 0.2.1. A seek to about 70% of a track continued gaplessly into the next. Swallow and GAUZE, which Symphonia and dr_mp3 had played wrongly, played with mpg123.
+- Changing tracks by hand every 6–8 s, while the playing MP3 was still read from the NAS, first took 1.4–6.7 s: the Server asked the NAS about every queued track and how the chosen file was spelled, and closing and reopening the ASIO driver took about 450 ms. With both fixed, changes took 44–452 ms from the play request.
+- Suggestions for broad queries took 37–44 ms; the first query after start, during the startup scan, took 112 ms.
 
 Checked by hand on 2026-11-02 in the 0.2.1 Release build, on the owner's library and settings (ASIO on the Chord DAVE), which were restored afterwards:
 
