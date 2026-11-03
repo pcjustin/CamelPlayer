@@ -45,6 +45,7 @@ public:
             info_.totalFrames = *measured;
         else if (mp3_.totalPCMFrameCount != DRMP3_UINT64_MAX)
             info_.totalFrames = drmp3_get_pcm_frame_count(&mp3_);
+        declared_ = mp3_.totalPCMFrameCount;
         // The first audio frame's header, which a Xing/Info frame before it would have cleared.
         if (mp3_.decoder.header[0] == 0xFF)
             frameBytes_ = (info_.sampleRate >= 32000 ? 144.0 : 72.0) * drmp3_hdr_bitrate_kbps(mp3_.decoder.header) * 1000.0 /
@@ -75,6 +76,9 @@ public:
     void seek(uint64_t frame) override {
         const bool estimated = estimateSeekPoint(frame);
         drmp3_bind_seek_table(&mp3_, estimated ? 1 : 0, estimated ? &point_ : nullptr);
+        // After an estimated seek the stream ends where its audio does: the declared length, counted from the estimate,
+        // could cut it short.
+        mp3_.totalPCMFrameCount = estimated ? DRMP3_UINT64_MAX : declared_;
         if (!drmp3_seek_to_pcm_frame(&mp3_, frame)) throw Error(ErrorCode::SeekFailed, "drmp3_seek_to_pcm_frame failed");
     }
 
@@ -129,6 +133,7 @@ private:
     std::FILE* file_ = nullptr;
     drmp3 mp3_{};
     SourceInfo info_;
+    uint64_t declared_ = 0; // the frames the Xing/Info frame declares, where the stream ends after an exact seek
     double frameBytes_ = 0;
     std::optional<XingToc> toc_; // read at the first seek
     bool tocRead_ = false;

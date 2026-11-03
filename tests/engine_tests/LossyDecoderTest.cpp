@@ -617,7 +617,8 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
 }
 
 // FFmpeg, Symphonia and dr_mp3 seek an MP3 at once, without reading the file up to the target: near it, by its Xing
-// table, also behind a large tag, or else its size and its length, which one measured before makes better.
+// table, also behind a large tag, or else its size and its length, which one measured before makes better. The
+// stream then plays all the audio after where it lands, which the declared length, counted from the target, could cut.
 TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
     reference();
     const std::pair<std::filesystem::path, const char*> files[] = {{path(kFixtures[2]), "Info CBR"},
@@ -646,7 +647,10 @@ TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
                     lag = d;
             }
             EXPECT_TRUE(lag) << decoderName(kind) << ", " << name << ": not within a second of the target";
-            if (lag) std::printf("%s seek in %s: %lld frames off\n", decoderName(kind), name, static_cast<long long>(*lag));
+            if (!lag) continue;
+            std::printf("%s seek in %s: %lld frames off\n", decoderName(kind), name, static_cast<long long>(*lag));
+            EXPECT_GE(int64_t(rest.size() / kChannels), int64_t(all.size() / kChannels - target) - *lag)
+                << decoderName(kind) << ", " << name << ": ends before its audio does";
         }
 }
 
