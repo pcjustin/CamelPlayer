@@ -76,6 +76,8 @@ public:
     // Runs `work` on the writer thread inside one transaction; the future rethrows its exception (the transaction is
     // then rolled back).
     std::future<void> write(std::function<void(sqlite::Database&)> work);
+    // Queues rewriting the file without the pages deleted rows freed (VACUUM), so it shrinks, and empties the WAL.
+    std::future<void> compact();
     // A read-only connection for the calling thread; WAL lets it read while the writer writes.
     sqlite::Database openReader() const;
     LibraryScanProgress scanProgress() const {
@@ -100,6 +102,7 @@ private:
     std::mutex jobsMutex_;
     std::multimap<int64_t, CancellationToken> jobs_;
     void writerMain();
+    std::future<void> enqueue(std::packaged_task<void()> task);
 
     std::filesystem::path path_;
     OpenReport report_;

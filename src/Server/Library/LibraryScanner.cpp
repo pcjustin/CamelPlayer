@@ -53,6 +53,9 @@ namespace {
 using Path = std::filesystem::path;
 using Clock = std::chrono::steady_clock;
 
+// A file missing this long from a folder still in the library is deleted (see LibraryScanner::scan).
+constexpr int kMissingDays = 30;
+
 int64_t now() {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
@@ -61,6 +64,41 @@ int64_t now() {
 int64_t addedTime(int64_t created) {
     constexpr int64_t kUnixEpoch = 116'444'736'000'000'000;
     return created > kUnixEpoch ? std::min(now(), (created - kUnixEpoch) / 10'000'000) : now();
+}
+
+// Deletes the files listed in temp.gone with everything that hangs on them: their tracks with tags, lyrics and
+// ReplayGain analysis, covers, statistics, favorites and play history, and their queue and playlist entries. Albums and
+// covers left without tracks go too. Returns how many files went.
+int64_t deleteGoneFiles(sqlite::Database& db) {
+    const auto files = db.scalar("SELECT count(*) FROM temp.gone").value_or(0);
+    if (!files) return 0;
+    db.exec("CREATE TEMP TABLE IF NOT EXISTS shortened(id INTEGER PRIMARY KEY);"
+            "DELETE FROM temp.shortened;"
+            "INSERT OR IGNORE INTO temp.shortened SELECT playlist_id FROM playlist_items "
+            "WHERE file_id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM play_events WHERE file_id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM stats WHERE file_id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM playlist_items WHERE file_id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM queue WHERE file_id IN (SELECT id FROM temp.gone);"
+            "UPDATE albums SET cover_id=NULL WHERE cover_id IN "
+            "(SELECT id FROM covers WHERE file_id IN (SELECT id FROM temp.gone));"
+            "DELETE FROM covers WHERE file_id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM tracks WHERE file_id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM files WHERE id IN (SELECT id FROM temp.gone);"
+            "DELETE FROM albums WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.album_id=albums.id);"
+            "DELETE FROM covers WHERE NOT EXISTS(SELECT 1 FROM albums WHERE albums.cover_id=covers.id);"
+            // Playlist positions run 0..n-1.
+            "UPDATE playlist_items SET position=r.n FROM (SELECT id,row_number() OVER "
+            "(PARTITION BY playlist_id ORDER BY position)-1 AS n FROM playlist_items "
+            "WHERE playlist_id IN (SELECT id FROM temp.shortened)) r WHERE r.id=playlist_items.id AND position<>r.n;"
+            "UPDATE library_revision SET value=value+1 WHERE id=1;"
+            "INSERT INTO app_state(key,value) VALUES('library_deletions',1) "
+            "ON CONFLICT(key) DO UPDATE SET value=value+1");
+    db.prepare("UPDATE playlists SET revision=revision+1,modified=? WHERE id IN (SELECT id FROM temp.shortened)")
+        .bind(1,
+              std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count())
+        .run();
+    return files;
 }
 
 std::wstring lower(std::wstring s) {
@@ -836,18 +874,52 @@ std::function<bool()> LibraryScanner::playbackGate(const Path& root) const {
     };
 }
 
-void LibraryScanner::removeRoot(int64_t root) {
-    std::lock_guard lock(store_.jobsMutex_);
-    const auto [first, last] = store_.jobs_.equal_range(root);
-    for (auto job = first; job != last; ++job) job->second.cancel();
-    store_
-        .write([root](sqlite::Database& db) {
-            auto existing = db.prepare("SELECT 1 FROM roots WHERE id=?");
-            if (!existing.bind(1, root).step()) throw std::invalid_argument("unknown library root");
-            db.prepare("UPDATE roots SET removed=COALESCE(removed,?),online=0 WHERE id=?").bind(1, now()).bind(2, root).run();
-            db.prepare("UPDATE files SET available=0 WHERE root_id=?").bind(1, root).run();
-        })
-        .get();
+std::future<void> LibraryScanner::removeRoot(int64_t root) {
+    {
+        std::lock_guard lock(store_.jobsMutex_);
+        const auto [first, last] = store_.jobs_.equal_range(root);
+        for (auto job = first; job != last; ++job) job->second.cancel();
+        store_
+            .write([root](sqlite::Database& db) {
+                auto existing = db.prepare("SELECT 1 FROM roots WHERE id=?");
+                if (!existing.bind(1, root).step()) throw std::invalid_argument("unknown library root");
+                db.prepare("UPDATE roots SET removed=COALESCE(removed,?),online=0 WHERE id=?").bind(1, now()).bind(2, root).run();
+                db.prepare("UPDATE files SET available=0 WHERE root_id=?").bind(1, root).run();
+            })
+            .get();
+    }
+    return deleteRemovedRoots();
+}
+
+std::future<void> LibraryScanner::deleteRemovedRoots() {
+    if (!store_.openReader().prepare("SELECT 1 FROM roots WHERE removed IS NOT NULL").step()) {
+        std::promise<void> none;
+        none.set_value();
+        return none.get_future();
+    }
+    // The cancelled scans of these roots write nothing more, as each write checks its token first.
+    store_.write([](sqlite::Database& db) {
+        std::vector<int64_t> roots;
+        auto removed = db.prepare("SELECT id FROM roots WHERE removed IS NOT NULL");
+        while (removed.step()) roots.push_back(removed.integer(0));
+        db.exec("CREATE TEMP TABLE IF NOT EXISTS gone(id INTEGER PRIMARY KEY);"
+                "DELETE FROM temp.gone;"
+                "INSERT INTO temp.gone SELECT f.id FROM files f JOIN roots r ON r.id=f.root_id WHERE r.removed IS NOT NULL");
+        const auto files = deleteGoneFiles(db);
+        db.exec("UPDATE albums SET folder_id=NULL WHERE folder_id IN "
+                "(SELECT d.id FROM folders d JOIN roots r ON r.id=d.root_id WHERE r.removed IS NOT NULL);"
+                "DELETE FROM folders WHERE root_id IN (SELECT id FROM roots WHERE removed IS NOT NULL);"
+                "DELETE FROM roots WHERE removed IS NOT NULL");
+        auto state = db.prepare("DELETE FROM app_state WHERE key=?");
+        for (const auto root : roots)
+            for (const auto* prefix : {"library_derived_dirty:", "library_refused_read:", "library_reread:"}) {
+                state.reset();
+                state.bind(1, prefix + std::to_string(root)).run();
+            }
+        deriveLibraryNames(db, loadLibraryNames(db));
+        log::info("library: %zu removed folders deleted with %lld files", roots.size(), static_cast<long long>(files));
+    });
+    return store_.compact();
 }
 
 ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, const std::vector<Path>& folders) {
@@ -1191,6 +1263,20 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 derivedChanged = derivedChanged || !added.empty();
                 report.moved = library::reconcileMoves(db, added);
                 db.prepare("UPDATE files SET identity_state=0 WHERE root_id=? AND identity_state=1").bind(1, root).run();
+                db.prepare("UPDATE files SET missing_since=? WHERE root_id=? AND available=0 AND missing_since IS NULL")
+                    .bind(1, now())
+                    .bind(2, root)
+                    .run();
+                if (!partial) {
+                    db.exec("CREATE TEMP TABLE IF NOT EXISTS gone(id INTEGER PRIMARY KEY);"
+                            "DELETE FROM temp.gone;");
+                    db.prepare("INSERT INTO temp.gone SELECT id FROM files WHERE root_id=? AND available=0 AND missing_since<=?")
+                        .bind(1, root)
+                        .bind(2, now() - int64_t{kMissingDays} * 86400)
+                        .run();
+                    report.deleted = size_t(deleteGoneFiles(db));
+                    derivedChanged = derivedChanged || report.deleted;
+                }
                 if (derivedChanged)
                     db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)").bind(1, derivedKey).run();
             }
@@ -1207,6 +1293,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 db.prepare("DELETE FROM app_state WHERE key=?").bind(1, derivedKey).run();
             })
             .get();
+    if (report.deleted) {
+        log::info("library: %zu files missing for %d days deleted", report.deleted, kMissingDays);
+        store_.compact().get();
+    }
     report.complete = report.complete && !token.cancelled();
     if (!partial) log::info("library: scan finished in %.1f s", seconds());
     return report;
@@ -1581,6 +1671,10 @@ void LibraryMonitor::refreshRoots() {
 }
 void LibraryMonitor::rescanAll() {
     impl_->rescanAll();
+}
+
+int64_t libraryDeletions(sqlite::Database& db) {
+    return db.scalar("SELECT value FROM app_state WHERE key='library_deletions'").value_or(0);
 }
 
 void requestMetadataReread(LibraryStore& store) {

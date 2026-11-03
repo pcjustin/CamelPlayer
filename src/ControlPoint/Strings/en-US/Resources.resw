@@ -141,6 +141,9 @@
   <data name="Settings_AddFolder.Content" xml:space="preserve"><value>Add folder…</value></data>
   <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>Remove folder</value></data>
   <data name="Settings_FolderOffline" xml:space="preserve"><value>offline</value></data>
+  <data name="Settings_RemoveFolderTitle" xml:space="preserve"><value>Remove “{0}” from the library?</value></data>
+  <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>Its {0} tracks leave the library with their {1} plays, {2} favorites and {3} playlist entries, and the library file shrinks. This cannot be undone. The music files themselves stay where they are; adding the folder again scans it as new.</value></data>
+  <data name="Settings_RemoveFolderPrimary" xml:space="preserve"><value>Remove</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>Albums appear here as the library folders are scanned.</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>Scanning the library: {0} of {1} files checked</value></data>
   <data name="Library_Finishing" xml:space="preserve"><value>Scan checked every file; organizing albums…</value></data>

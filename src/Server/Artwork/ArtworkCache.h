@@ -36,6 +36,8 @@ public:
     void clear();
     // Makes the album thumbnails the library lacks, until `yield` asks for the storage; returns how many it made.
     size_t prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token = {});
+    // Deletes the thumbnails of library covers whose files the library no longer holds; returns how many.
+    size_t forgetDeleted(const LibraryStore& store);
 
 private:
     // A cover the scan chose for an album or folder; its key comes from the stored file version, so an existing thumbnail

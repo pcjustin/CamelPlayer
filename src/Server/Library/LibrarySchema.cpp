@@ -464,6 +464,15 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
                 "VALUES('delete',old.id,coalesce(old.artist_norm,old.artist,'')); END;"
                 "INSERT INTO track_artists_fts(track_artists_fts) VALUES('rebuild');");
         },
+        // When a file went missing (Unix seconds), as a complete scan of its reachable folder found; it is deleted after
+        // 30 days unless it comes back. Files already missing start their 30 days at the upgrade.
+        [](sqlite::Database& db) {
+            db.exec("ALTER TABLE files ADD COLUMN missing_since INTEGER;"
+                    "UPDATE files SET missing_since=CAST(strftime('%s','now') AS INTEGER) WHERE available=0;"
+                    "CREATE TRIGGER files_found AFTER UPDATE OF available ON files "
+                    "WHEN new.available=1 AND new.missing_since IS NOT NULL "
+                    "BEGIN UPDATE files SET missing_since=NULL WHERE id=new.id; END;");
+        },
     };
     return migrations;
 }

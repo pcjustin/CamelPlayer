@@ -5,6 +5,7 @@
 #pragma once
 #include <chrono>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -26,6 +27,7 @@ struct ScanReport {
     bool online = true;
     uint32_t rootError = 0; // Win32 error distinguishes access denial from a missing/offline root
     size_t seen = 0, updated = 0, moved = 0;
+    size_t deleted = 0; // files missing for 30 days, deleted with what hangs on them
     std::vector<std::string> diagnostics;
 };
 
@@ -43,7 +45,12 @@ public:
                             std::function<std::filesystem::path()> playingSource = {})
         : store_(store), playbackActive_(std::move(playbackActive)), playingSource_(std::move(playingSource)) {}
     int64_t addRoot(const std::filesystem::path& path);
-    void removeRoot(int64_t root);
+    // Takes the folder out of the library at once, then queues deleting it (see deleteRemovedRoots); the future is ready
+    // once the database is compacted.
+    std::future<void> removeRoot(int64_t root);
+    // Queues deleting every removed folder with its files and everything that hangs only on them, and compacting
+    // library.db afterwards. Favorite artists and composers and artist pictures, kept by name, stay.
+    std::future<void> deleteRemovedRoots();
     // Queues replacing a track's length with the exact one playback measured, where the scan estimated it or a header
     // declared another; a row that already holds it is not written.
     void recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames);
@@ -65,6 +72,8 @@ private:
 // Settings › Rebuild library: the next complete scan of every root rereads each file's tags and covers,
 // keeping file identities (so play statistics and playlists stay) and stored fingerprints.
 void requestMetadataReread(LibraryStore& store);
+// How many times files left the library (removed folders, files missing for 30 days), for those holding file ids.
+int64_t libraryDeletions(sqlite::Database& db);
 
 class LibraryMonitor {
 public:

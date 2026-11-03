@@ -189,11 +189,24 @@ void LibraryStore::close() {
 }
 
 std::future<void> LibraryStore::write(std::function<void(sqlite::Database&)> work) {
-    std::packaged_task<void()> task([this, work = std::move(work)] {
+    return enqueue(std::packaged_task<void()>([this, work = std::move(work)] {
         sqlite::Transaction t(*db_);
         work(*db_);
         t.commit();
-    });
+    }));
+}
+
+std::future<void> LibraryStore::compact() {
+    return enqueue(std::packaged_task<void()>([this] {
+        std::error_code ec;
+        const auto before = std::filesystem::file_size(path_, ec);
+        db_->exec("VACUUM");
+        db_->exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        log::info("library: compacted from %llu to %llu MB", before >> 20, std::filesystem::file_size(path_, ec) >> 20);
+    }));
+}
+
+std::future<void> LibraryStore::enqueue(std::packaged_task<void()> task) {
     auto done = task.get_future();
     {
         std::lock_guard lock(mutex_);

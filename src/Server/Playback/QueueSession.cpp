@@ -43,7 +43,7 @@ void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts
         db.exec("DELETE FROM queue");
         auto insert =
             db.prepare("INSERT INTO queue(position,entry_id,file_id,path,start_frame,end_frame,decoder,source_description) "
-                       "VALUES(?,?,?,?,?,?,?,?)");
+                       "VALUES(?,?,(SELECT id FROM files WHERE id=?),?,?,?,?,?)"); // a file deleted meanwhile is unlinked
         for (size_t i = 0; i < session.entries.size(); ++i) {
             const auto& entry = session.entries[i];
             insert.bind(1, int64_t(i)).bind(2, int64_t(i) + 1);

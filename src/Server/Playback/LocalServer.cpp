@@ -191,6 +191,8 @@ public:
             artwork_ = std::make_unique<ArtworkCache>(directory / "thumbs");
             library_ = std::make_unique<LibraryStore>(directory);
             library_->write([](sqlite::Database& db) { updateLibraryNameRules(db); });
+            // Folders an earlier run removed, or one that ended before deleting them, go now.
+            LibraryScanner(*library_).deleteRemovedRoots();
             libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
             // Covers being shown take the storage first: scans drop to one worker and fingerprints wait meanwhile.
@@ -206,6 +208,7 @@ public:
             libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
             // Album-wall thumbnails are made ahead of display, only while nothing plays, scans or shows covers.
             coverWarmer_ = std::jthread([this](std::stop_token stop) {
+                int64_t swept = -1;
                 const auto busy = [this, &stop] {
                     return stop.stop_requested() || library_->scanProgress().scans > 0 ||
                            engine_->snapshot().state == audio::PlayState::Playing ||
@@ -218,6 +221,13 @@ public:
                     if (busy()) continue;
                     library_->backupIfDue();
                     try {
+                        // The thumbnails of covers whose files left the library go with them.
+                        auto reader = library_->openReader();
+                        if (const auto deletions = libraryDeletions(reader); deletions != swept) {
+                            swept = deletions;
+                            if (const auto forgotten = artwork_->forgetDeleted(*library_))
+                                log::info("artwork: %zu thumbnails of deleted covers removed", forgotten);
+                        }
                         if (const auto made = artwork_->prepare(*library_, busy))
                             log::info("artwork: prepared %zu album covers", made);
                     } catch (const std::exception& e) {
@@ -965,6 +975,19 @@ private:
         if (idle && large && now - availabilityChecked_ < std::chrono::seconds(1)) return;
         availabilityChecked_ = now;
         libraryVersion_ = version;
+        std::vector<uint64_t> deleted;
+        if (const auto deletions = libraryDeletions(*libraryReader_); deletions != libraryDeletions_) {
+            libraryDeletions_ = deletions;
+            auto exists = libraryReader_->prepare("SELECT 1 FROM files WHERE id=?");
+            for (const auto& [id, binding] : libraryEntries_) {
+                exists.reset();
+                if (binding.file && !exists.bind(1, binding.file).step()) deleted.push_back(id);
+            }
+            if (!deleted.empty()) {
+                removeQueue(deleted);
+                queueChanged_ = true;
+            }
+        }
         std::vector<std::wstring> removed;
         auto roots = libraryReader_->prepare("SELECT path FROM roots WHERE removed IS NOT NULL");
         while (roots.step()) {
@@ -995,7 +1018,9 @@ private:
             }
             queueChanged_ = policy_.setUnavailable(id, unavailable) || queueChanged_;
         }
-        if (std::any_of(chain_.begin(), chain_.end(), [&](uint64_t id) { return policy_.unavailable(id); })) {
+        if (std::any_of(chain_.begin(), chain_.end(), [&](uint64_t id) {
+                return policy_.unavailable(id) || std::find(deleted.begin(), deleted.end(), id) != deleted.end();
+            })) {
             engine_->discardPreloads();
             commitTransition();
             chain_.clear();
@@ -1495,6 +1520,7 @@ private:
     std::unique_ptr<LoudnessAnalyzer> loudness_; // uses the four above, library_ and engine_
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
+    int64_t libraryDeletions_ = -1; // entries whose files left the library leave the queue
     std::chrono::steady_clock::time_point availabilityChecked_;
     struct LibraryEntry {
         std::wstring path;
@@ -1684,6 +1710,10 @@ std::vector<LibraryTrackRow> LocalServer::folderTracks(int64_t folder, const Can
 }
 std::vector<LibraryRootInfo> LocalServer::libraryRoots() const {
     return camel::server::libraryRoots(impl_->library());
+}
+
+LibraryRootContents LocalServer::libraryRootContents(int64_t root) const {
+    return camel::server::libraryRootContents(impl_->library(), root);
 }
 LibraryScanProgress LocalServer::libraryScanProgress() const {
     return impl_->library().scanProgress();

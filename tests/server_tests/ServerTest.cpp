@@ -771,6 +771,21 @@ TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
     EXPECT_TRUE(send(missing).commandError);
 }
 
+TEST_F(LibraryPlaybackTest, RemovingARootTakesItsTracksOutOfTheQueue) {
+    const auto a = testutil::generatedFile({"remove-root", 48000, 16, 2, 0.3});
+    setUp({a});
+    const auto outside = toUtf8(testutil::testFile("16-44.1k").wstring());
+    send(queueReplace({track(a), TrackSource(outside)}));
+    send(command(CommandKind::Stop));
+    EXPECT_EQ(server->libraryRootContents(root).tracks, 1);
+    Command remove = command(CommandKind::RemoveLibraryRoot);
+    remove.rootId = root;
+    ASSERT_FALSE(send(remove).commandError);
+    EXPECT_TRUE(server->libraryRoots().empty());
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 1; }));
+    EXPECT_EQ(server->snapshot().queue.entries[0].source.pathUtf8(), outside);
+}
+
 TEST_F(LibraryPlaybackTest, ALibraryTrackPlaysUnderItsOnDiskSpelling) {
     const auto music = setUp({});
     std::filesystem::copy_file(testutil::generatedFile({"spelling", 48000, 16, 2, 0.3}), music / "Mixed Case.flac");
@@ -1137,27 +1152,21 @@ TEST_F(LibraryPlaybackTest, TheCountIsSavedWhilePlayingSoACrashCannotLoseIt) {
     send(command(CommandKind::Stop));
 }
 
-TEST_F(LibraryPlaybackTest, PlaysSurviveRootRemovalAndReconnectWithTheRoot) {
+TEST_F(LibraryPlaybackTest, PlaysGoWithARemovedRootAndTheRootAddedAgainStartsAfresh) {
     const auto a = testutil::generatedFile({"play-root", 48000, 16, 2, 0.4});
     setUp({a});
-    const auto id = file(a);
     send(queueReplace({track(a)}));
     ASSERT_TRUE(waitFor([&] { return stopped(); }));
     ASSERT_EQ(plays(1).history.size(), 1u);
     Command remove = command(CommandKind::RemoveLibraryRoot);
     remove.rootId = root;
     ASSERT_FALSE(send(remove).commandError);
-    auto removed = server->playStatistics({});
-    ASSERT_EQ(removed.history.size(), 1u);
-    EXPECT_FALSE(removed.history[0].available);
-    EXPECT_EQ(removed.overview.plays, 1);
-    ASSERT_EQ(scanner->addRoot(dir / "music"), root);
-    ASSERT_TRUE(scanner->scan(root).complete);
-    auto restored = server->playStatistics({});
-    ASSERT_EQ(restored.history.size(), 1u);
-    EXPECT_EQ(restored.history[0].track.file, id);
-    EXPECT_TRUE(restored.history[0].available);
-    EXPECT_EQ(restored.tracks[0].plays, 1);
+    ASSERT_TRUE(waitFor([&] { return server->playStatistics({}).history.empty(); }));
+    EXPECT_EQ(server->playStatistics({}).overview.plays, 0);
+    ASSERT_TRUE(scanner->scan(scanner->addRoot(dir / "music")).complete);
+    EXPECT_NE(file(a), 0);
+    EXPECT_TRUE(server->playStatistics({}).history.empty());
+    EXPECT_EQ(store->openReader().scalar("SELECT COUNT(*) FROM stats"), 0);
 }
 
 std::vector<int32_t> concatenatedReferences(const std::vector<std::filesystem::path>& files) {
@@ -1181,7 +1190,7 @@ std::vector<int32_t> capturedSamples(const std::filesystem::path& capture) {
     return samples;
 }
 
-TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
+TEST_F(ServerTest, RemovingThePlayingTracksRootFinishesTheTrackAndEmptiesTheQueue) {
     const auto dir = testutil::tempDir() / "server-removed-root";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -1214,7 +1223,6 @@ TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
     ASSERT_FALSE(removed.commandError);
     EXPECT_EQ(removed.queueEntryId, ids[0]);
     EXPECT_EQ(removed.playback.state, PlaybackState::Playing);
-    EXPECT_EQ(removed.queue.entries, playing.queue.entries);
     EXPECT_FALSE(removed.queue.upcomingEntryId);
     const auto end = std::chrono::steady_clock::now() + 5s;
     while (server->snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
@@ -1222,30 +1230,14 @@ TEST_F(ServerTest, RemovedRootKeepsQueueAndFinishesOnlyTheCurrentTrack) {
         std::this_thread::sleep_for(1ms);
     }
     EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
-    EXPECT_EQ(server->snapshot().queueEntryId, ids[0]);
     EXPECT_TRUE(heard == concatenatedReferences({a}));
-    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files WHERE available=1").value(), 0);
-    ASSERT_EQ(scanner.addRoot(dir / "music"), root);
-    ASSERT_TRUE(scanner.scan(root).complete);
-    const auto restored = std::chrono::steady_clock::now() + 3s;
-    while (!server->snapshot().queue.upcomingEntryId && std::chrono::steady_clock::now() < restored)
+    const auto emptied = std::chrono::steady_clock::now() + 3s;
+    while (!server->snapshot().queue.entries.empty() && std::chrono::steady_clock::now() < emptied)
         std::this_thread::sleep_for(10ms);
-    EXPECT_EQ(server->snapshot().queue.upcomingEntryId, ids[1]);
-    auto select = command(CommandKind::QueueSelect);
-    select.entryId = ids[1];
-    EXPECT_EQ(send(select).playback.state, PlaybackState::Playing);
-    send(command(CommandKind::Stop));
-    ASSERT_FALSE(send(remove).commandError);
-    const auto blocked = send(queueReplace({TrackSource(toUtf8(b.wstring()))}));
-    EXPECT_TRUE(blocked.commandError);
-    EXPECT_EQ(blocked.queue.entries.size(), 1u);
-    EXPECT_EQ(blocked.queueEntryId, 0u);
-    EXPECT_FALSE(blocked.track);
-    EXPECT_EQ(blocked.playback.state, PlaybackState::Stopped);
-    EXPECT_TRUE(send(command(CommandKind::Play)).commandError);
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
-    EXPECT_TRUE(send(command(CommandKind::TogglePause)).commandError);
-    EXPECT_EQ(server->snapshot().queueEntryId, 0u);
+    EXPECT_TRUE(server->snapshot().queue.entries.empty());
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files").value(), 0);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    EXPECT_TRUE(server->snapshot().queue.entries.empty());
     server.reset();
 }
 

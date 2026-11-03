@@ -1456,12 +1456,39 @@ winrt::fire_and_forget MainWindow::OnAddFolderClick(Windows::Foundation::IInspec
     if (!folders.empty()) refreshRoots();
 }
 
-void MainWindow::OnRemoveFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+winrt::fire_and_forget MainWindow::OnRemoveFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
     const int index = RootList().SelectedIndex();
-    if (index < 0 || size_t(index) >= roots_.size()) return;
+    if (index < 0 || size_t(index) >= roots_.size() || !server_) co_return;
+    const auto root = roots_[size_t(index)];
+    auto server = server_;
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    LibraryRootContents contents;
+    try {
+        contents = server->libraryRootContents(root.id);
+    } catch (const std::exception& e) {
+        camel::log::warn("remove folder: %s", e.what());
+        co_return;
+    }
+    co_await foreground;
+    // Removing deletes the folder's tracks with their plays, favorites and playlist entries, so it asks first.
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"Settings_RemoveFolderTitle", {std::wstring(ui::utf8(root.name))})));
+    TextBlock explanation;
+    explanation.Text(
+        ui::format(L"Settings_RemoveFolderConfirm", {ui::count(contents.tracks), ui::count(contents.plays),
+                                                     ui::count(contents.favorites), ui::count(contents.playlistEntries)}));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    dialog.Content(explanation);
+    dialog.PrimaryButtonText(ui::tr(L"Settings_RemoveFolderPrimary"));
+    dialog.CloseButtonText(ui::tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Close);
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
     Command command;
     command.kind = CommandKind::RemoveLibraryRoot;
-    command.rootId = roots_[size_t(index)].id;
+    command.rootId = root.id;
     submitCommand(std::move(command));
     refreshRoots();
 }

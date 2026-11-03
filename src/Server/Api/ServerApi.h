@@ -347,6 +347,7 @@ public:
     // Every track in a folder and below it, in the Folders page's order (see folderTracks in LibraryViews.h).
     virtual std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
+    virtual LibraryRootContents libraryRootContents(int64_t root) const = 0;
     virtual LibraryScanProgress libraryScanProgress() const = 0;
     // How far loudness analysis for ReplayGain has come (docs/Plan.md §5.9).
     virtual LoudnessProgress loudnessProgress() const = 0;

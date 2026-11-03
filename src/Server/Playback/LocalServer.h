@@ -58,6 +58,7 @@ public:
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryRootInfo> libraryRoots() const override;
+    LibraryRootContents libraryRootContents(int64_t root) const override;
     LibraryScanProgress libraryScanProgress() const override;
     LoudnessProgress loudnessProgress() const override;
     std::vector<PlaylistSummary> playlists() const override;

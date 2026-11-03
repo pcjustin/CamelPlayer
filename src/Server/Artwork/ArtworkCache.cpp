@@ -13,6 +13,7 @@
 #include <fstream>
 #include <future>
 #include <map>
+#include <set>
 #include <utility>
 #include "Common/util/Md5.h"
 #include "Server/Library/LibraryIdentity.h"
@@ -432,6 +433,28 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
         while (worker.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready)
             if (yield && yield()) reading.cancel();
     return made;
+}
+
+size_t ArtworkCache::forgetDeleted(const LibraryStore& store) {
+    std::set<std::string> kept;
+    {
+        auto db = store.openReader();
+        auto rows = db.prepare("SELECT 'folder',path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
+                               "WHERE kind='image' UNION ALL "
+                               "SELECT c.source,f.path,f.size,f.mtime,f.volume_serial,f.file_index,f.created,f.volume_key "
+                               "FROM covers c JOIN files f ON f.id=c.file_id WHERE c.source='embedded'");
+        while (rows.step()) kept.insert(storedCover(rows).key);
+    }
+    std::lock_guard lock(mutex_);
+    size_t removed = 0;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(directory_, ec)) {
+        const auto name = toUtf8(entry.path().stem().wstring());
+        if (!name.starts_with('s') || kept.contains(name.substr(0, name.find('-')))) continue;
+        if (std::filesystem::remove(entry.path(), ec)) ++removed;
+    }
+    if (removed) diskBytes_.reset();
+    return removed;
 }
 
 std::optional<ArtworkReference> ArtworkCache::thumbnail(const ArtworkCandidate& image, const CancellationToken& token) {

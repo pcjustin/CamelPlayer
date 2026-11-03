@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+Upgrading from 0.2.x: the first start records when each file the library could no longer find went missing (schema 20), and deletes the folders removed from the library under an earlier version with everything of theirs, then compacts the library, which takes a few seconds once. The old library is kept as `library.db.v19.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.2.x refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v19.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
+
 Changed since 0.2.2:
 
 - **Playback takes far less CPU:** the window followed the position 20 times a second and still did while minimized; it now shows it four times a second and stops while minimized, current again at once when restored. The ReplayGain analysis no longer reads the whole library every 10 seconds to count its progress, only while Settings shows it. Playing FLAC took 15–20 % of one core on a 2015 laptop and now takes 2–3 %.
 - **An MP3 from a NAS is read once:** where the library knows its exact length (from a Xing or Info header, or from playing the file before), mpg123 no longer reads the whole file a second time while it plays, nor the next track ahead of time. The first seek starts that reading, as the seek index needs it.
+- **A folder removed from the library leaves it:** its tracks went out of sight but stayed in the library file, with their tags, covers, plays and favorites, so the file only grew. Removing a folder now asks first, naming how many tracks, plays, favorites and playlist entries go, then deletes them with the folder's queue and playlist entries and the thumbnails of its covers, and shrinks the file. Favorite artists and composers and artist pictures stay, as they belong to the names. Adding the folder again scans it as new.
+- **Files gone for 30 days leave the library:** a file missing from a folder still in the library keeps its plays and favorites for 30 days, so a moved or renamed file found in that time keeps them; after that it is deleted like a removed folder's files. Only a complete scan of a reachable folder counts a file as missing, never one of a NAS that is off. Files already missing start their 30 days at the upgrade.
 
 ## 0.2.2
 

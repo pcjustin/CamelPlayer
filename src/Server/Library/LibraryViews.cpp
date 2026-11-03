@@ -811,4 +811,17 @@ std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store) {
     return out;
 }
 
+LibraryRootContents libraryRootContents(const LibraryStore& store, int64_t root) {
+    auto db = store.openReader();
+    auto row = db.prepare(
+        "SELECT (SELECT count(*) FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.root_id=?1),"
+        "(SELECT coalesce(sum(s.play_count),0) FROM stats s JOIN files f ON f.id=s.file_id WHERE f.root_id=?1),"
+        "(SELECT count(*) FROM stats s JOIN files f ON f.id=s.file_id WHERE f.root_id=?1 AND s.favorite=1)+"
+        "(SELECT count(DISTINCT t.album_id) FROM stats s JOIN files f ON f.id=s.file_id JOIN tracks t ON t.file_id=s.file_id "
+        "WHERE f.root_id=?1 AND s.album_favorite=1),"
+        "(SELECT count(*) FROM playlist_items i JOIN files f ON f.id=i.file_id WHERE f.root_id=?1)");
+    row.bind(1, root).step();
+    return {row.integer(0), row.integer(1), row.integer(2), row.integer(3)};
+}
+
 } // namespace camel::server

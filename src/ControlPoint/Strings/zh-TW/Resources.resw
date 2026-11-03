@@ -141,6 +141,9 @@
   <data name="Settings_AddFolder.Content" xml:space="preserve"><value>加入資料夾…</value></data>
   <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>移除資料夾</value></data>
   <data name="Settings_FolderOffline" xml:space="preserve"><value>離線</value></data>
+  <data name="Settings_RemoveFolderTitle" xml:space="preserve"><value>要從媒體庫移除「{0}」嗎？</value></data>
+  <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>其中的 {0} 首曲目會離開媒體庫，連同 {1} 次播放、{2} 個最愛和 {3} 個播放清單項目，媒體庫檔案也會隨之縮小。這無法復原。音樂檔案本身不會被刪除；之後再加入這個資料夾，會當作新資料夾重新掃描。</value></data>
+  <data name="Settings_RemoveFolderPrimary" xml:space="preserve"><value>移除</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>專輯會在掃描資料夾時陸續出現。</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>正在掃描媒體庫：已檢查 {0} / {1} 個檔案</value></data>
   <data name="Library_Finishing" xml:space="preserve"><value>已檢查所有檔案，正在整理專輯…</value></data>

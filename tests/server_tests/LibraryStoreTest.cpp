@@ -73,7 +73,7 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_TRUE(store.report().created);
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 19);
+    EXPECT_EQ(db.userVersion(), 20);
     EXPECT_EQ(tables(db),
               (std::set<std::string>{
                   "albums",  "app_state",         "artist_pictures", "change_log",     "covers",    "favorite_names", "files",
@@ -129,7 +129,7 @@ TEST(LibraryStore, UpgradesV1WithoutInventingFingerprintsOrChangingHistory) {
     EXPECT_EQ(store.report().migratedFrom, 1);
     EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 19);
+    EXPECT_EQ(db.userVersion(), 20);
     EXPECT_EQ(db.scalar("SELECT rating FROM stats JOIN files ON files.id=stats.file_id WHERE files.path='C:/music/old.flac'"), 5);
     EXPECT_EQ(db.scalar("SELECT play_count FROM stats"), 17);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL AND created=0 AND volume_key IS NULL"), 1);
@@ -169,7 +169,7 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
     LibraryStore store(dir);
     EXPECT_EQ(store.report().migratedFrom, 11);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 19);
+    EXPECT_EQ(db.userVersion(), 20);
     for (const char* table : {"tracks", "stats", "play_events", "playlist_items", "queue"})
         EXPECT_EQ(db.scalar(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name LIKE 'cue%'"), 0)
             << table;
@@ -233,6 +233,25 @@ TEST(LibraryStore, UpgradesV18ByIndexingTheArtistsOfEveryTrack) {
             .get());
 }
 
+TEST(LibraryStore, UpgradesV19BySettingTheMissingFilesThirtyDaysGoingFromNow) {
+    const auto dir = freshDir("upgrade-v19");
+    {
+        LibraryStore store(dir, std::vector<Migration>(libraryMigrations().begin(), libraryMigrations().begin() + 19));
+        store
+            .write([](Database& db) {
+                addTrack(db, "C:/music/gone.flac", "Gone");
+                addTrack(db, "C:/music/here.flac", "Here");
+                db.exec("UPDATE files SET available=0 WHERE path='C:/music/gone.flac'");
+            })
+            .get();
+    }
+    LibraryStore store(dir);
+    EXPECT_EQ(store.report().migratedFrom, 19);
+    auto db = store.openReader();
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE available=0 AND missing_since>=strftime('%s','now')-60"), 1);
+    EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE available=1 AND missing_since IS NULL"), 1);
+}
+
 TEST(LibraryStore, WriterRunsEachJobInOneTransaction) {
     LibraryStore store(freshDir("writer"));
     auto failed = store.write([](Database& db) {
@@ -241,6 +260,7 @@ TEST(LibraryStore, WriterRunsEachJobInOneTransaction) {
     });
     EXPECT_THROW(failed.get(), std::runtime_error);
     std::vector<std::thread> threads;
+    threads.reserve(8);
     std::vector<std::future<void>> jobs(8);
     for (int t = 0; t < 8; t++)
         threads.emplace_back([&, t] {
@@ -265,10 +285,10 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-        EXPECT_EQ(store.report().migratedFrom, 19);
+        EXPECT_EQ(store.report().migratedFrom, 20);
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 20);
-        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v19.bak"));
+        EXPECT_EQ(db.userVersion(), 21);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v20.bak"));
     }
     const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
                                        db.exec("CREATE TABLE half (x INTEGER)");
@@ -278,7 +298,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 20);
+        EXPECT_EQ(db.userVersion(), 21);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
@@ -363,12 +383,12 @@ TEST(LibraryStore, KeepsTheNewestThreeBackups) {
         LibraryStore store(dir);
     }
     std::vector<Migration> extra;
-    for (int v = 19; v <= 23; v++) {
+    for (int v = 20; v <= 24; v++) {
         extra.push_back(addTable("t" + std::to_string(v)));
         LibraryStore store(dir, withExtra(extra));
     }
     EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
-    for (int v : {21, 22, 23}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+    for (int v : {22, 23, 24}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
 }
 
 TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
@@ -379,7 +399,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-    } // writes library.db.v19.bak
+    } // writes library.db.v20.bak
     std::filesystem::remove(dir / "library.db-wal");
     std::ofstream(dir / "library.db", std::ios::binary | std::ios::trunc) << std::string(8192, 'x');
     {
@@ -389,7 +409,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
         auto db = store.openReader();
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
-        EXPECT_EQ(db.userVersion(), 20); // the backup was migrated again
+        EXPECT_EQ(db.userVersion(), 21); // the backup was migrated again
     }
     for (const auto& e : std::filesystem::directory_iterator(dir))
         if (e.path().extension() == ".bak") std::filesystem::remove(e.path());
@@ -457,7 +477,7 @@ TEST(LibraryStore, PagesAreCheckedOnlyAfterTheDatabaseWasNotClosed) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.open"));
     }
     EXPECT_FALSE(std::filesystem::exists(dir / "library.db.open"));
-    std::ofstream(dir / "library.db.open"); // as a crash or a forced end leaves it
+    std::ofstream{dir / "library.db.open"}.close(); // as a crash or a forced end leaves it
     LibraryStore store(dir);
     EXPECT_TRUE(store.report().checked);
     EXPECT_FALSE(store.report().damaged);

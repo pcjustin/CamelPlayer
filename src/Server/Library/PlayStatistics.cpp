@@ -91,6 +91,8 @@ void PlaySession::persist(LibraryStore& store) {
     persistedCount_ = counted_;
     store.write([event = event_, track = track_, started = startedMs_, offset = utcOffsetMinutes_, heardMs, counted = counted_,
                  addMs, addCount](sqlite::Database& db) {
+        // The track's file can leave the library while it plays (its folder removed); its plays go with it.
+        if (!db.prepare("SELECT 1 FROM files WHERE id=?").bind(1, track.file).step()) return;
         if (!*event) {
             db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,?,?,?,?)")
                 .bind(1, track.file)

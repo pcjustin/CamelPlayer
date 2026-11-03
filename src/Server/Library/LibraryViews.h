@@ -125,6 +125,10 @@ struct LibraryRootInfo {
     bool online = false;
     int64_t lastScan = 0;
 };
+// What removing a library folder deletes with it.
+struct LibraryRootContents {
+    int64_t tracks = 0, plays = 0, favorites = 0, playlistEntries = 0; // favorites: tracks and albums
+};
 
 LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
                               int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision = std::nullopt,
@@ -191,6 +195,7 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t album, const C
 // Shows the names and root locations scans recorded, without reading the music storage.
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token = {});
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store);
+LibraryRootContents libraryRootContents(const LibraryStore& store, int64_t root);
 // Every visible track in `folder` and below it in the order the Folders page lists them: each subfolder's tracks
 // first, by folder name, then the folder's own.
 std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t folder, const CancellationToken& token = {});

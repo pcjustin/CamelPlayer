@@ -11,6 +11,7 @@
 
 #include "Server/Library/LibraryIdentity.h"
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryViews.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -281,41 +282,155 @@ TEST_F(LibraryIdentityTest, PlaybackSourceGatesOnlyTheSameStorage) {
     EXPECT_NE(library::storageKey(L"\\\\TACHIKOMA\\Other\\track.flac"), L"\\\\tachikoma\\music");
 }
 
-TEST_F(LibraryIdentityTest, RemovingRootRetainsHistoryAndReadditionRequiresVerifiedIdentity) {
-    const auto source = file("old.lrc");
+TEST_F(LibraryIdentityTest, ARemovedRootLeavesNoRowsAndComesBackAsNew) {
+    fs::copy_file(testutil::testFile("16-44.1k"), music / "gone.flac");
+    file("gone.lrc");
+    const auto other = dir / "other";
+    fs::create_directories(other);
+    fs::copy_file(testutil::testFile("16-44.1k"), other / "kept.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    const auto otherRoot = scanner.addRoot(other);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_TRUE(scanner.scan(otherRoot).complete);
+    const auto gone = id(store, "gone.flac");
+    const auto kept = id(store, "kept.flac");
+    rate(store, gone);
+    rate(store, kept);
+    store
+        .write([=](sqlite::Database& db) {
+            db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Mixed',0,0);"
+                    "INSERT INTO favorite_names(field,name,added) VALUES('artist','Kept by name',1)");
+            db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) "
+                       "VALUES(1,0,?1,'a'),(1,1,?2,'b'),(1,2,?1,'c')")
+                .bind(1, gone)
+                .bind(2, kept)
+                .run();
+            db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,'gone','Gone')")
+                .bind(1, gone)
+                .run();
+            db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?1,1,0,1,1),(?2,1,0,1,1)")
+                .bind(1, gone)
+                .bind(2, kept)
+                .run();
+        })
+        .get();
+    const auto contents = libraryRootContents(store, root);
+    EXPECT_EQ(contents.tracks, 1);
+    EXPECT_EQ(contents.plays, 17);
+    EXPECT_EQ(contents.favorites, 1);
+    EXPECT_EQ(contents.playlistEntries, 2);
+
+    scanner.removeRoot(root).get();
+    EXPECT_THROW(scanner.removeRoot(root), std::invalid_argument);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM roots"), 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE root_id NOT IN (SELECT id FROM roots)"), 0);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM folders WHERE root_id NOT IN (SELECT id FROM roots)"), 0);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM tracks"), 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM albums"), 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM track_tags WHERE track_id NOT IN (SELECT id FROM tracks)"), 0);
+    EXPECT_EQ(scalar(store, "SELECT file_id FROM stats"), kept);
+    EXPECT_EQ(scalar(store, "SELECT file_id FROM play_events"), kept);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM queue"), 0);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM playlist_items"), 1);
+    EXPECT_EQ(scalar(store, "SELECT position FROM playlist_items"), 0);
+    EXPECT_EQ(scalar(store, "SELECT revision FROM playlists"), 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM favorite_names"), 1);
+    const auto rootState = "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_%:" + std::to_string(root) + "'";
+    EXPECT_EQ(scalar(store, rootState.c_str()), 0);
+    EXPECT_EQ(scalar(store, "SELECT value FROM app_state WHERE key='library_deletions'"), 1);
+    EXPECT_FALSE(store.openReader().prepare("PRAGMA foreign_key_check").step());
+    EXPECT_THROW(scanner.scan(root), std::invalid_argument);
+    EXPECT_FALSE(scanner.fingerprint(root).complete);
+
+    const auto again = scanner.addRoot(music);
+    EXPECT_NE(again, root);
+    ASSERT_TRUE(scanner.scan(again).complete);
+    EXPECT_NE(id(store, "gone.flac"), gone);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM tracks"), 2);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM stats"), 1);
+}
+
+TEST_F(LibraryIdentityTest, TheDatabaseShrinksWhenALargeRootIsRemoved) {
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    store
+        .write([root](sqlite::Database& db) {
+            auto insert = db.prepare("INSERT INTO files(root_id,path,kind,size,mtime,name) VALUES(?,?,'lrc',1,1,?)");
+            const std::string name(200, 'x');
+            for (int i = 0; i < 20000; ++i) {
+                insert.reset();
+                insert.bind(1, root).bind(2, "c:\\music\\" + std::to_string(i)).bind(3, name).run();
+            }
+        })
+        .get();
+    store.compact().get();
+    const auto before = fs::file_size(dir / "db" / "library.db");
+    scanner.removeRoot(root).get();
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 0);
+    EXPECT_LT(fs::file_size(dir / "db" / "library.db"), before / 4);
+}
+
+TEST_F(LibraryIdentityTest, FoldersAnEarlierVersionRemovedAreDeletedOnce) {
+    file("old.lrc");
     LibraryStore store(dir / "db");
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
-    const auto original = id(store, "old.lrc");
-    rate(store, original);
-    ASSERT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
-    store.write([=](sqlite::Database& db) {
-        db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
-        db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
-            .bind(1, original).run();
-        db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,'old','Kept')")
-            .bind(1, original).run();
-    }).get();
-    scanner.removeRoot(root);
-    scanner.removeRoot(root);
-    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE available=1"), 0);
-    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM roots WHERE removed IS NOT NULL AND online=0"), 1);
-    EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
-    EXPECT_EQ(scalar(store, "SELECT file_id FROM playlist_items"), original);
-    EXPECT_EQ(scalar(store, "SELECT file_id FROM queue"), original);
-    EXPECT_THROW(scanner.scan(root), std::invalid_argument);
-    EXPECT_FALSE(scanner.fingerprint(root).complete);
-    ASSERT_EQ(scanner.addRoot(music), root);
+    rate(store, id(store, "old.lrc"));
+    store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET removed=1,online=0; UPDATE files SET available=0"); }).get();
+    scanner.deleteRemovedRoots().get();
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM roots"), 0);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 0);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM stats"), 0);
+    scanner.deleteRemovedRoots().get();
+    EXPECT_EQ(scalar(store, "SELECT value FROM app_state WHERE key='library_deletions'"), 1);
+}
+
+TEST_F(LibraryIdentityTest, AFileMissingForThirtyDaysGoesAfterACompleteScanOfItsReachableFolder) {
+    const auto gone = file("gone.lrc", "gone");
+    file("kept.lrc", "kept");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_EQ(id(store, "old.lrc"), original);
-    scanner.removeRoot(root);
-    fs::remove(source);
-    file("old.lrc", "replacement with different content");
-    ASSERT_EQ(scanner.addRoot(music), root);
+    rate(store, id(store, "gone.lrc"));
+    fs::remove(gone);
     ASSERT_TRUE(scanner.scan(root).complete);
-    EXPECT_NE(id(store, "old.lrc"), original);
-    EXPECT_EQ(scalar(store, "SELECT file_id FROM stats"), original);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE available=0 AND missing_since IS NOT NULL"), 1);
+    const auto age = [&](int days) {
+        store
+            .write([days](sqlite::Database& db) {
+                db.prepare("UPDATE files SET missing_since=missing_since-?").bind(1, int64_t(days) * 86400).run();
+            })
+            .get();
+    };
+    age(29);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM stats"), 1);
+    age(2);
+    fs::rename(music, dir / "away");
+    EXPECT_FALSE(scanner.scan(root).complete);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 2);
+    fs::rename(dir / "away", music);
+    const auto report = scanner.scan(root);
+    ASSERT_TRUE(report.complete);
+    EXPECT_EQ(report.deleted, 1u);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM stats"), 0);
+    EXPECT_NE(id(store, "kept.lrc"), 0);
+}
+
+TEST_F(LibraryIdentityTest, AFileThatComesBackIsNoLongerMissing) {
+    file("back.lrc");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(music)).complete);
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET available=0,missing_since=1"); }).get();
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET available=1"); }).get();
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE missing_since IS NULL"), 1);
 }
 
 TEST_F(LibraryIdentityTest, RemovingRootCancelsRunningScanWithoutCancellingOtherRoots) {
@@ -328,7 +443,10 @@ TEST_F(LibraryIdentityTest, RemovingRootCancelsRunningScanWithoutCancellingOther
     auto released = release.get_future().share();
     std::atomic<bool> first = true;
     LibraryScanner slow(store, [&] {
-        if (first.exchange(false)) { entered.set_value(); released.wait(); }
+        if (first.exchange(false)) {
+            entered.set_value();
+            released.wait();
+        }
         return false;
     });
     CancellationToken parent;
@@ -382,9 +500,7 @@ TEST_F(LibraryIdentityTest, FingerprintsPendingFilesAfterAnIncompleteScan) {
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
-    store.write([](sqlite::Database& db) {
-             db.exec("UPDATE files SET identity_state=1,content_hash=NULL WHERE available=1");
-         })
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET identity_state=1,content_hash=NULL WHERE available=1"); })
         .get();
 
     const auto report = scanner.fingerprint(root);
