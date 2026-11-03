@@ -325,7 +325,7 @@ private:
             if (bySize) {
                 at = first + k * frameBytes;
             } else if (toc_) {
-                at = toc_->byteShare(k / frames) * toc_->bytes;
+                at = double(toc_->at) - double(start_) + toc_->byteShare(k / frames) * toc_->bytes;
             }
             offsets[i] = i ? std::max(int64_t(first), int64_t(at - kMargin)) : int64_t(first);
         }

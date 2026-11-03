@@ -193,6 +193,11 @@ std::string id3(size_t size) {
            char(size & 0x7f) + std::string(size, '\0');
 }
 
+// The Xing VBR file behind a tag as large as cover art makes one. Its Xing table counts from the Xing frame.
+std::filesystem::path taggedVbrMp3() {
+    return writeFile("tagged-vbr.mp3", id3(300000) + readFile(vbrMp3(true)));
+}
+
 // Where the movie box of FFmpeg's M4A starts; it follows the media data, so growing it moves no chunk offset.
 size_t movieBox(const std::string& m4a) {
     const size_t type = m4a.rfind("moov");
@@ -579,17 +584,19 @@ TEST(LossyDecoderPolicy, Mpg123SeeksACbrMp3ExactlyBeforeItsScanEnds) {
     }
 }
 
-// A VBR seek the scan has not reached lands at once, near the target: by the Xing table, or in proportion to the length
-// measured before, which also shows as the length at once.
+// A VBR seek the scan has not reached lands at once, near the target: by the Xing table, also behind a large tag, or in
+// proportion to the length measured before, which also shows as the length at once.
 TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
-    for (const bool lameTag : {true, false}) {
-        const auto file = vbrMp3(lameTag);
+    const std::pair<std::filesystem::path, const char*> files[] = {
+        {vbrMp3(true), "Xing table"}, {taggedVbrMp3(), "Xing table behind a 300 KB tag"}, {vbrMp3(false), "measured length"}};
+    for (const auto& [file, by] : files) {
+        const bool measured = file == vbrMp3(false);
         const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
         const uint64_t total = all.size() / kChannels;
-        if (!lameTag) rememberMeasuredLength(file, total);
+        if (measured) rememberMeasuredLength(file, total);
         const uint64_t target = total * 9 / 10;
         auto decoder = openDecoder(DecoderKind::Mpg123, file);
-        if (!lameTag) EXPECT_EQ(decoder->estimatedFrames(), total);
+        if (measured) EXPECT_EQ(decoder->estimatedFrames(), total);
         decoder->seek(target);
         const auto rest = decodeAll(*decoder);
         // Where the audio after the seek lies in the linear decode, past the frames that warm the decoder up.
@@ -604,24 +611,21 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
                            all.begin() + std::ptrdiff_t(at * kChannels)))
                 lag = d;
         }
-        ASSERT_TRUE(lag) << (lameTag ? "Xing table" : "measured length") << ": not within a second of the target";
-        std::printf("VBR seek by its %s: %lld frames off\n", lameTag ? "Xing table" : "measured length",
-                    static_cast<long long>(*lag));
+        ASSERT_TRUE(lag) << by << ": not within a second of the target";
+        std::printf("VBR seek by its %s: %lld frames off\n", by, static_cast<long long>(*lag));
     }
 }
 
 // FFmpeg, Symphonia and dr_mp3 seek an MP3 at once, without reading the file up to the target: near it, by its Xing
-// table or else its size and its length, which one measured before makes better. The table counts from the Xing frame,
-// past any tag before it, which cover art can make large.
+// table, also behind a large tag, or else its size and its length, which one measured before makes better.
 TEST(LossyDecoderPolicy, SeekAnMp3AtOnceNearTheTarget) {
     reference();
-    const std::pair<std::filesystem::path, const char*> files[] = {
-        {path(kFixtures[2]), "Info CBR"},
-        {path(kFixtures[3]), "CBR without a header"},
-        {vbrMp3(true), "Xing VBR"},
-        {writeFile("tagged-vbr.mp3", id3(300000) + readFile(vbrMp3(true))), "Xing VBR after a 300 KB tag"},
-        {quietThenLoudMp3(), "Xing VBR, silent then loud"},
-        {vbrMp3(false), "VBR without a header"}};
+    const std::pair<std::filesystem::path, const char*> files[] = {{path(kFixtures[2]), "Info CBR"},
+                                                                   {path(kFixtures[3]), "CBR without a header"},
+                                                                   {vbrMp3(true), "Xing VBR"},
+                                                                   {taggedVbrMp3(), "Xing VBR behind a 300 KB tag"},
+                                                                   {quietThenLoudMp3(), "Xing VBR, silent then loud"},
+                                                                   {vbrMp3(false), "VBR without a header"}};
     for (const auto kind : {DecoderKind::FFmpeg, DecoderKind::Symphonia, DecoderKind::DrMp3})
         for (const auto& [file, name] : files) {
             const auto all = decodeAll(*openDecoder(kind, file));

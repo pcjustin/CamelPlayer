@@ -438,11 +438,13 @@ std::optional<XingToc> xingToc(const std::filesystem::path& path) {
     const File f(path);
     // The tag follows the side information (at most 32 bytes in): flags, then frames, bytes and the table as flagged.
     uint8_t frame[4 + 32 + 8 + 8 + 100] = {};
-    if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame)) return std::nullopt;
+    const uint64_t start = mpegStart(f);
+    if (!f.readAt(start, frame, sizeof frame) || !frameSync(frame)) return std::nullopt;
     for (size_t i = 4; i <= 36; i++) {
         if (!tagIs(frame + i, "Xing")) continue;
         if ((be32(frame + i + 4) & 7) != 7) return std::nullopt;
         XingToc xing;
+        xing.at = start;
         xing.frames = be32(frame + i + 8);
         xing.bytes = be32(frame + i + 12);
         std::copy_n(frame + i + 16, xing.toc.size(), xing.toc.begin());

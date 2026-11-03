@@ -36,8 +36,10 @@ uint64_t vbriSamples(const std::filesystem::path& path);
 uint64_t audioAfterVbriFrame(const std::filesystem::path& path);
 
 // What an MP3's Xing (VBR) frame declares, when it declares all three: the frames after it, the bytes from it on, and
-// for each percent of the frames, where they start in 256ths of those bytes.
+// for each percent of the frames, where they start in 256ths of those bytes. `at` is where the frame starts in the file,
+// past any tag before it.
 struct XingToc {
+    uint64_t at = 0;
     uint32_t frames = 0;
     uint32_t bytes = 0;
     std::array<uint8_t, 100> toc{};
