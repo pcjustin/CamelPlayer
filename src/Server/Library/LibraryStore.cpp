@@ -6,10 +6,12 @@
 
 #include <windows.h>
 #include <shlwapi.h>
+#include <sqlite3.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <utility>
 
@@ -179,6 +181,13 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
                                  "); the previous database was kept");
         }
     }
+    sqlite3_update_hook(
+        db_->handle(),
+        [](void* changes, int, const char*, const char* table, sqlite3_int64) {
+            if (std::strcmp(table, "files") == 0 || std::strcmp(table, "roots") == 0)
+                static_cast<std::atomic<uint64_t>*>(changes)->fetch_add(1);
+        },
+        &fileChanges_);
     writer_ = std::thread([this] { writerMain(); });
 }
 

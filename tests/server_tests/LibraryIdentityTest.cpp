@@ -311,6 +311,19 @@ TEST_F(LibraryIdentityTest, PlaybackSourceGatesOnlyTheSameStorage) {
     EXPECT_NE(library::storageKey(L"\\\\TACHIKOMA\\Other\\track.flac"), L"\\\\tachikoma\\music");
 }
 
+TEST_F(LibraryIdentityTest, AFingerprintPassWithNothingLeftIsCompleteWhenPlaybackFallsBehind) {
+    const auto source = file("a.lrc");
+    LibraryStore store(dir / "db");
+    std::atomic<bool> playing = false;
+    std::atomic<int> calls = 0;
+    LibraryScanner scanner(store, {}, [&] { return playing ? PlaybackReads{{source}, calls++ == 0} : PlaybackReads{}; });
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_TRUE(scanner.fingerprint(root).complete);
+    playing = true;
+    EXPECT_TRUE(scanner.fingerprint(root).complete);
+}
+
 TEST_F(LibraryIdentityTest, ARemovedRootLeavesNoRowsAndComesBackAsNew) {
     fs::copy_file(testutil::testFile("16-44.1k"), music / "gone.flac");
     file("gone.lrc");

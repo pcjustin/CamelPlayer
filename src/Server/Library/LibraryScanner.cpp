@@ -1368,11 +1368,15 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
     // about 7 files a second on a local disk. The files were already checked after hashing, so the write only compares
     // with the database: checking them again on the storage held every other write for one NAS round trip per file.
     std::vector<std::pair<const PendingHash*, std::vector<uint8_t>>> digests;
+    bool stopped = false;
     const auto save = [&] {
         if (digests.empty()) return;
         store_
             .write([&](sqlite::Database& db) {
-                if (token.cancelled() || backgroundBlocked()) return;
+                if (token.cancelled() || backgroundBlocked()) {
+                    stopped = true;
+                    return;
+                }
                 auto current = db.prepare("SELECT path,size,mtime,volume_serial,file_index,created,volume_key FROM files "
                                           "WHERE id=? AND available=1 AND identity_state<>2 "
                                           "AND (content_hash IS NULL OR length(content_hash)=32)");
@@ -1401,7 +1405,6 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         std::optional<std::vector<uint8_t>> digest;
         std::string error;
     };
-    bool stopped = false;
     constexpr size_t kBatch = 256;
     for (size_t first = 0; first < pending.size() && !stopped; first += kBatch) {
         stopped = token.cancelled() || backgroundBlocked();
@@ -1436,7 +1439,9 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         }
         save();
     }
-    report.complete = !stopped && !token.cancelled() && !backgroundBlocked() && report.diagnostics.empty();
+    // Playback that needs the storage now does not make a pass that hashed everything incomplete: that pass would be
+    // repeated every second, each time reading every file row.
+    report.complete = !stopped && !token.cancelled() && report.diagnostics.empty();
     return report;
 }
 
@@ -1448,15 +1453,14 @@ public:
             throw std::invalid_argument("invalid library monitor interval");
         worker_ = std::jthread([this](const std::stop_token& stop) { run(stop); });
         fingerprints_ = std::jthread([this](const std::stop_token& stop) {
-            // Each pass reads every file row; once every root is done, the next waits until the library changes. The
-            // connection stays open, as its data_version counts the commits of the others.
-            auto db = store_.openReader();
-            std::optional<int64_t> settled;
+            // Each pass reads every file row; once every root is done, the next waits until files or roots change.
+            std::optional<uint64_t> settled;
             while (!stop.stop_requested()) {
                 try {
-                    const auto version = db.scalar("PRAGMA data_version");
+                    const auto version = store_.fileChanges();
                     std::vector<int64_t> ids;
                     if (version != settled) {
+                        auto db = store_.openReader();
                         auto roots = db.prepare("SELECT id FROM roots WHERE removed IS NULL AND online=1");
                         while (roots.step()) ids.push_back(roots.integer(0));
                     }

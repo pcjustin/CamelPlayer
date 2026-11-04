@@ -92,6 +92,21 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
         .get();
 }
 
+TEST(LibraryStore, CountsOnlyTheWritesToFilesAndRoots) {
+    LibraryStore store(freshDir("file-changes"));
+    const auto initial = store.fileChanges();
+    store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+    const auto added = store.fileChanges();
+    EXPECT_GT(added, initial);
+    store.write([](Database& db) { db.exec("UPDATE tracks SET title='Two'"); }).get();
+    EXPECT_EQ(store.fileChanges(), added);
+    store.write([](Database& db) { db.exec("UPDATE files SET content_hash=NULL"); }).get();
+    const auto rehashed = store.fileChanges();
+    EXPECT_GT(rehashed, added);
+    store.write([](Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
+    EXPECT_GT(store.fileChanges(), rehashed);
+}
+
 TEST(LibraryStore, IdentityRulesHold) {
     LibraryStore store(freshDir("identity"));
     store
