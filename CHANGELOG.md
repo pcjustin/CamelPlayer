@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
-Upgrading from 0.2.x: the first start records when each file the library could no longer find went missing (schema 20), and deletes the folders removed from the library under an earlier version with everything of theirs, then compacts the library, which takes a few seconds once. The old library is kept as `library.db.v19.bak` in `%LOCALAPPDATA%\CamelPlayer`. 0.2.x refuses the newer library, so to go back to it, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v19.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
+Upgrading from 0.2.0, 0.2.1 or 0.2.2: the first start records when each file the library could no longer find went missing (schema 20), and deletes the folders removed from the library under an earlier version with everything of theirs, then compacts the library, which takes a few seconds once. The old library is kept as `library.db.v19.bak` in `%LOCALAPPDATA%\CamelPlayer`. Those versions refuse the newer library, so to go back to one of them, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v19.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.
 
 Changed since 0.2.2:
 

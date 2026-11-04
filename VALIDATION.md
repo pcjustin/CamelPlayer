@@ -1,8 +1,10 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1 and 0.2.2 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0, 0.2.1 or 0.2.2. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2 and 0.2.3 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0, 0.2.1 or 0.2.2. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
+
+On 2026-11-04 and 2026-11-05, for 0.2.3, every C++ project and the Rust crates were rebuilt from scratch in Debug and Release. A full Debug run passed all 743 enabled C++ tests, the 100k-track search latency target included. An earlier Debug run passed 742: the queue-restore test failed when the restarted Server's scan was still reading the file the test renames back. The test now waits for the scan to let the file go, and its group then passed 5 runs of 20 tests each. A full Release run passed all 743 enabled C++ tests, and all 89 Rust Engine tests and 2 Symphonia bridge tests passed. After the fix to the fingerprint pass found in the app (below), a full Release run passed all 745 enabled C++ tests and the 89 Rust Engine tests; the fix was not run in Debug. Run alone, the test of a manual change during a crossfade failed 2 to 4 times in 10 with the CPU at 75–78 %, and passed 10 times out of 10 at 27–54 %.
 
 On 2026-11-03, for 0.2.2, every C++ project and the Rust crates were rebuilt from scratch in Release and Debug. After the last change, a full Release run passed all 729 enabled C++ tests, including the 100k-track search latency target, and all 89 Rust Engine tests and 2 Symphonia bridge tests passed. A full Debug run passed 728 of 729, the latency test again failing only unoptimized (first page p95 107.3 ms).
 
@@ -30,6 +32,8 @@ What the decoding tests check:
 
 ## Hardware
 
+On 2026-11-05, before 0.2.3, all 97 hardware tests passed twice on the release build, in 200 and 196 seconds.
+
 On 2026-11-03, before 0.2.2, all 97 hardware tests passed twice on the release candidate, in 194 and 189 seconds, and once more in 194 seconds after manual track changes began to keep the device open.
 
 On 2026-11-02, before 0.2.1, all 97 hardware tests passed twice, in 189 and 190 seconds. Before that the WASAPI polling test had failed in 2 of 5 runs right after other tests switched the DAVE to another format: the driver reported room that GetBuffer did not grant yet, which 0.2.1 waits out. Five runs of the output parameter tests in a row then passed.
@@ -45,6 +49,11 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 - A separate DAVE run of the output parameters (polling buffer, MMCSS, fixed sample rate, silence after a DoP-to-PCM switch and release after a pause) passed 5/5.
 
 ## In the app
+
+Checked by hand on 2026-11-05 in the 0.2.3 Release build, on a copy of the owner's library and settings (ASIO on the Chord DAVE, music on a NAS over Wi-Fi):
+
+- FLAC 16/44.1 from the NAS started 326 and 536 ms after the play request and changed gaplessly to the next track. An MP3 with a Xing header started within a second, reading 1.4 MB from the NAS for its 3.9 MB, continued gaplessly into the next track, and a seek to about 70% of that one continued gaplessly into the track after it.
+- Measuring the load of playback found the fingerprint pass reading every file row of the library about every 5 seconds while a track played, 43 MB each time: the queue position saved every 5 seconds counted as a library change, and a pass that playback interrupted never counted as done. FLAC playback read 605 MB in a minute at 19.6% of a core. After the fix it read 7.8 MB, its own bit rate, at 5.4% of a core with the window open and 1.7% minimized, with 194 MB of private memory.
 
 Checked by hand on 2026-11-03 in the 0.2.2 Release build, on a copy of the owner's library and settings (ASIO on the Chord DAVE, music on a NAS over Wi-Fi); the owner's own data was not touched:
 
@@ -87,6 +96,8 @@ Measured on 2026-10-24 after the scan speed-up, in Release with caches not flush
 The run before the speed-up, earlier the same day, measured a 100k-track search first page at p95 85.4 ms and one- and two-character fallback searches at p95 1,146 and 939 ms. Its synthetic first scan took 897.3 s, with the first 500-file batch at 633.3 s; the same NAS share took 10,507 s to scan fully (147 diagnostics) and 192.7 s to rescan unchanged (no updates, 4 diagnostics). Fingerprinting then hashed whole files: a run over that share was stopped after 157 of 86,680 files (3.21 GB) in 438 s, a rate that projected about 109 hours for its 2.87 TB, and the local index passed the SQLite integrity check afterwards. Fingerprints have since been sampled from the first and last 64 KiB of each file.
 
 ## NAS
+
+On 2026-11-05, for 0.2.3, a track played from the NAS on the Chord DAVE over ASIO while Settings › Rebuild library reread a copy of the owner's 86,479-file library from it. No underrun occurred, and the median start, seek, track change, pause, play, queue, settings, album wall and search suggestion took 47, 1,199, 836, 467, 15, 15, 5, 20 and 47 ms, against 63, 1,220, 885, 464, 15, 15, 12, 27 and 51 ms with the library idle. The rebuild read 1,201 files in 162 s while playing. The share answered slowly that night: the app's startup scan took 374.5 s at 00:45 and 28–63 s after 06:30, against 32–33 s on 2026-11-03.
 
 A Release run on a real SMB share on 2026-10-23 and 2026-10-24 passed:
 

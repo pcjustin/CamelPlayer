@@ -852,7 +852,12 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
     EXPECT_EQ(s.playback.source->sampleRate, 48000u);
     EXPECT_FALSE(s.playback.output);
     EXPECT_FALSE(s.playback.error);
-    std::filesystem::rename(music / "away.flac", music / b.filename());
+    // The startup scan of the restarted Server may still be reading the renamed file.
+    ASSERT_TRUE(waitFor([&] {
+        std::error_code error;
+        std::filesystem::rename(music / "away.flac", music / b.filename(), error);
+        return !error;
+    }));
     seek.frame = 24000;
     EXPECT_EQ(send(seek).playback.position, 24000u);
     send(command(CommandKind::Play));
