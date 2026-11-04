@@ -51,6 +51,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void goBack();
     void setBackChanged(std::function<void(bool)> changed) { backChanged_ = std::move(changed); }
 
+    void OnTextTrimmedChanged(Microsoft::UI::Xaml::Controls::TextBlock const& text,
+                              Microsoft::UI::Xaml::Controls::IsTextTrimmedChangedEventArgs const&);
+    void OnRowSizeChanged(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::SizeChangedEventArgs const& e);
     void OnBackClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnSortChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnDescendingClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -79,7 +82,6 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnArtworkLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnInitialsBarSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
-    void OnRowListSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnRowContainerContentChanging(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                        Microsoft::UI::Xaml::Controls::ContainerContentChangingEventArgs const&);
     void OnArtworkUnloaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -112,6 +114,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnTreeKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
 
 private:
+    Microsoft::UI::Xaml::Style creditSeparator();
+    void fitCredit(Microsoft::UI::Xaml::FrameworkElement const& root);
     struct ArtworkSlot {
         CamelPlayer::BrowseItem::PropertyChanged_revoker changed;
         camel::server::CancellationToken token;
@@ -142,7 +146,6 @@ private:
 
     void open(View view, bool push);
     void showList(Mode mode);
-    void fitAlbumTracks();
     Microsoft::UI::Xaml::Controls::ListViewBase listOf(Mode mode);
     // Scrolls a list reopened by Back to where it was, once its items are there.
     void restoreOffset();

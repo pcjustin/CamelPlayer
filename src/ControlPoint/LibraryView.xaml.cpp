@@ -27,6 +27,7 @@
 #include "DialogPlacement.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
+#include "TrimmedText.h"
 #include "ArtworkLoader.h"
 
 using namespace winrt;
@@ -502,7 +503,6 @@ void LibraryView::open(View view, bool push) {
 }
 
 void LibraryView::showList(Mode mode) {
-    fitAlbumTracks();
     AlbumGrid().Visibility(mode == Mode::Albums ? Visibility::Visible : Visibility::Collapsed);
     RowList().Visibility(mode == Mode::Groups || mode == Mode::Tracks || mode == Mode::AlbumDetail || mode == Mode::Artist ||
                                  mode == Mode::Search
@@ -1651,19 +1651,6 @@ void LibraryView::OnInitialsBarSizeChanged(Windows::Foundation::IInspectable con
     layoutInitials();
 }
 
-// The wall's columns are set explicitly so that a resize cannot keep the size of a tile that scrolled out of view.
-// An album's tracks read across more easily at the width the Settings page uses than across a wide window; the list
-// keeps its full width so that its scroll bar stays at the window edge.
-void LibraryView::fitAlbumTracks() {
-    constexpr double kAlbumTracksWidth = 820;
-    const double spare = current_.mode == Mode::AlbumDetail ? std::max(0.0, RowList().ActualWidth() - kAlbumTracksWidth) : 0.0;
-    RowList().Padding(ThicknessHelper::FromLengths(0, 0, spare, 0));
-}
-
-void LibraryView::OnRowListSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const&) {
-    fitAlbumTracks();
-}
-
 // On the album page a track's artists replace its subtitle, each name a link to that artist's albums.
 void LibraryView::OnRowContainerContentChanging(ListViewBase const&, ContainerContentChangingEventArgs const& args) {
     if (args.InRecycleQueue()) return;
@@ -1678,10 +1665,39 @@ void LibraryView::OnRowContainerContentChanging(ListViewBase const&, ContainerCo
     ToolTipService::SetToolTip(credit, linked ? box_value(row.subtitle) : nullptr);
     if (linked)
         ui::showCreditButtons(
-            credit, found->second, [this](hstring const& name) { showArtist(name, nullptr, true); },
-            Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>(), subtitle.FontSize());
+            credit, found->second, [this](hstring const& name) { showArtist(name, nullptr, true); }, creditSeparator(),
+            subtitle.FontSize());
+    Grid::SetColumnSpan(credit, row.detail.empty() ? 2 : 1);
     credit.Visibility(linked ? Visibility::Visible : Visibility::Collapsed);
     subtitle.Visibility(linked ? Visibility::Collapsed : Visibility::Visible);
+    fitCredit(root);
+    // A row with neither artists nor detail, as on an album with one artist, leaves their columns to the title.
+    if (const auto title = root.FindName(L"TitleCell").try_as<FrameworkElement>())
+        Grid::SetColumnSpan(title, !linked && row.subtitle.empty() && row.detail.empty() ? 3 : 1);
+}
+
+void LibraryView::OnRowSizeChanged(Windows::Foundation::IInspectable const& sender, SizeChangedEventArgs const& e) {
+    if (e.PreviousSize().Width != e.NewSize().Width) fitCredit(sender.as<FrameworkElement>());
+}
+
+// The credit gets the width of the columns it spans; a panel of links reports its own width, wider than they are.
+void LibraryView::fitCredit(FrameworkElement const& root) {
+    const auto row = root.try_as<Grid>();
+    const auto credit = root.FindName(L"CreditPanel").try_as<StackPanel>();
+    const auto subtitle = root.FindName(L"SubtitleText").try_as<TextBlock>();
+    if (!row || !credit || !subtitle || credit.Visibility() != Visibility::Visible) return;
+    const auto first = uint32_t(Grid::GetColumn(credit)), span = uint32_t(Grid::GetColumnSpan(credit));
+    double room = row.ColumnSpacing() * (span - 1);
+    for (auto column = first; column < first + span; ++column) room += row.ColumnDefinitions().GetAt(column).ActualWidth();
+    ui::fitCreditButtons(credit, room, creditSeparator(), subtitle.FontSize());
+}
+
+Microsoft::UI::Xaml::Style LibraryView::creditSeparator() {
+    return Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>();
+}
+
+void LibraryView::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {
+    ui::tipWhenTrimmed(text);
 }
 
 void LibraryView::OnAlbumGridSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {

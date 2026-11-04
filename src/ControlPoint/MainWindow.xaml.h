@@ -24,6 +24,9 @@ struct MainWindow : MainWindowT<MainWindow> {
     void InitializeComponent();
 
     // XAML event handlers
+    void OnTextTrimmedChanged(Microsoft::UI::Xaml::Controls::TextBlock const& text,
+                              Microsoft::UI::Xaml::Controls::IsTextTrimmedChangedEventArgs const&);
+    void OnArtistCreditSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const& e);
     void OnPlayPauseClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnStopClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPreviousClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -138,6 +141,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnRepairCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
+    void fitPlayerArtist();
     void populateSettings(); // fills every control from settings_
     // The EQ (docs/Plan.md §5.9): the DSP card from settings_.eq, and its changes applied. A dragged point applies at
     // most every 100 ms and is saved when released.

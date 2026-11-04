@@ -33,13 +33,13 @@
                           Foreground="{ThemeResource SystemFillColorCautionBrush}" />
                 <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" Visibility="{x:Bind IsPlaying, Mode=OneWay}"
                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                            Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
-                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                            FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
-                <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="2" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="3" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
                             PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
@@ -60,7 +60,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <FontIcon Glyph="&#xE90B;" FontSize="20" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
                 <TextBlock Grid.Column="2" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </Grid>
@@ -79,8 +79,8 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center">
-                <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" AutomationProperties.HeadingLevel="Level1" />
-                <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap" AutomationProperties.HeadingLevel="Level1" />
+                <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
             </StackPanel>
             <StackPanel x:Name="PlaylistActions" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <Button Style="{StaticResource AccentButtonStyle}" Click="OnPlayClick">

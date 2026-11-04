@@ -28,6 +28,7 @@
 #include "DialogPlacement.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
+#include "TrimmedText.h"
 #include "ArtworkLoader.h"
 #include "Common/settings/EqText.h"
 #include "Common/settings/Settings.h"
@@ -2791,6 +2792,7 @@ void MainWindow::showPlayerArtist(hstring const& artist) {
         ui::showCreditButtons(
             ArtistCredit(), parts, open,
             ArtistCredit().Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>(), 12);
+        fitPlayerArtist();
     };
     show({{winrt::to_string(artist), false}});
     ToolTipService::SetToolTip(ArtistCredit(), artist.empty() ? nullptr : box_value(artist));
@@ -4063,6 +4065,21 @@ winrt::fire_and_forget MainWindow::showUpdateResult() {
     UpdateNotesButton().Visibility(Visibility::Collapsed);
     UpdateSkipButton().Visibility(Visibility::Collapsed);
     bar.IsOpen(true);
+}
+
+void MainWindow::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {
+    ui::tipWhenTrimmed(text);
+}
+
+void MainWindow::OnArtistCreditSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {
+    if (e.PreviousSize().Width != e.NewSize().Width) fitPlayerArtist();
+}
+
+// The credit gets the width of the column it is in; a panel of links reports its own width, wider than they are.
+void MainWindow::fitPlayerArtist() {
+    ui::fitCreditButtons(ArtistCredit(), PlayerTextColumn().ActualWidth(),
+                         ArtistCredit().Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>(),
+                         12);
 }
 
 } // namespace winrt::CamelPlayer::implementation

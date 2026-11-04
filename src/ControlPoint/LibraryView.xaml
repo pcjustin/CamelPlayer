@@ -21,7 +21,8 @@
         <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
         <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
         <DataTemplate x:Key="RowTemplate" x:DataType="local:BrowseItem">
-            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnRowContextRequested">
+            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnRowContextRequested"
+                  SizeChanged="OnRowSizeChanged">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="3*" />
                     <ColumnDefinition Width="2*" />
@@ -29,9 +30,16 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" MinWidth="72" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" Spacing="12">
+                <!-- The title takes the room the row leaves it, ending in "…" with its whole text as a tooltip; it also
+                     takes the artist and detail columns when the row leaves them empty, as an album with one artist does. -->
+                <Grid x:Name="TitleCell">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
                     <!-- An artist's or composer's picture, over their initial (docs/Plan.md §7.4). -->
-                    <Border Width="32" Height="32" CornerRadius="16" Background="{x:Bind AvatarBrush, Mode=OneWay}"
+                    <Border Width="32" Height="32" CornerRadius="16" Margin="0,0,12,0" Background="{x:Bind AvatarBrush, Mode=OneWay}"
                             Visibility="{x:Bind HasAvatar, Mode=OneWay}">
                         <Grid>
                             <TextBlock Text="{x:Bind Initial, Mode=OneWay}" FontSize="14" FontWeight="SemiBold" Foreground="White"
@@ -41,24 +49,26 @@
                         </Grid>
                     </Border>
                     <!-- An album track's number; the track the queue is on shows a speaker or pause in its place. -->
-                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind Number, Mode=OneWay}" Visibility="{x:Bind ShowsNumber, Mode=OneWay}" />
-                        <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" Visibility="{x:Bind IsPlaying, Mode=OneWay}"
-                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
-                                   Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind Number, Mode=OneWay}" Margin="0,0,6,0" Visibility="{x:Bind ShowsNumber, Mode=OneWay}" />
+                        <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" Margin="0,0,6,0"
+                                  Visibility="{x:Bind IsPlaying, Mode=OneWay}" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                     </StackPanel>
-                </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                    <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                               Visibility="{x:Bind IsPlaying, Mode=OneWay}" IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                </Grid>
                 <TextBlock x:Name="SubtitleText" Grid.Column="1" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <!-- An album's track artists, each name a link; filled in code in place of the subtitle, and with the room of
-                     the detail column, which album tracks leave empty. -->
+                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                <!-- A track's artists, each name a link; filled in code in place of the subtitle, and with the room of the
+                     detail column where the row leaves it empty, as album tracks do. -->
                 <StackPanel x:Name="CreditPanel" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center"
                             Visibility="Collapsed" />
                 <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsTextTrimmedChanged="OnTextTrimmedChanged" />
                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
                             PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
                     <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Width="32" Padding="6,4" VerticalAlignment="Center"
@@ -84,8 +94,8 @@
                                Unloaded="OnArtworkUnloaded" DataContextChanged="OnArtworkContextChanged" />
                     </Grid>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                        <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </Grid>
@@ -111,16 +121,16 @@
                                   Visibility="{x:Bind IsPlaying, Mode=OneWay}" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                     </Grid>
                     <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                    Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" FontWeight="SemiBold"
                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
-                        <TextBlock Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                        <TextBlock Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
-                    <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                    <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="4" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                    <TextBlock Grid.Column="4" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Grid.Column="5" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -147,7 +157,7 @@
                     <Run Text="{x:Bind Title, Mode=OneWay}" /><Run Text=" " /><Run Text="{x:Bind Detail, Mode=OneWay}"
                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </TextBlock>
-                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                            FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
             </Grid>
         </DataTemplate>
@@ -166,9 +176,9 @@
                             </Border>
                         </Grid>
                     </Border>
-                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                                Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                                Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
             </Grid>
@@ -259,12 +269,12 @@
                             </ResourceDictionary.ThemeDictionaries>
                         </ResourceDictionary>
                     </StackPanel.Resources>
-                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"
+                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="Wrap"
                                MaxLines="2" AutomationProperties.HeadingLevel="Level1" />
-                    <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="HeaderDetail" TextWrapping="NoWrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
                     <!-- A Wikimedia Commons picture's author and license, linking to the file's page. -->
                     <TextBlock x:Name="PictureCredit" Style="{StaticResource CaptionTextBlockStyle}" Margin="0,2,0,0" TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                               TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
                     <!-- Each format, bit depth and sample rate among the album's tracks (docs/Plan.md §8.2) -->
                     <StackPanel x:Name="AlbumFormats" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0" Visibility="Collapsed" />
                     <StackPanel x:Name="AlbumActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" Margin="0,12,0,0">
@@ -403,7 +413,7 @@
                 </Button>
             </Grid>
             <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
-                      IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed" SizeChanged="OnRowListSizeChanged"
+                      IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed"
                       ContainerContentChanging="OnRowContainerContentChanging">
                 <ListView.Resources>
                     <ResourceDictionary>

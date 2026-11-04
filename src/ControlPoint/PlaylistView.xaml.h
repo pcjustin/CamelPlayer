@@ -32,6 +32,8 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
     // Marks the playing track afresh after ui::setNowPlaying, given the file that played before.
     void showNowPlaying(int64_t was);
 
+    void OnTextTrimmedChanged(Microsoft::UI::Xaml::Controls::TextBlock const& text,
+                              Microsoft::UI::Xaml::Controls::IsTextTrimmedChangedEventArgs const&);
     void OnPlayClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRenameClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnExportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

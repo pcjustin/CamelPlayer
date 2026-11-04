@@ -20,6 +20,7 @@
 #include "TrackMarks.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
+#include "TrimmedText.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
@@ -749,6 +750,10 @@ void HomeView::OnCoverUnloaded(Windows::Foundation::IInspectable const& sender, 
 void HomeView::cancelCovers() {
     for (auto& [image, token] : covers_) token.cancel();
     covers_.clear();
+}
+
+void HomeView::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {
+    ui::tipWhenTrimmed(text);
 }
 
 } // namespace winrt::CamelPlayer::implementation

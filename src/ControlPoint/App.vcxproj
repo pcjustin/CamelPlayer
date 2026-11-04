@@ -92,6 +92,7 @@
     <ClInclude Include="ThemeBrush.h" />
     <ClInclude Include="DialogPlacement.h" />
     <ClInclude Include="CreditText.h" />
+    <ClInclude Include="TrimmedText.h" />
     <ClInclude Include="BrowseItem.h">
       <DependentUpon>BrowseItem.idl</DependentUpon>
     </ClInclude>

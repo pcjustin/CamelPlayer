@@ -34,9 +34,9 @@
                         <Image Stretch="UniformToFill" Loaded="OnCoverLoaded" Unloaded="OnCoverUnloaded" />
                     </Grid>
                 </Border>
-                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                            Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                            Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
         </DataTemplate>
@@ -64,8 +64,8 @@
                           Foreground="{ThemeResource SystemFillColorCautionBrush}" />
                 <TextBlock Grid.Column="1" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -122,7 +122,7 @@
                             <TextBlock x:Uid="Home_Month" Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             <TextBlock x:Name="SummaryTotals" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <TextBlock x:Name="SummaryAlbum" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis"
+                            <TextBlock x:Name="SummaryAlbum" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">

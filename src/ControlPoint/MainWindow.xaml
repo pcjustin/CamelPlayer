@@ -46,8 +46,8 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap" />
+                                    <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                                                Style="{StaticResource CaptionTextBlockStyle}"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
@@ -680,12 +680,12 @@
                                               Visibility="{x:Bind ShowsAutomatic, Mode=OneWay}" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Padding="0,4"
                                                 ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}">
-                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                                    Visibility="{x:Bind IsNotCurrent, Mode=OneWay}" />
-                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                                    FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                                    Visibility="{x:Bind IsCurrent, Mode=OneWay}" />
-                                        <TextBlock Text="{x:Bind Artist, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                        <TextBlock Text="{x:Bind Artist, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                    Visibility="{x:Bind HasArtist, Mode=OneWay}" />
@@ -765,10 +765,10 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid Grid.Column="0" ColumnSpacing="8" MinWidth="0">
+                <Grid Grid.Column="0" ColumnSpacing="8" MinWidth="0" SizeChanged="OnArtistCreditSizeChanged">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="68" />
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="PlayerTextColumn" Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="CoverButton" x:Uid="Player_Cover" Click="OnCoverClick" Padding="0"
@@ -795,7 +795,7 @@
                                 </ResourceDictionary.ThemeDictionaries>
                             </ResourceDictionary>
                         </StackPanel.Resources>
-                        <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                        <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                                    MaxLines="1" FontSize="14" FontWeight="SemiBold" />
                         <!-- Each name in the artist credit opens that artist. -->
                         <StackPanel x:Name="ArtistCredit" Orientation="Horizontal" Visibility="Collapsed">
@@ -808,7 +808,7 @@
                         </StackPanel>
                         <HyperlinkButton x:Name="AlbumLink" Click="OnAlbumLinkClick" Padding="0"
                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Visibility="Collapsed">
-                            <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />
+                            <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />
                         </HyperlinkButton>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="16,0,0,0">

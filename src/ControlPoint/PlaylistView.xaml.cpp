@@ -22,6 +22,7 @@
 #include "TrackMarks.h"
 #include "DialogPlacement.h"
 #include "UiText.h"
+#include "TrimmedText.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -507,6 +508,10 @@ winrt::fire_and_forget PlaylistView::background(std::function<std::function<void
         auto self = weak.get();
         if (self && self->generation_ == generation && apply) apply();
     });
+}
+
+void PlaylistView::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {
+    ui::tipWhenTrimmed(text);
 }
 
 } // namespace winrt::CamelPlayer::implementation
