@@ -274,6 +274,7 @@ std::string toJson(const Settings& s) {
     j["trayNoticeShown"] = s.trayNoticeShown;
     j["firstRunDone"] = s.firstRunDone;
     j["autoplay"] = s.autoplay;
+    j["folderPlaysOn"] = s.folderPlaysOn;
     j["checkUpdates"] = s.checkUpdates;
     j["artistPictures"] = s.artistPictures == OnlineLookup::Allowed   ? "allowed"
                           : s.artistPictures == OnlineLookup::Refused ? "refused"
@@ -394,6 +395,7 @@ Settings fromJson(const std::string& text) {
     s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
     s.firstRunDone = boolean(j, "firstRunDone", false);
     s.autoplay = boolean(j, "autoplay", true);
+    s.folderPlaysOn = boolean(j, "folderPlaysOn", false);
     s.checkUpdates = boolean(j, "checkUpdates", true);
     const auto pictures = str(j, "artistPictures", "ask");
     s.artistPictures = pictures == "allowed"   ? OnlineLookup::Allowed

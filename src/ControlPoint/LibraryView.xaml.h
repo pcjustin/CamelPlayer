@@ -42,6 +42,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void hide();
     // Settings › Interface: the Folders page as one tree, as in foobar2000, instead of one folder at a time.
     void setFolderTree(bool on);
+    // Settings › Playback: a track played from a folder goes on to the end of its library folder instead of stopping at
+    // the end of its own folder.
+    void setFolderPlaysOn(bool on) { folderPlaysOn_ = on; }
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
     // Marks the playing track afresh after ui::setNowPlaying, given the file that played before.
@@ -242,6 +245,11 @@ private:
     size_t initialSlots_ = 0; // rows the jump bar shows now
     std::vector<camel::server::LibraryTrackRow> detailTracks_, folderTracks_, artistTracks_;
     bool folderTree_ = false;
+    bool folderPlaysOn_ = false;
+    // Plays `track` from the tracks of its folder, or on through its library folder when folderPlaysOn_ is set.
+    void playFolderTrack(const std::vector<camel::server::LibraryTrackRow>& folder, int64_t track);
+    // Queues the tracks after `own`, the folder tracks a click just queued, to the end of their library folder.
+    winrt::fire_and_forget appendFolderRest(std::shared_ptr<const std::vector<camel::server::LibraryTrackRow>> own);
     Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable> treeItems_{nullptr};
     std::unordered_map<int64_t, std::vector<camel::server::LibraryTrackRow>> treeTracks_; // by folder, as listed
     std::set<int64_t> openFolders_; // kept in the data folder, so the tree opens as it was left

@@ -323,6 +323,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     settings.artistPictures = OnlineLookup::Allowed;
     settings.folderTree = true;
     settings.trackColumns = {5, 1, 1};
+    settings.folderPlaysOn = true;
     settings.lastFile = L"C:\\music\\a.flac";
 
     const auto playback = resetPlayback(settings);
@@ -337,6 +338,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_EQ(playback.artistPictures, OnlineLookup::Allowed);
     EXPECT_TRUE(playback.folderTree);
     EXPECT_EQ(playback.trackColumns, settings.trackColumns);
+    EXPECT_FALSE(playback.folderPlaysOn);
     EXPECT_EQ(playback.lastFile, settings.lastFile);
 
     const auto ui = resetInterface(settings);
@@ -349,6 +351,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_EQ(ui.backend, Backend::Asio);
     EXPECT_EQ(ui.asio, settings.asio);
     EXPECT_FALSE(ui.convertWhenUnsupported);
+    EXPECT_TRUE(ui.folderPlaysOn);
 }
 
 TEST(SettingsBoundary, TheFirstRunGuideIsDueUntilFinishedOrSkipped) {
@@ -374,6 +377,14 @@ TEST(SettingsBoundary, TheFolderTreeIsOffUntilTurnedOn) {
     Settings settings;
     settings.folderTree = true;
     EXPECT_TRUE(fromJson(toJson(settings)).folderTree);
+}
+
+TEST(SettingsBoundary, AFolderTrackPlaysOnlyItsFolderUntilTurnedOn) {
+    EXPECT_FALSE(Settings{}.folderPlaysOn);
+    Settings settings;
+    settings.folderPlaysOn = true;
+    EXPECT_TRUE(fromJson(toJson(settings)).folderPlaysOn);
+    EXPECT_FALSE(fromJson(R"({"folderPlaysOn":"yes"})").folderPlaysOn);
 }
 
 TEST(SettingsBoundary, TrackColumnsAreThreeTwoTwoUntilDraggedAndRefuseNonsense) {

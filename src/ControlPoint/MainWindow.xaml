@@ -216,6 +216,7 @@
                                 <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="ConvertDsdCombo" x:Uid="Settings_ConvertDsd" Width="520" SelectionChanged="OnSettingChanged" />
                                 <ToggleSwitch x:Name="AutoplaySwitch" x:Uid="Settings_Autoplay" Toggled="OnAutoplayToggled" />
+                                <ToggleSwitch x:Name="FolderPlaysOnSwitch" x:Uid="Settings_FolderPlaysOn" Toggled="OnFolderPlaysOnToggled" />
 
                                 <StackPanel x:Name="WasapiGroup" Spacing="12">
                                     <TextBlock Text="WASAPI" Style="{StaticResource GroupHeaderStyle}" />

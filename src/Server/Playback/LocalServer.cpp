@@ -850,19 +850,28 @@ private:
         std::vector<QueueEntry> entries;
         entries.reserve(sources.size());
         if (library_ && !libraryReader_) libraryReader_.emplace(library_->openReader());
-        // shortcut: queue paths resolve serially; batch identity lookup if M3-R07 large-queue latency requires it.
+        // One statement serves every entry: preparing it for each took most of 15 s for a 55,000-track folder.
+        std::optional<sqlite::Statement> lookup;
+        if (libraryReader_) {
+            try {
+                lookup.emplace(
+                    libraryReader_->prepare("SELECT f.id,coalesce(t.title,''),coalesce(t.artist,''),"
+                                            "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
+                                            "LEFT JOIN tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
+                                            "WHERE f.path=? AND f.available=1"));
+            } catch (const std::exception& e) {
+                log::warn("library queue source: %s", e.what());
+            }
+        }
         for (const auto& source : sources) {
             const auto id = ++lastEntryId_;
             entries.push_back({id, source});
-            if (libraryReader_) {
+            if (lookup) {
                 try {
                     auto& binding = libraryEntries_[id];
                     const std::filesystem::path given(toWide(source.pathUtf8()));
-                    auto file = libraryReader_->prepare(
-                        "SELECT f.id,coalesce(t.title,''),coalesce(t.artist,''),"
-                        "coalesce(nullif(a.title,''),nullif(t.album,''),''),coalesce(a.id,0) FROM files f "
-                        "LEFT JOIN tracks t ON t.file_id=f.id LEFT JOIN albums a ON a.id=t.album_id "
-                        "WHERE f.path=? AND f.available=1");
+                    auto& file = *lookup;
+                    file.reset();
                     // A path the library gave out is found as spelled; resolving every entry on a share took seconds
                     // for an album and held back the play command. Other spellings, such as a mapped drive, resolve.
                     auto key = spelledLibraryPath(given).wstring();
@@ -1718,6 +1727,9 @@ LibraryFolderListing LocalServer::browseFolder(std::optional<int64_t> folder, co
 }
 std::vector<LibraryTrackRow> LocalServer::folderTracks(int64_t folder, const CancellationToken& token) const {
     return camel::server::folderTracks(impl_->library(), folder, token);
+}
+std::vector<LibraryTrackRow> LocalServer::folderTracksFrom(int64_t track, const CancellationToken& token) const {
+    return camel::server::folderTracksFrom(impl_->library(), track, token);
 }
 std::vector<LibraryRootInfo> LocalServer::libraryRoots() const {
     return camel::server::libraryRoots(impl_->library());

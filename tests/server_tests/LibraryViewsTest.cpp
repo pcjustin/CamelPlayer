@@ -59,11 +59,13 @@ INSERT INTO track_values(track_id,field,position,value,value_norm,sort_key) VALU
 
     std::vector<std::string> titles(const LibraryAlbumPage& page) {
         std::vector<std::string> out;
+        out.reserve(page.albums.size());
         for (const auto& a : page.albums) out.push_back(a.title);
         return out;
     }
     std::vector<int64_t> ids(const LibraryTrackRowPage& page) {
         std::vector<int64_t> out;
+        out.reserve(page.tracks.size());
         for (const auto& t : page.tracks) out.push_back(t.id);
         return out;
     }
@@ -258,7 +260,7 @@ TEST_F(LibraryViewsTest, SmartListsFollowPlaysFavoritesAndTheDateAdded) {
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     store
         ->write([now](sqlite::Database& db) {
-            db.exec("UPDATE files SET added=" + std::to_string(now - 40 * 86400) +
+            db.exec("UPDATE files SET added=" + std::to_string(now - (int64_t{40} * 86400)) +
                     " WHERE id IN (1,2);"
                     "UPDATE files SET added=" +
                     std::to_string(now - 86400) +
@@ -444,6 +446,32 @@ INSERT INTO tracks(id,file_id,title) VALUES(7,7,'Loose');
     EXPECT_TRUE(folderTracks(*store, 4).empty()); // an offline root
 }
 
+TEST_F(LibraryViewsTest, AFolderTrackPlaysOnToTheEndOfItsLibraryFolder) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec(R"sql(
+INSERT INTO folders(id,root_id,parent_id,path) VALUES(6,1,1,'c:\m\c'),(7,1,6,'c:\m\c\d');
+INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES
+ (7,1,1,'c:\m\loose.flac','audio',1,1,1),(8,7,1,'c:\m\c\d\1.flac','audio',1,1,1),(9,6,1,'c:\m\c\1.flac','audio',1,1,1);
+INSERT INTO tracks(id,file_id,title) VALUES(7,7,'Loose'),(8,8,'Nested'),(9,9,'Own');
+)sql");
+        })
+        .get();
+    const auto from = [&](int64_t track) {
+        std::vector<int64_t> order;
+        for (const auto& t : folderTracksFrom(*store, track)) order.push_back(t.id);
+        return order;
+    };
+    // Through the folders after it, each subfolder's tracks before a folder's own, up to the library folder's own.
+    EXPECT_EQ(from(1), (std::vector<int64_t>{1, 3, 4, 8, 9, 7}));
+    EXPECT_EQ(from(2), (std::vector<int64_t>{2, 1, 3, 4, 8, 9, 7}));
+    EXPECT_EQ(from(8), (std::vector<int64_t>{8, 9, 7}));
+    EXPECT_EQ(from(7), (std::vector<int64_t>{7}));
+    EXPECT_TRUE(from(5).empty()); // an unavailable file
+    EXPECT_TRUE(from(6).empty()); // an offline library folder
+    EXPECT_TRUE(from(99).empty());
+}
+
 TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
     store
         ->write([](sqlite::Database& db) {
@@ -468,7 +496,7 @@ TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
     const auto albumStart = std::chrono::steady_clock::now();
     ASSERT_EQ(browseAlbums(*store, AlbumSort::Title, std::nullopt, 0, 100).total, 1002);
     const double albumCold = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - albumStart).count();
-    std::mt19937 random(7);
+    std::mt19937 random(std::random_device{}());
     std::vector<double> tracks, albums;
     for (int i = 0; i < 30; ++i) {
         auto start = std::chrono::steady_clock::now();
@@ -488,7 +516,8 @@ TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
     RecordProperty("track_page_p95_ms", std::to_string(trackP95));
     RecordProperty("album_page_p95_ms", std::to_string(albumP95));
     std::cout << "100k orders cold " << trackCold << " / " << albumCold << " ms; random page p95 tracks " << trackP95
-              << " ms, albums " << albumP95 << " ms" << std::endl;
+              << " ms, albums " << albumP95 << " ms" << '\n'
+              << std::flush;
 #ifdef NDEBUG
     EXPECT_LT(trackP95, 50.0);
     EXPECT_LT(albumP95, 100.0);

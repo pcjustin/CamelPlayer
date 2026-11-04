@@ -363,6 +363,9 @@
   <data name="Settings_Autoplay.Header" xml:space="preserve"><value>When the queue ends</value></data>
   <data name="Settings_Autoplay.OnContent" xml:space="preserve"><value>Keep playing random tracks from the library</value></data>
   <data name="Settings_Autoplay.OffContent" xml:space="preserve"><value>Stop</value></data>
+  <data name="Settings_FolderPlaysOn.Header" xml:space="preserve"><value>When a track plays from a folder</value></data>
+  <data name="Settings_FolderPlaysOn.OnContent" xml:space="preserve"><value>Play on to the end of its library folder</value></data>
+  <data name="Settings_FolderPlaysOn.OffContent" xml:space="preserve"><value>Play only its own folder</value></data>
   <data name="Queue_Autoplay.Text" xml:space="preserve"><value>Autoplay when the queue ends</value></data>
   <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>Added automatically after the queue ended</value></data>
   <data name="Settings_Hotkeys.Text" xml:space="preserve"><value>Hotkeys</value></data>

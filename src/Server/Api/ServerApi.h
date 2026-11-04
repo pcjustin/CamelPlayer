@@ -59,6 +59,7 @@ struct SettingsDto {
     bool trayNoticeShown = false;
     bool firstRunDone = false;
     bool autoplay = true;
+    bool folderPlaysOn = false;
     bool checkUpdates = true;
     OnlineLookup artistPictures = OnlineLookup::Ask;
     bool folderTree = false;
@@ -347,6 +348,8 @@ public:
     virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;
     // Every track in a folder and below it, in the Folders page's order (see folderTracks in LibraryViews.h).
     virtual std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const = 0;
+    // A track and every track after it in its library folder, in the same order (see folderTracksFrom).
+    virtual std::vector<LibraryTrackRow> folderTracksFrom(int64_t track, const CancellationToken& token = {}) const = 0;
     virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
     virtual LibraryRootContents libraryRootContents(int64_t root) const = 0;
     virtual LibraryScanProgress libraryScanProgress() const = 0;

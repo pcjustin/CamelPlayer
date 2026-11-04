@@ -837,9 +837,54 @@ void LibraryView::playTree(CamelPlayer::BrowseItem const& node) {
     if (!parent) return;
     const auto found = treeTracks_.find(ui::LibraryCollection::rowOf(treeItems_.GetAt(*parent)).id);
     if (found == treeTracks_.end()) return;
-    const auto& tracks = found->second;
-    const auto track = std::find_if(tracks.begin(), tracks.end(), [&](const auto& t) { return t.id == row.id; });
-    if (track != tracks.end()) playTracks(tracks, size_t(track - tracks.begin()));
+    playFolderTrack(found->second, row.id);
+}
+
+void LibraryView::playFolderTrack(const std::vector<LibraryTrackRow>& folder, int64_t track) {
+    const auto found = std::ranges::find(folder, track, &LibraryTrackRow::id);
+    if (found == folder.end()) return;
+    if (!folderPlaysOn_ || !server_) return playTracks(folder, size_t(found - folder.begin()));
+    // The track's own folder plays at once from it on; reading a library folder of tens of thousands of tracks and
+    // queueing them takes seconds, so they follow.
+    auto own = std::make_shared<const std::vector<LibraryTrackRow>>(found, folder.end());
+    playTracks(*own, 0);
+    appendFolderRest(std::move(own));
+}
+
+winrt::fire_and_forget LibraryView::appendFolderRest(std::shared_ptr<const std::vector<LibraryTrackRow>> own) {
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    const auto server = server_;
+    co_await winrt::resume_background();
+    auto rest = std::make_shared<std::vector<LibraryTrackRow>>();
+    try {
+        *rest = server->folderTracksFrom(own->front().id);
+    } catch (const std::exception& e) {
+        camel::log::warn("library view: %s", e.what());
+        co_return;
+    }
+    if (rest->size() <= own->size() ||
+        !std::ranges::equal(*own, std::ranges::subrange(rest->begin(), rest->begin() + ptrdiff_t(own->size())), {},
+                            &LibraryTrackRow::id, &LibraryTrackRow::id))
+        co_return;
+    rest->erase(rest->begin(), rest->begin() + ptrdiff_t(own->size()));
+    // Only onto the queue the click made, once the Server holds it (it may still be opening the first track); another
+    // play or change to the queue meanwhile means the rest no longer belongs there. Entries show the spelling the scan
+    // stored, so they are matched by their library files.
+    const auto holdsOwn = [&] {
+        std::vector<int64_t> queued;
+        for (const auto& entry : server->snapshot().queue.entries.get())
+            if (!entry.automatic) queued.push_back(entry.file);
+        return std::ranges::equal(queued, *own, {}, {}, [](const LibraryTrackRow& t) { return t.track.file; });
+    };
+    constexpr int kChecks = 150; // 15 s, as long as a sleeping NAS can take to open the first track
+    for (int check = 0; !holdsOwn(); ++check) {
+        if (check == kChecks) co_return;
+        co_await winrt::resume_after(std::chrono::milliseconds(100));
+    }
+    queue.TryEnqueue([weak, rest] {
+        if (const auto self = weak.get()) self->queueTracks(*rest, false);
+    });
 }
 
 void LibraryView::saveOpenFolders() const {
@@ -1944,8 +1989,7 @@ void LibraryView::OnFolderItemClick(Windows::Foundation::IInspectable const&, It
         open(std::move(view), true);
         return;
     }
-    const auto found = std::find_if(folderTracks_.begin(), folderTracks_.end(), [&](const auto& t) { return t.id == row.id; });
-    if (found != folderTracks_.end()) playTracks(folderTracks_, size_t(found - folderTracks_.begin()));
+    playFolderTrack(folderTracks_, row.id);
 }
 
 } // namespace winrt::CamelPlayer::implementation

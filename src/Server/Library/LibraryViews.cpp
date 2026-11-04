@@ -774,29 +774,54 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
 
 std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t folder, const CancellationToken& token) {
     Query q(store, std::nullopt, token);
-    auto children = q.db.prepare("SELECT id FROM folders WHERE parent_id=? ORDER BY path");
-    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
-                             "WHERE f.folder_id=? AND" + kVisible + " ORDER BY t.disc_number,t.track_number,f.path");
+    auto top = q.db.prepare("SELECT path FROM folders WHERE id=?");
+    if (!top.bind(1, folder).step()) return {};
+    const auto path = top.text(0);
+    // The folders and tracks below `folder` are each read in one pass over a path range of their index: a library
+    // folder holds thousands of folders, and a query for each took most of a minute.
+    std::unordered_map<int64_t, std::vector<int64_t>> children; // by parent, in path order
+    auto below = q.db.prepare("SELECT id,parent_id FROM folders WHERE path>?1||'\\' AND path<?1||']' ORDER BY path");
+    below.bind(1, path);
+    while (below.step()) children[below.integer(1)].push_back(below.integer(0));
+    std::unordered_map<int64_t, std::vector<LibraryTrackRow>> tracks; // by folder
+    auto rows =
+        q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + ",f.folder_id FROM tracks t" + kJoins + kStats +
+                     "WHERE f.path>?1||'\\' AND f.path<?1||']' AND" + kVisible + " ORDER BY t.disc_number,t.track_number,f.path");
+    rows.bind(1, path);
+    while (rows.step()) {
+        if (token.cancelled()) throw std::runtime_error("library query cancelled");
+        tracks[rows.integer(13)].push_back(trackRow(rows));
+    }
     std::vector<LibraryTrackRow> out;
     std::vector<std::pair<int64_t, bool>> pending{{folder, false}}; // a folder, and whether its subfolders are listed
     while (!pending.empty()) {
-        if (token.cancelled()) throw std::runtime_error("library query cancelled");
         auto [id, expanded] = pending.back();
         pending.pop_back();
         if (expanded) {
-            rows.reset();
-            rows.bind(1, id);
-            while (rows.step()) out.push_back(trackRow(rows));
+            if (const auto own = tracks.find(id); own != tracks.end()) std::ranges::move(own->second, std::back_inserter(out));
             continue;
         }
         pending.emplace_back(id, true);
-        std::vector<int64_t> subfolders;
-        children.reset();
-        children.bind(1, id);
-        while (children.step()) subfolders.push_back(children.integer(0));
-        for (const auto subfolder : std::views::reverse(subfolders)) pending.emplace_back(subfolder, false);
+        if (const auto subfolders = children.find(id); subfolders != children.end())
+            for (const auto subfolder : std::views::reverse(subfolders->second)) pending.emplace_back(subfolder, false);
     }
     return out;
+}
+
+std::vector<LibraryTrackRow> folderTracksFrom(const LibraryStore& store, int64_t track, const CancellationToken& token) {
+    std::optional<int64_t> top;
+    {
+        Query q(store, std::nullopt, token);
+        auto row = q.db.prepare("WITH RECURSIVE up(id,parent) AS (SELECT d.id,d.parent_id FROM tracks t JOIN files f ON "
+                                "f.id=t.file_id JOIN folders d ON d.id=f.folder_id WHERE t.id=? UNION ALL SELECT d.id,"
+                                "d.parent_id FROM folders d JOIN up ON d.id=up.parent) SELECT id FROM up WHERE parent IS NULL");
+        if (row.bind(1, track).step()) top = row.integer(0);
+    }
+    if (!top) return {};
+    auto tracks = folderTracks(store, *top, token);
+    const auto from = std::ranges::find(tracks, track, &LibraryTrackRow::id);
+    tracks.erase(tracks.begin(), from);
+    return tracks;
 }
 
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store) {

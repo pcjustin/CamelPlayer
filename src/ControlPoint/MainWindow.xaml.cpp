@@ -552,6 +552,7 @@ void MainWindow::populateSettings() {
     fill(ConvertDsdCombo(), {tr(L"Convert_Off"), tr(L"ConvertDsd_On")}, settings_.convertDsdWhenUnsupported ? 1 : 0);
     AutoplaySwitch().IsOn(settings_.autoplay);
     QueueAutoplayItem().IsChecked(settings_.autoplay);
+    FolderPlaysOnSwitch().IsOn(settings_.folderPlaysOn);
     AutoUpdateSwitch().IsOn(settings_.checkUpdates);
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     FolderTreeSwitch().IsOn(settings_.folderTree);
@@ -559,6 +560,7 @@ void MainWindow::populateSettings() {
     DiscordCoversSwitch().IsOn(settings_.discord.covers);
     DiscordCoversSwitch().IsEnabled(settings_.discord.enabled);
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
+    get_self<LibraryView>(Library())->setFolderPlaysOn(settings_.folderPlaysOn);
     ui::trackColumns().columns(settings_.trackColumns);
     showDsp();
     showVolume();
@@ -677,6 +679,7 @@ void MainWindow::readSettingsFromUi() {
     settings_.resampleQuality = ResampleQuality(std::min(idx(ResampleQualityCombo()), 2));
     settings_.convertDsdWhenUnsupported = idx(ConvertDsdCombo()) == 1;
     settings_.autoplay = AutoplaySwitch().IsOn();
+    settings_.folderPlaysOn = FolderPlaysOnSwitch().IsOn();
     settings_.checkUpdates = AutoUpdateSwitch().IsOn();
     // Off stays unanswered until it was on, so the artist page still asks.
     if (ArtistPicturesSwitch().IsOn())
@@ -773,6 +776,7 @@ void MainWindow::settingsChanged() {
     readSettingsFromUi();
     applyTheme();
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
+    get_self<LibraryView>(Library())->setFolderPlaysOn(settings_.folderPlaysOn);
     if (settings_.backend != previous && !followDevice(previous) &&
         server_->snapshot().playback.state == PlaybackState::Playing) {
         // Never move sound to another device unannounced; its level may differ a lot.
@@ -2892,6 +2896,10 @@ void MainWindow::OnArtistPicturesToggled(Windows::Foundation::IInspectable const
 }
 
 void MainWindow::OnFolderTreeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settingsChanged();
+}
+
+void MainWindow::OnFolderPlaysOnToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
 }
 

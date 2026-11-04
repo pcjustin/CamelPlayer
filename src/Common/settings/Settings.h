@@ -271,6 +271,7 @@ struct Settings {
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     bool firstRunDone = false;    // the first-run guide was finished or skipped
     bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)
+    bool folderPlaysOn = false;   // a track played from a folder goes on to the end of its library folder
     bool checkUpdates = true;     // automatic update checks at startup and daily (docs/Plan.md §8.6)
     OnlineLookup artistPictures = OnlineLookup::Ask; // from Wikimedia Commons (docs/Plan.md §7.4)
     bool folderTree = false; // the Folders page as one tree, as in foobar2000 (made for a friend of the user)
@@ -289,9 +290,9 @@ struct Settings {
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
-// decoders and the DSP chain, whose saved EQ presets stay. Interface: language, close action, the tray notice, the first-run
-// guide, the hotkeys, the automatic update check, the online artist pictures, the folder tree, the track list columns
-// and Discord. Each keeps the other group.
+// decoders, autoplay, playing on from a folder and the DSP chain, whose saved EQ presets stay. Interface: language, close action,
+// the tray notice, the first-run guide, the hotkeys, the automatic update check, the online artist pictures, the folder tree, the
+// track list columns and Discord. Each keeps the other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

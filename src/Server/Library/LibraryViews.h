@@ -199,6 +199,9 @@ LibraryRootContents libraryRootContents(const LibraryStore& store, int64_t root)
 // Every visible track in `folder` and below it in the order the Folders page lists them: each subfolder's tracks
 // first, by folder name, then the folder's own.
 std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t folder, const CancellationToken& token = {});
+// `track` and every visible track after it in its library folder, in the order of folderTracks; empty when the track is
+// not visible.
+std::vector<LibraryTrackRow> folderTracksFrom(const LibraryStore& store, int64_t track, const CancellationToken& token = {});
 
 // A stored root key as people write it: the volume or share's own spelling without the extended-length prefix.
 std::string libraryDisplayPath(const std::string& key);

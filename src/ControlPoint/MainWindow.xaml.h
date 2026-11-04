@@ -88,6 +88,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDiscordToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnFolderTreeToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnFolderPlaysOnToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqPresetChanged(Windows::Foundation::IInspectable const&,
                            Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
