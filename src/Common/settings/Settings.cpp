@@ -279,6 +279,7 @@ std::string toJson(const Settings& s) {
                           : s.artistPictures == OnlineLookup::Refused ? "refused"
                                                                       : "ask";
     j["folderTree"] = s.folderTree;
+    j["trackColumns"] = {s.trackColumns.title, s.trackColumns.artist, s.trackColumns.album};
     j["discord"] = {{"enabled", s.discord.enabled}, {"covers", s.discord.covers}};
     j["skippedVersion"] = s.skippedVersion;
     j["hotkeys"] = {{"playPause", {s.hotkeys.playPause.modifiers, s.hotkeys.playPause.key}},
@@ -399,6 +400,11 @@ Settings fromJson(const std::string& text) {
                        : pictures == "refused" ? OnlineLookup::Refused
                                                : OnlineLookup::Ask;
     s.folderTree = boolean(j, "folderTree", false);
+    if (const auto columns = j.find("trackColumns");
+        columns != j.end() && columns->is_array() && columns->size() == 3 &&
+        std::all_of(columns->begin(), columns->end(),
+                    [](const json& c) { return c.is_number() && std::isfinite(c.get<double>()) && c.get<double>() > 0; }))
+        s.trackColumns = {(*columns)[0].get<double>(), (*columns)[1].get<double>(), (*columns)[2].get<double>()};
     if (j.contains("discord") && j["discord"].is_object()) {
         s.discord.enabled = boolean(j["discord"], "enabled", false);
         s.discord.covers = boolean(j["discord"], "covers", false);
@@ -566,6 +572,7 @@ Settings resetPlayback(const Settings& s) {
     reset.checkUpdates = s.checkUpdates;
     reset.artistPictures = s.artistPictures;
     reset.folderTree = s.folderTree;
+    reset.trackColumns = s.trackColumns;
     reset.discord = s.discord;
     reset.skippedVersion = s.skippedVersion;
     reset.eq.presets = s.eq.presets;
@@ -585,6 +592,7 @@ Settings resetInterface(const Settings& s) {
     reset.checkUpdates = defaults.checkUpdates;
     reset.artistPictures = defaults.artistPictures;
     reset.folderTree = defaults.folderTree;
+    reset.trackColumns = defaults.trackColumns;
     reset.discord = defaults.discord;
     return reset;
 }

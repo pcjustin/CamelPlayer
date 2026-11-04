@@ -99,6 +99,9 @@
     <ClInclude Include="CardSize.h">
       <DependentUpon>CardSize.idl</DependentUpon>
     </ClInclude>
+    <ClInclude Include="TrackColumns.h">
+      <DependentUpon>TrackColumns.idl</DependentUpon>
+    </ClInclude>
     <ClInclude Include="LibraryCollection.h" />
     <ClInclude Include="QueueItem.h">
       <DependentUpon>QueueItem.idl</DependentUpon>
@@ -153,6 +156,9 @@
     <ClCompile Include="CardSize.cpp">
       <DependentUpon>CardSize.idl</DependentUpon>
     </ClCompile>
+    <ClCompile Include="TrackColumns.cpp">
+      <DependentUpon>TrackColumns.idl</DependentUpon>
+    </ClCompile>
     <ClCompile Include="QueueItem.cpp">
       <DependentUpon>QueueItem.idl</DependentUpon>
     </ClCompile>
@@ -174,6 +180,7 @@
     </Midl>
     <Midl Include="BrowseItem.idl" />
     <Midl Include="CardSize.idl" />
+    <Midl Include="TrackColumns.idl" />
     <Midl Include="QueueItem.idl" />
     <Midl Include="LibraryView.idl">
       <SubType>Code</SubType>

@@ -115,7 +115,10 @@ struct LibraryView : LibraryViewT<LibraryView> {
 
 private:
     Microsoft::UI::Xaml::Style creditSeparator();
+    void showListColumns(bool shown, bool album = false, bool marks = true);
     void fitCredit(Microsoft::UI::Xaml::FrameworkElement const& root);
+    Microsoft::UI::Xaml::Data::INotifyPropertyChanged::PropertyChanged_revoker columnsChanged_;
+    bool refitCredits_ = false; // the columns changed: fit the rows' credits once the rows have their new widths
     struct ArtworkSlot {
         CamelPlayer::BrowseItem::PropertyChanged_revoker changed;
         camel::server::CancellationToken token;

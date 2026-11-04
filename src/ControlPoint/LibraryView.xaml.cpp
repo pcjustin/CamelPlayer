@@ -194,6 +194,19 @@ void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Com
         ui::setTheme(ActualTheme());
         showAlbumFormats(albumFormats_);
     });
+    // A dragged divider changes the columns but not the rows, so the rows' own size changes do not refit their credits.
+    columnsChanged_ = Application::Current()
+                          .Resources()
+                          .Lookup(box_value(L"TrackColumns"))
+                          .as<Data::INotifyPropertyChanged>()
+                          .PropertyChanged(auto_revoke, [this](auto&&, auto&&) { refitCredits_ = true; });
+    RowList().LayoutUpdated([this](auto&&, auto&&) {
+        if (!std::exchange(refitCredits_, false)) return;
+        if (const auto panel = RowList().ItemsPanelRoot())
+            for (const auto& child : panel.Children())
+                if (const auto container = child.try_as<ContentControl>())
+                    if (const auto root = container.ContentTemplateRoot().try_as<FrameworkElement>()) fitCredit(root);
+    });
     savePlaylist_ = std::move(savePlaylist);
     window_ = std::move(window);
     answerArtistPictures_ = std::move(answerArtistPictures);
@@ -358,6 +371,7 @@ void LibraryView::loadSearchGroups() {
             SearchArtistsHeader().Visibility(shown(results->totalArtists));
             SearchArtists().Visibility(shown(results->totalArtists));
             SearchTracksHeader().Visibility(shown(results->tracks.total));
+            showListColumns(results->tracks.total > 0, false, false);
             HeaderDetail().Text(counted(texts.tracks, results->tracks.total) + L" · " +
                                 counted(texts.albums, results->totalAlbums) + L" · " +
                                 counted(texts.artists, results->totalArtists));
@@ -474,6 +488,7 @@ void LibraryView::open(View view, bool push) {
     SearchAlbums().ItemsSource(nullptr);
     SearchArtists().ItemsSource(nullptr);
     ArtistTracksHeader().Visibility(Visibility::Collapsed);
+    showListColumns(false);
     ArtistAlbums().Visibility(Visibility::Collapsed);
     ArtistOwn().ItemsSource(nullptr);
     ArtistGuest().ItemsSource(nullptr);
@@ -548,6 +563,7 @@ void LibraryView::fillSortChoices() {
     DescendingToggle().Visibility(sortable ? Visibility::Visible : Visibility::Collapsed);
     DescendingToggle().IsChecked(descending_);
     TrackColumns().Visibility(sortable ? Visibility::Visible : Visibility::Collapsed);
+    if (current_.mode == Mode::Tracks) showListColumns(!sortable);
     // The sorted column's header carries an arrow pointing the way it sorts.
     const std::tuple<TextBlock, FontIcon, TrackSort, const wchar_t*> columns[] = {
         {TitleColumnText(), TitleColumnArrow(), TrackSort::Title, L"Library_SortTitle"},
@@ -669,6 +685,7 @@ void LibraryView::loadAlbumDetail() {
                 return t.artist == detail->tracks.front().artist;
             });
             for (const auto& t : detail->tracks) items.Append(item(albumTrackRow(t, a.discs > 1, oneArtist, texts)));
+            showListColumns(!oneArtist, true);
             detailTracks_ = std::move(detail->tracks);
             RowList().ItemsSource(items);
         });
@@ -699,6 +716,7 @@ void LibraryView::loadArtist() {
             const auto shown = [](bool visible) { return visible ? Visibility::Visible : Visibility::Collapsed; };
             ArtistTracksTitle().Text(header(L"Search_Tracks", page->tracks));
             ArtistTracksHeader().Visibility(shown(page->tracks > 0));
+            showListColumns(page->tracks > 0);
             ArtistTracksAll().Visibility(shown(std::cmp_greater(page->tracks, page->songs.size())));
             auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
             for (const auto& t : page->songs) {
@@ -1694,6 +1712,20 @@ void LibraryView::fitCredit(FrameworkElement const& root) {
 
 Microsoft::UI::Xaml::Style LibraryView::creditSeparator() {
     return Resources().Lookup(box_value(L"CreditSeparatorStyle")).as<Microsoft::UI::Xaml::Style>();
+}
+
+// The column headers of lists that do not sort by them; on an album's tracks the credits take the album column too.
+// Rows without hearts leave their column empty, and the headers do the same to stay over the rows' columns.
+void LibraryView::showListColumns(bool shown, bool album, bool marks) {
+    ListColumns().Visibility(shown ? Visibility::Visible : Visibility::Collapsed);
+    if (!shown) return;
+    ListMarksColumn().Width(GridLengthHelper::FromPixels(marks ? 32 : 0));
+    ListTitleColumn().Text(tr(L"Library_SortTitle"));
+    ListArtistColumn().Text(tr(L"Library_SortArtist"));
+    ListAlbumColumn().Text(album ? hstring{} : tr(L"Library_SortAlbum"));
+    ListDurationColumn().Text(tr(L"Library_SortDuration"));
+    Grid::SetColumnSpan(ListArtistColumn(), album ? 2 : 1);
+    ListAlbumDivider().Visibility(album ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void LibraryView::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {

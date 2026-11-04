@@ -24,9 +24,9 @@
             <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnRowContextRequested"
                   SizeChanged="OnRowSizeChanged">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="3*" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="{Binding Title, Source={StaticResource TrackColumns}}" />
+                    <ColumnDefinition Width="{Binding Artist, Source={StaticResource TrackColumns}}" />
+                    <ColumnDefinition Width="{Binding Album, Source={StaticResource TrackColumns}}" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" MinWidth="72" />
                 </Grid.ColumnDefinitions>
@@ -377,9 +377,9 @@
             </Grid.RowDefinitions>
             <Grid x:Name="TrackColumns" Padding="16,0,12,6" ColumnSpacing="16" Visibility="Collapsed">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="3*" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="{Binding Title, Source={StaticResource TrackColumns}}" />
+                    <ColumnDefinition Width="{Binding Artist, Source={StaticResource TrackColumns}}" />
+                    <ColumnDefinition Width="{Binding Album, Source={StaticResource TrackColumns}}" />
                     <ColumnDefinition Width="32" />
                     <ColumnDefinition Width="Auto" MinWidth="72" />
                 </Grid.ColumnDefinitions>
@@ -411,6 +411,9 @@
                         <FontIcon x:Name="DurationColumnArrow" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </Button>
+                <!-- Dragging a divider sizes the columns of every track list; a double-click returns them to 3:2:2. -->
+                <local:ColumnDivider Grid.Column="1" Boundary="0" HorizontalAlignment="Left" Margin="-16,0,0,0" />
+                <local:ColumnDivider Grid.Column="2" Boundary="1" HorizontalAlignment="Left" Margin="-16,0,0,0" />
             </Grid>
             <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
                       IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed"
@@ -500,6 +503,28 @@
                             <TextBlock x:Name="ArtistTracksTitle" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
                             <HyperlinkButton x:Name="ArtistTracksAll" x:Uid="Home_ViewAll" Tag="tracks" Click="OnArtistViewAllClick"
                                              HorizontalAlignment="Right" />
+                        </Grid>
+                        <!-- The column headers of lists that do not sort by them: search results, an artist's tracks, an album
+                             with several artists (whose credits take the album column too) and the smart lists. -->
+                        <Grid x:Name="ListColumns" Padding="16,0,12,6" ColumnSpacing="16" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{Binding Title, Source={StaticResource TrackColumns}}" />
+                                <ColumnDefinition Width="{Binding Artist, Source={StaticResource TrackColumns}}" />
+                                <ColumnDefinition Width="{Binding Album, Source={StaticResource TrackColumns}}" />
+                                <ColumnDefinition x:Name="ListMarksColumn" Width="32" />
+                                <ColumnDefinition Width="Auto" MinWidth="72" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ListTitleColumn" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock x:Name="ListArtistColumn" Grid.Column="1" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock x:Name="ListAlbumColumn" Grid.Column="2" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock x:Name="ListDurationColumn" Grid.Column="4" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" />
+                            <local:ColumnDivider Grid.Column="1" Boundary="0" HorizontalAlignment="Left" Margin="-16,0,0,0" />
+                            <local:ColumnDivider x:Name="ListAlbumDivider" Grid.Column="2" Boundary="1" HorizontalAlignment="Left"
+                                                 Margin="-16,0,0,0" />
                         </Grid>
                     </StackPanel>
                 </ListView.Header>

@@ -243,6 +243,13 @@ struct DiscordSettings {
     bool operator==(const DiscordSettings&) const = default;
 };
 
+// The title, artist and album columns of track lists as proportions of the room they share, which the user changes by
+// dragging the dividers between their headers (docs/Plan.md §8.2).
+struct TrackColumns {
+    double title = 3, artist = 2, album = 2;
+    bool operator==(const TrackColumns&) const = default;
+};
+
 struct Settings {
     static constexpr int kSchemaVersion = 3;
 
@@ -267,6 +274,7 @@ struct Settings {
     bool checkUpdates = true;     // automatic update checks at startup and daily (docs/Plan.md §8.6)
     OnlineLookup artistPictures = OnlineLookup::Ask; // from Wikimedia Commons (docs/Plan.md §7.4)
     bool folderTree = false; // the Folders page as one tree, as in foobar2000 (made for a friend of the user)
+    TrackColumns trackColumns;
     DiscordSettings discord;
     std::string skippedVersion; // the release the automatic check no longer offers
     HotkeySettings hotkeys;
@@ -282,8 +290,8 @@ struct Settings {
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
 // decoders and the DSP chain, whose saved EQ presets stay. Interface: language, close action, the tray notice, the first-run
-// guide, the hotkeys, the automatic update check, the online artist pictures, the folder tree and Discord. Each keeps the
-// other group.
+// guide, the hotkeys, the automatic update check, the online artist pictures, the folder tree, the track list columns
+// and Discord. Each keeps the other group.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

@@ -23,11 +23,11 @@
             <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent" ContextRequested="OnEntryContextRequested">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="20" />
-                    <ColumnDefinition Width="3*" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="{Binding Title, Source={StaticResource TrackColumns}}" />
+                    <ColumnDefinition Width="{Binding Artist, Source={StaticResource TrackColumns}}" />
+                    <ColumnDefinition Width="{Binding Album, Source={StaticResource TrackColumns}}" />
                     <ColumnDefinition Width="40" />
-                    <ColumnDefinition Width="Auto" MinWidth="56" />
+                    <ColumnDefinition Width="96" />
                 </Grid.ColumnDefinitions>
                 <FontIcon x:Uid="Playlist_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
                           Foreground="{ThemeResource SystemFillColorCautionBrush}" />
@@ -117,14 +117,16 @@
         </Grid>
 
         <!-- Clicking a column reorders the stored playlist by it after a confirmation; again for descending. -->
-        <Grid x:Name="ColumnHeaders" Grid.Row="1" Padding="16,0,28,0" ColumnSpacing="16">
+        <!-- The headers measure as the entries do (a list item's padding, the same fixed columns), so the dividers stay
+             over the entries' columns. -->
+        <Grid x:Name="ColumnHeaders" Grid.Row="1" Padding="16,0,12,0" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="20" />
-                <ColumnDefinition Width="3*" />
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="{Binding Title, Source={StaticResource TrackColumns}}" />
+                <ColumnDefinition Width="{Binding Artist, Source={StaticResource TrackColumns}}" />
+                <ColumnDefinition Width="{Binding Album, Source={StaticResource TrackColumns}}" />
                 <ColumnDefinition Width="40" />
-                <ColumnDefinition Width="Auto" MinWidth="56" />
+                <ColumnDefinition Width="96" />
             </Grid.ColumnDefinitions>
             <Button Grid.Column="1" Style="{StaticResource ColumnHeaderStyle}" Tag="0" Click="OnColumnClick">
                 <TextBlock x:Uid="Playlist_ColumnTitle" />
@@ -151,6 +153,9 @@
                     </Button.Flyout>
                 </Button>
             </StackPanel>
+            <!-- Dragging a divider sizes the columns of every track list; a double-click returns them to 3:2:2. -->
+            <local:ColumnDivider Grid.Column="2" Boundary="0" HorizontalAlignment="Left" Margin="-16,0,0,0" />
+            <local:ColumnDivider Grid.Column="3" Boundary="1" HorizontalAlignment="Left" Margin="-16,0,0,0" />
         </Grid>
 
         <ListView x:Name="EntryList" Grid.Row="2" ItemTemplate="{StaticResource EntryTemplate}" SelectionMode="Extended"

@@ -28,6 +28,7 @@
 #include "DialogPlacement.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
+#include "TrackColumns.h"
 #include "TrimmedText.h"
 #include "ArtworkLoader.h"
 #include "Common/settings/EqText.h"
@@ -264,6 +265,13 @@ void MainWindow::InitializeComponent() {
     }
     if (!Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported())
         ThemeBackground().Visibility(Visibility::Visible);
+    // Column widths dragged in any track list are kept in the settings once the drag ends.
+    ui::trackColumns().Committed([weak = get_weak()](auto&&, auto&&) {
+        auto self = weak.get();
+        if (!self || self->settings_.trackColumns == ui::trackColumns().columns()) return;
+        self->settings_.trackColumns = ui::trackColumns().columns();
+        self->applySettingsNow();
+    });
     ExtendsContentIntoTitleBar(true);
     SetTitleBar(AppTitleBar());
     AppWindow().TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
@@ -551,6 +559,7 @@ void MainWindow::populateSettings() {
     DiscordCoversSwitch().IsOn(settings_.discord.covers);
     DiscordCoversSwitch().IsEnabled(settings_.discord.enabled);
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
+    ui::trackColumns().columns(settings_.trackColumns);
     showDsp();
     showVolume();
     showReplayGain();

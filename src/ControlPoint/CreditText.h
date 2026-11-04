@@ -75,6 +75,9 @@ inline void fitCreditButtons(winrt::Microsoft::UI::Xaml::Controls::StackPanel co
                              winrt::Microsoft::UI::Xaml::Style const& separator, double fontSize) {
     using namespace winrt::Microsoft::UI::Xaml;
     constexpr double kShortestName = 32; // room enough to start a name before its "…"
+    // Widths that add up to the room exactly can sum a hair over it; such a name fits, or it would be "trimmed" to its
+    // own width and the names after it would go without a "…".
+    constexpr double kRounding = 0.5;
     const auto children = panel.Children();
     const auto ellipsis = winrt::hstring(L"…");
     if (const auto size = children.Size();
@@ -92,10 +95,10 @@ inline void fitCreditButtons(winrt::Microsoft::UI::Xaml::Controls::StackPanel co
         widths.push_back(element.DesiredSize().Width);
         total += widths.back();
     }
-    if (width <= 0 || total <= width) return;
+    if (width <= 0 || total <= width + kRounding) return;
     double used = 0;
     size_t kept = 0;
-    while (kept < widths.size() && used + widths[kept] <= width) used += widths[kept++];
+    while (kept < widths.size() && used + widths[kept] <= width + kRounding) used += widths[kept++];
     if (const auto link = children.GetAt(uint32_t(kept)).try_as<Controls::HyperlinkButton>();
         link && width - used >= kShortestName) {
         link.MaxWidth(width - used);

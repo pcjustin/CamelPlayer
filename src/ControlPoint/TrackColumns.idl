@@ -1,0 +1,23 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+namespace CamelPlayer {
+// The title, artist and album column widths every track list shares, as star lengths in proportion (docs/Plan.md §8.2).
+[Microsoft.UI.Xaml.Data.Bindable]
+[default_interface] runtimeclass TrackColumnWidths : Microsoft.UI.Xaml.Data.INotifyPropertyChanged {
+    TrackColumnWidths();
+    Microsoft.UI.Xaml.GridLength Title { get; };
+    Microsoft.UI.Xaml.GridLength Artist { get; };
+    Microsoft.UI.Xaml.GridLength Album { get; };
+    // The user finished changing them: a drag ended or a divider was double-clicked.
+    event Windows.Foundation.EventHandler<Object> Committed;
+}
+
+// The divider between two column headers of a track list, in the grid of the headers: dragging it moves the boundary
+// between columns Boundary and Boundary + 1; a double-click returns every column to its default width.
+[default_interface] runtimeclass ColumnDivider : Microsoft.UI.Xaml.Controls.Grid {
+    ColumnDivider();
+    Int32 Boundary;
+}
+} // namespace CamelPlayer

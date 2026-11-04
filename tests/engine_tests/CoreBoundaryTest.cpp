@@ -322,6 +322,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     settings.trayNoticeShown = settings.firstRunDone = true;
     settings.artistPictures = OnlineLookup::Allowed;
     settings.folderTree = true;
+    settings.trackColumns = {5, 1, 1};
     settings.lastFile = L"C:\\music\\a.flac";
 
     const auto playback = resetPlayback(settings);
@@ -335,6 +336,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_TRUE(playback.trayNoticeShown && playback.firstRunDone);
     EXPECT_EQ(playback.artistPictures, OnlineLookup::Allowed);
     EXPECT_TRUE(playback.folderTree);
+    EXPECT_EQ(playback.trackColumns, settings.trackColumns);
     EXPECT_EQ(playback.lastFile, settings.lastFile);
 
     const auto ui = resetInterface(settings);
@@ -343,6 +345,7 @@ TEST(SettingsBoundary, ResettingOneGroupKeepsTheOther) {
     EXPECT_FALSE(ui.trayNoticeShown || ui.firstRunDone);
     EXPECT_EQ(ui.artistPictures, OnlineLookup::Ask);
     EXPECT_FALSE(ui.folderTree);
+    EXPECT_EQ(ui.trackColumns, TrackColumns{});
     EXPECT_EQ(ui.backend, Backend::Asio);
     EXPECT_EQ(ui.asio, settings.asio);
     EXPECT_FALSE(ui.convertWhenUnsupported);
@@ -371,6 +374,16 @@ TEST(SettingsBoundary, TheFolderTreeIsOffUntilTurnedOn) {
     Settings settings;
     settings.folderTree = true;
     EXPECT_TRUE(fromJson(toJson(settings)).folderTree);
+}
+
+TEST(SettingsBoundary, TrackColumnsAreThreeTwoTwoUntilDraggedAndRefuseNonsense) {
+    EXPECT_EQ(Settings{}.trackColumns, (TrackColumns{3, 2, 2}));
+    Settings settings;
+    settings.trackColumns = {512.5, 180, 240};
+    EXPECT_EQ(fromJson(toJson(settings)).trackColumns, settings.trackColumns);
+    for (const auto* text : {R"({"trackColumns":[1,2]})", R"({"trackColumns":[1,0,2]})", R"({"trackColumns":[1,-2,2]})",
+                             R"({"trackColumns":"3:2:2"})", R"({"trackColumns":[1,"2",2]})"})
+        EXPECT_EQ(fromJson(text).trackColumns, TrackColumns{}) << text;
 }
 
 TEST(SettingsBoundary, TheEqIsOffWithFiveFlatBandsAndKeepsItsPresetsThroughAPlaybackReset) {

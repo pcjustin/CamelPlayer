@@ -6,6 +6,7 @@
 
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
+#include "TrackColumns.h"
 #include "Common/util/Log.h"
 
 using namespace winrt;
@@ -24,6 +25,8 @@ App::App(std::shared_ptr<camel::server::IServer> server) : server_(std::move(ser
 }
 
 void App::OnLaunched(LaunchActivatedEventArgs const&) {
+    // The column widths every track list shares (docs/Plan.md §8.2), for the window's lists to bind to.
+    Resources().Insert(box_value(L"TrackColumns"), make<TrackColumnWidths>());
     window_ = make<MainWindow>(std::move(server_));
     window_.Activate();
     hangWatch_.emplace([queue = window_.DispatcherQueue()](
