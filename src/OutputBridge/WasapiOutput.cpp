@@ -391,4 +391,19 @@ std::vector<DeviceEntry> listWasapiDevices() {
     return out;
 }
 
+std::string defaultWasapiDevice() {
+    ComScope com;
+    try {
+        auto en = wil::CoCreateInstance<MMDeviceEnumerator, IMMDeviceEnumerator>(CLSCTX_ALL);
+        wil::com_ptr<IMMDevice> device;
+        if (FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, &device))) return {};
+        wil::unique_cotaskmem_string id;
+        THROW_IF_FAILED(device->GetId(&id));
+        return toUtf8(id.get());
+    } catch (const wil::ResultException& e) {
+        log::error("wasapi: default device failed 0x%08lX", (unsigned long)e.GetErrorCode());
+        return {};
+    }
+}
+
 } // namespace camel::audio

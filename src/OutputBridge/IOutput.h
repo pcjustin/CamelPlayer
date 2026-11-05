@@ -83,6 +83,7 @@ struct DeviceEntry {
 };
 
 std::vector<DeviceEntry> listWasapiDevices(); // active render endpoints
+std::string defaultWasapiDevice();            // the default console render endpoint; empty when there is none
 std::vector<DeviceEntry> listAsioDrivers();
 std::vector<DeviceEntry> listKsPins(); // PCM render pins
 

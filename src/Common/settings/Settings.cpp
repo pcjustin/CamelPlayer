@@ -255,6 +255,154 @@ audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat
     return choices[format].value_or(audio::defaultDecoder(format));
 }
 
+static std::string str(const json& o, const char* k, const std::string& def) {
+    return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def;
+}
+
+static double num(const json& o, const char* k, double def, double minimum, double maximum) {
+    if (!o.contains(k) || !o[k].is_number()) return def;
+    const double value = o[k].get<double>();
+    return std::isfinite(value) && value >= minimum && value <= maximum ? value : def;
+}
+
+static int integer(const json& o, const char* k, int def, int minimum, int maximum) {
+    const double value = num(o, k, def, minimum, maximum);
+    return std::trunc(value) == value ? int(value) : def;
+}
+
+static bool boolean(const json& o, const char* k, bool def) {
+    return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
+}
+
+static void readTiming(const json& o, PlaybackTiming& t) {
+    t.predecodeSeconds = uint32_t(integer(o, "predecodeSeconds", 10, 1, 60));
+    t.formatChangeSilenceMs = uint32_t(integer(o, "formatChangeSilenceMs", 0, 0, 2000));
+    t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", 1, 0, 3600));
+}
+
+static json wasapiJson(const WasapiSettings& w) {
+    json j = {{"device", w.deviceId},
+              {"shareMode", w.shared ? "shared" : "exclusive"},
+              {"sharedResampleQuality", resampleQualityId(w.sharedResampleQuality)},
+              {"eventDriven", w.eventDriven},
+              {"period", periodId(w.period)},
+              {"customPeriodMs", w.customPeriodMs},
+              {"sampleType", w.sampleType ? sampleTypeId(*w.sampleType) : ""},
+              {"dsdOutput", dsdOutputId(w.dsdOutput)},
+              {"dsdPcmRate", w.dsdPcmRate},
+              {"fixedRate", w.fixedRate},
+              {"pollBufferMs", w.pollBufferMs},
+              {"mmcssTask", mmcssTaskId(w.mmcssTask)},
+              {"mmcssPriority", mmcssPriorityId(w.mmcssPriority)}};
+    j.update(timingJson(w.timing));
+    return j;
+}
+
+static void readWasapi(const json& o, WasapiSettings& w) {
+    w.deviceId = str(o, "device", "");
+    w.shared = str(o, "shareMode", "exclusive") == "shared";
+    w.sharedResampleQuality = resampleQualityFromId(str(o, "sharedResampleQuality", "high"));
+    w.eventDriven = boolean(o, "eventDriven", true);
+    w.period = periodFromId(str(o, "period", "default"));
+    w.customPeriodMs = num(o, "customPeriodMs", 10.0, 1.0, 500.0);
+    w.sampleType = sampleTypeFromId(str(o, "sampleType", ""));
+    w.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Dop);
+    if (w.dsdOutput == DsdOutput::Native) w.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
+    w.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
+    w.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    w.pollBufferMs = num(o, "pollBufferMs", 200.0, 20.0, 2000.0);
+    w.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
+    w.mmcssPriority = mmcssPriorityFromId(str(o, "mmcssPriority", ""));
+    readTiming(o, w.timing);
+}
+
+static json asioJson(const AsioSettings& a) {
+    json j = {{"driver", a.driverClsid},
+              {"bufferSize", a.bufferSize},
+              {"outLeft", a.outLeft},
+              {"outRight", a.outRight},
+              {"dsdOutput", dsdOutputId(a.dsdOutput)},
+              {"dsdPcmRate", a.dsdPcmRate},
+              {"fixedRate", a.fixedRate}};
+    j.update(timingJson(a.timing));
+    return j;
+}
+
+static void readAsio(const json& o, AsioSettings& a) {
+    a.driverClsid = str(o, "driver", "");
+    a.bufferSize = integer(o, "bufferSize", 0, 0, 65536);
+    a.outLeft = integer(o, "outLeft", 0, 0, 63);
+    a.outRight = integer(o, "outRight", 1, 0, 63);
+    a.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Native);
+    a.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
+    a.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    readTiming(o, a.timing);
+}
+
+static json ksJson(const KsSettings& k) {
+    json j = {{"device", k.deviceId},
+              {"mode", ksModeId(k.mode)},
+              {"bufferMs", k.bufferMs},
+              {"packetCount", k.packetCount},
+              {"packetMs", k.packetMs},
+              {"sampleType", k.sampleType ? sampleTypeId(*k.sampleType) : ""},
+              {"dsdOutput", dsdOutputId(k.dsdOutput)},
+              {"dsdPcmRate", k.dsdPcmRate},
+              {"fixedRate", k.fixedRate},
+              {"mmcssTask", mmcssTaskId(k.mmcssTask)},
+              {"mmcssPriority", mmcssPriorityId(k.mmcssPriority)}};
+    j.update(timingJson(k.timing));
+    return j;
+}
+
+static void readKs(const json& o, KsSettings& k) {
+    k.deviceId = str(o, "device", "");
+    k.mode = ksModeFromId(str(o, "mode", "auto"));
+    k.bufferMs = num(o, "bufferMs", 20.0, 2.0, 1000.0);
+    k.packetCount = integer(o, "packetCount", 4, 2, 16);
+    k.packetMs = num(o, "packetMs", 10.0, 1.0, 200.0);
+    k.sampleType = sampleTypeFromId(str(o, "sampleType", ""));
+    k.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Dop);
+    if (k.dsdOutput == DsdOutput::Native) k.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
+    k.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
+    k.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    k.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
+    k.mmcssPriority = mmcssPriorityFromId(str(o, "mmcssPriority", ""));
+    readTiming(o, k.timing);
+}
+
+static json outputJson(const SavedOutput& o) {
+    json j = {{"backend", backendId(o.backend)},
+              {"id", o.id},
+              {"name", o.name},
+              {"alias", o.alias},
+              {"enabled", o.enabled},
+              {"volumeMode", o.volumeMode == VolumeMode::Software ? "software" : "fixed"}};
+    j["parameters"] = o.backend == Backend::Asio ? asioJson(o.asio)
+                      : o.backend == Backend::Ks ? ksJson(o.ks)
+                                                 : wasapiJson(o.wasapi);
+    return j;
+}
+
+static std::optional<SavedOutput> outputFrom(const json& o) {
+    SavedOutput saved;
+    if (!o.is_object() || !backendFromId(str(o, "backend", ""), saved.backend)) return std::nullopt;
+    saved.id = str(o, "id", "");
+    saved.name = str(o, "name", "");
+    saved.alias = str(o, "alias", "");
+    saved.enabled = boolean(o, "enabled", false);
+    saved.volumeMode = str(o, "volumeMode", "fixed") == "software" ? VolumeMode::Software : VolumeMode::Fixed;
+    const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
+    if (saved.backend == Backend::Asio)
+        readAsio(parameters, saved.asio);
+    else if (saved.backend == Backend::Ks)
+        readKs(parameters, saved.ks);
+    else
+        readWasapi(parameters, saved.wasapi);
+    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.id;
+    return saved;
+}
+
 std::string toJson(const Settings& s) {
     json j;
     j["schema"] = Settings::kSchemaVersion;
@@ -305,40 +453,13 @@ std::string toJson(const Settings& s) {
     j["dspOrder"] = json::array();
     for (const auto node : s.dspOrder) j["dspOrder"].push_back(kDspNodeIds[int(node) - 1]);
     j["lastFile"] = toUtf8(s.lastFile);
-    j["wasapi"] = {{"device", s.wasapi.deviceId},
-                   {"shareMode", s.wasapi.shared ? "shared" : "exclusive"},
-                   {"sharedResampleQuality", resampleQualityId(s.wasapi.sharedResampleQuality)},
-                   {"eventDriven", s.wasapi.eventDriven},
-                   {"period", periodId(s.wasapi.period)},
-                   {"customPeriodMs", s.wasapi.customPeriodMs},
-                   {"sampleType", s.wasapi.sampleType ? sampleTypeId(*s.wasapi.sampleType) : ""},
-                   {"dsdOutput", dsdOutputId(s.wasapi.dsdOutput)},
-                   {"dsdPcmRate", s.wasapi.dsdPcmRate},
-                   {"fixedRate", s.wasapi.fixedRate},
-                   {"pollBufferMs", s.wasapi.pollBufferMs},
-                   {"mmcssTask", mmcssTaskId(s.wasapi.mmcssTask)},
-                   {"mmcssPriority", mmcssPriorityId(s.wasapi.mmcssPriority)}};
-    j["wasapi"].update(timingJson(s.wasapi.timing));
-    j["asio"] = {{"driver", s.asio.driverClsid},
-                 {"bufferSize", s.asio.bufferSize},
-                 {"outLeft", s.asio.outLeft},
-                 {"outRight", s.asio.outRight},
-                 {"dsdOutput", dsdOutputId(s.asio.dsdOutput)},
-                 {"dsdPcmRate", s.asio.dsdPcmRate},
-                 {"fixedRate", s.asio.fixedRate}};
-    j["asio"].update(timingJson(s.asio.timing));
-    j["ks"] = {{"device", s.ks.deviceId},
-               {"mode", ksModeId(s.ks.mode)},
-               {"bufferMs", s.ks.bufferMs},
-               {"packetCount", s.ks.packetCount},
-               {"packetMs", s.ks.packetMs},
-               {"sampleType", s.ks.sampleType ? sampleTypeId(*s.ks.sampleType) : ""},
-               {"dsdOutput", dsdOutputId(s.ks.dsdOutput)},
-               {"dsdPcmRate", s.ks.dsdPcmRate},
-               {"fixedRate", s.ks.fixedRate},
-               {"mmcssTask", mmcssTaskId(s.ks.mmcssTask)},
-               {"mmcssPriority", mmcssPriorityId(s.ks.mmcssPriority)}};
-    j["ks"].update(timingJson(s.ks.timing));
+    j["wasapi"] = wasapiJson(s.wasapi);
+    j["asio"] = asioJson(s.asio);
+    j["ks"] = ksJson(s.ks);
+    j["outputs"] = json::array();
+    for (const auto& output : s.outputs) j["outputs"].push_back(outputJson(output));
+    j["followedDefault"] = s.followedDefault;
+    if (s.adoptOutputSets) j["adoptOutputSets"] = true;
     return j.dump(2);
 }
 
@@ -349,26 +470,6 @@ Settings fromJson(const std::string& text) {
     if (j.contains("schema") && !j["schema"].is_number_integer()) throw std::invalid_argument("invalid settings schema");
     const int schema = j.contains("schema") ? j["schema"].get<int>() : 0;
     if (schema < 0 || schema > Settings::kSchemaVersion) throw std::invalid_argument("unsupported settings schema");
-    auto str = [](const json& o, const char* k, const std::string& def) {
-        return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def;
-    };
-    auto num = [](const json& o, const char* k, double def, double minimum, double maximum) {
-        if (!o.contains(k) || !o[k].is_number()) return def;
-        const double value = o[k].get<double>();
-        return std::isfinite(value) && value >= minimum && value <= maximum ? value : def;
-    };
-    auto integer = [&](const json& o, const char* k, int def, int minimum, int maximum) {
-        const double value = num(o, k, def, minimum, maximum);
-        return std::trunc(value) == value ? int(value) : def;
-    };
-    auto boolean = [](const json& o, const char* k, bool def) {
-        return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
-    };
-    auto readTiming = [&](const json& o, PlaybackTiming& t) {
-        t.predecodeSeconds = uint32_t(integer(o, "predecodeSeconds", 10, 1, 60));
-        t.formatChangeSilenceMs = uint32_t(integer(o, "formatChangeSilenceMs", 0, 0, 2000));
-        t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", 1, 0, 3600));
-    };
     backendFromId(str(j, "backend", "wasapi"), s.backend);
     // A choice survives only when that decoder is integrated for that format.
     auto choose = [&](std::string_view formatId, std::string_view decoderId) {
@@ -498,51 +599,14 @@ Settings fromJson(const std::string& text) {
         if (known && sorted == audio::kDefaultDspOrder) s.dspOrder = order;
     }
     s.lastFile = toWide(str(j, "lastFile", ""));
-    if (j.contains("wasapi") && j["wasapi"].is_object()) {
-        const json& w = j["wasapi"];
-        s.wasapi.deviceId = str(w, "device", "");
-        s.wasapi.shared = str(w, "shareMode", "exclusive") == "shared";
-        s.wasapi.sharedResampleQuality = resampleQualityFromId(str(w, "sharedResampleQuality", "high"));
-        s.wasapi.eventDriven = boolean(w, "eventDriven", true);
-        s.wasapi.period = periodFromId(str(w, "period", "default"));
-        s.wasapi.customPeriodMs = num(w, "customPeriodMs", 10.0, 1.0, 500.0);
-        s.wasapi.sampleType = sampleTypeFromId(str(w, "sampleType", ""));
-        s.wasapi.dsdOutput = dsdOutputFromId(str(w, "dsdOutput", ""), DsdOutput::Dop);
-        if (s.wasapi.dsdOutput == DsdOutput::Native) s.wasapi.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
-        s.wasapi.dsdPcmRate = dsdPcmRateFrom(num(w, "dsdPcmRate", 176400, 0, 1e7));
-        s.wasapi.fixedRate = fixedRateFrom(num(w, "fixedRate", 0, 0, 1e7));
-        s.wasapi.pollBufferMs = num(w, "pollBufferMs", 200.0, 20.0, 2000.0);
-        s.wasapi.mmcssTask = mmcssTaskFromId(str(w, "mmcssTask", ""));
-        s.wasapi.mmcssPriority = mmcssPriorityFromId(str(w, "mmcssPriority", ""));
-        readTiming(w, s.wasapi.timing);
-    }
-    if (j.contains("asio") && j["asio"].is_object()) {
-        const json& a = j["asio"];
-        s.asio.driverClsid = str(a, "driver", "");
-        s.asio.bufferSize = integer(a, "bufferSize", 0, 0, 65536);
-        s.asio.outLeft = integer(a, "outLeft", 0, 0, 63);
-        s.asio.outRight = integer(a, "outRight", 1, 0, 63);
-        s.asio.dsdOutput = dsdOutputFromId(str(a, "dsdOutput", ""), DsdOutput::Native);
-        s.asio.dsdPcmRate = dsdPcmRateFrom(num(a, "dsdPcmRate", 176400, 0, 1e7));
-        s.asio.fixedRate = fixedRateFrom(num(a, "fixedRate", 0, 0, 1e7));
-        readTiming(a, s.asio.timing);
-    }
-    if (j.contains("ks") && j["ks"].is_object()) {
-        const json& k = j["ks"];
-        s.ks.deviceId = str(k, "device", "");
-        s.ks.mode = ksModeFromId(str(k, "mode", "auto"));
-        s.ks.bufferMs = num(k, "bufferMs", 20.0, 2.0, 1000.0);
-        s.ks.packetCount = integer(k, "packetCount", 4, 2, 16);
-        s.ks.packetMs = num(k, "packetMs", 10.0, 1.0, 200.0);
-        s.ks.sampleType = sampleTypeFromId(str(k, "sampleType", ""));
-        s.ks.dsdOutput = dsdOutputFromId(str(k, "dsdOutput", ""), DsdOutput::Dop);
-        if (s.ks.dsdOutput == DsdOutput::Native) s.ks.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
-        s.ks.dsdPcmRate = dsdPcmRateFrom(num(k, "dsdPcmRate", 176400, 0, 1e7));
-        s.ks.fixedRate = fixedRateFrom(num(k, "fixedRate", 0, 0, 1e7));
-        s.ks.mmcssTask = mmcssTaskFromId(str(k, "mmcssTask", ""));
-        s.ks.mmcssPriority = mmcssPriorityFromId(str(k, "mmcssPriority", ""));
-        readTiming(k, s.ks.timing);
-    }
+    if (j.contains("wasapi") && j["wasapi"].is_object()) readWasapi(j["wasapi"], s.wasapi);
+    if (j.contains("asio") && j["asio"].is_object()) readAsio(j["asio"], s.asio);
+    if (j.contains("ks") && j["ks"].is_object()) readKs(j["ks"], s.ks);
+    if (j.contains("outputs") && j["outputs"].is_array())
+        for (const auto& item : j["outputs"])
+            if (auto output = outputFrom(item)) s.outputs.push_back(std::move(*output));
+    s.followedDefault = str(j, "followedDefault", "");
+    s.adoptOutputSets = schema < 4 || boolean(j, "adoptOutputSets", false);
     return s;
 }
 

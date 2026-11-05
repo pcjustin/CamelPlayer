@@ -49,13 +49,19 @@ CamelPlayer asks GitHub for a newer release when it starts and once a day while 
 
 Settings › Interface › **Check for updates automatically** turns the startup and daily checks off. Settings › About › **Check for updates** checks at any time. You can still update by hand: extract the new zip over the old folder or into a new one; your settings and library stay.
 
-## Choosing an output backend
+## Choosing an output
 
-Settings › Playback › Output backend picks how audio reaches the device. Each backend keeps its own device and settings.
+The output button in the player bar lists your outputs. Choose one to switch to it: a playing track goes on from where you hear it, with the queue unchanged, and a paused track stays paused.
+
+Settings › Audio outputs lists every device CamelPlayer finds, by backend. The switch at the end of a row shows that output in the menu, the pencil names it as you like, and the bin clears what CamelPlayer saved for it. The same DAC through WASAPI and through ASIO is two outputs. A saved device that is off stays listed as Not connected.
+
+Each output keeps its own settings, shown in Settings › Playback for the output in use; an output you choose for the first time starts from the defaults. "Windows default device (WASAPI)" follows Windows and uses the settings of whichever device is the default.
+
+The backend is how audio reaches the device:
 
 | Backend | Use it when | Notes |
 | --- | --- | --- |
-| WASAPI, exclusive (default) | Almost always | Bit-perfect. "Follow Windows default" moves playback to a new default device; a device you select pauses when it disappears. |
+| WASAPI, exclusive (default) | Almost always | Bit-perfect. "Windows default device" moves playback to a new default device; a device you select pauses when it disappears. |
 | WASAPI, shared | Other programs must play at the same time | Goes through the Windows mixer, so it is always converted and shown as Processed. |
 | ASIO | Your DAC has its own ASIO driver | Bit-perfect and the only backend with native DSD. **Open control panel** shows the driver's own settings. |
 | Kernel Streaming | A device without ASIO where WASAPI misbehaves | Talks to the driver directly. While it plays, Windows and other programs cannot use the device. |
@@ -110,7 +116,7 @@ Settings › Interface › **Show what's playing on Discord** puts the playing t
 
 **A file is skipped with "The device cannot play this format bit-perfectly".** The device does not accept the file's sample rate, bit depth or channel count. Check that the right device is selected, try a different **Sample format**, or allow conversion (see above).
 
-**No sound, or "Output device not connected".** Turn the DAC on and choose it under Output device. The lists update by themselves when a device appears or goes away; **Refresh device lists** reads them again at once. A device you selected yourself is never replaced by another one; select it again or choose "Follow Windows default".
+**No sound, or "Output device not connected".** Turn the DAC on and choose it in the output menu. The lists update by themselves when a device appears or goes away; **Refresh device lists** in Settings › Audio outputs reads them again at once. A device you selected yourself is never replaced by another one; choose another output or "Windows default device (WASAPI)".
 
 **DSD plays as loud noise or hiss.** The DAC does not understand DoP (or the driver does not pass it unchanged). Set DSD output to **Convert to PCM**. Turn the volume down before trying DSD on a new device.
 

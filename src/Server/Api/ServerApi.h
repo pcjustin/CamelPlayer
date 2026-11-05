@@ -74,6 +74,8 @@ struct SettingsDto {
     VolumeSettings volume;
     ReplayGainSettings replayGain;
     CrossfadeSettings crossfade;
+    std::vector<SavedOutput> outputs;
+    std::string followedDefault;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
 };
@@ -182,6 +184,7 @@ struct DeviceInfo {
 struct DeviceCatalog {
     uint64_t revision = 0;
     std::vector<DeviceInfo> wasapi, asio, ks;
+    std::string defaultWasapi; // the Windows default render endpoint; empty when there is none
     bool operator==(const DeviceCatalog&) const = default;
 };
 

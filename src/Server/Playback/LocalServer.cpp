@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Playback/LocalServer.h"
+#include "Server/Playback/Outputs.h"
 
 #include <windows.h>
 #include <objbase.h>
@@ -794,8 +795,11 @@ private:
                     const auto lastFile = settings_.lastFile;
                     const auto replayGain = settings_.replayGain;
                     const auto crossfade = settings_.crossfade;
+                    const bool adoptOutputSets = settings_.adoptOutputSets;
                     settings_ = nativeSettings(*c.settings);
                     settings_.lastFile = lastFile;
+                    settings_.adoptOutputSets = adoptOutputSets;
+                    syncOutputs(settings_, state_.devices);
                     engine_->applySettings(settings_);
                     discord_->configure(settings_.discord);
                     shareLoudnessInputs();
@@ -1442,8 +1446,15 @@ private:
         catalog.wasapi = devices(audio::listWasapiDevices());
         catalog.asio = devices(audio::listAsioDrivers());
         catalog.ks = devices(audio::listKsPins());
+        catalog.defaultWasapi = audio::defaultWasapiDevice();
         catalog.revision = state_.devices.revision + 1;
         state_.devices = std::move(catalog);
+        const auto outputs = settings_.outputs;
+        const auto followed = settings_.followedDefault;
+        syncOutputs(settings_, state_.devices);
+        if (settings_.outputs == outputs && settings_.followedDefault == followed) return;
+        engine_->applySettings(settings_);
+        persist();
     }
 
     // A DAC switched on or off raises several endpoint events, and its KS pin and ASIO device can follow later; the

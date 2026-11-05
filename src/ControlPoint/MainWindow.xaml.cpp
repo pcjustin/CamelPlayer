@@ -38,7 +38,7 @@
 #include "Common/util/Text.h"
 #include "Common/Version.h"
 #include "Engine/Dsp.h"
-#include "Server/Playback/DeviceMatch.h"
+#include "Server/Playback/Outputs.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
 #include "TrackMarks.h"
@@ -537,7 +537,6 @@ void MainWindow::setRefreshing(bool refreshing) {
 
 void MainWindow::populateSettings() {
     populating_ = true;
-    fill(BackendCombo(), {L"WASAPI", L"ASIO", L"Kernel Streaming"}, int(settings_.backend));
     for (const auto& [combo, format] : decoderCombos()) {
         const auto registered = decodersFor(format);
         std::vector<hstring> names;
@@ -615,49 +614,191 @@ void MainWindow::populateSettings() {
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
     fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
     fill(ThemeCombo(), {tr(L"Theme_System"), tr(L"Theme_Light"), tr(L"Theme_Dark")}, int(settings_.theme));
-    populateDeviceLists(server_->snapshot().devices);
+    populateOutputs();
     populating_ = false;
     updateBackendGroups();
     applyTheme();
 }
 
-void MainWindow::populateDeviceLists(const DeviceCatalog& devices) {
-    const bool was = populating_;
-    populating_ = true;
-    WasapiDeviceCombo().IsEnabled(devices.revision != 0);
-    AsioDriverCombo().IsEnabled(devices.revision != 0);
-    KsDeviceCombo().IsEnabled(devices.revision != 0);
-    // A saved device that is missing stays selected as "not connected"; it is never replaced by another device.
-    const auto withSaved = [](std::vector<DeviceInfo> list, const std::string& saved) {
-        if (!saved.empty() && std::none_of(list.begin(), list.end(), [&](const DeviceInfo& d) { return d.id == saved; }))
-            list.push_back({saved, ""});
-        return list;
-    };
-    const auto label = [](const DeviceInfo& d) { return d.name.empty() ? tr(L"Device_NotConnected") : ui::utf8(d.name); };
-    wasapiDevices_ = withSaved(devices.wasapi, settings_.wasapi.deviceId);
-    std::vector<hstring> names{tr(L"Device_Default")};
-    int sel = 0;
-    for (size_t i = 0; i < wasapiDevices_.size(); i++) {
-        names.push_back(label(wasapiDevices_[i]));
-        if (wasapiDevices_[i].id == settings_.wasapi.deviceId) sel = int(i + 1);
-    }
-    fill(WasapiDeviceCombo(), names, sel);
+namespace {
 
-    auto fillList = [&](ComboBox const& combo, const std::vector<DeviceInfo>& list, const std::string& current) {
-        std::vector<hstring> n;
-        int s = 0;
-        for (size_t i = 0; i < list.size(); i++) {
-            n.push_back(label(list[i]));
-            if (list[i].id == current) s = int(i);
+hstring outputLabel(const camel::server::OutputRow& row) {
+    if (!row.alias.empty()) return ui::utf8(row.alias);
+    if (row.id.empty()) return tr(L"Device_Default");
+    return row.name.empty() ? tr(L"Device_NotConnected") : ui::utf8(row.name);
+}
+
+// The same DAC through WASAPI and through ASIO are two entries, told apart by the backend.
+hstring outputMenuLabel(const camel::server::OutputRow& row) {
+    const hstring label = outputLabel(row);
+    if (!row.alias.empty() || row.id.empty()) return label;
+    return label + L" (" + ui::utf8(camel::backendName(row.backend)) + L")";
+}
+
+} // namespace
+
+void MainWindow::populateOutputs() {
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
+    const auto inUse = std::ranges::find_if(rows, &camel::server::OutputRow::selected);
+    if (inUse != rows.end()) {
+        ToolTipService::SetToolTip(OutputButton(), box_value(outputMenuLabel(*inUse)));
+        Automation::AutomationProperties::SetName(OutputButton(),
+                                                  ui::format(L"Output_ButtonName", {std::wstring(outputMenuLabel(*inUse))}));
+    }
+    auto list = OutputList().Children();
+    list.Clear();
+    std::optional<Backend> group;
+    for (const auto& row : rows) {
+        if (row.backend != group) {
+            group = row.backend;
+            TextBlock header;
+            header.Text(ui::utf8(camel::backendName(row.backend)));
+            header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+            header.Margin({0, 8, 0, 0});
+            Automation::AutomationProperties::SetHeadingLevel(header, Automation::Peers::AutomationHeadingLevel::Level3);
+            list.Append(header);
         }
-        if (n.empty()) n.push_back(tr(L"Device_None"));
-        fill(combo, n, s);
-    };
-    asioDrivers_ = withSaved(devices.asio, settings_.asio.driverClsid);
-    fillList(AsioDriverCombo(), asioDrivers_, settings_.asio.driverClsid);
-    ksPins_ = withSaved(devices.ks, settings_.ks.deviceId);
-    fillList(KsDeviceCombo(), ksPins_, settings_.ks.deviceId);
-    populating_ = was;
+        const hstring label = outputLabel(row);
+        Grid line;
+        line.ColumnSpacing(8);
+        for (const GridLength width : {GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto},
+                                       GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto}}) {
+            ColumnDefinition column;
+            column.Width(width);
+            line.ColumnDefinitions().Append(column);
+        }
+        StackPanel names;
+        names.VerticalAlignment(VerticalAlignment::Center);
+        TextBlock name;
+        name.Text(label);
+        name.TextTrimming(TextTrimming::CharacterEllipsis);
+        names.Children().Append(name);
+        if (row.selected || !row.connected) {
+            TextBlock state;
+            state.Text(tr(row.connected ? L"Output_InUse" : L"Device_NotConnected"));
+            state.Style(unbox_value<Microsoft::UI::Xaml::Style>(
+                Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle"))));
+            names.Children().Append(state);
+        }
+        line.Children().Append(names);
+
+        const auto iconButton = [&](const wchar_t* glyph, const wchar_t* text, int32_t column) {
+            Button button;
+            FontIcon icon;
+            icon.Glyph(glyph);
+            icon.FontSize(14);
+            button.Content(icon);
+            button.VerticalAlignment(VerticalAlignment::Center);
+            ToolTipService::SetToolTip(button, box_value(tr(text)));
+            Automation::AutomationProperties::SetName(
+                button, ui::format(L"Output_ButtonOn", {std::wstring(tr(text)), std::wstring(label)}));
+            Grid::SetColumn(button, column);
+            line.Children().Append(button);
+            return button;
+        };
+        iconButton(L"\xE8AC", L"Output_Rename", 1).Click([this, row, label](auto&&, auto&&) {
+            askRenameOutput(row.backend, row.id, row.alias, label);
+        });
+        if (row.saved)
+            iconButton(L"\xE74D", L"Output_Delete", 2).Click([this, row, label](auto&&, auto&&) {
+                askDeleteOutput(row.backend, row.id, label);
+            });
+
+        ToggleSwitch enabled;
+        enabled.IsOn(row.enabled);
+        enabled.IsEnabled(!row.selected); // the output in use stays in the menu
+        enabled.OnContent(box_value(L""));
+        enabled.OffContent(box_value(L""));
+        enabled.MinWidth(0);
+        enabled.VerticalAlignment(VerticalAlignment::Center);
+        ToolTipService::SetToolTip(enabled, box_value(tr(L"Output_Enabled")));
+        Automation::AutomationProperties::SetName(
+            enabled, ui::format(L"Output_ButtonOn", {std::wstring(tr(L"Output_Enabled")), std::wstring(label)}));
+        enabled.Toggled([this, row, enabled](auto&&, auto&&) {
+            changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                camel::server::setOutputEnabled(s, row.backend, row.id, enabled.IsOn(), devices);
+            });
+        });
+        Grid::SetColumn(enabled, 3);
+        line.Children().Append(enabled);
+        list.Append(line);
+    }
+}
+
+void MainWindow::changeOutputs(std::function<void(camel::Settings&, const DeviceCatalog&)> const& change) {
+    auto settings = nativeSettings(settings_);
+    change(settings, server_->snapshot().devices);
+    settings_ = settingsDto(settings);
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = settings_;
+    submitCommand(std::move(command));
+}
+
+winrt::fire_and_forget MainWindow::askRenameOutput(Backend backend, std::string id, std::string alias, hstring label) {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"Output_RenameTitle", {std::wstring(label)})));
+    TextBox name;
+    name.Text(ui::utf8(alias));
+    name.Header(box_value(tr(L"Output_RenameNote")));
+    dialog.Content(name);
+    dialog.PrimaryButtonText(tr(L"Output_Rename"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    std::wstring text(name.Text());
+    text.erase(0, text.find_first_not_of(L" \t"));
+    text.erase(text.find_last_not_of(L" \t") + 1);
+    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+        camel::server::renameOutput(s, backend, id, toUtf8(text), devices);
+    });
+    populateOutputs();
+}
+
+winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string id, hstring label) {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"Output_DeleteTitle", {std::wstring(label)})));
+    TextBlock explanation;
+    explanation.Text(tr(L"Output_DeleteText"));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    dialog.Content(explanation);
+    dialog.PrimaryButtonText(tr(L"Output_Delete"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Close);
+    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    changeOutputs(
+        [&](camel::Settings& s, const DeviceCatalog& devices) { camel::server::deleteOutput(s, backend, id, devices); });
+    populateSettings();
+}
+
+void MainWindow::OnOutputMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
+    auto items = OutputMenu().Items();
+    items.Clear();
+    for (const auto& row : camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices)) {
+        if (!row.enabled) continue;
+        RadioMenuFlyoutItem item;
+        item.GroupName(L"Outputs");
+        item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
+        item.IsChecked(row.selected);
+        item.IsEnabled(row.connected);
+        item.Click([this, row](auto&&, auto&&) {
+            if (row.selected) return;
+            changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                camel::server::selectOutput(s, row.backend, row.id, devices);
+            });
+            populateSettings();
+        });
+        items.Append(item);
+    }
+    items.Append(MenuFlyoutSeparator());
+    MenuFlyoutItem open;
+    open.Text(tr(L"Output_MenuSettings"));
+    open.Click([this](auto&&, auto&&) { showSettingsCard(OutputsCard()); });
+    items.Append(open);
 }
 
 std::array<std::pair<ComboBox, AudioFormat>, 4> MainWindow::decoderCombos() {
@@ -669,7 +810,6 @@ std::array<std::pair<ComboBox, AudioFormat>, 4> MainWindow::decoderCombos() {
 
 void MainWindow::readSettingsFromUi() {
     auto idx = [](ComboBox const& c) { return std::max(0, c.SelectedIndex()); };
-    settings_.backend = Backend(std::min(idx(BackendCombo()), 2));
     for (const auto& [combo, format] : decoderCombos()) {
         const auto registered = decodersFor(format);
         const DecoderKind chosen = registered[std::min<size_t>(idx(combo), registered.size() - 1)];
@@ -711,10 +851,6 @@ void MainWindow::readSettingsFromUi() {
         settings_.crossfade.seconds =
             std::clamp(std::round(seconds * 2) / 2, camel::CrossfadeSettings::kMinSeconds, camel::CrossfadeSettings::kMaxSeconds);
 
-    const int dev = idx(WasapiDeviceCombo());
-    if (shownDevicesRevision_ != 0)
-        settings_.wasapi.deviceId =
-            dev == 0 || std::cmp_greater(dev, wasapiDevices_.size()) ? "" : wasapiDevices_[size_t(dev - 1)].id;
     settings_.wasapi.shared = idx(WasapiShareCombo()) == 1;
     settings_.wasapi.sharedResampleQuality = ResampleQuality(std::min(idx(WasapiSharedQualityCombo()), 2));
     settings_.wasapi.eventDriven = idx(WasapiModeCombo()) == 0;
@@ -729,8 +865,6 @@ void MainWindow::readSettingsFromUi() {
     settings_.wasapi.mmcssPriority = MmcssPriority(std::min(idx(WasapiMmcssPriorityCombo()), 2));
     readTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), settings_.wasapi.timing);
 
-    const int drv = idx(AsioDriverCombo());
-    if (std::cmp_less(drv, asioDrivers_.size())) settings_.asio.driverClsid = asioDrivers_[size_t(drv)].id;
     settings_.asio.bufferSize = long(numberOr(AsioBufferBox(), double(settings_.asio.bufferSize)));
     settings_.asio.outLeft = int(numberOr(AsioLeftBox(), settings_.asio.outLeft + 1)) - 1;
     settings_.asio.outRight = int(numberOr(AsioRightBox(), settings_.asio.outRight + 1)) - 1;
@@ -739,8 +873,6 @@ void MainWindow::readSettingsFromUi() {
     settings_.asio.dsdPcmRate = dsdRateAt(idx(AsioDsdRateCombo()));
     readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
-    const int pin = idx(KsDeviceCombo());
-    if (std::cmp_less(pin, ksPins_.size())) settings_.ks.deviceId = ksPins_[size_t(pin)].id;
     settings_.ks.mode = KsMode(std::min(idx(KsModeCombo()), 3));
     settings_.ks.bufferMs = numberOr(KsBufferBox(), settings_.ks.bufferMs);
     settings_.ks.packetCount = int(numberOr(KsPacketCountBox(), settings_.ks.packetCount));
@@ -772,59 +904,15 @@ void MainWindow::OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, 
 
 void MainWindow::settingsChanged() {
     if (populating_ || !server_) return;
-    const Backend previous = settings_.backend;
     readSettingsFromUi();
     applyTheme();
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     get_self<LibraryView>(Library())->setFolderPlaysOn(settings_.folderPlaysOn);
-    if (settings_.backend != previous && !followDevice(previous) &&
-        server_->snapshot().playback.state == PlaybackState::Playing) {
-        // Never move sound to another device unannounced; its level may differ a lot.
-        Command pause;
-        pause.kind = CommandKind::Pause;
-        submitCommand(std::move(pause));
-    }
     Command command;
     command.kind = CommandKind::ApplySettings;
     command.settings = settings_;
     submitCommand(std::move(command));
     updateBackendGroups();
-}
-
-bool MainWindow::followDevice(Backend previous) {
-    BackendNotice().IsOpen(false);
-    const auto list = [&](Backend backend) -> const std::vector<DeviceInfo>& {
-        return backend == Backend::Wasapi ? wasapiDevices_ : backend == Backend::Asio ? asioDrivers_ : ksPins_;
-    };
-    const auto savedId = [&](Backend backend) -> std::string& {
-        return backend == Backend::Wasapi ? settings_.wasapi.deviceId
-               : backend == Backend::Asio ? settings_.asio.driverClsid
-                                          : settings_.ks.deviceId;
-    };
-    // An empty WASAPI choice follows the Windows default, whose name the catalog does not give; ASIO and KS open
-    // their first entry.
-    const auto& from = list(previous);
-    const auto current = std::find_if(from.begin(), from.end(), [&](const DeviceInfo& d) { return d.id == savedId(previous); });
-    const DeviceInfo* device = current != from.end() ? &*current : nullptr;
-    if (!device && previous != Backend::Wasapi && savedId(previous).empty() && !from.empty()) device = &from.front();
-    if (!device || device->name.empty()) return true; // a device that is not connected plays nothing to follow
-    if (const auto match = matchDevice(previous, *device, settings_.backend, list(settings_.backend))) {
-        savedId(settings_.backend) = *match;
-        populateDeviceLists(server_->snapshot().devices);
-        return true;
-    }
-    std::wstring message(tr(L"Backend_NoMatch"));
-    const std::array<std::wstring, 2> values{
-        std::wstring(ui::utf8(device->name)),
-        std::wstring(BackendCombo().SelectedItem() ? unbox_value<hstring>(BackendCombo().SelectedItem()) : hstring{})};
-    for (size_t i = 0; i < values.size(); ++i) {
-        const std::wstring marker = L"{" + std::to_wstring(i) + L"}";
-        if (const auto at = message.find(marker); at != std::wstring::npos) message.replace(at, marker.size(), values[i]);
-    }
-    BackendNotice().Title(tr(L"Backend_NoMatchTitle"));
-    BackendNotice().Message(message);
-    BackendNotice().IsOpen(true);
-    return false;
 }
 
 void MainWindow::updateBackendGroups() {
@@ -892,12 +980,30 @@ bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
            now.total == before.total && now.underruns == before.underruns;
 }
 
+// A device scan can change what the Server keeps: the outputs, and the parameters when the Windows default moved on.
+void MainWindow::showOutputsOf(const SettingsDto& server) {
+    const bool parameters = server.backend != settings_.backend || server.wasapi != settings_.wasapi ||
+                            server.asio != settings_.asio || server.ks != settings_.ks ||
+                            server.volume.mode != settings_.volume.mode;
+    settings_.outputs = server.outputs;
+    settings_.followedDefault = server.followedDefault;
+    settings_.backend = server.backend;
+    settings_.wasapi = server.wasapi;
+    settings_.asio = server.asio;
+    settings_.ks = server.ks;
+    settings_.volume.mode = server.volume.mode;
+    if (parameters)
+        populateSettings();
+    else
+        populateOutputs();
+}
+
 void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (!server_ || !cursor_.accept(snapshot)) return;
     shown_ = snapshot;
     if (snapshot.devices.revision != shownDevicesRevision_) {
         shownDevicesRevision_ = snapshot.devices.revision;
-        populateDeviceLists(snapshot.devices);
+        showOutputsOf(snapshot.settings);
     }
     const auto& s = snapshot.playback;
     if (artworkPath_ != s.pathUtf8) {
@@ -1740,10 +1846,15 @@ void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IIn
 // Back sits in the title bar, as in other Windows apps, while a library page has somewhere to return to.
 void MainWindow::addSettingsLinks() {
     const std::pair<const wchar_t*, FrameworkElement> cards[] = {
-        {L"Settings_Library/Text", LibraryCard()},   {L"Settings_Playback/Text", PlaybackCard()},
-        {L"Settings_Dsp/Text", VolumeCard()},        {L"Settings_Status/Text", StatusCard()},
-        {L"Settings_Decoders/Text", DecodersCard()}, {L"Settings_Interface/Text", InterfaceCard()},
-        {L"Settings_Hotkeys/Text", HotkeysCard()},   {L"Reset_Title/Text", ResetCard()},
+        {L"Settings_Library/Text", LibraryCard()},
+        {L"Settings_Outputs/Text", OutputsCard()},
+        {L"Settings_Playback/Text", PlaybackCard()},
+        {L"Settings_Dsp/Text", VolumeCard()},
+        {L"Settings_Status/Text", StatusCard()},
+        {L"Settings_Decoders/Text", DecodersCard()},
+        {L"Settings_Interface/Text", InterfaceCard()},
+        {L"Settings_Hotkeys/Text", HotkeysCard()},
+        {L"Reset_Title/Text", ResetCard()},
         {L"Settings_About/Text", AboutCard()},
     };
     for (const auto& [title, card] : cards) {
@@ -2280,17 +2391,11 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
 
     // Finishing applies the chosen output; skipping keeps the defaults. Either way the guide is done.
     if (result == ContentDialogResult::Primary) {
-        settings_.backend = Backend(std::max(0, backend.SelectedIndex()));
         const auto index = device.SelectedIndex();
-        if (index >= 0 && size_t(index) < devices->size()) {
-            const std::string& id = (*devices)[size_t(index)];
-            if (settings_.backend == Backend::Wasapi)
-                settings_.wasapi.deviceId = id;
-            else if (settings_.backend == Backend::Asio)
-                settings_.asio.driverClsid = id;
-            else
-                settings_.ks.deviceId = id;
-        }
+        if (index >= 0 && size_t(index) < devices->size())
+            changeOutputs([&](camel::Settings& s, const DeviceCatalog& catalog) {
+                camel::server::selectOutput(s, Backend(std::max(0, backend.SelectedIndex())), (*devices)[size_t(index)], catalog);
+            });
     }
     settings_.firstRunDone = true;
     Command command;

@@ -57,7 +57,6 @@
   <data name="Settings_Period.Header" xml:space="preserve"><value>Device period</value></data>
   <data name="Settings_PeriodMs.Header" xml:space="preserve"><value>Custom period (ms)</value></data>
   <data name="Settings_SampleFormat.Header" xml:space="preserve"><value>Sample format</value></data>
-  <data name="Settings_AsioDriver.Header" xml:space="preserve"><value>ASIO driver</value></data>
   <data name="Settings_AsioPanel.Content" xml:space="preserve"><value>Open control panel</value></data>
   <data name="Settings_AsioBuffer.Header" xml:space="preserve"><value>Buffer size (samples, 0 = driver preferred)</value></data>
   <data name="Settings_AsioLeft.Header" xml:space="preserve"><value>Left → output channel</value></data>
@@ -101,9 +100,8 @@
   <data name="KsMode_RtEvent" xml:space="preserve"><value>WaveRT event</value></data>
   <data name="KsMode_RtPoll" xml:space="preserve"><value>WaveRT polling</value></data>
   <data name="KsMode_Standard" xml:space="preserve"><value>Standard streaming</value></data>
-  <data name="Device_Default" xml:space="preserve"><value>Follow Windows default</value></data>
-  <data name="Device_None" xml:space="preserve"><value>(none found)</value></data>
-  <data name="Device_NotConnected" xml:space="preserve"><value>Saved device (not connected)</value></data>
+  <data name="Device_Default" xml:space="preserve"><value>Windows default device (WASAPI)</value></data>
+  <data name="Device_NotConnected" xml:space="preserve"><value>Not connected</value></data>
   <data name="Status_Adjusted" xml:space="preserve"><value>Requested ≠ active</value></data>
   <data name="Lang_System" xml:space="preserve"><value>Follow Windows</value></data>
   <data name="NoFile" xml:space="preserve"><value>No file open</value></data>
@@ -197,8 +195,6 @@
   <data name="Status_Details.Text" xml:space="preserve"><value>Device details</value></data>
   <data name="Status_BufferValue" xml:space="preserve"><value>{0} frames · {1} ms</value></data>
   <data name="Status_NotConnected" xml:space="preserve"><value>Output device not connected</value></data>
-  <data name="Backend_NoMatchTitle" xml:space="preserve"><value>Playback paused</value></data>
-  <data name="Backend_NoMatch" xml:space="preserve"><value>{1} lists no device matching {0}, so nothing was switched to another device. Choose the output device below, then press Play.</value></data>
   <data name="Tray_Open" xml:space="preserve"><value>Open CamelPlayer</value></data>
   <data name="Tray_Exit" xml:space="preserve"><value>Exit</value></data>
   <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer is still running</value></data>
@@ -662,4 +658,20 @@
   <data name="Discord_CoverStarting" xml:space="preserve"><value>Starting the cover tunnel…</value></data>
   <data name="Discord_CoverReady" xml:space="preserve"><value>The cover tunnel is ready.</value></data>
   <data name="Discord_CoverFailed" xml:space="preserve"><value>The cover tunnel failed: {0}</value></data>
+  <data name="Settings_Outputs.Text" xml:space="preserve"><value>Audio outputs</value></data>
+  <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>Outputs that are on appear in the output menu of the player bar, where you switch between them while playing. Each keeps its own settings; the settings below belong to the output in use.</value></data>
+  <data name="Output_Button.ToolTipService.ToolTip" xml:space="preserve"><value>Output</value></data>
+  <data name="Output_ButtonName" xml:space="preserve"><value>Output: {0}</value></data>
+  <data name="Output_ButtonOn" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="Output_InUse" xml:space="preserve"><value>In use</value></data>
+  <data name="Output_Enabled" xml:space="preserve"><value>Show in the output menu</value></data>
+  <data name="Output_Rename" xml:space="preserve"><value>Rename</value></data>
+  <data name="Output_RenameTitle" xml:space="preserve"><value>Rename {0}</value></data>
+  <data name="Output_RenameNote" xml:space="preserve"><value>Leave empty to use the device's own name</value></data>
+  <data name="Output_Delete" xml:space="preserve"><value>Delete</value></data>
+  <data name="Output_DeleteTitle" xml:space="preserve"><value>Delete the settings of {0}?</value></data>
+  <data name="Output_DeleteText" xml:space="preserve"><value>Its settings, name and place in the output menu are cleared. If it is found again, it starts from the defaults.</value></data>
+  <data name="Output_Offline" xml:space="preserve"><value>{0} (not connected)</value></data>
+  <data name="Output_MenuSettings" xml:space="preserve"><value>Audio output settings…</value></data>
+  <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>Output</value></data>
 </root>

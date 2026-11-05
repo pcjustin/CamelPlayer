@@ -203,6 +203,17 @@
                             </StackPanel>
                         </Border>
 
+                        <Border x:Name="OutputsCard" Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE7F5;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Outputs" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <TextBlock x:Uid="Settings_OutputsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <StackPanel x:Name="OutputList" Spacing="4" />
+                                <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
+                            </StackPanel>
+                        </Border>
                         <Border x:Name="PlaybackCard" Style="{StaticResource SettingsCardStyle}">
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
@@ -210,8 +221,6 @@
                                     <TextBlock x:Uid="Settings_Playback" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
                                 <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <ComboBox x:Name="BackendCombo" x:Uid="Settings_Backend" Width="360" SelectionChanged="OnSettingChanged" />
-                                <InfoBar x:Name="BackendNotice" Severity="Warning" IsOpen="False" IsClosable="True" />
                                 <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="ConvertDsdCombo" x:Uid="Settings_ConvertDsd" Width="520" SelectionChanged="OnSettingChanged" />
@@ -220,7 +229,6 @@
 
                                 <StackPanel x:Name="WasapiGroup" Spacing="12">
                                     <TextBlock Text="WASAPI" Style="{StaticResource GroupHeaderStyle}" />
-                                    <ComboBox x:Name="WasapiDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiShareCombo" x:Uid="Settings_WasapiShare" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiSharedQualityCombo" x:Uid="Settings_WasapiSharedQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiModeCombo" x:Uid="Settings_WasapiMode" Width="360" SelectionChanged="OnSettingChanged" />
@@ -249,10 +257,7 @@
 
                                 <StackPanel x:Name="AsioGroup" Spacing="12">
                                     <TextBlock Text="ASIO" Style="{StaticResource GroupHeaderStyle}" />
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <ComboBox x:Name="AsioDriverCombo" x:Uid="Settings_AsioDriver" Width="360" SelectionChanged="OnSettingChanged" />
-                                        <Button x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" VerticalAlignment="Bottom" />
-                                    </StackPanel>
+                                    <Button x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <NumberBox x:Name="AsioLeftBox" x:Uid="Settings_AsioLeft" Width="160" Minimum="1" Maximum="64"
                                                    SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
@@ -278,7 +283,6 @@
 
                                 <StackPanel x:Name="KsGroup" Spacing="12">
                                     <TextBlock Text="Kernel Streaming" Style="{StaticResource GroupHeaderStyle}" />
-                                    <ComboBox x:Name="KsDeviceCombo" x:Uid="Settings_Device" Width="520" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsModeCombo" x:Uid="Settings_KsMode" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsFormatCombo" x:Uid="Settings_SampleFormat" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
@@ -307,7 +311,6 @@
                                     <TextBlock x:Uid="Settings_KsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
 
-                                <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
                             </StackPanel>
                         </Border>
 
@@ -912,6 +915,13 @@
                         </StackPanel>
                     </Grid>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <!-- The enabled outputs (docs/Plan.md §8.1), the one in use checked. -->
+                        <Button x:Name="OutputButton" x:Uid="Output_Button" Style="{StaticResource TransportButtonStyle}">
+                            <FontIcon Glyph="&#xE7F5;" />
+                            <Button.Flyout>
+                                <MenuFlyout x:Name="OutputMenu" Placement="Top" Opening="OnOutputMenuOpening" />
+                            </Button.Flyout>
+                        </Button>
                         <!-- Volume (docs/Plan.md §5.9): fixed volume shows a lock and says who sets the level; software volume
                              opens a vertical slider with mute, and the wheel over the button moves it 1 dB a notch. -->
                         <Button x:Name="VolumeButton" Style="{StaticResource TransportButtonStyle}" PointerWheelChanged="OnVolumeWheel">

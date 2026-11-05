@@ -477,7 +477,8 @@ json toJson(const Snapshot& s) {
              {{"revision", s.devices.revision},
               {"wasapi", toJson(s.devices.wasapi)},
               {"asio", toJson(s.devices.asio)},
-              {"ks", toJson(s.devices.ks)}}},
+              {"ks", toJson(s.devices.ks)},
+              {"defaultWasapi", s.devices.defaultWasapi}}},
             {"commandError", optionalJson(s.commandError)},
             {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
 }
@@ -497,6 +498,7 @@ Snapshot snapshotFromJson(const json& j) {
     s.devices.wasapi = devicesFrom(devices, "wasapi");
     s.devices.asio = devicesFrom(devices, "asio");
     s.devices.ks = devicesFrom(devices, "ks");
+    s.devices.defaultWasapi = value<std::string>(devices, "defaultWasapi");
     s.commandError = optional<Failure>(j, "commandError", failureFrom);
     s.controlPanelOpened = optional<bool>(j, "controlPanelOpened", [](const json& v) {
         if (!v.is_boolean()) invalid("controlPanelOpened is not a boolean");

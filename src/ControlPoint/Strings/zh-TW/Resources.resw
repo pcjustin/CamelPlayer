@@ -57,7 +57,6 @@
   <data name="Settings_Period.Header" xml:space="preserve"><value>裝置週期</value></data>
   <data name="Settings_PeriodMs.Header" xml:space="preserve"><value>自訂週期（ms）</value></data>
   <data name="Settings_SampleFormat.Header" xml:space="preserve"><value>樣本格式</value></data>
-  <data name="Settings_AsioDriver.Header" xml:space="preserve"><value>ASIO 驅動程式</value></data>
   <data name="Settings_AsioPanel.Content" xml:space="preserve"><value>開啟控制面板</value></data>
   <data name="Settings_AsioBuffer.Header" xml:space="preserve"><value>緩衝大小（samples，0 = 驅動建議值）</value></data>
   <data name="Settings_AsioLeft.Header" xml:space="preserve"><value>左聲道 → 輸出聲道</value></data>
@@ -101,9 +100,8 @@
   <data name="KsMode_RtEvent" xml:space="preserve"><value>WaveRT 事件</value></data>
   <data name="KsMode_RtPoll" xml:space="preserve"><value>WaveRT 輪詢</value></data>
   <data name="KsMode_Standard" xml:space="preserve"><value>標準串流</value></data>
-  <data name="Device_Default" xml:space="preserve"><value>跟隨 Windows 預設</value></data>
-  <data name="Device_None" xml:space="preserve"><value>（找不到）</value></data>
-  <data name="Device_NotConnected" xml:space="preserve"><value>已儲存的裝置（未連接）</value></data>
+  <data name="Device_Default" xml:space="preserve"><value>Windows 預設裝置（WASAPI）</value></data>
+  <data name="Device_NotConnected" xml:space="preserve"><value>未連接</value></data>
   <data name="Status_Adjusted" xml:space="preserve"><value>設定值 ≠ 實際值</value></data>
   <data name="Lang_System" xml:space="preserve"><value>跟隨系統</value></data>
   <data name="NoFile" xml:space="preserve"><value>尚未開啟檔案</value></data>
@@ -197,8 +195,6 @@
   <data name="Status_Details.Text" xml:space="preserve"><value>裝置細節</value></data>
   <data name="Status_BufferValue" xml:space="preserve"><value>{0} 個取樣框 · {1} 毫秒</value></data>
   <data name="Status_NotConnected" xml:space="preserve"><value>輸出裝置未連接</value></data>
-  <data name="Backend_NoMatchTitle" xml:space="preserve"><value>已暫停播放</value></data>
-  <data name="Backend_NoMatch" xml:space="preserve"><value>{1} 沒有與「{0}」對應的裝置，因此沒有改用其他裝置。請在下方選擇輸出裝置後再按播放。</value></data>
   <data name="Tray_Open" xml:space="preserve"><value>開啟 CamelPlayer</value></data>
   <data name="Tray_Exit" xml:space="preserve"><value>結束</value></data>
   <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer 仍在執行</value></data>
@@ -662,4 +658,20 @@
   <data name="Discord_CoverStarting" xml:space="preserve"><value>封面通道準備中…</value></data>
   <data name="Discord_CoverReady" xml:space="preserve"><value>封面通道已就緒。</value></data>
   <data name="Discord_CoverFailed" xml:space="preserve"><value>封面通道無法使用：{0}</value></data>
+  <data name="Settings_Outputs.Text" xml:space="preserve"><value>音訊輸出</value></data>
+  <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>開啟的輸出會列在播放列的輸出選單，播放中也能在那裡切換。每個輸出都有自己的設定；下方的設定屬於使用中的輸出。</value></data>
+  <data name="Output_Button.ToolTipService.ToolTip" xml:space="preserve"><value>輸出</value></data>
+  <data name="Output_ButtonName" xml:space="preserve"><value>輸出：{0}</value></data>
+  <data name="Output_ButtonOn" xml:space="preserve"><value>{0}：{1}</value></data>
+  <data name="Output_InUse" xml:space="preserve"><value>使用中</value></data>
+  <data name="Output_Enabled" xml:space="preserve"><value>顯示在輸出選單</value></data>
+  <data name="Output_Rename" xml:space="preserve"><value>重新命名</value></data>
+  <data name="Output_RenameTitle" xml:space="preserve"><value>重新命名 {0}</value></data>
+  <data name="Output_RenameNote" xml:space="preserve"><value>留空則使用裝置本身的名稱</value></data>
+  <data name="Output_Delete" xml:space="preserve"><value>刪除</value></data>
+  <data name="Output_DeleteTitle" xml:space="preserve"><value>要刪除 {0} 的設定嗎？</value></data>
+  <data name="Output_DeleteText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除。之後再找到時，會從預設值開始。</value></data>
+  <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
+  <data name="Output_MenuSettings" xml:space="preserve"><value>音訊輸出設定…</value></data>
+  <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>輸出</value></data>
 </root>

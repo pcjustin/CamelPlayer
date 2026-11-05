@@ -99,6 +99,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqExportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
+    void OnOutputMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnVolumeChanged(Windows::Foundation::IInspectable const&,
@@ -174,7 +175,11 @@ private:
     void showDspOrder();
     void showDspSummary();
     winrt::fire_and_forget loadConvolution();
-    void populateDeviceLists(const camel::server::DeviceCatalog& devices);
+    void populateOutputs();
+    void showOutputsOf(const camel::server::SettingsDto& server);
+    void changeOutputs(std::function<void(camel::Settings&, const camel::server::DeviceCatalog&)> const& change);
+    winrt::fire_and_forget askRenameOutput(camel::Backend backend, std::string id, std::string alias, hstring label);
+    winrt::fire_and_forget askDeleteOutput(camel::Backend backend, std::string id, hstring label);
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format with more than one integrated decoder.
     std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 4> decoderCombos();
@@ -228,7 +233,6 @@ private:
     std::shared_ptr<camel::server::IServer> server_;
     camel::server::SnapshotCursor cursor_;
     camel::server::Snapshot shown_; // the snapshot last applied
-    std::vector<camel::server::DeviceInfo> wasapiDevices_, asioDrivers_, ksPins_;
     std::vector<camel::server::LibraryRootInfo> roots_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer uiTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
@@ -300,7 +304,6 @@ private:
     bool inTray_ = false;
     bool minimized_ = false;
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
-    bool followDevice(camel::Backend previous);
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);
 
     // Playlists (docs/Plan.md §7.9, §8.3).

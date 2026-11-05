@@ -171,7 +171,7 @@ TEST(SettingsBoundary, UnknownIdsDoNotOverwriteOutputs) {
 }
 
 TEST(SettingsBoundary, WrongTypesAndUnknownEnumsUseDefaults) {
-    const auto settings = fromJson(R"({"backend":"other","decoder":5,"language":false,"lastFile":[],
+    const auto settings = fromJson(R"({"schema":4,"backend":"other","decoder":5,"language":false,"lastFile":[],
         "wasapi":{"device":1,"eventDriven":"yes","period":"other","customPeriodMs":[],"sampleType":"other"},
         "asio":{"bufferSize":"512","outLeft":null,"outRight":true},"ks":{"mode":"other","packetCount":"4"}})");
     EXPECT_EQ(toJson(settings), toJson(Settings{}));
@@ -192,7 +192,7 @@ TEST(SettingsMigration, GlobalDecoderChoiceBecomesTheFlacChoiceAndNewSettingsUse
             EXPECT_EQ(migrated.backend, Backend::Ks);
             EXPECT_EQ(migrated.decoderByFormat, flacChoice(decoder));
             const auto saved = toJson(migrated);
-            EXPECT_NE(saved.find(R"("schema": 3)"), std::string::npos);
+            EXPECT_NE(saved.find(R"("schema": 4)"), std::string::npos);
             EXPECT_EQ(saved.find(R"("decoder")"), std::string::npos);
         }
 
@@ -287,7 +287,7 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
     std::stringstream contents;
     contents << in.rdbuf();
     in.close();
-    EXPECT_NE(contents.str().find(R"("schema": 3)"), std::string::npos);
+    EXPECT_NE(contents.str().find(R"("schema": 4)"), std::string::npos);
     EXPECT_NE(contents.str().find(R"("flac": "drflac")"), std::string::npos);
     std::filesystem::remove(file);
 }

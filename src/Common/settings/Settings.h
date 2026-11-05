@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Persisted settings (docs/Plan.md §6, §16.4). One set per backend; stored as JSON in %LOCALAPPDATA%\CamelPlayer.
+// Persisted settings (docs/Plan.md §6, §16.4). One parameter set per output device; stored as JSON in
+// %LOCALAPPDATA%\CamelPlayer.
 #pragma once
 #include <array>
 #include <filesystem>
@@ -250,8 +251,23 @@ struct TrackColumns {
     bool operator==(const TrackColumns&) const = default;
 };
 
+// An output device the user enabled, named or set up, kept by stable identity (docs/Plan.md §6). Only `backend`'s
+// parameters are used; those of the output in use live in Settings and are copied here as they change.
+struct SavedOutput {
+    Backend backend = Backend::Wasapi;
+    std::string id;       // as in the backend's settings; empty on WASAPI is "Windows default device", without parameters
+    std::string name;     // as the device last called itself, for when it is not connected
+    std::string alias;    // the user's name for it; empty shows `name`
+    bool enabled = false; // listed in the output menu
+    WasapiSettings wasapi;
+    AsioSettings asio;
+    KsSettings ks;
+    VolumeMode volumeMode = VolumeMode::Fixed;
+    bool operator==(const SavedOutput&) const = default;
+};
+
 struct Settings {
-    static constexpr int kSchemaVersion = 3;
+    static constexpr int kSchemaVersion = 4;
 
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
@@ -286,7 +302,10 @@ struct Settings {
     VolumeSettings volume;
     ReplayGainSettings replayGain;
     CrossfadeSettings crossfade;
+    std::vector<SavedOutput> outputs;
+    std::string followedDefault; // the endpoint whose parameters are in `wasapi` while it follows the Windows default
     std::wstring lastFile;
+    bool adoptOutputSets = false; // from an earlier version: each backend's set still has to reach its device
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Upgrading from 0.2.3: the first start gives each backend's settings to the device it had selected and enables the device in use (settings schema 4). 0.2.3 refuses the newer settings file, so to go back to it, close CamelPlayer, delete `settings.json` in `%LOCALAPPDATA%\CamelPlayer`, and choose your output again.
+
+Changed since 0.2.3:
+
+- **An output menu in the player bar:** it lists the outputs you enabled, marks those not connected and switches between them. A playing track goes on from the audible position with the queue unchanged, and a paused track stays paused. This replaces the output backend and device lists in Settings.
+- **Settings › Audio outputs** lists every device found by backend, each with a switch for the menu and a name of your choice, and "Windows default device (WASAPI)" as an entry of its own. A new installation selects that entry; an upgrade keeps the device in use.
+- **Each output keeps its own settings:** every WASAPI endpoint, ASIO driver and Kernel Streaming pin has its own parameters and fixed or software volume, and a device chosen for the first time starts from the defaults. Following the Windows default uses the settings of whichever device is the default. Deleting a saved device clears its settings, name and place in the menu; found again, it starts from the defaults.
+
 ## 0.2.3
 
 Upgrading from 0.2.0, 0.2.1 or 0.2.2: the first start records when each file the library could no longer find went missing (schema 20), and deletes the folders removed from the library under an earlier version with everything of theirs, then compacts the library, which takes a few seconds once. The old library is kept as `library.db.v19.bak` in `%LOCALAPPDATA%\CamelPlayer`. Those versions refuse the newer library, so to go back to one of them, close CamelPlayer, delete `library.db`, `library.db-wal` and `library.db-shm`, and rename `library.db.v19.bak` to `library.db`; what changed since the upgrade, such as plays and favorites, is lost that way.

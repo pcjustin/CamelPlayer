@@ -31,7 +31,8 @@ The screenshots show a demo library with made-up albums and covers.
 - **DSP** in Settings › DSP: a parametric EQ (five bands to start, up to ten in the editor, eight filter types and per-channel bands on a draggable curve, presets, and Equalizer APO and AutoEq import and export), bs2b headphone crossfeed, and convolution with an impulse response from a mono, stereo or true-stereo .wav or a .zip with one per sample rate. Their order can be changed, one automatic preamp keeps the whole chain from clipping, and changes are heard within a quarter of a second without a gap. While nothing changes the signal, playback stays bit-perfect.
 - **Volume and ReplayGain:** volume stays fixed for your DAC or amplifier unless you choose software volume, whose vertical slider and mute open from the player bar's volume button. ReplayGain plays tracks or albums (or either, by what the queue plays) at an even loudness from their tags; tracks without tags are analyzed in the background with EBU R128 while ReplayGain is on, and the results stay in the library.
 - **Gapless playback** between tracks of the same format, and **crossfade** (1–10 s, off by default) at every other change of track, natural or chosen; an album played in order stays gapless.
-- **Output settings for each backend:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
+- **An output menu** in the player bar switches between the outputs you enable in Settings › Audio outputs, each with a name of your choice, and playback goes on from the audible position with the queue unchanged.
+- **Output settings for each device:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
 
 ### Library
 
@@ -142,7 +143,7 @@ Each build also writes `build/compile_commands.json`, so clangd (for example in 
 
 ## Testing
 
-`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-11-05 a full Release run passed all 745 enabled C++ tests, including the 100k-track search latency target, and all 91 Rust tests.
+`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-11-05 a full Release run passed all 768 enabled C++ tests, including the 100k-track search latency target, and all 91 Rust tests.
 
 The 113 disabled tests play audio on named devices or scan a NAS, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
 
