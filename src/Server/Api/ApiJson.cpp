@@ -478,6 +478,7 @@ json toJson(const Snapshot& s) {
               {"wasapi", toJson(s.devices.wasapi)},
               {"asio", toJson(s.devices.asio)},
               {"ks", toJson(s.devices.ks)},
+              {"network", toJson(s.devices.network)},
               {"defaultWasapi", s.devices.defaultWasapi}}},
             {"commandError", optionalJson(s.commandError)},
             {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
@@ -498,6 +499,7 @@ Snapshot snapshotFromJson(const json& j) {
     s.devices.wasapi = devicesFrom(devices, "wasapi");
     s.devices.asio = devicesFrom(devices, "asio");
     s.devices.ks = devicesFrom(devices, "ks");
+    s.devices.network = devicesFrom(devices, "network");
     s.devices.defaultWasapi = value<std::string>(devices, "defaultWasapi");
     s.commandError = optional<Failure>(j, "commandError", failureFrom);
     s.controlPanelOpened = optional<bool>(j, "controlPanelOpened", [](const json& v) {

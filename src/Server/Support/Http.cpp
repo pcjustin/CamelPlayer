@@ -95,6 +95,53 @@ Response get(const std::string& url, const char* accept, const CancellationToken
     return response;
 }
 
+Reply send(const std::string& method, const std::string& url, const std::string& headers, const std::string& body, int timeoutMs,
+           size_t maxBytes) {
+    const std::wstring wide = toWide(url);
+    URL_COMPONENTS parts{};
+    parts.dwStructSize = sizeof(parts);
+    parts.dwHostNameLength = DWORD(-1);
+    parts.dwUrlPathLength = DWORD(-1);
+    parts.dwExtraInfoLength = DWORD(-1);
+    if (!WinHttpCrackUrl(wide.c_str(), DWORD(wide.size()), 0, &parts)) throw std::runtime_error("invalid URL: " + url);
+    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
+    const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
+                              std::wstring(parts.lpszExtraInfo ? parts.lpszExtraInfo : L"", parts.dwExtraInfoLength);
+    const Internet session(WinHttpOpen(toWide(userAgent()).c_str(), WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME,
+                                       WINHTTP_NO_PROXY_BYPASS, 0));
+    WinHttpSetTimeouts(session.get(), timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+    const Internet connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
+    const Internet request(WinHttpOpenRequest(connection.get(), toWide(method).c_str(), path.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                              WINHTTP_DEFAULT_ACCEPT_TYPES, 0));
+    const std::wstring wideHeaders = toWide(headers);
+    if (!WinHttpSendRequest(request.get(), wideHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : wideHeaders.c_str(),
+                            DWORD(wideHeaders.size()), const_cast<char*>(body.data()), DWORD(body.size()), DWORD(body.size()),
+                            0) ||
+        !WinHttpReceiveResponse(request.get(), nullptr))
+        fail("HTTP request");
+    Reply reply;
+    DWORD status = 0, size = sizeof(status);
+    WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                        &status, &size, WINHTTP_NO_HEADER_INDEX);
+    reply.status = status;
+    size = 0;
+    WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER,
+                        &size, WINHTTP_NO_HEADER_INDEX);
+    std::wstring head(size / sizeof(wchar_t), L'\0');
+    if (WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX, head.data(), &size,
+                            WINHTTP_NO_HEADER_INDEX))
+        reply.headers = toUtf8(head.substr(0, size / sizeof(wchar_t)));
+    std::vector<char> buffer(size_t{16} * 1024);
+    for (;;) {
+        DWORD read = 0;
+        if (!WinHttpReadData(request.get(), buffer.data(), DWORD(buffer.size()), &read)) fail("HTTP read");
+        if (read == 0) break;
+        if (reply.body.size() + read > maxBytes) throw std::runtime_error("HTTP response too large");
+        reply.body.append(buffer.data(), read);
+    }
+    return reply;
+}
+
 std::string encode(std::string_view text) {
     static constexpr char kHex[] = "0123456789ABCDEF";
     std::string out;

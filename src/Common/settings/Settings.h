@@ -19,8 +19,8 @@
 
 namespace camel {
 
-enum class Backend : uint8_t { Wasapi, Asio, Ks };
-const char* backendId(Backend b); // "wasapi" / "asio" / "ks"
+enum class Backend : uint8_t { Wasapi, Asio, Ks, Network };
+const char* backendId(Backend b); // "wasapi" / "asio" / "ks" / "network"
 const char* backendName(Backend b);
 bool backendFromId(std::string_view id, Backend& out);
 
@@ -103,6 +103,13 @@ struct KsSettings {
     MmcssPriority mmcssPriority = MmcssPriority::High;
     PlaybackTiming timing;
     bool operator==(const KsSettings&) const = default;
+};
+
+// A UPnP AV or OpenHome player (docs/Plan.md §5.10), kept by its UDN and never by its address.
+struct NetworkSettings {
+    std::string udn;
+    PlaybackTiming timing;
+    bool operator==(const NetworkSettings&) const = default;
 };
 
 // Explicit per-format choices; a format without one uses its default (docs/Plan.md §3.1).
@@ -262,6 +269,7 @@ struct SavedOutput {
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;
+    NetworkSettings network;
     VolumeMode volumeMode = VolumeMode::Fixed;
     bool operator==(const SavedOutput&) const = default;
 };
@@ -281,6 +289,7 @@ struct Settings {
     WasapiSettings wasapi;
     AsioSettings asio;
     KsSettings ks;
+    NetworkSettings network;
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
     CloseAction closeAction = CloseAction::Tray;
     Theme theme = Theme::System;

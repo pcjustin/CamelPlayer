@@ -143,9 +143,9 @@ Each build also writes `build/compile_commands.json`, so clangd (for example in 
 
 ## Testing
 
-`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-11-05 a full Release run passed all 768 enabled C++ tests, including the 100k-track search latency target, and all 91 Rust tests.
+`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-11-05 a full Release run passed all 810 enabled C++ tests, including the 100k-track search latency target, and all 91 Rust tests.
 
-The 113 disabled tests play audio on named devices or scan a NAS, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
+The 114 disabled tests play audio on named devices, scan a NAS or read the network players on your network, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
 
 ```powershell
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*"

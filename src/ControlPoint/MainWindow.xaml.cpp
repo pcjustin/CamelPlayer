@@ -38,6 +38,7 @@
 #include "Common/util/Text.h"
 #include "Common/Version.h"
 #include "Engine/Dsp.h"
+#include "Server/Network/Firewall.h"
 #include "Server/Playback/Outputs.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
@@ -631,7 +632,7 @@ hstring outputLabel(const camel::server::OutputRow& row) {
 // The same DAC through WASAPI and through ASIO are two entries, told apart by the backend.
 hstring outputMenuLabel(const camel::server::OutputRow& row) {
     const hstring label = outputLabel(row);
-    if (!row.alias.empty() || row.id.empty()) return label;
+    if (!row.alias.empty() || row.id.empty() || row.backend == Backend::Network) return label;
     return label + L" (" + ui::utf8(camel::backendName(row.backend)) + L")";
 }
 
@@ -652,7 +653,7 @@ void MainWindow::populateOutputs() {
         if (row.backend != group) {
             group = row.backend;
             TextBlock header;
-            header.Text(ui::utf8(camel::backendName(row.backend)));
+            header.Text(row.backend == Backend::Network ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend)));
             header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
             header.Margin({0, 8, 0, 0});
             Automation::AutomationProperties::SetHeadingLevel(header, Automation::Peers::AutomationHeadingLevel::Level3);
@@ -718,11 +719,49 @@ void MainWindow::populateOutputs() {
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::setOutputEnabled(s, row.backend, row.id, enabled.IsOn(), devices);
             });
+            if (row.backend == Backend::Network && enabled.IsOn()) askFirewallRule();
         });
         Grid::SetColumn(enabled, 3);
         line.Children().Append(enabled);
         list.Append(line);
     }
+    const bool players =
+        std::ranges::any_of(rows, [](const camel::server::OutputRow& r) { return r.backend == Backend::Network && r.enabled; });
+    FirewallNotice().IsOpen(players && !camel::server::firewallRuleExists());
+}
+
+winrt::fire_and_forget MainWindow::addFirewallRule() {
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    camel::server::addFirewallRule();
+    queue.TryEnqueue([weak] {
+        if (auto self = weak.get()) self->populateOutputs();
+    });
+}
+
+// The first player enabled says why before Windows asks for an administrator; declining leaves the notice with its fix.
+winrt::fire_and_forget MainWindow::askFirewallRule() {
+    auto strong = get_strong();
+    if (camel::server::firewallRuleExists()) co_return;
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(tr(L"Firewall_Title")));
+    TextBlock explanation;
+    explanation.Text(tr(L"Firewall_Text"));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    dialog.Content(explanation);
+    dialog.PrimaryButtonText(tr(L"Firewall_AddButton/Content"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    if (co_await dialog.ShowAsync() == ContentDialogResult::Primary)
+        addFirewallRule();
+    else
+        populateOutputs();
+}
+
+void MainWindow::OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    addFirewallRule();
 }
 
 void MainWindow::changeOutputs(std::function<void(camel::Settings&, const DeviceCatalog&)> const& change) {

@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Playback/LocalServer.h"
+#include "Server/Network/Firewall.h"
+#include "Server/Network/PlayerFinder.h"
 #include "Server/Playback/Outputs.h"
 
 #include <windows.h>
@@ -1447,6 +1449,7 @@ private:
         catalog.asio = devices(audio::listAsioDrivers());
         catalog.ks = devices(audio::listKsPins());
         catalog.defaultWasapi = audio::defaultWasapiDevice();
+        findNetworkPlayers(catalog);
         catalog.revision = state_.devices.revision + 1;
         state_.devices = std::move(catalog);
         const auto outputs = settings_.outputs;
@@ -1455,6 +1458,22 @@ private:
         if (settings_.outputs == outputs && settings_.followedDefault == followed) return;
         engine_->applySettings(settings_);
         persist();
+    }
+
+    // Searching needs nothing from the firewall. Listening for announcements waits for the rule, so that a user who has
+    // no network players never sees Windows ask about CamelPlayer.
+    void findNetworkPlayers(DeviceCatalog& catalog) {
+        if (finder_) {
+            finder_->search();
+        } else {
+            FinderOptions options;
+            if (!firewallRuleExists()) options.notifyPort = 0;
+            finder_ = std::make_unique<PlayerFinder>(options, [this] {
+                devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
+            });
+        }
+        for (const auto& player : finder_->players())
+            catalog.network.push_back({player.description.udn, player.description.name});
     }
 
     // A DAC switched on or off raises several endpoint events, and its KS pin and ASIO device can follow later; the
@@ -1524,6 +1543,7 @@ private:
             }
         }
         deviceWatcher.reset();
+        finder_.reset();
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
         engine_.reset();
@@ -1616,6 +1636,7 @@ private:
     std::unique_ptr<DiscordPresence> discord_;
     static constexpr std::chrono::seconds kDevicesSettle{1};
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
+    std::unique_ptr<PlayerFinder> finder_;     // from the first device scan
     std::thread worker_;
 };
 

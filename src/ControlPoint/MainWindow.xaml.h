@@ -100,6 +100,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnOutputMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
+    void OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnVolumeChanged(Windows::Foundation::IInspectable const&,
@@ -180,6 +181,8 @@ private:
     void changeOutputs(std::function<void(camel::Settings&, const camel::server::DeviceCatalog&)> const& change);
     winrt::fire_and_forget askRenameOutput(camel::Backend backend, std::string id, std::string alias, hstring label);
     winrt::fire_and_forget askDeleteOutput(camel::Backend backend, std::string id, hstring label);
+    winrt::fire_and_forget askFirewallRule();
+    winrt::fire_and_forget addFirewallRule();
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format with more than one integrated decoder.
     std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 4> decoderCombos();

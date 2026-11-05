@@ -32,6 +32,8 @@ const char* backendId(Backend b) {
         return "asio";
     case Backend::Ks:
         return "ks";
+    case Backend::Network:
+        return "network";
     }
     return "wasapi";
 }
@@ -44,12 +46,14 @@ const char* backendName(Backend b) {
         return "ASIO";
     case Backend::Ks:
         return "Kernel Streaming";
+    case Backend::Network:
+        return "UPnP";
     }
     return "?";
 }
 
 bool backendFromId(std::string_view id, Backend& out) {
-    for (Backend b : {Backend::Wasapi, Backend::Asio, Backend::Ks})
+    for (Backend b : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network})
         if (id == backendId(b)) {
             out = b;
             return true;
@@ -242,12 +246,17 @@ uint32_t fixedRate(const Settings& s) {
         return s.asio.fixedRate;
     case Backend::Ks:
         return s.ks.fixedRate;
+    case Backend::Network:
+        return 0;
     }
     return 0;
 }
 
 const PlaybackTiming& timing(const Settings& s) {
-    return s.backend == Backend::Asio ? s.asio.timing : s.backend == Backend::Ks ? s.ks.timing : s.wasapi.timing;
+    return s.backend == Backend::Asio      ? s.asio.timing
+           : s.backend == Backend::Ks      ? s.ks.timing
+           : s.backend == Backend::Network ? s.network.timing
+                                           : s.wasapi.timing;
 }
 
 audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format) {
@@ -371,6 +380,17 @@ static void readKs(const json& o, KsSettings& k) {
     readTiming(o, k.timing);
 }
 
+static json networkJson(const NetworkSettings& n) {
+    json j = {{"player", n.udn}};
+    j.update(timingJson(n.timing));
+    return j;
+}
+
+static void readNetwork(const json& o, NetworkSettings& n) {
+    n.udn = str(o, "player", "");
+    readTiming(o, n.timing);
+}
+
 static json outputJson(const SavedOutput& o) {
     json j = {{"backend", backendId(o.backend)},
               {"id", o.id},
@@ -378,9 +398,10 @@ static json outputJson(const SavedOutput& o) {
               {"alias", o.alias},
               {"enabled", o.enabled},
               {"volumeMode", o.volumeMode == VolumeMode::Software ? "software" : "fixed"}};
-    j["parameters"] = o.backend == Backend::Asio ? asioJson(o.asio)
-                      : o.backend == Backend::Ks ? ksJson(o.ks)
-                                                 : wasapiJson(o.wasapi);
+    j["parameters"] = o.backend == Backend::Network ? networkJson(o.network)
+                      : o.backend == Backend::Asio  ? asioJson(o.asio)
+                      : o.backend == Backend::Ks    ? ksJson(o.ks)
+                                                    : wasapiJson(o.wasapi);
     return j;
 }
 
@@ -393,13 +414,15 @@ static std::optional<SavedOutput> outputFrom(const json& o) {
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = str(o, "volumeMode", "fixed") == "software" ? VolumeMode::Software : VolumeMode::Fixed;
     const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
-    if (saved.backend == Backend::Asio)
+    if (saved.backend == Backend::Network)
+        readNetwork(parameters, saved.network);
+    else if (saved.backend == Backend::Asio)
         readAsio(parameters, saved.asio);
     else if (saved.backend == Backend::Ks)
         readKs(parameters, saved.ks);
     else
         readWasapi(parameters, saved.wasapi);
-    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.id;
+    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.id;
     return saved;
 }
 
@@ -456,6 +479,7 @@ std::string toJson(const Settings& s) {
     j["wasapi"] = wasapiJson(s.wasapi);
     j["asio"] = asioJson(s.asio);
     j["ks"] = ksJson(s.ks);
+    j["network"] = networkJson(s.network);
     j["outputs"] = json::array();
     for (const auto& output : s.outputs) j["outputs"].push_back(outputJson(output));
     j["followedDefault"] = s.followedDefault;
@@ -602,6 +626,7 @@ Settings fromJson(const std::string& text) {
     if (j.contains("wasapi") && j["wasapi"].is_object()) readWasapi(j["wasapi"], s.wasapi);
     if (j.contains("asio") && j["asio"].is_object()) readAsio(j["asio"], s.asio);
     if (j.contains("ks") && j["ks"].is_object()) readKs(j["ks"], s.ks);
+    if (j.contains("network") && j["network"].is_object()) readNetwork(j["network"], s.network);
     if (j.contains("outputs") && j["outputs"].is_array())
         for (const auto& item : j["outputs"])
             if (auto output = outputFrom(item)) s.outputs.push_back(std::move(*output));

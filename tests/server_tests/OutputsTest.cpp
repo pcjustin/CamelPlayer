@@ -321,6 +321,87 @@ TEST(OutputsTest, ADeviceThatDisappearsStaysSelectedAndIsNeverSubstituted) {
     EXPECT_TRUE(s.wasapi.shared);
 }
 
+TEST(OutputsTest, NetworkPlayersAreListedKeptAndFoundAgainByUdn) {
+    auto devices = catalog();
+    devices.network = {{"uuid:eversolo", "Eversolo DMP-A6"}};
+    Settings s = fresh();
+    setOutputEnabled(s, Backend::Network, "uuid:eversolo", true, devices);
+    const auto rows = outputRows(s, devices);
+    ASSERT_EQ(rows.back().backend, Backend::Network);
+    EXPECT_EQ(rows.back().name, "Eversolo DMP-A6");
+    EXPECT_TRUE(rows.back().enabled);
+
+    selectOutput(s, Backend::Network, "uuid:eversolo", devices);
+    EXPECT_EQ(s.backend, Backend::Network);
+    EXPECT_EQ(s.network.udn, "uuid:eversolo");
+    s.network.timing.formatChangeSilenceMs = 500;
+    syncOutputs(s, devices);
+
+    auto gone = devices;
+    gone.revision = 2;
+    gone.network.clear();
+    syncOutputs(s, gone);
+    const auto missing = outputRows(s, gone);
+    EXPECT_FALSE(missing.back().connected);
+    EXPECT_TRUE(missing.back().selected);
+    EXPECT_EQ(missing.back().name, "Eversolo DMP-A6");
+
+    Settings read = fromJson(toJson(s));
+    selectOutput(read, Backend::Wasapi, "", devices);
+    selectOutput(read, Backend::Network, "uuid:eversolo", devices);
+    EXPECT_EQ(read.network.timing.formatChangeSilenceMs, 500U);
+}
+
+TEST(OutputsServerTest, PlayingToANetworkPlayerFailsWithoutSubstitutingADevice) {
+    Settings s = fresh();
+    s.autoplay = false;
+    auto devices = catalog();
+    devices.network = {{"uuid:player", "Player"}};
+    selectOutput(s, Backend::Network, "uuid:player", devices);
+    LocalServer server(s);
+    Command replace;
+    replace.kind = CommandKind::QueueReplace;
+    replace.sources = {TrackSource(toUtf8(testutil::testFile("24-96k").wstring()))};
+    server.submit(std::move(replace));
+    server.waitIdle();
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (!server.snapshot().playback.error && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(5ms);
+    const auto playback = server.snapshot().playback;
+    ASSERT_TRUE(playback.error);
+    EXPECT_EQ(*playback.error, audio::ErrorCode::DeviceNotFound);
+    EXPECT_NE(playback.state, PlaybackState::Playing);
+    EXPECT_EQ(server.snapshot().settings.backend, Backend::Network);
+    server.shutdown();
+}
+
+TEST(OutputsTest, AnOutputChangedForTheFirstTimeSurvivesTheServersCheckOfTheFile) {
+    auto devices = catalog();
+    devices.network = {{"uuid:player", "Player"}};
+    for (const auto& [backend, id] : std::vector<std::pair<Backend, std::string>>{{Backend::Wasapi, "w-dave"},
+                                                                                  {Backend::Asio, "a-dave"},
+                                                                                  {Backend::Ks, "k-dave"},
+                                                                                  {Backend::Network, "uuid:player"}}) {
+        Settings enabled = fresh();
+        setOutputEnabled(enabled, backend, id, true, devices);
+        EXPECT_EQ(fromJson(toJson(enabled)).outputs, enabled.outputs) << backendId(backend);
+        Settings renamed = fresh();
+        renameOutput(renamed, backend, id, "Mine", devices);
+        EXPECT_EQ(fromJson(toJson(renamed)).outputs, renamed.outputs) << backendId(backend);
+    }
+}
+
+TEST(OutputsServerTest, TheServerTakesAnOutputEnabledForTheFirstTime) {
+    Settings s = fresh();
+    s.autoplay = false;
+    LocalServer server(s);
+    setOutputEnabled(s, Backend::Wasapi, "w-dave", true, catalog());
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(s);
+    EXPECT_NO_THROW(server.submit(std::move(apply)));
+    server.shutdown();
+}
+
 TEST(OutputsTest, ResettingPlaybackForgetsTheDevices) {
     Settings s = fresh();
     selectOutput(s, Backend::Asio, "a-dave", catalog());

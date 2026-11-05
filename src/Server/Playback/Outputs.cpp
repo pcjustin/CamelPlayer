@@ -21,11 +21,15 @@ SavedOutput& savedOutput(Settings& s, Backend backend, const std::string& id) {
     SavedOutput added;
     added.backend = backend;
     added.id = id;
+    added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = id;
     return s.outputs.emplace_back(std::move(added));
 }
 
 const std::string& selectedId(const Settings& s) {
-    return s.backend == Backend::Asio ? s.asio.driverClsid : s.backend == Backend::Ks ? s.ks.deviceId : s.wasapi.deviceId;
+    return s.backend == Backend::Asio      ? s.asio.driverClsid
+           : s.backend == Backend::Ks      ? s.ks.deviceId
+           : s.backend == Backend::Network ? s.network.udn
+                                           : s.wasapi.deviceId;
 }
 
 bool followsDefault(const Settings& s) {
@@ -45,9 +49,11 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
         saved.asio = s.asio;
     else if (backend == Backend::Ks)
         saved.ks = s.ks;
+    else if (backend == Backend::Network)
+        saved.network = s.network;
     else
         saved.wasapi = s.wasapi;
-    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = id;
+    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = id;
 }
 
 // Puts `device`'s parameters, or the defaults for a device without any, in Settings' fields for the output `selected`.
@@ -63,6 +69,9 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     } else if (backend == Backend::Ks) {
         s.ks = source.ks;
         s.ks.deviceId = std::move(selected);
+    } else if (backend == Backend::Network) {
+        s.network = source.network;
+        s.network.udn = std::move(selected);
     } else {
         s.wasapi = source.wasapi;
         s.wasapi.deviceId = std::move(selected);
@@ -83,7 +92,10 @@ void adoptSets(Settings& s, const DeviceCatalog& devices) {
 }
 
 const std::vector<DeviceInfo>& devicesOf(const DeviceCatalog& devices, Backend backend) {
-    return backend == Backend::Asio ? devices.asio : backend == Backend::Ks ? devices.ks : devices.wasapi;
+    return backend == Backend::Asio      ? devices.asio
+           : backend == Backend::Ks      ? devices.ks
+           : backend == Backend::Network ? devices.network
+                                         : devices.wasapi;
 }
 
 const DeviceInfo* findDevice(const DeviceCatalog& devices, Backend backend, const std::string& id) {
@@ -109,7 +121,7 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
         row.name = !row.alias.empty() ? row.alias : saved && deviceName.empty() ? saved->name : deviceName;
         rows.push_back(std::move(row));
     };
-    for (const Backend backend : {Backend::Wasapi, Backend::Asio, Backend::Ks}) {
+    for (const Backend backend : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network}) {
         if (backend == Backend::Wasapi) add(backend, {}, {}, true);
         for (const auto& device : devicesOf(devices, backend)) add(backend, device.id, device.name, true);
         for (const auto& saved : s.outputs)

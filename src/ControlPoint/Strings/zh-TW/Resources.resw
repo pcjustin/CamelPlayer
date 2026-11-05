@@ -674,4 +674,10 @@
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>音訊輸出設定…</value></data>
   <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>輸出</value></data>
+  <data name="Output_NetworkGroup" xml:space="preserve"><value>網路播放器</value></data>
+  <data name="Firewall_Title" xml:space="preserve"><value>要讓網路播放器連到 CamelPlayer 嗎？</value></data>
+  <data name="Firewall_Text" xml:space="preserve"><value>網路播放器要從 CamelPlayer 取得音樂，所以 Windows 防火牆必須放行。CamelPlayer 會新增一條規則，只適用於這個程式和私人網路。Windows 會要求系統管理員權限。</value></data>
+  <data name="Firewall_AddButton.Content" xml:space="preserve"><value>新增規則</value></data>
+  <data name="Firewall_Notice.Title" xml:space="preserve"><value>缺少防火牆規則</value></data>
+  <data name="Firewall_Notice.Message" xml:space="preserve"><value>新增私人網路的規則之前，網路播放器無法連到 CamelPlayer。</value></data>
 </root>

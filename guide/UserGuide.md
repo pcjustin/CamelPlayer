@@ -57,6 +57,8 @@ Settings › Audio outputs lists every device CamelPlayer finds, by backend. The
 
 Each output keeps its own settings, shown in Settings › Playback for the output in use; an output you choose for the first time starts from the defaults. "Windows default device (WASAPI)" follows Windows and uses the settings of whichever device is the default.
 
+UPnP AV and OpenHome players on your network appear under Network players. Turning the first one on explains why Windows Firewall has to let them reach CamelPlayer and asks to add one rule, for this program on private networks only; if you decline, Settings shows a notice with **Add the rule**. Playing to network players is not available yet.
+
 The backend is how audio reaches the device:
 
 | Backend | Use it when | Notes |

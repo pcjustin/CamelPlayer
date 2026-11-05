@@ -41,7 +41,8 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
     case Backend::Ks:
         return s.ks.sampleType;
     case Backend::Asio:
-        return std::nullopt; // the driver dictates the type
+    case Backend::Network:
+        return std::nullopt; // the driver or the player dictates the type
     }
     return std::nullopt;
 }
@@ -108,6 +109,8 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
         return sameOutput(a.asio, b.asio);
     case Backend::Ks:
         return sameOutput(a.ks, b.ks);
+    case Backend::Network:
+        return a.network == b.network;
     }
     return false;
 }

@@ -8,6 +8,7 @@ Changed since 0.2.3:
 
 - **An output menu in the player bar:** it lists the outputs you enabled, marks those not connected and switches between them. A playing track goes on from the audible position with the queue unchanged, and a paused track stays paused. This replaces the output backend and device lists in Settings.
 - **Settings › Audio outputs** lists every device found by backend, each with a switch for the menu and a name of your choice, and "Windows default device (WASAPI)" as an entry of its own. A new installation selects that entry; an upgrade keeps the device in use.
+- **Network players are found:** UPnP AV and OpenHome players on your network are listed in Settings › Audio outputs, each kept by its identity, so one with several addresses appears once and one that gets a new address is still the same player. Turning the first one on explains the firewall rule network players need, for this program on private networks only, and Settings says so if the rule is missing. Playing to them is not there yet.
 - **Each output keeps its own settings:** every WASAPI endpoint, ASIO driver and Kernel Streaming pin has its own parameters and fixed or software volume, and a device chosen for the first time starts from the defaults. Following the Windows default uses the settings of whichever device is the default. Deleting a saved device clears its settings, name and place in the menu; found again, it starts from the defaults.
 
 ## 0.2.3

@@ -30,6 +30,16 @@ struct Response {
 // The whole body; throws std::runtime_error past `maxBytes`, on network errors and on cancellation.
 Response get(const std::string& url, const char* accept, const CancellationToken& token, size_t maxBytes);
 
+// One request without a proxy, as to a player on the local network. `headers` are CRLF-separated lines without a final
+// CRLF. Throws std::runtime_error on network errors and past `maxBytes`.
+struct Reply {
+    unsigned status = 0;
+    std::string headers; // CRLF-separated, the status line first
+    std::string body;
+};
+Reply send(const std::string& method, const std::string& url, const std::string& headers, const std::string& body, int timeoutMs,
+           size_t maxBytes);
+
 // Percent-encodes UTF-8 text for a query value or a path segment.
 std::string encode(std::string_view text);
 

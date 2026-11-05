@@ -210,6 +210,11 @@
                                     <TextBlock x:Uid="Settings_Outputs" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
                                 <TextBlock x:Uid="Settings_OutputsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <InfoBar x:Name="FirewallNotice" x:Uid="Firewall_Notice" Severity="Warning" IsOpen="False" IsClosable="False">
+                                    <InfoBar.ActionButton>
+                                        <Button x:Uid="Firewall_AddButton" Click="OnAddFirewallRuleClick" />
+                                    </InfoBar.ActionButton>
+                                </InfoBar>
                                 <StackPanel x:Name="OutputList" Spacing="4" />
                                 <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
                             </StackPanel>

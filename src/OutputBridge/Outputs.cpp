@@ -16,6 +16,8 @@ std::unique_ptr<IOutput> createOutput(const Settings& s) {
         return createAsioOutput(s.asio);
     case Backend::Ks:
         return createKsOutput(s.ks);
+    case Backend::Network:
+        throw Error(ErrorCode::DeviceNotFound, "playing to a network player is not available yet");
     }
     return createWasapiOutput(s.wasapi);
 }

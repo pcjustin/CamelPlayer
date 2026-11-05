@@ -125,6 +125,7 @@ std::string devicesText(const DiagnosticInput& input) {
     list("WASAPI endpoints", input.snapshot.devices.wasapi);
     list("ASIO drivers", input.snapshot.devices.asio);
     list("Kernel Streaming pins", input.snapshot.devices.ks);
+    list("Network players", input.snapshot.devices.network);
     out << "\n" << input.capabilities;
     return out.str();
 }
