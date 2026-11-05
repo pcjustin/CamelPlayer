@@ -43,6 +43,9 @@ constexpr size_t kDsfBlock = 4096;
 constexpr size_t kDsfHeader = 92;
 constexpr size_t kWavHeader = 44;
 constexpr auto kPatience = milliseconds(1500);
+constexpr uint64_t kNearStartMs = 2000, kNearEndMs = 3000, kClockSlackMs = 2000;
+constexpr int64_t kSlowStartMs = 3000;
+constexpr auto kChangeSettles = milliseconds(3000);
 
 void putLe(std::string& out, uint64_t value, int bytes) {
     for (int i = 0; i < bytes; ++i) out.push_back(char((value >> (8 * i)) & 0xFF));
@@ -171,11 +174,14 @@ public:
             carry_.clear();
             framesRendered_ = 0;
             framesFinished_ = 0;
+            highestMs_ = 0;
+            reportsPosition_ = false;
             started_ = false;
             playing_ = false;
             playingSince_ = {};
             nextId_ = 0;
-            announcedNext_ = 0;
+            queuedNext_ = 0;
+            announcedBody_ = 0;
             closing_ = false;
             bodies_.push_back(makeBody(source->streamTrack()));
         }
@@ -295,12 +301,15 @@ private:
                 // The stream's own change of track: the player moved on to what it was given next.
                 framesFinished_ += bodies_.front().framesWritten;
                 bodies_.pop_front();
+                highestMs_ = 0;
+                changedAt_ = Clock::now();
                 moved_.notify_all();
                 return;
             }
         }
         if (event.kind == PlayerEventKind::Seeked) {
             std::scoped_lock lock(mutex_);
+            if (event.positionMs < kNearStartMs && (bodies_.size() > 1 || Clock::now() - changedAt_ < kChangeSettles)) return;
             if (!bodies_.empty()) {
                 PlayerEvent seek = event;
                 seek.positionMs += bodies_.front().track.startFrame * 1000 / std::max(format_.sampleRate, 1U);
@@ -312,21 +321,64 @@ private:
     }
 
     uint64_t playedFrames() const {
-        uint64_t reported = link_ ? link_->positionMs() * format_.sampleRate / 1000 : 0;
-        // A player that never reports a position is taken to play in real time.
-        if (reported == 0 && playingSince_ != Clock::time_point{}) {
+        const uint64_t positionMs = link_ ? link_->positionMs() : 0;
+        const auto now = Clock::now();
+        if (positionMs != lastReported_) {
+            lastReported_ = positionMs;
+            lastAdvance_ = now;
+        }
+        // Players report whole seconds, late by up to a poll, so a clock runs that only a report far from it corrects.
+        uint64_t smoothMs = positionMs;
+        if (positionMs && link_ && link_->playing()) {
+            const uint64_t flowing = clockMs_ + uint64_t(std::chrono::duration_cast<milliseconds>(now - clockAt_).count());
+            if (flowing >= positionMs && flowing <= positionMs + kClockSlackMs) {
+                smoothMs = flowing;
+            } else {
+                clockMs_ = positionMs;
+                clockAt_ = now;
+            }
+        }
+        uint64_t reported = smoothMs * format_.sampleRate / 1000;
+        if (positionMs) reportsPosition_ = true;
+        // A player that never reports a position is taken to play in real time from a start it may take seconds to reach (the
+        // DMP-A6 does); 0 is also a track's start.
+        if (!reportsPosition_ && playingSince_ != Clock::time_point{}) {
             const auto elapsed = std::chrono::duration_cast<milliseconds>(Clock::now() - playingSince_).count();
-            if (elapsed > 3000) reported = uint64_t(elapsed) * format_.sampleRate / 1000;
+            if (elapsed > kSlowStartMs) reported = uint64_t(elapsed - kSlowStartMs) * format_.sampleRate / 1000;
         }
         return reported;
     }
+
+    // Back at the start with the next track ready is the change of track: a player can report the old URL long after it
+    // (the DMP-A6 does), so the position says so first.
+    bool backAtStart() const {
+        const uint64_t positionMs = link_ ? link_->positionMs() : 0;
+        if (positionMs > highestMs_) highestMs_ = positionMs;
+        if (bodies_.size() < 2 || !bodies_.front().complete || positionMs >= kNearStartMs || positionMs >= highestMs_)
+            return false;
+        const uint64_t durationMs = bodies_.front().framesWritten * 1000 / std::max(format_.sampleRate, 1U);
+        return highestMs_ + kNearEndMs >= durationMs;
+    }
+
+    uint64_t allPlayed() const { return framesFinished_ + (backAtStart() ? bodies_.front().framesWritten : 0) + playedFrames(); }
 
     uint64_t held() const {
         std::scoped_lock lock(mutex_);
         if (!source_ || !started_) return 0;
         if (link_ && link_->stopped() && bodies_.size() <= 1 && !bodies_.empty() && bodies_.front().complete) return 0;
-        const uint64_t played = framesFinished_ + playedFrames();
+        const uint64_t played = allPlayed();
         return framesRendered_ > played ? framesRendered_ - played : 0;
+    }
+
+    void followChangeOfTrack() {
+        std::scoped_lock lock(mutex_);
+        if (closing_ || !backAtStart()) return;
+        framesFinished_ += bodies_.front().framesWritten;
+        bodies_.pop_front();
+        highestMs_ = 0;
+        changedAt_ = Clock::now();
+        link_->advance();
+        moved_.notify_all();
     }
 
     Body makeBody(const StreamTrack& track) {
@@ -402,15 +454,18 @@ private:
         }
     }
 
-    // Tells the player what follows, as soon as the Engine has queued it.
+    // Tells the player what follows once that track has data: a player opens the URL at once, and one that finds nothing
+    // to read gives up on it and reopens it at the change, with a gap (the DMP-A6 does).
     void announceNext() {
         std::unique_lock lock(mutex_);
         if (closing_ || !gapless_ || !started_ || !source_) return;
-        const auto next = source_->nextStreamTrack();
-        if (!next || next->sequence == announcedNext_) return;
-        announcedNext_ = next->sequence;
-        bodies_.push_back(makeBody(*next));
-        const std::string uri = bodies_.back().uri, didl = bodies_.back().didl;
+        if (const auto next = source_->nextStreamTrack(); next && next->sequence != queuedNext_) {
+            queuedNext_ = next->sequence;
+            bodies_.push_back(makeBody(*next));
+        }
+        if (bodies_.size() < 2 || !bodies_.front().complete || bodies_[1].id == announcedBody_ || !mayRender()) return;
+        announcedBody_ = bodies_[1].id;
+        const std::string uri = bodies_[1].uri, didl = bodies_[1].didl;
         lock.unlock();
         if (!link_->loadNext(uri, didl)) log::warn("network player %s refused the next track", player_.name.c_str());
     }
@@ -441,6 +496,7 @@ private:
                 if (closing_) return;
                 sent = !bodies_.empty() && !producing();
             }
+            followChangeOfTrack();
             announceNext();
             startLateNext();
             if (sent) produce();
@@ -478,7 +534,7 @@ private:
     void answer(SOCKET client, const std::string& request) {
         const auto space = request.find(' ');
         if (space == std::string::npos) return;
-        log::info("network player asks: %s", request.substr(0, request.find("\r\n\r\n")).c_str());
+        log::info("network player asks: %s", request.substr(0, request.find("\r\n")).c_str());
         const std::string method = request.substr(0, space);
         const std::string path = request.substr(space + 1, request.find(' ', space + 1) - space - 1);
         const bool head = method == "HEAD";
@@ -585,18 +641,12 @@ private:
 
     bool mayRender() {
         if (!source_ || !started_ || !playing_) return false;
-        const uint64_t reported = link_ ? link_->positionMs() : 0;
         const auto now = Clock::now();
-        if (reported != lastReported_) {
-            lastReported_ = reported;
-            lastAdvance_ = now;
-        }
-        const uint64_t played = framesFinished_ + playedFrames();
+        const uint64_t played = allPlayed();
         // A player whose position stands still may want more in its buffer before it goes on (a Linkplay module does).
         const bool waiting = playingSince_ != Clock::time_point{} && now - std::max(playingSince_, lastAdvance_) > kPatience;
-        const auto ahead = waiting ? options_.aheadBeforePlay : options_.ahead;
-        const uint64_t limit = uint64_t(ahead.count()) * format_.sampleRate / 1000;
-        return framesRendered_ < played + limit;
+        const auto ahead = bodies_.size() > 1 ? options_.nextTrackLead : waiting ? options_.aheadBeforePlay : options_.ahead;
+        return framesRendered_ < played + uint64_t(ahead.count()) * format_.sampleRate / 1000;
     }
 
     // Renders a chunk into the track the stream has reached. False when there is nothing to render now.
@@ -726,12 +776,17 @@ private:
     std::deque<Body> bodies_;
     std::vector<uint8_t> carry_; // frames past a boundary, for the track that has no body yet
     uint32_t generation_ = 0, nextId_ = 0;
-    uint64_t announcedNext_ = 0;
+    uint64_t queuedNext_ = 0;
+    uint32_t announcedBody_ = 0;
     uint64_t framesRendered_ = 0, framesFinished_ = 0;
     bool started_ = false, playing_ = false, closing_ = false;
     Clock::time_point playingSince_;
-    uint64_t lastReported_ = 0;
-    Clock::time_point lastAdvance_;
+    mutable uint64_t highestMs_ = 0; // of the track playing
+    mutable bool reportsPosition_ = false;
+    Clock::time_point changedAt_;
+    mutable uint64_t lastReported_ = 0, clockMs_ = 0;
+    mutable Clock::time_point clockAt_;
+    mutable Clock::time_point lastAdvance_;
 
     std::mutex renderMutex_; // one renderer at a time; taken before mutex_
     std::vector<uint8_t> rendered_;

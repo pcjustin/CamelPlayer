@@ -28,6 +28,8 @@ struct NetworkOutputOptions {
     LinkOptions link{std::chrono::milliseconds(500), 3, 1800, 3000};
     std::chrono::milliseconds ahead{5000};            // rendered past what the player has played
     std::chrono::milliseconds aheadBeforePlay{30000}; // for a player that fills its buffer before it starts
+    // Rendered ahead once a next track is queued, so that the player has time to open that track before the change.
+    std::chrono::milliseconds nextTrackLead{20000};
 };
 
 // `details` and `follow` run on the output's own threads. `follow` gets what the player did by itself.

@@ -86,6 +86,10 @@ public:
     // Plays back at this many bytes a second instead of as fast as it fetches.
     void limitFetch(uint64_t bytesPerSecond) { fetchLimit_ = bytesPerSecond; }
     void reportNoPosition() { noPosition_ = true; }
+    // After Play it stays TRANSITIONING this long, reporting the position it had, as the DMP-A6 does.
+    void startSlowly(int milliseconds) { startMs_ = milliseconds; }
+    // Goes on reporting the first URL after it moved on to the next, as the DMP-A6 does.
+    void keepReportingFirstTrack() { oldTrack_ = true; }
     // Refuses SetAVTransportURI and Insert, as a player does a format it cannot play.
     void refuseStreams() { refuseStreams_ = true; }
 
@@ -380,7 +384,9 @@ private:
                 nextUri_.clear();
                 if (!next.empty()) {
                     currentUri_ = next;
-                    state_["track"] = next;
+                    state_["time"] = "0:00:00";
+                    state_["seconds"] = "0";
+                    if (!oldTrack_) state_["track"] = next;
                     for (const auto& [id, entry] : playlist_)
                         if (entry == next) state_["track"] = id;
                 } else {
@@ -392,6 +398,7 @@ private:
                 if (kind_ == RendererKind::UpnpAv) emitLastChange(R"(<TransportState val="STOPPED"/>)");
                 return;
             }
+            if (oldTrack_) continue;
             if (kind_ == RendererKind::OpenHome)
                 emitVariable("Playlist", "Id", state("track"));
             else
@@ -428,8 +435,14 @@ private:
             if (headEnd == std::string::npos) {
                 headEnd = data.find("\r\n\r\n");
                 if (headEnd == std::string::npos) continue;
-                std::scoped_lock lock(mutex_);
-                fetchHeaders_ = data.substr(0, headEnd);
+                {
+                    std::scoped_lock lock(mutex_);
+                    fetchHeaders_ = data.substr(0, headEnd);
+                }
+                if (const int wait = startMs_.load()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+                    set("state", "PLAYING");
+                }
             }
             const size_t body = data.size() - headEnd - 4;
             if (!bytesPerSecond && body >= 44 && data.compare(headEnd + 4, 4, "RIFF") == 0)
@@ -498,7 +511,7 @@ private:
             playlist_.clear();
             nextUri_.clear();
         } else if (name == "Play") {
-            state_["state"] = kind_ == RendererKind::OpenHome ? "Playing" : "PLAYING";
+            state_["state"] = kind_ == RendererKind::OpenHome ? "Playing" : startMs_.load() ? "TRANSITIONING" : "PLAYING";
             if (!fetching_.exchange(true)) playRequested_ = true;
         } else if (name == "Pause") {
             state_["state"] = kind_ == RendererKind::OpenHome ? "Paused" : "PAUSED_PLAYBACK";
@@ -584,7 +597,9 @@ private:
     std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
                       refuseStreams_ = false;
     std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false;
+    std::atomic<bool> oldTrack_ = false;
     std::atomic<uint64_t> fetchLimit_ = 0;
+    std::atomic<int> startMs_ = 0;
     std::atomic<SOCKET> fetchSocket_ = INVALID_SOCKET;
     std::thread fetchThread_;
     std::string sink_ = "http-get:*:audio/wav:*,http-get:*:audio/L16:*", currentUri_, nextUri_, metadata_, fetchHeaders_;

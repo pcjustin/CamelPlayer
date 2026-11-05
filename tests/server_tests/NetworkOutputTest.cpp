@@ -237,6 +237,7 @@ TEST(NetworkOutputTest, DescribesTheTrackToThePlayer) {
 
 TEST(NetworkOutputTest, OneUrlForEachTrackWithTheBoundaryExactlyWhereItBelongs) {
     FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
     CountingSource source(k16.bytesPerFrame(), 30000, 20000);
     source.queueSecond();
     OutputRun output(renderer, source, k16);
@@ -254,6 +255,7 @@ TEST(NetworkOutputTest, OneUrlForEachTrackWithTheBoundaryExactlyWhereItBelongs) 
 
 TEST(NetworkOutputTest, AnOpenHomePlayerGetsTheQueueAsItsPlaylist) {
     FakeRenderer renderer(RendererKind::OpenHome);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
     CountingSource source(k16.bytesPerFrame(), 30000, 20000);
     source.queueSecond();
     OutputRun output(renderer, source, k16);
@@ -276,6 +278,52 @@ TEST(NetworkOutputTest, StaysAFewSecondsAheadOfThePlayer) {
     std::this_thread::sleep_for(1500ms);
     EXPECT_LT(source.rendered(), 44100ULL * 8); // far less than the 600 s it could have rendered
     EXPECT_GT(output->status().heldFrames, 0U);
+}
+
+TEST(NetworkOutputTest, ThePlayerHearsOfTheNextTrackOnlyOnceThatTrackHasData) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
+    constexpr uint64_t first = 44100ULL * 6;
+    CountingSource source(k16.bytesPerFrame(), first, 44100ULL * 60);
+    source.queueSecond();
+    NetworkOutputOptions options;
+    options.ahead = 1000ms;
+    options.nextTrackLead = 3000ms;
+    OutputRun output(renderer, source, k16, options);
+    output->start();
+    const auto told = [&] { return std::ranges::count(renderer.actions(), "SetNextAVTransportURI"); };
+    std::this_thread::sleep_for(1000ms);
+    EXPECT_EQ(told(), 0);
+    EXPECT_TRUE(waitFor([&] { return told() == 1; }, 5s));
+    EXPECT_GE(source.rendered(), first);
+}
+
+TEST(NetworkOutputTest, TheNextTrackIsFetchableAheadOnceTheFirstIsSent) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
+    constexpr uint64_t first = 44100ULL * 1;
+    CountingSource source(k16.bytesPerFrame(), first, 44100ULL * 600);
+    source.queueSecond();
+    NetworkOutputOptions options;
+    options.ahead = 1000ms;
+    options.nextTrackLead = 10000ms;
+    OutputRun output(renderer, source, k16, options);
+    output->start();
+    // Well before the first has played, the stream has run on into the next, past what `ahead` allows alone.
+    EXPECT_TRUE(waitFor([&] { return source.rendered() >= first + 44100ULL * 9; }, 3s)) << source.rendered();
+    EXPECT_LT(source.rendered(), first + 44100ULL * 15);
+}
+
+TEST(NetworkOutputTest, APlayerThatNeverReportsAPositionIsTakenToPlayInRealTime) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.reportNoPosition();
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 44100ULL * 4; }));
+    EXPECT_GT(output->status().heldFrames, 0U);
+    EXPECT_TRUE(waitFor([&] { return source.rendered() > 44100ULL * 8; }, 7s)); // rendering goes on as time passes
 }
 
 TEST(NetworkOutputTest, APlayerThatReconnectsGetsTheStartAgain) {
@@ -433,6 +481,97 @@ TEST_F(StreamingTest, MatchingTracksAreGaplessOnTwoUrls) {
     server->shutdown();
 }
 
+TEST_F(StreamingTest, ThePositionFollowsAPlayerThatGoesOnReportingTheFirstTrack) {
+    const auto first = testutil::generatedFile({"network-lag-a", 44100, 16, 2, 4.0});
+    const auto second = testutil::generatedFile({"network-lag-b", 44100, 16, 2, 6.0});
+    renderer_.limitFetch(4ULL * 44100);
+    renderer_.keepReportingFirstTrack();
+    auto server = serverFor();
+    server->submit(queue({first, second}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
+    const uint64_t firstEntry = server->snapshot().queueEntryId;
+    uint64_t last = 0;
+    bool wentBack = false;
+    ASSERT_TRUE(waitFor(
+        [&] {
+            const auto now = server->snapshot();
+            if (now.queueEntryId != firstEntry) return true;
+            // The next track's position can reach the snapshot just before its entry does.
+            wentBack = wentBack || (now.playback.position + 44100 < last && now.playback.position > 4410);
+            last = now.playback.position;
+            return false;
+        },
+        12s));
+    EXPECT_FALSE(wentBack);
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < 1500ms) { // a track's start must not read as a player without a position
+        const auto now = server->snapshot();
+        EXPECT_LT(now.playback.position, 3ULL * 44100);
+        std::this_thread::sleep_for(20ms);
+    }
+    EXPECT_FALSE(server->snapshot().playback.error) << server->snapshot().playback.errorDetail;
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, ThePositionAPlayerKeepsFromBeforeASeekIsNotAChangeOfTrack) {
+    const auto first = testutil::generatedFile({"network-stale-a", 44100, 16, 2, 10.0});
+    const auto second = testutil::generatedFile({"network-stale-b", 44100, 16, 2, 4.0});
+    renderer_.limitFetch(4ULL * 44100);
+    renderer_.startSlowly(800);
+    auto server = serverFor();
+    server->submit(queue({first, second}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
+    std::this_thread::sleep_for(3500ms); // the fake now reports 2 s or more
+    const uint64_t entry = server->snapshot().queueEntryId;
+    Command seek;
+    seek.kind = CommandKind::Seek;
+    seek.frame = uint64_t{6} * 44100;
+    server->submit(std::move(seek));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.position >= uint64_t{6} * 44100; }));
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < 2500ms) {
+        const auto now = server->snapshot();
+        EXPECT_EQ(now.queueEntryId, entry);
+        EXPECT_GE(now.playback.position + 4410, uint64_t{6} * 44100);
+        EXPECT_LT(now.playback.position, uint64_t{9} * 44100);
+        std::this_thread::sleep_for(20ms);
+    }
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, ThePositionDoesNotOvertakeAPlayerSlowToReportOne) {
+    const auto file = testutil::generatedFile({"network-slow-start", 44100, 16, 2, 20.0});
+    renderer_.startSlowly(4500); // reports nothing until then
+    renderer_.limitFetch(4ULL * 44100);
+    auto server = serverFor();
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < 4000ms) {
+        EXPECT_LT(server->snapshot().playback.position, uint64_t{2} * 44100);
+        std::this_thread::sleep_for(20ms);
+    }
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, TheNextTrackStartsAtItsStartWhenOnlyAnEventNamesIt) {
+    const auto first = testutil::generatedFile({"network-event-a", 44100, 16, 2, 4.0});
+    const auto second = testutil::generatedFile({"network-event-b", 44100, 16, 2, 6.0});
+    renderer_.limitFetch(4ULL * 44100);
+    auto server = serverFor();
+    server->submit(queue({first, second}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
+    const uint64_t entry = server->snapshot().queueEntryId;
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queueEntryId != entry; }));
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < 500ms) {
+        EXPECT_LT(server->snapshot().playback.position, uint64_t{2} * 44100);
+        std::this_thread::sleep_for(20ms);
+    }
+    server->shutdown();
+}
+
 TEST_F(StreamingTest, ASeekRestartsTheStreamFromThere) {
     const auto file = testutil::generatedFile({"network-seek", 44100, 16, 2, 4.0});
     renderer_.limitFetch(4ULL * 44100);
@@ -474,6 +613,7 @@ TEST_F(StreamingTest, ADspChangeRestartsTheStreamFromTheAudiblePosition) {
     server->submit(queue({file}));
     ASSERT_TRUE(waitFor([&] { return !renderer_.currentUri().empty(); }));
     ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.position > 44100; }));
+    EXPECT_LT(server->snapshot().playback.position, 44100ULL * 3); // not what has been sent, about 5 s
     const auto url = renderer_.currentUri();
     const auto position = server->snapshot().playback.position;
     auto settings = nativeSettings(server->snapshot().settings);
@@ -485,7 +625,7 @@ TEST_F(StreamingTest, ADspChangeRestartsTheStreamFromTheAudiblePosition) {
     server->submit(std::move(apply));
     ASSERT_TRUE(waitFor([&] { return renderer_.currentUri() != url; }));
     EXPECT_NEAR(double(server->snapshot().playback.position), double(position), 44100.0);
-    EXPECT_FALSE(server->snapshot().playback.bitPerfect());
+    EXPECT_TRUE(waitFor([&] { return !server->snapshot().playback.bitPerfect(); }));
     server->shutdown();
 }
 

@@ -73,6 +73,7 @@ std::string headerValue(const std::string& head, const char* name) {
 
 void PlayerFollower::expect(ExpectedTracks tracks) {
     expected_ = std::move(tracks);
+    left_.clear();
     ended_ = false;
     position_.reset();
 }
@@ -86,13 +87,19 @@ void PlayerFollower::expectNext(std::string track) {
     expected_.next = std::move(track);
 }
 
+void PlayerFollower::advance() {
+    left_ = expected_.current;
+    expected_ = {expected_.next, {}, {}};
+    position_.reset();
+}
+
 void PlayerFollower::expectPosition(uint64_t positionMs, milliseconds now) {
     position_ = positionMs;
     positionAt_ = now;
 }
 
 void PlayerFollower::followTrack(const std::string& track, std::vector<PlayerEvent>& events) {
-    if (expected_.current.empty() || track == expected_.current) return;
+    if (expected_.current.empty() || track == expected_.current || track == left_) return;
     if (track.empty()) return; // a stopped player has none, which its state reports
     if (track == expected_.next) {
         expected_ = {expected_.next, {}, expected_.current};
@@ -328,17 +335,22 @@ struct PlayerLink::Impl {
     }
 
     void observe(const PlayerObservation& observation) {
-        if (observation.positionMs) lastPositionMs = *observation.positionMs;
         if (observation.state) {
             lastPlaying = *observation.state == TransportState::Playing;
             if (lastPlaying) sawPlaying = true;
             lastStopped = sawPlaying && *observation.state == TransportState::Stopped; // not the moment before it starts
         }
+        // Until it plays, a player reports the position of what it played before.
+        if (observation.positionMs && sawPlaying && !lastStopped) lastPositionMs = *observation.positionMs;
         std::vector<PlayerEvent> events;
         {
             std::scoped_lock lock(mutex);
             events = follower.observe(observation, now());
         }
+        // An event that names the next track says nothing of the position, which still is the last track's.
+        if (!observation.positionMs &&
+            std::ranges::any_of(events, [](const PlayerEvent& event) { return event.kind == PlayerEventKind::NextTrack; }))
+            lastPositionMs = 0;
         report(events);
     }
 
@@ -559,6 +571,11 @@ bool PlayerLink::seek(uint64_t positionMs) {
         return impl_->attempt("Playlist", "SeekSecondAbsolute", {{"Value", std::to_string(positionMs / 1000)}});
     return impl_->attempt("AVTransport", "Seek",
                           {{"InstanceID", "0"}, {"Unit", "REL_TIME"}, {"Target", upnp::formatDuration(positionMs)}});
+}
+
+void PlayerLink::advance() {
+    std::scoped_lock lock(impl_->mutex);
+    impl_->follower.advance();
 }
 
 uint64_t PlayerLink::positionMs() const {

@@ -48,6 +48,8 @@ public:
     // Just given to the player, which may report what it played before for a moment.
     void expectLoaded(ExpectedTracks tracks, std::chrono::milliseconds now);
     void expectNext(std::string track);
+    // The player moved on to the next track without saying so; what it reported until now means nothing more.
+    void advance();
     void expectPosition(uint64_t positionMs, std::chrono::milliseconds now);
     std::vector<PlayerEvent> observe(const PlayerObservation& observation, std::chrono::milliseconds now);
     std::vector<PlayerEvent> lost();
@@ -56,6 +58,7 @@ private:
     void followTrack(const std::string& track, std::vector<PlayerEvent>& events);
 
     ExpectedTracks expected_;
+    std::string left_; // the track `advance` moved on from
     std::optional<TransportState> state_;
     std::optional<uint64_t> position_;
     std::chrono::milliseconds positionAt_{};
@@ -82,6 +85,7 @@ public:
     // False when the player refused or did not answer.
     bool load(const std::string& uri, const std::string& metadata);
     bool loadNext(const std::string& uri, const std::string& metadata);
+    void advance();
     bool play();
     bool pause();
     bool stop();

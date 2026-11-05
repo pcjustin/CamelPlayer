@@ -264,6 +264,22 @@ TEST(PlayerFollowerTest, MovesThroughNextAndPrevious) {
     EXPECT_TRUE(follower.observe(seen, 20ms).empty());
 }
 
+TEST(PlayerFollowerTest, AfterAdvancingTheOldTrackIsNoLongerNewsAndTheNextStillIs) {
+    PlayerFollower follower;
+    follower.expect({"a", "b", ""});
+    follower.advance();
+    PlayerObservation seen;
+    seen.track = "a"; // the DMP-A6 reports it long after the change
+    EXPECT_TRUE(follower.observe(seen, 0ms).empty());
+    seen.track = "b";
+    EXPECT_TRUE(follower.observe(seen, 10ms).empty());
+    follower.expectNext("c");
+    seen.track = "c";
+    EXPECT_EQ(follower.observe(seen, 20ms), (std::vector<PlayerEvent>{{PlayerEventKind::NextTrack}}));
+    seen.track = "other";
+    EXPECT_EQ(follower.observe(seen, 30ms), (std::vector<PlayerEvent>{{PlayerEventKind::TakenOver}}));
+}
+
 TEST(PlayerFollowerTest, AnotherTrackIsATakeoverAndThenItIsSilent) {
     PlayerFollower follower;
     follower.expect({"a", "b", ""});

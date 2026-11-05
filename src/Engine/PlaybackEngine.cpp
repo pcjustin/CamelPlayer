@@ -215,6 +215,7 @@ public:
         const size_t n = rendered.frames;
         const bool drained = rendered.ended || rendered.fault;
         const auto transitions = rust_->transitions();
+        const uint64_t renderedFrames = renderedFrames_.fetch_add(n, std::memory_order_relaxed) + n;
         boundary_.store(kNoBoundary, std::memory_order_relaxed);
         if (transitions.count != renderTransitions_.load(std::memory_order_relaxed)) {
             // A queued file became audible inside this request; positions now count from its start.
@@ -223,6 +224,7 @@ public:
             leaving_.store(base_.load(std::memory_order_relaxed) + consumed_.load(std::memory_order_relaxed) + n -
                                transitions.trackPosition,
                            std::memory_order_relaxed);
+            trackStartFrame_.store(renderedFrames - transitions.trackPosition, std::memory_order_relaxed);
             base_.store(0, std::memory_order_relaxed);
             consumed_.store(transitions.trackPosition, std::memory_order_relaxed);
             transitionPending_.store(true, std::memory_order_release);
@@ -739,8 +741,10 @@ private:
             snap_.outputStatus = status;
             buffered = snap_.outputStatus.bufferFrames;
         }
-        held_.store(snap_.outputStatus.heldFrames, std::memory_order_relaxed);
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
+        held_.store(snap_.outputStatus.heldFrames, std::memory_order_relaxed);
+        const uint64_t rendered = renderedFrames_.load(std::memory_order_relaxed);
+        heard_.store(rendered - std::min(snap_.outputStatus.heldFrames, rendered), std::memory_order_relaxed);
         rust_->reportAudible(toOutput(base_) + consumed - std::min(buffered, consumed));
     }
 
@@ -761,14 +765,19 @@ private:
     // manual crossfade's file stays at its start until its fade is heard.
     uint64_t sourcePosition() const {
         if (renderTransitions_.load(std::memory_order_acquire) < heldUntil_.load(std::memory_order_acquire)) return 0;
-        const uint64_t held = held_.load(std::memory_order_relaxed);
-        const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
-        if (held > consumed && transitionPending_.load(std::memory_order_acquire)) {
-            const uint64_t left = held - consumed; // frames of the track being left, which is still heard
-            const uint64_t end = leaving_.load(std::memory_order_relaxed);
-            return end - std::min(left, end);
+        uint64_t heard = consumed_.load(std::memory_order_relaxed);
+        if (pulled_.load(std::memory_order_relaxed)) {
+            // Rendering runs in bursts past the tracks' boundaries, so what was heard counts from the session's start, which
+            // the boundaries do not move.
+            const uint64_t measured = heard_.load(std::memory_order_relaxed);
+            const uint64_t trackStart = trackStartFrame_.load(std::memory_order_relaxed);
+            if (transitionPending_.load(std::memory_order_acquire)) {
+                const uint64_t left = trackStart - std::min(measured, trackStart); // of the track being left, still heard
+                const uint64_t end = leaving_.load(std::memory_order_relaxed);
+                return end - std::min(left, end);
+            }
+            heard = measured - std::min(measured, trackStart);
         }
-        const uint64_t heard = consumed - std::min(held, consumed);
         const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
         return base_ + (in == out || !out ? heard : (heard * in + out / 2) / out);
     }
@@ -951,6 +960,9 @@ private:
             nextStream_.clear();
         }
         held_ = 0;
+        heard_ = 0;
+        renderedFrames_ = 0;
+        trackStartFrame_ = 0;
         pulled_ = settings_.backend == Backend::Network;
         base_ = startFrame;
         consumed_ = 0;
@@ -1371,8 +1383,10 @@ private:
     // shared with the decode / output threads
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
-    std::atomic<bool> pulled_{false};  // a network player takes what is ready, so nothing short is an underrun
-    std::atomic<uint64_t> held_{0};    // frames rendered that the device has not played
+    std::atomic<bool> pulled_{false}; // a network player takes what is ready, so nothing short is an underrun
+    std::atomic<uint64_t> held_{0};   // frames rendered that the device has not played
+    std::atomic<uint64_t> heard_{0};  // frames a network player has played since the session started
+    std::atomic<uint64_t> renderedFrames_{0}, trackStartFrame_{0}; // since the session started
     std::atomic<uint64_t> leaving_{0}; // where the track being left ended, while a network player still plays it
     std::atomic<size_t> boundary_{kNoBoundary};
     mutable std::mutex streamMutex_;
