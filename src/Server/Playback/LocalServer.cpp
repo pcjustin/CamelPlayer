@@ -428,6 +428,7 @@ public:
     }
 
     void setFinderOptions(const FinderOptions& options) { finderOptions_ = options; }
+    void setAirPlayFinderOptions(const AirPlayFinderOptions& options) { airplayFinderOptions_ = options; }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
         const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
@@ -817,10 +818,12 @@ private:
                     const auto replayGain = settings_.replayGain;
                     const auto crossfade = settings_.crossfade;
                     const bool adoptOutputSets = settings_.adoptOutputSets;
+                    const auto outputs = settings_.outputs;
                     settings_ = nativeSettings(*c.settings);
                     settings_.lastFile = lastFile;
                     settings_.adoptOutputSets = adoptOutputSets;
                     syncOutputs(settings_, state_.devices);
+                    checkEnabledReceivers(outputs);
                     engine_->applySettings(settings_);
                     discord_->configure(settings_.discord);
                     shareLoudnessInputs();
@@ -1474,6 +1477,7 @@ private:
         catalog.ks = devices(audio::listKsPins());
         catalog.defaultWasapi = audio::defaultWasapiDevice();
         findNetworkPlayers(catalog);
+        findAirPlayReceivers(catalog);
         catalog.revision = state_.devices.revision + 1;
         state_.devices = std::move(catalog);
         const auto outputs = settings_.outputs;
@@ -1499,6 +1503,28 @@ private:
         }
         for (const auto& player : finder_->players())
             catalog.network.push_back({player.description.udn, player.description.name});
+    }
+
+    void findAirPlayReceivers(DeviceCatalog& catalog) {
+        if (airplayFinder_) {
+            airplayFinder_->search();
+        } else {
+            std::scoped_lock lock(finderMutex_);
+            airplayFinder_ = std::make_unique<AirPlayFinder>(airplayFinderOptions_, [this] {
+                devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
+            });
+        }
+        for (const auto& receiver : airplayFinder_->receivers())
+            catalog.airplay.push_back({receiver.id, receiver.name, airplay::supportId(receiver.support)});
+    }
+
+    void checkEnabledReceivers(const std::vector<SavedOutput>& before) {
+        if (!airplayFinder_) return;
+        for (const auto& output : settings_.outputs) {
+            const auto same = [&](const SavedOutput& o) { return o.backend == output.backend && o.id == output.id && o.enabled; };
+            if (output.backend == Backend::AirPlay && output.enabled && std::ranges::none_of(before, same))
+                airplayFinder_->check(output.id);
+        }
     }
 
     std::unique_ptr<audio::IOutput> networkOutput(const Settings& settings) {
@@ -1669,6 +1695,7 @@ private:
         {
             std::scoped_lock lock(finderMutex_);
             finder_.reset();
+            airplayFinder_.reset();
         }
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
@@ -1765,6 +1792,8 @@ private:
     FinderOptions finderOptions_;
     std::mutex finderMutex_;
     std::unique_ptr<PlayerFinder> finder_; // from the first device scan
+    AirPlayFinderOptions airplayFinderOptions_;
+    std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan
     std::unique_ptr<PlayerVolume> playerVolume_;
     std::optional<upnp::PlayerDescription> volumePlayer_;
     std::string volumeUdn_;
@@ -1777,6 +1806,9 @@ LocalServer::LocalServer(const Settings& settings, std::filesystem::path setting
 LocalServer::~LocalServer() = default;
 void LocalServer::setFinderOptions(const FinderOptions& options) {
     impl_->setFinderOptions(options);
+}
+void LocalServer::setAirPlayFinderOptions(const AirPlayFinderOptions& options) {
+    impl_->setAirPlayFinderOptions(options);
 }
 CommandStamp LocalServer::submit(Command command) {
     return impl_->enqueue(std::move(command));

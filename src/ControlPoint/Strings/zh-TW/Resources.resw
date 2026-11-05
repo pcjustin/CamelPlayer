@@ -673,6 +673,11 @@
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>音訊輸出設定…</value></data>
   <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>輸出</value></data>
+  <data name="Settings_AboutAirPlay.Text" xml:space="preserve"><value>AirPlay 是 Apple Inc. 的商標。</value></data>
+  <data name="Output_AirPlayEncrypted" xml:space="preserve"><value>不支援：只接受加密音訊</value></data>
+  <data name="Output_AirPlayPassword" xml:space="preserve"><value>不支援：需要密碼</value></data>
+  <data name="Output_AirPlayFormat" xml:space="preserve"><value>不支援：不接受此音訊格式</value></data>
+  <data name="Output_AirPlayRefused" xml:space="preserve"><value>不支援：拒絕此連線</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>網路播放器</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>要讓網路播放器連到 CamelPlayer 嗎？</value></data>
   <data name="Firewall_Text" xml:space="preserve"><value>網路播放器要從 CamelPlayer 取得音樂，所以 Windows 防火牆必須放行。CamelPlayer 會新增一條規則，只適用於這個程式和私人網路。Windows 會要求系統管理員權限。</value></data>

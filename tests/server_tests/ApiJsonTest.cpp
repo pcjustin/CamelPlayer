@@ -92,6 +92,7 @@ Snapshot fullSnapshot() {
     p.errorDetail = "unplugged";
     p.revision = 17;
     s.devices = {8, {{"w1", "Speakers"}}, {{"{CLSID}", "Chord ASIO"}}, {{"k|1", "DAVE"}, {"k|2", "Cirrus"}}};
+    s.devices.airplay = {{"800A805D016B", "DMP-A6"}, {"GROUP", "主臥", "refused"}};
     s.commandError = Failure{ErrorCode::FormatNotSupported, "no bit-perfect format"};
     s.controlPanelOpened = false;
     s.settings.backend = Backend::Wasapi;

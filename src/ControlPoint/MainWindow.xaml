@@ -612,6 +612,7 @@
                                 <StackPanel Spacing="4">
                                     <TextBlock x:Name="AboutVersionText" Style="{StaticResource BodyStrongTextBlockStyle}" IsTextSelectionEnabled="True" />
                                     <TextBlock x:Uid="Settings_AboutLicense" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock x:Uid="Settings_AboutAirPlay" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <Button x:Name="CheckUpdatesButton" x:Uid="Settings_CheckUpdates" Click="OnCheckUpdatesClick" />

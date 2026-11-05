@@ -126,6 +126,7 @@ std::string devicesText(const DiagnosticInput& input) {
     list("ASIO drivers", input.snapshot.devices.asio);
     list("Kernel Streaming pins", input.snapshot.devices.ks);
     list("Network players", input.snapshot.devices.network);
+    list("AirPlay receivers", input.snapshot.devices.airplay);
     out << "\n" << input.capabilities;
     return out.str();
 }

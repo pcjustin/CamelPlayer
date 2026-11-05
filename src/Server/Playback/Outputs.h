@@ -15,13 +15,14 @@ namespace camel::server {
 
 struct OutputRow {
     Backend backend = Backend::Wasapi;
-    std::string id;        // empty on WASAPI is "Windows default device"
-    std::string name;      // the user's name or the device's; empty for "Windows default device" unrenamed
-    std::string alias;     // the user's name alone
-    bool enabled = false;  // listed in the output menu
-    bool connected = true; // found by the last device scan
-    bool selected = false; // the output in use
-    bool saved = false;    // has anything to delete
+    std::string id;          // empty on WASAPI is "Windows default device"
+    std::string name;        // the user's name or the device's; empty for "Windows default device" unrenamed
+    std::string alias;       // the user's name alone
+    bool enabled = false;    // listed in the output menu
+    bool connected = true;   // found by the last device scan
+    bool selected = false;   // the output in use
+    bool saved = false;      // has anything to delete
+    std::string unsupported; // why an AirPlay receiver cannot be enabled; empty when it can
     bool operator==(const OutputRow&) const = default;
 };
 
@@ -29,8 +30,8 @@ struct OutputRow {
 std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& devices);
 
 // Brings `s` in line with `devices`: gives an earlier version's sets to their devices, moves to the default device's
-// set when the followed default changed, keeps the parameters in use and the devices' names, and enables the output
-// in use. Does nothing before the first device scan.
+// set when the followed default changed, keeps the parameters in use and the devices' names, enables the output in use
+// and disables any other that cannot be used. Does nothing before the first device scan.
 void syncOutputs(Settings& s, const DeviceCatalog& devices);
 
 void selectOutput(Settings& s, Backend backend, const std::string& id, const DeviceCatalog& devices);

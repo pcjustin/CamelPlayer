@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Server/Api/ServerApi.h"
+#include "Server/Network/AirPlayFinder.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Engine/PlaybackEngine.h"
 
@@ -83,6 +84,7 @@ public:
     void setDiscordTexts(const DiscordTexts& texts) override;
     // Where to look for network players; before the first device scan.
     void setFinderOptions(const FinderOptions& options);
+    void setAirPlayFinderOptions(const AirPlayFinderOptions& options);
     // How the settings passed in were obtained (openSettings).
     void setSettingsRecovery(SettingsRecovery recovery);
 

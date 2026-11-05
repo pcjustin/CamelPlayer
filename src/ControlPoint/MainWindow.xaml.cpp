@@ -647,6 +647,13 @@ hstring outputMenuLabel(const camel::server::OutputRow& row) {
     return label + L" (" + ui::utf8(camel::backendName(row.backend)) + L")";
 }
 
+const wchar_t* unsupportedReason(const std::string& reason) {
+    if (reason == "encrypted") return L"Output_AirPlayEncrypted";
+    if (reason == "password") return L"Output_AirPlayPassword";
+    if (reason == "format") return L"Output_AirPlayFormat";
+    return L"Output_AirPlayRefused";
+}
+
 } // namespace
 
 void MainWindow::populateOutputs() {
@@ -661,16 +668,17 @@ void MainWindow::populateOutputs() {
     list.Clear();
     std::optional<Backend> group;
     for (const auto& row : rows) {
-        if (row.backend != group) {
-            group = row.backend;
+        const bool player = camel::isNetworkPlayer(row.backend);
+        if (const Backend rowGroup = player ? Backend::Network : row.backend; rowGroup != group) {
+            group = rowGroup;
             TextBlock header;
-            header.Text(row.backend == Backend::Network ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend)));
+            header.Text(player ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend)));
             header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
             header.Margin({0, 8, 0, 0});
             Automation::AutomationProperties::SetHeadingLevel(header, Automation::Peers::AutomationHeadingLevel::Level3);
             list.Append(header);
         }
-        const hstring label = outputLabel(row);
+        const hstring label = row.backend == Backend::AirPlay ? outputMenuLabel(row) : outputLabel(row);
         Grid line;
         line.ColumnSpacing(8);
         for (const GridLength width : {GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto},
@@ -685,9 +693,12 @@ void MainWindow::populateOutputs() {
         name.Text(label);
         name.TextTrimming(TextTrimming::CharacterEllipsis);
         names.Children().Append(name);
-        if (row.selected || !row.connected) {
+        if (row.selected || !row.connected || !row.unsupported.empty()) {
             TextBlock state;
-            state.Text(tr(row.connected ? L"Output_InUse" : L"Device_NotConnected"));
+            state.Text(tr(row.selected     ? L"Output_InUse"
+                          : !row.connected ? L"Device_NotConnected"
+                                           : unsupportedReason(row.unsupported)));
+            state.TextWrapping(TextWrapping::Wrap);
             state.Style(unbox_value<Microsoft::UI::Xaml::Style>(
                 Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle"))));
             names.Children().Append(state);
@@ -718,7 +729,7 @@ void MainWindow::populateOutputs() {
 
         ToggleSwitch enabled;
         enabled.IsOn(row.enabled);
-        enabled.IsEnabled(!row.selected); // the output in use stays in the menu
+        enabled.IsEnabled(!row.selected && row.unsupported.empty()); // the output in use stays in the menu
         enabled.OnContent(box_value(L""));
         enabled.OffContent(box_value(L""));
         enabled.MinWidth(0);
@@ -730,14 +741,14 @@ void MainWindow::populateOutputs() {
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::setOutputEnabled(s, row.backend, row.id, enabled.IsOn(), devices);
             });
-            if (row.backend == Backend::Network && enabled.IsOn()) askFirewallRule();
+            if (camel::isNetworkPlayer(row.backend) && enabled.IsOn()) askFirewallRule();
         });
         Grid::SetColumn(enabled, 3);
         line.Children().Append(enabled);
         list.Append(line);
     }
-    const bool players =
-        std::ranges::any_of(rows, [](const camel::server::OutputRow& r) { return r.backend == Backend::Network && r.enabled; });
+    const bool players = std::ranges::any_of(
+        rows, [](const camel::server::OutputRow& r) { return camel::isNetworkPlayer(r.backend) && r.enabled; });
     FirewallNotice().IsOpen(players && !camel::server::firewallRuleExists());
 }
 
@@ -3261,7 +3272,7 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
 // slider and mute while it is Software and says who sets the level while it is Fixed.
 void MainWindow::showVolume() {
     const bool wasPopulating = std::exchange(populating_, true);
-    const bool network = settings_.backend == Backend::Network;
+    const bool network = camel::isNetworkPlayer(settings_.backend);
     const bool software = settings_.volume.mode == camel::VolumeMode::Software;
     const bool wantsPlayer = settings_.volume.mode == camel::VolumeMode::Player;
     const bool player = wantsPlayer && playerVolume_.has_value();
@@ -3373,7 +3384,7 @@ void MainWindow::showLoudnessProgress() {
 
 camel::VolumeMode MainWindow::chosenVolumeMode() {
     if (VolumeModeCombo().SelectedIndex() != 1) return camel::VolumeMode::Fixed;
-    return settings_.backend == Backend::Network ? camel::VolumeMode::Player : camel::VolumeMode::Software;
+    return camel::isNetworkPlayer(settings_.backend) ? camel::VolumeMode::Player : camel::VolumeMode::Software;
 }
 
 void MainWindow::OnVolumeModeChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {

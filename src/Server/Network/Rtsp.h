@@ -1,0 +1,44 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// An RTSP connection to an AirPlay receiver (docs/Plan.md §5.10). Throws std::runtime_error when the receiver does not
+// answer.
+#pragma once
+
+#include <winsock2.h>
+
+#include <cstdint>
+#include <map>
+#include <string>
+#include <string_view>
+
+namespace camel::server::airplay {
+
+struct RtspReply {
+    int status = 0;
+    std::map<std::string, std::string> headers; // names in lower case
+    std::string body;
+};
+
+class RtspClient {
+public:
+    RtspClient(const std::string& address, uint16_t port, int timeoutMs);
+    ~RtspClient();
+    RtspClient(const RtspClient&) = delete;
+    RtspClient& operator=(const RtspClient&) = delete;
+
+    const std::string& localAddress() const { return localAddress_; }
+    const std::string& session() const { return session_; }
+    std::string url() const; // of this session
+
+    RtspReply request(std::string_view method, std::string_view url, std::string_view contentType = {},
+                      std::string_view body = {});
+
+private:
+    SOCKET socket_ = INVALID_SOCKET;
+    std::string localAddress_, session_, instance_;
+    int sequence_ = 0;
+};
+
+} // namespace camel::server::airplay

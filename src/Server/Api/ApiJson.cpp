@@ -336,13 +336,14 @@ PlaybackSnapshot playbackFrom(const json& j) {
 
 json toJson(const std::vector<DeviceInfo>& devices) {
     json out = json::array();
-    for (const auto& d : devices) out.push_back({{"id", d.id}, {"name", d.name}});
+    for (const auto& d : devices) out.push_back({{"id", d.id}, {"name", d.name}, {"unsupported", d.unsupported}});
     return out;
 }
 
 std::vector<DeviceInfo> devicesFrom(const json& j, const char* key) {
     std::vector<DeviceInfo> out;
-    for (const auto& d : array(j, key)) out.push_back({value<std::string>(d, "id"), value<std::string>(d, "name")});
+    for (const auto& d : array(j, key))
+        out.push_back({value<std::string>(d, "id"), value<std::string>(d, "name"), value<std::string>(d, "unsupported")});
     return out;
 }
 
@@ -498,6 +499,7 @@ json toJson(const Snapshot& s) {
               {"asio", toJson(s.devices.asio)},
               {"ks", toJson(s.devices.ks)},
               {"network", toJson(s.devices.network)},
+              {"airplay", toJson(s.devices.airplay)},
               {"defaultWasapi", s.devices.defaultWasapi}}},
             {"commandError", optionalJson(s.commandError)},
             {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
@@ -519,6 +521,7 @@ Snapshot snapshotFromJson(const json& j) {
     s.devices.asio = devicesFrom(devices, "asio");
     s.devices.ks = devicesFrom(devices, "ks");
     s.devices.network = devicesFrom(devices, "network");
+    s.devices.airplay = devicesFrom(devices, "airplay");
     s.devices.defaultWasapi = value<std::string>(devices, "defaultWasapi");
     s.commandError = optional<Failure>(j, "commandError", failureFrom);
     s.controlPanelOpened = optional<bool>(j, "controlPanelOpened", [](const json& v) {

@@ -54,6 +54,7 @@ struct SettingsDto {
     AsioSettings asio;
     KsSettings ks;
     NetworkSettings network;
+    AirPlaySettings airplay;
     std::string language;
     CloseAction closeAction = CloseAction::Tray;
     Theme theme = Theme::System;
@@ -185,6 +186,7 @@ struct PlaybackSnapshot {
 
 struct DeviceInfo {
     std::string id, name;
+    std::string unsupported; // why an AirPlay receiver cannot be used, as airplay::supportId; empty when it can
     bool operator==(const DeviceInfo&) const = default;
 };
 
@@ -192,6 +194,7 @@ struct DeviceCatalog {
     uint64_t revision = 0;
     std::vector<DeviceInfo> wasapi, asio, ks;
     std::vector<DeviceInfo> network; // UPnP AV and OpenHome players, by UDN
+    std::vector<DeviceInfo> airplay; // AirPlay receivers, by device ID
     std::string defaultWasapi;       // the Windows default render endpoint; empty when there is none
     bool operator==(const DeviceCatalog&) const = default;
 };

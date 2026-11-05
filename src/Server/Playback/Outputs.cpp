@@ -18,7 +18,7 @@ const SavedOutput* findOutput(const Settings& s, Backend backend, const std::str
 SavedOutput newOutput(Backend backend) {
     SavedOutput added;
     added.backend = backend;
-    if (backend == Backend::Network) added.volumeMode = VolumeMode::Player;
+    if (isNetworkPlayer(backend)) added.volumeMode = VolumeMode::Player;
     return added;
 }
 
@@ -27,7 +27,7 @@ SavedOutput& savedOutput(Settings& s, Backend backend, const std::string& id) {
     if (found != s.outputs.end()) return *found;
     SavedOutput added = newOutput(backend);
     added.id = id;
-    added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = id;
+    added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = added.airplay.deviceId = id;
     return s.outputs.emplace_back(std::move(added));
 }
 
@@ -35,6 +35,7 @@ const std::string& selectedId(const Settings& s) {
     return s.backend == Backend::Asio      ? s.asio.driverClsid
            : s.backend == Backend::Ks      ? s.ks.deviceId
            : s.backend == Backend::Network ? s.network.udn
+           : s.backend == Backend::AirPlay ? s.airplay.deviceId
                                            : s.wasapi.deviceId;
 }
 
@@ -57,9 +58,11 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
         saved.ks = s.ks;
     else if (backend == Backend::Network)
         saved.network = s.network;
+    else if (backend == Backend::AirPlay)
+        saved.airplay = s.airplay;
     else
         saved.wasapi = s.wasapi;
-    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = id;
+    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId = id;
 }
 
 // Puts `device`'s parameters, or the defaults for a device without any, in Settings' fields for the output `selected`.
@@ -69,7 +72,7 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     const SavedOutput& source = saved ? *saved : defaults;
     s.backend = backend;
     s.volume.mode = source.volumeMode;
-    if (backend == Backend::Network && s.volume.mode == VolumeMode::Software) s.volume.mode = VolumeMode::Player;
+    if (isNetworkPlayer(backend) && s.volume.mode == VolumeMode::Software) s.volume.mode = VolumeMode::Player;
     if (backend == Backend::Asio) {
         s.asio = source.asio;
         s.asio.driverClsid = std::move(selected);
@@ -79,6 +82,9 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     } else if (backend == Backend::Network) {
         s.network = source.network;
         s.network.udn = std::move(selected);
+    } else if (backend == Backend::AirPlay) {
+        s.airplay = source.airplay;
+        s.airplay.deviceId = std::move(selected);
     } else {
         s.wasapi = source.wasapi;
         s.wasapi.deviceId = std::move(selected);
@@ -102,6 +108,7 @@ const std::vector<DeviceInfo>& devicesOf(const DeviceCatalog& devices, Backend b
     return backend == Backend::Asio      ? devices.asio
            : backend == Backend::Ks      ? devices.ks
            : backend == Backend::Network ? devices.network
+           : backend == Backend::AirPlay ? devices.airplay
                                          : devices.wasapi;
 }
 
@@ -115,11 +122,13 @@ const DeviceInfo* findDevice(const DeviceCatalog& devices, Backend backend, cons
 
 std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& devices) {
     std::vector<OutputRow> rows;
-    const auto add = [&](Backend backend, const std::string& id, const std::string& deviceName, bool connected) {
+    const auto add = [&](Backend backend, const std::string& id, const std::string& deviceName, bool connected,
+                         const std::string& unsupported) {
         OutputRow row;
         row.backend = backend;
         row.id = id;
         row.connected = connected;
+        row.unsupported = unsupported;
         row.selected = s.backend == backend && selectedId(s) == id;
         const SavedOutput* saved = findOutput(s, backend, id);
         row.saved = saved != nullptr && !id.empty();
@@ -128,12 +137,12 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
         row.name = !row.alias.empty() ? row.alias : saved && deviceName.empty() ? saved->name : deviceName;
         rows.push_back(std::move(row));
     };
-    for (const Backend backend : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network}) {
-        if (backend == Backend::Wasapi) add(backend, {}, {}, true);
-        for (const auto& device : devicesOf(devices, backend)) add(backend, device.id, device.name, true);
+    for (const Backend backend : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network, Backend::AirPlay}) {
+        if (backend == Backend::Wasapi) add(backend, {}, {}, true, {});
+        for (const auto& device : devicesOf(devices, backend)) add(backend, device.id, device.name, true, device.unsupported);
         for (const auto& saved : s.outputs)
             if (saved.backend == backend && !saved.id.empty() && !findDevice(devices, backend, saved.id))
-                add(backend, saved.id, {}, devices.revision == 0);
+                add(backend, saved.id, {}, devices.revision == 0, {});
     }
     return rows;
 }
@@ -149,7 +158,11 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     keepParameters(s, s.backend, deviceInUse(s));
     if (s.backend == Backend::Wasapi || !selectedId(s).empty()) savedOutput(s, s.backend, selectedId(s)).enabled = true;
     for (auto& saved : s.outputs)
-        if (const auto* device = findDevice(devices, saved.backend, saved.id)) saved.name = device->name;
+        if (const auto* device = findDevice(devices, saved.backend, saved.id)) {
+            saved.name = device->name;
+            const bool inUse = saved.backend == s.backend && saved.id == selectedId(s);
+            if (!device->unsupported.empty() && !inUse) saved.enabled = false;
+        }
 }
 
 void selectOutput(Settings& s, Backend backend, const std::string& id, const DeviceCatalog& devices) {

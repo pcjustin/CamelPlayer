@@ -63,6 +63,8 @@ With a network player in use, Settings › Playback shows its own settings: the 
 
 A network player's volume is its own. In Settings › DSP, **Volume control** offers **The player's volume**, the default where the player has one, or **Fixed**; CamelPlayer never lowers the level of the stream, so it stays bit-perfect. The volume button then opens a 0–100 slider and mute that show what the player reports, follow its remote and app, and change it only when you move them. CamelPlayer remembers only the choice, never a level. Some players report volume 0 and mute while they are in standby or set to fixed volume; the slider shows that as it is.
 
+AirPlay receivers appear under Network players too, marked (AirPlay), so a player that offers both is listed twice. Turning one on asks it for a session, which carries no audio; one that refuses goes back off and stays that way until CamelPlayer restarts. A receiver CamelPlayer cannot use says why, and its switch stays off: HomePods and many other recent receivers refuse the unencrypted connection CamelPlayer uses. Playing to a receiver is not available yet. AirPlay is a trademark of Apple Inc.
+
 The backend is how audio reaches the device:
 
 | Backend | Use it when | Notes |

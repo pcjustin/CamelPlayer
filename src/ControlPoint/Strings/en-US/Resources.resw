@@ -673,6 +673,11 @@
   <data name="Output_Offline" xml:space="preserve"><value>{0} (not connected)</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>Audio output settings…</value></data>
   <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>Output</value></data>
+  <data name="Settings_AboutAirPlay.Text" xml:space="preserve"><value>AirPlay is a trademark of Apple Inc.</value></data>
+  <data name="Output_AirPlayEncrypted" xml:space="preserve"><value>Not supported: takes only encrypted audio</value></data>
+  <data name="Output_AirPlayPassword" xml:space="preserve"><value>Not supported: asks for a password</value></data>
+  <data name="Output_AirPlayFormat" xml:space="preserve"><value>Not supported: does not take this audio format</value></data>
+  <data name="Output_AirPlayRefused" xml:space="preserve"><value>Not supported: refuses this connection</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>Network players</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>Let network players reach CamelPlayer?</value></data>
   <data name="Firewall_Text" xml:space="preserve"><value>Network players fetch their music from CamelPlayer, so Windows Firewall has to let them in. CamelPlayer adds one rule, for this program on private networks only. Windows asks for an administrator to do that.</value></data>

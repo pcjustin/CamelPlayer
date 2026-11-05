@@ -19,9 +19,12 @@
 
 namespace camel {
 
-enum class Backend : uint8_t { Wasapi, Asio, Ks, Network };
-const char* backendId(Backend b); // "wasapi" / "asio" / "ks" / "network"
+enum class Backend : uint8_t { Wasapi, Asio, Ks, Network, AirPlay };
+const char* backendId(Backend b); // "wasapi" / "asio" / "ks" / "network" / "airplay"
 const char* backendName(Backend b);
+inline bool isNetworkPlayer(Backend b) {
+    return b == Backend::Network || b == Backend::AirPlay;
+}
 bool backendFromId(std::string_view id, Backend& out);
 
 enum class WasapiPeriod : uint8_t { Default, Minimum, Custom };
@@ -115,6 +118,13 @@ struct NetworkSettings {
     bool gapless = true;                                   // off for a player that declares a next track and handles it badly
     PlaybackTiming timing{.releaseAfterPauseSeconds = 60}; // a player resumes slower than a local device
     bool operator==(const NetworkSettings&) const = default;
+};
+
+// The format is always 44.1 kHz/16-bit, so a receiver has no limit, DSD or silence settings (docs/Plan.md §6).
+struct AirPlaySettings {
+    std::string deviceId;
+    PlaybackTiming timing{.releaseAfterPauseSeconds = 60};
+    bool operator==(const AirPlaySettings&) const = default;
 };
 
 // Explicit per-format choices; a format without one uses its default (docs/Plan.md §3.1).
@@ -276,6 +286,7 @@ struct SavedOutput {
     AsioSettings asio;
     KsSettings ks;
     NetworkSettings network;
+    AirPlaySettings airplay;
     VolumeMode volumeMode = VolumeMode::Fixed;
     bool operator==(const SavedOutput&) const = default;
 };
@@ -296,6 +307,7 @@ struct Settings {
     AsioSettings asio;
     KsSettings ks;
     NetworkSettings network;
+    AirPlaySettings airplay;
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
     CloseAction closeAction = CloseAction::Tray;
     Theme theme = Theme::System;

@@ -18,6 +18,8 @@ std::unique_ptr<IOutput> createOutput(const Settings& s) {
         return createKsOutput(s.ks);
     case Backend::Network:
         throw Error(ErrorCode::DeviceNotFound, "playing to a network player is not available yet");
+    case Backend::AirPlay:
+        throw Error(ErrorCode::DeviceNotFound, "playing to an AirPlay receiver is not available yet");
     }
     return createWasapiOutput(s.wasapi);
 }

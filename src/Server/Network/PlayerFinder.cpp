@@ -6,8 +6,6 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
-// ws2tcpip.h comes first
-#include <iphlpapi.h>
 
 #include <algorithm>
 #include <atomic>
@@ -16,9 +14,9 @@
 #include <thread>
 
 #include "Common/util/Log.h"
+#include "Server/Network/LocalAddresses.h"
 #include "Server/Support/Http.h"
 
-#pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
 
 namespace camel::server {
@@ -31,21 +29,6 @@ constexpr int kDescriptionTimeoutMs = 3000;
 constexpr auto kPollSockets = std::chrono::milliseconds(100);
 constexpr int kRetryAfterSearches = 10; // an address that did not answer waits this long, as asking it takes seconds
 constexpr size_t kMaxRefusedAddresses = 256;
-
-std::vector<in_addr> localAddresses() {
-    std::vector<in_addr> addresses;
-    ULONG size = 16 * 1024;
-    std::vector<char> buffer(size);
-    auto* list = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
-    const ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
-    if (GetAdaptersAddresses(AF_INET, flags, nullptr, list, &size) != NO_ERROR) return addresses;
-    for (auto* adapter = list; adapter; adapter = adapter->Next) {
-        if (adapter->OperStatus != IfOperStatusUp || adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
-        for (auto* unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next)
-            addresses.push_back(reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr)->sin_addr);
-    }
-    return addresses;
-}
 
 std::optional<upnp::PlayerDescription> fetchDescription(const std::string& location) {
     if (!upnp::isLanUrl(location)) return std::nullopt;
