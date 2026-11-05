@@ -48,6 +48,7 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
 }
 
 DsdOutput dsdOutput(const Settings& s) {
+    if (s.backend == Backend::Network) return DsdOutput::Native; // sent as DSF when the player declares DSD
     return s.backend == Backend::Asio ? s.asio.dsdOutput : s.backend == Backend::Ks ? s.ks.dsdOutput : s.wasapi.dsdOutput;
 }
 
@@ -88,7 +89,8 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
     const DsdOutput mode = dsdOutput(s);
     std::optional<OutputPlan> plan;
     if (mode != DsdOutput::Pcm)
-        plan = negotiateDsd(src, s.backend == Backend::Asio && mode == DsdOutput::Native, fixedSampleType(s), supports);
+        plan = negotiateDsd(src, (s.backend == Backend::Asio || s.backend == Backend::Network) && mode == DsdOutput::Native,
+                            fixedSampleType(s), supports);
     if (!plan && (mode == DsdOutput::Pcm || s.convertDsdWhenUnsupported))
         plan = negotiateDsdToPcm(src, dsdPcmRate(s), fixedSampleType(s), s.convertWhenUnsupported, supports);
     return plan;
@@ -213,9 +215,14 @@ public:
         const size_t n = rendered.frames;
         const bool drained = rendered.ended || rendered.fault;
         const auto transitions = rust_->transitions();
+        boundary_.store(kNoBoundary, std::memory_order_relaxed);
         if (transitions.count != renderTransitions_.load(std::memory_order_relaxed)) {
             // A queued file became audible inside this request; positions now count from its start.
             renderTransitions_.store(transitions.count, std::memory_order_release);
+            if (transitions.trackPosition <= n) boundary_.store(size_t(n - transitions.trackPosition), std::memory_order_relaxed);
+            leaving_.store(base_.load(std::memory_order_relaxed) + consumed_.load(std::memory_order_relaxed) + n -
+                               transitions.trackPosition,
+                           std::memory_order_relaxed);
             base_.store(0, std::memory_order_relaxed);
             consumed_.store(transitions.trackPosition, std::memory_order_relaxed);
             transitionPending_.store(true, std::memory_order_release);
@@ -227,7 +234,8 @@ public:
         if (n < frames) {
             if (drained) {
                 if (!ended_.exchange(true)) qCv_.notify_all();
-            } else if (playing_.load(std::memory_order_relaxed) && !leadDone_.load(std::memory_order_acquire)) {
+            } else if (playing_.load(std::memory_order_relaxed) && !leadDone_.load(std::memory_order_acquire) &&
+                       !pulled_.load(std::memory_order_relaxed)) {
                 underruns_.fetch_add(1, std::memory_order_relaxed);
             }
         }
@@ -235,6 +243,18 @@ public:
     }
 
     bool writesSilence() const noexcept override { return rawDsd_.load(std::memory_order_acquire); }
+    size_t boundaryInLastRender() const noexcept override { return boundary_.load(std::memory_order_relaxed); }
+    bool renderEnded() const noexcept override { return ended_.load(); }
+
+    StreamTrack streamTrack() const override {
+        std::lock_guard lock(streamMutex_);
+        return streamTrack_;
+    }
+
+    std::optional<StreamTrack> nextStreamTrack() const override {
+        std::lock_guard lock(streamMutex_);
+        return nextStream_.empty() ? std::nullopt : std::optional(nextStream_.front());
+    }
 
     // ---- commands (control thread) ----
     void openAndPlay(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb, bool afterEnd) {
@@ -252,7 +272,7 @@ public:
 
     void crossfadeTo(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
         const bool fades = settings_.crossfade.enabled && active_ && state_ == PlayState::Playing && !rawDsd_ &&
-                           !leadSilence_.load(std::memory_order_acquire);
+                           settings_.backend != Backend::Network && !leadSilence_.load(std::memory_order_acquire);
         const auto next = fades ? prepareNext(file, requested) : std::nullopt;
         if (!next || !rust_->crossfadeTo(file, next->decoder, gainDb, {crossfadeMs(), next->convert})) {
             if (fades)
@@ -404,7 +424,9 @@ public:
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
         const uint64_t pos = currentPosition();
-        if ((outputChanged || decoderChanged) && wasActive) teardown();
+        // What a network player holds cannot change, so a new chain is heard only from a new stream.
+        const bool restart = outputChanged || decoderChanged || (dspChanged && s.backend == Backend::Network);
+        if (restart && wasActive) teardown();
         if (outputChanged) output_.reset();
         settings_ = s;
         updateWatcher();
@@ -413,7 +435,7 @@ public:
             snap_.backend = s.backend;
             snap_.decoder = displayedDecoder(s);
         }
-        if ((outputChanged || decoderChanged) && wasActive) {
+        if (restart && wasActive) {
             startSession(pos, wasPlaying);
         } else {
             if (dspChanged)
@@ -425,11 +447,17 @@ public:
     }
 
     bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb, uint32_t fadeMs) {
-        if (!active_ || rust_->transitions().nextQueued) return false;
+        if (!active_ || rust_->transitions().nextQueued || !output_->gapless()) return false;
         const auto next = prepareNext(file, requested);
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
         queued_.push_back(
             {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, gainDb});
+        {
+            const uint32_t in = next->source.sampleRate, out = fmt_.sampleRate;
+            std::lock_guard lock(streamMutex_);
+            nextStream_.push_back(
+                {file.wstring(), in == out || !in ? next->shown : (next->shown * out + in / 2) / in, 0, ++streamSequence_});
+        }
         publishQueue();
         return true;
     }
@@ -506,6 +534,10 @@ public:
         if (!rust_ || !rust_->transitions().nextQueued) return true;
         if (!rust_->clearNext()) return false;
         queued_.pop_back();
+        {
+            std::lock_guard lock(streamMutex_);
+            if (!nextStream_.empty()) nextStream_.pop_back();
+        }
         publishQueue();
         return true;
     }
@@ -577,9 +609,8 @@ private:
             std::function<void()> fn;
             {
                 std::unique_lock lock(qMutex_);
-                qCv_.wait_for(lock, std::chrono::milliseconds(50), [&] {
-                    return quit_ || !queue_.empty() || ended_.load() || transitionPending_.load() || leadDone_.load();
-                });
+                qCv_.wait_for(lock, std::chrono::milliseconds(50),
+                              [&] { return quit_ || !queue_.empty() || eventDue() || leadDone_.load(); });
                 if (!queue_.empty()) {
                     fn = std::move(queue_.front());
                     queue_.pop_front();
@@ -605,8 +636,11 @@ private:
                 if (state_ == PlayState::Playing) rust_->play();
                 leadDone_ = false;
             }
-            if (active_ && transitionPending_.exchange(false)) onTransition();
-            if (active_ && ended_.load()) onEnded();
+            if (active_ && transitionPending_.load() && !stillHeld()) {
+                transitionPending_ = false;
+                onTransition();
+            }
+            if (active_ && ended_.load() && !transitionPending_.load() && heldFrames() == 0) onEnded();
             if (active_) {
                 logFirstAudio();
                 logUnderruns();
@@ -705,9 +739,21 @@ private:
             snap_.outputStatus = status;
             buffered = snap_.outputStatus.bufferFrames;
         }
+        held_.store(snap_.outputStatus.heldFrames, std::memory_order_relaxed);
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
         rust_->reportAudible(toOutput(base_) + consumed - std::min(buffered, consumed));
     }
+
+    uint64_t heldFrames() const { return output_ ? output_->status().heldFrames : 0; }
+
+    // The end of a track and a change of track wait for what a network player still holds.
+    bool eventDue() const {
+        const uint64_t held = held_.load(std::memory_order_relaxed);
+        return (ended_.load() && !held) || (transitionPending_.load() && held <= consumed_.load(std::memory_order_relaxed));
+    }
+
+    // A queued track reaches the device long before it is heard on a network player.
+    bool stillHeld() const { return heldFrames() > consumed_.load(std::memory_order_relaxed); }
 
     uint64_t currentPosition() const { return active_ ? sourcePosition() : position_; }
 
@@ -715,9 +761,16 @@ private:
     // manual crossfade's file stays at its start until its fade is heard.
     uint64_t sourcePosition() const {
         if (renderTransitions_.load(std::memory_order_acquire) < heldUntil_.load(std::memory_order_acquire)) return 0;
+        const uint64_t held = held_.load(std::memory_order_relaxed);
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
+        if (held > consumed && transitionPending_.load(std::memory_order_acquire)) {
+            const uint64_t left = held - consumed; // frames of the track being left, which is still heard
+            const uint64_t end = leaving_.load(std::memory_order_relaxed);
+            return end - std::min(left, end);
+        }
+        const uint64_t heard = consumed - std::min(held, consumed);
         const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
-        return base_ + (in == out || !out ? consumed : (consumed * in + out / 2) / out);
+        return base_ + (in == out || !out ? heard : (heard * in + out / 2) / out);
     }
     uint64_t toOutput(uint64_t sourceFrames) const {
         const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
@@ -871,7 +924,8 @@ private:
             position_ = deviceChange ? startFrame : 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), onDeviceFailure);
         }
-        if (const uint64_t shown = shownLength(*dec); startFrame && shown && startFrame >= shown) startFrame = 0;
+        const uint64_t shown = shownLength(*dec);
+        if (startFrame && shown && startFrame >= shown) startFrame = 0;
         negotiated_ = *plan;
         plan_ = withDsp(negotiated_);
         fmt_ = plan_.format;
@@ -890,6 +944,14 @@ private:
         }
         stages_[4] = measure::now();
 
+        {
+            std::lock_guard lock(streamMutex_);
+            streamTrack_ = {file_, shown > startFrame ? toOutput(shown - startFrame) : 0, toOutput(startFrame),
+                            ++streamSequence_};
+            nextStream_.clear();
+        }
+        held_ = 0;
+        pulled_ = settings_.backend == Backend::Network;
         base_ = startFrame;
         consumed_ = 0;
         prefilled_ = 0;
@@ -1057,7 +1119,7 @@ private:
     // `keepOutput`: the device plays silence on while another session is prepared, which reuses it if it takes the
     // same format; closing and reopening an ASIO driver costs about half a second at every manual change.
     void teardown(bool keepOutput = false) {
-        if (keepOutput && canKeepOutput()) {
+        if (keepOutput && settings_.backend != Backend::Network && canKeepOutput()) { // a network player gets a new URL
             switching_ = true;
             while (rendering_.load()) std::this_thread::yield();
         } else {
@@ -1103,6 +1165,10 @@ private:
             if (handledTransitions_ == manualTransition_ || queued_.empty()) continue;
             const Queued next = queued_.front();
             queued_.pop_front();
+            {
+                std::lock_guard lock(streamMutex_);
+                if (!nextStream_.empty()) nextStream_.pop_front();
+            }
             fadeSkip_ = FadeSkip::None;
             adopt(next);
             std::lock_guard lock(snapMutex_);
@@ -1305,6 +1371,14 @@ private:
     // shared with the decode / output threads
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
+    std::atomic<bool> pulled_{false};  // a network player takes what is ready, so nothing short is an underrun
+    std::atomic<uint64_t> held_{0};    // frames rendered that the device has not played
+    std::atomic<uint64_t> leaving_{0}; // where the track being left ended, while a network player still plays it
+    std::atomic<size_t> boundary_{kNoBoundary};
+    mutable std::mutex streamMutex_;
+    StreamTrack streamTrack_;
+    std::deque<StreamTrack> nextStream_; // queued, in order
+    uint64_t streamSequence_ = 0;
     std::atomic<int64_t> fullAt_{0}; // steady_clock ticks when the decoder last found its ring full
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
     std::atomic<bool> rawDsd_{false};            // the open stream is DoP or native DSD

@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Playback/LocalServer.h"
+#include <fstream>
+
 #include "Server/Network/Firewall.h"
+#include "Server/Network/NetworkOutput.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Playback/Outputs.h"
 
@@ -55,6 +58,8 @@ bool startsEntry(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueSelect || kind == CommandKind::Next ||
            kind == CommandKind::Previous;
 }
+
+constexpr int kPlayerCoverPixels = 512;
 
 bool changesQueue(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
@@ -184,7 +189,10 @@ bool SnapshotCursor::accept(const Snapshot& s) {
 class LocalServer::Impl {
 public:
     Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
-        : settings_(settings), settingsFile_(std::move(settingsFile)), factory_(std::move(factory)),
+        : settings_(settings), settingsFile_(std::move(settingsFile)),
+          factory_([this, given = std::move(factory)](const Settings& s) {
+              return s.backend == Backend::Network ? networkOutput(s) : given(s);
+          }),
           engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)) {
         published_.settings = settingsDto(settings_);
         published_.playback = playback(engine_->snapshot());
@@ -415,6 +423,8 @@ public:
     void clearArtworkCache() {
         if (artwork_) artwork_->clear();
     }
+
+    void setFinderOptions(const FinderOptions& options) { finderOptions_ = options; }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
         const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
@@ -1466,14 +1476,88 @@ private:
         if (finder_) {
             finder_->search();
         } else {
-            FinderOptions options;
+            FinderOptions options = finderOptions_;
             if (!firewallRuleExists()) options.notifyPort = 0;
+            std::scoped_lock lock(finderMutex_);
             finder_ = std::make_unique<PlayerFinder>(options, [this] {
                 devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
             });
         }
         for (const auto& player : finder_->players())
             catalog.network.push_back({player.description.udn, player.description.name});
+    }
+
+    std::unique_ptr<audio::IOutput> networkOutput(const Settings& settings) {
+        std::optional<upnp::PlayerDescription> player;
+        {
+            std::scoped_lock lock(finderMutex_);
+            if (finder_)
+                for (auto& found : finder_->players())
+                    if (found.description.udn == settings.network.udn) player = std::move(found.description);
+        }
+        if (!player) throw audio::Error(audio::ErrorCode::DeviceNotFound, "the network player is not connected");
+        return createNetworkOutput(
+            *player, [this](const std::wstring& file) { return trackDetails(file); },
+            [this](const PlayerEvent& event) { followPlayer(event); });
+    }
+
+    TrackDetails trackDetails(const std::wstring& file) {
+        TrackDetails details;
+        const std::string path = toUtf8(file);
+        const auto now = snapshot();
+        const auto entry =
+            std::ranges::find_if(now.queue.entries, [&](const QueueEntry& e) { return e.source.pathUtf8() == path; });
+        if (entry != now.queue.entries.end()) {
+            details.title = entry->title;
+            details.artist = entry->artist;
+            details.album = entry->album;
+        }
+        if (details.title.empty()) details.title = toUtf8(std::filesystem::path(file).stem().wstring());
+        try {
+            if (library_) {
+                ArtworkRequest request;
+                request.kind = ArtworkKind::Track;
+                request.path = path;
+                if (const auto cover = artwork(request, {})) {
+                    std::ifstream in(cover->path, std::ios::binary);
+                    const std::vector<uint8_t> image((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                    const auto square = squarePicture(image, kPlayerCoverPixels);
+                    details.coverJpeg.assign(square.begin(), square.end());
+                }
+            }
+        } catch (const std::exception& e) {
+            log::info("no cover for a network player: %s", e.what());
+        }
+        return details;
+    }
+
+    // What a network player did by itself, from its remote or app (docs/Plan.md §5.10).
+    void followPlayer(const PlayerEvent& event) {
+        Command command;
+        switch (event.kind) {
+        case PlayerEventKind::Playing:
+            command.kind = CommandKind::Play;
+            break;
+        case PlayerEventKind::Paused:
+            command.kind = CommandKind::Pause;
+            break;
+        case PlayerEventKind::NextTrack:
+            command.kind = CommandKind::Next;
+            break;
+        case PlayerEventKind::PreviousTrack:
+            command.kind = CommandKind::Previous;
+            break;
+        case PlayerEventKind::Seeked: {
+            const auto source = snapshot().playback.source;
+            if (!source) return;
+            command.kind = CommandKind::Seek;
+            command.frame = event.positionMs * source->sampleRate / 1000;
+            break;
+        }
+        default:
+            return;
+        }
+        enqueue(std::move(command));
     }
 
     // A DAC switched on or off raises several endpoint events, and its KS pin and ASIO device can follow later; the
@@ -1543,7 +1627,10 @@ private:
             }
         }
         deviceWatcher.reset();
-        finder_.reset();
+        {
+            std::scoped_lock lock(finderMutex_);
+            finder_.reset();
+        }
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
         engine_.reset();
@@ -1636,13 +1723,18 @@ private:
     std::unique_ptr<DiscordPresence> discord_;
     static constexpr std::chrono::seconds kDevicesSettle{1};
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
-    std::unique_ptr<PlayerFinder> finder_;     // from the first device scan
+    FinderOptions finderOptions_;
+    std::mutex finderMutex_;
+    std::unique_ptr<PlayerFinder> finder_; // from the first device scan
     std::thread worker_;
 };
 
 LocalServer::LocalServer(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
     : impl_(std::make_unique<Impl>(settings, std::move(settingsFile), std::move(factory))) {}
 LocalServer::~LocalServer() = default;
+void LocalServer::setFinderOptions(const FinderOptions& options) {
+    impl_->setFinderOptions(options);
+}
 CommandStamp LocalServer::submit(Command command) {
     return impl_->enqueue(std::move(command));
 }

@@ -680,4 +680,6 @@
   <data name="Firewall_AddButton.Content" xml:space="preserve"><value>Add the rule</value></data>
   <data name="Firewall_Notice.Title" xml:space="preserve"><value>The firewall rule is missing</value></data>
   <data name="Firewall_Notice.Message" xml:space="preserve"><value>Network players cannot reach CamelPlayer until the rule for private networks is added.</value></data>
+  <data name="SignalPath_Renderer" xml:space="preserve"><value>Network player</value></data>
+  <data name="Lamp_BitPerfectRenderer" xml:space="preserve"><value>Bit-perfect to the renderer</value></data>
 </root>

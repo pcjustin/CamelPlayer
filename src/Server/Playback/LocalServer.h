@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Server/Api/ServerApi.h"
+#include "Server/Network/PlayerFinder.h"
 #include "Engine/PlaybackEngine.h"
 
 namespace camel::server {
@@ -80,6 +81,8 @@ public:
     DataRecovery dataRecovery() const override;
     DiscordStatus discordStatus() const override;
     void setDiscordTexts(const DiscordTexts& texts) override;
+    // Where to look for network players; before the first device scan.
+    void setFinderOptions(const FinderOptions& options);
     // How the settings passed in were obtained (openSettings).
     void setSettingsRecovery(SettingsRecovery recovery);
 

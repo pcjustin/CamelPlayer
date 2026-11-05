@@ -125,6 +125,30 @@ size_t OutputBridge::render(uint8_t* destination, size_t frames) noexcept {
     return rendered;
 }
 
+size_t OutputBridge::boundaryInLastRender() const noexcept {
+    const auto* source = source_.load(std::memory_order_acquire);
+    return source ? source->boundaryInLastRender() : kNoBoundary;
+}
+
+bool OutputBridge::renderEnded() const noexcept {
+    const auto* source = source_.load(std::memory_order_acquire);
+    return source && source->renderEnded();
+}
+
+StreamTrack OutputBridge::streamTrack() const {
+    const auto* source = source_.load(std::memory_order_acquire);
+    return source ? source->streamTrack() : StreamTrack{};
+}
+
+std::optional<StreamTrack> OutputBridge::nextStreamTrack() const {
+    const auto* source = source_.load(std::memory_order_acquire);
+    return source ? source->nextStreamTrack() : std::nullopt;
+}
+
+bool OutputBridge::gapless() const {
+    return output_->gapless();
+}
+
 uint64_t OutputBridge::generation() const {
     std::lock_guard lock(controlMutex_);
     return generation_;

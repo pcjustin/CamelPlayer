@@ -45,6 +45,9 @@ struct PlayerObservation {
 class PlayerFollower {
 public:
     void expect(ExpectedTracks tracks);
+    // Just given to the player, which may report what it played before for a moment.
+    void expectLoaded(ExpectedTracks tracks, std::chrono::milliseconds now);
+    void expectNext(std::string track);
     void expectPosition(uint64_t positionMs, std::chrono::milliseconds now);
     std::vector<PlayerEvent> observe(const PlayerObservation& observation, std::chrono::milliseconds now);
     std::vector<PlayerEvent> lost();
@@ -57,6 +60,7 @@ private:
     std::optional<uint64_t> position_;
     std::chrono::milliseconds positionAt_{};
     bool ended_ = false;
+    std::chrono::milliseconds settledAt_{};
 };
 
 struct LinkOptions {
@@ -76,10 +80,15 @@ public:
 
     void expect(ExpectedTracks tracks);
     // False when the player refused or did not answer.
+    bool load(const std::string& uri, const std::string& metadata);
+    bool loadNext(const std::string& uri, const std::string& metadata);
     bool play();
     bool pause();
     bool stop();
     bool seek(uint64_t positionMs);
+    uint64_t positionMs() const; // in the current track, as last polled
+    bool stopped() const;        // as last polled
+    bool playing() const;        // as last polled
 
 private:
     struct Impl;

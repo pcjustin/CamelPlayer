@@ -1194,7 +1194,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         switch (plan.state) {
         case PipelineState::BitPerfect:
             lampColor_ = L"SystemFillColorSuccessBrush";
-            setAnnounced(LampText(), tr(L"Lamp_BitPerfect"));
+            setAnnounced(LampText(), tr(s.backend == Backend::Network ? L"Lamp_BitPerfectRenderer" : L"Lamp_BitPerfect"));
             break;
         case PipelineState::LosslessConversion:
             lampColor_ = L"SystemFillColorCautionBrush";
@@ -1298,7 +1298,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             add(tr(L"SignalPath_Dither"), to_hstring(bits) + L"-bit", PathState::Lossy);
         else if (container > bits)
             add(tr(L"SignalPath_Pad"), to_hstring(bits) + L"→" + to_hstring(container) + L"-bit", PathState::BitPerfect);
-        add(tr(L"SignalPath_Device"), ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)),
+        add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
+            ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)),
             plan.state == PipelineState::BitPerfect           ? PathState::BitPerfect
             : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
             : plan.state == PipelineState::LossySource        ? PathState::Lossy

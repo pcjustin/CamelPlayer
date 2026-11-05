@@ -214,6 +214,33 @@ TEST(PlayerFollowerTest, ReportsASeekOnlyWhenThePositionJumps) {
     EXPECT_EQ(follower.observe(seen, 7000ms), (std::vector<PlayerEvent>{{PlayerEventKind::Seeked, 5000}}));
 }
 
+TEST(PlayerFollowerTest, AStoppedPlayersPositionIsNotASeek) {
+    PlayerFollower follower;
+    follower.expect({"a", "", ""});
+    PlayerObservation seen;
+    seen.state = TransportState::Playing;
+    seen.positionMs = 1000;
+    follower.observe(seen, 0ms);
+    seen.state = TransportState::Stopped; // a Linkplay module then reports the track's length
+    seen.positionMs = 211000;
+    const auto events = follower.observe(seen, 100ms);
+    EXPECT_EQ(events, (std::vector<PlayerEvent>{{PlayerEventKind::Stopped}}));
+    seen.state = TransportState::Playing;
+    seen.positionMs = 0;
+    EXPECT_EQ(follower.observe(seen, 200ms), (std::vector<PlayerEvent>{{PlayerEventKind::Playing}}));
+}
+
+TEST(PlayerFollowerTest, ThePositionRightAfterANewTrackIsNotASeek) {
+    PlayerFollower follower;
+    follower.expectLoaded({"a", "", ""}, 0ms);
+    PlayerObservation seen;
+    seen.state = TransportState::Playing;
+    seen.positionMs = 200000; // of what it played before
+    follower.observe(seen, 100ms);
+    seen.positionMs = 0;
+    EXPECT_TRUE(follower.observe(seen, 200ms).empty());
+}
+
 TEST(PlayerFollowerTest, ASeekAskedByCamelPlayerIsNotReportedBack) {
     PlayerFollower follower;
     follower.expect({"a", "", ""});

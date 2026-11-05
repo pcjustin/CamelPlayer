@@ -32,6 +32,7 @@ using Values = std::map<std::string, std::string>;
 constexpr uint64_t kSeekMarginMs = 2000; // polls and events lag, so a smaller jump is not a seek
 constexpr int kNotifyTimeoutMs = 2000;
 constexpr auto kTick = milliseconds(25);
+constexpr auto kSettling = milliseconds(3000); // a player can still report the old track this long after a new one
 constexpr SOCKET kNoSocket = INVALID_SOCKET;
 
 std::optional<TransportState> stateFrom(const std::string& text) {
@@ -68,32 +69,21 @@ std::string headerValue(const std::string& head, const char* name) {
     return {};
 }
 
-// The address of this computer that `host` can reach.
-std::string localAddressFor(const std::string& host) {
-    const SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    sockaddr_in target{};
-    target.sin_family = AF_INET;
-    target.sin_port = htons(9);
-    inet_pton(AF_INET, host.c_str(), &target.sin_addr);
-    std::string local;
-    if (connect(probe, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) == 0) {
-        sockaddr_in address{};
-        int length = sizeof(address);
-        char text[INET_ADDRSTRLEN] = {};
-        if (getsockname(probe, reinterpret_cast<sockaddr*>(&address), &length) == 0 &&
-            inet_ntop(AF_INET, &address.sin_addr, text, sizeof(text)))
-            local = text;
-    }
-    closesocket(probe);
-    return local;
-}
-
 } // namespace
 
 void PlayerFollower::expect(ExpectedTracks tracks) {
     expected_ = std::move(tracks);
     ended_ = false;
     position_.reset();
+}
+
+void PlayerFollower::expectLoaded(ExpectedTracks tracks, milliseconds now) {
+    expect(std::move(tracks));
+    settledAt_ = now + kSettling;
+}
+
+void PlayerFollower::expectNext(std::string track) {
+    expected_.next = std::move(track);
 }
 
 void PlayerFollower::expectPosition(uint64_t positionMs, milliseconds now) {
@@ -126,7 +116,7 @@ std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observ
         events.push_back({PlayerEventKind::TakenOver});
         return events;
     }
-    if (observation.track) {
+    if (observation.track && now >= settledAt_) {
         followTrack(*observation.track, events);
         if (ended_) return events;
     }
@@ -139,15 +129,19 @@ std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observ
                                                                   : PlayerEventKind::Stopped});
     }
     if (observation.positionMs) {
-        if (position_) {
+        const bool stopped = state_ == TransportState::Stopped;
+        if (stopped) position_.reset(); // a stopped Linkplay reports the track's length as its position
+        if (position_ && now >= settledAt_) {
             const auto elapsed = state_ == TransportState::Playing ? uint64_t((now - positionAt_).count()) : uint64_t{0};
             const uint64_t predicted = *position_ + elapsed;
             const uint64_t reported = *observation.positionMs;
             if ((reported > predicted ? reported - predicted : predicted - reported) > kSeekMarginMs)
                 events.push_back({PlayerEventKind::Seeked, reported});
         }
-        position_ = observation.positionMs;
-        positionAt_ = now;
+        if (!stopped) {
+            position_ = observation.positionMs;
+            positionAt_ = now;
+        }
     }
     return events;
 }
@@ -178,6 +172,9 @@ struct PlayerLink::Impl {
     PlayerFollower follower;
     std::deque<Notification> notifications;
     std::optional<std::string> ownSource, seenSource;
+    std::string currentId; // OpenHome: the playlist entry playing
+    std::atomic<uint64_t> lastPositionMs = 0;
+    std::atomic<bool> lastStopped = false, lastPlaying = false, sawPlaying = false;
     Clock::time_point started = Clock::now();
     std::thread listening, working;
 
@@ -233,7 +230,7 @@ struct PlayerLink::Impl {
     void openListener() {
         const auto* first = player.services.empty() ? nullptr : &player.services.front();
         const std::string host = first ? upnp::hostOf(first->controlUrl) : std::string();
-        const std::string local = localAddressFor(host);
+        const std::string local = upnp::localAddressFor(host);
         if (local.empty()) throw std::runtime_error("no route to the player");
         listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in address{};
@@ -331,6 +328,12 @@ struct PlayerLink::Impl {
     }
 
     void observe(const PlayerObservation& observation) {
+        if (observation.positionMs) lastPositionMs = *observation.positionMs;
+        if (observation.state) {
+            lastPlaying = *observation.state == TransportState::Playing;
+            if (lastPlaying) sawPlaying = true;
+            lastStopped = sawPlaying && *observation.state == TransportState::Stopped; // not the moment before it starts
+        }
         std::vector<PlayerEvent> events;
         {
             std::scoped_lock lock(mutex);
@@ -477,6 +480,61 @@ void PlayerLink::expect(ExpectedTracks tracks) {
     impl_->ownSource = impl_->seenSource;
 }
 
+bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
+    auto& link = *impl_;
+    link.lastPositionMs = 0;
+    link.lastStopped = false; // what the player reports next is about the new track
+    link.lastPlaying = false;
+    link.sawPlaying = false;
+    if (link.player.protocol == upnp::PlayerProtocol::OpenHome) {
+        try {
+            if (!link.call("Playlist", "DeleteAll", {}).ok) return false;
+            const auto inserted = link.call("Playlist", "Insert", {{"AfterId", "0"}, {"Uri", uri}, {"Metadata", metadata}});
+            const auto id = inserted.values.find("NewId");
+            if (!inserted.ok || id == inserted.values.end() || !link.call("Playlist", "SeekId", {{"Value", id->second}}).ok)
+                return false;
+            link.currentId = id->second;
+            std::scoped_lock lock(link.mutex);
+            link.follower.expectLoaded({id->second, {}, {}}, link.now());
+            link.ownSource = link.seenSource;
+            return true;
+        } catch (const std::exception& e) {
+            log::warn("network player Insert: %s", e.what());
+            return false;
+        }
+    }
+    if (!link.attempt("AVTransport", "SetAVTransportURI",
+                      {{"InstanceID", "0"}, {"CurrentURI", uri}, {"CurrentURIMetaData", metadata}}))
+        return false;
+    std::scoped_lock lock(link.mutex);
+    link.follower.expectLoaded({uri, {}, {}}, link.now());
+    return true;
+}
+
+bool PlayerLink::loadNext(const std::string& uri, const std::string& metadata) {
+    auto& link = *impl_;
+    std::string track = uri;
+    if (link.player.protocol == upnp::PlayerProtocol::OpenHome) {
+        try {
+            const auto inserted =
+                link.call("Playlist", "Insert", {{"AfterId", link.currentId}, {"Uri", uri}, {"Metadata", metadata}});
+            const auto id = inserted.values.find("NewId");
+            if (!inserted.ok || id == inserted.values.end()) return false;
+            track = id->second;
+            link.currentId = track;
+        } catch (const std::exception& e) {
+            log::warn("network player Insert: %s", e.what());
+            return false;
+        }
+    } else if (!link.attempt("AVTransport", "SetNextAVTransportURI",
+                             {{"InstanceID", "0"}, {"NextURI", uri}, {"NextURIMetaData", metadata}})) {
+        return false;
+    }
+    std::scoped_lock lock(link.mutex);
+    link.follower.expectNext(track);
+    return true;
+}
+
 bool PlayerLink::play() {
     if (impl_->player.protocol == upnp::PlayerProtocol::OpenHome) return impl_->attempt("Playlist", "Play", {});
     return impl_->attempt("AVTransport", "Play", {{"InstanceID", "0"}, {"Speed", "1"}});
@@ -501,6 +559,18 @@ bool PlayerLink::seek(uint64_t positionMs) {
         return impl_->attempt("Playlist", "SeekSecondAbsolute", {{"Value", std::to_string(positionMs / 1000)}});
     return impl_->attempt("AVTransport", "Seek",
                           {{"InstanceID", "0"}, {"Unit", "REL_TIME"}, {"Target", upnp::formatDuration(positionMs)}});
+}
+
+uint64_t PlayerLink::positionMs() const {
+    return impl_->lastPositionMs;
+}
+
+bool PlayerLink::stopped() const {
+    return impl_->lastStopped;
+}
+
+bool PlayerLink::playing() const {
+    return impl_->lastPlaying;
 }
 
 } // namespace camel::server

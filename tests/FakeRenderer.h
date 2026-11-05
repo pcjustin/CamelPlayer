@@ -9,7 +9,9 @@
 #include <ws2tcpip.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <string>
@@ -74,6 +76,52 @@ public:
         std::scoped_lock lock(mutex_);
         extraLocation_ = std::move(location);
     }
+    // What GetProtocolInfo declares.
+    void declare(std::string sink) {
+        std::scoped_lock lock(mutex_);
+        sink_ = std::move(sink);
+    }
+    // A player that plays one track at a time.
+    void withoutNextTrack() { noNext_ = true; }
+    // Plays back at this many bytes a second instead of as fast as it fetches.
+    void limitFetch(uint64_t bytesPerSecond) { fetchLimit_ = bytesPerSecond; }
+    void reportNoPosition() { noPosition_ = true; }
+    // Refuses SetAVTransportURI and Insert, as a player does a format it cannot play.
+    void refuseStreams() { refuseStreams_ = true; }
+
+    std::map<std::string, std::string> received() const {
+        std::scoped_lock lock(mutex_);
+        return received_;
+    }
+    std::vector<std::string> played() const {
+        std::scoped_lock lock(mutex_);
+        return played_;
+    }
+    std::string metadata() const {
+        std::scoped_lock lock(mutex_);
+        return metadata_;
+    }
+    std::string currentUri() const {
+        std::scoped_lock lock(mutex_);
+        return currentUri_;
+    }
+    std::string state() const {
+        std::scoped_lock lock(mutex_);
+        const auto found = state_.find("state");
+        return found == state_.end() ? std::string() : found->second;
+    }
+    std::string fetchHeaders() const {
+        std::scoped_lock lock(mutex_);
+        return fetchHeaders_;
+    }
+    // Stops fetching and changes to another source's track, as Spotify Connect does.
+    void takeOver(const std::string& uri) {
+        stopFetch();
+        set("track", uri);
+        set("state", "PLAYING");
+        emitLastChange(R"(<CurrentTrackURI val=")" + uri + R"("/><TransportState val="PLAYING"/>)");
+    }
+
     // Stops answering searches, while its other services stay.
     void goQuiet() { quiet_ = true; }
 
@@ -88,6 +136,7 @@ public:
 
     void disappear() {
         if (gone_.exchange(true)) return;
+        stopFetch();
         closesocket(http_);
         closesocket(udp_);
         httpThread_.join();
@@ -218,6 +267,7 @@ private:
             }
             shutdown(client, SD_SEND);
             closesocket(client);
+            applyTransport();
         }
     }
 
@@ -247,6 +297,13 @@ private:
             requests_.push_back(method + " " + path);
         }
         if (method == "GET" && path == "/description.xml") return http(200, descriptionXml());
+        if (method == "GET" && path == "/AVTransport.xml") {
+            std::string actions;
+            for (const char* name : {"SetAVTransportURI", "Play", "Pause", "Stop", "Seek"})
+                actions += std::string("<action><name>") + name + "</name></action>";
+            if (!noNext_) actions += "<action><name>SetNextAVTransportURI</name></action>";
+            return http(200, "<scpd><actionList>" + actions + "</actionList></scpd>");
+        }
         if (method == "POST" && path.starts_with("/ctl/")) return soap(header(head, "soapaction"), body);
         if (method == "SUBSCRIBE" && path.starts_with("/evt/")) return subscribe(path.substr(5), head);
         if (method == "UNSUBSCRIBE" && path.starts_with("/evt/")) {
@@ -279,7 +336,127 @@ public:
     }
 
 private:
-    std::string soap(std::string action, const std::string&) {
+    static std::string between(const std::string& body, const std::string& tag) {
+        const auto start = body.find("<" + tag + ">");
+        if (start == std::string::npos) return {};
+        const auto from = start + tag.size() + 2;
+        std::string value = body.substr(from, body.find("</" + tag + ">", from) - from);
+        for (const auto& [escaped, plain] :
+             std::vector<std::pair<std::string, std::string>>{{"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&amp;", "&"}})
+            for (auto at = value.find(escaped); at != std::string::npos; at = value.find(escaped, at + plain.size()))
+                value.replace(at, escaped.size(), plain);
+        return value;
+    }
+
+    void startFetch() {
+        stopFetch();
+        fetchStop_ = false;
+        fetchThread_ = std::thread([this] { fetchLoop(); });
+    }
+
+    void stopFetch() {
+        fetchStop_ = true;
+        const SOCKET open = fetchSocket_.exchange(INVALID_SOCKET);
+        if (open != INVALID_SOCKET) closesocket(open);
+        if (fetchThread_.joinable()) fetchThread_.join();
+    }
+
+    void fetchLoop() {
+        for (;;) {
+            std::string uri;
+            {
+                std::scoped_lock lock(mutex_);
+                uri = currentUri_;
+                nextPending_ = false;
+            }
+            if (uri.empty() || !fetch(uri) || fetchStop_) {
+                fetching_ = false;
+                return;
+            }
+            std::string next;
+            {
+                std::scoped_lock lock(mutex_);
+                next = nextUri_;
+                nextUri_.clear();
+                if (!next.empty()) {
+                    currentUri_ = next;
+                    state_["track"] = next;
+                    for (const auto& [id, entry] : playlist_)
+                        if (entry == next) state_["track"] = id;
+                } else {
+                    state_["state"] = kind_ == RendererKind::OpenHome ? "Stopped" : "STOPPED";
+                }
+            }
+            if (next.empty()) {
+                fetching_ = false;
+                if (kind_ == RendererKind::UpnpAv) emitLastChange(R"(<TransportState val="STOPPED"/>)");
+                return;
+            }
+            if (kind_ == RendererKind::OpenHome)
+                emitVariable("Playlist", "Id", state("track"));
+            else
+                emitLastChange(R"(<CurrentTrackURI val=")" + next + R"("/>)");
+        }
+    }
+
+    std::string state(const char* key) {
+        std::scoped_lock lock(mutex_);
+        return state_[key];
+    }
+
+    bool fetch(const std::string& uri) {
+        const auto hostStart = uri.find("://") + 3, colon = uri.find(':', hostStart), slash = uri.find('/', colon);
+        const SOCKET in = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        fetchSocket_ = in;
+        sockaddr_in target = loopback();
+        target.sin_port = htons(uint16_t(atoi(uri.substr(colon + 1, slash - colon - 1).c_str())));
+        inet_pton(AF_INET, uri.substr(hostStart, colon - hostStart).c_str(), &target.sin_addr);
+        if (connect(in, reinterpret_cast<sockaddr*>(&target), sizeof(target)) != 0) return false;
+        const std::string request = "GET " + uri.substr(slash) +
+                                    " HTTP/1.1\r\nHost: " + uri.substr(hostStart, slash - hostStart) +
+                                    "\r\nConnection: close\r\n\r\n";
+        ::send(in, request.data(), int(request.size()), 0);
+        std::string data;
+        char buffer[32768];
+        size_t headEnd = std::string::npos;
+        uint64_t bytesPerSecond = 0;
+        const auto started = std::chrono::steady_clock::now();
+        for (;;) {
+            const int read = recv(in, buffer, sizeof(buffer), 0);
+            if (read <= 0) break;
+            data.append(buffer, size_t(read));
+            if (headEnd == std::string::npos) {
+                headEnd = data.find("\r\n\r\n");
+                if (headEnd == std::string::npos) continue;
+                std::scoped_lock lock(mutex_);
+                fetchHeaders_ = data.substr(0, headEnd);
+            }
+            const size_t body = data.size() - headEnd - 4;
+            if (!bytesPerSecond && body >= 44 && data.compare(headEnd + 4, 4, "RIFF") == 0)
+                bytesPerSecond = *reinterpret_cast<const uint32_t*>(data.data() + headEnd + 4 + 28);
+            if (bytesPerSecond && !noPosition_) {
+                const uint64_t ms = uint64_t(body) * 1000 / bytesPerSecond;
+                char text[32];
+                snprintf(text, sizeof(text), "%llu:%02llu:%02llu", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60);
+                set("time", text);
+                set("seconds", std::to_string(ms / 1000));
+            }
+            if (const uint64_t limit = fetchLimit_.load()) {
+                const auto due = started + std::chrono::milliseconds(uint64_t(body) * 1000 / limit);
+                std::this_thread::sleep_until(due);
+            }
+            if (fetchStop_) break;
+        }
+        fetchSocket_.exchange(INVALID_SOCKET);
+        closesocket(in);
+        if (headEnd == std::string::npos) return false;
+        std::scoped_lock lock(mutex_);
+        received_[uri] = data.substr(headEnd + 4);
+        played_.push_back(uri);
+        return true;
+    }
+
+    std::string soap(std::string action, const std::string& body) {
         if (action.size() >= 2 && action.front() == '"') action = action.substr(1, action.size() - 2);
         const auto hash = action.find('#');
         const std::string type = action.substr(0, hash), name = action.substr(hash + 1);
@@ -291,6 +468,46 @@ private:
                 R"(<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>501</errorCode></UPnPError></detail></s:Fault></s:Body></s:Envelope>)");
         }
         std::string values;
+        if (refuseStreams_ && (name == "SetAVTransportURI" || name == "Insert")) {
+            return http(
+                500,
+                R"(<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>714</errorCode></UPnPError></detail></s:Fault></s:Body></s:Envelope>)");
+        }
+        if (name == "SetAVTransportURI") {
+            currentUri_ = between(body, "CurrentURI");
+            metadata_ = between(body, "CurrentURIMetaData");
+            state_["track"] = currentUri_;
+            nextUri_.clear();
+        } else if (name == "SetNextAVTransportURI") {
+            nextUri_ = between(body, "NextURI");
+            metadata_ = between(body, "NextURIMetaData");
+        } else if (name == "Insert") {
+            const std::string id = std::to_string(++nextPlaylistId_);
+            playlist_[id] = between(body, "Uri");
+            metadata_ = between(body, "Metadata");
+            if (between(body, "AfterId") == "0") {
+                currentUri_ = playlist_[id];
+                state_["track"] = id;
+            } else {
+                nextUri_ = playlist_[id];
+            }
+            values = "<NewId>" + id + "</NewId>";
+        } else if (name == "SeekId") {
+            state_["track"] = between(body, "Value");
+        } else if (name == "DeleteAll") {
+            playlist_.clear();
+            nextUri_.clear();
+        } else if (name == "Play") {
+            state_["state"] = kind_ == RendererKind::OpenHome ? "Playing" : "PLAYING";
+            if (!fetching_.exchange(true)) playRequested_ = true;
+        } else if (name == "Pause") {
+            state_["state"] = kind_ == RendererKind::OpenHome ? "Paused" : "PAUSED_PLAYBACK";
+        } else if (name == "Stop") {
+            state_["state"] = kind_ == RendererKind::OpenHome ? "Stopped" : "STOPPED";
+            stopRequested_ = true;
+        } else if (name == "GetProtocolInfo") {
+            values = "<Source></Source><Sink>" + sink_ + "</Sink>";
+        }
         const auto add = [&](const char* tag, const char* key, const char* fallback) {
             const auto found = state_.find(key);
             values += std::string("<") + tag + ">" + (found == state_.end() ? fallback : found->second) + "</" + tag + ">";
@@ -312,6 +529,15 @@ private:
         return http(200, R"(<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:)" + name +
                              R"(Response xmlns:u=")" + type + R"(">)" + values + "</u:" + name +
                              "Response></s:Body></s:Envelope>");
+    }
+
+    // SOAP answers come first, as a real player's do: what they start waits for the next request.
+    void applyTransport() {
+        if (stopRequested_.exchange(false)) {
+            stopFetch();
+            fetching_ = false;
+        }
+        if (playRequested_.exchange(false)) startFetch();
     }
 
     void emit(const std::string& service, const std::string& properties) {
@@ -355,7 +581,16 @@ private:
     SOCKET http_ = INVALID_SOCKET, udp_ = INVALID_SOCKET;
     uint16_t httpPort_ = 0, ssdpPort_ = 0;
     std::thread httpThread_, udpThread_;
-    std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false;
+    std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
+                      refuseStreams_ = false;
+    std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false;
+    std::atomic<uint64_t> fetchLimit_ = 0;
+    std::atomic<SOCKET> fetchSocket_ = INVALID_SOCKET;
+    std::thread fetchThread_;
+    std::string sink_ = "http-get:*:audio/wav:*,http-get:*:audio/L16:*", currentUri_, nextUri_, metadata_, fetchHeaders_;
+    std::map<std::string, std::string> received_, playlist_;
+    std::vector<std::string> played_;
+    int nextPlaylistId_ = 0;
     std::atomic<int> searches_ = 0;
     mutable std::mutex mutex_;
     std::map<std::string, std::string> state_;

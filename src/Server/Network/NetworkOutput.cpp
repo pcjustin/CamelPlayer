@@ -1,0 +1,749 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#include "Server/Network/NetworkOutput.h"
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#include <algorithm>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include "Common/util/Log.h"
+#include "Common/util/Text.h"
+#include "Server/Support/Http.h"
+
+#pragma comment(lib, "ws2_32.lib")
+
+namespace camel::server {
+
+namespace {
+
+using audio::DeviceFormat;
+using audio::Error;
+using audio::ErrorCode;
+using audio::IRenderSource;
+using audio::OutputStatus;
+using audio::SampleType;
+using audio::StreamTrack;
+using Clock = std::chrono::steady_clock;
+using std::chrono::milliseconds;
+
+constexpr SOCKET kNoSocket = INVALID_SOCKET;
+constexpr size_t kChunkFrames = 2048;
+constexpr size_t kRetainBytes = size_t{16} << 20; // what a player that reconnects can ask for again
+constexpr uint64_t kUnknownLength = uint64_t{1} << 31;
+constexpr size_t kDsfBlock = 4096;
+constexpr size_t kDsfHeader = 92;
+constexpr size_t kWavHeader = 44;
+constexpr auto kPatience = milliseconds(1500);
+
+void putLe(std::string& out, uint64_t value, int bytes) {
+    for (int i = 0; i < bytes; ++i) out.push_back(char((value >> (8 * i)) & 0xFF));
+}
+
+std::string wavHeader(const DeviceFormat& format, uint64_t dataBytes) {
+    const uint32_t data = uint32_t(std::min<uint64_t>(dataBytes, 0xFFFFFFFFULL - 36));
+    const uint32_t blockAlign = format.bytesPerFrame();
+    std::string header = "RIFF";
+    putLe(header, 36ULL + data, 4);
+    header += "WAVEfmt ";
+    putLe(header, 16, 4);
+    putLe(header, 1, 2); // PCM
+    putLe(header, format.channels, 2);
+    putLe(header, format.sampleRate, 4);
+    putLe(header, uint64_t{format.sampleRate} * blockAlign, 4);
+    putLe(header, blockAlign, 2);
+    putLe(header, uint64_t{audio::bytesPerSample(format.type)} * 8, 2);
+    header += "data";
+    putLe(header, data, 4);
+    return header;
+}
+
+// DSD interleaved a byte per channel, the oldest sample in each byte's top bit, becomes blocks of one channel with the
+// oldest sample in the bottom bit.
+std::string dsfHeader(const DeviceFormat& format, uint64_t frames) {
+    const uint64_t blocks = (frames + kDsfBlock - 1) / kDsfBlock;
+    const uint64_t dataBytes = blocks * kDsfBlock * format.channels;
+    std::string header = "DSD ";
+    putLe(header, 28, 8);
+    putLe(header, kDsfHeader + dataBytes, 8);
+    putLe(header, 0, 8);
+    header += "fmt ";
+    putLe(header, 52, 8);
+    putLe(header, 1, 4); // format version
+    putLe(header, 0, 4); // DSD raw
+    putLe(header, 2, 4); // stereo
+    putLe(header, format.channels, 4);
+    putLe(header, uint64_t{format.sampleRate} * 8, 4);
+    putLe(header, 1, 4); // one bit per sample
+    putLe(header, frames * 8, 8);
+    putLe(header, kDsfBlock, 4);
+    putLe(header, 0, 4);
+    header += "data";
+    putLe(header, 12 + dataBytes, 8);
+    return header;
+}
+
+uint8_t reverseBits(uint8_t value) {
+    value = uint8_t((value & 0xF0) >> 4 | (value & 0x0F) << 4);
+    value = uint8_t((value & 0xCC) >> 2 | (value & 0x33) << 2);
+    return uint8_t((value & 0xAA) >> 1 | (value & 0x55) << 1);
+}
+
+std::string xmlText(std::string_view text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '&')
+            out += "&amp;";
+        else if (c == '<')
+            out += "&lt;";
+        else if (c == '>')
+            out += "&gt;";
+        else if (c == '"')
+            out += "&quot;";
+        else
+            out += c;
+    }
+    return out;
+}
+
+// One track of the stream: bytes the player has asked for or may ask for again.
+struct Body {
+    uint32_t id = 0;
+    StreamTrack track;
+    std::string contentType, protocolInfo, extension, uri, didl, coverJpeg;
+    uint64_t totalBytes = 0, totalFrames = 0;
+    bool lengthKnown = false;
+    std::vector<uint8_t> retained;
+    uint64_t retainedFrom = 0; // offset of retained[0]
+    uint64_t framesWritten = 0;
+    bool complete = false;
+    std::vector<uint8_t> dsfLeft, dsfRight;
+
+    uint64_t produced() const { return retainedFrom + retained.size(); }
+};
+
+class NetworkOutput final : public audio::IOutput {
+public:
+    NetworkOutput(upnp::PlayerDescription player, std::function<TrackDetails(const std::wstring&)> details,
+                  std::function<void(const PlayerEvent&)> follow, NetworkOutputOptions options)
+        : player_(std::move(player)), details_(std::move(details)), follow_(std::move(follow)), options_(options) {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+        readCapabilities();
+    }
+
+    ~NetworkOutput() override {
+        close();
+        link_.reset();
+        WSACleanup();
+    }
+    NetworkOutput(const NetworkOutput&) = delete;
+    NetworkOutput& operator=(const NetworkOutput&) = delete;
+
+    bool supports(const DeviceFormat& f) override {
+        if (f.channels != 2) return false;
+        if (f.type == SampleType::Dsd8) return formats_.dsf;
+        if (f.type == SampleType::Int16) return formats_.wav || formats_.l16;
+        if (f.type == SampleType::Int24) return formats_.wav || formats_.l24;
+        return false;
+    }
+
+    bool gapless() const override { return gapless_; }
+
+    void open(const DeviceFormat& f, IRenderSource* source) override {
+        close();
+        ensureLink();
+        openListener();
+        {
+            std::scoped_lock lock(mutex_);
+            format_ = f;
+            source_ = source;
+            ++generation_;
+            bodies_.clear();
+            carry_.clear();
+            framesRendered_ = 0;
+            framesFinished_ = 0;
+            started_ = false;
+            playing_ = false;
+            playingSince_ = {};
+            nextId_ = 0;
+            announcedNext_ = 0;
+            closing_ = false;
+            bodies_.push_back(makeBody(source->streamTrack()));
+        }
+        acceptor_ = std::thread([this] { acceptLoop(); });
+        announcer_ = std::thread([this] { announceLoop(); });
+    }
+
+    void start() override {
+        std::string uri, didl;
+        {
+            std::scoped_lock lock(mutex_);
+            if (started_) {
+                uri.clear();
+            } else {
+                uri = bodies_.front().uri;
+                didl = bodies_.front().didl;
+            }
+        }
+        if (!uri.empty() && !link_->load(uri, didl)) throw Error(ErrorCode::FormatNotSupported, "the player refused the stream");
+        {
+            std::scoped_lock lock(mutex_);
+            started_ = true;
+            playing_ = true;
+        }
+        announceNext();
+        if (!link_->play()) throw Error(ErrorCode::DriverError, "the player did not start");
+        std::scoped_lock lock(mutex_);
+        if (playingSince_ == Clock::time_point{}) playingSince_ = Clock::now();
+        moved_.notify_all();
+    }
+
+    void pause() override {
+        {
+            std::scoped_lock lock(mutex_);
+            playing_ = false;
+        }
+        if (link_) link_->pause();
+    }
+
+    void close() override {
+        {
+            std::scoped_lock lock(mutex_);
+            if (!acceptor_.joinable()) return;
+            closing_ = true;
+            for (const SOCKET client : clients_) closesocket(client);
+            clients_.clear();
+            moved_.notify_all();
+        }
+        closesocket(listener_);
+        listener_ = kNoSocket;
+        acceptor_.join();
+        announcer_.join();
+        for (auto& connection : connections_) connection.join();
+        connections_.clear();
+        std::scoped_lock lock(mutex_);
+        source_ = nullptr;
+        if (link_ && started_) link_->stop();
+        started_ = false;
+    }
+
+    OutputStatus status() const override {
+        OutputStatus status;
+        status.mode = "UPnP · " + player_.name;
+        status.heldFrames = held();
+        if (!gapless_) status.adjustments.emplace_back("this player cannot follow one track with the next without a gap");
+        return status;
+    }
+
+private:
+    void readCapabilities() {
+        try {
+            if (const auto* manager = player_.service("ConnectionManager")) {
+                const auto request = upnp::soapRequest(manager->type, "GetProtocolInfo", {});
+                const auto reply = http::send("POST", manager->controlUrl,
+                                              "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + manager->type +
+                                                  "#GetProtocolInfo\"",
+                                              request, options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
+                const auto parsed = upnp::parseSoapReply(reply.status, reply.body);
+                if (const auto sink = parsed.values.find("Sink"); sink != parsed.values.end())
+                    formats_ = upnp::parseProtocolInfo(sink->second);
+            }
+            if (player_.protocol == upnp::PlayerProtocol::OpenHome) {
+                gapless_ = true;
+                if (!formats_.wav && !formats_.l16) formats_.wav = true; // OpenHome players take WAV by URL
+            } else if (const auto* transport = player_.service("AVTransport"); transport && !transport->scpdUrl.empty()) {
+                const auto reply =
+                    http::send("GET", transport->scpdUrl, "", "", options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
+                const auto actions = upnp::parseActions(reply.body);
+                gapless_ = std::ranges::find(actions, "SetNextAVTransportURI") != actions.end();
+            }
+        } catch (const std::exception& e) {
+            log::warn("network player %s: %s", player_.name.c_str(), e.what());
+        }
+    }
+
+    void ensureLink() {
+        if (link_) return;
+        try {
+            link_ = std::make_unique<PlayerLink>(player_, [this](const PlayerEvent& event) { onPlayer(event); }, options_.link);
+        } catch (const std::exception& e) {
+            throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: " + std::string(e.what()));
+        }
+    }
+
+    void onPlayer(const PlayerEvent& event) {
+        if (event.kind == PlayerEventKind::Lost) {
+            raiseError(Error(ErrorCode::DeviceLost, "the network player is not connected"));
+            return;
+        }
+        if (event.kind == PlayerEventKind::TakenOver) {
+            raiseError(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+            return;
+        }
+        if (event.kind == PlayerEventKind::NextTrack) {
+            std::scoped_lock lock(mutex_);
+            if (bodies_.size() > 1 && bodies_.front().complete) {
+                // The stream's own change of track: the player moved on to what it was given next.
+                framesFinished_ += bodies_.front().framesWritten;
+                bodies_.pop_front();
+                moved_.notify_all();
+                return;
+            }
+        }
+        if (event.kind == PlayerEventKind::Seeked) {
+            std::scoped_lock lock(mutex_);
+            if (!bodies_.empty()) {
+                PlayerEvent seek = event;
+                seek.positionMs += bodies_.front().track.startFrame * 1000 / std::max(format_.sampleRate, 1U);
+                if (follow_) follow_(seek);
+            }
+            return;
+        }
+        if (follow_ && event.kind != PlayerEventKind::Stopped) follow_(event);
+    }
+
+    uint64_t playedFrames() const {
+        uint64_t reported = link_ ? link_->positionMs() * format_.sampleRate / 1000 : 0;
+        // A player that never reports a position is taken to play in real time.
+        if (reported == 0 && playingSince_ != Clock::time_point{}) {
+            const auto elapsed = std::chrono::duration_cast<milliseconds>(Clock::now() - playingSince_).count();
+            if (elapsed > 3000) reported = uint64_t(elapsed) * format_.sampleRate / 1000;
+        }
+        return reported;
+    }
+
+    uint64_t held() const {
+        std::scoped_lock lock(mutex_);
+        if (!source_ || !started_) return 0;
+        if (link_ && link_->stopped() && bodies_.size() <= 1 && !bodies_.empty() && bodies_.front().complete) return 0;
+        const uint64_t played = framesFinished_ + playedFrames();
+        return framesRendered_ > played ? framesRendered_ - played : 0;
+    }
+
+    Body makeBody(const StreamTrack& track) {
+        Body body;
+        body.id = nextId_++;
+        body.track = track;
+        body.lengthKnown = track.frames != 0;
+        body.totalFrames = track.frames;
+        const uint32_t bytesPerFrame = format_.bytesPerFrame();
+        std::string header;
+        if (format_.type == SampleType::Dsd8) {
+            const uint64_t frames = body.lengthKnown ? track.frames : kUnknownLength;
+            header = dsfHeader(format_, frames);
+            body.totalBytes = kDsfHeader + (frames + kDsfBlock - 1) / kDsfBlock * kDsfBlock * format_.channels;
+            body.contentType = "audio/x-dsf";
+            body.extension = "dsf";
+        } else if (formats_.wav) {
+            const uint64_t data = (body.lengthKnown ? track.frames : kUnknownLength) * bytesPerFrame;
+            header = wavHeader(format_, data);
+            body.totalBytes = kWavHeader + data;
+            body.contentType = "audio/wav";
+            body.extension = "wav";
+        } else {
+            body.totalBytes = (body.lengthKnown ? track.frames : kUnknownLength) * bytesPerFrame;
+            body.contentType = std::string(format_.type == SampleType::Int16 ? "audio/L16" : "audio/L24") +
+                               ";rate=" + std::to_string(format_.sampleRate) + ";channels=" + std::to_string(format_.channels);
+            body.extension = "pcm";
+        }
+        body.protocolInfo = "http-get:*:" + body.contentType + ":*";
+        body.retained.assign(header.begin(), header.end());
+        body.uri = base_ + "/s/" + std::to_string(generation_) + "/" + std::to_string(body.id) + "." + body.extension;
+        const TrackDetails details = details_ ? details_(track.file) : TrackDetails{};
+        body.coverJpeg = details.coverJpeg;
+        const std::string cover = details.coverJpeg.empty()
+                                      ? std::string()
+                                      : base_ + "/c/" + std::to_string(generation_) + "/" + std::to_string(body.id) + ".jpg";
+        const uint64_t durationMs = body.totalFrames * 1000 / std::max(format_.sampleRate, 1U);
+        body.didl = upnp::didlLite(
+            {details.title, details.artist, details.album, cover, body.protocolInfo, body.uri, durationMs, body.totalBytes});
+        return body;
+    }
+
+    void openListener() {
+        const auto* first = player_.services.empty() ? nullptr : &player_.services.front();
+        const std::string host = first ? upnp::hostOf(first->controlUrl) : std::string();
+        const std::string local = upnp::localAddressFor(host);
+        if (local.empty()) throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: no route to it");
+        const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        inet_pton(AF_INET, local.c_str(), &address.sin_addr);
+        if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(listener, 8) != 0) {
+            closesocket(listener);
+            throw Error(ErrorCode::DeviceNotFound, "cannot serve the stream");
+        }
+        int length = sizeof(address);
+        getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
+        listener_ = listener;
+        base_ = "http://" + local + ":" + std::to_string(ntohs(address.sin_port));
+    }
+
+    void acceptLoop() {
+        for (;;) {
+            const SOCKET client = accept(listener_, nullptr, nullptr);
+            if (client == kNoSocket) return;
+            std::scoped_lock lock(mutex_);
+            if (closing_) {
+                closesocket(client);
+                return;
+            }
+            clients_.push_back(client);
+            connections_.emplace_back([this, client] { serve(client); });
+        }
+    }
+
+    // Tells the player what follows, as soon as the Engine has queued it.
+    void announceNext() {
+        std::unique_lock lock(mutex_);
+        if (closing_ || !gapless_ || !started_ || !source_) return;
+        const auto next = source_->nextStreamTrack();
+        if (!next || next->sequence == announcedNext_) return;
+        announcedNext_ = next->sequence;
+        bodies_.push_back(makeBody(*next));
+        const std::string uri = bodies_.back().uri, didl = bodies_.back().didl;
+        lock.unlock();
+        if (!link_->loadNext(uri, didl)) log::warn("network player %s refused the next track", player_.name.c_str());
+    }
+
+    // The player finished a track before it heard of the next, as with a very short one: it starts that one like any other.
+    void startLateNext() {
+        std::string uri, didl;
+        {
+            std::scoped_lock lock(mutex_);
+            if (closing_ || !started_ || !playing_ || !link_->stopped() || bodies_.size() < 2 || !bodies_.front().complete)
+                return;
+            framesFinished_ += bodies_.front().framesWritten;
+            bodies_.pop_front();
+            uri = bodies_.front().uri;
+            didl = bodies_.front().didl;
+        }
+        if (!link_->load(uri, didl) || !link_->play())
+            log::warn("network player %s refused the next track", player_.name.c_str());
+    }
+
+    // Renders on once every track is sent, for the Engine to reach its end or its next track.
+    void announceLoop() {
+        for (;;) {
+            bool sent = false;
+            {
+                std::unique_lock lock(mutex_);
+                moved_.wait_for(lock, milliseconds(50), [&] { return closing_; });
+                if (closing_) return;
+                sent = !bodies_.empty() && !producing();
+            }
+            announceNext();
+            startLateNext();
+            if (sent) produce();
+        }
+    }
+
+    void forget(SOCKET client) {
+        std::scoped_lock lock(mutex_);
+        if (std::erase(clients_, client)) closesocket(client);
+    }
+
+    static bool sendAll(SOCKET client, const char* data, size_t size) {
+        for (size_t sent = 0; sent < size;) {
+            const int n = send(client, data + sent, int(std::min<size_t>(size - sent, 1U << 20)), 0);
+            if (n <= 0) return false;
+            sent += size_t(n);
+        }
+        return true;
+    }
+
+    void serve(SOCKET client) {
+        const BOOL noDelay = TRUE;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
+        std::string request;
+        char buffer[4096];
+        while (request.find("\r\n\r\n") == std::string::npos && request.size() < sizeof(buffer) * 4) {
+            const int read = recv(client, buffer, sizeof(buffer), 0);
+            if (read <= 0) break;
+            request.append(buffer, size_t(read));
+        }
+        answer(client, request);
+        forget(client);
+    }
+
+    void answer(SOCKET client, const std::string& request) {
+        const auto space = request.find(' ');
+        if (space == std::string::npos) return;
+        log::info("network player asks: %s", request.substr(0, request.find("\r\n\r\n")).c_str());
+        const std::string method = request.substr(0, space);
+        const std::string path = request.substr(space + 1, request.find(' ', space + 1) - space - 1);
+        const bool head = method == "HEAD";
+        if (method != "GET" && !head) return respond(client, "405 Method Not Allowed");
+        unsigned generation = 0, id = 0;
+        char kind = 0;
+        if (sscanf_s(path.c_str(), "/%c/%u/%u.", &kind, 1, &generation, &id) != 3) return respond(client, "404 Not Found");
+        std::unique_lock lock(mutex_);
+        if (generation != generation_ || closing_) {
+            lock.unlock();
+            return respond(client, "404 Not Found");
+        }
+        Body* body = find(id);
+        if (!body) {
+            lock.unlock();
+            return respond(client, "404 Not Found");
+        }
+        if (kind == 'c') {
+            const std::string cover = body->coverJpeg;
+            lock.unlock();
+            const std::string reply =
+                "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: " + std::to_string(cover.size()) +
+                "\r\nConnection: close\r\n\r\n";
+            sendAll(client, reply.data(), reply.size());
+            if (!head) sendAll(client, cover.data(), cover.size());
+            return;
+        }
+        uint64_t start = 0;
+        std::optional<uint64_t> end;
+        const bool ranged = rangeOf(request, start, end);
+        const uint64_t total = body->totalBytes;
+        if (start >= total && total) {
+            lock.unlock();
+            return respond(client, "416 Range Not Satisfiable");
+        }
+        // Further than the stream has got, or before what it keeps: the player seeked, which restarts the stream there.
+        if (start < body->retainedFrom || start > body->produced() + kRetainBytes) {
+            const uint64_t frames = (start > kWavHeader ? start - kWavHeader : 0) / std::max(format_.bytesPerFrame(), 1U);
+            const uint64_t positionMs = (body->track.startFrame + frames) * 1000 / std::max(format_.sampleRate, 1U);
+            lock.unlock();
+            if (follow_) follow_({PlayerEventKind::Seeked, positionMs});
+            return respond(client, "503 Service Unavailable");
+        }
+        const uint64_t last = end ? std::min(*end, total - 1) : total - 1;
+        std::string reply = ranged ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n";
+        reply += "Content-Type: " + body->contentType + "\r\nContent-Length: " + std::to_string(last - start + 1) +
+                 "\r\nAccept-Ranges: bytes\r\ntransferMode.dlna.org: Streaming\r\nConnection: close\r\n";
+        if (ranged)
+            reply += "Content-Range: bytes " + std::to_string(start) + "-" + std::to_string(last) + "/" + std::to_string(total) +
+                     "\r\n";
+        reply += "\r\n";
+        lock.unlock();
+        if (!sendAll(client, reply.data(), reply.size()) || head) return;
+        stream(client, id, start, last + 1);
+    }
+
+    void respond(SOCKET client, const std::string& status) {
+        const std::string reply = "HTTP/1.1 " + status + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        sendAll(client, reply.data(), reply.size());
+    }
+
+    static bool rangeOf(const std::string& request, uint64_t& start, std::optional<uint64_t>& end) {
+        std::string lowered = request;
+        std::ranges::transform(lowered, lowered.begin(), [](unsigned char c) { return char(tolower(c)); });
+        const auto at = lowered.find("\r\nrange: bytes=");
+        if (at == std::string::npos) return false;
+        unsigned long long first = 0, last = 0;
+        const int read = sscanf_s(lowered.c_str() + at + 15, "%llu-%llu", &first, &last);
+        if (read < 1) return false;
+        start = first;
+        if (read == 2) end = last;
+        return true;
+    }
+
+    Body* find(uint32_t id) {
+        const auto found = std::ranges::find(bodies_, id, &Body::id);
+        return found == bodies_.end() ? nullptr : &*found;
+    }
+
+    void stream(SOCKET client, uint32_t id, uint64_t from, uint64_t to) {
+        std::vector<uint8_t> chunk;
+        uint64_t offset = from;
+        while (offset < to) {
+            std::unique_lock lock(mutex_);
+            if (closing_) return;
+            Body* body = find(id);
+            if (!body) return;
+            if (offset < body->produced()) {
+                if (offset < body->retainedFrom) return;
+                const auto begin = size_t(offset - body->retainedFrom);
+                const auto size = std::min<size_t>({body->retained.size() - begin, size_t{256} * 1024, size_t(to - offset)});
+                chunk.assign(body->retained.begin() + std::ptrdiff_t(begin),
+                             body->retained.begin() + std::ptrdiff_t(begin + size));
+                lock.unlock();
+                if (!sendAll(client, reinterpret_cast<const char*>(chunk.data()), chunk.size())) return;
+                offset += size;
+                continue;
+            }
+            if (body->complete) return; // an unknown length ended here
+            lock.unlock();
+            if (!produce()) std::this_thread::sleep_for(milliseconds(10));
+        }
+    }
+
+    bool mayRender() {
+        if (!source_ || !started_ || !playing_) return false;
+        const uint64_t reported = link_ ? link_->positionMs() : 0;
+        const auto now = Clock::now();
+        if (reported != lastReported_) {
+            lastReported_ = reported;
+            lastAdvance_ = now;
+        }
+        const uint64_t played = framesFinished_ + playedFrames();
+        // A player whose position stands still may want more in its buffer before it goes on (a Linkplay module does).
+        const bool waiting = playingSince_ != Clock::time_point{} && now - std::max(playingSince_, lastAdvance_) > kPatience;
+        const auto ahead = waiting ? options_.aheadBeforePlay : options_.ahead;
+        const uint64_t limit = uint64_t(ahead.count()) * format_.sampleRate / 1000;
+        return framesRendered_ < played + limit;
+    }
+
+    // Renders a chunk into the track the stream has reached. False when there is nothing to render now.
+    bool produce() {
+        std::scoped_lock rendering(renderMutex_);
+        size_t frames = 0;
+        size_t boundary = IRenderSource::kNoBoundary;
+        bool ended = false;
+        const uint32_t bytesPerFrame = [&] {
+            std::scoped_lock lock(mutex_);
+            return format_.bytesPerFrame();
+        }();
+        rendered_.resize(kChunkFrames * bytesPerFrame);
+        {
+            std::unique_lock lock(mutex_);
+            if (closing_ || !source_) return false;
+            if (Body* body = producing(); body && !carry_.empty()) {
+                write(*body, carry_.data(), carry_.size() / bytesPerFrame);
+                carry_.clear();
+            }
+            // Frames past the last track belong to one queued too late to have a URL yet.
+            if ((!carry_.empty() && !producing()) || !mayRender()) return false;
+            auto* source = source_;
+            lock.unlock();
+            frames = source->render(rendered_.data(), kChunkFrames);
+            boundary = source->boundaryInLastRender();
+            ended = source->renderEnded();
+        }
+        std::scoped_lock lock(mutex_);
+        Body* body = producing();
+        framesRendered_ += frames;
+        if (!body) {
+            carry_.assign(rendered_.begin(), rendered_.begin() + std::ptrdiff_t(frames * bytesPerFrame));
+            return frames != 0;
+        }
+        if (boundary != IRenderSource::kNoBoundary && boundary <= frames) {
+            write(*body, rendered_.data(), boundary);
+            finish(*body);
+            carry_.assign(rendered_.begin() + std::ptrdiff_t(boundary * bytesPerFrame),
+                          rendered_.begin() + std::ptrdiff_t(frames * bytesPerFrame));
+        } else if (frames) {
+            write(*body, rendered_.data(), frames);
+        }
+        if (ended && !frames) finish(*body);
+        return frames != 0;
+    }
+
+    Body* producing() {
+        const auto found = std::ranges::find_if(bodies_, [](const Body& b) { return !b.complete; });
+        return found == bodies_.end() ? nullptr : &*found;
+    }
+
+    void write(Body& body, const uint8_t* data, size_t frames) {
+        if (body.lengthKnown && body.framesWritten + frames > body.totalFrames)
+            frames = size_t(body.totalFrames - body.framesWritten);
+        const size_t bytes = frames * format_.bytesPerFrame();
+        if (format_.type == SampleType::Dsd8) {
+            for (size_t i = 0; i < frames; ++i) {
+                body.dsfLeft.push_back(reverseBits(data[i * 2]));
+                body.dsfRight.push_back(reverseBits(data[i * 2 + 1]));
+                if (body.dsfLeft.size() == kDsfBlock) flushDsf(body);
+            }
+        } else if (body.extension == "pcm") {
+            const size_t width = audio::bytesPerSample(format_.type);
+            const size_t at = body.retained.size();
+            body.retained.resize(at + bytes);
+            for (size_t i = 0; i < bytes; i += width)
+                std::reverse_copy(data + i, data + i + width, body.retained.begin() + std::ptrdiff_t(at + i));
+        } else {
+            body.retained.insert(body.retained.end(), data, data + bytes);
+        }
+        body.framesWritten += frames;
+        if (body.lengthKnown && body.framesWritten == body.totalFrames) finish(body);
+        trim(body);
+        moved_.notify_all();
+    }
+
+    static void flushDsf(Body& body) {
+        if (body.dsfLeft.empty()) return;
+        body.dsfLeft.resize(kDsfBlock);
+        body.dsfRight.resize(kDsfBlock);
+        body.retained.insert(body.retained.end(), body.dsfLeft.begin(), body.dsfLeft.end());
+        body.retained.insert(body.retained.end(), body.dsfRight.begin(), body.dsfRight.end());
+        body.dsfLeft.clear();
+        body.dsfRight.clear();
+    }
+
+    // What is missing of a length that was only estimated is silence, as the player was told the length.
+    void finish(Body& body) {
+        if (body.complete) return;
+        flushDsf(body);
+        if (body.lengthKnown && body.produced() < body.totalBytes) {
+            log::info("network player: %s ended %llu bytes short of its length", toUtf8(body.track.file).c_str(),
+                      static_cast<unsigned long long>(body.totalBytes - body.produced()));
+            body.retained.resize(body.retained.size() + size_t(body.totalBytes - body.produced()));
+        }
+        if (!body.lengthKnown) body.totalBytes = body.produced();
+        body.complete = true;
+        moved_.notify_all();
+    }
+
+    static void trim(Body& body) {
+        if (body.retained.size() <= 2 * kRetainBytes) return;
+        const size_t drop = body.retained.size() - kRetainBytes;
+        body.retained.erase(body.retained.begin(), body.retained.begin() + std::ptrdiff_t(drop));
+        body.retainedFrom += drop;
+    }
+
+    upnp::PlayerDescription player_;
+    std::function<TrackDetails(const std::wstring&)> details_;
+    std::function<void(const PlayerEvent&)> follow_;
+    NetworkOutputOptions options_;
+    upnp::PlayerFormats formats_;
+    bool gapless_ = false;
+    std::unique_ptr<PlayerLink> link_;
+
+    SOCKET listener_ = kNoSocket;
+    std::string base_;
+    std::thread acceptor_, announcer_;
+    std::vector<std::thread> connections_;
+    std::vector<SOCKET> clients_;
+
+    mutable std::mutex mutex_;
+    std::condition_variable moved_;
+    DeviceFormat format_{};
+    IRenderSource* source_ = nullptr;
+    std::deque<Body> bodies_;
+    std::vector<uint8_t> carry_; // frames past a boundary, for the track that has no body yet
+    uint32_t generation_ = 0, nextId_ = 0;
+    uint64_t announcedNext_ = 0;
+    uint64_t framesRendered_ = 0, framesFinished_ = 0;
+    bool started_ = false, playing_ = false, closing_ = false;
+    Clock::time_point playingSince_;
+    uint64_t lastReported_ = 0;
+    Clock::time_point lastAdvance_;
+
+    std::mutex renderMutex_; // one renderer at a time; taken before mutex_
+    std::vector<uint8_t> rendered_;
+};
+
+} // namespace
+
+std::unique_ptr<audio::IOutput> createNetworkOutput(upnp::PlayerDescription player,
+                                                    std::function<TrackDetails(const std::wstring&)> details,
+                                                    std::function<void(const PlayerEvent&)> follow,
+                                                    NetworkOutputOptions options) {
+    return std::make_unique<NetworkOutput>(std::move(player), std::move(details), std::move(follow), options);
+}
+
+} // namespace camel::server

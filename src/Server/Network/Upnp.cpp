@@ -177,6 +177,7 @@ std::optional<PlayerDescription> parseDescription(std::string_view xml, const st
         entry.type = service.childText("serviceType");
         entry.controlUrl = resolve(location, service.childText("controlURL"));
         entry.eventUrl = resolve(location, service.childText("eventSubURL"));
+        entry.scpdUrl = resolve(location, service.childText("SCPDURL"));
         if (!entry.type.empty() && !entry.controlUrl.empty()) player.services.push_back(std::move(entry));
     }
     if (player.service("Product") && player.service("Playlist"))
@@ -298,6 +299,71 @@ std::map<std::string, std::string> parseLastChange(std::string_view xml) {
         if (value != variable.attributes.end()) values[variable.name] = value->second;
     }
     return values;
+}
+
+PlayerFormats parseProtocolInfo(std::string_view sink) {
+    PlayerFormats formats;
+    size_t start = 0;
+    while (start <= sink.size()) {
+        auto end = sink.find(',', start);
+        if (end == std::string_view::npos) end = sink.size();
+        const std::string entry = lower(trim(sink.substr(start, end - start)));
+        start = end + 1;
+        if (!entry.starts_with("http-get:")) continue;
+        const auto contentType = entry.find(':', 9);
+        if (contentType == std::string::npos) continue;
+        const std::string mime = entry.substr(contentType + 1, entry.find(':', contentType + 1) - contentType - 1);
+        if (mime == "audio/wav" || mime == "audio/x-wav" || mime == "audio/wave" || mime == "audio/vnd.wave") formats.wav = true;
+        if (mime.starts_with("audio/l16")) formats.l16 = true;
+        if (mime.starts_with("audio/l24")) formats.l24 = true;
+        if (mime == "audio/dsf" || mime == "audio/x-dsf" || mime == "audio/dsd") formats.dsf = true;
+    }
+    return formats;
+}
+
+std::vector<std::string> parseActions(std::string_view scpd) {
+    std::vector<std::string> actions;
+    const auto root = parseXml(scpd);
+    if (!root) return actions;
+    if (const auto* list = root->child("actionList"))
+        for (const auto& action : list->children) actions.push_back(action.childText("name"));
+    return actions;
+}
+
+std::string didlLite(const DidlTrack& track) {
+    std::string item =
+        R"(<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" )"
+        R"(xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="1" parentID="0" restricted="1">)";
+    item += "<dc:title>" + escape(track.title) + "</dc:title>";
+    if (!track.artist.empty())
+        item += "<dc:creator>" + escape(track.artist) + "</dc:creator><upnp:artist>" + escape(track.artist) + "</upnp:artist>";
+    if (!track.album.empty()) item += "<upnp:album>" + escape(track.album) + "</upnp:album>";
+    if (!track.coverUrl.empty()) item += "<upnp:albumArtURI>" + escape(track.coverUrl) + "</upnp:albumArtURI>";
+    item += "<upnp:class>object.item.audioItem.musicTrack</upnp:class>";
+    item += "<res protocolInfo=\"" + escape(track.protocolInfo) + "\"";
+    if (track.durationMs) item += " duration=\"" + formatDuration(track.durationMs) + ".000\"";
+    if (track.sizeBytes) item += " size=\"" + std::to_string(track.sizeBytes) + "\"";
+    item += ">" + escape(track.url) + "</res></item></DIDL-Lite>";
+    return item;
+}
+
+std::string localAddressFor(const std::string& host) {
+    const SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    sockaddr_in target{};
+    target.sin_family = AF_INET;
+    target.sin_port = htons(9);
+    inet_pton(AF_INET, host.c_str(), &target.sin_addr);
+    std::string local;
+    if (connect(probe, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) == 0) {
+        sockaddr_in address{};
+        int length = sizeof(address);
+        char text[INET_ADDRSTRLEN] = {};
+        if (getsockname(probe, reinterpret_cast<sockaddr*>(&address), &length) == 0 &&
+            inet_ntop(AF_INET, &address.sin_addr, text, sizeof(text)))
+            local = text;
+    }
+    closesocket(probe);
+    return local;
 }
 
 std::optional<uint64_t> parseDuration(std::string_view text) {

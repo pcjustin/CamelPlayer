@@ -31,7 +31,7 @@ std::optional<XmlNode> parseXml(std::string_view xml);
 enum class PlayerProtocol : uint8_t { UpnpAv, OpenHome };
 
 struct PlayerService {
-    std::string type, controlUrl, eventUrl;
+    std::string type, controlUrl, eventUrl, scpdUrl;
     bool operator==(const PlayerService&) const = default;
 };
 
@@ -77,6 +77,23 @@ SoapReply parseSoapReply(unsigned status, std::string_view body);
 // The variables of a GENA event, and those inside a LastChange value.
 std::map<std::string, std::string> parsePropertySet(std::string_view xml);
 std::map<std::string, std::string> parseLastChange(std::string_view xml);
+
+// What a player's ConnectionManager declares it can play.
+struct PlayerFormats {
+    bool wav = false, l16 = false, l24 = false, dsf = false;
+    bool operator==(const PlayerFormats&) const = default;
+};
+PlayerFormats parseProtocolInfo(std::string_view sink);
+std::vector<std::string> parseActions(std::string_view scpd);
+
+struct DidlTrack {
+    std::string title, artist, album, coverUrl, protocolInfo, url;
+    uint64_t durationMs = 0, sizeBytes = 0;
+};
+std::string didlLite(const DidlTrack& track);
+
+// The address of this computer that `host` can reach.
+std::string localAddressFor(const std::string& host);
 
 std::optional<uint64_t> parseDuration(std::string_view text); // h:mm:ss[.fff] in milliseconds
 std::string formatDuration(uint64_t milliseconds);

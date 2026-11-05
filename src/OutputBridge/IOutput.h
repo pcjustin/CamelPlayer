@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,15 +20,33 @@ struct Settings;
 
 namespace camel::audio {
 
+// A track as a stream carries it, for outputs that announce each track to a network player (docs/Plan.md §5.10).
+struct StreamTrack {
+    std::wstring file;
+    uint64_t frames = 0;     // output frames the stream has of it; 0 while the length is unknown
+    uint64_t startFrame = 0; // output frames of the file before the stream's start
+    uint64_t sequence = 0;   // tells the same file queued twice apart
+    bool operator==(const StreamTrack&) const = default;
+};
+
 // Supplies packed device bytes. Called on the output's real-time thread: must not block or allocate.
 class IRenderSource {
 public:
+    static constexpr size_t kNoBoundary = static_cast<size_t>(-1);
+
     virtual ~IRenderSource() = default;
     // Writes up to `frames` frames into `dst`; returns how many it wrote. The output fills the rest with silence.
     virtual size_t render(uint8_t* dst, size_t frames) noexcept = 0;
     // True while render() writes format-correct silence after its frames itself (raw DSD: idle pattern, continuing
     // DoP markers), so nothing may overwrite the rest with zeros.
     virtual bool writesSilence() const noexcept { return false; }
+    // Where the next track starts in the frames of the last render(), or kNoBoundary.
+    virtual size_t boundaryInLastRender() const noexcept { return kNoBoundary; }
+    // True once render() has handed out the last frame of the last track.
+    virtual bool renderEnded() const noexcept { return false; }
+    // The track the stream starts with, and the queued one after it. Not for the real-time thread.
+    virtual StreamTrack streamTrack() const { return {}; }
+    virtual std::optional<StreamTrack> nextStreamTrack() const { return std::nullopt; }
 };
 
 struct OutputStatus {
@@ -42,6 +61,8 @@ struct OutputStatus {
     uint64_t lateCallbacks = 0;
     double longestGapMs = 0;
     double periodMs = 0; // the buffer period
+    // Frames rendered that the device has not played yet, where that is far more than its buffer (a network player).
+    uint64_t heldFrames = 0;
 };
 
 class IOutput {
@@ -58,6 +79,8 @@ public:
     virtual void close() = 0; // after close() returns the source is never called again
 
     virtual OutputStatus status() const = 0;
+    // False when the device cannot follow one track with the next without a gap, so nothing is queued on it.
+    virtual bool gapless() const { return true; }
 
     // Called from any thread when the stream fails after open() (device unplugged, taken over, ...).
     void setErrorHandler(std::function<void(const Error&)> h) { onError_ = std::move(h); }

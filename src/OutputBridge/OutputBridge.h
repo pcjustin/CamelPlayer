@@ -36,6 +36,11 @@ public:
 
     // A source that writes its own silence hands the output the whole request.
     size_t render(uint8_t* destination, size_t frames) noexcept override;
+    size_t boundaryInLastRender() const noexcept override;
+    bool renderEnded() const noexcept override;
+    StreamTrack streamTrack() const override;
+    std::optional<StreamTrack> nextStreamTrack() const override;
+    bool gapless() const;
     uint64_t generation() const;
     std::optional<DeviceFormat> activeFormat() const;
 
