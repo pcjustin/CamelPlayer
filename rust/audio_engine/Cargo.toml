@@ -10,4 +10,7 @@ license = "MPL-2.0"
 publish = false
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["staticlib"]
+
+[dependencies]
+symphonia_ffi = { path = "../symphonia_ffi" }

@@ -22,6 +22,8 @@ mod resample;
 mod ring;
 
 use convert::Converter;
+// Links the Symphonia decoders into this static library, which exports them with the Engine.
+use symphonia_ffi as _;
 
 // Counts the heap operations of the DSP stage and the render callback in tests: both must have none (docs/Plan.md
 // §5.2).
@@ -1398,12 +1400,14 @@ fn device_ring_capacity(format: &AudioFormat, rate_hz: u32) -> Option<usize> {
     usize::try_from(bytes.clamp(1, MAX_RING_BYTES)).ok()
 }
 
+#[no_mangle]
 pub extern "C" fn camel_engine_abi_version() -> u32 {
     ABI_VERSION
 }
 
 /// # Safety
 /// `config` must point to a readable V1 configuration and `out_engine` to writable storage.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_create_v1(
     config: *const CamelEngineConfigV1,
     out_engine: *mut *mut CamelEngine,
@@ -1535,6 +1539,7 @@ fn operation_is_current(engine: &CamelEngine, epoch: u64) -> bool {
 
 /// # Safety
 /// All pointers must reference valid V1 structures. Stop and drain render before replacing the source. Decoder callbacks and their context must remain valid until replacement or destruction. Commands must have strictly increasing IDs.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_load_flac_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -1597,6 +1602,7 @@ pub unsafe extern "C" fn camel_engine_load_flac_v1(
 
 /// # Safety
 /// `engine` and `command` must remain valid for the call. Stop and drain render before seeking. Commands must have strictly increasing IDs.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_seek_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -1669,6 +1675,7 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
 
 /// # Safety
 /// `engine` and `command` must remain valid for the call. Commands must have strictly increasing IDs.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_play_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -1701,6 +1708,7 @@ pub unsafe extern "C" fn camel_engine_play_v1(
 
 /// # Safety
 /// `engine` and `command` must remain valid for the call. Commands must have strictly increasing IDs.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_pause_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -1733,6 +1741,7 @@ pub unsafe extern "C" fn camel_engine_pause_v1(
 
 /// # Safety
 /// `engine` and `command` must remain valid for the call. Stop and drain render before calling. Commands must have strictly increasing IDs.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_stop_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -1799,6 +1808,7 @@ pub unsafe extern "C" fn camel_engine_stop_v1(
 
 /// # Safety
 /// Call from one decode worker only. Stop and drain render before replacing or seeking the source.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_prefill_v1(
     engine: *mut CamelEngine,
     frame_limit: u64,
@@ -1961,6 +1971,7 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
 ///
 /// The DSP stage: turns decoded frames into device bytes until the device ring is full. Prefill runs it too; a
 /// separate worker calls this so the device ring stays filled while decoding waits for slow storage.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_process_v1(
     engine: *mut CamelEngine,
     frames_processed: *mut u64,
@@ -1990,6 +2001,7 @@ pub unsafe extern "C" fn camel_engine_process_v1(
 
 /// # Safety
 /// `engine`, `output`, and `frames_read` must reference valid storage for this call.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_read_decoded_v1(
     engine: *mut CamelEngine,
     output: *mut i32,
@@ -2067,6 +2079,7 @@ pub unsafe extern "C" fn camel_engine_read_decoded_v1(
 
 /// # Safety
 /// `engine` and `state` must reference a live handle and writable V1 state.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_state_v1(
     engine: *mut CamelEngine,
     state: *mut CamelEngineStateV1,
@@ -2103,6 +2116,7 @@ pub unsafe extern "C" fn camel_engine_get_state_v1(
 
 /// # Safety
 /// `engine` and `timeline` must reference a live engine and writable V1 timeline.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_timeline_v1(
     engine: *mut CamelEngine,
     timeline: *mut CamelEngineTimelineV1,
@@ -2139,6 +2153,7 @@ pub unsafe extern "C" fn camel_engine_get_timeline_v1(
 
 /// # Safety
 /// `engine` and `command` must remain valid. `audible_frame` is the output bridge's estimated audible track position.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_report_audible_position_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -2173,6 +2188,7 @@ pub unsafe extern "C" fn camel_engine_report_audible_position_v1(
 
 /// # Safety
 /// `engine` and `integrity` must reference a live handle and writable V1 state.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_flac_integrity_v1(
     engine: *mut CamelEngine,
     integrity: *mut CamelFlacIntegrityV1,
@@ -2214,6 +2230,7 @@ pub unsafe extern "C" fn camel_engine_get_flac_integrity_v1(
 ///
 /// Queues the track that follows the current one gaplessly. It must decode to the current output format; otherwise
 /// the call fails and playback ends normally at the current track. Queuing again replaces a track not yet started.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -2272,6 +2289,7 @@ pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
 ///
 /// Discards a queued next track. Fails with `CAMEL_ENGINE_E_INVALID_STATE` once decoding has already moved on to
 /// it; that track then becomes current at its boundary as queued.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_clear_next_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -2307,6 +2325,7 @@ pub unsafe extern "C" fn camel_engine_clear_next_v1(
 /// its way to the device is heard first, so the new track's is the next transition. Fails with
 /// `CAMEL_ENGINE_E_INVALID_STATE` when nothing plays that can be mixed with it, or that boundary is not heard within a
 /// second; the caller then loads the track instead.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
@@ -2478,6 +2497,7 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
 ///
 /// Reports how many queued tracks have become audible, the current track position (submitted frames) and whether
 /// a queued track still waits in the slot.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_transitions_v1(
     engine: *mut CamelEngine,
     transitions: *mut u64,
@@ -2533,6 +2553,7 @@ fn source_audio_format(info: &CamelSourceInfoV1) -> CamelAudioFormatV1 {
 
 /// # Safety
 /// The handle and structures must remain valid for the call. No new call may begin after quiesce starts.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_render_v1(
     engine: *mut CamelEngine,
     request: *const CamelRenderRequestV1,
@@ -2763,6 +2784,7 @@ unsafe fn dsp_settings(dsp: *const CamelDspV1) -> Result<dsp::Settings, i32> {
 ///
 /// Prepares an impulse response for convolution at its rate; the work of splitting it is done here, once. The handle
 /// is released with `camel_impulse_destroy_v1`, and engines using it keep what they need.
+#[no_mangle]
 pub unsafe extern "C" fn camel_impulse_create_v1(
     impulse: *const CamelImpulseResponseV1,
     out: *mut *mut CamelImpulse,
@@ -2801,6 +2823,7 @@ pub unsafe extern "C" fn camel_impulse_create_v1(
 
 /// # Safety
 /// `impulse` must be null or a handle from `camel_impulse_create_v1` not yet destroyed.
+#[no_mangle]
 pub unsafe extern "C" fn camel_impulse_destroy_v1(impulse: *mut CamelImpulse) -> i32 {
     if !impulse.is_null() {
         drop(Box::from_raw(impulse));
@@ -2814,6 +2837,7 @@ pub unsafe extern "C" fn camel_impulse_destroy_v1(impulse: *mut CamelImpulse) ->
 /// Sets the DSP chain. Bands that cannot change the signal are skipped, and a chain left without anything that changes
 /// it is bypassed, keeping playback bit-perfect. An impulse response must be at the engine's rate. The change fades in
 /// and is heard within the DSP lead.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_set_dsp_v1(
     engine: *mut CamelEngine,
     dsp: *const CamelDspV1,
@@ -2843,6 +2867,7 @@ pub unsafe extern "C" fn camel_engine_set_dsp_v1(
 ///
 /// The samples the DSP chain has sent above full scale since the engine was created; the final quantization clips
 /// them.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_get_dsp_clipped_v1(
     engine: *mut CamelEngine,
     clipped: *mut u64,
@@ -2865,6 +2890,7 @@ pub unsafe extern "C" fn camel_engine_get_dsp_clipped_v1(
 ///
 /// Analyzes a DSP setting at `rate_hz` on a stereo device without an engine: the level the EQ's bands give each
 /// channel at each frequency, for its response curve, whether the chain changes the signal and the preamp it needs.
+#[no_mangle]
 pub unsafe extern "C" fn camel_dsp_analyze_v1(
     dsp: *const CamelDspV1,
     rate_hz: u32,
@@ -2919,6 +2945,7 @@ pub unsafe extern "C" fn camel_dsp_analyze_v1(
 
 /// # Safety
 /// `engine` must point to a live handle. The caller must prevent new render calls before quiesce.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_quiesce_v1(engine: *mut CamelEngine) -> i32 {
     if engine.is_null() {
         return ENGINE_E_INVALID_ARGUMENT;
@@ -2931,6 +2958,7 @@ pub unsafe extern "C" fn camel_engine_quiesce_v1(engine: *mut CamelEngine) -> i3
 
 /// # Safety
 /// `engine` must be live, quiesced, and inaccessible to all other calls.
+#[no_mangle]
 pub unsafe extern "C" fn camel_engine_destroy_v1(engine: *mut CamelEngine) -> i32 {
     if engine.is_null() {
         return ENGINE_E_INVALID_ARGUMENT;

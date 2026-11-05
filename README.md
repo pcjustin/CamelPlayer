@@ -134,6 +134,8 @@ Run from the repository root:
 
 The executables are written to `build/<Configuration>/App/CamelPlayer.exe`, `build/<Configuration>/camelcli/camelcli.exe` and `build/<Configuration>/tests/tests.exe`. A Release build packages `dist/CamelPlayer-<version>-win-x64.zip` with the third-party source and symbol archives and `CamelPlayer-<version>-SHA256SUMS.txt` beside it.
 
+The Rust Engine is a project of its own, `rust/audio_engine/audio_engine.vcxproj`, which runs Cargo and writes `build/cargo/release/camel_audio_engine.lib`. Its C ABI is exported by that library, which the Symphonia bridge (`rust/symphonia_ffi`, a Rust library with its own project) joins, because two Rust static libraries in one program would each carry the Rust standard library. The Engine, CamelPlayer.exe, camelcli and tests all depend on that project, so building any of them picks up a change to the Rust code.
+
 The version comes from the `VERSION` file; the build puts it in the executable's file properties, Settings › About and `camelcli --version`. Change it before tagging a release on GitHub (tag `v` followed by the version).
 
 Each build also writes `build/compile_commands.json`, so clangd (for example in VS Code) applies the repository's `.clang-tidy` checks and `.clang-format` style to the C++ in `src/`. Diagnostics are fixed in the code or the check configuration, never suppressed with `NOLINT`. Rust code is kept clean with `cargo fmt` and `cargo clippy -- -D warnings`.
@@ -187,7 +189,7 @@ CamelPlayer runs as one process with these parts:
 
 ## Dependencies and licensing
 
-FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine come from Cargo with one committed workspace lockfile and are linked into one static library. The repository includes third-party license and notice snapshots and a [dependency inventory](third_party/dependencies.json); [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists what must accompany a release. To refresh the notice snapshots after restoring dependencies:
+FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine come from Cargo with one committed workspace lockfile and are linked into the Engine's one static library. The repository includes third-party license and notice snapshots and a [dependency inventory](third_party/dependencies.json); [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists what must accompany a release. To refresh the notice snapshots after restoring dependencies:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File msbuild/collect-licenses.ps1

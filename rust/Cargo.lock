@@ -23,6 +23,9 @@ checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 [[package]]
 name = "camel_audio_engine"
 version = "0.1.0"
+dependencies = [
+ "symphonia_ffi",
+]
 
 [[package]]
 name = "extended"
@@ -200,6 +203,5 @@ dependencies = [
 name = "symphonia_ffi"
 version = "0.1.0"
 dependencies = [
- "camel_audio_engine",
  "symphonia",
 ]

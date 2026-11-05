@@ -21,6 +21,7 @@
     <Project Path="src/Tools/camelcli/camelcli.vcxproj" />
   </Folder>
   <Folder Name="/rust/">
+    <Project Path="rust/audio_engine/audio_engine.vcxproj" />
     <Project Path="rust/symphonia_ffi/symphonia_ffi.vcxproj" />
   </Folder>
   <Folder Name="/tests/">
