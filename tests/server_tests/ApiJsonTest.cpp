@@ -86,6 +86,8 @@ Snapshot fullSnapshot() {
     p.outputAdjustments = {"Fixed sample rate: requested 96000 Hz, using 44100 Hz"};
     p.bufferFrames = 512;
     p.underruns = 2;
+    p.playerVolume = 48;
+    p.playerMuted = true;
     p.error = ErrorCode::DeviceLost;
     p.errorDetail = "unplugged";
     p.revision = 17;
@@ -189,6 +191,14 @@ TEST(ApiJson, FavoriteCommandsRoundTrip) {
     j = toJson(album);
     j["albums"] = json::array({"3"});
     EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+    Command level;
+    level.kind = CommandKind::SetPlayerVolume;
+    level.playerVolume = 48;
+    EXPECT_EQ(throughText(level, commandFromJson), level);
+    Command mute;
+    mute.kind = CommandKind::SetPlayerMute;
+    mute.playerMute = true;
+    EXPECT_EQ(throughText(mute, commandFromJson), mute);
     Command artist;
     artist.kind = CommandKind::SetArtistFavorite;
     artist.artists = {{LibraryGroupField::Artist, "mizuki"}, {LibraryGroupField::Composer, "澤野弘之"}};

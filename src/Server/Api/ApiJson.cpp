@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 28> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 30> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -92,7 +92,9 @@ constexpr Names<CommandKind, 28> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::QueueClear, "queueClear"},
                                                   {CommandKind::SetFavorite, "setFavorite"},
                                                   {CommandKind::SetAlbumFavorite, "setAlbumFavorite"},
-                                                  {CommandKind::SetArtistFavorite, "setArtistFavorite"}};
+                                                  {CommandKind::SetArtistFavorite, "setArtistFavorite"},
+                                                  {CommandKind::SetPlayerVolume, "setPlayerVolume"},
+                                                  {CommandKind::SetPlayerMute, "setPlayerMute"}};
 constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},
                                                        {LibraryGroupField::Composer, "composer"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
@@ -291,6 +293,8 @@ json toJson(const PlaybackSnapshot& p) {
             {"outputAdjustments", p.outputAdjustments},
             {"bufferFrames", p.bufferFrames},
             {"underruns", p.underruns},
+            {"playerVolume", p.playerVolume ? json(*p.playerVolume) : json(nullptr)},
+            {"playerMuted", p.playerMuted},
             {"error", p.error ? json(nameOf(*p.error, kErrorCodes)) : json(nullptr)},
             {"errorDetail", p.errorDetail},
             {"revision", p.revision}};
@@ -319,6 +323,11 @@ PlaybackSnapshot playbackFrom(const json& j) {
     }
     p.bufferFrames = value<uint32_t>(j, "bufferFrames");
     p.underruns = value<uint64_t>(j, "underruns");
+    p.playerVolume = optional<uint32_t>(j, "playerVolume", [](const json& v) {
+        if (!v.is_number_unsigned()) invalid("playerVolume is not a number");
+        return v.get<uint32_t>();
+    });
+    p.playerMuted = value<bool>(j, "playerMuted");
     p.error = optional<ErrorCode>(j, "error", [](const json& v) { return enumFrom(v, kErrorCodes, "error code"); });
     p.errorDetail = value<std::string>(j, "errorDetail");
     p.revision = value<uint64_t>(j, "revision");
@@ -429,7 +438,9 @@ json toJson(const Command& c) {
             {"path", c.path},
             {"favorite", c.favorite},
             {"albums", c.albums},
-            {"artists", artists}};
+            {"artists", artists},
+            {"playerVolume", c.playerVolume ? json(*c.playerVolume) : json(nullptr)},
+            {"playerMute", c.playerMute ? json(*c.playerMute) : json(nullptr)}};
 }
 
 Command commandFromJson(const json& j) {
@@ -461,6 +472,14 @@ Command commandFromJson(const json& j) {
     if (j.contains("artists") || c.kind == CommandKind::SetArtistFavorite)
         for (const auto& a : array(j, "artists"))
             c.artists.push_back({enumFrom(field(a, "field"), kArtistFields, "artist field"), value<std::string>(a, "name")});
+    c.playerVolume = optional<uint32_t>(j, "playerVolume", [](const json& v) {
+        if (!v.is_number_unsigned()) invalid("playerVolume is not a number");
+        return v.get<uint32_t>();
+    });
+    c.playerMute = optional<bool>(j, "playerMute", [](const json& v) {
+        if (!v.is_boolean()) invalid("playerMute is not a boolean");
+        return v.get<bool>();
+    });
     return c;
 }
 

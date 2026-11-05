@@ -169,6 +169,13 @@ TEST(UpnpMessages, BuildsAndReadsSoap) {
     EXPECT_EQ(good.values.at("Value"), "5");
 }
 
+TEST(UpnpMessages, OnlyTheMasterChannelOfAnEventIsRead) {
+    const auto values = upnp::parseLastChange(
+        R"(<Event><InstanceID val="0"><Volume channel="Master" val="40"/><Volume channel="LF" val="90"/><Volume Channel="RF" val="80"/><Mute channel="Master" val="1"/></InstanceID></Event>)");
+    EXPECT_EQ(values.at("Volume"), "40");
+    EXPECT_EQ(values.at("Mute"), "1");
+}
+
 TEST(UpnpMessages, ReadsTimesAsTheyAreWritten) {
     EXPECT_EQ(parseDuration("0:01:30"), 90000U);
     EXPECT_EQ(parseDuration("01:00:00.500"), 3600500U);

@@ -286,7 +286,15 @@ static bool boolean(const json& o, const char* k, bool def) {
 static void readTiming(const json& o, PlaybackTiming& t) {
     t.predecodeSeconds = uint32_t(integer(o, "predecodeSeconds", 10, 1, 60));
     t.formatChangeSilenceMs = uint32_t(integer(o, "formatChangeSilenceMs", 0, 0, 2000));
-    t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", 1, 0, 3600));
+    t.releaseAfterPauseSeconds = uint32_t(integer(o, "releaseAfterPauseSeconds", int(t.releaseAfterPauseSeconds), 0, 3600));
+}
+
+static const char* volumeModeId(VolumeMode mode) {
+    return mode == VolumeMode::Software ? "software" : mode == VolumeMode::Player ? "player" : "fixed";
+}
+
+static VolumeMode volumeModeFromId(const std::string& id) {
+    return id == "software" ? VolumeMode::Software : id == "player" ? VolumeMode::Player : VolumeMode::Fixed;
 }
 
 static json wasapiJson(const WasapiSettings& w) {
@@ -381,23 +389,30 @@ static void readKs(const json& o, KsSettings& k) {
 }
 
 static json networkJson(const NetworkSettings& n) {
-    json j = {{"player", n.udn}};
+    json j = {{"player", n.udn},
+              {"maxSampleRate", n.maxSampleRate},
+              {"maxBits", n.maxBits},
+              {"dsdOutput", dsdOutputId(n.dsdOutput)},
+              {"dsdPcmRate", n.dsdPcmRate},
+              {"gapless", n.gapless}};
     j.update(timingJson(n.timing));
     return j;
 }
 
 static void readNetwork(const json& o, NetworkSettings& n) {
     n.udn = str(o, "player", "");
+    n.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
+    n.maxBits = integer(o, "maxBits", 0, 0, 16) == 16 ? 16 : 0;
+    n.dsdOutput = str(o, "dsdOutput", "") == dsdOutputId(DsdOutput::Pcm) ? DsdOutput::Pcm : DsdOutput::Native;
+    n.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
+    n.gapless = boolean(o, "gapless", true);
     readTiming(o, n.timing);
 }
 
 static json outputJson(const SavedOutput& o) {
-    json j = {{"backend", backendId(o.backend)},
-              {"id", o.id},
-              {"name", o.name},
-              {"alias", o.alias},
-              {"enabled", o.enabled},
-              {"volumeMode", o.volumeMode == VolumeMode::Software ? "software" : "fixed"}};
+    json j = {
+        {"backend", backendId(o.backend)},         {"id", o.id}, {"name", o.name}, {"alias", o.alias}, {"enabled", o.enabled},
+        {"volumeMode", volumeModeId(o.volumeMode)}};
     j["parameters"] = o.backend == Backend::Network ? networkJson(o.network)
                       : o.backend == Backend::Asio  ? asioJson(o.asio)
                       : o.backend == Backend::Ks    ? ksJson(o.ks)
@@ -412,7 +427,7 @@ static std::optional<SavedOutput> outputFrom(const json& o) {
     saved.name = str(o, "name", "");
     saved.alias = str(o, "alias", "");
     saved.enabled = boolean(o, "enabled", false);
-    saved.volumeMode = str(o, "volumeMode", "fixed") == "software" ? VolumeMode::Software : VolumeMode::Fixed;
+    saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));
     const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
     if (saved.backend == Backend::Network)
         readNetwork(parameters, saved.network);
@@ -465,8 +480,7 @@ std::string toJson(const Settings& s) {
                       {"cutoff", s.crossfeed.cutoffHz},
                       {"feed", s.crossfeed.feedDb}};
     j["convolution"] = {{"enabled", s.convolution.enabled}, {"file", s.convolution.file}};
-    j["volume"] = {
-        {"mode", s.volume.mode == VolumeMode::Software ? "software" : "fixed"}, {"db", s.volume.db}, {"muted", s.volume.muted}};
+    j["volume"] = {{"mode", volumeModeId(s.volume.mode)}, {"db", s.volume.db}, {"muted", s.volume.muted}};
     j["replayGain"] = {{"mode", kReplayGainModeIds[int(s.replayGain.mode)]},
                        {"preamp", s.replayGain.preampDb},
                        {"noValuePreamp", s.replayGain.noValuePreampDb},
@@ -588,7 +602,7 @@ Settings fromJson(const std::string& text) {
     };
     if (j.contains("volume") && j["volume"].is_object()) {
         const json& v = j["volume"];
-        s.volume.mode = str(v, "mode", "fixed") == "software" ? VolumeMode::Software : VolumeMode::Fixed;
+        s.volume.mode = volumeModeFromId(str(v, "mode", "fixed"));
         s.volume.db = bounded(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
         s.volume.muted = boolean(v, "muted", false);
     }

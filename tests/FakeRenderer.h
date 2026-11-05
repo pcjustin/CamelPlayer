@@ -149,22 +149,21 @@ public:
 
     // Sends the event to the service's subscriber.
     void emitLastChange(const std::string& variables) {
-        const std::string inner =
-            R"(<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/"><InstanceID val="0">)" + variables + "</InstanceID></Event>";
-        std::string escaped;
-        for (const char c : inner) {
-            if (c == '<')
-                escaped += "&lt;";
-            else if (c == '>')
-                escaped += "&gt;";
-            else if (c == '&')
-                escaped += "&amp;";
-            else if (c == '"')
-                escaped += "&quot;";
-            else
-                escaped += c;
-        }
-        emit("AVTransport", "<e:property><LastChange>" + escaped + "</LastChange></e:property>");
+        emit("AVTransport", "<e:property><LastChange>" + escaped(lastChange(variables)) + "</LastChange></e:property>");
+    }
+    // As a player's remote does: changes the level and tells whoever subscribed.
+    void changeVolume(int level, bool muted) {
+        setVolume(level, muted);
+        emitVolume(R"(<Volume channel="Master" val=")" + std::to_string(level) + R"("/><Mute channel="Master" val=")" +
+                   (muted ? "1" : "0") + R"("/>)");
+    }
+    // Reports this level from now on without telling anyone, as a player without RenderingControl events does.
+    void setVolume(int level, bool muted) {
+        set("volume", std::to_string(level));
+        set("mute", muted ? "1" : "0");
+    }
+    void emitVolume(const std::string& variables) {
+        emit("RenderingControl", "<e:property><LastChange>" + escaped(lastChange(variables)) + "</LastChange></e:property>");
     }
     void emitVariable(const std::string& service, const std::string& name, const std::string& value) {
         emit(service, "<e:property><" + name + ">" + value + "</" + name + "></e:property>");
@@ -197,6 +196,26 @@ public:
     int searches() const { return searches_; }
 
 private:
+    static std::string lastChange(const std::string& variables) {
+        return R"(<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/"><InstanceID val="0">)" + variables +
+               "</InstanceID></Event>";
+    }
+    static std::string escaped(const std::string& text) {
+        std::string out;
+        for (const char c : text) {
+            if (c == '<')
+                out += "&lt;";
+            else if (c == '>')
+                out += "&gt;";
+            else if (c == '&')
+                out += "&amp;";
+            else if (c == '"')
+                out += "&quot;";
+            else
+                out += c;
+        }
+        return out;
+    }
     static sockaddr_in loopback() {
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -518,6 +537,10 @@ private:
         } else if (name == "Stop") {
             state_["state"] = kind_ == RendererKind::OpenHome ? "Stopped" : "STOPPED";
             stopRequested_ = true;
+        } else if (name == "SetVolume") {
+            state_["volume"] = between(body, "DesiredVolume");
+        } else if (name == "SetMute") {
+            state_["mute"] = between(body, "DesiredMute");
         } else if (name == "GetProtocolInfo") {
             values = "<Source></Source><Sink>" + sink_ + "</Sink>";
         }
@@ -527,6 +550,10 @@ private:
         };
         if (name == "GetTransportInfo") {
             add("CurrentTransportState", "state", "STOPPED");
+        } else if (name == "GetVolume") {
+            add("CurrentVolume", "volume", "48");
+        } else if (name == "GetMute") {
+            add("CurrentMute", "mute", "0");
         } else if (name == "GetPositionInfo") {
             add("TrackURI", "track", "");
             add("RelTime", "time", "0:00:00");

@@ -352,6 +352,54 @@ TEST(OutputsTest, NetworkPlayersAreListedKeptAndFoundAgainByUdn) {
     EXPECT_EQ(read.network.timing.formatChangeSilenceMs, 500U);
 }
 
+TEST(OutputsTest, ANetworkPlayerStartsOnItsOwnVolumeAndKeepsEachPlayersChoices) {
+    DeviceCatalog devices;
+    devices.revision = 1;
+    devices.network = {{"uuid:a", "A"}, {"uuid:b", "B"}};
+    Settings s;
+    setOutputEnabled(s, Backend::Network, "uuid:a", true, devices);
+    selectOutput(s, Backend::Network, "uuid:a", devices);
+    EXPECT_EQ(s.volume.mode, VolumeMode::Player);
+    EXPECT_EQ(s.network.timing.releaseAfterPauseSeconds, 60U);
+    EXPECT_TRUE(s.network.gapless);
+    s.volume.mode = VolumeMode::Fixed;
+    s.network.maxSampleRate = 96000;
+    s.network.maxBits = 16;
+    s.network.dsdOutput = DsdOutput::Pcm;
+    s.network.dsdPcmRate = 88200;
+    s.network.gapless = false;
+    selectOutput(s, Backend::Network, "uuid:b", devices);
+    EXPECT_EQ(s.volume.mode, VolumeMode::Player);
+    EXPECT_EQ(s.network.maxSampleRate, 0U);
+    EXPECT_TRUE(s.network.gapless);
+
+    Settings read = fromJson(toJson(s));
+    selectOutput(read, Backend::Network, "uuid:a", devices);
+    EXPECT_EQ(read.volume.mode, VolumeMode::Fixed);
+    EXPECT_EQ(read.network.maxSampleRate, 96000U);
+    EXPECT_EQ(read.network.maxBits, 16U);
+    EXPECT_EQ(read.network.dsdOutput, DsdOutput::Pcm);
+    EXPECT_EQ(read.network.dsdPcmRate, 88200U);
+    EXPECT_FALSE(read.network.gapless);
+}
+
+TEST(OutputsTest, ANetworkPlayerNeverKeepsSoftwareVolume) {
+    DeviceCatalog devices;
+    devices.revision = 1;
+    devices.network = {{"uuid:a", "A"}};
+    devices.wasapi = {{"device", "Device"}};
+    Settings s;
+    selectOutput(s, Backend::Wasapi, "device", devices);
+    s.volume.mode = VolumeMode::Software;
+    selectOutput(s, Backend::Network, "uuid:a", devices);
+    EXPECT_EQ(s.volume.mode, VolumeMode::Player);
+    s.outputs.back().volumeMode = VolumeMode::Software;
+    selectOutput(s, Backend::Wasapi, "device", devices);
+    EXPECT_EQ(s.volume.mode, VolumeMode::Software);
+    selectOutput(s, Backend::Network, "uuid:a", devices);
+    EXPECT_EQ(s.volume.mode, VolumeMode::Player);
+}
+
 TEST(OutputsServerTest, PlayingToANetworkPlayerFailsWithoutSubstitutingADevice) {
     Settings s = fresh();
     s.autoplay = false;

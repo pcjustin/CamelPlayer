@@ -4,22 +4,16 @@
 
 #include "Server/Network/PlayerLink.h"
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
 #include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <cstdlib>
-#include <deque>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
 
 #include "Common/util/Log.h"
 #include "Server/Support/Http.h"
-
-#pragma comment(lib, "ws2_32.lib")
 
 namespace camel::server {
 
@@ -30,10 +24,8 @@ using std::chrono::milliseconds;
 using Values = std::map<std::string, std::string>;
 
 constexpr uint64_t kSeekMarginMs = 2000; // polls and events lag, so a smaller jump is not a seek
-constexpr int kNotifyTimeoutMs = 2000;
 constexpr auto kTick = milliseconds(25);
 constexpr auto kSettling = milliseconds(3000); // a player can still report the old track this long after a new one
-constexpr SOCKET kNoSocket = INVALID_SOCKET;
 
 std::optional<TransportState> stateFrom(const std::string& text) {
     if (text == "PLAYING" || text == "Playing") return TransportState::Playing;
@@ -51,22 +43,6 @@ uint64_t number(std::string_view text) {
 std::string find(const Values& values, const char* name) {
     const auto found = values.find(name);
     return found == values.end() ? std::string() : found->second;
-}
-
-std::string headerValue(const std::string& head, const char* name) {
-    const std::string wanted = std::string(name) + ":";
-    size_t start = 0;
-    while (start < head.size()) {
-        auto end = head.find("\r\n", start);
-        if (end == std::string::npos) end = head.size();
-        if (end - start > wanted.size() && _strnicmp(head.c_str() + start, wanted.c_str(), wanted.size()) == 0) {
-            auto value = head.substr(start + wanted.size(), end - start - wanted.size());
-            value.erase(0, value.find_first_not_of(" \t"));
-            return value;
-        }
-        start = end + 2;
-    }
-    return {};
 }
 
 } // namespace
@@ -160,178 +136,42 @@ std::vector<PlayerEvent> PlayerFollower::lost() {
 }
 
 struct PlayerLink::Impl {
-    struct Subscription {
-        std::string kind, eventUrl, sid;
-        Clock::time_point renewAt;
-    };
-    struct Notification {
-        std::string sid, body;
-    };
-
     upnp::PlayerDescription player;
     std::function<void(const PlayerEvent&)> onEvent;
     LinkOptions options;
-    SOCKET listener = INVALID_SOCKET;
-    std::string callback;
-    std::vector<Subscription> subscriptions;
+    PlayerEvents events;
     std::atomic<bool> stopping = false;
-    std::mutex mutex; // the follower, the queue and the source
+    std::mutex mutex; // the follower and the source
     PlayerFollower follower;
-    std::deque<Notification> notifications;
     std::optional<std::string> ownSource, seenSource;
     std::string currentId; // OpenHome: the playlist entry playing
     std::atomic<uint64_t> lastPositionMs = 0;
     std::atomic<bool> lastStopped = false, lastPlaying = false, sawPlaying = false;
     Clock::time_point started = Clock::now();
-    std::thread listening, working;
+    std::thread working;
 
     milliseconds now() const { return std::chrono::duration_cast<milliseconds>(Clock::now() - started); }
 
     Impl(upnp::PlayerDescription description, std::function<void(const PlayerEvent&)> handler, LinkOptions linkOptions)
-        : player(std::move(description)), onEvent(std::move(handler)), options(linkOptions) {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
-        openListener();
-        listening = std::thread([this] { listen(); });
-        try {
-            for (const char* kind : subscribedKinds()) {
-                const auto* service = player.service(kind);
-                if (!service || service->eventUrl.empty()) continue;
-                subscribe(*service, kind);
-            }
-            if (subscriptions.empty()) throw std::runtime_error("the player offers no events");
-        } catch (...) {
-            stopListening();
-            throw;
-        }
+        : player(std::move(description)), onEvent(std::move(handler)), options(linkOptions),
+          events(player, subscribedKinds(), options) {
         working = std::thread([this] { work(); });
     }
 
     ~Impl() {
         stopping = true;
         working.join();
-        for (const auto& subscription : subscriptions) {
-            try {
-                http::send("UNSUBSCRIBE", subscription.eventUrl, "SID: " + subscription.sid, "", options.requestTimeoutMs, 4096);
-            } catch (const std::exception&) {
-                log::info("network player: could not end a subscription");
-            }
-        }
-        stopListening();
     }
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
 
-    std::vector<const char*> subscribedKinds() const {
+    std::vector<std::string> subscribedKinds() const {
         if (player.protocol == upnp::PlayerProtocol::OpenHome) return {"Product", "Playlist", "Time"};
         return {"AVTransport"};
     }
 
-    void stopListening() {
-        stopping = true;
-        closesocket(listener);
-        listening.join();
-        WSACleanup();
-    }
-
-    void openListener() {
-        const auto* first = player.services.empty() ? nullptr : &player.services.front();
-        const std::string host = first ? upnp::hostOf(first->controlUrl) : std::string();
-        const std::string local = upnp::localAddressFor(host);
-        if (local.empty()) throw std::runtime_error("no route to the player");
-        listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        inet_pton(AF_INET, local.c_str(), &address.sin_addr);
-        if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(listener, 8) != 0) {
-            closesocket(listener);
-            throw std::runtime_error("cannot listen for the player's events");
-        }
-        int length = sizeof(address);
-        getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
-        callback = "http://" + local + ":" + std::to_string(ntohs(address.sin_port)) + "/event";
-    }
-
-    void subscribe(const upnp::PlayerService& service, const char* kind) {
-        const auto reply = http::send("SUBSCRIBE", service.eventUrl,
-                                      "CALLBACK: <" + callback + ">\r\nNT: upnp:event\r\nTIMEOUT: Second-" +
-                                          std::to_string(options.subscribeSeconds),
-                                      "", options.requestTimeoutMs, upnp::kMaxMessageBytes);
-        const auto sid = headerValue(reply.headers, "SID");
-        if (reply.status != 200 || sid.empty()) throw std::runtime_error("the player refused a subscription");
-        subscriptions.push_back({kind, service.eventUrl, sid, renewalTime(reply.headers)});
-    }
-
-    // Halfway through what the player granted, which may be less than what was asked.
-    Clock::time_point renewalTime(const std::string& head) const {
-        const auto timeout = headerValue(head, "TIMEOUT");
-        int seconds = options.subscribeSeconds;
-        if (timeout.starts_with("Second-"))
-            seconds = std::clamp(int(number(std::string_view(timeout).substr(7))), 2, options.subscribeSeconds);
-        return Clock::now() + std::chrono::seconds(seconds) / 2;
-    }
-
-    void renew(Subscription& subscription) {
-        const auto reply =
-            http::send("SUBSCRIBE", subscription.eventUrl,
-                       "SID: " + subscription.sid + "\r\nTIMEOUT: Second-" + std::to_string(options.subscribeSeconds), "",
-                       options.requestTimeoutMs, upnp::kMaxMessageBytes);
-        if (reply.status == 200) {
-            subscription.renewAt = renewalTime(reply.headers);
-            return;
-        }
-        // The player forgot the subscription, as after a restart.
-        const auto* service = player.service(subscription.kind);
-        const auto fresh = service ? http::send("SUBSCRIBE", service->eventUrl,
-                                                "CALLBACK: <" + callback + ">\r\nNT: upnp:event\r\nTIMEOUT: Second-" +
-                                                    std::to_string(options.subscribeSeconds),
-                                                "", options.requestTimeoutMs, upnp::kMaxMessageBytes)
-                                   : http::Reply{};
-        const auto sid = headerValue(fresh.headers, "SID");
-        if (fresh.status != 200 || sid.empty()) throw std::runtime_error("the player dropped a subscription");
-        subscription.sid = sid;
-        subscription.renewAt = renewalTime(fresh.headers);
-    }
-
-    void listen() {
-        for (;;) {
-            const SOCKET client = accept(listener, nullptr, nullptr);
-            if (client == kNoSocket) return;
-            const DWORD timeout = kNotifyTimeoutMs;
-            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-            std::string request;
-            char buffer[4096];
-            size_t headEnd = std::string::npos;
-            size_t total = 0;
-            while (request.size() < upnp::kMaxMessageBytes) {
-                const int read = recv(client, buffer, sizeof(buffer), 0);
-                if (read <= 0) break;
-                request.append(buffer, size_t(read));
-                if (headEnd == std::string::npos) {
-                    headEnd = request.find("\r\n\r\n");
-                    if (headEnd != std::string::npos)
-                        total = headEnd + 4 + size_t(number(headerValue(request.substr(0, headEnd), "CONTENT-LENGTH")));
-                }
-                if (headEnd != std::string::npos && request.size() >= total) break;
-            }
-            bool accepted = false;
-            if (headEnd != std::string::npos && request.starts_with("NOTIFY ")) {
-                const auto head = request.substr(0, headEnd);
-                std::scoped_lock lock(mutex);
-                notifications.push_back({headerValue(head, "SID"), request.substr(headEnd + 4)});
-                accepted = true;
-            }
-            const std::string reply = accepted
-                                          ? "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                                          : "HTTP/1.1 412 Precondition Failed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-            send(client, reply.data(), int(reply.size()), 0);
-            shutdown(client, SD_SEND);
-            closesocket(client);
-        }
-    }
-
-    void report(const std::vector<PlayerEvent>& events) {
-        for (const auto& event : events) onEvent(event);
+    void report(const std::vector<PlayerEvent>& happened) {
+        for (const auto& event : happened) onEvent(event);
     }
 
     void observe(const PlayerObservation& observation) {
@@ -342,16 +182,16 @@ struct PlayerLink::Impl {
         }
         // Until it plays, a player reports the position of what it played before.
         if (observation.positionMs && sawPlaying && !lastStopped) lastPositionMs = *observation.positionMs;
-        std::vector<PlayerEvent> events;
+        std::vector<PlayerEvent> happened;
         {
             std::scoped_lock lock(mutex);
-            events = follower.observe(observation, now());
+            happened = follower.observe(observation, now());
         }
         // An event that names the next track says nothing of the position, which still is the last track's.
         if (!observation.positionMs &&
-            std::ranges::any_of(events, [](const PlayerEvent& event) { return event.kind == PlayerEventKind::NextTrack; }))
+            std::ranges::any_of(happened, [](const PlayerEvent& event) { return event.kind == PlayerEventKind::NextTrack; }))
             lastPositionMs = 0;
-        report(events);
+        report(happened);
     }
 
     PlayerObservation fromAvTransport(const Values& values) {
@@ -381,9 +221,7 @@ struct PlayerLink::Impl {
         return seen;
     }
 
-    void handle(const Notification& notification) {
-        const auto subscribed = std::ranges::find(subscriptions, notification.sid, &Subscription::sid);
-        if (subscribed == subscriptions.end()) return;
+    void handle(const PlayerEvents::Notification& notification) {
         const auto values = upnp::parsePropertySet(notification.body);
         if (player.protocol == upnp::PlayerProtocol::OpenHome) {
             observe(fromOpenHome(values));
@@ -450,15 +288,9 @@ struct PlayerLink::Impl {
         int failures = 0;
         auto nextPoll = Clock::now();
         while (!stopping) {
-            std::deque<Notification> pending;
-            {
-                std::scoped_lock lock(mutex);
-                pending.swap(notifications);
-            }
-            for (const auto& notification : pending) handle(notification);
+            for (const auto& notification : events.take()) handle(notification);
             try {
-                for (auto& subscription : subscriptions)
-                    if (Clock::now() >= subscription.renewAt) renew(subscription);
+                events.renewDue();
                 if (Clock::now() >= nextPoll) {
                     nextPoll = Clock::now() + options.pollInterval;
                     poll();
@@ -467,12 +299,12 @@ struct PlayerLink::Impl {
             } catch (const std::exception& e) {
                 log::info("network player %s: %s", player.name.c_str(), e.what());
                 if (++failures >= options.failuresUntilLost) {
-                    std::vector<PlayerEvent> events;
+                    std::vector<PlayerEvent> happened;
                     {
                         std::scoped_lock lock(mutex);
-                        events = follower.lost();
+                        happened = follower.lost();
                     }
-                    report(events);
+                    report(happened);
                     return;
                 }
             }

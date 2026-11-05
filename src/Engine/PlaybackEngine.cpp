@@ -48,19 +48,31 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
 }
 
 DsdOutput dsdOutput(const Settings& s) {
-    if (s.backend == Backend::Network) return DsdOutput::Native; // sent as DSF when the player declares DSD
+    if (s.backend == Backend::Network) return s.network.dsdOutput;
     return s.backend == Backend::Asio ? s.asio.dsdOutput : s.backend == Backend::Ks ? s.ks.dsdOutput : s.wasapi.dsdOutput;
 }
 
 uint32_t dsdPcmRate(const Settings& s) {
+    if (s.backend == Backend::Network) return s.network.dsdPcmRate;
     return s.backend == Backend::Asio ? s.asio.dsdPcmRate : s.backend == Backend::Ks ? s.ks.dsdPcmRate : s.wasapi.dsdPcmRate;
+}
+
+// The limit a network player's settings put on PCM; raw DSD keeps its rate (docs/Plan.md §6).
+bool withinLimit(const Settings& s, const DeviceFormat& f) {
+    if (s.backend != Backend::Network || f.type == SampleType::Dsd8) return true;
+    return (!s.network.maxSampleRate || f.sampleRate <= s.network.maxSampleRate) &&
+           (!s.network.maxBits || bytesPerSample(f.type) * 8 <= s.network.maxBits);
 }
 
 // How `src` reaches a device that takes what `supports` accepts under settings `s` (docs/Plan.md §5.3). DSD: the
 // configured raw path (ASIO native, else DoP; WASAPI and KS have no native DSD), PCM only when
 // chosen or allowed as a fallback. A fixed rate the device refuses falls back to the file's rate, noted in `adjustment`.
 std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool lossy,
-                                  const std::function<bool(const DeviceFormat&)>& supports, std::string* adjustment = nullptr) {
+                                  const std::function<bool(const DeviceFormat&)>& deviceSupports,
+                                  std::string* adjustment = nullptr) {
+    const std::function<bool(const DeviceFormat&)> supports = [&](const DeviceFormat& f) {
+        return withinLimit(s, f) && deviceSupports(f);
+    };
     if (s.backend == Backend::Wasapi && s.wasapi.shared) {
         // Choosing shared mode permits converting to the mixer's float32 format; nothing here is bit-perfect, and raw
         // DSD cannot pass the mixer.
@@ -111,10 +123,15 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
         return sameOutput(a.asio, b.asio);
     case Backend::Ks:
         return sameOutput(a.ks, b.ks);
-    case Backend::Network:
-        return a.network == b.network;
+    case Backend::Network: // the rest is a choice of path, which reopens only when the path differs
+        return a.network.udn == b.network.udn && a.network.gapless == b.network.gapless;
     }
     return false;
+}
+
+bool samePlayerPath(const NetworkSettings& a, const NetworkSettings& b) {
+    return a.maxSampleRate == b.maxSampleRate && a.maxBits == b.maxBits && a.dsdOutput == b.dsdOutput &&
+           a.dsdPcmRate == b.dsdPcmRate;
 }
 
 // The file's own decoder, else the per-format setting; an unsupported pairing fails instead of substituting.
@@ -199,6 +216,8 @@ public:
     size_t renderSession(uint8_t* dst, size_t frames) noexcept {
         if (!rust_) return 0;
         if (uint64_t lead = leadSilence_.load(std::memory_order_acquire)) {
+            if (pulled_.load(std::memory_order_relaxed))
+                frames = size_t(std::min<uint64_t>(frames, lead)); // counted in the stream
             // The whole request is silence; the paused Engine writes the DSD idle pattern with continuing DoP markers.
             if (rawDsd_.load(std::memory_order_acquire))
                 rust_->render(dst, frames, bpf_);
@@ -416,12 +435,13 @@ public:
         // A conversion setting reopens the stream only when the path it would choose differs.
         const bool conversionChanged =
             (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality ||
-             settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported) &&
+             settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported ||
+             !samePlayerPath(settings_.network, s.network)) &&
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || conversionChanged;
         const bool dspChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
                                 settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder ||
-                                settings_.volume != s.volume;
+                                volumeDb(settings_.volume) != volumeDb(s.volume);
         const bool crossfadeChanged = settings_.crossfade != s.crossfade;
         const bool wasActive = active_;
         const bool wasPlaying = state_ == PlayState::Playing;
@@ -812,12 +832,16 @@ private:
     // After a format change the device first plays the configured silence (docs/Plan.md §6): the Engine stays paused,
     // rendering silence in the stream's format, until the output has taken that many frames.
     void startRust() {
-        const uint32_t ms = timing(settings_).formatChangeSilenceMs;
-        if (pendingSilence_ && ms)
-            leadSilence_ = std::max<uint64_t>(1, uint64_t(fmt_.sampleRate) * ms / 1000);
+        if (const uint64_t frames = silenceFrames())
+            leadSilence_ = frames;
         else
             rust_->play();
         pendingSilence_ = false;
+    }
+
+    uint64_t silenceFrames() const {
+        const uint32_t ms = timing(settings_).formatChangeSilenceMs;
+        return pendingSilence_ && ms ? std::max<uint64_t>(1, uint64_t(fmt_.sampleRate) * ms / 1000) : 0;
     }
 
     // Closes the device once playback has been paused for the configured time; play reopens it at the same position.
@@ -1005,6 +1029,13 @@ private:
             });
         }
         rawDsd_.store(plan_.dsd == DsdPath::Native || plan_.dsd == DsdPath::Dop, std::memory_order_release);
+        const bool raw = rawDsd_.load(std::memory_order_relaxed);
+        pendingSilence_ = !lastOpened_ || lastOpened_->generation != outputGeneration_ || lastOpened_->format != fmt_ ||
+                          lastOpened_->raw != raw;
+        if (pulled_) {
+            std::lock_guard lock(streamMutex_);
+            streamTrack_.leadFrames = silenceFrames();
+        }
         try {
             if (!kept) output_->open(fmt_, this);
             outputOpen_ = true;
@@ -1021,9 +1052,6 @@ private:
         }
         active_ = true;
         waitingForSource_ = false;
-        const bool raw = rawDsd_.load(std::memory_order_relaxed);
-        pendingSilence_ = !lastOpened_ || lastOpened_->generation != outputGeneration_ || lastOpened_->format != fmt_ ||
-                          lastOpened_->raw != raw;
         lastOpened_ = Opened{outputGeneration_, fmt_, raw};
         {
             std::lock_guard lock(snapMutex_);

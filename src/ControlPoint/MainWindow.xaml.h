@@ -107,6 +107,10 @@ struct MainWindow : MainWindowT<MainWindow> {
                          Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
     void OnVolumeWheel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
     void OnMuteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayerVolumeChanged(Windows::Foundation::IInspectable const&,
+                               Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
+    void OnPlayerMuteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnNetworkGaplessToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeSettingsClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnReplayGainChanged(Windows::Foundation::IInspectable const&,
@@ -160,6 +164,7 @@ private:
     void showCrossfade();
     void enableDependentFields();
     // One row of the signal path (docs/Plan.md §8.1): a step, what follows it, its state and the stage it belongs to.
+    camel::VolumeMode chosenVolumeMode();
     enum class PathState : uint8_t { BitPerfect, Lossless, Processed, Lossy, AtTrackChanges };
     enum class PathStage : uint8_t { Source, Processing, Output };
     struct PathStep {
@@ -261,9 +266,12 @@ private:
     const wchar_t* stateColor_ = L"TextFillColorSecondaryBrush";
     const wchar_t* lampColor_ = L"ControlStrongFillColorDisabledBrush";
     const wchar_t* dspColor_ = L"TextFillColorPrimaryBrush";
-    int volumeWheel_ = 0;         // the part of a wheel notch not yet applied
-    bool populating_ = false;     // ignore control events while filling controls
-    bool sliderUpdating_ = false; // ignore slider events caused by position updates
+    int volumeWheel_ = 0;                  // the part of a wheel notch not yet applied
+    std::optional<uint32_t> playerVolume_; // the network player's own level, as the Server last reported it
+    bool playerMuted_ = false;
+    std::chrono::steady_clock::time_point playerVolumeMovedAt_; // until it settles, the slider stays where the user left it
+    bool populating_ = false;                                   // ignore control events while filling controls
+    bool sliderUpdating_ = false;                               // ignore slider events caused by position updates
     bool queueOpen_ = false;
     bool navCompacted_ = false;
     double pendingSeek_ = 0;

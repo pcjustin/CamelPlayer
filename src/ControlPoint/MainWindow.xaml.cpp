@@ -188,6 +188,8 @@ void foldNote(TextBlock const& note) {
     link.Click([show, open = false](auto&&, auto&&) mutable { show(open = !open); });
 }
 
+constexpr auto kPlayerVolumeSettles = std::chrono::milliseconds(2000);
+
 std::vector<hstring> rateItems() {
     std::vector<hstring> items{tr(L"Rate_FollowFile")};
     for (uint32_t rate : kFixedRates) {
@@ -611,6 +613,15 @@ void MainWindow::populateSettings() {
     fill(KsMmcssPriorityCombo(), priorities, int(settings_.ks.mmcssPriority));
     showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
 
+    auto limits = rates;
+    limits.front() = tr(L"Limit_FollowPlayer");
+    fill(NetworkRateCombo(), limits, rateIndex(settings_.network.maxSampleRate));
+    fill(NetworkBitsCombo(), {tr(L"Limit_FollowPlayer"), L"16"}, settings_.network.maxBits ? 1 : 0);
+    fill(NetworkDsdCombo(), {tr(L"Dsd_Dsf"), tr(L"Dsd_Pcm")}, settings_.network.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(NetworkDsdRateCombo(), dsdRates, dsdRateIndex(settings_.network.dsdPcmRate));
+    NetworkGaplessSwitch().IsOn(settings_.network.gapless);
+    showTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
+
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
     fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
@@ -872,7 +883,7 @@ void MainWindow::readSettingsFromUi() {
     if (eqEditor_) settings_.eq.bands = eqEditor_->settings().bands;
     settings_.crossfeed.enabled = CrossfeedSwitch().IsOn();
     settings_.convolution.enabled = ConvolutionSwitch().IsOn();
-    settings_.volume.mode = VolumeModeCombo().SelectedIndex() == 1 ? camel::VolumeMode::Software : camel::VolumeMode::Fixed;
+    settings_.volume.mode = chosenVolumeMode();
     settings_.volume.db = std::round(VolumeSlider().Value() * 2) / 2;
     auto& rg = settings_.replayGain;
     if (ReplayGainModeCombo().SelectedIndex() >= 0) rg.mode = camel::ReplayGainMode(ReplayGainModeCombo().SelectedIndex());
@@ -923,6 +934,13 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
     settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
+
+    settings_.network.maxSampleRate = rateAt(idx(NetworkRateCombo()));
+    settings_.network.maxBits = idx(NetworkBitsCombo()) == 1 ? 16 : 0;
+    settings_.network.dsdOutput = idx(NetworkDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
+    settings_.network.dsdPcmRate = dsdRateAt(idx(NetworkDsdRateCombo()));
+    settings_.network.gapless = NetworkGaplessSwitch().IsOn();
+    readTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
     settings_.theme = Theme(std::clamp(idx(ThemeCombo()), 0, 2));
 }
@@ -934,6 +952,10 @@ void MainWindow::OnAutoplayToggled(Windows::Foundation::IInspectable const& send
     AutoplaySwitch().IsOn(on);
     QueueAutoplayItem().IsChecked(on);
     populating_ = false;
+    settingsChanged();
+}
+
+void MainWindow::OnNetworkGaplessToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
 }
 
@@ -958,6 +980,7 @@ void MainWindow::updateBackendGroups() {
     WasapiGroup().Visibility(settings_.backend == Backend::Wasapi ? Visibility::Visible : Visibility::Collapsed);
     AsioGroup().Visibility(settings_.backend == Backend::Asio ? Visibility::Visible : Visibility::Collapsed);
     KsGroup().Visibility(settings_.backend == Backend::Ks ? Visibility::Visible : Visibility::Collapsed);
+    NetworkGroup().Visibility(settings_.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
     WasapiPeriodBox().IsEnabled(settings_.wasapi.period == WasapiPeriod::Custom);
     WasapiRateCombo().IsEnabled(!settings_.wasapi.shared); // the mixer sets the rate in shared mode
     WasapiPollBufferBox().IsEnabled(!settings_.wasapi.eventDriven);
@@ -1038,6 +1061,11 @@ void MainWindow::showOutputsOf(const SettingsDto& server) {
 }
 
 void MainWindow::applySnapshot(const Snapshot& snapshot) {
+    if (snapshot.playback.playerVolume != playerVolume_ || snapshot.playback.playerMuted != playerMuted_) {
+        playerVolume_ = snapshot.playback.playerVolume;
+        playerMuted_ = snapshot.playback.playerMuted;
+        showVolume();
+    }
     if (!server_ || !cursor_.accept(snapshot)) return;
     shown_ = snapshot;
     if (snapshot.devices.revision != shownDevicesRevision_) {
@@ -1298,12 +1326,16 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             add(tr(L"SignalPath_Dither"), to_hstring(bits) + L"-bit", PathState::Lossy);
         else if (container > bits)
             add(tr(L"SignalPath_Pad"), to_hstring(bits) + L"→" + to_hstring(container) + L"-bit", PathState::BitPerfect);
+        const PathState reached = plan.state == PipelineState::BitPerfect           ? PathState::BitPerfect
+                                  : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
+                                  : plan.state == PipelineState::LossySource        ? PathState::Lossy
+                                                                                    : PathState::Processed;
         add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
-            ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)),
-            plan.state == PipelineState::BitPerfect           ? PathState::BitPerfect
-            : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
-            : plan.state == PipelineState::LossySource        ? PathState::Lossy
-                                                              : PathState::Processed);
+            ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
+        if (s.backend == Backend::Network && !settings_.network.gapless)
+            add(tr(L"SignalPath_GaplessOff"), {}, PathState::AtTrackChanges);
+        if (s.playerVolume)
+            add(tr(L"SignalPath_PlayerVolume"), s.playerMuted ? tr(L"SignalPath_Muted") : to_hstring(*s.playerVolume), reached);
         showSignalPath(std::move(steps));
         dspActive = processed;
     } else {
@@ -3229,13 +3261,25 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
 // slider and mute while it is Software and says who sets the level while it is Fixed.
 void MainWindow::showVolume() {
     const bool wasPopulating = std::exchange(populating_, true);
+    const bool network = settings_.backend == Backend::Network;
     const bool software = settings_.volume.mode == camel::VolumeMode::Software;
-    VolumeModeCombo().SelectedIndex(software ? 1 : 0);
-    FixedVolumePanel().Visibility(software ? Visibility::Collapsed : Visibility::Visible);
+    const bool wantsPlayer = settings_.volume.mode == camel::VolumeMode::Player;
+    const bool player = wantsPlayer && playerVolume_.has_value();
+    VolumeModeOwnItem().Content(box_value(tr(network ? L"Volume_ModePlayer" : L"Volume_ModeSoftware")));
+    VolumeModeCombo().SelectedIndex(software || wantsPlayer ? 1 : 0);
+    VolumeNote().Text(tr(network ? L"Volume_NotePlayer" : L"Volume_NoteLocal"));
+    FixedVolumePanel().Visibility(software || player ? Visibility::Collapsed : Visibility::Visible);
     SoftwareVolumePanel().Visibility(software ? Visibility::Visible : Visibility::Collapsed);
-    VolumeLock().Visibility(software ? Visibility::Collapsed : Visibility::Visible);
-    FixedVolumeTitle().Text(tr(L"Volume_Fixed"));
+    PlayerVolumePanel().Visibility(player ? Visibility::Visible : Visibility::Collapsed);
+    VolumeLock().Visibility(software || player ? Visibility::Collapsed : Visibility::Visible);
+    FixedVolumeTitle().Text(tr(wantsPlayer ? L"Volume_PlayerUnknown" : L"Volume_Fixed"));
     VolumeSlider().Value(settings_.volume.db);
+    if (player && std::chrono::steady_clock::now() - playerVolumeMovedAt_ > kPlayerVolumeSettles)
+        PlayerVolumeSlider().Value(*playerVolume_);
+    PlayerMuteIcon().Glyph(playerMuted_ ? L"\xE74F" : L"\xE767");
+    const auto playerMute = tr(playerMuted_ ? L"Volume_Unmute" : L"Volume_Mute");
+    ToolTipService::SetToolTip(PlayerMuteButton(), box_value(playerMute));
+    Automation::AutomationProperties::SetName(PlayerMuteButton(), playerMute);
     MuteIcon().Glyph(settings_.volume.muted ? L"\xE74F" : L"\xE767");
     const auto mute = tr(settings_.volume.muted ? L"Volume_Unmute" : L"Volume_Mute");
     ToolTipService::SetToolTip(MuteButton(), box_value(mute));
@@ -3252,7 +3296,13 @@ void MainWindow::showVolumeLevel() {
     swprintf_s(level, L"%.1f dB", volume.db);
     VolumeText().Text(level);
     hstring name;
-    if (volume.mode != camel::VolumeMode::Software) {
+    if (volume.mode == camel::VolumeMode::Player && playerVolume_) {
+        const auto shown = uint32_t(PlayerVolumeSlider().Value());
+        const auto text = to_hstring(shown);
+        PlayerVolumeText().Text(text);
+        VolumeIcon().Glyph(playerMuted_ ? L"\xE74F" : shown > 66 ? L"\xE995" : shown > 33 ? L"\xE994" : L"\xE993");
+        name = ui::format(L"Volume_Level", {playerMuted_ ? std::wstring(tr(L"SignalPath_Muted")) : std::wstring(text)});
+    } else if (volume.mode != camel::VolumeMode::Software) {
         VolumeIcon().Glyph(L"\xE767");
         name = tr(L"Volume_Fixed");
     } else {
@@ -3321,9 +3371,14 @@ void MainWindow::showLoudnessProgress() {
     if (LoudnessProgressText().Text() != text) LoudnessProgressText().Text(text);
 }
 
+camel::VolumeMode MainWindow::chosenVolumeMode() {
+    if (VolumeModeCombo().SelectedIndex() != 1) return camel::VolumeMode::Fixed;
+    return settings_.backend == Backend::Network ? camel::VolumeMode::Player : camel::VolumeMode::Software;
+}
+
 void MainWindow::OnVolumeModeChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
     if (populating_) return;
-    settings_.volume.mode = VolumeModeCombo().SelectedIndex() == 1 ? camel::VolumeMode::Software : camel::VolumeMode::Fixed;
+    settings_.volume.mode = chosenVolumeMode();
     showVolume();
     settingsChanged();
 }
@@ -3338,13 +3393,37 @@ void MainWindow::OnVolumeChanged(Windows::Foundation::IInspectable const&, Primi
 }
 
 void MainWindow::OnVolumeWheel(Windows::Foundation::IInspectable const&, Input::PointerRoutedEventArgs const& e) {
-    if (settings_.volume.mode != camel::VolumeMode::Software) return;
+    const bool player = settings_.volume.mode == camel::VolumeMode::Player && playerVolume_;
+    if (settings_.volume.mode != camel::VolumeMode::Software && !player) return;
     // A notch moves 1 dB; one event may carry several notches, and a touchpad sends parts of one.
-    volumeWheel_ += e.GetCurrentPoint(VolumeSlider()).Properties().MouseWheelDelta();
+    volumeWheel_ += e.GetCurrentPoint(nullptr).Properties().MouseWheelDelta();
     const int notches = volumeWheel_ / WHEEL_DELTA;
     volumeWheel_ %= WHEEL_DELTA;
-    if (notches != 0) VolumeSlider().Value(std::clamp(VolumeSlider().Value() + notches, camel::VolumeSettings::kMinDb, 0.0));
+    if (notches != 0 && player)
+        PlayerVolumeSlider().Value(std::clamp(PlayerVolumeSlider().Value() + notches, 0.0, 100.0));
+    else if (notches != 0)
+        VolumeSlider().Value(std::clamp(VolumeSlider().Value() + notches, camel::VolumeSettings::kMinDb, 0.0));
     e.Handled(true);
+}
+
+// Only a move of the user's reaches the player; what it reports by itself is shown with `populating_` set.
+void MainWindow::OnPlayerVolumeChanged(Windows::Foundation::IInspectable const&,
+                                       Primitives::RangeBaseValueChangedEventArgs const&) {
+    if (populating_ || !server_) return;
+    showVolumeLevel();
+    playerVolumeMovedAt_ = std::chrono::steady_clock::now();
+    Command command;
+    command.kind = CommandKind::SetPlayerVolume;
+    command.playerVolume = uint32_t(PlayerVolumeSlider().Value());
+    submitCommand(std::move(command));
+}
+
+void MainWindow::OnPlayerMuteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_) return;
+    Command command;
+    command.kind = CommandKind::SetPlayerMute;
+    command.playerMute = !playerMuted_;
+    submitCommand(std::move(command));
 }
 
 void MainWindow::OnMuteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

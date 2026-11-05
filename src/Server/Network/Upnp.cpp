@@ -295,6 +295,11 @@ std::map<std::string, std::string> parseLastChange(std::string_view xml) {
     const XmlNode* instance = root->child("InstanceID");
     if (!instance) return values;
     for (const auto& variable : instance->children) {
+        // The DMP-A6 spells the attribute "Channel".
+        const bool otherChannel = std::ranges::any_of(variable.attributes, [](const auto& attribute) {
+            return _stricmp(attribute.first.c_str(), "channel") == 0 && _stricmp(attribute.second.c_str(), "Master") != 0;
+        });
+        if (otherChannel) continue;
         const auto value = variable.attributes.find("val");
         if (value != variable.attributes.end()) values[variable.name] = value->second;
     }

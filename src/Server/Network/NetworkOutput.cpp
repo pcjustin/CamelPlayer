@@ -159,7 +159,7 @@ public:
         return false;
     }
 
-    bool gapless() const override { return gapless_; }
+    bool gapless() const override { return gapless_ && options_.gapless; }
 
     void open(const DeviceFormat& f, IRenderSource* source) override {
         close();
@@ -246,7 +246,8 @@ public:
         OutputStatus status;
         status.mode = "UPnP · " + player_.name;
         status.heldFrames = held();
-        if (!gapless_) status.adjustments.emplace_back("this player cannot follow one track with the next without a gap");
+        if (options_.gapless && !gapless_)
+            status.adjustments.emplace_back("this player cannot follow one track with the next without a gap");
         return status;
     }
 
@@ -295,6 +296,11 @@ private:
             raiseError(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
             return;
         }
+        {
+            // A player still starting reports PLAYING after a stop, which is not a request to play.
+            std::scoped_lock lock(mutex_);
+            if (!started_) return;
+        }
         if (event.kind == PlayerEventKind::NextTrack) {
             std::scoped_lock lock(mutex_);
             if (bodies_.size() > 1 && bodies_.front().complete) {
@@ -311,9 +317,7 @@ private:
             std::scoped_lock lock(mutex_);
             if (event.positionMs < kNearStartMs && (bodies_.size() > 1 || Clock::now() - changedAt_ < kChangeSettles)) return;
             if (!bodies_.empty()) {
-                PlayerEvent seek = event;
-                seek.positionMs += bodies_.front().track.startFrame * 1000 / std::max(format_.sampleRate, 1U);
-                if (follow_) follow_(seek);
+                if (follow_) follow_({PlayerEventKind::Seeked, positionInFile(bodies_.front(), event.positionMs)});
             }
             return;
         }
@@ -386,23 +390,23 @@ private:
         body.id = nextId_++;
         body.track = track;
         body.lengthKnown = track.frames != 0;
-        body.totalFrames = track.frames;
+        body.totalFrames = track.frames ? track.frames + track.leadFrames : 0;
         const uint32_t bytesPerFrame = format_.bytesPerFrame();
         std::string header;
         if (format_.type == SampleType::Dsd8) {
-            const uint64_t frames = body.lengthKnown ? track.frames : kUnknownLength;
+            const uint64_t frames = body.lengthKnown ? body.totalFrames : kUnknownLength;
             header = dsfHeader(format_, frames);
             body.totalBytes = kDsfHeader + (frames + kDsfBlock - 1) / kDsfBlock * kDsfBlock * format_.channels;
             body.contentType = "audio/x-dsf";
             body.extension = "dsf";
         } else if (formats_.wav) {
-            const uint64_t data = (body.lengthKnown ? track.frames : kUnknownLength) * bytesPerFrame;
+            const uint64_t data = (body.lengthKnown ? body.totalFrames : kUnknownLength) * bytesPerFrame;
             header = wavHeader(format_, data);
             body.totalBytes = kWavHeader + data;
             body.contentType = "audio/wav";
             body.extension = "wav";
         } else {
-            body.totalBytes = (body.lengthKnown ? track.frames : kUnknownLength) * bytesPerFrame;
+            body.totalBytes = (body.lengthKnown ? body.totalFrames : kUnknownLength) * bytesPerFrame;
             body.contentType = std::string(format_.type == SampleType::Int16 ? "audio/L16" : "audio/L24") +
                                ";rate=" + std::to_string(format_.sampleRate) + ";channels=" + std::to_string(format_.channels);
             body.extension = "pcm";
@@ -458,7 +462,7 @@ private:
     // to read gives up on it and reopens it at the change, with a gap (the DMP-A6 does).
     void announceNext() {
         std::unique_lock lock(mutex_);
-        if (closing_ || !gapless_ || !started_ || !source_) return;
+        if (closing_ || !gapless() || !started_ || !source_) return;
         if (const auto next = source_->nextStreamTrack(); next && next->sequence != queuedNext_) {
             queuedNext_ = next->sequence;
             bodies_.push_back(makeBody(*next));
@@ -501,6 +505,12 @@ private:
             startLateNext();
             if (sent) produce();
         }
+    }
+
+    uint64_t positionInFile(const Body& body, uint64_t positionMs) const {
+        const uint32_t rate = std::max(format_.sampleRate, 1U);
+        const uint64_t leadMs = body.track.leadFrames * 1000 / rate;
+        return (positionMs > leadMs ? positionMs - leadMs : 0) + body.track.startFrame * 1000 / rate;
     }
 
     void forget(SOCKET client) {
@@ -573,7 +583,7 @@ private:
         // Further than the stream has got, or before what it keeps: the player seeked, which restarts the stream there.
         if (start < body->retainedFrom || start > body->produced() + kRetainBytes) {
             const uint64_t frames = (start > kWavHeader ? start - kWavHeader : 0) / std::max(format_.bytesPerFrame(), 1U);
-            const uint64_t positionMs = (body->track.startFrame + frames) * 1000 / std::max(format_.sampleRate, 1U);
+            const uint64_t positionMs = positionInFile(*body, frames * 1000 / std::max(format_.sampleRate, 1U));
             lock.unlock();
             if (follow_) follow_({PlayerEventKind::Seeked, positionMs});
             return respond(client, "503 Service Unavailable");

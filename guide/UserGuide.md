@@ -59,6 +59,10 @@ Each output keeps its own settings, shown in Settings › Playback for the outpu
 
 UPnP AV and OpenHome players on your network appear under Network players. Turning the first one on explains why Windows Firewall has to let them reach CamelPlayer and asks to add one rule, for this program on private networks only; if you decline, Settings shows a notice with **Add the rule**. Choose a player in the output menu to play to it: the music is streamed at the source's format, the player's own remote and app work as usual, and its own volume stays as it is. Tracks of the same format follow without a gap where the player can; if not, Settings › Status says so. If another source takes the player over, CamelPlayer stops and says so; press play to take it back.
 
+With a network player in use, Settings › Playback shows its own settings: the highest sample rate and bit depth to send, for a player that declares more than it plays (above them the conversion rule applies and the path shows as processed), whether DSD goes as DSF or becomes PCM, and **Gapless playback**, on by default. Turn that off only for a player that handles the next track badly: it then gets one track at a time, with a short pause at each change, and the signal path says so. Under Advanced, silence after a format change gives a player that mutes while it switches format up to 2 seconds of silence at the start of the stream, and the device is released 60 seconds into a pause, so a short pause resumes at once.
+
+A network player's volume is its own. In Settings › DSP, **Volume control** offers **The player's volume**, the default where the player has one, or **Fixed**; CamelPlayer never lowers the level of the stream, so it stays bit-perfect. The volume button then opens a 0–100 slider and mute that show what the player reports, follow its remote and app, and change it only when you move them. CamelPlayer remembers only the choice, never a level. Some players report volume 0 and mute while they are in standby or set to fixed volume; the slider shows that as it is.
+
 The backend is how audio reaches the device:
 
 | Backend | Use it when | Notes |

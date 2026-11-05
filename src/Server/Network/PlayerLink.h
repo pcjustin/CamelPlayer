@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "Server/Network/PlayerEvents.h"
 #include "Server/Network/Upnp.h"
 
 namespace camel::server {
@@ -64,13 +65,6 @@ private:
     std::chrono::milliseconds positionAt_{};
     bool ended_ = false;
     std::chrono::milliseconds settledAt_{};
-};
-
-struct LinkOptions {
-    std::chrono::milliseconds pollInterval{2000};
-    int failuresUntilLost = 2;
-    int subscribeSeconds = 1800;
-    int requestTimeoutMs = 3000;
 };
 
 class PlayerLink {

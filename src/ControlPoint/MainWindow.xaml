@@ -316,6 +316,26 @@
                                     <TextBlock x:Uid="Settings_KsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
 
+                                <StackPanel x:Name="NetworkGroup" Spacing="12">
+                                    <TextBlock x:Uid="Settings_NetworkGroup" Style="{StaticResource GroupHeaderStyle}" />
+                                    <ComboBox x:Name="NetworkRateCombo" x:Uid="Settings_NetworkRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkBitsCombo" x:Uid="Settings_NetworkBits" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ToggleSwitch x:Name="NetworkGaplessSwitch" x:Uid="Settings_NetworkGapless" Toggled="OnNetworkGaplessToggled" />
+                                    <TextBlock x:Uid="Settings_NetworkGaplessNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
+                                        <StackPanel Spacing="12">
+                                            <NumberBox x:Name="NetworkPredecodeBox" x:Uid="Settings_Predecode" Width="320" HorizontalAlignment="Left" Minimum="1" Maximum="60"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="NetworkSilenceBox" x:Uid="Settings_FormatSilence" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="2000"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                            <NumberBox x:Name="NetworkReleaseBox" x:Uid="Settings_ReleaseAfterPause" Width="320" HorizontalAlignment="Left" Minimum="0" Maximum="3600"
+                                                       SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+
                             </StackPanel>
                         </Border>
 
@@ -332,9 +352,9 @@
                                 <TextBlock x:Uid="Settings_Volume" Style="{StaticResource GroupHeaderStyle}" />
                                 <ComboBox x:Name="VolumeModeCombo" x:Uid="Settings_VolumeMode" Width="240" SelectionChanged="OnVolumeModeChanged">
                                     <ComboBoxItem x:Uid="Settings_VolumeFixed" />
-                                    <ComboBoxItem x:Uid="Settings_VolumeSoftware" />
+                                    <ComboBoxItem x:Name="VolumeModeOwnItem" />
                                 </ComboBox>
-                                <TextBlock x:Name="VolumeNote" x:Uid="Settings_VolumeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="VolumeNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock x:Uid="Settings_ReplayGain" Style="{StaticResource GroupHeaderStyle}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -952,6 +972,16 @@
                                             <Button x:Name="MuteButton" Click="OnMuteClick" Width="40" Height="40" Padding="0" CornerRadius="20"
                                                     HorizontalAlignment="Center">
                                                 <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
+                                            </Button>
+                                        </StackPanel>
+                                        <StackPanel x:Name="PlayerVolumePanel" Spacing="8" HorizontalAlignment="Center" Visibility="Collapsed">
+                                            <TextBlock x:Name="PlayerVolumeText" Style="{StaticResource CaptionTextBlockStyle}" HorizontalAlignment="Center" />
+                                            <Slider x:Name="PlayerVolumeSlider" x:Uid="Volume_Slider" Orientation="Vertical" Height="160" Minimum="0"
+                                                    Maximum="100" StepFrequency="1" SmallChange="1" LargeChange="5" HorizontalAlignment="Center"
+                                                    ValueChanged="OnPlayerVolumeChanged" PointerWheelChanged="OnVolumeWheel" />
+                                            <Button x:Name="PlayerMuteButton" Click="OnPlayerMuteClick" Width="40" Height="40" Padding="0" CornerRadius="20"
+                                                    HorizontalAlignment="Center">
+                                                <FontIcon x:Name="PlayerMuteIcon" Glyph="&#xE767;" FontSize="16" />
                                             </Button>
                                         </StackPanel>
                                     </Grid>

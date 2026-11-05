@@ -581,8 +581,7 @@
   <data name="Settings_Volume.Text" xml:space="preserve"><value>Volume</value></data>
   <data name="Settings_VolumeMode.Header" xml:space="preserve"><value>Volume control</value></data>
   <data name="Settings_VolumeFixed.Content" xml:space="preserve"><value>Fixed (bit-perfect)</value></data>
-  <data name="Settings_VolumeSoftware.Content" xml:space="preserve"><value>Software</value></data>
-  <data name="Settings_VolumeNote.Text" xml:space="preserve"><value>Fixed leaves the level to your DAC or amplifier. Software adds a volume slider and mute to the player bar, from −80 to 0 dB; at 0 dB playback stays bit-perfect. The Windows volume and media keys keep controlling the system volume.</value></data>
+  <data name="Volume_NoteLocal" xml:space="preserve"><value>Fixed leaves the level to your DAC or amplifier. Software adds a volume slider and mute to the player bar, from −80 to 0 dB; at 0 dB playback stays bit-perfect. The Windows volume and media keys keep controlling the system volume.</value></data>
   <data name="Settings_ReplayGain.Text" xml:space="preserve"><value>ReplayGain</value></data>
   <data name="Settings_ReplayGainMode.Header" xml:space="preserve"><value>Mode</value></data>
   <data name="Settings_ReplayGainOff.Content" xml:space="preserve"><value>Off</value></data>
@@ -682,4 +681,17 @@
   <data name="Firewall_Notice.Message" xml:space="preserve"><value>Network players cannot reach CamelPlayer until the rule for private networks is added.</value></data>
   <data name="SignalPath_Renderer" xml:space="preserve"><value>Network player</value></data>
   <data name="Lamp_BitPerfectRenderer" xml:space="preserve"><value>Bit-perfect to the renderer</value></data>
+  <data name="Settings_NetworkGroup.Text" xml:space="preserve"><value>Network player</value></data>
+  <data name="Settings_NetworkRate.Header" xml:space="preserve"><value>Highest sample rate</value></data>
+  <data name="Settings_NetworkBits.Header" xml:space="preserve"><value>Highest bit depth</value></data>
+  <data name="Limit_FollowPlayer" xml:space="preserve"><value>Follow the player</value></data>
+  <data name="Dsd_Dsf" xml:space="preserve"><value>DSF, when the player declares DSD</value></data>
+  <data name="Settings_NetworkGapless.Header" xml:space="preserve"><value>Gapless playback</value></data>
+  <data name="Settings_NetworkGaplessNote.Text" xml:space="preserve"><value>Off, this player gets one track at a time, with a short pause at each change. Turn it off only if the player handles the next track badly.</value></data>
+  <data name="Volume_ModePlayer" xml:space="preserve"><value>The player's volume</value></data>
+  <data name="Volume_ModeSoftware" xml:space="preserve"><value>Software</value></data>
+  <data name="Volume_NotePlayer" xml:space="preserve"><value>The player's volume moves the player's own level and follows its remote and app, and the stream stays bit-perfect. CamelPlayer writes it only when you move the slider or mute.</value></data>
+  <data name="Volume_PlayerUnknown" xml:space="preserve"><value>The player's volume cannot be read</value></data>
+  <data name="SignalPath_PlayerVolume" xml:space="preserve"><value>Player volume</value></data>
+  <data name="SignalPath_GaplessOff" xml:space="preserve"><value>Gapless off</value></data>
 </root>

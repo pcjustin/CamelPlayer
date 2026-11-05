@@ -26,6 +26,7 @@ struct StreamTrack {
     uint64_t frames = 0;     // output frames the stream has of it; 0 while the length is unknown
     uint64_t startFrame = 0; // output frames of the file before the stream's start
     uint64_t sequence = 0;   // tells the same file queued twice apart
+    uint64_t leadFrames = 0; // silence render() gives before the track, which the stream carries too
     bool operator==(const StreamTrack&) const = default;
 };
 

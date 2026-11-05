@@ -152,6 +152,35 @@ TEST(NetworkOutputTest, APlayerWithoutTheNextActionIsNotGapless) {
     EXPECT_FALSE(output->status().adjustments.empty());
 }
 
+TEST(NetworkOutputTest, APlayerThatReportsPlayingAfterAStopIsNotFollowed) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.startSlowly(2000);
+    CountingSource source(k16.bytesPerFrame(), 44100);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    output->close();
+    renderer.emitLastChange(R"(<TransportState val="STOPPED"/>)");
+    renderer.emitLastChange(R"(<TransportState val="PLAYING"/>)");
+    std::this_thread::sleep_for(200ms);
+    EXPECT_EQ(std::ranges::count(output.events(), PlayerEvent{PlayerEventKind::Playing}), 0);
+}
+
+TEST(NetworkOutputTest, GaplessTurnedOffGivesThePlayerOneTrackAtATime) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    NetworkOutputOptions options;
+    options.gapless = false;
+    CountingSource source(k16.bytesPerFrame(), 2000, 2000);
+    OutputRun output(renderer, source, k16, options);
+    EXPECT_FALSE(output->gapless());
+    EXPECT_TRUE(output->status().adjustments.empty()); // the player can, so nothing is wrong
+    source.queueSecond();
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.received().empty(); }));
+    std::this_thread::sleep_for(100ms);
+    const auto actions = renderer.actions();
+    EXPECT_EQ(std::ranges::count(actions, "SetNextAVTransportURI"), 0);
+}
+
 TEST(NetworkOutputTest, ServesTheFramesBitForBitAsWav) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     CountingSource source(k24.bytesPerFrame(), 40000);
@@ -569,6 +598,112 @@ TEST_F(StreamingTest, TheNextTrackStartsAtItsStartWhenOnlyAnEventNamesIt) {
         EXPECT_LT(server->snapshot().playback.position, uint64_t{2} * 44100);
         std::this_thread::sleep_for(20ms);
     }
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, SilenceAfterAFormatChangeLeadsTheStreamAndLosesNoFrame) {
+    const auto file = testutil::generatedFile({"network-silence", 44100, 16, 2, 1.0});
+    const auto reference = audio::testaudio::referenceDecode(file);
+    ASSERT_TRUE(reference.error.empty()) << reference.error;
+    auto server = serverFor();
+    auto settings = nativeSettings(server->snapshot().settings);
+    settings.network.timing.formatChangeSilenceMs = 500;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(settings);
+    server->submit(std::move(apply));
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return !renderer_.received().empty(); })) << server->snapshot().playback.errorDetail;
+    const std::string body = renderer_.received().begin()->second;
+    const size_t silence = 22050;
+    ASSERT_EQ(body.size(), 44 + silence * 4 + reference.samples.size() * 2);
+    for (size_t i = 44; i < 44 + silence * 4; ++i) ASSERT_EQ(body[i], 0) << i;
+    for (size_t i = 0; i < reference.samples.size(); ++i) {
+        const auto sample = *reinterpret_cast<const int16_t*>(body.data() + 44 + silence * 4 + i * 2);
+        ASSERT_EQ(int32_t(sample), reference.samples[i]) << i;
+    }
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, ASampleRateAboveTheLimitIsConvertedAndShownAsProcessed) {
+    const auto file = testutil::generatedFile({"network-limit", 96000, 24, 2, 0.5});
+    auto server = serverFor();
+    auto settings = nativeSettings(server->snapshot().settings);
+    settings.network.maxSampleRate = 48000;
+    settings.network.maxBits = 16;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(settings);
+    server->submit(std::move(apply));
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return !renderer_.received().empty(); })) << server->snapshot().playback.errorDetail;
+    const auto playback = server->snapshot().playback;
+    ASSERT_TRUE(playback.output);
+    EXPECT_EQ(playback.output->sampleRate, 48000U);
+    EXPECT_EQ(playback.output->type, SampleType::Int16);
+    EXPECT_FALSE(playback.bitPerfect());
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, AChoiceThatChangesNothingKeepsTheStream) {
+    const auto file = testutil::generatedFile({"network-keep", 44100, 16, 2, 8.0});
+    renderer_.limitFetch(4ULL * 44100);
+    auto server = serverFor();
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return !renderer_.currentUri().empty(); }));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.position > 22050; }));
+    const auto url = renderer_.currentUri();
+    auto settings = nativeSettings(server->snapshot().settings);
+    settings.network.maxSampleRate = 96000;
+    settings.network.timing.releaseAfterPauseSeconds = 120;
+    settings.volume.mode = VolumeMode::Fixed;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(settings);
+    server->submit(std::move(apply));
+    server->waitIdle();
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(renderer_.currentUri(), url);
+    EXPECT_EQ(std::ranges::count(renderer_.actions(), "SetAVTransportURI"), 1);
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, ThePlayersVolumeIsReadFollowedAndWrittenOnlyWhenAsked) {
+    renderer_.setVolume(30, false);
+    auto server = serverFor();
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.playerVolume == 30U; }));
+    EXPECT_EQ(std::ranges::count(renderer_.actions(), "SetVolume"), 0);
+    EXPECT_EQ(std::ranges::count(renderer_.actions(), "SetMute"), 0);
+
+    renderer_.setVolume(65, true); // as read again, or by an event
+    ASSERT_TRUE(waitFor([&] {
+        renderer_.changeVolume(65, true);
+        return server->snapshot().playback.playerVolume == 65U && server->snapshot().playback.playerMuted;
+    }));
+
+    Command level;
+    level.kind = CommandKind::SetPlayerVolume;
+    level.playerVolume = 20;
+    server->submit(std::move(level));
+    EXPECT_TRUE(waitFor([&] { return std::ranges::count(renderer_.actions(), "SetVolume") == 1; }));
+    Command mute;
+    mute.kind = CommandKind::SetPlayerMute;
+    mute.playerMute = false;
+    server->submit(std::move(mute));
+    EXPECT_TRUE(waitFor([&] { return std::ranges::count(renderer_.actions(), "SetMute") == 1; }));
+    server->shutdown();
+}
+
+TEST_F(StreamingTest, FixedVolumeLeavesThePlayerAlone) {
+    auto server = serverFor();
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.playerVolume.has_value(); }));
+    auto settings = nativeSettings(server->snapshot().settings);
+    settings.volume.mode = VolumeMode::Fixed;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(settings);
+    server->submit(std::move(apply));
+    EXPECT_TRUE(waitFor([&] { return !server->snapshot().playback.playerVolume; }));
     server->shutdown();
 }
 

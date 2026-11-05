@@ -108,7 +108,12 @@ struct KsSettings {
 // A UPnP AV or OpenHome player (docs/Plan.md §5.10), kept by its UDN and never by its address.
 struct NetworkSettings {
     std::string udn;
-    PlaybackTiming timing;
+    uint32_t maxSampleRate = 0;              // 0 follows the player; more goes through the conversion rule
+    uint32_t maxBits = 0;                    // 0 follows the player, else 16
+    DsdOutput dsdOutput = DsdOutput::Native; // Native is DSF; Pcm is the permission to convert
+    uint32_t dsdPcmRate = 176400;
+    bool gapless = true;                                   // off for a player that declares a next track and handles it badly
+    PlaybackTiming timing{.releaseAfterPauseSeconds = 60}; // a player resumes slower than a local device
     bool operator==(const NetworkSettings&) const = default;
 };
 
@@ -208,7 +213,8 @@ struct ConvolutionSettings {
 };
 
 // Software volume (docs/Plan.md §5.9): Fixed by default, leaving the level to the DAC or amplifier.
-enum class VolumeMode : uint8_t { Fixed, Software };
+// Player is a network player's own volume, read from it and never stored (docs/Plan.md §6).
+enum class VolumeMode : uint8_t { Fixed, Software, Player };
 
 struct VolumeSettings {
     static constexpr double kMinDb = -80.0;

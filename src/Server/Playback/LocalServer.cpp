@@ -8,6 +8,7 @@
 #include "Server/Network/Firewall.h"
 #include "Server/Network/NetworkOutput.h"
 #include "Server/Network/PlayerFinder.h"
+#include "Server/Network/PlayerVolume.h"
 #include "Server/Playback/Outputs.h"
 
 #include <windows.h>
@@ -83,7 +84,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetArtistFavorite)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetPlayerMute)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -95,6 +96,8 @@ void validate(const Command& c) {
         (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
+        c.playerVolume.has_value() != (c.kind == CommandKind::SetPlayerVolume) || (c.playerVolume && *c.playerVolume > 100) ||
+        c.playerMute.has_value() != (c.kind == CommandKind::SetPlayerMute) ||
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) || c.tracks.empty() == trackKeys ||
         c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
         c.albums.empty() == (c.kind == CommandKind::SetAlbumFavorite) ||
@@ -780,6 +783,12 @@ private:
                 if (session_) session_->interrupt();
                 engine_->seek(c.frame);
                 break;
+            case CommandKind::SetPlayerVolume:
+                if (playerVolume_) playerVolume_->setLevel(*c.playerVolume);
+                break;
+            case CommandKind::SetPlayerMute:
+                if (playerVolume_) playerVolume_->setMuted(*c.playerMute);
+                break;
             case CommandKind::ResetPlayStatistics:
             case CommandKind::ResetAllPlayStatistics:
                 if (!library_) throw std::logic_error("Server library is not configured");
@@ -1414,6 +1423,10 @@ private:
     void publish(bool completed) {
         shareLoudnessInputs();
         auto p = playback(engine_->snapshot());
+        if (const auto level = playerVolume_ ? playerVolume_->current() : std::nullopt) {
+            p.playerVolume = level->level;
+            p.playerMuted = level->muted;
+        }
         if (restored_ && p.state == PlaybackState::Stopped && state_.track) {
             p.state = PlaybackState::Paused;
             p.pathUtf8 = state_.track->pathUtf8();
@@ -1423,7 +1436,8 @@ private:
             p.format = restored_->format;
         }
         if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
-            p.underruns == state_.playback.underruns && state_.devices.revision == published_.devices.revision)
+            p.underruns == state_.playback.underruns && p.playerVolume == state_.playback.playerVolume &&
+            p.playerMuted == state_.playback.playerMuted && state_.devices.revision == published_.devices.revision)
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
@@ -1496,9 +1510,32 @@ private:
                     if (found.description.udn == settings.network.udn) player = std::move(found.description);
         }
         if (!player) throw audio::Error(audio::ErrorCode::DeviceNotFound, "the network player is not connected");
+        NetworkOutputOptions options;
+        options.gapless = settings.network.gapless;
         return createNetworkOutput(
             *player, [this](const std::wstring& file) { return trackDetails(file); },
-            [this](const PlayerEvent& event) { followPlayer(event); });
+            [this](const PlayerEvent& event) { followPlayer(event); }, options);
+    }
+
+    // The chosen player's own volume is followed from when it is chosen, whether it plays or not.
+    void followPlayerVolume() {
+        const std::string udn =
+            settings_.backend == Backend::Network && settings_.volume.mode == VolumeMode::Player ? settings_.network.udn : "";
+        if (udn == volumeUdn_ && state_.devices.revision == volumeDevices_) return;
+        volumeUdn_ = udn;
+        volumeDevices_ = state_.devices.revision;
+        std::optional<upnp::PlayerDescription> player;
+        if (!udn.empty()) {
+            std::scoped_lock lock(finderMutex_);
+            if (finder_)
+                for (auto& found : finder_->players())
+                    if (found.description.udn == udn) player = std::move(found.description);
+        }
+        if (player == volumePlayer_) return;
+        playerVolume_.reset();
+        volumePlayer_ = std::move(player);
+        if (volumePlayer_ && volumePlayer_->service("RenderingControl"))
+            playerVolume_ = std::make_unique<PlayerVolume>(*volumePlayer_);
     }
 
     TrackDetails trackDetails(const std::wstring& file) {
@@ -1613,6 +1650,7 @@ private:
                 recordPlaybackLength();
                 updatePlaySession();
                 refreshDevicesAfterChange();
+                followPlayerVolume();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -1627,6 +1665,7 @@ private:
             }
         }
         deviceWatcher.reset();
+        playerVolume_.reset();
         {
             std::scoped_lock lock(finderMutex_);
             finder_.reset();
@@ -1726,6 +1765,10 @@ private:
     FinderOptions finderOptions_;
     std::mutex finderMutex_;
     std::unique_ptr<PlayerFinder> finder_; // from the first device scan
+    std::unique_ptr<PlayerVolume> playerVolume_;
+    std::optional<upnp::PlayerDescription> volumePlayer_;
+    std::string volumeUdn_;
+    uint64_t volumeDevices_ = 0;
     std::thread worker_;
 };
 

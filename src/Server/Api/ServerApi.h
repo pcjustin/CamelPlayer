@@ -112,14 +112,16 @@ enum class CommandKind : uint8_t {
     RemoveLibraryRoot,   // rootId
     ResetPlayStatistics, // tracks: delete their plays and zero their counters
     ResetAllPlayStatistics,
-    AddLibraryRoot,   // path: a folder to index; overlapping and alias paths are normalized by the Server
-    QueueAdd,         // sources: append entries without changing the current track
-    QueuePlayNext,    // sources: insert entries after the current entry
-    QueueRemove,      // entryIds: remove entries without stopping the current track
-    QueueClear,       // keep the current queue entry, if any
-    SetFavorite,      // tracks + favorite
-    SetAlbumFavorite, // albums + favorite: marks or clears every track of the albums
-    SetArtistFavorite // artists + favorite: artists and composers by name
+    AddLibraryRoot,    // path: a folder to index; overlapping and alias paths are normalized by the Server
+    QueueAdd,          // sources: append entries without changing the current track
+    QueuePlayNext,     // sources: insert entries after the current entry
+    QueueRemove,       // entryIds: remove entries without stopping the current track
+    QueueClear,        // keep the current queue entry, if any
+    SetFavorite,       // tracks + favorite
+    SetAlbumFavorite,  // albums + favorite: marks or clears every track of the albums
+    SetArtistFavorite, // artists + favorite: artists and composers by name
+    SetPlayerVolume,   // playerVolume: the network player's own level, 0-100
+    SetPlayerMute      // playerMute: the network player's own mute
 };
 
 struct Command {
@@ -140,6 +142,8 @@ struct Command {
     bool favorite = false;
     std::vector<int64_t> albums;
     std::vector<LibraryGroupFilter> artists;
+    std::optional<uint32_t> playerVolume;
+    std::optional<bool> playerMute;
     bool operator==(const Command&) const = default;
 };
 
@@ -169,6 +173,8 @@ struct PlaybackSnapshot {
     std::vector<std::string> outputAdjustments; // saved output parameters replaced by device defaults (requested ≠ active)
     uint32_t bufferFrames = 0;
     uint64_t underruns = 0;
+    std::optional<uint32_t> playerVolume; // the network player's own level, 0-100; nothing without one to follow
+    bool playerMuted = false;
     std::optional<audio::ErrorCode> error;
     std::string errorDetail;
     uint64_t revision = 0;

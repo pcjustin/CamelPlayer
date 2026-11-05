@@ -15,11 +15,17 @@ const SavedOutput* findOutput(const Settings& s, Backend backend, const std::str
     return found == s.outputs.end() ? nullptr : &*found;
 }
 
+SavedOutput newOutput(Backend backend) {
+    SavedOutput added;
+    added.backend = backend;
+    if (backend == Backend::Network) added.volumeMode = VolumeMode::Player;
+    return added;
+}
+
 SavedOutput& savedOutput(Settings& s, Backend backend, const std::string& id) {
     const auto found = std::ranges::find_if(s.outputs, [&](const SavedOutput& o) { return o.backend == backend && o.id == id; });
     if (found != s.outputs.end()) return *found;
-    SavedOutput added;
-    added.backend = backend;
+    SavedOutput added = newOutput(backend);
     added.id = id;
     added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = id;
     return s.outputs.emplace_back(std::move(added));
@@ -59,10 +65,11 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
 // Puts `device`'s parameters, or the defaults for a device without any, in Settings' fields for the output `selected`.
 void loadParameters(Settings& s, Backend backend, const std::string& device, std::string selected) {
     const SavedOutput* saved = device.empty() ? nullptr : findOutput(s, backend, device);
-    const SavedOutput defaults;
+    const SavedOutput defaults = newOutput(backend);
     const SavedOutput& source = saved ? *saved : defaults;
     s.backend = backend;
     s.volume.mode = source.volumeMode;
+    if (backend == Backend::Network && s.volume.mode == VolumeMode::Software) s.volume.mode = VolumeMode::Player;
     if (backend == Backend::Asio) {
         s.asio = source.asio;
         s.asio.driverClsid = std::move(selected);
