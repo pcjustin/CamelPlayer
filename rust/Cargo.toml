@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 [workspace]
-members = ["audio_engine", "symphonia_ffi"]
+members = ["audio_engine", "dts_core", "symphonia_ffi"]
 resolver = "2"
 
 [profile.release]

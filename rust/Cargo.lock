@@ -28,6 +28,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dts_core"
+version = "0.0.0"
+
+[[package]]
 name = "extended"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
