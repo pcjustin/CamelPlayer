@@ -7,6 +7,7 @@
 #pragma once
 #include <array>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -125,6 +126,13 @@ struct AirPlaySettings {
     std::string deviceId;
     PlaybackTiming timing{.releaseAfterPauseSeconds = 60};
     bool operator==(const AirPlaySettings&) const = default;
+};
+
+// An AirPlay 1 receiver cannot be asked for its level, so the last one is kept for each (docs/Plan.md §6).
+struct AirPlayLevel {
+    uint32_t level = 33; // about -20 dB
+    bool muted = false;
+    bool operator==(const AirPlayLevel&) const = default;
 };
 
 // Explicit per-format choices; a format without one uses its default (docs/Plan.md §3.1).
@@ -330,6 +338,7 @@ struct Settings {
     ReplayGainSettings replayGain;
     CrossfadeSettings crossfade;
     std::vector<SavedOutput> outputs;
+    std::map<std::string, AirPlayLevel> airplayLevels; // by receiver, only the Server's
     std::string followedDefault; // the endpoint whose parameters are in `wasapi` while it follows the Windows default
     std::wstring lastFile;
     bool adoptOutputSets = false; // from an earlier version: each backend's set still has to reach its device

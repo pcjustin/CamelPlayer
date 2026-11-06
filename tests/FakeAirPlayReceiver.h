@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// AirPlay receivers on 127.0.0.1: one mDNS responder answering for all of them, and an RTSP port each that answers what
-// a test says and records what it was asked (docs/Plan.md §5.10).
+// AirPlay receivers on 127.0.0.1: one mDNS responder answering for all of them, and for each an RTSP port that answers
+// what a test says and records what it was asked, with UDP ports that keep what arrives (docs/Plan.md §5.10).
 #pragma once
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -20,25 +21,62 @@
 
 namespace testutil {
 
+struct FakeRtp {
+    uint16_t sequence = 0;
+    uint32_t rtpTime = 0;
+    bool marker = false;
+    std::string alac;
+};
+
+// The frames of an uncompressed ALAC frame, read bit by bit without the sender's code. Empty when it is not one.
+inline std::string pcmOfAlac(const std::string& alac) {
+    size_t bit = 0;
+    const auto read = [&](int count) {
+        uint32_t value = 0;
+        for (int i = 0; i < count; ++i, ++bit) value = value << 1 | ((uint8_t(alac[bit / 8]) >> (7 - bit % 8)) & 1);
+        return value;
+    };
+    if (alac.size() != 1412) return {};
+    if (read(3) != 1 || read(4) != 0 || read(12) != 0 || read(1) != 0 || read(2) != 0 || read(1) != 1) return {};
+    std::string pcm;
+    for (int i = 0; i < 704; ++i) {
+        const uint32_t sample = read(16);
+        pcm.push_back(char(sample & 0xFF));
+        pcm.push_back(char(sample >> 8));
+    }
+    return read(3) == 7 ? pcm : std::string();
+}
+
 class FakeRtsp {
 public:
     FakeRtsp() {
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
         listener_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        sockaddr_in address = loopback();
         ::bind(listener_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
         listen(listener_, 8);
         int length = sizeof(address);
         getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length);
         port_ = ntohs(address.sin_port);
+        audio_ = boundUdp(audioPort_);
+        control_ = boundUdp(controlPort_);
+        timing_ = boundUdp(timingPort_);
         thread_ = std::thread([this] { serve(); });
+        audioThread_ = std::thread([this] { receiveAudio(); });
+        controlThread_ = std::thread([this] { receiveInto(control_, controlPackets_); });
+        timingThread_ = std::thread([this] { receiveInto(timing_, timingReplies_); });
     }
     ~FakeRtsp() {
         closesocket(listener_);
+        takeOver();
+        closesocket(audio_);
+        closesocket(control_);
+        closesocket(timing_);
         thread_.join();
+        audioThread_.join();
+        controlThread_.join();
+        timingThread_.join();
         WSACleanup();
     }
     FakeRtsp(const FakeRtsp&) = delete;
@@ -58,22 +96,122 @@ public:
         for (const auto& request : requests()) names.push_back(request.substr(0, request.find(' ')));
         return names;
     }
+    std::vector<std::string> requestsOf(const std::string& method) const {
+        std::vector<std::string> found;
+        for (const auto& request : requests())
+            if (request.starts_with(method + " ")) found.push_back(request);
+        return found;
+    }
+    int count(const std::string& method) const { return int(requestsOf(method).size()); }
+
+    std::vector<FakeRtp> packets() const {
+        std::scoped_lock lock(mutex_);
+        return packets_;
+    }
+    size_t packetCount() const {
+        std::scoped_lock lock(mutex_);
+        return packets_.size();
+    }
+    std::vector<std::string> controlPackets() const {
+        std::scoped_lock lock(mutex_);
+        return controlPackets_;
+    }
+    std::vector<std::string> timingReplies() const {
+        std::scoped_lock lock(mutex_);
+        return timingReplies_;
+    }
+
+    void askTiming(const std::string& request) const {
+        sockaddr_in target = loopback();
+        target.sin_port = htons(portAfter("timing_port="));
+        sendto(timing_, request.data(), int(request.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
+    }
+    void askResend(uint16_t sequence, uint16_t count) const {
+        std::string request("\x80\xD5\x00\x01", 4);
+        request += {char(sequence >> 8), char(sequence & 0xFF), char(count >> 8), char(count & 0xFF)};
+        sockaddr_in target = loopback();
+        target.sin_port = htons(portAfter("control_port="));
+        sendto(control_, request.data(), int(request.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
+    }
+
+    // Another sender takes the receiver, which closes the connection.
+    void takeOver() {
+        const SOCKET client = client_.exchange(INVALID_SOCKET);
+        if (client != INVALID_SOCKET) {
+            shutdown(client, SD_BOTH);
+            closesocket(client);
+        }
+    }
+    void stopAnswering() { silent_ = true; }
 
 private:
+    static sockaddr_in loopback() {
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        return address;
+    }
+
+    static SOCKET boundUdp(uint16_t& port) {
+        const SOCKET udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        sockaddr_in address = loopback();
+        ::bind(udp, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+        int length = sizeof(address);
+        getsockname(udp, reinterpret_cast<sockaddr*>(&address), &length);
+        port = ntohs(address.sin_port);
+        return udp;
+    }
+
+    uint16_t portAfter(const std::string& name) const {
+        std::scoped_lock lock(mutex_);
+        for (const auto& request : requests_)
+            if (const size_t at = request.find(name); request.starts_with("SETUP") && at != std::string::npos)
+                return uint16_t(std::stoi(request.substr(at + name.size())));
+        return 0;
+    }
+
+    void receiveAudio() {
+        char buffer[2048];
+        for (;;) {
+            const int got = recv(audio_, buffer, sizeof(buffer), 0);
+            if (got <= 0) return;
+            const auto byte = [&](int at) { return uint32_t(uint8_t(buffer[at])); };
+            FakeRtp packet;
+            packet.marker = (byte(1) & 0x80) != 0;
+            packet.sequence = uint16_t(byte(2) << 8 | byte(3));
+            packet.rtpTime = byte(4) << 24 | byte(5) << 16 | byte(6) << 8 | byte(7);
+            packet.alac.assign(buffer + 12, size_t(got) - 12);
+            std::scoped_lock lock(mutex_);
+            packets_.push_back(std::move(packet));
+        }
+    }
+
+    void receiveInto(SOCKET udp, std::vector<std::string>& into) {
+        char buffer[2048];
+        for (;;) {
+            const int got = recv(udp, buffer, sizeof(buffer), 0);
+            if (got <= 0) return;
+            std::scoped_lock lock(mutex_);
+            into.emplace_back(buffer, size_t(got));
+        }
+    }
+
     void serve() {
+        std::vector<char> buffer(65536);
         for (;;) {
             const SOCKET client = accept(listener_, nullptr, nullptr);
             if (client == INVALID_SOCKET) return;
+            client_ = client;
             std::string received;
-            char buffer[4096];
             for (;;) {
-                const int got = recv(client, buffer, sizeof(buffer), 0);
+                const int got = recv(client, buffer.data(), int(buffer.size()), 0);
                 if (got <= 0) break;
-                received.append(buffer, size_t(got));
+                received.append(buffer.data(), size_t(got));
                 while (answerOne(client, received)) {
                 }
             }
-            closesocket(client);
+            SOCKET expected = client;
+            if (client_.compare_exchange_strong(expected, INVALID_SOCKET)) closesocket(client);
         }
     }
 
@@ -87,27 +225,40 @@ private:
         if (received.size() < total) return false;
         const std::string request = received.substr(0, total);
         received.erase(0, total);
+        const std::string method = request.substr(0, request.find(' '));
         int status = 200;
         {
             std::scoped_lock lock(mutex_);
             requests_.push_back(request);
-            if (const auto chosen = statuses_.find(request.substr(0, request.find(' '))); chosen != statuses_.end())
-                status = chosen->second;
+            if (const auto chosen = statuses_.find(method); chosen != statuses_.end()) status = chosen->second;
         }
+        if (silent_) return true;
         const size_t sequence = request.find("CSeq: ");
-        const std::string reply = "RTSP/1.0 " + std::to_string(status) + " Reason\r\nCSeq: " +
-                                  request.substr(sequence + 6, request.find("\r\n", sequence) - sequence - 6) +
-                                  "\r\nServer: Fake\r\n\r\n";
+        std::string reply = "RTSP/1.0 " + std::to_string(status) +
+                            " Reason\r\nCSeq: " + request.substr(sequence + 6, request.find("\r\n", sequence) - sequence - 6) +
+                            "\r\nServer: Fake\r\n";
+        if (method == "SETUP")
+            reply += "Session: 1\r\nTransport: RTP/AVP/UDP;unicast;mode=record;server_port=" + std::to_string(audioPort_) +
+                     ";control_port=" + std::to_string(controlPort_) + ";timing_port=" + std::to_string(timingPort_) + "\r\n";
+        if (method == "RECORD") reply += "Audio-Latency: 11025\r\n";
+        reply += "\r\n";
         send(client, reply.data(), int(reply.size()), 0);
         return true;
     }
 
     SOCKET listener_ = INVALID_SOCKET;
-    uint16_t port_ = 0;
+    SOCKET audio_ = INVALID_SOCKET;
+    SOCKET control_ = INVALID_SOCKET;
+    SOCKET timing_ = INVALID_SOCKET;
+    std::atomic<SOCKET> client_ = INVALID_SOCKET;
+    std::atomic<bool> silent_ = false;
+    uint16_t port_ = 0, audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;
     std::vector<std::string> requests_;
-    std::thread thread_;
+    std::vector<FakeRtp> packets_;
+    std::vector<std::string> controlPackets_, timingReplies_;
+    std::thread thread_, audioThread_, controlThread_, timingThread_;
 };
 
 struct FakeReceiverRecord {

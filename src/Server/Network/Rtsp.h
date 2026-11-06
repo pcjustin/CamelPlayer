@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -19,6 +20,12 @@ struct RtspReply {
     int status = 0;
     std::map<std::string, std::string> headers; // names in lower case
     std::string body;
+};
+
+// The receiver closed the connection, as opposed to not answering.
+class RtspClosed : public std::runtime_error {
+public:
+    RtspClosed() : std::runtime_error("the receiver closed the connection") {}
 };
 
 class RtspClient {
@@ -31,13 +38,16 @@ public:
     const std::string& localAddress() const { return localAddress_; }
     const std::string& session() const { return session_; }
     std::string url() const; // of this session
+    void setSession(std::string session) { sessionHeader_ = std::move(session); }
+    bool closed() const; // whether the receiver has closed the connection, without waiting
 
+    // `headers` are complete lines.
     RtspReply request(std::string_view method, std::string_view url, std::string_view contentType = {},
-                      std::string_view body = {});
+                      std::string_view body = {}, std::string_view headers = {});
 
 private:
     SOCKET socket_ = INVALID_SOCKET;
-    std::string localAddress_, session_, instance_;
+    std::string localAddress_, session_, instance_, sessionHeader_;
     int sequence_ = 0;
 };
 

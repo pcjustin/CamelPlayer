@@ -69,4 +69,25 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced);
 // The ANNOUNCE body for 44.1 kHz/16-bit stereo as ALAC frames of 352 samples, without keys.
 std::string sessionDescription(std::string_view localAddress, std::string_view remoteAddress, std::string_view session);
 
+constexpr uint32_t kSampleRate = 44100;
+constexpr uint64_t kFramesPerPacket = 352;
+constexpr uint32_t kSyncLatency = 77175;         // between the frame a sync packet says is playing and the newest sent
+constexpr uint32_t kDefaultAudioLatency = 11025; // added by a receiver that does not say
+constexpr double kMutedDb = -144.0;
+
+// `pcm` holds 352 little-endian 16-bit stereo frames; the ALAC frame carries them unchanged, uncompressed.
+std::string alacFrame(const uint8_t* pcm);
+std::string rtpPacket(uint16_t sequence, uint32_t rtpTime, uint32_t ssrc, bool first, std::string_view alac);
+std::string syncPacket(bool first, uint32_t playing, uint64_t ntpTime, uint32_t newest);
+std::string timingReply(std::string_view request, uint64_t received, uint64_t sent); // empty for anything else
+
+struct ResendRequest {
+    uint16_t first = 0, count = 0;
+};
+std::optional<ResendRequest> parseResend(std::string_view message);
+std::string resendPacket(uint16_t sequence, std::string_view rtp);
+
+std::string dmapTags(std::string_view title, std::string_view artist, std::string_view album);
+double volumeDb(uint32_t level, bool muted); // from the slider's 0-100 to the receiver's -30-0 dB, 0 being silence
+
 } // namespace camel::server::airplay

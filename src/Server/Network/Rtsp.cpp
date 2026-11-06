@@ -113,15 +113,26 @@ std::string RtspClient::url() const {
     return std::format("rtsp://{}/{}", localAddress_, session_);
 }
 
-RtspReply RtspClient::request(std::string_view method, std::string_view url, std::string_view contentType,
-                              std::string_view body) {
+bool RtspClient::closed() const {
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(socket_, &readable);
+    const timeval now{0, 0};
+    if (select(0, &readable, nullptr, nullptr, &now) <= 0) return false;
+    char next = 0;
+    return recv(socket_, &next, 1, MSG_PEEK) <= 0;
+}
+
+RtspReply RtspClient::request(std::string_view method, std::string_view url, std::string_view contentType, std::string_view body,
+                              std::string_view headers) {
     std::string message = std::format("{} {} RTSP/1.0\r\nCSeq: {}\r\nUser-Agent: CamelPlayer\r\nClient-Instance: {}\r\n", method,
                                       url, ++sequence_, instance_);
+    if (!sessionHeader_.empty()) message += std::format("Session: {}\r\n", sessionHeader_);
+    message += headers;
     if (!body.empty()) message += std::format("Content-Type: {}\r\nContent-Length: {}\r\n", contentType, body.size());
     message += kEndOfLine;
     message += body;
-    if (send(socket_, message.data(), int(message.size()), 0) != int(message.size()))
-        throw std::runtime_error("the receiver closed the connection");
+    if (send(socket_, message.data(), int(message.size()), 0) != int(message.size())) throw RtspClosed();
 
     std::string received;
     while (received.size() <= kMaxReplyBytes) {
@@ -138,7 +149,9 @@ RtspReply RtspClient::request(std::string_view method, std::string_view url, std
         }
         char buffer[4096];
         const int got = recv(socket_, buffer, sizeof(buffer), 0);
-        if (got <= 0) throw std::runtime_error("the receiver closed the connection");
+        if (got == 0) throw RtspClosed();
+        if (got < 0)
+            throw std::runtime_error(WSAGetLastError() == WSAETIMEDOUT ? "the receiver does not answer" : "connection lost");
         received.append(buffer, size_t(got));
     }
     throw std::runtime_error("a reply without an end");

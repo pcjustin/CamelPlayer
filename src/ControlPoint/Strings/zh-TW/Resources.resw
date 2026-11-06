@@ -678,6 +678,9 @@
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>不支援：需要密碼</value></data>
   <data name="Output_AirPlayFormat" xml:space="preserve"><value>不支援：不接受此音訊格式</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>不支援：拒絕此連線</value></data>
+  <data name="Lamp_BitPerfectReceiver" xml:space="preserve"><value>Bit-perfect 到接收器</value></data>
+  <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay 接收器</value></data>
+  <data name="Volume_NoteAirPlay" xml:space="preserve"><value>播放器音量會調整接收器本身的音量，串流維持 bit-perfect。AirPlay 無法讀回音量，所以 CamelPlayer 會記住你為每台接收器設定的最後音量；在接收器上調整的變動不會顯示在這裡。</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>網路播放器</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>要讓網路播放器連到 CamelPlayer 嗎？</value></data>
   <data name="Firewall_Text" xml:space="preserve"><value>網路播放器要從 CamelPlayer 取得音樂，所以 Windows 防火牆必須放行。CamelPlayer 會新增一條規則，只適用於這個程式和私人網路。Windows 會要求系統管理員權限。</value></data>

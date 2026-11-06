@@ -517,6 +517,10 @@ std::string toJson(const Settings& s) {
     j["airplay"] = airplayJson(s.airplay);
     j["outputs"] = json::array();
     for (const auto& output : s.outputs) j["outputs"].push_back(outputJson(output));
+    if (!s.airplayLevels.empty()) {
+        j["airplayLevels"] = json::object();
+        for (const auto& [id, level] : s.airplayLevels) j["airplayLevels"][id] = {{"level", level.level}, {"muted", level.muted}};
+    }
     j["followedDefault"] = s.followedDefault;
     if (s.adoptOutputSets) j["adoptOutputSets"] = true;
     return j.dump(2);
@@ -666,6 +670,10 @@ Settings fromJson(const std::string& text) {
     if (j.contains("outputs") && j["outputs"].is_array())
         for (const auto& item : j["outputs"])
             if (auto output = outputFrom(item)) s.outputs.push_back(std::move(*output));
+    if (j.contains("airplayLevels") && j["airplayLevels"].is_object())
+        for (const auto& [id, level] : j["airplayLevels"].items())
+            if (level.is_object())
+                s.airplayLevels[id] = {uint32_t(integer(level, "level", 33, 0, 100)), boolean(level, "muted", false)};
     s.followedDefault = str(j, "followedDefault", "");
     s.adoptOutputSets = schema < 4 || boolean(j, "adoptOutputSets", false);
     return s;

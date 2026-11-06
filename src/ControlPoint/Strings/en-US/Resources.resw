@@ -678,6 +678,9 @@
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>Not supported: asks for a password</value></data>
   <data name="Output_AirPlayFormat" xml:space="preserve"><value>Not supported: does not take this audio format</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>Not supported: refuses this connection</value></data>
+  <data name="Lamp_BitPerfectReceiver" xml:space="preserve"><value>Bit-perfect to the receiver</value></data>
+  <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay receiver</value></data>
+  <data name="Volume_NoteAirPlay" xml:space="preserve"><value>The receiver's volume moves its own level, and the stream stays bit-perfect. AirPlay cannot read the level back, so CamelPlayer remembers the last one you set for each receiver and a change on the receiver itself is not shown.</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>Network players</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>Let network players reach CamelPlayer?</value></data>
   <data name="Firewall_Text" xml:space="preserve"><value>Network players fetch their music from CamelPlayer, so Windows Firewall has to let them in. CamelPlayer adds one rule, for this program on private networks only. Windows asks for an administrator to do that.</value></data>

@@ -1233,7 +1233,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         switch (plan.state) {
         case PipelineState::BitPerfect:
             lampColor_ = L"SystemFillColorSuccessBrush";
-            setAnnounced(LampText(), tr(s.backend == Backend::Network ? L"Lamp_BitPerfectRenderer" : L"Lamp_BitPerfect"));
+            setAnnounced(LampText(), tr(s.backend == Backend::Network   ? L"Lamp_BitPerfectRenderer"
+                                        : s.backend == Backend::AirPlay ? L"Lamp_BitPerfectReceiver"
+                                                                        : L"Lamp_BitPerfect"));
             break;
         case PipelineState::LosslessConversion:
             lampColor_ = L"SystemFillColorCautionBrush";
@@ -1341,7 +1343,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                   : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
                                   : plan.state == PipelineState::LossySource        ? PathState::Lossy
                                                                                     : PathState::Processed;
-        add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
+        add(tr(s.backend == Backend::Network   ? L"SignalPath_Renderer"
+               : s.backend == Backend::AirPlay ? L"SignalPath_Receiver"
+                                               : L"SignalPath_Device"),
             ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
         if (s.backend == Backend::Network && !settings_.network.gapless)
             add(tr(L"SignalPath_GaplessOff"), {}, PathState::AtTrackChanges);
@@ -3278,7 +3282,9 @@ void MainWindow::showVolume() {
     const bool player = wantsPlayer && playerVolume_.has_value();
     VolumeModeOwnItem().Content(box_value(tr(network ? L"Volume_ModePlayer" : L"Volume_ModeSoftware")));
     VolumeModeCombo().SelectedIndex(software || wantsPlayer ? 1 : 0);
-    VolumeNote().Text(tr(network ? L"Volume_NotePlayer" : L"Volume_NoteLocal"));
+    VolumeNote().Text(tr(settings_.backend == Backend::AirPlay ? L"Volume_NoteAirPlay"
+                         : network                             ? L"Volume_NotePlayer"
+                                                               : L"Volume_NoteLocal"));
     FixedVolumePanel().Visibility(software || player ? Visibility::Collapsed : Visibility::Visible);
     SoftwareVolumePanel().Visibility(software ? Visibility::Visible : Visibility::Collapsed);
     PlayerVolumePanel().Visibility(player ? Visibility::Visible : Visibility::Collapsed);

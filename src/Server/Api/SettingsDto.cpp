@@ -77,6 +77,7 @@ Settings nativeSettings(const SettingsDto& s) {
             s.replayGain,
             s.crossfade,
             s.outputs,
+            {},
             s.followedDefault,
             toWide(s.lastFileUtf8)};
 }

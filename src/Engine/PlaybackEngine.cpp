@@ -50,11 +50,13 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
 
 DsdOutput dsdOutput(const Settings& s) {
     if (s.backend == Backend::Network) return s.network.dsdOutput;
+    if (s.backend == Backend::AirPlay) return DsdOutput::Native; // no raw DSD, so PCM only with the permission
     return s.backend == Backend::Asio ? s.asio.dsdOutput : s.backend == Backend::Ks ? s.ks.dsdOutput : s.wasapi.dsdOutput;
 }
 
 uint32_t dsdPcmRate(const Settings& s) {
     if (s.backend == Backend::Network) return s.network.dsdPcmRate;
+    if (s.backend == Backend::AirPlay) return 44100;
     return s.backend == Backend::Asio ? s.asio.dsdPcmRate : s.backend == Backend::Ks ? s.ks.dsdPcmRate : s.wasapi.dsdPcmRate;
 }
 
@@ -990,7 +992,7 @@ private:
         heard_ = 0;
         renderedFrames_ = 0;
         trackStartFrame_ = 0;
-        pulled_ = settings_.backend == Backend::Network;
+        pulled_ = isNetworkPlayer(settings_.backend);
         base_ = startFrame;
         consumed_ = 0;
         prefilled_ = 0;
@@ -1162,7 +1164,7 @@ private:
     // `keepOutput`: the device plays silence on while another session is prepared, which reuses it if it takes the
     // same format; closing and reopening an ASIO driver costs about half a second at every manual change.
     void teardown(bool keepOutput = false) {
-        if (keepOutput && settings_.backend != Backend::Network && canKeepOutput()) { // a network player gets a new URL
+        if (keepOutput && !isNetworkPlayer(settings_.backend) && canKeepOutput()) { // a network player starts anew
             switching_ = true;
             while (rendering_.load()) std::this_thread::yield();
         } else {

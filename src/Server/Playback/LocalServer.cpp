@@ -5,6 +5,7 @@
 #include "Server/Playback/LocalServer.h"
 #include <fstream>
 
+#include "Server/Network/AirPlayOutput.h"
 #include "Server/Network/Firewall.h"
 #include "Server/Network/NetworkOutput.h"
 #include "Server/Network/PlayerFinder.h"
@@ -21,6 +22,7 @@
 #include <deque>
 #include <future>
 #include <iterator>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
@@ -194,7 +196,9 @@ public:
     Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
         : settings_(settings), settingsFile_(std::move(settingsFile)),
           factory_([this, given = std::move(factory)](const Settings& s) {
-              return s.backend == Backend::Network ? networkOutput(s) : given(s);
+              return s.backend == Backend::Network   ? networkOutput(s)
+                     : s.backend == Backend::AirPlay ? airplayOutput(s)
+                                                     : given(s);
           }),
           engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)) {
         published_.settings = settingsDto(settings_);
@@ -785,10 +789,16 @@ private:
                 engine_->seek(c.frame);
                 break;
             case CommandKind::SetPlayerVolume:
-                if (playerVolume_) playerVolume_->setLevel(*c.playerVolume);
+                if (playerVolume_)
+                    playerVolume_->setLevel(*c.playerVolume);
+                else if (receiverVolumeWanted())
+                    changeReceiverLevel([&](AirPlayLevel& level) { level.level = *c.playerVolume; });
                 break;
             case CommandKind::SetPlayerMute:
-                if (playerVolume_) playerVolume_->setMuted(*c.playerMute);
+                if (playerVolume_)
+                    playerVolume_->setMuted(*c.playerMute);
+                else if (receiverVolumeWanted())
+                    changeReceiverLevel([&](AirPlayLevel& level) { level.muted = *c.playerMute; });
                 break;
             case CommandKind::ResetPlayStatistics:
             case CommandKind::ResetAllPlayStatistics:
@@ -819,7 +829,14 @@ private:
                     const auto crossfade = settings_.crossfade;
                     const bool adoptOutputSets = settings_.adoptOutputSets;
                     const auto outputs = settings_.outputs;
+                    auto airplayLevels = std::move(settings_.airplayLevels);
                     settings_ = nativeSettings(*c.settings);
+                    settings_.airplayLevels = std::move(airplayLevels);
+                    std::erase_if(settings_.airplayLevels, [&](const auto& entry) {
+                        return std::ranges::none_of(settings_.outputs, [&](const SavedOutput& o) {
+                            return o.backend == Backend::AirPlay && o.id == entry.first;
+                        });
+                    });
                     settings_.lastFile = lastFile;
                     settings_.adoptOutputSets = adoptOutputSets;
                     syncOutputs(settings_, state_.devices);
@@ -1426,7 +1443,11 @@ private:
     void publish(bool completed) {
         shareLoudnessInputs();
         auto p = playback(engine_->snapshot());
-        if (const auto level = playerVolume_ ? playerVolume_->current() : std::nullopt) {
+        if (receiverVolumeWanted()) {
+            const auto level = receiverLevel();
+            p.playerVolume = level.level;
+            p.playerMuted = level.muted;
+        } else if (const auto level = playerVolume_ ? playerVolume_->current() : std::nullopt) {
             p.playerVolume = level->level;
             p.playerMuted = level->muted;
         }
@@ -1525,6 +1546,50 @@ private:
             if (output.backend == Backend::AirPlay && output.enabled && std::ranges::none_of(before, same))
                 airplayFinder_->check(output.id);
         }
+    }
+
+    std::unique_ptr<audio::IOutput> airplayOutput(const Settings& settings) {
+        std::optional<airplay::Receiver> receiver;
+        {
+            std::scoped_lock lock(finderMutex_);
+            if (airplayFinder_)
+                for (auto& found : airplayFinder_->receivers())
+                    if (found.id == settings.airplay.deviceId) receiver = std::move(found);
+        }
+        if (!receiver) throw audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
+        if (receiver->support != airplay::Support::Supported)
+            throw audio::Error(audio::ErrorCode::FormatNotSupported, "the receiver refuses this connection");
+        AirPlayOutputOptions options;
+        options.details = [this](const std::wstring& file) { return trackDetails(file); };
+        options.volumeDb = [this]() -> std::optional<double> {
+            const double db = receiverDb_.load(std::memory_order_acquire);
+            return std::isnan(db) ? std::nullopt : std::optional(db);
+        };
+        return createAirPlayOutput(std::move(*receiver), std::move(options));
+    }
+
+    bool receiverVolumeWanted() const {
+        return settings_.backend == Backend::AirPlay && settings_.volume.mode == VolumeMode::Player;
+    }
+
+    AirPlayLevel receiverLevel() const {
+        const auto found = settings_.airplayLevels.find(settings_.airplay.deviceId);
+        return found == settings_.airplayLevels.end() ? AirPlayLevel{} : found->second;
+    }
+
+    void changeReceiverLevel(const std::function<void(AirPlayLevel&)>& change) {
+        AirPlayLevel level = receiverLevel();
+        change(level);
+        settings_.airplayLevels[settings_.airplay.deviceId] = level;
+        persist();
+    }
+
+    // What the output tells the receiver, from any thread.
+    void followReceiverVolume() {
+        const auto level = receiverLevel();
+        receiverDb_.store(receiverVolumeWanted() ? airplay::volumeDb(level.level, level.muted)
+                                                 : std::numeric_limits<double>::quiet_NaN(),
+                          std::memory_order_release);
     }
 
     std::unique_ptr<audio::IOutput> networkOutput(const Settings& settings) {
@@ -1677,6 +1742,7 @@ private:
                 updatePlaySession();
                 refreshDevicesAfterChange();
                 followPlayerVolume();
+                followReceiverVolume();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -1793,6 +1859,7 @@ private:
     std::mutex finderMutex_;
     std::unique_ptr<PlayerFinder> finder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
+    std::atomic<double> receiverDb_{std::numeric_limits<double>::quiet_NaN()};
     std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan
     std::unique_ptr<PlayerVolume> playerVolume_;
     std::optional<upnp::PlayerDescription> volumePlayer_;
