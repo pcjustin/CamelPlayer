@@ -240,7 +240,7 @@ impl Decoder {
     ///
     /// # Errors
     ///
-    /// A frame that cannot be decoded leaves the filters as they were.
+    /// A [`DecodeError`] when the frame gives no audio; [`Decoder::reset`] clears what it may have left in the filters.
     pub fn decode(&mut self, bytes: &[u8]) -> Result<Decoded, DecodeError> {
         let packing = packing_at_start(bytes)?;
         let length = header_of(bytes, packing)?.frame_size_container_bytes(packing) as usize;

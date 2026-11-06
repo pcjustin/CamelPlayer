@@ -13,4 +13,5 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+dts_core = { path = "../dts_core" }
 symphonia_ffi = { path = "../symphonia_ffi" }

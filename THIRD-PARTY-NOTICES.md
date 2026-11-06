@@ -50,6 +50,8 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 
 The headphone crossfeed (`rust/audio_engine/src/crossfeed.rs`) follows the filters of libbs2b by Boris Mikhaylov, used under the MIT license ([notice](third_party/licenses/adapted/libbs2b.txt)). No libbs2b code is linked.
 
+The DTS core decoder (`rust/dts_core`) is a pinned copy of the decoder of oxideav-dts 0.0.2, commit `ec55712`, copyright Karpelès Lab Inc., used under the MIT license ([notice](third_party/licenses/adapted/oxideav-dts.txt)).
+
 ## Rust components
 
 Locked in `rust/Cargo.lock` and linked into CamelPlayer.exe through the Rust Engine. Symphonia uses MPL-2.0 (full text in [MPL-2.0.txt](third_party/licenses/MPL-2.0.txt)). The other crates are used under their MIT option. Crate sources are at `https://static.crates.io/crates/<name>/<name>-<version>.crate` and match the checksums in Cargo.lock.

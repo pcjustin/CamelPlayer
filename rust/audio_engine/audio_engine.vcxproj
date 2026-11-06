@@ -35,6 +35,7 @@
     <None Include="build.rs" />
     <None Include="Cargo.toml" />
     <None Include="src\**\*.rs" />
+    <ClInclude Include="dts_abi.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(CamelRoot)rust\symphonia_ffi\symphonia_ffi.vcxproj">

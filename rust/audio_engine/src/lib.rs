@@ -15,6 +15,7 @@ mod decoder_host;
 mod dsd;
 mod dsd2pcm;
 mod dsp;
+mod dts_abi;
 mod eq;
 mod fft;
 mod packing;

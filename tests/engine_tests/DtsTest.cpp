@@ -38,8 +38,16 @@ std::filesystem::path dtsPath() {
     return testutil::tempDir() / "dts-cd.wav";
 }
 
+constexpr float kDecoderTolerance = 1e-5f; // -100 dBFS, between dts_core and FFmpeg's decode
+
+float worstDifference(const float* a, const float* b, size_t count) {
+    float worst = 0.0f;
+    for (size_t i = 0; i < count; i++) worst = std::max(worst, std::abs(a[i] - b[i]));
+    return worst;
+}
+
 std::vector<float> readAll(IDecoder& d) {
-    std::vector<float> out, block(4096 * d.info().channels);
+    std::vector<float> out, block(size_t{4096} * d.info().channels);
     while (const size_t got = d.readFloat(block.data(), 4096))
         out.insert(out.end(), block.begin(), block.begin() + ptrdiff_t(got * d.info().channels));
     return out;
@@ -82,7 +90,7 @@ TEST(Dts, EveryWaveDecoderReadsTheSameDecode) {
         EXPECT_EQ(d->info().totalFrames, file.frames);
         const auto decoded = readAll(*d);
         ASSERT_EQ(decoded.size(), file.frames * 6);
-        EXPECT_TRUE(std::equal(decoded.begin(), decoded.end(), file.reference.begin())) << "differs from FFmpeg's decode";
+        EXPECT_LT(worstDifference(decoded.data(), file.reference.data(), decoded.size()), kDecoderTolerance);
     }
 }
 
@@ -93,9 +101,10 @@ TEST(Dts, SeeksToTheExactSample) {
         const auto d = openDecoder(kind, dtsPath());
         for (const uint64_t target : {uint64_t(0), uint64_t(777), file.frames / 2 + 123, file.frames - 300}) {
             d->seek(target);
-            std::vector<float> block(256 * 6);
+            std::vector<float> block(size_t{256} * 6);
             ASSERT_EQ(d->readFloat(block.data(), 256), 256u) << target;
-            EXPECT_TRUE(std::equal(block.begin(), block.end(), file.reference.begin() + ptrdiff_t(target * 6))) << target;
+            EXPECT_LT(worstDifference(block.data(), file.reference.data() + target * 6, block.size()), kDecoderTolerance)
+                << target;
         }
     }
 }
@@ -151,10 +160,11 @@ TEST(Dts, PlaysOnlyWithConversionAndThenDownmixes) {
     EXPECT_EQ(played.snapshot.format, AudioFormat::Dts);
     const auto& samples = played.samples;
     ASSERT_EQ(samples.size(), file.frames * 2);
+    const auto decoded = readAll(*openDecoder(DecoderKind::Sndfile, dtsPath()));
     const double a = std::numbers::sqrt2 / 2;
     int32_t worst = 0;
     for (size_t i = 0; i < file.frames; i++) {
-        const float* f = &file.reference[i * 6]; // L R C LFE Ls Rs; the LFE is dropped
+        const float* f = &decoded[i * 6]; // L R C LFE Ls Rs; the LFE is dropped
         const double left = (f[0] + a * f[2] + a * f[4]) * 8388608.0, right = (f[1] + a * f[2] + a * f[5]) * 8388608.0;
         worst = std::max({worst, std::abs(samples[i * 2] - int32_t(std::lround(left))),
                           std::abs(samples[i * 2 + 1] - int32_t(std::lround(right)))});

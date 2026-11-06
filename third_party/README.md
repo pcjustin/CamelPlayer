@@ -14,6 +14,7 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 | libsndfile | `vcpkg.json` with a pinned baseline | `src/Engine/decode/SndfileDecoder.cpp` |
 | DSD Nexus (libdsf, libdsdiff, libdst) | Overlay port `vcpkg-ports/dsd-nexus` pinned to upstream tag 0.1.82 by commit and SHA512; builds only these libraries and libsautil as the shared `dsdnexus.dll` | `src/Engine/decode/DsdReader.cpp` (not yet used for playback) |
 | Symphonia | `rust/symphonia_ffi/Cargo.toml` and `rust/Cargo.lock` | Owned Rust C ABI bridge in `rust/symphonia_ffi`; C++ adapter in `src/Engine/decode/SymphoniaDecoder.cpp` |
+| oxideav-dts | Pinned copy of its decoder in `rust/dts_core`, commit `ec55712` | C ABI in `rust/audio_engine/src/dts_abi.rs`; C++ stage in `src/Engine/decode/DtsStage.cpp` |
 | libFLAC | vcpkg `libflac` | Test-audio encoding and independent reference decoding in `src/Engine/testing` |
 
 The vcpkg installation is generated under `vcpkg_installed`; Cargo output is generated under `build/cargo`. Both are ignored by Git.

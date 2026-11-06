@@ -34,7 +34,7 @@
     <ClCompile>
       <!-- C++ host of the Rust Engine: playback coordination and decoder adapters; free of WinRT (docs/Plan.md §4) -->
       <PreprocessorDefinitions>CAMEL_CORE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(CamelRoot)rust\symphonia_ffi;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(CamelRoot)rust\symphonia_ffi;$(CamelRoot)rust\audio_engine;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

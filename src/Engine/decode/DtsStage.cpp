@@ -2,19 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// DTS-CD: the chosen WAVE decoder reads the DTS bitstream as 16-bit stereo words, and libavcodec's DTS decoder turns
-// them into the PCM they carry. DTS-CD frames fill the PCM rate exactly, so a frame that starts at word frame n plays
-// from sample n; frames are placed by their position, which keeps the length and seeking exact.
+// DTS-CD: the chosen WAVE decoder reads the DTS bitstream as 16-bit stereo words, and dts_core turns them into the PCM
+// they carry. DTS-CD frames fill the PCM rate exactly, so a frame that starts at word frame n plays from sample n; frames
+// are placed by their position, which keeps the length and seeking exact.
 #include "Engine/decode/DecoderImpl.h"
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavutil/samplefmt.h>
-}
+#include <dts_abi.h>
 
 #include <algorithm>
 #include <functional>
-#include <string>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -27,26 +24,26 @@ constexpr size_t kWordFrames = 4096; // read from the WAVE decoder at a time
 constexpr uint64_t kBytesPerWordFrame = 4;
 // Read before a seek target, so the frame holding it is found and the synthesis filter has settled.
 constexpr uint64_t kPreroll = 8192;
+constexpr size_t kHeaderBytes = 64;     // enough of a frame to read its header
+constexpr size_t kLongestSyncBytes = 6; // what can start a sync word that the next read completes
+constexpr size_t kWordBytes = 2;
+
+struct FreeDts {
+    void operator()(DtsDecoder* decoder) const { dts_free(decoder); }
+};
 
 class DtsStage final : public IDecoder {
 public:
-    DtsStage(std::unique_ptr<IDecoder> words, uint32_t bits) : words_(std::move(words)) {
+    DtsStage(std::unique_ptr<IDecoder> words, uint32_t bits) : words_(std::move(words)), decoder_(dts_new()) {
         const SourceInfo& in = words_->info();
         if (words_->readsFloat() || in.bitsPerSample != 16 || in.channels != 2)
             throw Error(ErrorCode::UnsupportedStream, "DTS in a WAVE file must be read as 16-bit stereo PCM");
-        codec_ = avcodec_find_decoder(AV_CODEC_ID_DTS);
-        if (!codec_) throw Error(ErrorCode::UnsupportedStream, "no DTS decoder");
-        pkt_ = av_packet_alloc();
-        frame_ = av_frame_alloc();
+        if (!decoder_) throw Error(ErrorCode::UnsupportedStream, "no DTS decoder");
         info_ = in;
         info_.bitsPerSample = bits;
         probe(in.sampleRate);
         restart(0);
     }
-
-    ~DtsStage() override { close(); }
-    DtsStage(const DtsStage&) = delete;
-    DtsStage& operator=(const DtsStage&) = delete;
 
     const SourceInfo& info() const override { return info_; }
 
@@ -83,63 +80,46 @@ public:
     }
 
 private:
-    void close() {
-        av_parser_close(parser_);
-        parser_ = nullptr;
-        avcodec_free_context(&ctx_);
-        av_frame_free(&frame_);
-        av_packet_free(&pkt_);
-    }
-
-    void openCodec() {
-        av_parser_close(parser_);
-        avcodec_free_context(&ctx_);
-        parser_ = av_parser_init(AV_CODEC_ID_DTS);
-        ctx_ = avcodec_alloc_context3(codec_);
-        if (!parser_ || !ctx_ || avcodec_open2(ctx_, codec_, nullptr) < 0)
-            throw Error(ErrorCode::UnsupportedStream, "cannot open the DTS decoder");
-        parserStarted_ = false;
+    void startReadingAt(uint64_t wordFrame) {
+        words_->seek(wordFrame);
+        dts_reset(decoder_.get());
+        bytes_.clear();
+        bytesFrom_ = wordFrame * kBytesPerWordFrame;
+        wordsDone_ = false;
     }
 
     // The layout comes from the first frames, which must also follow the PCM rate one sample per word frame.
     void probe(uint32_t wordRate) {
-        openCodec();
-        readFrom_ = 0;
-        wordsDone_ = false;
-        std::vector<std::pair<uint64_t, int>> frames; // start, samples
-        onFrame_ = [&](uint64_t start, const AVFrame& f) {
+        std::vector<std::pair<uint64_t, uint32_t>> frames; // start, samples
+        bytesFrom_ = 0;
+        onFrame_ = [&](uint64_t start, const DtsPcm& pcm) {
             if (frames.empty()) {
-                info_.sampleRate = uint32_t(f.sample_rate);
-                info_.channels = uint32_t(f.ch_layout.nb_channels);
+                info_.sampleRate = pcm.sample_rate;
+                info_.channels = pcm.channels;
             }
-            frames.emplace_back(start, f.nb_samples);
+            frames.emplace_back(start, pcm.frames);
         };
-        while (frames.size() < 2 && pump()) {
+        while (frames.size() < 2 && decodeNextFrame()) {
         }
         onFrame_ = nullptr;
         if (frames.size() < 2) throw Error(ErrorCode::UnsupportedStream, "no DTS frames found");
         if (info_.sampleRate != wordRate || frames[1].first - frames[0].first != uint64_t(frames[0].second))
             throw Error(ErrorCode::UnsupportedStream, "the DTS frames do not follow the PCM rate");
-        if (!info_.channels || info_.channels > 8) throw Error(ErrorCode::UnsupportedStream, "unsupported DTS channel layout");
     }
 
     // Decoding continues from `frame`, reading from shortly before it.
     void restart(uint64_t frame) {
-        const uint64_t from = frame > kPreroll ? frame - kPreroll : 0;
-        words_->seek(from);
-        openCodec();
-        readFrom_ = from;
-        wordsDone_ = false;
+        startReadingAt(frame > kPreroll ? frame - kPreroll : 0);
         next_ = frame;
         out_.clear();
         outPos_ = 0;
-        onFrame_ = [this](uint64_t start, const AVFrame& f) { place(start, f); };
+        onFrame_ = [this](uint64_t start, const DtsPcm& pcm) { place(start, pcm); };
     }
 
     // Decodes more into out_; false once the stream has ended and out_ reaches the end of the track.
     bool refill() {
         while (out_.empty()) {
-            if (pump()) continue;
+            if (decodeNextFrame()) continue;
             if (next_ >= info_.totalFrames) return false;
             out_.assign(size_t(info_.totalFrames - next_) * info_.channels, 0.0f); // a short last frame
             next_ = info_.totalFrames;
@@ -147,86 +127,77 @@ private:
         return true;
     }
 
-    // Feeds one block of words through the parser and decoder; false at the end of the stream.
-    bool pump() {
+    // Appends the next block of words as the file holds them; false at the end of the stream.
+    bool readWords() {
         if (wordsDone_) return false;
         words16_.resize(kWordFrames * 2);
         const size_t got = words_->read(words16_.data(), kWordFrames);
-        bytes_.resize(got * kBytesPerWordFrame + AV_INPUT_BUFFER_PADDING_SIZE);
-        for (size_t i = 0; i < got * 2; i++) { // the bytes as the file holds them
-            bytes_[2 * i] = uint8_t(words16_[i]);
-            bytes_[2 * i + 1] = uint8_t(words16_[i] >> 8);
+        wordsDone_ = got == 0;
+        for (size_t i = 0; i < got * 2; i++) {
+            bytes_.push_back(uint8_t(words16_[i]));
+            bytes_.push_back(uint8_t(words16_[i] >> 8));
         }
-        const int size = int(got * kBytesPerWordFrame);
-        int used = 0;
-        do {
-            uint8_t* packet = nullptr;
-            int packetSize = 0;
-            // The first call sets the stream offset the parser reports frame positions from.
-            const int64_t pos = parserStarted_ ? 0 : int64_t(readFrom_ * kBytesPerWordFrame);
-            parserStarted_ = true;
-            used += av_parser_parse2(parser_, ctx_, &packet, &packetSize, size ? bytes_.data() + used : nullptr, size - used,
-                                     AV_NOPTS_VALUE, AV_NOPTS_VALUE, pos);
-            if (packetSize) decode(packet, packetSize, uint64_t(parser_->frame_offset) / kBytesPerWordFrame);
-        } while (used < size);
-        if (!got) {
-            wordsDone_ = true;
-            decode(nullptr, 0, next_);
-        }
-        return true;
+        return !wordsDone_;
     }
 
-    void decode(uint8_t* data, int size, uint64_t start) {
-        pkt_->data = data;
-        pkt_->size = size;
-        // A packet the decoder refuses, such as bytes before the first sync word, leaves a gap that place() fills.
-        if (avcodec_send_packet(ctx_, data ? pkt_ : nullptr) < 0) return;
-        while (avcodec_receive_frame(ctx_, frame_) == 0) {
-            if (onFrame_) onFrame_(start, *frame_);
-            start += uint64_t(frame_->nb_samples);
-            av_frame_unref(frame_);
+    void dropBytes(size_t count) {
+        bytes_.erase(bytes_.begin(), bytes_.begin() + ptrdiff_t(count));
+        bytesFrom_ += count;
+    }
+
+    // Decodes the next frame there is; false at the end of the stream. What only looks like a frame is passed over and
+    // leaves a gap that place() fills.
+    bool decodeNextFrame() {
+        for (;;) {
+            const int64_t sync = dts_find_sync(bytes_.data(), bytes_.size(), 0);
+            if (sync < 0) {
+                dropBytes(bytes_.size() - std::min(bytes_.size(), kLongestSyncBytes));
+                if (!readWords()) return false;
+                continue;
+            }
+            dropBytes(size_t(sync));
+            if (bytes_.size() < kHeaderBytes && readWords()) continue;
+            DtsFrameInfo frame{};
+            if (dts_frame_info(bytes_.data(), bytes_.size(), &frame) != DTS_OK) {
+                dropBytes(std::min(bytes_.size(), kWordBytes));
+                continue;
+            }
+            if (bytes_.size() < frame.container_bytes) {
+                if (readWords()) continue;
+                return false;
+            }
+            DtsPcm pcm{};
+            if (dts_decode(decoder_.get(), bytes_.data(), bytes_.size(), &pcm) != DTS_OK) {
+                dropBytes(kWordBytes);
+                continue;
+            }
+            if (onFrame_) onFrame_(bytesFrom_ / kBytesPerWordFrame, pcm);
+            dropBytes(frame.container_bytes);
+            return true;
         }
     }
 
     // Appends a decoded frame at its position: silence fills a gap before it, and what precedes next_ is dropped.
-    void place(uint64_t start, const AVFrame& f) {
-        if (uint32_t(f.ch_layout.nb_channels) != info_.channels)
+    void place(uint64_t start, const DtsPcm& pcm) {
+        if (pcm.channels != info_.channels)
             throw Error(ErrorCode::DecodeFailed, "the DTS channel layout changed within the track");
         const size_t ch = info_.channels;
-        const uint64_t end = std::min(start + uint64_t(f.nb_samples), info_.totalFrames);
+        const uint64_t end = std::min(start + uint64_t(pcm.frames), info_.totalFrames);
         if (end <= next_ || start >= end) return;
         if (start > next_) {
             out_.resize(out_.size() + size_t(start - next_) * ch, 0.0f);
             next_ = start;
         }
-        const auto fmt = AVSampleFormat(f.format);
-        const AVSampleFormat packed = av_get_packed_sample_fmt(fmt);
-        const bool planar = av_sample_fmt_is_planar(fmt);
-        if (packed != AV_SAMPLE_FMT_FLT && packed != AV_SAMPLE_FMT_S32 && packed != AV_SAMPLE_FMT_S16)
-            throw Error(ErrorCode::DecodeFailed, std::string("unexpected DTS sample format ") + av_get_sample_fmt_name(fmt));
-        for (uint64_t i = next_ - start; i < end - start; i++)
-            for (size_t c = 0; c < ch; c++) {
-                const size_t index = planar ? size_t(i) : size_t(i) * ch + c;
-                const uint8_t* plane = f.extended_data[planar ? c : 0];
-                out_.push_back(packed == AV_SAMPLE_FMT_FLT ? reinterpret_cast<const float*>(plane)[index]
-                               : packed == AV_SAMPLE_FMT_S32
-                                   ? float(double(reinterpret_cast<const int32_t*>(plane)[index]) / 2147483648.0)
-                                   : float(reinterpret_cast<const int16_t*>(plane)[index]) / 32768.0f);
-            }
+        out_.insert(out_.end(), pcm.samples + size_t(next_ - start) * ch, pcm.samples + size_t(end - start) * ch);
         next_ = end;
     }
 
     std::unique_ptr<IDecoder> words_;
-    const AVCodec* codec_ = nullptr;
-    AVCodecContext* ctx_ = nullptr;
-    AVCodecParserContext* parser_ = nullptr;
-    AVPacket* pkt_ = nullptr;
-    AVFrame* frame_ = nullptr;
-    bool parserStarted_ = false;
+    std::unique_ptr<DtsDecoder, FreeDts> decoder_;
     bool wordsDone_ = false;
-    uint64_t readFrom_ = 0; // word frame the parser started at
-    uint64_t next_ = 0;     // track position of the next sample appended to out_
-    std::function<void(uint64_t, const AVFrame&)> onFrame_;
+    uint64_t bytesFrom_ = 0; // stream offset of bytes_[0]
+    uint64_t next_ = 0;      // track position of the next sample appended to out_
+    std::function<void(uint64_t, const DtsPcm&)> onFrame_;
     std::vector<int32_t> words16_;
     std::vector<uint8_t> bytes_;
     std::vector<float> out_; // interleaved, from outPos_ on
