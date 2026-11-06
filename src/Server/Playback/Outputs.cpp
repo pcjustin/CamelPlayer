@@ -91,6 +91,11 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     }
 }
 
+// "Windows default device" keeps its parameters under the device it stands for now.
+std::string parameterDevice(const DeviceCatalog& devices, Backend backend, const std::string& id) {
+    return backend == Backend::Wasapi && id.empty() ? devices.defaultWasapi : id;
+}
+
 // Each backend's set goes to the device it had selected; empty meant the Windows default, or the first ASIO driver or
 // KS pin (docs/Plan.md §6).
 void adoptSets(Settings& s, const DeviceCatalog& devices) {
@@ -163,6 +168,39 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
             const bool inUse = saved.backend == s.backend && saved.id == selectedId(s);
             if (!device->unsupported.empty() && !inUse) saved.enabled = false;
         }
+}
+
+Settings withOutputParameters(Settings s, Backend backend, const std::string& id, const DeviceCatalog& devices) {
+    if (s.backend == backend && selectedId(s) == id) return s;
+    const std::string device = parameterDevice(devices, backend, id);
+    loadParameters(s, backend, device, id);
+    return s;
+}
+
+void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, const std::string& id,
+                          const DeviceCatalog& devices) {
+    const bool inUse = s.backend == backend && selectedId(s) == id;
+    if (inUse) {
+        if (backend == Backend::Asio)
+            s.asio = edited.asio;
+        else if (backend == Backend::Ks)
+            s.ks = edited.ks;
+        else if (backend == Backend::Network)
+            s.network = edited.network;
+        else if (backend == Backend::AirPlay)
+            s.airplay = edited.airplay;
+        else
+            s.wasapi = edited.wasapi;
+        return;
+    }
+    const std::string device = parameterDevice(devices, backend, id);
+    if (device.empty()) return;
+    Settings kept = edited;
+    kept.outputs = s.outputs;
+    const SavedOutput* saved = findOutput(s, backend, device);
+    kept.volume.mode = saved ? saved->volumeMode : newOutput(backend).volumeMode;
+    keepParameters(kept, backend, device);
+    s.outputs = std::move(kept.outputs);
 }
 
 void selectOutput(Settings& s, Backend backend, const std::string& id, const DeviceCatalog& devices) {

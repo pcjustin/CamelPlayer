@@ -607,3 +607,44 @@ TEST(OutputsServerTest, TheFirstDeviceScanEnablesTheOutputInUseAndSavesIt) {
     EXPECT_NE(std::ranges::find_if(read.outputs, [](const SavedOutput& o) { return o.id.empty() && o.enabled; }),
               read.outputs.end());
 }
+
+TEST(OutputParametersTest, AnOutputNotInUseIsEditedWithoutLeavingTheOneInUse) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    s.asio.outLeft = 3;
+    syncOutputs(s, catalog());
+
+    Settings edited = withOutputParameters(s, Backend::Wasapi, "w-dave", catalog());
+    EXPECT_EQ(edited.backend, Backend::Wasapi);
+    edited.wasapi.customPeriodMs = 33.0;
+    keepOutputParameters(s, edited, Backend::Wasapi, "w-dave", catalog());
+
+    EXPECT_EQ(s.backend, Backend::Asio);
+    EXPECT_EQ(s.asio.driverClsid, "a-dave");
+    EXPECT_EQ(s.asio.outLeft, 3);
+    EXPECT_NE(s.wasapi.customPeriodMs, 33.0);
+    selectOutput(s, Backend::Wasapi, "w-dave", catalog());
+    EXPECT_EQ(s.wasapi.customPeriodMs, 33.0);
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    EXPECT_EQ(s.asio.outLeft, 3);
+}
+
+TEST(OutputParametersTest, TheOutputInUseChangesAtOnce) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    Settings edited = withOutputParameters(s, Backend::Asio, "a-dave", catalog());
+    edited.asio.outLeft = 5;
+    keepOutputParameters(s, edited, Backend::Asio, "a-dave", catalog());
+    EXPECT_EQ(s.asio.outLeft, 5);
+}
+
+TEST(OutputParametersTest, TheWindowsDefaultEntryKeepsThemUnderTheDeviceItFollows) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    Settings edited = withOutputParameters(s, Backend::Wasapi, "", catalog());
+    EXPECT_TRUE(edited.wasapi.deviceId.empty());
+    edited.wasapi.customPeriodMs = 27.0;
+    keepOutputParameters(s, edited, Backend::Wasapi, "", catalog());
+    EXPECT_EQ(withOutputParameters(s, Backend::Wasapi, "", catalog()).wasapi.customPeriodMs, 27.0);
+    EXPECT_EQ(s.backend, Backend::Asio);
+}

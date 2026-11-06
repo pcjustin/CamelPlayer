@@ -219,7 +219,9 @@
                                 </InfoBar>
                                 <StackPanel x:Name="OutputList" Spacing="4" />
                                 <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
-
+                                <!-- One output's settings, which a row's gear shows in a dialog. -->
+                                <Border x:Name="OutputSettingsHost" Visibility="Collapsed">
+                                <StackPanel x:Name="OutputSettingsPanel" Spacing="12">
                                 <StackPanel x:Name="WasapiGroup" Spacing="12">
                                     <TextBlock Text="WASAPI" Style="{StaticResource GroupHeaderStyle}" />
                                     <ComboBox x:Name="WasapiShareCombo" x:Uid="Settings_WasapiShare" Width="360" SelectionChanged="OnSettingChanged" />
@@ -250,7 +252,7 @@
 
                                 <StackPanel x:Name="AsioGroup" Spacing="12">
                                     <TextBlock Text="ASIO" Style="{StaticResource GroupHeaderStyle}" />
-                                    <Button x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" />
+                                    <Button x:Name="AsioPanelButton" x:Uid="Settings_AsioPanel" Click="OnAsioPanelClick" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <NumberBox x:Name="AsioLeftBox" x:Uid="Settings_AsioLeft" Width="160" Minimum="1" Maximum="64"
                                                    SpinButtonPlacementMode="Compact" ValueChanged="OnNumberChanged" />
@@ -323,6 +325,8 @@
                                         </StackPanel>
                                     </Expander>
                                 </StackPanel>
+                                </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Border>
                         <Border x:Name="PlaybackCard" Style="{StaticResource SettingsCardStyle}">

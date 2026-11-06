@@ -656,13 +656,15 @@
   <data name="Discord_CoverReady" xml:space="preserve"><value>封面通道已就緒。</value></data>
   <data name="Discord_CoverFailed" xml:space="preserve"><value>封面通道無法使用：{0}</value></data>
   <data name="Settings_Outputs.Text" xml:space="preserve"><value>音訊輸出</value></data>
-  <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>開啟的輸出會列在播放列的輸出選單，播放中也能在那裡切換。每個輸出都有自己的設定；下方的設定屬於使用中的輸出。</value></data>
+  <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>開啟的輸出會列在播放列的輸出選單，播放中也能在那裡切換。每個輸出都有自己的設定，按該列的齒輪就能開啟。</value></data>
   <data name="Output_Button.ToolTipService.ToolTip" xml:space="preserve"><value>輸出</value></data>
   <data name="Output_ButtonName" xml:space="preserve"><value>輸出：{0}</value></data>
   <data name="Output_ButtonOn" xml:space="preserve"><value>{0}：{1}</value></data>
   <data name="Output_InUse" xml:space="preserve"><value>使用中</value></data>
   <data name="Output_Enabled" xml:space="preserve"><value>顯示在輸出選單</value></data>
   <data name="Output_More" xml:space="preserve"><value>更多</value></data>
+  <data name="Output_Settings" xml:space="preserve"><value>設定</value></data>
+  <data name="Output_SettingsClose" xml:space="preserve"><value>關閉</value></data>
   <data name="Output_Rename" xml:space="preserve"><value>重新命名</value></data>
   <data name="Output_RenameTitle" xml:space="preserve"><value>重新命名 {0}</value></data>
   <data name="Output_RenameNote" xml:space="preserve"><value>留空則使用裝置本身的名稱</value></data>

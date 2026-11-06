@@ -35,6 +35,11 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
 void syncOutputs(Settings& s, const DeviceCatalog& devices);
 
 void selectOutput(Settings& s, Backend backend, const std::string& id, const DeviceCatalog& devices);
+// `s` as it would be with this output in use, for showing its parameters without leaving the one in use.
+Settings withOutputParameters(Settings s, Backend backend, const std::string& id, const DeviceCatalog& devices);
+// Takes this output's parameters from `edited`, which came from withOutputParameters. An output not in use only keeps them.
+void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, const std::string& id,
+                          const DeviceCatalog& devices);
 // The output in use stays enabled.
 void setOutputEnabled(Settings& s, Backend backend, const std::string& id, bool enabled, const DeviceCatalog& devices);
 void renameOutput(Settings& s, Backend backend, const std::string& id, const std::string& alias, const DeviceCatalog& devices);

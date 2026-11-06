@@ -304,6 +304,13 @@ private:
     void openArtist(hstring const& artist);
     void addSettingsLinks();
     void markSettingsSection();
+    winrt::fire_and_forget showOutputSettings(camel::Backend backend, std::string id, winrt::hstring label);
+    struct OutputEdit {
+        camel::Backend backend = camel::Backend::Wasapi;
+        std::string id;
+        camel::server::SettingsDto real; // settings_ holds this output's parameters while the dialog is open
+    };
+    std::optional<OutputEdit> editingOutput_;
     std::vector<std::pair<Microsoft::UI::Xaml::FrameworkElement, Microsoft::UI::Xaml::Controls::HyperlinkButton>> settingsLinks_;
     // Goes back in the library pages, or from Listening to Home, when the title bar offers Back.
     bool goBack();

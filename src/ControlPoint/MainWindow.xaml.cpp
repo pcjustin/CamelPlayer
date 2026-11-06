@@ -698,8 +698,8 @@ void MainWindow::populateOutputs() {
         const hstring label = row.backend == Backend::AirPlay ? outputMenuLabel(row) : outputLabel(row);
         Grid line;
         line.ColumnSpacing(8);
-        for (const GridLength width :
-             {GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto}}) {
+        for (const GridLength width : {GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto},
+                                       GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto}}) {
             ColumnDefinition column;
             column.Width(width);
             line.ColumnDefinitions().Append(column);
@@ -739,6 +739,20 @@ void MainWindow::populateOutputs() {
             remove.Click([this, row, label](auto&&, auto&&) { askDeleteOutput(row.backend, row.id, label); });
             actions.Items().Append(remove);
         }
+        if (row.backend != Backend::AirPlay) {
+            Button gear;
+            FontIcon gearIcon;
+            gearIcon.Glyph(L"\xE713");
+            gearIcon.FontSize(14);
+            gear.Content(gearIcon);
+            gear.VerticalAlignment(VerticalAlignment::Center);
+            ToolTipService::SetToolTip(gear, box_value(tr(L"Output_Settings")));
+            Automation::AutomationProperties::SetName(
+                gear, ui::format(L"Output_ButtonOn", {std::wstring(tr(L"Output_Settings")), std::wstring(label)}));
+            gear.Click([this, row, label](auto&&, auto&&) { showOutputSettings(row.backend, row.id, label); });
+            Grid::SetColumn(gear, 1);
+            line.Children().Append(gear);
+        }
         Button more;
         FontIcon moreIcon;
         moreIcon.Glyph(L"\xE712");
@@ -749,7 +763,7 @@ void MainWindow::populateOutputs() {
         ToolTipService::SetToolTip(more, box_value(tr(L"Output_More")));
         Automation::AutomationProperties::SetName(
             more, ui::format(L"Output_ButtonOn", {std::wstring(tr(L"Output_More")), std::wstring(label)}));
-        Grid::SetColumn(more, 1);
+        Grid::SetColumn(more, 2);
         line.Children().Append(more);
 
         ToggleSwitch enabled;
@@ -768,7 +782,7 @@ void MainWindow::populateOutputs() {
             });
             if (camel::isNetworkPlayer(row.backend) && enabled.IsOn()) askFirewallRule();
         });
-        Grid::SetColumn(enabled, 2);
+        Grid::SetColumn(enabled, 3);
         line.Children().Append(enabled);
         groupRows.Children().Append(line);
     }
@@ -819,6 +833,38 @@ void MainWindow::changeOutputs(std::function<void(camel::Settings&, const Device
     command.kind = CommandKind::ApplySettings;
     command.settings = settings_;
     submitCommand(std::move(command));
+}
+
+// Any output's parameters, in use or not, in the controls of the settings page; changes apply as they are made.
+winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::string id, hstring label) {
+    auto strong = get_strong();
+    const auto real = nativeSettings(settings_);
+    const auto rows = camel::server::outputRows(real, server_->snapshot().devices);
+    const bool inUse = std::ranges::any_of(
+        rows, [&](const camel::server::OutputRow& r) { return r.selected && r.backend == backend && r.id == id; });
+    editingOutput_ = OutputEdit{backend, id, settings_};
+    settings_ = settingsDto(camel::server::withOutputParameters(real, backend, id, server_->snapshot().devices));
+    populateSettings();
+    updateBackendGroups();
+    AsioPanelButton().IsEnabled(inUse); // the driver's panel opens for the driver in use
+    const auto panel = OutputSettingsPanel();
+    OutputSettingsHost().Child(nullptr);
+    ScrollViewer scroller;
+    scroller.Content(panel);
+    panel.Padding(ThicknessHelper::FromLengths(0, 0, 16, 0));
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(label));
+    dialog.Content(scroller);
+    dialog.CloseButtonText(tr(L"Output_SettingsClose"));
+    co_await dialog.ShowAsync();
+    scroller.Content(nullptr);
+    OutputSettingsHost().Child(panel);
+    settings_ = editingOutput_->real;
+    editingOutput_.reset();
+    AsioPanelButton().IsEnabled(true);
+    populateSettings();
+    updateBackendGroups();
 }
 
 winrt::fire_and_forget MainWindow::askRenameOutput(Backend backend, std::string id, std::string alias, hstring label) {
@@ -1000,6 +1046,18 @@ void MainWindow::OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, 
 void MainWindow::settingsChanged() {
     if (populating_ || !server_) return;
     readSettingsFromUi();
+    if (editingOutput_) {
+        auto real = nativeSettings(editingOutput_->real);
+        camel::server::keepOutputParameters(real, nativeSettings(settings_), editingOutput_->backend, editingOutput_->id,
+                                            server_->snapshot().devices);
+        editingOutput_->real = settingsDto(real);
+        Command command;
+        command.kind = CommandKind::ApplySettings;
+        command.settings = editingOutput_->real;
+        submitCommand(std::move(command));
+        updateBackendGroups();
+        return;
+    }
     applyTheme();
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     get_self<LibraryView>(Library())->setFolderPlaysOn(settings_.folderPlaysOn);
@@ -1078,6 +1136,7 @@ bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
 
 // A device scan can change what the Server keeps: the outputs, and the parameters when the Windows default moved on.
 void MainWindow::showOutputsOf(const SettingsDto& server) {
+    if (editingOutput_) return; // settings_ holds the output in the dialog
     const bool parameters = server.backend != settings_.backend || server.wasapi != settings_.wasapi ||
                             server.asio != settings_.asio || server.ks != settings_.ks ||
                             server.volume.mode != settings_.volume.mode;
