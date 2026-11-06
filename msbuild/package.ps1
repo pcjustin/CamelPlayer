@@ -75,7 +75,7 @@ $manifest = Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullN
 }
 [System.IO.File]::WriteAllLines((Join-Path $stage 'install-manifest.txt'), [string[]]$manifest, (New-Object System.Text.UTF8Encoding $false))
 
-$ffmpeg = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Include 'av*.dll', 'sw*.dll')
+$ffmpeg = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object { $_.Name -like 'av*.dll' -or $_.Name -like 'sw*.dll' })
 if ($ffmpeg) { throw "FFmpeg must not ship: $($ffmpeg.Name -join ', ')" }
 
 $zip = Join-Path $dist "$name-win-x64.zip"
