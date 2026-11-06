@@ -152,11 +152,12 @@ mod tests {
 
     #[test]
     fn concurrent_producer_consumer_preserve_all_bytes() {
+        let bytes = if cfg!(miri) { 2_000 } else { 100_000 };
         let ring = Arc::new(SpscByteRing::new(257).unwrap());
         let producer_ring = Arc::clone(&ring);
         let producer = thread::spawn(move || {
             let mut next = 0u8;
-            for _ in 0..100_000 {
+            for _ in 0..bytes {
                 let byte = [next];
                 while producer_ring.write(&byte) == 0 {
                     thread::yield_now();
@@ -167,7 +168,7 @@ mod tests {
 
         let mut expected = 0u8;
         let mut output = [0u8; 31];
-        for _ in 0..100_000 {
+        for _ in 0..bytes {
             while ring.read(&mut output[..1]) == 0 {
                 thread::yield_now();
             }

@@ -89,7 +89,8 @@ mod stage_heap {
     }
 }
 
-#[cfg(test)]
+// Under Miri, System runs std's own Windows code for over-aligned blocks, which Stacked Borrows rejects.
+#[cfg(all(test, not(miri)))]
 #[global_allocator]
 static HEAP: stage_heap::Counting = stage_heap::Counting;
 pub use decoder_host::{
