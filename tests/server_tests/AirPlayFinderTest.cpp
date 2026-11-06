@@ -188,6 +188,20 @@ TEST_F(AirPlayFinderTest, AReceiverComesBackAtANewAddressAsTheSameOne) {
     EXPECT_EQ(receivers().front().id, "800A805D016B");
 }
 
+TEST_F(AirPlayFinderTest, ARenamedReceiverIsTheSameOneUnderItsNewName) {
+    mdns_.add(record(rtsp_));
+    start();
+    ASSERT_TRUE(found(1));
+    mdns_.rename("800A805D016B", "Living Room");
+    // The old name's record stays until it ages out, and the two never show as two receivers.
+    EXPECT_TRUE(waitFor([&] {
+        const auto now = receivers();
+        EXPECT_EQ(now.size(), 1u);
+        return now.size() == 1 && now.front().name == "Living Room";
+    }));
+    EXPECT_EQ(receivers().front().id, "800A805D016B");
+}
+
 TEST_F(AirPlayFinderTest, AReceiverThatStopsAnsweringGoes) {
     mdns_.add(record(rtsp_));
     start();
@@ -333,6 +347,30 @@ TEST(AirPlayOutputsTest, ReceiversAreListedWithPlayersAndKeptByDeviceId) {
     selectOutput(read, Backend::Wasapi, "", devices);
     selectOutput(read, Backend::AirPlay, "800A805D016B", devices);
     EXPECT_EQ(read.airplay.timing.releaseAfterPauseSeconds, 30);
+}
+
+TEST(AirPlayOutputsTest, ARenamedReceiverKeepsItsSettings) {
+    DeviceCatalog devices;
+    devices.revision = 1;
+    devices.airplay = {{"800A805D016B", "DMP-A6"}};
+    Settings s;
+    s.adoptOutputSets = false;
+    setOutputEnabled(s, Backend::AirPlay, "800A805D016B", true, devices);
+    selectOutput(s, Backend::AirPlay, "800A805D016B", devices);
+    s.airplay.timing.releaseAfterPauseSeconds = 30;
+    syncOutputs(s, devices);
+
+    auto renamed = devices;
+    renamed.revision = 2;
+    renamed.airplay = {{"800A805D016B", "Living Room"}};
+    syncOutputs(s, renamed);
+    const auto row = outputRows(s, renamed).back();
+    EXPECT_EQ(row.backend, Backend::AirPlay);
+    EXPECT_EQ(row.name, "Living Room");
+    EXPECT_TRUE(row.connected);
+    EXPECT_TRUE(row.selected);
+    EXPECT_EQ(s.airplay.deviceId, "800A805D016B");
+    EXPECT_EQ(s.airplay.timing.releaseAfterPauseSeconds, 30);
 }
 
 TEST(AirPlayOutputsTest, AnUnsupportedReceiverSaysWhyAndDoesNotStayEnabled) {

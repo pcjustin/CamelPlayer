@@ -307,6 +307,11 @@ public:
         for (auto& record : records_)
             if (record.deviceId == deviceId) record.address = address;
     }
+    void rename(const std::string& deviceId, const std::string& name) {
+        std::scoped_lock lock(mutex_);
+        for (auto& record : records_)
+            if (record.deviceId == deviceId) record.name = name;
+    }
 
 private:
     using Records = std::vector<std::string>;
