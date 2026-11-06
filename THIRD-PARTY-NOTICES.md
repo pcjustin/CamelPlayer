@@ -20,7 +20,7 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 
 | Component | Package | Version | License | Use | Text |
 |---|---|---|---|---|---|
-| FFmpeg (avcodec, avformat, swresample) | `ffmpeg` | 9.0.2#1 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/ffmpeg.txt) |
+| FFmpeg (avcodec, avformat, swresample) | `ffmpeg` | 9.0.2#1 | LGPL-2.1-or-later | tests only | [Notice](third_party/licenses/native/ffmpeg.txt) |
 | libsndfile | `libsndfile` | 1.2.2#2 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/libsndfile.txt) |
 | dr_flac / dr_wav | `drlibs` | 2026-10-30 | Unlicense OR MIT-0 | linked | [Notice](third_party/licenses/native/drlibs.txt) |
 | libFLAC | `libflac` | 1.5.0 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libflac.txt) |
@@ -50,7 +50,7 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 
 The headphone crossfeed (`rust/audio_engine/src/crossfeed.rs`) follows the filters of libbs2b by Boris Mikhaylov, used under the MIT license ([notice](third_party/licenses/adapted/libbs2b.txt)). No libbs2b code is linked.
 
-The DTS core decoder (`rust/dts_core`) is a pinned copy of the decoder of oxideav-dts 0.0.2, commit `ec55712`, copyright Karpelès Lab Inc., used under the MIT license ([notice](third_party/licenses/adapted/oxideav-dts.txt)).
+DTS is a trademark of its owner. CamelPlayer names the format only to describe it, and is neither licensed nor endorsed by that owner. The DTS core decoder (`rust/dts_core`) is a pinned copy of the decoder of oxideav-dts 0.0.2, commit `ec55712`, copyright Karpelès Lab Inc., used under the MIT license ([notice](third_party/licenses/adapted/oxideav-dts.txt)).
 
 ## Rust components
 
@@ -122,7 +122,7 @@ Discord Rich Presence is off until the user switches it on (Settings › Interfa
 
 ## Source access and relinking
 
-The LGPL libraries (FFmpeg, libsndfile, mpg123, libsoxr, TagLib) are linked statically into CamelPlayer.exe; DSD Nexus is a separate DLL. Because CamelPlayer's complete source and build scripts are public, anyone can rebuild CamelPlayer against a modified version of any of them:
+The LGPL libraries (libsndfile, mpg123, libsoxr, TagLib) are linked statically into CamelPlayer.exe; DSD Nexus is a separate DLL. Because CamelPlayer's complete source and build scripts are public, anyone can rebuild CamelPlayer against a modified version of any of them:
 
 1. Get CamelPlayer's source at the release tag and `CamelPlayer-<version>-win-x64-third-party-source.zip` from the same release.
 2. Install Visual Studio 2026 with the C++ desktop workload and the Rust toolchain recorded in `third_party/licenses/rust-runtime/toolchain.txt`.

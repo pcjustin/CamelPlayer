@@ -491,7 +491,7 @@ public:
 
     struct Prepared {
         AudioFormat format{};
-        DecoderKind decoder{};
+        DecoderKind decoder = DecoderKind::Sndfile;
         SourceInfo source;
         uint64_t shown = 0; // shownLength()
         OutputPlan plan;
@@ -891,7 +891,7 @@ private:
             snap_.outputStatus = {};
         }
         std::unique_ptr<IDecoder> dec;
-        DecoderKind decoder{};
+        DecoderKind decoder = DecoderKind::Sndfile;
         try {
             format_.reset();
             format_ = probeFormat(file_);

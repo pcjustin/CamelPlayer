@@ -80,7 +80,7 @@ TEST(Dts, ProbeFindsDtsInsideWave) {
 TEST(Dts, EveryWaveDecoderReadsTheSameDecode) {
     const auto& file = dtsCd();
     ASSERT_GT(file.reference.size(), 6u * 40000);
-    for (const DecoderKind kind : {DecoderKind::Sndfile, DecoderKind::DrWav, DecoderKind::Symphonia, DecoderKind::FFmpeg}) {
+    for (const DecoderKind kind : {DecoderKind::Sndfile, DecoderKind::DrWav, DecoderKind::Symphonia}) {
         SCOPED_TRACE(decoderName(kind));
         const auto d = openDecoder(kind, dtsPath());
         EXPECT_TRUE(d->readsFloat());
@@ -96,7 +96,7 @@ TEST(Dts, EveryWaveDecoderReadsTheSameDecode) {
 
 TEST(Dts, SeeksToTheExactSample) {
     const auto& file = dtsCd();
-    for (const DecoderKind kind : {DecoderKind::Sndfile, DecoderKind::FFmpeg}) {
+    for (const DecoderKind kind : {DecoderKind::Sndfile, DecoderKind::Symphonia}) {
         SCOPED_TRACE(decoderName(kind));
         const auto d = openDecoder(kind, dtsPath());
         for (const uint64_t target : {uint64_t(0), uint64_t(777), file.frames / 2 + 123, file.frames - 300}) {

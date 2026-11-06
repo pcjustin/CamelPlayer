@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "Commands.h"
-#include "Engine/testing/TestAudio.h"
+#include "Tools/testaudio/TestAudio.h"
 #include "Common/util/Text.h"
 
 #pragma comment(lib, "windowscodecs.lib")

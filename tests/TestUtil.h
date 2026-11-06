@@ -10,7 +10,7 @@
 
 #include "Common/AudioFormat.h"
 #include "Engine/decode/IDecoder.h"
-#include "Engine/testing/TestAudio.h"
+#include "Tools/testaudio/TestAudio.h"
 
 namespace testutil {
 

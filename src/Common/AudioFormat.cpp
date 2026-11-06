@@ -81,7 +81,7 @@ bool supports(AudioFormat format, DecoderKind decoder) {
 
 DecoderKind defaultDecoder(AudioFormat format) {
     const auto id = decoderRegistry().defaultFor(formatId(format));
-    DecoderKind kind{};
+    DecoderKind kind = DecoderKind::Sndfile;
     if (!id || !decoderFromId(*id, kind)) return DecoderKind::Sndfile;
     return kind;
 }

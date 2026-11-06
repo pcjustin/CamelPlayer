@@ -5,7 +5,7 @@
                        "name":  "ffmpeg",
                        "version":  "9.0.2#1",
                        "license":  "LGPL-2.1-or-later",
-                       "role":  "runtime or verification",
+                       "role":  "test",
                        "port_source":  "git+https://github.com/microsoft/vcpkg@b9e158fe3e4f9d727af5e5904e1121d844267df3",
                        "sources":  [
                                        {

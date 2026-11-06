@@ -81,11 +81,11 @@ CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Settin
 
 | Format | Decoders (default first) | Notes |
 | --- | --- | --- |
-| FLAC | libsndfile, FFmpeg, Symphonia, dr_flac | Complete decodes verify the STREAMINFO MD5. |
-| WAV, AIFF | libsndfile, FFmpeg, Symphonia, dr_wav | |
+| FLAC | libsndfile, Symphonia, dr_flac | Complete decodes verify the STREAMINFO MD5. |
+| WAV, AIFF | libsndfile, Symphonia, dr_wav | |
 | ADPCM WAV (IMA, Microsoft) | libsndfile | A lossy source decoded to exact 16-bit PCM. |
-| DTS-CD WAV | CamelPlayer's Rust DTS core; FFmpeg's DTS decoder when FFmpeg is chosen for WAV | The decoder chosen for WAV reads the bitstream, which the DTS core decodes. Played and downmixed only when conversion is allowed. |
-| ALAC | Symphonia, FFmpeg | |
+| DTS-CD WAV | CamelPlayer's Rust DTS core | The decoder chosen for WAV reads the bitstream, which the DTS core decodes. Played and downmixed only when conversion is allowed. |
+| ALAC | Symphonia | Symphonia alone. |
 | AAC-LC | Symphonia | Decoded to 24-bit PCM with encoder delay and padding trimmed. The sound of an MP4 video plays as a track. |
 | MP3 | mpg123 | Decoded to 24-bit PCM with encoder delay and padding trimmed. A file without a Xing or Info header is listed with an estimate until it first plays to its end; while it plays, the estimate becomes exact. MP3 inside an MP4 file is not supported. |
 | DSF, DSDIFF | DSD Nexus | Raw DSD; DST-compressed DSDIFF is not supported. |
@@ -143,7 +143,7 @@ Each build also writes `build/compile_commands.json`, so clangd (for example in 
 
 ## Testing
 
-`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-11-06 a full Release run passed all 918 enabled C++ tests, including the 100k-track search latency target, and all 91 Rust tests.
+`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. On 2026-11-06 a full Release run passed all 870 enabled C++ tests, including the 100k-track search latency target, and all 91 Rust tests.
 
 The 114 disabled tests play audio on named devices, scan a NAS or read the network players on your network, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
 

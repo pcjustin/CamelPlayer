@@ -3272,7 +3272,7 @@ mod tests {
                 engine,
                 &command,
                 &source,
-                decoder_host::DECODER_FFMPEG,
+                decoder_host::DECODER_SYMPHONIA,
                 host,
             )
         }
@@ -3299,7 +3299,7 @@ mod tests {
                 engine,
                 &command_stamp(command_id),
                 &source,
-                decoder_host::DECODER_FFMPEG,
+                decoder_host::DECODER_SYMPHONIA,
                 &host,
             )
         }
@@ -3767,7 +3767,7 @@ mod tests {
                     engine,
                     &command_stamp(1),
                     &source,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -3822,7 +3822,7 @@ mod tests {
                 engine,
                 &command_stamp(command),
                 &source,
-                decoder_host::DECODER_FFMPEG,
+                decoder_host::DECODER_SYMPHONIA,
                 &host,
             )
         }
@@ -3935,7 +3935,7 @@ mod tests {
                             engine,
                             &command_stamp(3),
                             &source,
-                            decoder_host::DECODER_FFMPEG,
+                            decoder_host::DECODER_SYMPHONIA,
                             &host,
                         )
                     },
@@ -3982,7 +3982,7 @@ mod tests {
                         engine,
                         &command_stamp(4),
                         &source,
-                        decoder_host::DECODER_FFMPEG,
+                        decoder_host::DECODER_SYMPHONIA,
                         &host,
                     )
                 };
@@ -4017,7 +4017,7 @@ mod tests {
                 engine,
                 &command_stamp(command),
                 &source,
-                decoder_host::DECODER_FFMPEG,
+                decoder_host::DECODER_SYMPHONIA,
                 &host,
             )
         };
@@ -4029,7 +4029,7 @@ mod tests {
                     engine,
                     &command_stamp(2),
                     &none,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -4058,7 +4058,7 @@ mod tests {
                     engine,
                     &command_stamp(1),
                     first,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -4199,7 +4199,7 @@ mod tests {
                                 engine,
                                 &command_stamp(10 + changes),
                                 &source,
-                                decoder_host::DECODER_FFMPEG,
+                                decoder_host::DECODER_SYMPHONIA,
                                 &host,
                             )
                         };
@@ -4281,7 +4281,7 @@ mod tests {
                     engine,
                     &command_stamp(1),
                     &source,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -4795,7 +4795,7 @@ mod tests {
                     engine,
                     &load,
                     &source,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -4881,7 +4881,7 @@ mod tests {
                     engine,
                     &command_stamp(1),
                     &source,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -4964,7 +4964,7 @@ mod tests {
                     engine_address as *mut CamelEngine,
                     &command,
                     &source,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             }
@@ -5035,7 +5035,7 @@ mod tests {
                     engine,
                     &load,
                     &source,
-                    decoder_host::DECODER_FFMPEG,
+                    decoder_host::DECODER_SYMPHONIA,
                     &host,
                 )
             },
@@ -5304,7 +5304,7 @@ mod tests {
         let host_abi = mock_host();
         let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
         let mut decoded =
-            unsafe { DecoderSource::open(&source, decoder_host::DECODER_FFMPEG, host) }.unwrap();
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_SYMPHONIA, host) }.unwrap();
         let mut output = [0; 8];
         assert_eq!(decoded.read(&mut output, 4), Ok(2));
         assert_eq!(output, [2, -2, 3, -3, 0, 0, 0, 0]);
@@ -5339,7 +5339,7 @@ mod tests {
         let host_abi = mock_host_with_metadata(&mut metadata);
         let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
         let mut decoded =
-            unsafe { DecoderSource::open(&source, decoder_host::DECODER_FFMPEG, host) }.unwrap();
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_SYMPHONIA, host) }.unwrap();
         let mut output = [0; 8];
         assert_eq!(decoded.integrity_status(), FLAC_INTEGRITY_INCOMPLETE);
         assert_eq!(decoded.read(&mut output, 4), Ok(4));
@@ -5372,7 +5372,7 @@ mod tests {
         let host_abi = mock_host_with_metadata(&mut metadata);
         let host = unsafe { DecoderHost::from_abi(&host_abi).unwrap() };
         let mut decoded =
-            unsafe { DecoderSource::open(&source, decoder_host::DECODER_FFMPEG, host) }.unwrap();
+            unsafe { DecoderSource::open(&source, decoder_host::DECODER_SYMPHONIA, host) }.unwrap();
         let mut output = [0; 8];
         assert_eq!(decoded.read(&mut output, 4), Ok(4));
         assert_eq!(decoded.read(&mut output, 1), Err(ENGINE_E_DECODE));

@@ -26,7 +26,6 @@
   <data name="Settings_Playback.Text" xml:space="preserve"><value>播放</value></data>
   <data name="Settings_Backend.Header" xml:space="preserve"><value>輸出後端</value></data>
   <data name="Settings_Decoder.Header" xml:space="preserve"><value>FLAC 解碼器</value></data>
-  <data name="Settings_AlacDecoder.Header" xml:space="preserve"><value>ALAC 解碼器</value></data>
   <data name="Settings_WavDecoder.Header" xml:space="preserve"><value>WAV 解碼器</value></data>
   <data name="Settings_AiffDecoder.Header" xml:space="preserve"><value>AIFF 解碼器</value></data>
   <data name="Lamp_Lossy" xml:space="preserve"><value>有損來源</value></data>

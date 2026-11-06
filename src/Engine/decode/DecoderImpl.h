@@ -9,7 +9,6 @@
 
 namespace camel::audio {
 
-std::unique_ptr<IDecoder> openFfmpeg(const std::filesystem::path& path, uint32_t lossyBits);
 std::unique_ptr<IDecoder> openSymphonia(const std::filesystem::path& path, uint32_t lossyBits);
 std::unique_ptr<IDecoder> openDrFlac(const std::filesystem::path& path);
 std::unique_ptr<IDecoder> openSndfile(const std::filesystem::path& path);

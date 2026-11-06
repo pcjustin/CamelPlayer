@@ -19,7 +19,7 @@ void usage() {
         "camelcli <command> [options]\n"
         "  --version\n"
         "      print the CamelPlayer version\n"
-        "  decode <file> [--decoder ffmpeg|symphonia|drflac|sndfile|drwav|all]\n"
+        "  decode <file> [--decoder symphonia|drflac|sndfile|drwav|all]\n"
         "      decode the whole file (FLAC, ALAC, WAV, AIFF); FLAC is compared with its STREAMINFO MD5\n"
         "  list-devices\n"
         "      list WASAPI endpoints, ASIO drivers and Kernel Streaming pins\n"

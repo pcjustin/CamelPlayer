@@ -12,7 +12,7 @@ namespace camel::audio {
 
 CamelDecoderHostV1 makeDecoderHostV1();
 
-// The C ABI decoder number for a decoder in decoderRegistry(): built-ins keep CAMEL_DECODER_FFMPEG..DSD_NEXUS, others
+// The C ABI decoder number for a decoder in decoderRegistry(): built-ins keep CAMEL_DECODER_SYMPHONIA..DSD_NEXUS, others
 // are CAMEL_DECODER_REGISTERED_BASE + their registration index. 0 for an unknown ID.
 uint32_t abiDecoder(std::string_view decoder);
 

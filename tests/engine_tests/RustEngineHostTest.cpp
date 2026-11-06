@@ -9,13 +9,14 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "Common/DecoderRegistry.h"
 #include "Engine/decode/DecoderHost.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/decode/FlacStreamInfo.h"
-#include "Engine/testing/TestAudio.h"
+#include "Tools/testaudio/TestAudio.h"
 #include "Engine/EngineAbi.h"
 #include "Engine/SamplePacker.h"
 #include "Common/util/Text.h"
@@ -98,7 +99,7 @@ void expectRenderCapacityParity(const CamelAudioFormatV1& format, uint64_t units
         EXPECT_TRUE(std::all_of(output.begin(), output.begin() + required, [](uint8_t value) { return value == 0x69; }));
     if (format.stream_kind == CAMEL_AUDIO_DOP) {
         const size_t bytesPerSample = format.container_bits / 8;
-        for (size_t i = 0; i < size_t(required); i += bytesPerSample) {
+        for (size_t i = 0; std::cmp_less(i, required); i += bytesPerSample) {
             EXPECT_EQ(output[i + bytesPerSample - 3], 0x69);
             EXPECT_EQ(output[i + bytesPerSample - 2], 0x69);
             EXPECT_EQ(output[i + bytesPerSample - 1], (i / bytesPerSample / 2) % 2 ? 0xFA : 0x05);
@@ -245,12 +246,12 @@ TEST(RustEngineHost, RegisteredDecoderNumberDecodesThroughTheHost) {
     ASSERT_NE(engine, nullptr);
     ASSERT_EQ(loadSource(engine, path, number), CAMEL_ENGINE_OK);
     std::vector<int32_t> samples;
-    std::array<int32_t, 4096 * 2> chunk{};
+    std::array<int32_t, size_t{4096} * 2> chunk{};
     for (;;) {
         uint64_t framesRead = 0;
         const auto status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
         ASSERT_TRUE(status == CAMEL_ENGINE_OK || status == CAMEL_ENGINE_END) << status;
-        samples.insert(samples.end(), chunk.begin(), chunk.begin() + framesRead * reference.info.channels);
+        samples.insert(samples.end(), chunk.begin(), chunk.begin() + ptrdiff_t(framesRead * reference.info.channels));
         if (status == CAMEL_ENGINE_END) break;
     }
     EXPECT_EQ(samples, reference.samples);
@@ -261,8 +262,7 @@ TEST(RustEngineHost, RegisteredDecoderNumberDecodesThroughTheHost) {
 }
 
 TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
-    constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
-                                                  CAMEL_DECODER_SNDFILE};
+    constexpr std::array<uint32_t, 3> decoders = {CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC, CAMEL_DECODER_SNDFILE};
     for (const auto* name : {"16-44.1k", "24-96k"}) {
         const auto path = testutil::testFile(name);
         const auto reference = camel::audio::testaudio::referenceDecode(path);
@@ -283,12 +283,12 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
             EXPECT_EQ(flacIntegrity(engine).status, CAMEL_FLAC_INTEGRITY_INCOMPLETE);
 
             std::vector<int32_t> samples;
-            std::array<int32_t, 4096 * 2> chunk{};
+            std::array<int32_t, size_t{4096} * 2> chunk{};
             for (;;) {
                 uint64_t framesRead = 0;
                 const auto status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
                 ASSERT_TRUE(status == CAMEL_ENGINE_OK || status == CAMEL_ENGINE_END) << status;
-                samples.insert(samples.end(), chunk.begin(), chunk.begin() + framesRead * reference.info.channels);
+                samples.insert(samples.end(), chunk.begin(), chunk.begin() + ptrdiff_t(framesRead * reference.info.channels));
                 if (status == CAMEL_ENGINE_END) break;
             }
             EXPECT_EQ(samples, reference.samples) << "decoder=" << decoderKind << " file=" << name;
@@ -307,7 +307,7 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
             uint64_t framesRead = 0;
             ASSERT_EQ(camel_engine_read_decoded_v1(engine, seekSamples.data(), 256, &framesRead), CAMEL_ENGINE_OK);
             ASSERT_EQ(framesRead, 256u);
-            const auto begin = reference.samples.begin() + seekFrame * reference.info.channels;
+            const auto begin = reference.samples.begin() + ptrdiff_t(seekFrame * reference.info.channels);
             EXPECT_TRUE(std::equal(seekSamples.begin(), seekSamples.end(), begin))
                 << "seek decoder=" << decoderKind << " file=" << name;
             ASSERT_EQ(camel_engine_get_state_v1(engine, &state), CAMEL_ENGINE_OK);
@@ -318,8 +318,7 @@ TEST(RustEngineHost, AllFlacDecodersMatchIndependentReferenceAndSeekExactly) {
 }
 
 TEST(RustEngineHost, ReportsIncompleteUnavailableAndFailedFlacIntegrity) {
-    constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
-                                                  CAMEL_DECODER_SNDFILE};
+    constexpr std::array<uint32_t, 3> decoders = {CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC, CAMEL_DECODER_SNDFILE};
     for (const auto decoderKind : decoders) {
         auto* engine = createEngine(rateOf(testutil::testFile("no-md5")));
         ASSERT_NE(engine, nullptr);
@@ -344,7 +343,7 @@ TEST(RustEngineHost, ReportsIncompleteUnavailableAndFailedFlacIntegrity) {
             engine = createEngine();
             ASSERT_NE(engine, nullptr);
             ASSERT_EQ(loadSource(engine, testutil::testFile(name), decoderKind), CAMEL_ENGINE_OK) << decoderKind << " " << name;
-            std::array<int32_t, 4096 * 2> chunk{};
+            std::array<int32_t, size_t{4096} * 2> chunk{};
             int32_t status = CAMEL_ENGINE_OK;
             while (status == CAMEL_ENGINE_OK) {
                 status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
@@ -365,7 +364,7 @@ TEST(RustEngineHost, FullTrackRangeFinalizesIntegrityAndMissingMd5StaysUnavailab
     ASSERT_TRUE(full.error.empty()) << full.error;
     ASSERT_EQ(loadSource(engine, testutil::testFile("24-96k"), CAMEL_DECODER_SNDFILE, 0, full.info.totalFrames, true),
               CAMEL_ENGINE_OK);
-    std::array<int32_t, 4096 * 2> chunk{};
+    std::array<int32_t, size_t{4096} * 2> chunk{};
     uint64_t framesRead = 0;
     int32_t status = CAMEL_ENGINE_OK;
     while (status == CAMEL_ENGINE_OK) status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
@@ -386,14 +385,13 @@ TEST(RustEngineHost, FullTrackRangeFinalizesIntegrityAndMissingMd5StaysUnavailab
 }
 
 TEST(RustEngineHost, CorruptAndTruncatedFlacFailIntegrityForEveryDecoder) {
-    constexpr std::array<uint32_t, 4> decoders = {CAMEL_DECODER_FFMPEG, CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC,
-                                                  CAMEL_DECODER_SNDFILE};
+    constexpr std::array<uint32_t, 3> decoders = {CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC, CAMEL_DECODER_SNDFILE};
     for (const auto* name : {"damaged", "truncated"}) {
         for (const auto decoderKind : decoders) {
             auto* engine = createEngine();
             ASSERT_NE(engine, nullptr);
             ASSERT_EQ(loadSource(engine, testutil::testFile(name), decoderKind), CAMEL_ENGINE_OK) << name << " " << decoderKind;
-            std::array<int32_t, 4096 * 2> chunk{};
+            std::array<int32_t, size_t{4096} * 2> chunk{};
             uint64_t framesRead = 0;
             int32_t status = CAMEL_ENGINE_OK;
             while (status == CAMEL_ENGINE_OK) status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);

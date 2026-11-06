@@ -18,7 +18,7 @@
 #include "Commands.h"
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
-#include "Engine/testing/TestAudio.h"
+#include "Tools/testaudio/TestAudio.h"
 #include "Engine/verify/FlacMd5.h"
 #include "Common/util/Text.h"
 

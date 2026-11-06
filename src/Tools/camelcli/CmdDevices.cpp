@@ -16,7 +16,7 @@
 #include "Engine/PlaybackEngine.h"
 #include "Engine/SamplePacker.h"
 #include "OutputBridge/CaptureOutput.h"
-#include "Engine/testing/TestAudio.h"
+#include "Tools/testaudio/TestAudio.h"
 #include "Server/Playback/LocalServer.h"
 #include "Common/util/Text.h"
 
@@ -47,7 +47,7 @@ Settings settingsFromArgs(const Args& args) {
         if (!backendFromId(toUtf8(*v), s.backend)) throw std::runtime_error("unknown backend");
     }
     if (auto v = option(args, L"--decoder")) {
-        DecoderKind decoder{};
+        DecoderKind decoder = DecoderKind::Sndfile;
         if (!decoderFromId(toUtf8(*v), decoder)) throw std::runtime_error("unknown decoder");
         for (const auto format : kAllFormats) // every format this decoder reads
             if (supports(format, decoder)) s.decoderByFormat[format] = decoder;

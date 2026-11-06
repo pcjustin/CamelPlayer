@@ -190,7 +190,7 @@ private:
     winrt::fire_and_forget addFirewallRule();
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format with more than one integrated decoder.
-    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 4> decoderCombos();
+    std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 3> decoderCombos();
     void settingsChanged();
     void updateBackendGroups();
     void refreshFromServer();

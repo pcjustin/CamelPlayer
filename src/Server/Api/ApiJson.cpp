@@ -137,7 +137,7 @@ Backend backendFrom(const json& v) {
 }
 
 DecoderKind decoderFrom(const json& v) {
-    DecoderKind d{};
+    DecoderKind d = DecoderKind::Sndfile;
     if (!v.is_string() || !decoderFromId(v.get<std::string>(), d)) invalid("unknown decoder");
     return d;
 }

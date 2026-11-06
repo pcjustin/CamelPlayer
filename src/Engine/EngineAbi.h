@@ -44,7 +44,7 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_ENGINE_E_DECODE (-11)
 #define CAMEL_ENGINE_E_SEEK (-12)
 
-#define CAMEL_DECODER_FFMPEG 1u
+// 1 was FFmpeg and is not used again.
 #define CAMEL_DECODER_SYMPHONIA 2u
 #define CAMEL_DECODER_DR_FLAC 3u
 #define CAMEL_DECODER_SNDFILE 4u

@@ -537,7 +537,7 @@ Settings fromJson(const std::string& text) {
     // A choice survives only when that decoder is integrated for that format.
     auto choose = [&](std::string_view formatId, std::string_view decoderId) {
         audio::AudioFormat format{};
-        audio::DecoderKind decoder{};
+        audio::DecoderKind decoder = audio::DecoderKind::Sndfile;
         if (audio::formatFromId(formatId, format) && audio::decoderFromId(decoderId, decoder) && audio::supports(format, decoder))
             s.decoderByFormat[format] = decoder;
     };

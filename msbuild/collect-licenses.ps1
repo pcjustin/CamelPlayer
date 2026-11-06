@@ -17,7 +17,7 @@ $nativeLicenses = [ordered]@{
     libwebp = 'BSD-3-Clause'; opencc = 'Apache-2.0'; 'marisa-trie' = 'BSD-2-Clause'; 'darts-clone' = 'BSD-2-Clause'; rapidjson = 'MIT'
     tclap = 'MIT'; libebur128 = 'MIT'
 }
-$testOnly = @('gtest', 'mp3lame') # linked into tests.exe only, never shipped
+$testOnly = @('ffmpeg', 'gtest', 'mp3lame') # linked into tests.exe only, never shipped
 $buildOnly = @('tclap') # OpenCC's command-line tools only; not part of the OpenCC library
 foreach ($port in $nativeLicenses.Keys) {
     $share = Join-Path $root "vcpkg_installed\x64-windows-static-md\share\$port"

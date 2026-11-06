@@ -26,7 +26,6 @@
   <data name="Settings_Playback.Text" xml:space="preserve"><value>Playback</value></data>
   <data name="Settings_Backend.Header" xml:space="preserve"><value>Output backend</value></data>
   <data name="Settings_Decoder.Header" xml:space="preserve"><value>FLAC decoder</value></data>
-  <data name="Settings_AlacDecoder.Header" xml:space="preserve"><value>ALAC decoder</value></data>
   <data name="Settings_WavDecoder.Header" xml:space="preserve"><value>WAV decoder</value></data>
   <data name="Settings_AiffDecoder.Header" xml:space="preserve"><value>AIFF decoder</value></data>
   <data name="Lamp_Lossy" xml:space="preserve"><value>Lossy source</value></data>

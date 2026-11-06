@@ -40,6 +40,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="*.cpp" />
+    <ClCompile Include="..\testaudio\TestAudio.cpp" />
     <ClInclude Include="*.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

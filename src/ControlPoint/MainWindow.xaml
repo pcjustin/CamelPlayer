@@ -499,7 +499,6 @@
                                     <TextBlock x:Uid="Settings_Decoders" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
                                 <ComboBox x:Name="DecoderCombo" x:Uid="Settings_Decoder" Width="360" SelectionChanged="OnSettingChanged" />
-                                <ComboBox x:Name="AlacDecoderCombo" x:Uid="Settings_AlacDecoder" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="WavDecoderCombo" x:Uid="Settings_WavDecoder" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="AiffDecoderCombo" x:Uid="Settings_AiffDecoder" Width="360" SelectionChanged="OnSettingChanged" />
                             </StackPanel>

@@ -862,11 +862,9 @@ void MainWindow::OnOutputMenuOpening(Windows::Foundation::IInspectable const&, W
     items.Append(open);
 }
 
-std::array<std::pair<ComboBox, AudioFormat>, 4> MainWindow::decoderCombos() {
-    return {{{DecoderCombo(), AudioFormat::Flac},
-             {AlacDecoderCombo(), AudioFormat::Alac},
-             {WavDecoderCombo(), AudioFormat::Wav},
-             {AiffDecoderCombo(), AudioFormat::Aiff}}};
+std::array<std::pair<ComboBox, AudioFormat>, 3> MainWindow::decoderCombos() {
+    return {
+        {{DecoderCombo(), AudioFormat::Flac}, {WavDecoderCombo(), AudioFormat::Wav}, {AiffDecoderCombo(), AudioFormat::Aiff}}};
 }
 
 void MainWindow::readSettingsFromUi() {
@@ -1281,9 +1279,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                        s.source->sampleRate / 1000.0, bits, s.source->channels);
         const PathState sourceState = lossy ? PathState::Lossy : PathState::BitPerfect;
         add(tr(L"SignalPath_File"), text, sourceState);
-        // Other WAVE decoders read a DTS-CD bitstream that the Rust DTS core then decodes.
-        const hstring reader =
-            s.format == AudioFormat::Dts && s.decoder != DecoderKind::FFmpeg ? decoder + L" → DTS core" : decoder;
+        // The WAVE decoders read a DTS-CD bitstream that the Rust DTS core then decodes.
+        const hstring reader = s.format == AudioFormat::Dts ? decoder + L" → DTS core" : decoder;
         add(tr(L"SignalPath_Decoder"), lossy ? reader + L" · " + to_hstring(bits) + L"-bit PCM" : reader, sourceState);
         stage = PathStage::Processing;
         if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);

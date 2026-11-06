@@ -18,8 +18,6 @@ namespace camel::audio {
 
 const char* decoderName(DecoderKind k) {
     switch (k) {
-    case DecoderKind::FFmpeg:
-        return "FFmpeg";
     case DecoderKind::Symphonia:
         return "Symphonia";
     case DecoderKind::DrFlac:
@@ -38,8 +36,6 @@ const char* decoderName(DecoderKind k) {
 
 const char* decoderId(DecoderKind k) {
     switch (k) {
-    case DecoderKind::FFmpeg:
-        return "ffmpeg";
     case DecoderKind::Symphonia:
         return "symphonia";
     case DecoderKind::DrFlac:
@@ -134,21 +130,20 @@ private:
 };
 
 // Lossy decoders need a few frames of warm-up after a seek (the AAC MDCT overlap), and some land beside the target when
-// they also trim encoder delay. This seeks early, or reopens the file, and decodes and discards up to the target, so a
-// seek matches the linear decode exactly (docs/Plan.md §16.3).
+// they also trim encoder delay. This seeks early, or reopens the file near the start, and decodes and discards up to the target,
+// so a seek matches the linear decode exactly (docs/Plan.md §16.3).
 std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits);
 
 class LossySeek final : public IDecoder {
 public:
-    enum class Mode : uint8_t { Preroll, Reopen };
     static constexpr uint64_t kPreroll = 4608; // four and a half AAC frames
 
     // Without `lengthKnown` the decoder's length is only an estimate, as a header can count frames the decoder does not
     // decode: it is reported as unknown (0), since the Engine treats a nonzero length as exact, and becomes the frames
     // decoded once a read reaches the end.
-    LossySeek(DecoderKind kind, std::filesystem::path path, uint32_t lossyBits, Mode mode, bool lengthKnown)
+    LossySeek(DecoderKind kind, std::filesystem::path path, uint32_t lossyBits, bool lengthKnown)
         : kind_(kind), path_(std::move(path)), lossyBits_(lossyBits), inner_(openAdapter(kind_, path_, lossyBits_)),
-          info_(inner_->info()), mode_(mode) {
+          info_(inner_->info()) {
         if (lengthKnown) return;
         estimate_ = info_.totalFrames;
         info_.totalFrames = 0;
@@ -159,7 +154,7 @@ public:
     bool readsFloat() const override { return inner_->readsFloat(); }
     size_t readFloat(float* dst, size_t frames) override { return counted(inner_->readFloat(dst, frames), frames); }
     void seek(uint64_t frame) override {
-        const uint64_t start = mode_ == Mode::Preroll && frame > kPreroll ? frame - kPreroll : 0;
+        const uint64_t start = frame > kPreroll ? frame - kPreroll : 0;
         if (start)
             inner_->seek(start);
         else
@@ -185,7 +180,6 @@ private:
     uint32_t lossyBits_;
     std::unique_ptr<IDecoder> inner_;
     SourceInfo info_;
-    Mode mode_;
     uint64_t estimate_ = 0;
     uint64_t position_ = 0;
 };
@@ -234,8 +228,6 @@ namespace {
 
 std::unique_ptr<IDecoder> openAdapter(DecoderKind kind, const std::filesystem::path& path, uint32_t lossyBits) {
     switch (kind) {
-    case DecoderKind::FFmpeg:
-        return openFfmpeg(path, lossyBits);
     case DecoderKind::Symphonia:
         return openSymphonia(path, lossyBits);
     case DecoderKind::DrFlac:
@@ -262,19 +254,13 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
     if (format == AudioFormat::Dsd) return openAdapter(kind, path, 0); // raw DSD, not PCM
     // ADPCM decodes to exact 16-bit samples, which libsndfile seeks exactly.
     if (format == AudioFormat::Adpcm) return openAdapter(kind, path, lossyBits);
-    if (format == AudioFormat::Dts) {
-        // FFmpeg's WAVE reader finds the DTS stream and decodes it, but seeks only near the target, so it decodes from
-        // the start; the other WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly.
-        // One sample per word frame makes the data chunk's length exact.
-        if (kind != DecoderKind::FFmpeg) return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits);
-        auto d = std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Reopen, true);
-        if (!d->readsFloat()) throw Error(ErrorCode::UnsupportedStream, "FFmpeg did not find the DTS stream");
-        return d;
-    }
+    // The WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly. One sample per word
+    // frame makes the data chunk's length exact.
+    if (format == AudioFormat::Dts) return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits);
     std::unique_ptr<IDecoder> d;
     // mpg123 seeks an MP3 exactly by itself; Symphonia lands on an AAC target after warm-up.
     if (isLossy(format) && kind != DecoderKind::Mpg123)
-        d = std::make_unique<LossySeek>(kind, path, lossyBits, LossySeek::Mode::Preroll, lossyLengthDeclared(path));
+        d = std::make_unique<LossySeek>(kind, path, lossyBits, lossyLengthDeclared(path));
     else
         d = openAdapter(kind, path, lossyBits);
     if (format == AudioFormat::Aac && kind == DecoderKind::Symphonia)

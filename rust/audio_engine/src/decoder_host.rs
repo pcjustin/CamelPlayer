@@ -6,7 +6,7 @@ use std::ffi::c_void;
 
 use crate::{CamelTrackSourceV1, ENGINE_E_DECODE, ENGINE_E_SEEK, ENGINE_E_SOURCE_IO};
 
-pub const DECODER_FFMPEG: u32 = 1;
+// 1 was FFmpeg and is not used again.
 pub const DECODER_SYMPHONIA: u32 = 2;
 pub const DECODER_DR_FLAC: u32 = 3;
 pub const DECODER_SNDFILE: u32 = 4;
@@ -138,8 +138,7 @@ pub(crate) struct DecoderSource {
 pub(crate) fn is_decoder_kind(decoder_kind: u32) -> bool {
     matches!(
         decoder_kind,
-        DECODER_FFMPEG
-            | DECODER_SYMPHONIA
+        DECODER_SYMPHONIA
             | DECODER_DR_FLAC
             | DECODER_SNDFILE
             | DECODER_DR_WAV
@@ -460,8 +459,8 @@ mod tests {
 
     #[test]
     fn accepts_built_in_and_registered_decoder_numbers_only() {
-        for kind in DECODER_FFMPEG..=DECODER_DSD_NEXUS {
-            assert_eq!(is_decoder_kind(kind), kind != 7, "{kind}");
+        for kind in 1..=DECODER_DSD_NEXUS {
+            assert_eq!(is_decoder_kind(kind), kind != 1 && kind != 7, "{kind}");
         }
         for kind in [
             DECODER_REGISTERED_BASE,

@@ -13,7 +13,7 @@
 
 #include "Engine/PlaybackEngine.h"
 #include "Engine/SamplePacker.h"
-#include "Engine/testing/TestAudio.h"
+#include "Tools/testaudio/TestAudio.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "StartedSnapshot.h"
 #include "TestUtil.h"

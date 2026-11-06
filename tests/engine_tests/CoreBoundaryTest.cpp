@@ -251,7 +251,6 @@ TEST(SettingsBoundary, DecoderChoicesKeepOnlyIntegratedPairs) {
     const auto settings = fromJson(R"({"schema":3,"decoderByFormat":{"flac":"symphonia","alac":"ffmpeg",
         "ogg":"ffmpeg","mp3":"sndfile","wav":"drflac","aiff":7}})");
     auto expected = flacChoice(DecoderKind::Symphonia);
-    expected[AudioFormat::Alac] = DecoderKind::FFmpeg;
     EXPECT_EQ(settings.decoderByFormat, expected);
     EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":{"flac":"mpg123"}})").decoderByFormat, DecoderByFormat{});
     EXPECT_EQ(fromJson(R"({"schema":3,"decoderByFormat":["flac"]})").decoderByFormat, DecoderByFormat{});

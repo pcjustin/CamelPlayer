@@ -92,7 +92,6 @@ struct Builtins {
         // DTS-CD is read by the WAVE decoders. AAC plays with Symphonia alone and ADPCM with libsndfile alone. MP3 plays
         // with mpg123 alone, chosen from five MP3 decoders measured from a NAS: it alone measures an MP3's exact length
         // while it plays, and seeks exactly once it has (docs/Plan.md §3.1).
-        builtin(DecoderKind::FFmpeg, {"flac", "alac", "wav", "aiff", "dts"});
         builtin(DecoderKind::Symphonia, {"flac", "alac", "wav", "aiff", "aac", "dts"});
         builtin(DecoderKind::DrFlac, {"flac"});
         builtin(DecoderKind::Sndfile, {"flac", "wav", "aiff", "dts", "adpcm"});

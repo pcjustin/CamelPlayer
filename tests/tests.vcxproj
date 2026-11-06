@@ -44,6 +44,7 @@
     <ClCompile Include="**\*.cpp" />
     <ClCompile Include="**\*.c" />
     <ClCompile Include="$(CamelRoot)src\Updater\Install.cpp" />
+    <ClCompile Include="$(CamelRoot)src\Tools\testaudio\TestAudio.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

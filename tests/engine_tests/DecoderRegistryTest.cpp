@@ -54,10 +54,10 @@ std::vector<int32_t> decodeAll(IDecoder& d) {
 } // namespace
 
 TEST(DecoderRegistry, BuiltInIdsOrderAndDefaultsAreUnchanged) {
-    EXPECT_EQ(ids("flac"), (std::vector<std::string>{"ffmpeg", "symphonia", "drflac", "sndfile"}));
-    EXPECT_EQ(ids("alac"), (std::vector<std::string>{"ffmpeg", "symphonia"}));
+    EXPECT_EQ(ids("flac"), (std::vector<std::string>{"symphonia", "drflac", "sndfile"}));
+    EXPECT_EQ(ids("alac"), (std::vector<std::string>{"symphonia"}));
     for (const char* format : {"wav", "aiff"})
-        EXPECT_EQ(ids(format), (std::vector<std::string>{"ffmpeg", "symphonia", "sndfile", "drwav"})) << format;
+        EXPECT_EQ(ids(format), (std::vector<std::string>{"symphonia", "sndfile", "drwav"})) << format;
     EXPECT_EQ(ids("aac"), (std::vector<std::string>{"symphonia"}));
     EXPECT_EQ(ids("mp3"), (std::vector<std::string>{"mpg123"}));
     EXPECT_EQ(ids("adpcm"), (std::vector<std::string>{"sndfile"}));
@@ -81,7 +81,7 @@ TEST(DecoderRegistry, RejectsDuplicateAndUnknownIds) {
 TEST(DecoderRegistry, RegisteredDecoderOpensLikeABuiltInOnlyForItsFormats) {
     const char* alias = registerAlias();
     EXPECT_EQ(ids("flac").back(), alias);
-    EXPECT_EQ(decodersFor(AudioFormat::Flac).size(), 4u); // the built-in choice list is unchanged
+    EXPECT_EQ(decodersFor(AudioFormat::Flac).size(), 3u); // the built-in choice list is unchanged
     const auto file = testutil::testFile("16-44.1k");
     auto viaAlias = openDecoder(std::string_view(alias), file);
     auto direct = openDecoder(DecoderKind::Sndfile, file);
@@ -100,7 +100,6 @@ TEST(DecoderRegistry, RegisteredDecoderOpensLikeABuiltInOnlyForItsFormats) {
 }
 
 TEST(DecoderRegistry, AbiNumbersKeepBuiltInsAndNumberRegisteredDecoders) {
-    EXPECT_EQ(abiDecoder("ffmpeg"), CAMEL_DECODER_FFMPEG);
     EXPECT_EQ(abiDecoder("sndfile"), CAMEL_DECODER_SNDFILE);
     EXPECT_EQ(abiDecoder("dsdnexus"), CAMEL_DECODER_DSD_NEXUS);
     EXPECT_EQ(abiDecoder("mpg123"), CAMEL_DECODER_MPG123);
