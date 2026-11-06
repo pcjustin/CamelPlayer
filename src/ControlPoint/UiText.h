@@ -11,6 +11,7 @@
 namespace ui {
 
 winrt::hstring tr(const wchar_t* key);
+void reloadText(); // after the language changes
 // The string `key` with {0}, {1}, … replaced by `values`.
 winrt::hstring format(const wchar_t* key, std::initializer_list<std::wstring> values);
 winrt::hstring errorTitle(camel::audio::ErrorCode code);

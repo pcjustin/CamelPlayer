@@ -84,7 +84,6 @@
   <data name="Settings_Status.Text" xml:space="preserve"><value>Status</value></data>
   <data name="Settings_Interface.Text" xml:space="preserve"><value>Interface</value></data>
   <data name="Settings_Language.Header" xml:space="preserve"><value>Language</value></data>
-  <data name="Settings_LanguageNote.Text" xml:space="preserve"><value>Restart CamelPlayer to switch the language.</value></data>
   <data name="Mode_Event" xml:space="preserve"><value>Event driven</value></data>
   <data name="Settings_WasapiShare.Header" xml:space="preserve"><value>Mode</value></data>
   <data name="Share_Exclusive" xml:space="preserve"><value>Exclusive (bit-perfect)</value></data>
@@ -663,6 +662,7 @@
   <data name="Output_ButtonOn" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="Output_InUse" xml:space="preserve"><value>In use</value></data>
   <data name="Output_Enabled" xml:space="preserve"><value>Show in the output menu</value></data>
+  <data name="Output_More" xml:space="preserve"><value>More</value></data>
   <data name="Output_Rename" xml:space="preserve"><value>Rename</value></data>
   <data name="Output_RenameTitle" xml:space="preserve"><value>Rename {0}</value></data>
   <data name="Output_RenameNote" xml:space="preserve"><value>Leave empty to use the device's own name</value></data>

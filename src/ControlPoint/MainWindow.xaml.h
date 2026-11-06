@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <map>
+
 #include "MainWindow.g.h"
 #include "LibraryView.xaml.h"
 #include "PlaylistView.xaml.h"
@@ -74,6 +76,13 @@ struct MainWindow : MainWindowT<MainWindow> {
                           Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnNumberChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
                          Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
+    // A window takes its language when it is built, so a new language needs a new window on the same Server.
+    void onReplace(std::function<void(std::shared_ptr<camel::server::IServer>)> replace) { replaceWindow_ = std::move(replace); }
+    // The window a language change replaces: where it stood, for this one to stand there.
+    void takeOverFrom(MainWindow& old);
+    void OnTitleBarSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+    void OnSettingsScrolled(Windows::Foundation::IInspectable const&,
+                            Microsoft::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs const&);
     void OnLanguageChanged(Windows::Foundation::IInspectable const&,
                            Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     winrt::fire_and_forget OnAsioPanelClick(Windows::Foundation::IInspectable const&,
@@ -160,6 +169,7 @@ private:
     void showVolume();
     void showVolumeLevel();
     void fitStatus();
+    void changeLanguage();
     void showReplayGain();
     void showCrossfade();
     void enableDependentFields();
@@ -293,6 +303,8 @@ private:
     void showPlayerArtist(hstring const& artist);
     void openArtist(hstring const& artist);
     void addSettingsLinks();
+    void markSettingsSection();
+    std::vector<std::pair<Microsoft::UI::Xaml::FrameworkElement, Microsoft::UI::Xaml::Controls::HyperlinkButton>> settingsLinks_;
     // Goes back in the library pages, or from Listening to Home, when the title bar offers Back.
     bool goBack();
     bool listeningShown();
@@ -312,6 +324,10 @@ private:
     void showHotkeys();
     void submitKind(camel::server::CommandKind kind);
     bool exiting_ = false;
+    bool replaced_ = false; // a new window goes on with the Server
+    std::map<camel::Backend, bool> outputGroupsOpen_;
+    bool openInterfaceCard_ = false; // this window replaced one that changed the language
+    std::function<void(std::shared_ptr<camel::server::IServer>)> replaceWindow_;
     bool inTray_ = false;
     bool minimized_ = false;
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.

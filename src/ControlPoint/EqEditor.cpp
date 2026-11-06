@@ -208,6 +208,10 @@ void EqEditor::rebuildRows() {
         row.Children().Append(controls.q);
         row.Children().Append(controls.slope);
 
+        Automation::AutomationProperties::SetName(kind, tr(L"Eq_Column_Type"));
+        Automation::AutomationProperties::SetName(channels, tr(L"Eq_Column_Channels"));
+        Automation::AutomationProperties::SetName(controls.slope, tr(L"Eq_Column_Slope"));
+
         kind.SelectionChanged([this, i, kind, enable](auto&&, auto&&) {
             if (populating_ || kind.SelectedIndex() < 0) return;
             eq_.bands[i].kind = EqKind(kind.SelectedIndex() + 1);

@@ -248,7 +248,7 @@ void MainWindow::InitializeComponent() {
     AppWindow().Resize({1180, 780});
     if (const auto presenter = AppWindow().Presenter().try_as<Microsoft::UI::Windowing::OverlappedPresenter>()) {
         const double scale = ::GetDpiForWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id())) / 96.0;
-        presenter.PreferredMinimumWidth(static_cast<int32_t>(800 * scale));
+        presenter.PreferredMinimumWidth(static_cast<int32_t>(860 * scale));
         presenter.PreferredMinimumHeight(static_cast<int32_t>(600 * scale));
         presenter.Maximize(); // starts maximized; restoring returns to the size above
     }
@@ -287,6 +287,7 @@ void MainWindow::InitializeComponent() {
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
+    SettingsScroller().SizeChanged([this](auto&&, auto&&) { markSettingsSection(); });
     eqEditor_ = std::make_unique<ui::EqEditor>(EqCurve(), EqBands(), EqAddBandButton(),
                                                [this](const camel::EqSettings&, bool final) { eqChanged(final); });
     Content().AddHandler(UIElement::PointerPressedEvent(),
@@ -404,6 +405,9 @@ void MainWindow::InitializeComponent() {
     ContentLayout().Loaded([this](auto&&, auto&&) {
         if (camel::measure::measuring())
             camel::log::info("measure: main window loaded %.0f ms after process start", camel::measure::sinceProcessStart());
+        repaintTheme(); // what was painted before the window had a theme
+        fitStatus();
+        if (openInterfaceCard_) showSettingsCard(InterfaceCard());
         showFirstRunGuideIfDue(); // a dialog needs a XamlRoot
         showUpdateResult();
         showDataRecovery();
@@ -487,6 +491,7 @@ void MainWindow::InitializeComponent() {
         updateTimer_.Stop();
         uiTimer_.Stop();
         seekTimer_.Stop();
+        if (replaced_) return;
         server_->setListener({});
         Command pause; // silences the device first; a stop would also forget the position the next start restores
         pause.kind = CommandKind::Pause;
@@ -643,7 +648,7 @@ hstring outputLabel(const camel::server::OutputRow& row) {
 // The same DAC through WASAPI and through ASIO are two entries, told apart by the backend.
 hstring outputMenuLabel(const camel::server::OutputRow& row) {
     const hstring label = outputLabel(row);
-    if (!row.alias.empty() || row.id.empty() || row.backend == Backend::Network) return label;
+    if (!row.alias.empty() || row.id.empty()) return label;
     return label + L" (" + ui::utf8(camel::backendName(row.backend)) + L")";
 }
 
@@ -666,32 +671,50 @@ void MainWindow::populateOutputs() {
     }
     auto list = OutputList().Children();
     list.Clear();
+    StackPanel groupRows{nullptr};
     std::optional<Backend> group;
     for (const auto& row : rows) {
         const bool player = camel::isNetworkPlayer(row.backend);
         if (const Backend rowGroup = player ? Backend::Network : row.backend; rowGroup != group) {
             group = rowGroup;
-            TextBlock header;
-            header.Text(player ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend)));
-            header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
-            header.Margin({0, 8, 0, 0});
-            Automation::AutomationProperties::SetHeadingLevel(header, Automation::Peers::AutomationHeadingLevel::Level3);
-            list.Append(header);
+            // A group in use stays open; one the user opened or closed stays so until the program restarts.
+            const bool used = std::ranges::any_of(rows, [&](const camel::server::OutputRow& r) {
+                return (camel::isNetworkPlayer(r.backend) ? Backend::Network : r.backend) == rowGroup &&
+                       (r.enabled || r.selected);
+            });
+            const auto remembered = outputGroupsOpen_.find(rowGroup);
+            Expander expander;
+            expander.Header(box_value(player ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend))));
+            expander.HorizontalAlignment(HorizontalAlignment::Stretch);
+            expander.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            expander.IsExpanded(remembered == outputGroupsOpen_.end() ? used : remembered->second);
+            expander.Expanding([this, rowGroup](auto&&, auto&&) { outputGroupsOpen_[rowGroup] = true; });
+            expander.Collapsed([this, rowGroup](auto&&, auto&&) { outputGroupsOpen_[rowGroup] = false; });
+            groupRows = StackPanel{};
+            groupRows.Spacing(4);
+            expander.Content(groupRows);
+            list.Append(expander);
         }
         const hstring label = row.backend == Backend::AirPlay ? outputMenuLabel(row) : outputLabel(row);
         Grid line;
         line.ColumnSpacing(8);
-        for (const GridLength width : {GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto},
-                                       GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto}}) {
+        for (const GridLength width :
+             {GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto}}) {
             ColumnDefinition column;
             column.Width(width);
             line.ColumnDefinitions().Append(column);
+        }
+        if (row.selected) { // the output in use stands out of a long list
+            line.Background(themeBrush(L"SubtleFillColorSecondaryBrush"));
+            line.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
+            line.Padding(ThicknessHelper::FromLengths(8, 4, 0, 4));
         }
         StackPanel names;
         names.VerticalAlignment(VerticalAlignment::Center);
         TextBlock name;
         name.Text(label);
         name.TextTrimming(TextTrimming::CharacterEllipsis);
+        if (row.selected) name.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
         names.Children().Append(name);
         if (row.selected || !row.connected || !row.unsupported.empty()) {
             TextBlock state;
@@ -705,27 +728,29 @@ void MainWindow::populateOutputs() {
         }
         line.Children().Append(names);
 
-        const auto iconButton = [&](const wchar_t* glyph, const wchar_t* text, int32_t column) {
-            Button button;
-            FontIcon icon;
-            icon.Glyph(glyph);
-            icon.FontSize(14);
-            button.Content(icon);
-            button.VerticalAlignment(VerticalAlignment::Center);
-            ToolTipService::SetToolTip(button, box_value(tr(text)));
-            Automation::AutomationProperties::SetName(
-                button, ui::format(L"Output_ButtonOn", {std::wstring(tr(text)), std::wstring(label)}));
-            Grid::SetColumn(button, column);
-            line.Children().Append(button);
-            return button;
-        };
-        iconButton(L"\xE8AC", L"Output_Rename", 1).Click([this, row, label](auto&&, auto&&) {
-            askRenameOutput(row.backend, row.id, row.alias, label);
-        });
-        if (row.saved)
-            iconButton(L"\xE74D", L"Output_Delete", 2).Click([this, row, label](auto&&, auto&&) {
-                askDeleteOutput(row.backend, row.id, label);
-            });
+        MenuFlyout actions;
+        MenuFlyoutItem rename;
+        rename.Text(tr(L"Output_Rename"));
+        rename.Click([this, row, label](auto&&, auto&&) { askRenameOutput(row.backend, row.id, row.alias, label); });
+        actions.Items().Append(rename);
+        if (row.saved) {
+            MenuFlyoutItem remove;
+            remove.Text(tr(L"Output_Delete"));
+            remove.Click([this, row, label](auto&&, auto&&) { askDeleteOutput(row.backend, row.id, label); });
+            actions.Items().Append(remove);
+        }
+        Button more;
+        FontIcon moreIcon;
+        moreIcon.Glyph(L"\xE712");
+        moreIcon.FontSize(14);
+        more.Content(moreIcon);
+        more.Flyout(actions);
+        more.VerticalAlignment(VerticalAlignment::Center);
+        ToolTipService::SetToolTip(more, box_value(tr(L"Output_More")));
+        Automation::AutomationProperties::SetName(
+            more, ui::format(L"Output_ButtonOn", {std::wstring(tr(L"Output_More")), std::wstring(label)}));
+        Grid::SetColumn(more, 1);
+        line.Children().Append(more);
 
         ToggleSwitch enabled;
         enabled.IsOn(row.enabled);
@@ -743,9 +768,9 @@ void MainWindow::populateOutputs() {
             });
             if (camel::isNetworkPlayer(row.backend) && enabled.IsOn()) askFirewallRule();
         });
-        Grid::SetColumn(enabled, 3);
+        Grid::SetColumn(enabled, 2);
         line.Children().Append(enabled);
-        list.Append(line);
+        groupRows.Children().Append(line);
     }
     const bool players = std::ranges::any_of(
         rows, [](const camel::server::OutputRow& r) { return camel::isNetworkPlayer(r.backend) && r.enabled; });
@@ -1905,6 +1930,7 @@ void MainWindow::repaintTheme() {
     showHotkeys();
     showRoots(RootList());
     if (eqEditor_) eqEditor_->repaint();
+    markSettingsSection();
 }
 
 // The minimize, maximize and close buttons sit on our title bar, so they follow the app's light or dark theme.
@@ -1952,7 +1978,34 @@ void MainWindow::addSettingsLinks() {
             card.StartBringIntoView(options);
         });
         SettingsLinks().Children().Append(link);
+        settingsLinks_.emplace_back(card, link);
     }
+}
+
+// The last card whose top has reached the upper third of the view, or the last card at the end of the scroll.
+void MainWindow::markSettingsSection() {
+    if (SettingsPanel().Visibility() != Visibility::Visible) return;
+    const auto scroller = SettingsScroller();
+    size_t current = 0;
+    if (scroller.ScrollableHeight() > 0 && scroller.VerticalOffset() >= scroller.ScrollableHeight() - 1) {
+        current = settingsLinks_.size() - 1;
+    } else {
+        for (size_t i = 0; i < settingsLinks_.size(); ++i)
+            if (settingsLinks_[i].first.TransformToVisual(scroller).TransformPoint({0, 0}).Y <= scroller.ViewportHeight() / 3)
+                current = i;
+    }
+    for (size_t i = 0; i < settingsLinks_.size(); ++i) {
+        const auto& link = settingsLinks_[i].second;
+        link.FontWeight(Windows::UI::Text::FontWeight{uint16_t(i == current ? 600 : 400)});
+        if (i == current)
+            link.Foreground(themeBrush(L"TextFillColorPrimaryBrush"));
+        else
+            link.ClearValue(Controls::Control::ForegroundProperty());
+    }
+}
+
+void MainWindow::OnSettingsScrolled(Windows::Foundation::IInspectable const&, ScrollViewerViewChangedEventArgs const&) {
+    markSettingsSection();
 }
 
 void MainWindow::showTitleBack() {
@@ -2306,7 +2359,7 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
         queueOpen_ = false;
         updateQueuePanel();
         applySettingsNow();
-        LanguageNote().Visibility(Visibility::Visible); // the language follows Windows again after a restart
+        changeLanguage();
     } else if (kind == L"statistics") {
         Command command;
         command.kind = CommandKind::ResetAllPlayStatistics;
@@ -3034,11 +3087,13 @@ void MainWindow::OnSliderValueChanged(Windows::Foundation::IInspectable const&,
 void MainWindow::OnNavSelectionChanged(NavigationView const&, NavigationViewSelectionChangedEventArgs const& e) {
     if (navUpdating_) return;
     if (e.IsSettingsSelected()) {
+        SearchBox().Text(L"");
         showPage(L"settings");
         return;
     }
     auto item = e.SelectedItemContainer();
     if (!item) return;
+    SearchBox().Text(L"");
     const hstring tag = unbox_value_or<hstring>(item.Tag(), L"albums");
     PlaceholderTitle().Text(unbox_value_or<hstring>(item.Content(), L""));
     showPage(tag);
@@ -3060,7 +3115,49 @@ void MainWindow::OnLanguageChanged(Windows::Foundation::IInspectable const&, Sel
     command.kind = CommandKind::ApplySettings;
     command.settings = settings_;
     submitCommand(std::move(command));
-    LanguageNote().Visibility(Visibility::Visible); // takes effect after restart (docs/Plan.md §8.5)
+    changeLanguage();
+}
+
+// Takes effect at once (docs/Plan.md §8.5): after this handler, as the control that called it goes with the window.
+void MainWindow::changeLanguage() {
+    DispatcherQueue().TryEnqueue([weak = get_weak()] {
+        const auto self = weak.get();
+        if (!self) return;
+        try {
+            winrt::Microsoft::Windows::Globalization::ApplicationLanguages::PrimaryLanguageOverride(
+                to_hstring(self->settings_.language));
+        } catch (const hresult_error& e) {
+            camel::log::warn("language override failed: 0x%08X", static_cast<unsigned>(e.code()));
+            return;
+        }
+        ui::reloadText();
+        const auto server = self->server_;
+        server->waitIdle();
+        self->replaced_ = true;
+        self->exiting_ = true;
+        self->tray_.reset();
+        self->hotkeys_.reset();
+        self->media_.reset();
+        server->setListener({});
+        self->replaceWindow_(server);
+    });
+}
+
+void MainWindow::takeOverFrom(MainWindow& old) {
+    using Microsoft::UI::Windowing::OverlappedPresenter;
+    using Microsoft::UI::Windowing::OverlappedPresenterState;
+    const auto before = old.AppWindow();
+    AppWindow().MoveAndResize({before.Position().X, before.Position().Y, before.Size().Width, before.Size().Height});
+    if (const auto presenter = before.Presenter().try_as<OverlappedPresenter>();
+        presenter && presenter.State() == OverlappedPresenterState::Maximized)
+        AppWindow().Presenter().as<OverlappedPresenter>().Maximize();
+    openInterfaceCard_ = true;
+}
+
+// The pane toggle and title on the left and the caption buttons on the right keep their room.
+void MainWindow::OnTitleBarSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {
+    constexpr double kAroundSearch = 420, kSearchMin = 160, kSearchMax = 420;
+    SearchBox().Width(std::clamp(e.NewSize().Width - kAroundSearch, kSearchMin, kSearchMax));
 }
 
 winrt::fire_and_forget MainWindow::OnAsioPanelClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -3335,15 +3432,17 @@ void MainWindow::OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const
     fitStatus();
 }
 
-// The state badge and the lamp's words show only while every badge fits; the lamp's dot stays and opens the signal path.
+// Where the badges do not fit the state badge gives way, then the lamp's words; the dot stays and opens the signal path.
 void MainWindow::fitStatus() {
+    const auto fits = [this] {
+        StatusBadges().Measure({std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()});
+        return StatusBadges().DesiredSize().Width <= StatusArea().ActualWidth();
+    };
     StateBadge().Visibility(Visibility::Visible);
     LampText().Visibility(Visibility::Visible);
-    StatusBadges().Measure({std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()});
-    const auto shown =
-        StatusBadges().DesiredSize().Width <= StatusArea().ActualWidth() ? Visibility::Visible : Visibility::Collapsed;
-    StateBadge().Visibility(shown);
-    LampText().Visibility(shown);
+    if (StatusArea().ActualWidth() == 0 || fits()) return;
+    StateBadge().Visibility(Visibility::Collapsed);
+    if (!fits()) LampText().Visibility(Visibility::Collapsed);
 }
 
 void MainWindow::showReplayGain() {

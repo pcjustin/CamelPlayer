@@ -15,6 +15,9 @@ struct App : AppT<App> {
     void OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&);
 
 private:
+    void openWindow(std::shared_ptr<camel::server::IServer> server);
+    void replaceWindow(std::shared_ptr<camel::server::IServer> server);
+
     std::shared_ptr<camel::server::IServer> server_;
     Microsoft::UI::Xaml::Window window_{nullptr};
     std::optional<camel::HangWatch> hangWatch_;

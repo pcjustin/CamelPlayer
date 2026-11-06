@@ -53,7 +53,7 @@ Settings › Interface › **Check for updates automatically** turns the startup
 
 The output button in the player bar lists your outputs. Choose one to switch to it: a playing track goes on from where you hear it, with the queue unchanged, and a paused track stays paused.
 
-Settings › Audio outputs lists every device CamelPlayer finds, by backend. The switch at the end of a row shows that output in the menu, the pencil names it as you like, and the bin clears what CamelPlayer saved for it. The same DAC through WASAPI and through ASIO is two outputs. A saved device that is off stays listed as Not connected.
+Settings › Audio outputs lists every device CamelPlayer finds, by backend, in groups that fold; groups with an output on start open. The switch at the end of a row shows that output in the menu, and its More menu names it as you like or clears what CamelPlayer saved for it. The settings of the output in use follow the list. The same DAC through WASAPI and through ASIO is two outputs. A saved device that is off stays listed as Not connected.
 
 Each output keeps its own settings, shown in Settings › Playback for the output in use; an output you choose for the first time starts from the defaults. "Windows default device (WASAPI)" follows Windows and uses the settings of whichever device is the default.
 

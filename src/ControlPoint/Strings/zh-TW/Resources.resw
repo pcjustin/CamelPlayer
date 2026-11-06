@@ -84,7 +84,6 @@
   <data name="Settings_Status.Text" xml:space="preserve"><value>狀態</value></data>
   <data name="Settings_Interface.Text" xml:space="preserve"><value>介面</value></data>
   <data name="Settings_Language.Header" xml:space="preserve"><value>語言</value></data>
-  <data name="Settings_LanguageNote.Text" xml:space="preserve"><value>重新啟動 CamelPlayer 後才會切換語言。</value></data>
   <data name="Mode_Event" xml:space="preserve"><value>事件驅動</value></data>
   <data name="Settings_WasapiShare.Header" xml:space="preserve"><value>模式</value></data>
   <data name="Share_Exclusive" xml:space="preserve"><value>獨佔（bit-perfect）</value></data>
@@ -663,6 +662,7 @@
   <data name="Output_ButtonOn" xml:space="preserve"><value>{0}：{1}</value></data>
   <data name="Output_InUse" xml:space="preserve"><value>使用中</value></data>
   <data name="Output_Enabled" xml:space="preserve"><value>顯示在輸出選單</value></data>
+  <data name="Output_More" xml:space="preserve"><value>更多</value></data>
   <data name="Output_Rename" xml:space="preserve"><value>重新命名</value></data>
   <data name="Output_RenameTitle" xml:space="preserve"><value>重新命名 {0}</value></data>
   <data name="Output_RenameNote" xml:space="preserve"><value>留空則使用裝置本身的名稱</value></data>

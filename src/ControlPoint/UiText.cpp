@@ -8,10 +8,22 @@
 
 namespace ui {
 
+namespace {
+
+winrt::Microsoft::Windows::ApplicationModel::Resources::ResourceLoader& loader() {
+    static winrt::Microsoft::Windows::ApplicationModel::Resources::ResourceLoader current;
+    return current;
+}
+
+} // namespace
+
+void reloadText() {
+    loader() = {};
+}
+
 winrt::hstring tr(const wchar_t* key) {
-    static winrt::Microsoft::Windows::ApplicationModel::Resources::ResourceLoader loader;
     try {
-        auto s = loader.GetString(key);
+        auto s = loader().GetString(key);
         return s.empty() ? winrt::hstring(key) : s;
     } catch (...) {
         return winrt::hstring(key);

@@ -33,6 +33,7 @@
         <!-- The window's own title bar, in the app's theme: the pane toggle, and search on every page (docs/Plan.md §8.2):
              grouped suggestions while typing, Enter opens all results. -->
         <TitleBar x:Name="AppTitleBar" Title="CamelPlayer" IsPaneToggleButtonVisible="True" IsTabStop="False"
+                  SizeChanged="OnTitleBarSizeChanged"
                   PaneToggleRequested="OnPaneToggleRequested" BackRequested="OnTitleBackRequested">
             <TitleBar.Content>
                 <AutoSuggestBox x:Name="SearchBox" x:Uid="Search_Box" QueryIcon="Find" UpdateTextOnSelect="False"
@@ -160,7 +161,8 @@
                                     TabFocusNavigation="Once" XYFocusKeyboardNavigation="Enabled" />
                     </ScrollViewer>
                 </StackPanel>
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="SettingsScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              ViewChanged="OnSettingsScrolled">
                     <StackPanel Spacing="16" MaxWidth="820" HorizontalAlignment="Left" Padding="0,0,16,24">
                         <StackPanel.Resources>
                             <Style x:Key="SettingsCardStyle" TargetType="Border">
@@ -217,20 +219,6 @@
                                 </InfoBar>
                                 <StackPanel x:Name="OutputList" Spacing="4" />
                                 <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
-                            </StackPanel>
-                        </Border>
-                        <Border x:Name="PlaybackCard" Style="{StaticResource SettingsCardStyle}">
-                            <StackPanel Spacing="12">
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <FontIcon Glyph="&#xE7F5;" FontSize="20" />
-                                    <TextBlock x:Uid="Settings_Playback" Style="{StaticResource CardHeaderStyle}" />
-                                </StackPanel>
-                                <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
-                                <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
-                                <ComboBox x:Name="ConvertDsdCombo" x:Uid="Settings_ConvertDsd" Width="520" SelectionChanged="OnSettingChanged" />
-                                <ToggleSwitch x:Name="AutoplaySwitch" x:Uid="Settings_Autoplay" Toggled="OnAutoplayToggled" />
-                                <ToggleSwitch x:Name="FolderPlaysOnSwitch" x:Uid="Settings_FolderPlaysOn" Toggled="OnFolderPlaysOnToggled" />
 
                                 <StackPanel x:Name="WasapiGroup" Spacing="12">
                                     <TextBlock Text="WASAPI" Style="{StaticResource GroupHeaderStyle}" />
@@ -335,7 +323,20 @@
                                         </StackPanel>
                                     </Expander>
                                 </StackPanel>
-
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="PlaybackCard" Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE768;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Playback" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
+                                <ComboBox x:Name="ConvertDsdCombo" x:Uid="Settings_ConvertDsd" Width="520" SelectionChanged="OnSettingChanged" />
+                                <ToggleSwitch x:Name="AutoplaySwitch" x:Uid="Settings_Autoplay" Toggled="OnAutoplayToggled" />
+                                <ToggleSwitch x:Name="FolderPlaysOnSwitch" x:Uid="Settings_FolderPlaysOn" Toggled="OnFolderPlaysOnToggled" />
                             </StackPanel>
                         </Border>
 
@@ -525,8 +526,6 @@
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ToggleSwitch x:Name="FolderTreeSwitch" x:Uid="Settings_FolderTree" Toggled="OnFolderTreeToggled" />
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
-                                <TextBlock x:Name="LanguageNote" x:Uid="Settings_LanguageNote" Visibility="Collapsed" TextWrapping="Wrap"
-                                           Foreground="{ThemeResource SystemFillColorCautionBrush}" />
                             </StackPanel>
                         </Border>
 
@@ -572,32 +571,32 @@
                                         <TextBlock x:Uid="Reset_PlaybackTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock x:Uid="Reset_PlaybackText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" x:Uid="Reset_Button" Tag="playback" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <Button Grid.Column="1" x:Uid="Reset_Button" HorizontalAlignment="Stretch" Tag="playback" Click="OnResetClick" VerticalAlignment="Center" />
                                     <StackPanel Grid.Row="1">
                                         <TextBlock x:Uid="Reset_InterfaceTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock x:Uid="Reset_InterfaceText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <Button Grid.Row="1" Grid.Column="1" x:Uid="Reset_Button" Tag="interface" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <Button Grid.Row="1" Grid.Column="1" x:Uid="Reset_Button" HorizontalAlignment="Stretch" Tag="interface" Click="OnResetClick" VerticalAlignment="Center" />
                                     <StackPanel Grid.Row="2">
                                         <TextBlock x:Uid="Reset_LibraryTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock x:Uid="Reset_LibraryText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <Button Grid.Row="2" Grid.Column="1" x:Uid="Reset_RebuildButton" Tag="library" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <Button Grid.Row="2" Grid.Column="1" x:Uid="Reset_RebuildButton" HorizontalAlignment="Stretch" Tag="library" Click="OnResetClick" VerticalAlignment="Center" />
                                     <StackPanel Grid.Row="3">
                                         <TextBlock x:Uid="Reset_CoversTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock x:Uid="Reset_CoversText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <Button Grid.Row="3" Grid.Column="1" x:Uid="Reset_ClearButton" Tag="covers" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <Button Grid.Row="3" Grid.Column="1" x:Uid="Reset_ClearButton" HorizontalAlignment="Stretch" Tag="covers" Click="OnResetClick" VerticalAlignment="Center" />
                                     <StackPanel Grid.Row="4">
                                         <TextBlock x:Uid="Reset_StatisticsTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock x:Uid="Reset_StatisticsText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <Button Grid.Row="4" Grid.Column="1" x:Uid="Reset_Button" Tag="statistics" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <Button Grid.Row="4" Grid.Column="1" x:Uid="Reset_Button" HorizontalAlignment="Stretch" Tag="statistics" Click="OnResetClick" VerticalAlignment="Center" />
                                     <StackPanel Grid.Row="5">
                                         <TextBlock x:Uid="Reset_AllTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock x:Uid="Reset_AllText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <Button Grid.Row="5" Grid.Column="1" x:Uid="Reset_AllButton" Tag="all" Click="OnResetClick" VerticalAlignment="Center" />
+                                    <Button Grid.Row="5" Grid.Column="1" x:Uid="Reset_AllButton" HorizontalAlignment="Stretch" Tag="all" Click="OnResetClick" VerticalAlignment="Center" />
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -741,8 +740,9 @@
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
             <Grid.Resources>
                 <Style x:Key="BadgeStyle" TargetType="Border">
-                    <Setter Property="Padding" Value="8,2" />
-                    <Setter Property="CornerRadius" Value="10" />
+                    <Setter Property="Padding" Value="10,2" />
+                    <Setter Property="MinHeight" Value="32" />
+                    <Setter Property="CornerRadius" Value="16" />
                     <Setter Property="VerticalAlignment" Value="Center" />
                     <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
                     <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
@@ -884,8 +884,8 @@
                                 </StackPanel>
                             </Border>
                             <!-- The lamp opens the signal path. -->
-                            <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Padding="8,2" MinHeight="0"
-                                    CornerRadius="10" VerticalAlignment="Center"
+                            <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Padding="10,2" MinHeight="32"
+                                    CornerRadius="16" VerticalAlignment="Center"
                                     Background="{ThemeResource ControlFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -929,7 +929,7 @@
                                 <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
                             </Border>
                             <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
-                            <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="8,2" MinHeight="0" CornerRadius="10" VerticalAlignment="Center"
+                            <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="10,2" MinHeight="32" CornerRadius="16" VerticalAlignment="Center"
                                     Background="{ThemeResource ControlFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}">
                                 <TextBlock x:Name="DspButtonText" Text="DSP" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
