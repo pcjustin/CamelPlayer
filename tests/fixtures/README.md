@@ -1,6 +1,6 @@
 # Test fixtures
 
-Encoded audio the tests read, so that neither the build nor the tests need FFmpeg. Every file was written by FFmpeg 9.0.2 through `generator/generate.cpp`. "The test signal" is `makeSignal` in `src/Tools/testaudio/TestAudio.cpp`, a deterministic sine and noise that reaches every bit.
+Encoded audio the tests read, so that neither the build nor the tests need FFmpeg. Every file was written by FFmpeg 9.0.2. "The test signal" is `makeSignal` in `src/Tools/testaudio/TestAudio.cpp`, a deterministic sine and noise that reaches every bit.
 
 | File | What it carries | Bytes | SHA-256 |
 |---|---|---|---|
@@ -18,14 +18,4 @@ Encoded audio the tests read, so that neither the build nor the tests need FFmpe
 
 `dts-cd.f32` is FFmpeg's decode as the DTS tests stored it, compared with `dts_core` at -100 dBFS. The tests' ADPCM files are written by libsndfile while they run, and their FLAC, WAV, AIFF and MP3 files by libFLAC, CamelPlayer's own writers and LAME.
 
-To write them again, install the generator's own dependencies and run its build from a Developer Command Prompt, in `generator`:
-
-```bash
-vcpkg install --triplet x64-windows-static-md
-```
-
-```bash
-build.cmd
-```
-
-AAC and ALAC files depend on the encoder's version, so new ones can differ from the hashes above. Update this list with them.
+To write them again, restore the generator from commit `5c308e3`, where it is `tests/fixtures/generator` with its own `vcpkg.json` and `build.cmd`; its `vcpkg install` was never run. AAC and ALAC files depend on the encoder's version, so new ones can differ from the hashes above. Update this list with them.
