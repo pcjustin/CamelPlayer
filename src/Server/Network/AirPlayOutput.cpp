@@ -70,6 +70,17 @@ struct TrackNotice {
     uint32_t rtpTime = 0;
 };
 
+// Where a speaker takes its packets.
+struct Destination {
+    sockaddr_in audio{}, control{};
+};
+
+struct Connected {
+    std::unique_ptr<RtspClient> client;
+    Destination destination;
+    uint32_t latency = kDefaultAudioLatency;
+};
+
 SOCKET boundUdp(uint16_t& port) {
     const SOCKET udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     sockaddr_in address{};
@@ -214,35 +225,45 @@ private:
     void startSession() {
         std::scoped_lock lock(rtspMutex_);
         closeAt_ = Clock::time_point::max();
-        if (client_) return;
-        auto connected = connectToReceiver();
-        client_ = std::move(connected);
+        if (!sessions_.empty()) return;
+        std::vector<Connected> connected;
+        connected.push_back(connectToSpeaker({receiver_.address, receiver_.port}));
+        for (const auto& speaker : receiver_.others) connected.push_back(connectToSpeaker(speaker));
+        {
+            std::scoped_lock streaming(mutex_);
+            destinations_.clear();
+            audioLatency_ = kDefaultAudioLatency;
+            for (const auto& speaker : connected) {
+                destinations_.push_back(speaker.destination);
+                audioLatency_ = std::max(audioLatency_, speaker.latency);
+            }
+        }
+        for (auto& speaker : connected) sessions_.push_back(std::move(speaker.client));
         nextHeartbeat_ = Clock::now() + options_.heartbeat;
         volumeSent_ = std::nullopt;
     }
 
-    std::unique_ptr<RtspClient> connectToReceiver() {
+    Connected connectToSpeaker(const Speaker& speaker) {
         try {
-            auto client = std::make_unique<RtspClient>(receiver_.address, receiver_.port, options_.requestTimeoutMs);
+            auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
             check(client->request("OPTIONS", "*"), "OPTIONS");
             check(client->request("ANNOUNCE", client->url(), "application/sdp",
-                                  sessionDescription(client->localAddress(), receiver_.address, client->session())),
+                                  sessionDescription(client->localAddress(), speaker.address, client->session())),
                   "ANNOUNCE");
             const auto transport =
                 std::format("Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port={};timing_port={}\r\n",
                             controlPort_, timingPort_);
             const auto setup = client->request("SETUP", client->url(), {}, {}, transport);
             check(setup, "SETUP");
-            setReceiverPorts(setup);
+            const auto destination = destinationFrom(setup, speaker.address);
             if (const auto session = setup.headers.find("session"); session != setup.headers.end())
                 client->setSession(session->second);
             const auto record = client->request("RECORD", client->url(), {}, {}, std::format("Range: npt=0-\r\n{}", rtpInfo()));
             check(record, "RECORD");
-            std::scoped_lock lock(mutex_);
-            audioLatency_ = kDefaultAudioLatency;
+            uint32_t audioLatency = kDefaultAudioLatency;
             if (const auto latency = record.headers.find("audio-latency"); latency != record.headers.end())
-                std::from_chars(latency->second.data(), latency->second.data() + latency->second.size(), audioLatency_);
-            return client;
+                std::from_chars(latency->second.data(), latency->second.data() + latency->second.size(), audioLatency);
+            return {std::move(client), destination, audioLatency};
         } catch (const Error&) {
             throw;
         } catch (const std::exception& e) {
@@ -251,7 +272,7 @@ private:
         }
     }
 
-    void setReceiverPorts(const RtspReply& setup) {
+    static Destination destinationFrom(const RtspReply& setup, const std::string& speaker) {
         const auto transport = setup.headers.find("transport");
         if (transport == setup.headers.end()) throw Error(ErrorCode::DriverError, "the receiver gave no ports");
         const uint16_t server = portIn(transport->second, "server_port=");
@@ -259,11 +280,11 @@ private:
         if (!server) throw Error(ErrorCode::DriverError, "the receiver gave no ports");
         sockaddr_in address{};
         address.sin_family = AF_INET;
-        inet_pton(AF_INET, receiver_.address.c_str(), &address.sin_addr);
-        std::scoped_lock lock(mutex_);
-        receiverAudio_ = receiverControl_ = address;
-        receiverAudio_.sin_port = htons(server);
-        receiverControl_.sin_port = htons(control ? control : server);
+        inet_pton(AF_INET, speaker.c_str(), &address.sin_addr);
+        Destination destination{address, address};
+        destination.audio.sin_port = htons(server);
+        destination.control.sin_port = htons(control ? control : server);
+        return destination;
     }
 
     std::string rtpInfo() {
@@ -273,56 +294,62 @@ private:
 
     void flush() {
         std::scoped_lock lock(rtspMutex_);
-        if (!client_ || !sentSinceFlush_.exchange(false)) return;
+        if (sessions_.empty() || !sentSinceFlush_.exchange(false)) return;
         try {
-            client_->request("FLUSH", client_->url(), {}, {}, std::format("Range: npt=0-\r\n{}", rtpInfo()));
+            for (const auto& client : sessions_)
+                client->request("FLUSH", client->url(), {}, {}, std::format("Range: npt=0-\r\n{}", rtpInfo()));
         } catch (const std::exception& e) {
             log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what()); // the service thread finds out why
         }
     }
 
     _Requires_lock_held_(rtspMutex_) void endSession() {
-        if (!client_) return;
-        try {
-            client_->request("TEARDOWN", client_->url());
-        } catch (const std::exception& e) {
-            log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what());
+        for (const auto& client : sessions_) {
+            try {
+                client->request("TEARDOWN", client->url());
+            } catch (const std::exception& e) {
+                log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what());
+            }
         }
-        client_.reset();
+        sessions_.clear();
     }
 
     _Requires_lock_held_(rtspMutex_) void lose(ErrorCode code, const char* why) {
-        client_.reset();
+        sessions_.clear();
         if (opened_) raiseError(Error(code, why));
     }
 
     _Requires_lock_held_(rtspMutex_) void tellVolume() {
         const auto wanted = options_.volumeDb ? options_.volumeDb() : std::nullopt;
         if (!wanted || wanted == volumeSent_) return;
-        client_->request("SET_PARAMETER", client_->url(), "text/parameters", std::format("volume: {:.6f}\r\n", *wanted));
+        for (const auto& client : sessions_)
+            client->request("SET_PARAMETER", client->url(), "text/parameters", std::format("volume: {:.6f}\r\n", *wanted));
         volumeSent_ = wanted;
     }
 
     _Requires_lock_held_(rtspMutex_) void tellTrack(const TrackNotice& notice, const TrackDetails& details) {
         const auto at = std::format("RTP-Info: rtptime={}\r\n", notice.rtpTime);
-        const std::string url = client_->url();
-        client_->request("SET_PARAMETER", url, "application/x-dmap-tagged",
-                         dmapTags(details.title, details.artist, details.album), at);
-        if (!details.coverJpeg.empty()) client_->request("SET_PARAMETER", url, "image/jpeg", details.coverJpeg, at);
-        if (notice.track.frames) {
-            const uint32_t start = notice.rtpTime - uint32_t(notice.track.startFrame);
-            const uint32_t end = notice.rtpTime + uint32_t(notice.track.frames);
-            client_->request("SET_PARAMETER", url, "text/parameters",
-                             std::format("progress: {}/{}/{}\r\n", start, notice.rtpTime, end));
+        for (const auto& client : sessions_) {
+            const std::string url = client->url();
+            client->request("SET_PARAMETER", url, "application/x-dmap-tagged",
+                            dmapTags(details.title, details.artist, details.album), at);
+            if (!details.coverJpeg.empty()) client->request("SET_PARAMETER", url, "image/jpeg", details.coverJpeg, at);
+            if (notice.track.frames) {
+                const uint32_t start = notice.rtpTime - uint32_t(notice.track.startFrame);
+                const uint32_t end = notice.rtpTime + uint32_t(notice.track.frames);
+                client->request("SET_PARAMETER", url, "text/parameters",
+                                std::format("progress: {}/{}/{}\r\n", start, notice.rtpTime, end));
+            }
         }
     }
 
     // A connection the receiver closes means another sender took it; one that stops answering means it has gone.
     void tendSession(const std::optional<TrackNotice>& notice, const TrackDetails& details) {
         std::scoped_lock lock(rtspMutex_);
-        if (!client_) return;
+        if (sessions_.empty()) return;
         try {
-            if (client_->closed()) throw RtspClosed();
+            for (const auto& client : sessions_)
+                if (client->closed()) throw RtspClosed();
             tellVolume();
             if (notice) tellTrack(*notice, details);
             const auto now = Clock::now();
@@ -330,7 +357,7 @@ private:
                 endSession();
             } else if (now >= nextHeartbeat_) {
                 nextHeartbeat_ = now + options_.heartbeat;
-                client_->request("OPTIONS", "*");
+                for (const auto& client : sessions_) client->request("OPTIONS", "*");
             }
         } catch (const RtspClosed&) {
             lose(ErrorCode::DeviceInUse, kInUse);
@@ -433,8 +460,9 @@ private:
     _Requires_lock_held_(mutex_) void sendSync(Clock::time_point now) {
         const uint32_t head = runRtp_ + uint32_t(framesDue(now));
         const auto packet = syncPacket(firstPacket_, head - kSyncLatency, ntpNow(), head);
-        sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&receiverControl_),
-               sizeof(receiverControl_));
+        for (const auto& destination : destinations_)
+            sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&destination.control),
+                   sizeof(destination.control));
         nextSync_ = now + kSyncEvery;
     }
 
@@ -488,7 +516,8 @@ private:
         packet.sequence = sequence_++;
         packet.rtpTime = rtpNext_;
         rtpNext_ += kFramesPerPacket;
-        sendTo(receiverAudio_, rtpPacket(packet.sequence, packet.rtpTime, ssrc_, firstPacket_, packet.alac));
+        const auto rtp = rtpPacket(packet.sequence, packet.rtpTime, ssrc_, firstPacket_, packet.alac);
+        for (const auto& destination : destinations_) sendTo(destination.audio, rtp);
         firstPacket_ = false;
         sentSinceFlush_ = true;
         ++nextPacket_;
@@ -525,8 +554,8 @@ private:
     std::thread service_, session_, sender_;
     std::atomic<bool> stopping_ = false, opened_ = false, sentSinceFlush_ = false;
 
-    std::mutex rtspMutex_; // taken before `mutex_`
-    _Guarded_by_(rtspMutex_) std::unique_ptr<RtspClient> client_;
+    std::mutex rtspMutex_;                                                       // taken before `mutex_`
+    _Guarded_by_(rtspMutex_) std::vector<std::unique_ptr<RtspClient>> sessions_; // one for each speaker
     _Guarded_by_(rtspMutex_) std::optional<double> volumeSent_;
     _Guarded_by_(rtspMutex_) Clock::time_point nextHeartbeat_;
     std::atomic<Clock::time_point> closeAt_ = Clock::time_point::max();
@@ -534,8 +563,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable moved_;
     _Guarded_by_(mutex_) IRenderSource* source_ = nullptr;
-    _Guarded_by_(mutex_) sockaddr_in receiverAudio_ {};
-    _Guarded_by_(mutex_) sockaddr_in receiverControl_ {};
+    _Guarded_by_(mutex_) std::vector<Destination> destinations_;
     _Guarded_by_(mutex_) uint32_t audioLatency_ = kDefaultAudioLatency;
     _Guarded_by_(mutex_) bool running_ = false;
     _Guarded_by_(mutex_) bool parked_ = false;

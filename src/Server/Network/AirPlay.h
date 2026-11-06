@@ -54,16 +54,25 @@ struct Announced {
     TxtRecord airplay; // empty for a receiver without an _airplay._tcp service
 };
 
+struct Speaker {
+    std::string address;
+    uint16_t port = 0;
+    bool operator==(const Speaker&) const = default;
+};
+
 struct Receiver {
     std::string id; // the device ID, or the group of a stereo pair, which either speaker may lead
     std::string name, address;
     uint16_t port = 0;
     std::string version;
     Support support = Support::Supported;
+    std::vector<Speaker> others; // the rest of a stereo pair, which does not pass the stream on
     bool operator==(const Receiver&) const = default;
 };
 
-// One receiver for each device or stereo pair, by name. A pair is reached through the member that leads it.
+bool isApple(const TxtRecord& raop); // by the model it announces: only Apple's own receivers are offered
+
+// One receiver for each Apple device or stereo pair, by name. A pair is asked through the member that leads it.
 std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced);
 
 // The ANNOUNCE body for 44.1 kHz/16-bit stereo as ALAC frames of 352 samples, without keys.

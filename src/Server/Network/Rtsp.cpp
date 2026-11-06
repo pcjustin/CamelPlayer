@@ -21,6 +21,7 @@ namespace {
 
 constexpr size_t kMaxReplyBytes = 65536;
 constexpr std::string_view kEndOfHeaders = "\r\n\r\n";
+constexpr std::string_view kUserAgent = "AirPlay/999.0.0 CamelPlayer"; // HomePods on OS 27 refuse any other form tried
 constexpr std::string_view kEndOfLine = "\r\n";
 
 int numberIn(std::string_view text) {
@@ -125,8 +126,8 @@ bool RtspClient::closed() const {
 
 RtspReply RtspClient::request(std::string_view method, std::string_view url, std::string_view contentType, std::string_view body,
                               std::string_view headers) {
-    std::string message = std::format("{} {} RTSP/1.0\r\nCSeq: {}\r\nUser-Agent: CamelPlayer\r\nClient-Instance: {}\r\n", method,
-                                      url, ++sequence_, instance_);
+    std::string message = std::format("{} {} RTSP/1.0\r\nCSeq: {}\r\nUser-Agent: {}\r\nClient-Instance: {}\r\n", method, url,
+                                      ++sequence_, kUserAgent, instance_);
     if (!sessionHeader_.empty()) message += std::format("Session: {}\r\n", sessionHeader_);
     message += headers;
     if (!body.empty()) message += std::format("Content-Type: {}\r\nContent-Length: {}\r\n", contentType, body.size());

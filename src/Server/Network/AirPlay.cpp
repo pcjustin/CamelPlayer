@@ -5,6 +5,7 @@
 #include "Server/Network/AirPlay.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <format>
 #include <stdexcept>
@@ -254,9 +255,16 @@ Support supportFrom(const TxtRecord& raop) {
     return Support::Supported;
 }
 
+bool isApple(const TxtRecord& raop) {
+    const std::string model = textOf(raop, "am");
+    return std::ranges::any_of(std::array<std::string_view, 5>{"AudioAccessory", "AppleTV", "AirPort", "Mac", "iMac"},
+                               [&](std::string_view family) { return model.starts_with(family); });
+}
+
 std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
     std::map<std::string, const Announced*> leads;
     for (const auto& member : announced) {
+        if (!isApple(member.raop)) continue;
         const std::string group = textOf(member.airplay, "tsid");
         const auto [lead, added] = leads.try_emplace(group.empty() ? member.deviceId : group, &member);
         if (!added && textOf(lead->second->airplay, "igl") != "1" &&
@@ -266,8 +274,12 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
     std::vector<Receiver> receivers;
     for (const auto& [id, lead] : leads) {
         const std::string group = textOf(lead->airplay, "gpn");
+        std::vector<Speaker> others;
+        for (const auto& member : announced)
+            if (member.deviceId != lead->deviceId && textOf(member.airplay, "tsid") == id)
+                others.push_back({member.address, member.port});
         receivers.push_back({id, group.empty() ? lead->name : group, lead->address, lead->port, textOf(lead->raop, "vs"),
-                             supportFrom(lead->raop)});
+                             supportFrom(lead->raop), std::move(others)});
     }
     std::ranges::sort(receivers, {}, [](const Receiver& r) { return std::pair(r.name, r.id); });
     return receivers;

@@ -10,12 +10,12 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <chrono>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -279,7 +279,7 @@ struct FakeReceiverRecord {
     std::string deviceId, name, host;
     uint16_t port = 0;
     std::string address = "127.0.0.1";
-    std::vector<std::string> raopTxt = {"cn=0,1", "et=0,1", "pw=false", "vs=105.1"};
+    std::vector<std::string> raopTxt = {"am=AudioAccessory5,1", "cn=0,1", "et=0,1", "pw=false", "vs=105.1"};
     std::vector<std::string> airplayTxt; // empty for a receiver without _airplay._tcp
     bool terse = false;                  // answers a browse with the name alone
 };

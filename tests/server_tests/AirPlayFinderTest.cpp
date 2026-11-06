@@ -132,27 +132,44 @@ TEST(AirPlayTest, TheSessionDescriptionCarriesNoKeys) {
     EXPECT_EQ(description.find("aesiv"), std::string::npos);
 }
 
+TEST(AirPlayTest, OnlyApplesReceiversAreListed) {
+    const auto modelled = [](const char* model) { return TxtRecord{{"am", model}, {"et", "0"}, {"cn", "1"}}; };
+    const auto receivers = receiversFrom({{"A", "HomePod", "192.168.0.1", 7000, modelled("AudioAccessory5,1"), {}},
+                                          {"B", "Mac", "192.168.0.2", 7000, modelled("Mac14,2"), {}},
+                                          {"C", "Apple TV", "192.168.0.3", 7000, modelled("AppleTV11,1"), {}},
+                                          {"D", "DMP-A6", "192.168.0.4", 5500, modelled("eversolo,1"), {}},
+                                          {"E", "Bravo", "192.168.0.5", 7000, modelled("MUZO Cobblestone"), {}},
+                                          {"F", "Unknown", "192.168.0.6", 7000, {{"et", "0"}, {"cn", "1"}}, {}}});
+    ASSERT_EQ(receivers.size(), 3U);
+    EXPECT_EQ(receivers[0].name, "Apple TV");
+    EXPECT_EQ(receivers[1].name, "HomePod");
+    EXPECT_EQ(receivers[2].name, "Mac");
+}
+
 TEST(AirPlayTest, AStereoPairIsOneReceiverReachedThroughItsLeader) {
-    const TxtRecord raop = {{"et", "0"}, {"cn", "1"}, {"vs", "1005.13.2"}};
+    const TxtRecord raop = {{"am", "AudioAccessory5,1"}, {"et", "0"}, {"cn", "1"}, {"vs", "1005.13.2"}};
     const TxtRecord follower = {{"tsid", "GROUP"}, {"gpn", "主臥"}, {"igl", "0"}};
     const TxtRecord leader = {{"tsid", "GROUP"}, {"gpn", "主臥"}, {"igl", "1"}};
     const auto receivers = receiversFrom({{"32FBAAAB399D", "主臥", "192.168.0.220", 7000, raop, follower},
                                           {"FAE2708FA125", "主臥 (2)", "192.168.0.222", 7000, raop, leader},
-                                          {"800A805D016B", "DMP-A6", "192.168.0.71", 5500, raop, {}}});
+                                          {"800A805D016B", "Other", "192.168.0.71", 5500, raop, {}}});
     ASSERT_EQ(receivers.size(), 2U);
     EXPECT_EQ(receivers[0].id, "800A805D016B");
     EXPECT_EQ(receivers[1].id, "GROUP");
     EXPECT_EQ(receivers[1].name, "主臥");
     EXPECT_EQ(receivers[1].address, "192.168.0.222");
+    EXPECT_EQ(receivers[1].others, (std::vector<Speaker>{{"192.168.0.220", 7000}}));
+    EXPECT_TRUE(receivers[0].others.empty());
 }
 
 TEST(AirPlayTest, APairMissingAMemberKeepsItsIdentity) {
-    const TxtRecord raop = {{"et", "0"}, {"cn", "1"}};
+    const TxtRecord raop = {{"am", "AudioAccessory5,1"}, {"et", "0"}, {"cn", "1"}};
     const auto receivers = receiversFrom(
         {{"32FBAAAB399D", "主臥", "192.168.0.220", 7000, raop, {{"tsid", "GROUP"}, {"gpn", "主臥"}, {"igl", "0"}}}});
     ASSERT_EQ(receivers.size(), 1U);
     EXPECT_EQ(receivers[0].id, "GROUP");
     EXPECT_EQ(receivers[0].address, "192.168.0.220");
+    EXPECT_TRUE(receivers[0].others.empty());
 }
 
 TEST_F(AirPlayFinderTest, FindsAReceiverAndAsksOnlyOptions) {
@@ -212,7 +229,7 @@ TEST_F(AirPlayFinderTest, AReceiverThatStopsAnsweringGoes) {
 
 TEST_F(AirPlayFinderTest, APasswordIsNotSupportedAndNothingAsksIt) {
     auto locked = record(rtsp_);
-    locked.raopTxt = {"cn=1", "et=0", "pw=true"};
+    locked.raopTxt = {"am=AudioAccessory5,1", "cn=1", "et=0", "pw=true"};
     mdns_.add(locked);
     start();
     ASSERT_TRUE(found(1));
@@ -223,7 +240,7 @@ TEST_F(AirPlayFinderTest, APasswordIsNotSupportedAndNothingAsksIt) {
 
 TEST_F(AirPlayFinderTest, EncryptionOnlyIsNotSupported) {
     auto encrypted = record(rtsp_);
-    encrypted.raopTxt = {"cn=1", "et=1,3,5"};
+    encrypted.raopTxt = {"am=AudioAccessory5,1", "cn=1", "et=1,3,5"};
     mdns_.add(encrypted);
     start();
     ASSERT_TRUE(found(1));

@@ -5,7 +5,8 @@
 // The output that sends to an AirPlay 1 receiver (docs/Plan.md §5.10): 44.1 kHz/16-bit stereo as uncompressed ALAC over
 // RTP, unencrypted. This computer's clock is the master: packets leave at 44.1 kHz and the receiver plays them a fixed
 // latency later. A pause, a seek and a new track end in a FLUSH and go on in the same RTSP session, which is closed once
-// nothing has been sent for a few seconds.
+// nothing has been sent for a few seconds. Each speaker of a stereo pair has its own session and gets the same packets;
+// the two follow this clock apart, so packets lost on one way can put them audibly out of step until the next start.
 #pragma once
 
 #include <chrono>

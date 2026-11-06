@@ -80,7 +80,9 @@ TrackDetails sampleDetails(const std::wstring& file) {
 
 class AirPlayOutputTest : public ::testing::Test {
 protected:
-    airplay::Receiver receiver() const { return {"800A805D016B", "DMP-A6", "127.0.0.1", rtsp_.port(), "105.1"}; }
+    airplay::Receiver receiver() const {
+        return {"800A805D016B", "DMP-A6", "127.0.0.1", rtsp_.port(), "105.1", airplay::Support::Supported, others_};
+    }
 
     std::unique_ptr<audio::IOutput> output(std::function<std::optional<double>()> volume = {}) {
         AirPlayOutputOptions options;
@@ -99,6 +101,7 @@ protected:
     }
 
     FakeRtsp rtsp_;
+    std::vector<airplay::Speaker> others_;
     std::atomic<int> error_ = 0;
 };
 
@@ -146,6 +149,68 @@ TEST_F(AirPlayOutputTest, TheSessionStartsUnencryptedInOrder) {
     EXPECT_NE(rtsp_.requestsOf("SETUP").front().find("timing_port="), std::string::npos);
     EXPECT_NE(rtsp_.requestsOf("RECORD").front().find("Session: 1\r\n"), std::string::npos);
     EXPECT_NE(rtsp_.requestsOf("RECORD").front().find("RTP-Info: seq="), std::string::npos);
+    out->close();
+}
+
+TEST_F(AirPlayOutputTest, RequestsCarryTheUserAgentHomePodsAccept) {
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    for (const auto& request : rtsp_.requests())
+        EXPECT_NE(request.find("User-Agent: AirPlay/999.0.0 CamelPlayer\r\n"), std::string::npos) << request;
+    out->close();
+}
+
+TEST_F(AirPlayOutputTest, EachSpeakerOfAPairGetsTheSameStream) {
+    FakeRtsp second;
+    others_ = {{"127.0.0.1", second.port()}};
+    CountingSource source(kSecond * 4);
+    double wanted = -12;
+    auto out = output([&]() -> std::optional<double> { return wanted; });
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(40));
+    ASSERT_TRUE(waitFor([&] { return second.packetCount() >= 40; }));
+    out->pause();
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("FLUSH") == 1 && second.count("FLUSH") == 1; }));
+    EXPECT_TRUE(waitFor([&] { return second.count("SET_PARAMETER") >= 1; }));
+    EXPECT_EQ(rtsp_.requestsOf("SET_PARAMETER").front().find("volume: -12.000000") != std::string::npos,
+              second.requestsOf("SET_PARAMETER").front().find("volume: -12.000000") != std::string::npos);
+    out->close();
+    EXPECT_TRUE(waitFor([&] { return rtsp_.count("TEARDOWN") == 1 && second.count("TEARDOWN") == 1; }));
+
+    const auto first = rtsp_.packets();
+    const auto other = second.packets();
+    const size_t count = std::min(first.size(), other.size());
+    ASSERT_GE(count, 40U);
+    for (size_t i = 0; i < count; ++i) {
+        EXPECT_EQ(first[i].sequence, other[i].sequence);
+        EXPECT_EQ(first[i].rtpTime, other[i].rtpTime);
+        EXPECT_EQ(first[i].alac, other[i].alac);
+    }
+    EXPECT_GE(second.controlPackets().size(), 1U);
+}
+
+TEST_F(AirPlayOutputTest, APairDoesNotOpenWhenASpeakerRefuses) {
+    FakeRtsp second;
+    second.answer("ANNOUNCE", 403);
+    others_ = {{"127.0.0.1", second.port()}};
+    CountingSource source(kSecond);
+    auto out = output();
+    EXPECT_THROW(out->open(kCd, &source), audio::Error);
+    EXPECT_EQ(error_, 0);
+}
+
+TEST_F(AirPlayOutputTest, LosingEitherSpeakerOfAPairEndsTheStream) {
+    FakeRtsp second;
+    others_ = {{"127.0.0.1", second.port()}};
+    CountingSource source(kSecond * 4);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return second.packetCount() >= 10; }));
+    second.takeOver();
+    EXPECT_TRUE(waitFor([&] { return error_ == int(audio::ErrorCode::DeviceInUse) + 1; }));
     out->close();
 }
 
