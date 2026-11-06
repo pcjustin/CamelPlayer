@@ -1221,6 +1221,7 @@ private:
             fadeSkip_ = FadeSkip::None;
             adopt(next);
             std::lock_guard lock(snapMutex_);
+            snap_.queuedFiles = queued_.size();
             snap_.transitions++;
         }
         publishQueue();
