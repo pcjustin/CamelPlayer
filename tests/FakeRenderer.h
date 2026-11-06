@@ -479,8 +479,7 @@ private:
             }
             if (fetchStop_) break;
         }
-        fetchSocket_.exchange(INVALID_SOCKET);
-        closesocket(in);
+        if (fetchSocket_.exchange(INVALID_SOCKET) != INVALID_SOCKET) closesocket(in);
         if (headEnd == std::string::npos) return false;
         std::scoped_lock lock(mutex_);
         received_[uri] = data.substr(headEnd + 4);
