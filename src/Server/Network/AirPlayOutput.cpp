@@ -117,7 +117,7 @@ public:
         service_ = std::thread([this] { serviceLoop(); });
     }
 
-    ~AirPlayOutput() override {
+    _No_competing_thread_ ~AirPlayOutput() override {
         close();
         stopping_ = true;
         service_.join();
@@ -174,7 +174,7 @@ public:
             stoppedAt_ = heard(Clock::now());
             running_ = false;
             moved_.notify_all();
-            moved_.wait(lock, [this] { return parked_ || !sender_.joinable(); });
+            while (!parked_ && sender_.joinable()) moved_.wait(lock);
         }
         flush();
     }
@@ -279,7 +279,7 @@ private:
         }
     }
 
-    void endSession() {
+    _Requires_lock_held_(rtspMutex_) void endSession() {
         if (!client_) return;
         try {
             client_->request("TEARDOWN", client_->url());
@@ -289,19 +289,19 @@ private:
         client_.reset();
     }
 
-    void lose(ErrorCode code, const char* why) {
+    _Requires_lock_held_(rtspMutex_) void lose(ErrorCode code, const char* why) {
         client_.reset();
         if (opened_) raiseError(Error(code, why));
     }
 
-    void tellVolume() {
+    _Requires_lock_held_(rtspMutex_) void tellVolume() {
         const auto wanted = options_.volumeDb ? options_.volumeDb() : std::nullopt;
         if (!wanted || wanted == volumeSent_) return;
         client_->request("SET_PARAMETER", client_->url(), "text/parameters", std::format("volume: {:.6f}\r\n", *wanted));
         volumeSent_ = wanted;
     }
 
-    void tellTrack(const TrackNotice& notice, const TrackDetails& details) {
+    _Requires_lock_held_(rtspMutex_) void tellTrack(const TrackNotice& notice, const TrackDetails& details) {
         const auto at = std::format("RTP-Info: rtptime={}\r\n", notice.rtpTime);
         const std::string url = client_->url();
         client_->request("SET_PARAMETER", url, "application/x-dmap-tagged",
@@ -405,12 +405,12 @@ private:
 
     // ---- the stream; `mutex_` is held unless a function says otherwise ----
 
-    uint64_t framesDue(Clock::time_point now) const {
+    _Requires_lock_held_(mutex_) uint64_t framesDue(Clock::time_point now) const {
         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now - runStart_).count();
         return kPrefillFrames + uint64_t(std::max<int64_t>(elapsed, 0)) * kSampleRate / 1000000;
     }
 
-    uint64_t heard(Clock::time_point now) const {
+    _Requires_lock_held_(mutex_) uint64_t heard(Clock::time_point now) const {
         if (!running_) return stoppedAt_;
         const uint64_t due = framesDue(now);
         const uint64_t latency = kSyncLatency + audioLatency_;
@@ -421,7 +421,7 @@ private:
         sendto(audio_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
     }
 
-    void sendSync(Clock::time_point now) {
+    _Requires_lock_held_(mutex_) void sendSync(Clock::time_point now) {
         const uint32_t head = runRtp_ + uint32_t(framesDue(now));
         const auto packet = syncPacket(firstPacket_, head - kSyncLatency, ntpNow(), head);
         sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&receiverControl_),
@@ -430,12 +430,14 @@ private:
     }
 
     // The source ran dry for longer than the receiver's buffer, whose time has passed: what comes next is heard late.
-    void goOnFromNow(Clock::time_point now) {
+    _Requires_lock_held_(mutex_) void goOnFromNow(Clock::time_point now) {
         const uint64_t sent = (nextPacket_ - runPacket_) * kFramesPerPacket;
         const uint64_t due = framesDue(now);
         if (ended_ || due < sent + kPrefillFrames + kMaxBehindFrames) return;
         runStart_ += std::chrono::microseconds((due - sent - kPrefillFrames) * 1000000 / kSampleRate);
     }
+
+    _Requires_lock_held_(mutex_) IRenderSource* renderSource() const { return source_; }
 
     // Runs without `mutex_`, which close() needs: the source stays valid until this thread ends.
     bool encodeNext(IRenderSource* source) {
@@ -462,11 +464,12 @@ private:
         return true;
     }
 
-    bool sendDue(Clock::time_point now, std::unique_lock<std::mutex>& lock) {
+    _Requires_lock_held_(mutex_)
+        _Requires_lock_held_(lock) bool sendDue(Clock::time_point now, std::unique_lock<std::mutex>& lock) {
         if ((nextPacket_ - runPacket_) * kFramesPerPacket >= framesDue(now)) return false;
         if (nextPacket_ == endPacket_) {
             if (ended_) return false;
-            auto* source = source_;
+            auto* source = renderSource();
             lock.unlock();
             const bool encoded = encodeNext(source);
             lock.lock();
@@ -489,7 +492,7 @@ private:
             if (!running_) {
                 parked_ = true;
                 moved_.notify_all();
-                moved_.wait(lock, [this] { return running_ || closing_; });
+                while (!running_ && !closing_) moved_.wait(lock);
                 parked_ = false;
                 continue;
             }
@@ -514,24 +517,37 @@ private:
     std::atomic<bool> stopping_ = false, opened_ = false, sentSinceFlush_ = false;
 
     std::mutex rtspMutex_; // taken before `mutex_`
-    std::unique_ptr<RtspClient> client_;
-    std::optional<double> volumeSent_;
-    Clock::time_point nextHeartbeat_;
+    _Guarded_by_(rtspMutex_) std::unique_ptr<RtspClient> client_;
+    _Guarded_by_(rtspMutex_) std::optional<double> volumeSent_;
+    _Guarded_by_(rtspMutex_) Clock::time_point nextHeartbeat_;
     std::atomic<Clock::time_point> closeAt_ = Clock::time_point::max();
 
     mutable std::mutex mutex_;
     std::condition_variable moved_;
-    IRenderSource* source_ = nullptr;
-    sockaddr_in receiverAudio_{}, receiverControl_{};
-    uint32_t audioLatency_ = kDefaultAudioLatency;
-    bool running_ = false, parked_ = false, closing_ = false, ended_ = false, firstPacket_ = true;
-    uint16_t sequence_ = 0;
-    uint32_t rtpNext_ = 0, ssrc_ = 0, runRtp_ = 0;
-    uint64_t rendered_ = 0, stoppedAt_ = 0;
-    uint64_t nextPacket_ = 0, endPacket_ = 0, runPacket_ = 0;
-    Clock::time_point runStart_, nextSync_;
-    std::deque<Packet> history_;
-    std::deque<TrackNotice> notices_;
+    _Guarded_by_(mutex_) IRenderSource* source_ = nullptr;
+    _Guarded_by_(mutex_) sockaddr_in receiverAudio_ {};
+    _Guarded_by_(mutex_) sockaddr_in receiverControl_ {};
+    _Guarded_by_(mutex_) uint32_t audioLatency_ = kDefaultAudioLatency;
+    _Guarded_by_(mutex_) bool running_ = false;
+    _Guarded_by_(mutex_) bool parked_ = false;
+    _Guarded_by_(mutex_) bool closing_ = false;
+    _Guarded_by_(mutex_) bool ended_ = false;
+    _Guarded_by_(mutex_) bool firstPacket_ = true;
+    _Guarded_by_(mutex_) uint16_t sequence_ = 0;
+    _Guarded_by_(mutex_) uint32_t rtpNext_ = 0;
+    _Guarded_by_(mutex_) uint32_t ssrc_ = 0;
+    _Guarded_by_(mutex_) uint32_t runRtp_ = 0;
+    _Guarded_by_(mutex_) uint64_t rendered_ = 0;
+    _Guarded_by_(mutex_) uint64_t stoppedAt_ = 0;
+    _Guarded_by_(mutex_) uint64_t nextPacket_ = 0;
+    _Guarded_by_(mutex_) uint64_t endPacket_ = 0;
+    _Guarded_by_(mutex_) uint64_t runPacket_ = 0;
+    _Guarded_by_(mutex_) Clock::time_point runStart_;
+    _Guarded_by_(mutex_) Clock::time_point nextSync_;
+    _Guarded_by_(mutex_) std::deque<Packet> history_;
+    _Guarded_by_(mutex_) std::deque<TrackNotice> notices_;
+
+    // The sender thread's alone, reset by open() before it starts.
     std::array<uint8_t, kFramesPerPacket * kBytesPerFrame> pcm_{};
     size_t pendingFrames_ = 0;
 };

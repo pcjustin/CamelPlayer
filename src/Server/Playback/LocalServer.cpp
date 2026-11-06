@@ -193,7 +193,7 @@ bool SnapshotCursor::accept(const Snapshot& s) {
 
 class LocalServer::Impl {
 public:
-    Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
+    _No_competing_thread_ Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
         : settings_(settings), settingsFile_(std::move(settingsFile)),
           factory_([this, given = std::move(factory)](const Settings& s) {
               return s.backend == Backend::Network   ? networkOutput(s)
@@ -306,7 +306,7 @@ public:
         worker_ = std::thread([this] { run(); });
     }
 
-    ~Impl() { shutdown(); }
+    _No_competing_thread_ ~Impl() { shutdown(); }
 
     // The cover warmer and the loudness analysis stop before the worker releases the engine they read; the worker saves
     // the queue on its way out.
@@ -397,7 +397,7 @@ public:
     void waitIdle() {
         std::unique_lock lock(mutex_);
         const auto target = issued_.id;
-        idle_.wait(lock, [&] { return processed_ >= target; });
+        while (processed_ < target) idle_.wait(lock);
     }
 
     LibraryTrackPage browseLibrary(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
@@ -1512,12 +1512,12 @@ private:
     // Searching needs nothing from the firewall. Listening for announcements waits for the rule, so that a user who has
     // no network players never sees Windows ask about CamelPlayer.
     void findNetworkPlayers(DeviceCatalog& catalog) {
+        std::scoped_lock lock(finderMutex_);
         if (finder_) {
             finder_->search();
         } else {
             FinderOptions options = finderOptions_;
             if (!firewallRuleExists()) options.notifyPort = 0;
-            std::scoped_lock lock(finderMutex_);
             finder_ = std::make_unique<PlayerFinder>(options, [this] {
                 devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
             });
@@ -1712,7 +1712,9 @@ private:
             std::optional<Pending> pending;
             {
                 std::unique_lock lock(mutex_);
-                cv_.wait_for(lock, std::chrono::milliseconds(50), [&] { return closing_ || !queue_.empty(); });
+                const auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                while (!closing_ && queue_.empty())
+                    if (cv_.wait_until(lock, due) == std::cv_status::timeout) break;
                 if (!queue_.empty()) {
                     pending = std::move(queue_.front());
                     queue_.pop_front();
@@ -1777,20 +1779,20 @@ private:
     std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
     mutable std::mutex creditMutex_;
-    mutable std::shared_ptr<const LibraryCreditNames> creditNames_;
+    _Guarded_by_(creditMutex_) mutable std::shared_ptr<const LibraryCreditNames> creditNames_;
     std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
     std::jthread coverWarmer_; // uses artwork_, library_ and engine_, so it stops before they go
     mutable std::mutex loudnessMutex_;
-    ReplayGainSettings loudnessSettings_;
-    DecoderByFormat loudnessDecoders_;
-    std::vector<int64_t> queuedFiles_;
+    _Guarded_by_(loudnessMutex_) ReplayGainSettings loudnessSettings_;
+    _Guarded_by_(loudnessMutex_) DecoderByFormat loudnessDecoders_;
+    _Guarded_by_(loudnessMutex_) std::vector<int64_t> queuedFiles_;
     std::unique_ptr<LoudnessAnalyzer> loudness_; // uses the four above, library_ and engine_
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
     int64_t libraryDeletions_ = -1; // entries whose files left the library leave the queue
     mutable std::mutex readsMutex_;
-    std::filesystem::path queuedRead_; // the file last queued in the engine to follow
+    _Guarded_by_(readsMutex_) std::filesystem::path queuedRead_; // the file last queued in the engine to follow
     std::chrono::steady_clock::time_point availabilityChecked_;
     struct LibraryEntry {
         std::wstring path;
@@ -1809,10 +1811,10 @@ private:
     bool sessionCountPersisted_ = false;
     mutable std::mutex mutex_;
     std::condition_variable cv_, idle_;
-    std::deque<Pending> queue_;
-    CommandStamp issued_;
-    uint64_t processed_ = 0;
-    bool closing_ = false;
+    _Guarded_by_(mutex_) std::deque<Pending> queue_;
+    _Guarded_by_(mutex_) CommandStamp issued_;
+    _Guarded_by_(mutex_) uint64_t processed_ = 0;
+    _Guarded_by_(mutex_) bool closing_ = false;
     Snapshot published_, state_;
     QueuePolicy policy_;
     std::vector<QueueEntry> entries_;
@@ -1857,7 +1859,7 @@ private:
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
     FinderOptions finderOptions_;
     std::mutex finderMutex_;
-    std::unique_ptr<PlayerFinder> finder_; // from the first device scan
+    _Guarded_by_(finderMutex_) std::unique_ptr<PlayerFinder> finder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
     std::atomic<double> receiverDb_{std::numeric_limits<double>::quiet_NaN()};
     std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan

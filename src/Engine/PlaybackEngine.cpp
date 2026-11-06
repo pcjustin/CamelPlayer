@@ -171,7 +171,7 @@ public:
         post([this] { updateWatcher(); });
     }
 
-    ~Impl() override {
+    _No_competing_thread_ ~Impl() override {
         try {
             post([this] {
                 watcher_.reset();
@@ -626,7 +626,10 @@ public:
 
     bool waitForState(PlayState s, std::chrono::milliseconds timeout) {
         std::unique_lock lock(snapMutex_);
-        return snapCv_.wait_for(lock, timeout, [&] { return snap_.state == s; });
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (snap_.state != s)
+            if (snapCv_.wait_until(lock, deadline) == std::cv_status::timeout) return snap_.state == s;
+        return true;
     }
 
 private:
@@ -636,8 +639,9 @@ private:
             std::function<void()> fn;
             {
                 std::unique_lock lock(qMutex_);
-                qCv_.wait_for(lock, std::chrono::milliseconds(50),
-                              [&] { return quit_ || !queue_.empty() || eventDue() || leadDone_.load(); });
+                const auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                while (!quit_ && queue_.empty() && !eventDue() && !leadDone_.load())
+                    if (qCv_.wait_until(lock, due) == std::cv_status::timeout) break;
                 if (!queue_.empty()) {
                     fn = std::move(queue_.front());
                     queue_.pop_front();
@@ -767,9 +771,9 @@ private:
             buffered = snap_.outputStatus.bufferFrames;
         }
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
-        held_.store(snap_.outputStatus.heldFrames, std::memory_order_relaxed);
+        held_.store(status.heldFrames, std::memory_order_relaxed);
         const uint64_t rendered = renderedFrames_.load(std::memory_order_relaxed);
-        heard_.store(rendered - std::min(snap_.outputStatus.heldFrames, rendered), std::memory_order_relaxed);
+        heard_.store(rendered - std::min(status.heldFrames, rendered), std::memory_order_relaxed);
         rust_->reportAudible(toOutput(base_) + consumed - std::min(buffered, consumed));
     }
 
@@ -1423,9 +1427,9 @@ private:
     std::atomic<uint64_t> leaving_{0}; // where the track being left ended, while a network player still plays it
     std::atomic<size_t> boundary_{kNoBoundary};
     mutable std::mutex streamMutex_;
-    StreamTrack streamTrack_;
-    std::deque<StreamTrack> nextStream_; // queued, in order
-    uint64_t streamSequence_ = 0;
+    _Guarded_by_(streamMutex_) StreamTrack streamTrack_;
+    _Guarded_by_(streamMutex_) std::deque<StreamTrack> nextStream_; // queued, in order
+    _Guarded_by_(streamMutex_) uint64_t streamSequence_ = 0;
     std::atomic<int64_t> fullAt_{0}; // steady_clock ticks when the decoder last found its ring full
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
     std::atomic<bool> rawDsd_{false};            // the open stream is DoP or native DSD
@@ -1441,18 +1445,18 @@ private:
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     std::thread decodeThread_, dspThread_;
     std::mutex decodeErrMutex_;
-    std::optional<Error> decodeError_;
+    _Guarded_by_(decodeErrMutex_) std::optional<Error> decodeError_;
 
     std::thread thread_;
     std::mutex qMutex_;
     std::condition_variable qCv_;
-    std::deque<std::function<void()>> queue_;
-    bool quit_ = false;
+    _Guarded_by_(qMutex_) std::deque<std::function<void()>> queue_;
+    _Guarded_by_(qMutex_) bool quit_ = false;
 
     mutable std::mutex snapMutex_;
     std::condition_variable snapCv_;
-    EngineSnapshot snap_;
-    std::function<void()> listener_;
+    _Guarded_by_(snapMutex_) EngineSnapshot snap_;
+    _Guarded_by_(snapMutex_) std::function<void()> listener_;
 };
 
 PlaybackEngine::PlaybackEngine(const Settings& s, OutputFactory f, DeviceWatcherFactory w)

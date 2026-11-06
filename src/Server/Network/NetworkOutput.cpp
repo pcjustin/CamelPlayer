@@ -143,7 +143,7 @@ public:
         readCapabilities();
     }
 
-    ~NetworkOutput() override {
+    _No_competing_thread_ ~NetworkOutput() override {
         close();
         link_.reset();
         WSACleanup();
@@ -324,7 +324,7 @@ private:
         if (follow_ && event.kind != PlayerEventKind::Stopped) follow_(event);
     }
 
-    uint64_t playedFrames() const {
+    _Requires_lock_held_(mutex_) uint64_t playedFrames() const {
         const uint64_t positionMs = link_ ? link_->positionMs() : 0;
         const auto now = Clock::now();
         if (positionMs != lastReported_) {
@@ -355,7 +355,7 @@ private:
 
     // Back at the start with the next track ready is the change of track: a player can report the old URL long after it
     // (the DMP-A6 does), so the position says so first.
-    bool backAtStart() const {
+    _Requires_lock_held_(mutex_) bool backAtStart() const {
         const uint64_t positionMs = link_ ? link_->positionMs() : 0;
         if (positionMs > highestMs_) highestMs_ = positionMs;
         if (bodies_.size() < 2 || !bodies_.front().complete || positionMs >= kNearStartMs || positionMs >= highestMs_)
@@ -364,7 +364,9 @@ private:
         return highestMs_ + kNearEndMs >= durationMs;
     }
 
-    uint64_t allPlayed() const { return framesFinished_ + (backAtStart() ? bodies_.front().framesWritten : 0) + playedFrames(); }
+    _Requires_lock_held_(mutex_) uint64_t allPlayed() const {
+        return framesFinished_ + (backAtStart() ? bodies_.front().framesWritten : 0) + playedFrames();
+    }
 
     uint64_t held() const {
         std::scoped_lock lock(mutex_);
@@ -385,7 +387,7 @@ private:
         moved_.notify_all();
     }
 
-    Body makeBody(const StreamTrack& track) {
+    _Requires_lock_held_(mutex_) Body makeBody(const StreamTrack& track) {
         Body body;
         body.id = nextId_++;
         body.track = track;
@@ -496,7 +498,9 @@ private:
             bool sent = false;
             {
                 std::unique_lock lock(mutex_);
-                moved_.wait_for(lock, milliseconds(50), [&] { return closing_; });
+                const auto due = Clock::now() + milliseconds(50);
+                while (!closing_)
+                    if (moved_.wait_until(lock, due) == std::cv_status::timeout) break;
                 if (closing_) return;
                 sent = !bodies_.empty() && !producing();
             }
@@ -507,7 +511,7 @@ private:
         }
     }
 
-    uint64_t positionInFile(const Body& body, uint64_t positionMs) const {
+    _Requires_lock_held_(mutex_) uint64_t positionInFile(const Body& body, uint64_t positionMs) const {
         const uint32_t rate = std::max(format_.sampleRate, 1U);
         const uint64_t leadMs = body.track.leadFrames * 1000 / rate;
         return (positionMs > leadMs ? positionMs - leadMs : 0) + body.track.startFrame * 1000 / rate;
@@ -619,7 +623,7 @@ private:
         return true;
     }
 
-    Body* find(uint32_t id) {
+    _Requires_lock_held_(mutex_) Body* find(uint32_t id) {
         const auto found = std::ranges::find(bodies_, id, &Body::id);
         return found == bodies_.end() ? nullptr : &*found;
     }
@@ -649,7 +653,7 @@ private:
         }
     }
 
-    bool mayRender() {
+    _Requires_lock_held_(mutex_) bool mayRender() {
         if (!source_ || !started_ || !playing_) return false;
         const auto now = Clock::now();
         const uint64_t played = allPlayed();
@@ -658,6 +662,9 @@ private:
         const auto ahead = bodies_.size() > 1 ? options_.nextTrackLead : waiting ? options_.aheadBeforePlay : options_.ahead;
         return framesRendered_ < played + uint64_t(ahead.count()) * format_.sampleRate / 1000;
     }
+
+    // The source outlives the renderers: `close` joins them before it clears the source.
+    _Requires_lock_held_(mutex_) IRenderSource* renderSource() const { return source_; }
 
     // Renders a chunk into the track the stream has reached. False when there is nothing to render now.
     bool produce() {
@@ -679,7 +686,7 @@ private:
             }
             // Frames past the last track belong to one queued too late to have a URL yet.
             if ((!carry_.empty() && !producing()) || !mayRender()) return false;
-            auto* source = source_;
+            auto* source = renderSource();
             lock.unlock();
             frames = source->render(rendered_.data(), kChunkFrames);
             boundary = source->boundaryInLastRender();
@@ -704,12 +711,12 @@ private:
         return frames != 0;
     }
 
-    Body* producing() {
+    _Requires_lock_held_(mutex_) Body* producing() {
         const auto found = std::ranges::find_if(bodies_, [](const Body& b) { return !b.complete; });
         return found == bodies_.end() ? nullptr : &*found;
     }
 
-    void write(Body& body, const uint8_t* data, size_t frames) {
+    _Requires_lock_held_(mutex_) void write(Body& body, const uint8_t* data, size_t frames) {
         if (body.lengthKnown && body.framesWritten + frames > body.totalFrames)
             frames = size_t(body.totalFrames - body.framesWritten);
         const size_t bytes = frames * format_.bytesPerFrame();
@@ -777,29 +784,33 @@ private:
     std::string base_;
     std::thread acceptor_, announcer_;
     std::vector<std::thread> connections_;
-    std::vector<SOCKET> clients_;
-
     mutable std::mutex mutex_;
     std::condition_variable moved_;
-    DeviceFormat format_{};
-    IRenderSource* source_ = nullptr;
-    std::deque<Body> bodies_;
-    std::vector<uint8_t> carry_; // frames past a boundary, for the track that has no body yet
-    uint32_t generation_ = 0, nextId_ = 0;
-    uint64_t queuedNext_ = 0;
-    uint32_t announcedBody_ = 0;
-    uint64_t framesRendered_ = 0, framesFinished_ = 0;
-    bool started_ = false, playing_ = false, closing_ = false;
-    Clock::time_point playingSince_;
-    mutable uint64_t highestMs_ = 0; // of the track playing
-    mutable bool reportsPosition_ = false;
-    Clock::time_point changedAt_;
-    mutable uint64_t lastReported_ = 0, clockMs_ = 0;
-    mutable Clock::time_point clockAt_;
-    mutable Clock::time_point lastAdvance_;
+    _Guarded_by_(mutex_) std::vector<SOCKET> clients_;
+    _Guarded_by_(mutex_) DeviceFormat format_ {};
+    _Guarded_by_(mutex_) IRenderSource* source_ = nullptr;
+    _Guarded_by_(mutex_) std::deque<Body> bodies_;
+    _Guarded_by_(mutex_) std::vector<uint8_t> carry_; // frames past a boundary, for the track that has no body yet
+    _Guarded_by_(mutex_) uint32_t generation_ = 0;
+    _Guarded_by_(mutex_) uint32_t nextId_ = 0;
+    _Guarded_by_(mutex_) uint64_t queuedNext_ = 0;
+    _Guarded_by_(mutex_) uint32_t announcedBody_ = 0;
+    _Guarded_by_(mutex_) uint64_t framesRendered_ = 0;
+    _Guarded_by_(mutex_) uint64_t framesFinished_ = 0;
+    _Guarded_by_(mutex_) bool started_ = false;
+    _Guarded_by_(mutex_) bool playing_ = false;
+    _Guarded_by_(mutex_) bool closing_ = false;
+    _Guarded_by_(mutex_) Clock::time_point playingSince_;
+    _Guarded_by_(mutex_) mutable uint64_t highestMs_ = 0; // of the track playing
+    _Guarded_by_(mutex_) mutable bool reportsPosition_ = false;
+    _Guarded_by_(mutex_) Clock::time_point changedAt_;
+    _Guarded_by_(mutex_) mutable uint64_t lastReported_ = 0;
+    _Guarded_by_(mutex_) mutable uint64_t clockMs_ = 0;
+    _Guarded_by_(mutex_) mutable Clock::time_point clockAt_;
+    _Guarded_by_(mutex_) mutable Clock::time_point lastAdvance_;
 
     std::mutex renderMutex_; // one renderer at a time; taken before mutex_
-    std::vector<uint8_t> rendered_;
+    _Guarded_by_(renderMutex_) std::vector<uint8_t> rendered_;
 };
 
 } // namespace
