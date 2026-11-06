@@ -20,7 +20,6 @@ Built through vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`). "Linked" li
 
 | Component | Package | Version | License | Use | Text |
 |---|---|---|---|---|---|
-| FFmpeg (avcodec, avformat, swresample) | `ffmpeg` | 9.0.2#1 | LGPL-2.1-or-later | tests only | [Notice](third_party/licenses/native/ffmpeg.txt) |
 | libsndfile | `libsndfile` | 1.2.2#2 | LGPL-2.1-or-later | linked | [Notice](third_party/licenses/native/libsndfile.txt) |
 | dr_flac / dr_wav | `drlibs` | 2026-10-30 | Unlicense OR MIT-0 | linked | [Notice](third_party/licenses/native/drlibs.txt) |
 | libFLAC | `libflac` | 1.5.0 | BSD-3-Clause | linked | [Notice](third_party/licenses/native/libflac.txt) |
@@ -104,7 +103,6 @@ vcpkg host ports used while building the native libraries above. None is linked 
 
 | vcpkg host port | Version | License | Text |
 |---|---|---|---|
-| `ffmpeg-bin2c` | 9.0.2 | MIT | [Notices](third_party/licenses/build-tools/ffmpeg-bin2c/) |
 | `pkgconf` | 3.0.3#1 | ISC AND BSD-2-Clause AND BSD-4-Clause (getopt) AND GPL-2.0-or-later WITH Autoconf-exception-generic (pkg.m4) | [Notices](third_party/licenses/build-tools/pkgconf/) |
 | `vcpkg-cmake` | 2025-08-07 | MIT | [Notices](third_party/licenses/build-tools/vcpkg-cmake/) |
 | `vcpkg-cmake-config` | 2026-07-21 | MIT | [Notices](third_party/licenses/build-tools/vcpkg-cmake-config/) |

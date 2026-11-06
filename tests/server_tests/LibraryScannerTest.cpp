@@ -624,7 +624,7 @@ TEST_F(LibraryScannerTest, AacMetadataUsesContainerTimingWithoutDecodingAudio) {
     using namespace camel::audio;
     using namespace camel::audio::testaudio;
     const auto path = dir / "music" / "album" / "track.m4a";
-    writeAac(path, makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2, false);
+    testutil::copyFixture("aac-short.m4a", path);
     const auto expected = probeAacInfo(path);
     EXPECT_EQ(expected.totalFrames, openDecoder(DecoderKind::Symphonia, path)->info().totalFrames);
     std::ifstream input(path, std::ios::binary);
@@ -720,9 +720,9 @@ TEST_F(LibraryScannerTest, ReadsEverySupportedContainer) {
     const auto folder = dir / "music" / "album";
     writeWav(folder / "wave.wav", pcm, 44100, 16, 2);
     writeAiff(folder / "aiff.aiff", pcm, 44100, 16, 2);
-    writeAlac(folder / "alac.m4a", pcm, 44100, 16, 2);
-    writeAac(folder / "aac.m4a", pcm, 44100, 16, 2, false);
-    writeAac(folder / "adts.aac", pcm, 44100, 16, 2, true);
+    testutil::copyFixture("alac-short.m4a", folder / "alac.m4a");
+    testutil::copyFixture("aac-short.m4a", folder / "aac.m4a");
+    testutil::copyFixture("aac-short.aac", folder / "adts.aac");
     testutil::writeMp3(folder / "mp3.mp3", pcm, 44100, 16, 2, true);
     writeAdpcm(folder / "adpcm.wav", pcm, 44100, 2, false);
     const auto raw = dsdfixture::rawDsd(4096, 2);

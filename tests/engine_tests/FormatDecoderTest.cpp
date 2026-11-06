@@ -27,7 +27,7 @@ using namespace camel::audio;
 namespace {
 
 const testaudio::GenSpec kSpecs[] = {
-    {"16-44.1k", 44100, 16, 2, 2.0}, {"24-96k", 96000, 24, 2, 2.0}, {"24-192k", 192000, 24, 2, 1.0}};
+    {"16-44.1k", 44100, 16, 2, 0.5}, {"24-96k", 96000, 24, 2, 0.25}, {"24-192k", 192000, 24, 2, 0.25}};
 
 const char* extension(AudioFormat format) {
     return format == AudioFormat::Alac ? ".m4a" : format == AudioFormat::Wav ? ".wav" : ".aiff";
@@ -46,7 +46,7 @@ const std::vector<int32_t>& reference(const testaudio::GenSpec& spec) {
             signals.push_back(testaudio::makeSignal(s));
             testaudio::writeWav(fixture(AudioFormat::Wav, s), signals.back(), s.sampleRate, s.bits, s.channels);
             testaudio::writeAiff(fixture(AudioFormat::Aiff, s), signals.back(), s.sampleRate, s.bits, s.channels);
-            testaudio::writeAlac(fixture(AudioFormat::Alac, s), signals.back(), s.sampleRate, s.bits, s.channels);
+            testutil::copyFixture("alac-" + s.name + ".m4a", fixture(AudioFormat::Alac, s));
         }
     });
     return signals[size_t(&spec - kSpecs)];
@@ -221,7 +221,7 @@ TEST(FormatDecoderPolicy, AiffChunkAfterSoundDataIsNotAudio) {
         bytes.assign(std::istreambuf_iterator<char>(in), {});
     }
     bytes += std::string("ANNO\0\0\0\x08", 8) + "trailing";
-    const uint32_t form = uint32_t(bytes.size() - 8);
+    const auto form = uint32_t(bytes.size() - 8);
     for (size_t i = 0; i < 4; i++) bytes[4 + i] = char(form >> (24 - 8 * i));
     std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
     for (const auto decoder : decodersFor(AudioFormat::Aiff)) {

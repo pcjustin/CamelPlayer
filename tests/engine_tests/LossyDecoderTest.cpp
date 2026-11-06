@@ -78,8 +78,8 @@ const std::vector<int32_t>& reference() {
     static std::vector<int32_t> pcm;
     std::call_once(once, [] {
         pcm = signal();
-        testaudio::writeAac(path(kFixtures[0]), pcm, kRate, kBits, kChannels, false);
-        testaudio::writeAac(path(kFixtures[1]), pcm, kRate, kBits, kChannels, true);
+        testutil::copyFixture("aac.m4a", path(kFixtures[0]));
+        testutil::copyFixture("aac.aac", path(kFixtures[1]));
         testutil::writeMp3(path(kFixtures[2]), pcm, kRate, kBits, kChannels, true);
         testutil::writeMp3(path(kFixtures[3]), pcm, kRate, kBits, kChannels, false);
     });
@@ -274,7 +274,7 @@ TEST(LossyDecoderPolicy, OversClipInsteadOfWrapping) {
     for (size_t i = 0; i < loud.size(); i++) clipped[i] = std::clamp(loud[i], -full, full);
     const auto aac = testutil::tempDir() / "lossy-loud.m4a";
     const auto mp3 = testutil::tempDir() / "lossy-loud.mp3";
-    testaudio::writeAac(aac, clipped, kRate, kBits, kChannels, false);
+    testutil::copyFixture("aac-loud.m4a", aac);
     testutil::writeMp3(mp3, clipped, kRate, kBits, kChannels, true);
     for (const auto& [file, format] : {std::pair{aac, AudioFormat::Aac}, std::pair{mp3, AudioFormat::Mp3}})
         for (const auto kind : decodersFor(format)) {

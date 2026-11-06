@@ -23,6 +23,18 @@ inline std::filesystem::path tempDir() {
     return dir;
 }
 
+// A file committed in tests/fixtures, which tests/fixtures/README.md lists.
+inline std::filesystem::path fixtureFile(const std::string& name) {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    return std::filesystem::path(exe).parent_path().parent_path().parent_path().parent_path() / L"tests" / L"fixtures" / name;
+}
+
+inline void copyFixture(const std::string& name, const std::filesystem::path& to) {
+    std::filesystem::create_directories(to.parent_path());
+    std::filesystem::copy_file(fixtureFile(name), to, std::filesystem::copy_options::overwrite_existing);
+}
+
 // Short versions of the §16.6 files, generated once per test run.
 inline std::filesystem::path testFile(const char* name) {
     static std::once_flag once;

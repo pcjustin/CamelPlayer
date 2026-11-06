@@ -42,14 +42,7 @@ void writeWav(const std::filesystem::path& path, const std::vector<int32_t>& sam
               uint32_t channels, bool float32 = false);
 void writeAiff(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
                uint32_t channels);
-// Encodes 16/24-bit `samples` as ALAC in an M4A container with FFmpeg's encoder. Throws std::runtime_error.
-void writeAlac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
-               uint32_t channels);
-// Encodes 16/24-bit `samples` as AAC-LC with FFmpeg's encoder: M4A (an edit list declares the encoder delay) or raw
-// ADTS (no trim metadata). Throws std::runtime_error.
-void writeAac(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t bits,
-              uint32_t channels, bool adts, int64_t bitRate = 256000);
-// Encodes 16-bit `samples` as IMA or Microsoft ADPCM in a WAVE file with FFmpeg's encoder. Throws std::runtime_error.
+// Encodes 16-bit `samples` as IMA or Microsoft ADPCM in a WAVE file with libsndfile. Throws std::runtime_error.
 void writeAdpcm(const std::filesystem::path& path, const std::vector<int32_t>& samples, uint32_t sampleRate, uint32_t channels,
                 bool microsoft);
 

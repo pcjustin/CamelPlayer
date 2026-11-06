@@ -29,7 +29,7 @@ using namespace camel::audio;
 namespace {
 
 const testutil::DtsCd& dtsCd() {
-    static const testutil::DtsCd file = testutil::writeDtsCd(testutil::tempDir() / "dts-cd.wav", 1.0);
+    static const testutil::DtsCd file = testutil::copyDtsCd(testutil::tempDir() / "dts-cd.wav");
     return file;
 }
 
@@ -79,7 +79,7 @@ TEST(Dts, ProbeFindsDtsInsideWave) {
 
 TEST(Dts, EveryWaveDecoderReadsTheSameDecode) {
     const auto& file = dtsCd();
-    ASSERT_GT(file.reference.size(), 6u * 40000);
+    ASSERT_GT(file.reference.size(), 6u * 20000);
     for (const DecoderKind kind : {DecoderKind::Sndfile, DecoderKind::DrWav, DecoderKind::Symphonia}) {
         SCOPED_TRACE(decoderName(kind));
         const auto d = openDecoder(kind, dtsPath());

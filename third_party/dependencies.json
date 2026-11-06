@@ -2,25 +2,6 @@
     "project":  "CamelPlayer",
     "native":  [
                    {
-                       "name":  "ffmpeg",
-                       "version":  "9.0.2#1",
-                       "license":  "LGPL-2.1-or-later",
-                       "role":  "test",
-                       "port_source":  "git+https://github.com/microsoft/vcpkg@b9e158fe3e4f9d727af5e5904e1121d844267df3",
-                       "sources":  [
-                                       {
-                                           "location":  "git+https://github.com/ffmpeg/ffmpeg@n9.0.2",
-                                           "checksums":  [
-                                                             {
-                                                                 "algorithm":  "SHA512",
-                                                                 "checksumValue":  "21bf3fbcdfd2f41ea6edeab40433fecfe362b09ecaa177a652471b54f9357011b4f74dab18245ab1c26f1a473b94205490baecb42289afd2effd603cd0b22b59"
-                                                             }
-                                                         ]
-                                       }
-                                   ],
-                       "notice":  "licenses/native/ffmpeg.txt"
-                   },
-                   {
                        "name":  "libsndfile",
                        "version":  "1.2.2#2",
                        "license":  "LGPL-2.1-or-later",
@@ -706,14 +687,6 @@
                       }
                   ],
     "build_tools":  [
-                        {
-                            "name":  "ffmpeg-bin2c",
-                            "version":  "9.0.2",
-                            "license":  "MIT",
-                            "role":  "build",
-                            "port_source":  "git+https://github.com/microsoft/vcpkg@125448cbcefa4ba0d8169d6971bc63302d0274ba",
-                            "notice":  "licenses/build-tools/ffmpeg-bin2c/"
-                        },
                         {
                             "name":  "pkgconf",
                             "version":  "3.0.3#1",

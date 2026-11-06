@@ -4,7 +4,6 @@ This directory holds upstream source distributed directly with CamelPlayer and s
 
 | Component | Source management | CamelPlayer integration |
 |---|---|---|
-| FFmpeg | `vcpkg.json` with a pinned baseline | Test fixtures in `src/Tools/testaudio/TestAudio.cpp` and `tests/DtsFixture.cpp`; linked into tests.exe and camelcli only, never shipped |
 | dr_flac | vcpkg `drlibs` | `src/Engine/decode/DrFlac.cpp` |
 | dr_wav | vcpkg `drlibs` | `src/Engine/decode/DrWav.cpp` |
 | mpg123 | `vcpkg.json` with a pinned baseline | `src/Engine/decode/Mpg123Decoder.cpp` |

@@ -122,7 +122,7 @@ Requirements:
 - Windows x64; the application targets Windows 10 version 1809 or later.
 - Visual Studio 2026 with the Desktop development with C++ workload and Windows SDK 10.0.26100.0. The C++ WinUI app development tools component is not required.
 - Rust stable with the `x86_64-pc-windows-msvc` target.
-- Internet access for the first vcpkg, NuGet and Cargo restore, and at least 25 GB of free disk space. Building FFmpeg the first time takes about an hour; later builds use caches.
+- Internet access for the first vcpkg, NuGet and Cargo restore, and at least 25 GB of free disk space. The first restore builds the native libraries, later builds use caches.
 
 Run from the repository root:
 
@@ -190,7 +190,7 @@ CamelPlayer runs as one process with these parts:
 
 ## Dependencies and licensing
 
-FFmpeg, dr_flac and libsndfile are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine come from Cargo with one committed workspace lockfile and are linked into the Engine's one static library. The repository includes third-party license and notice snapshots and a [dependency inventory](third_party/dependencies.json); [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists what must accompany a release. To refresh the notice snapshots after restoring dependencies:
+dr_flac, libsndfile and the other native libraries are restored through the pinned vcpkg manifest. Symphonia and the Rust Engine come from Cargo with one committed workspace lockfile and are linked into the Engine's one static library. The repository includes third-party license and notice snapshots and a [dependency inventory](third_party/dependencies.json); [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists what must accompany a release. To refresh the notice snapshots after restoring dependencies:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File msbuild/collect-licenses.ps1

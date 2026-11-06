@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Force $destination | Out-Null
 $inventory = [ordered]@{ project = 'CamelPlayer'; native = @(); rust = @(); microsoft = @(); build_tools = @() }
 
 $nativeLicenses = [ordered]@{
-    ffmpeg = 'LGPL-2.1-or-later'; libsndfile = 'LGPL-2.1-or-later'; drlibs = 'Unlicense OR MIT-0'
+    libsndfile = 'LGPL-2.1-or-later'; drlibs = 'Unlicense OR MIT-0'
     libflac = 'BSD-3-Clause'; libogg = 'BSD-3-Clause'; libvorbis = 'BSD-3-Clause'; opus = 'BSD-3-Clause'
     zlib = 'Zlib'; wil = 'MIT'; 'nlohmann-json' = 'MIT'; gtest = 'BSD-3-Clause'
     mpg123 = 'LGPL-2.1-or-later'; mp3lame = 'LGPL-2.0-only'; soxr = 'LGPL-2.1-or-later'
@@ -17,7 +17,7 @@ $nativeLicenses = [ordered]@{
     libwebp = 'BSD-3-Clause'; opencc = 'Apache-2.0'; 'marisa-trie' = 'BSD-2-Clause'; 'darts-clone' = 'BSD-2-Clause'; rapidjson = 'MIT'
     tclap = 'MIT'; libebur128 = 'MIT'
 }
-$testOnly = @('ffmpeg', 'gtest', 'mp3lame') # linked into tests.exe only, never shipped
+$testOnly = @('gtest', 'mp3lame') # linked into tests.exe only, never shipped
 $buildOnly = @('tclap') # OpenCC's command-line tools only; not part of the OpenCC library
 foreach ($port in $nativeLicenses.Keys) {
     $share = Join-Path $root "vcpkg_installed\x64-windows-static-md\share\$port"
@@ -40,7 +40,7 @@ foreach ($port in $nativeLicenses.Keys) {
 
 # vcpkg host tools run while building the libraries above; none is linked or shipped.
 $hostLicenses = [ordered]@{
-    'ffmpeg-bin2c' = 'MIT'; pkgconf = 'ISC AND BSD-2-Clause AND BSD-4-Clause (getopt) AND GPL-2.0-or-later WITH Autoconf-exception-generic (pkg.m4)'
+    pkgconf = 'ISC AND BSD-2-Clause AND BSD-4-Clause (getopt) AND GPL-2.0-or-later WITH Autoconf-exception-generic (pkg.m4)'
     'vcpkg-cmake' = 'MIT'; 'vcpkg-cmake-config' = 'MIT'; 'vcpkg-cmake-get-vars' = 'MIT'; 'vcpkg-msbuild' = 'MIT'
     'vcpkg-pkgconfig-get-modules' = 'MIT'; 'vcpkg-tool-meson' = 'MIT (port scripts) AND Apache-2.0 (Meson)'
     yasm = 'BSD-2-Clause AND BSD-3-Clause AND (Artistic-1.0 OR GPL-2.0-only OR LGPL-2.0-only) (bitvect)'

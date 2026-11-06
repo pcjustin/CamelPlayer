@@ -41,7 +41,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="**\*.cpp" />
+    <ClCompile Include="**\*.cpp" Exclude="fixtures\**" />
     <ClCompile Include="**\*.c" />
     <ClCompile Include="$(CamelRoot)src\Updater\Install.cpp" />
     <ClCompile Include="$(CamelRoot)src\Tools\testaudio\TestAudio.cpp" />
