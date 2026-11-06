@@ -2,9 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::cell::UnsafeCell;
-use std::ptr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(loom)]
+use loom::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+#[cfg(not(loom))]
+use std::{
+    cell::UnsafeCell,
+    ptr,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 pub(crate) struct SpscByteRing {
     buffer: Box<[UnsafeCell<u8>]>,
@@ -52,11 +60,10 @@ impl SpscByteRing {
         }
 
         let offset = head % self.buffer.len();
-        let first = length.min(self.buffer.len() - offset);
-        let destination = self.buffer.as_ptr().cast::<u8>().cast_mut();
+        let (first, second) = source[..length].split_at(length.min(self.buffer.len() - offset));
         unsafe {
-            ptr::copy_nonoverlapping(source.as_ptr(), destination.add(offset), first);
-            ptr::copy_nonoverlapping(source.as_ptr().add(first), destination, length - first);
+            self.put(offset, first);
+            self.put(0, second);
         }
         self.head
             .store(head.wrapping_add(length), Ordering::Release);
@@ -73,11 +80,11 @@ impl SpscByteRing {
         }
 
         let offset = tail % self.buffer.len();
-        let first = length.min(self.buffer.len() - offset);
-        let source = self.buffer.as_ptr().cast::<u8>();
+        let (first, second) =
+            destination[..length].split_at_mut(length.min(self.buffer.len() - offset));
         unsafe {
-            ptr::copy_nonoverlapping(source.add(offset), destination.as_mut_ptr(), first);
-            ptr::copy_nonoverlapping(source, destination.as_mut_ptr().add(first), length - first);
+            self.take(offset, first);
+            self.take(0, second);
         }
         self.tail
             .store(tail.wrapping_add(length), Ordering::Release);
@@ -88,9 +95,41 @@ impl SpscByteRing {
         let head = self.head.load(Ordering::Acquire);
         self.tail.store(head, Ordering::Release);
     }
+
+    // SAFETY for `put` and `take`: the caller owns these slots, as `write` and `read` establish from the cursors.
+    #[cfg(not(loom))]
+    unsafe fn put(&self, offset: usize, source: &[u8]) {
+        let slots = self.buffer.as_ptr().cast::<u8>().cast_mut();
+        ptr::copy_nonoverlapping(source.as_ptr(), slots.add(offset), source.len());
+    }
+
+    #[cfg(not(loom))]
+    unsafe fn take(&self, offset: usize, destination: &mut [u8]) {
+        let slots = self.buffer.as_ptr().cast::<u8>();
+        ptr::copy_nonoverlapping(
+            slots.add(offset),
+            destination.as_mut_ptr(),
+            destination.len(),
+        );
+    }
+
+    // Loom sees each slot's access, so a cursor that publishes too weakly shows as a race.
+    #[cfg(loom)]
+    unsafe fn put(&self, offset: usize, source: &[u8]) {
+        for (slot, byte) in self.buffer[offset..].iter().zip(source) {
+            slot.with_mut(|cell| *cell = *byte);
+        }
+    }
+
+    #[cfg(loom)]
+    unsafe fn take(&self, offset: usize, destination: &mut [u8]) {
+        for (slot, byte) in self.buffer[offset..].iter().zip(destination) {
+            *byte = slot.with(|cell| *cell);
+        }
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::SpscByteRing;
     use std::sync::Arc;

@@ -15,3 +15,6 @@ crate-type = ["staticlib"]
 [dependencies]
 dts_core = { path = "../dts_core" }
 symphonia_ffi = { path = "../symphonia_ffi" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
