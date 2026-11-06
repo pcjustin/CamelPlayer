@@ -339,6 +339,11 @@ TEST_F(EngineStateTest, AManualChangeDuringACrossfadeFadesOutWhatPlaysWithoutReo
     engine->waitIdle();
     // Past the device ring's lead the fade into the second file plays when the third one is chosen.
     ASSERT_EQ(pull(48000), 48000u);
+    // A slow decoder can put the second file's fade just past that pull. The Engine waits a second to hear it before
+    // fading again, and this output renders nothing while the Engine waits.
+    const auto heard = std::chrono::steady_clock::now() + 10s;
+    while (engine->snapshot().position == 0 && std::chrono::steady_clock::now() < heard) pull(64);
+    ASSERT_GT(engine->snapshot().position, 0u);
     engine->crossfadeTo(third);
     engine->waitIdle();
     auto s = engine->snapshot();
