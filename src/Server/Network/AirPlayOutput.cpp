@@ -115,12 +115,14 @@ public:
         systemStart_ = std::chrono::system_clock::now();
         steadyStart_ = Clock::now();
         service_ = std::thread([this] { serviceLoop(); });
+        session_ = std::thread([this] { sessionLoop(); });
     }
 
     _No_competing_thread_ ~AirPlayOutput() override {
         close();
         stopping_ = true;
         service_.join();
+        session_.join();
         {
             std::scoped_lock lock(rtspMutex_);
             endSession();
@@ -397,6 +399,13 @@ private:
                 if (FD_ISSET(timing_, &readable)) answerTiming();
                 if (FD_ISSET(control_, &readable)) answerResend();
             }
+        }
+    }
+
+    // Apart from the UDP ports: a request here can take seconds, and a HomePod answers SETUP only after its timing requests.
+    void sessionLoop() {
+        while (!stopping_) {
+            std::this_thread::sleep_for(kPollSockets);
             const auto notice = nextNotice();
             const TrackDetails details = notice && options_.details ? options_.details(notice->track.file) : TrackDetails{};
             tendSession(notice, details);
@@ -513,7 +522,7 @@ private:
     uint16_t audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
     std::chrono::system_clock::time_point systemStart_;
     Clock::time_point steadyStart_;
-    std::thread service_, sender_;
+    std::thread service_, session_, sender_;
     std::atomic<bool> stopping_ = false, opened_ = false, sentSinceFlush_ = false;
 
     std::mutex rtspMutex_; // taken before `mutex_`

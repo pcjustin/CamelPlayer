@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -143,6 +144,8 @@ public:
         }
     }
     void stopAnswering() { silent_ = true; }
+    // Answers SETUP only once the sender has answered a timing request, as a HomePod does.
+    void timeBeforeSetup() { timeBeforeSetup_ = true; }
 
 private:
     static sockaddr_in loopback() {
@@ -215,6 +218,17 @@ private:
         }
     }
 
+    bool timedSender() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // a network's delay
+        std::string request("\x80\xD2\x00\x07", 4);
+        request.resize(32, '\0');
+        askTiming(request);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+        while (timingReplies().empty() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        return !timingReplies().empty();
+    }
+
     bool answerOne(SOCKET client, std::string& received) {
         const size_t headEnd = received.find("\r\n\r\n");
         if (headEnd == std::string::npos) return false;
@@ -232,7 +246,7 @@ private:
             requests_.push_back(request);
             if (const auto chosen = statuses_.find(method); chosen != statuses_.end()) status = chosen->second;
         }
-        if (silent_) return true;
+        if (silent_ || (method == "SETUP" && timeBeforeSetup_ && !timedSender())) return true;
         const size_t sequence = request.find("CSeq: ");
         std::string reply = "RTSP/1.0 " + std::to_string(status) +
                             " Reason\r\nCSeq: " + request.substr(sequence + 6, request.find("\r\n", sequence) - sequence - 6) +
@@ -251,7 +265,7 @@ private:
     SOCKET control_ = INVALID_SOCKET;
     SOCKET timing_ = INVALID_SOCKET;
     std::atomic<SOCKET> client_ = INVALID_SOCKET;
-    std::atomic<bool> silent_ = false;
+    std::atomic<bool> silent_ = false, timeBeforeSetup_ = false;
     uint16_t port_ = 0, audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;

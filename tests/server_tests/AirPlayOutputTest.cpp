@@ -170,6 +170,15 @@ TEST_F(AirPlayOutputTest, ASyncPacketComesFirstAndEverySecond) {
     out->close();
 }
 
+TEST_F(AirPlayOutputTest, TimingIsAnsweredWhileTheSessionOpens) {
+    rtsp_.timeBeforeSetup();
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    EXPECT_EQ(rtsp_.count("RECORD"), 1);
+    out->close();
+}
+
 TEST_F(AirPlayOutputTest, TimingRequestsAreAnswered) {
     CountingSource source(44100);
     auto out = output();
