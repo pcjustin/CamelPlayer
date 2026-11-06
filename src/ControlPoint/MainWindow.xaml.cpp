@@ -3183,8 +3183,10 @@ void MainWindow::changeLanguage() {
         const auto self = weak.get();
         if (!self) return;
         try {
+            // An empty override fails at run time, so following Windows names Windows's language.
             winrt::Microsoft::Windows::Globalization::ApplicationLanguages::PrimaryLanguageOverride(
-                to_hstring(self->settings_.language));
+                self->settings_.language.empty() ? Windows::System::UserProfile::GlobalizationPreferences::Languages().GetAt(0)
+                                                 : to_hstring(self->settings_.language));
         } catch (const hresult_error& e) {
             camel::log::warn("language override failed: 0x%08X", static_cast<unsigned>(e.code()));
             return;
