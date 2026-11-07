@@ -8,6 +8,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -89,6 +90,8 @@ public:
     void withoutNextTrack() { noNext_ = true; }
     // Plays back at this many bytes a second instead of as fast as it fetches.
     void limitFetch(uint64_t bytesPerSecond) { fetchLimit_ = bytesPerSecond; }
+    // Takes this much of a next track at once, as a player fills its buffer, before the limit and its clock begin.
+    void fillNextTrack(uint64_t bytes) { nextTrackFill_ = bytes; }
     void reportNoPosition() { noPosition_ = true; }
     // After Play it stays TRANSITIONING this long, reporting the position it had, as the DMP-A6 does.
     void startSlowly(int milliseconds) { startMs_ = milliseconds; }
@@ -144,11 +147,11 @@ public:
 
     void disappear() {
         if (gone_.exchange(true)) return;
-        stopFetch();
         closesocket(http_);
         closesocket(udp_);
         httpThread_.join();
         udpThread_.join();
+        stopFetch();
     }
 
     // Sends the event to the service's subscriber.
@@ -380,12 +383,18 @@ private:
     }
 
     void startFetch() {
-        stopFetch();
+        std::scoped_lock lock(fetchControl_);
+        joinFetch();
         fetchStop_ = false;
         fetchThread_ = std::thread([this] { fetchLoop(); });
     }
 
     void stopFetch() {
+        std::scoped_lock lock(fetchControl_);
+        joinFetch();
+    }
+
+    void joinFetch() {
         fetchStop_ = true;
         const SOCKET open = fetchSocket_.exchange(INVALID_SOCKET);
         if (!std::cmp_equal(open, INVALID_SOCKET)) closesocket(open);
@@ -455,6 +464,10 @@ private:
         size_t headEnd = std::string::npos;
         uint64_t bytesPerSecond = 0;
         const auto started = std::chrono::steady_clock::now();
+        const uint64_t fill = [&] {
+            std::scoped_lock lock(mutex_);
+            return played_.empty() ? 0 : nextTrackFill_.load();
+        }();
         for (;;) {
             const int read = recv(in, buffer, sizeof(buffer), 0);
             if (read <= 0) break;
@@ -478,14 +491,14 @@ private:
                 bytesPerSecond = rate;
             }
             if (bytesPerSecond && !noPosition_) {
-                const uint64_t ms = uint64_t(body) * 1000 / bytesPerSecond;
+                const uint64_t ms = (body - std::min<uint64_t>(body, fill)) * 1000 / bytesPerSecond;
                 char text[32];
                 snprintf(text, sizeof(text), "%llu:%02llu:%02llu", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60);
                 set("time", text);
                 set("seconds", std::to_string(ms / 1000));
             }
             if (const uint64_t limit = fetchLimit_.load()) {
-                const auto due = started + std::chrono::milliseconds(uint64_t(body) * 1000 / limit);
+                const auto due = started + std::chrono::milliseconds((body - std::min<uint64_t>(body, fill)) * 1000 / limit);
                 std::this_thread::sleep_until(due);
             }
             if (fetchStop_) break;
@@ -635,9 +648,11 @@ private:
                       refuseStreams_ = false;
     std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false;
     std::atomic<bool> oldTrack_ = false;
+    std::atomic<uint64_t> nextTrackFill_ = 0;
     std::atomic<uint64_t> fetchLimit_ = 0;
     std::atomic<int> startMs_ = 0;
     std::atomic<SOCKET> fetchSocket_ = INVALID_SOCKET;
+    std::mutex fetchControl_; // the HTTP thread and the test both start and stop the fetch
     std::thread fetchThread_;
     std::string sink_ = "http-get:*:audio/wav:*,http-get:*:audio/L16:*", currentUri_, nextUri_, metadata_, fetchHeaders_;
     std::map<std::string, std::string> received_, playlist_;

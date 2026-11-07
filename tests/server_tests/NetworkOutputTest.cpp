@@ -329,12 +329,14 @@ TEST(NetworkOutputTest, ThePlayerHearsOfTheNextTrackOnlyOnceThatTrackHasData) {
 
 TEST(NetworkOutputTest, TheNextTrackIsFetchableAheadOnceTheFirstIsSent) {
     FakeRenderer renderer(RendererKind::UpnpAv);
-    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);         // real time
+    renderer.fillNextTrack(k16.bytesPerFrame() * 44100ULL * 20); // more than the lead, which then sets the limit
     constexpr uint64_t first = 44100ULL * 1;
     CountingSource source(k16.bytesPerFrame(), first, 44100ULL * 600);
     source.queueSecond();
     NetworkOutputOptions options;
     options.ahead = 1000ms;
+    options.aheadBeforePlay = 1000ms;
     options.nextTrackLead = 10000ms;
     OutputRun output(renderer, source, k16, options);
     output->start();
@@ -737,7 +739,10 @@ TEST_F(StreamingTest, AManualChangeOfTrackGetsItsOwnUrl) {
     server->submit(std::move(next));
     ASSERT_TRUE(waitFor([&] { return renderer_.currentUri() != url; }));
     ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
-    EXPECT_EQ(server->snapshot().queueEntryId, server->snapshot().queue.entries.back().id);
+    EXPECT_TRUE(waitFor([&] {
+        const auto snapshot = server->snapshot();
+        return snapshot.queueEntryId == snapshot.queue.entries.back().id;
+    }));
     server->shutdown();
 }
 
