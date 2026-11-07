@@ -17,6 +17,10 @@
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerLink.h"
 
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+
 using namespace camel::server;
 using namespace camel::server::upnp;
 using namespace std::chrono_literals;
@@ -132,6 +136,19 @@ TEST(UpnpMessages, ReadsSearchAnswersAndAnnouncements) {
     EXPECT_EQ(bye->kind, SsdpKind::ByeBye);
     EXPECT_FALSE(
         parseSsdp("HTTP/1.1 200 OK\r\nST: upnp:rootdevice\r\nUSN: uuid:a\r\nLOCATION: http://192.168.1.5/d.xml\r\n\r\n"));
+}
+
+TEST(UpnpMessages, ReadingAMessageKeepsNoCopyOfIt) {
+    const auto privateBytes = [] {
+        PROCESS_MEMORY_COUNTERS_EX memory{};
+        memory.cb = sizeof(memory);
+        GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+        return int64_t(memory.PrivateUsage);
+    };
+    const std::string notXml(kMaxMessageBytes, 'x');
+    const int64_t before = privateBytes();
+    for (int i = 0; i < 1000; ++i) EXPECT_FALSE(parseXml(notXml));
+    EXPECT_LT(privateBytes() - before, 500 * int64_t(kMaxMessageBytes));
 }
 
 TEST(UpnpMessages, ALocationOutsideTheLocalNetworkIsIgnored) {

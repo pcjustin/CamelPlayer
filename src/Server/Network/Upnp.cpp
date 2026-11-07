@@ -120,7 +120,8 @@ std::string XmlNode::childText(std::string_view childName) const {
 
 std::optional<XmlNode> parseXml(std::string_view xml) {
     if (xml.empty() || xml.size() > kMaxMessageBytes) return std::nullopt;
-    const wil::com_ptr<IStream> stream(SHCreateMemStream(reinterpret_cast<const BYTE*>(xml.data()), UINT(xml.size())));
+    wil::com_ptr<IStream> stream;
+    stream.attach(SHCreateMemStream(reinterpret_cast<const BYTE*>(xml.data()), UINT(xml.size())));
     wil::com_ptr<IXmlReader> reader;
     if (!stream || FAILED(CreateXmlReader(IID_PPV_ARGS(&reader), nullptr)) || FAILED(reader->SetInput(stream.get())))
         return std::nullopt;
