@@ -470,6 +470,15 @@ INSERT INTO tracks(id,file_id,title) VALUES(7,7,'Loose'),(8,8,'Nested'),(9,9,'Ow
     EXPECT_TRUE(from(5).empty()); // an unavailable file
     EXPECT_TRUE(from(6).empty()); // an offline library folder
     EXPECT_TRUE(from(99).empty());
+    // A folder played plays on the same way: its tracks lead what follows from its first track.
+    for (const int64_t folder : {1, 2, 6, 7}) {
+        std::vector<int64_t> own;
+        for (const auto& t : folderTracks(*store, folder)) own.push_back(t.id);
+        ASSERT_FALSE(own.empty()) << folder;
+        const auto on = from(own.front());
+        ASSERT_GE(on.size(), own.size()) << folder;
+        EXPECT_TRUE(std::equal(own.begin(), own.end(), on.begin())) << folder;
+    }
 }
 
 TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {

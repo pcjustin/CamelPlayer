@@ -1036,11 +1036,13 @@ void LibraryView::queueFolder(int64_t folder, bool playNext, bool playNow) {
     if (!server_ || folder <= 0) return;
     background([this, server = server_, folder, playNext, playNow] {
         auto tracks = server->folderTracks(folder);
-        return std::function<void()>([this, tracks = std::move(tracks), playNext, playNow] {
-            if (playNow)
-                playTracks(tracks, 0);
-            else
-                queueTracks(tracks, playNext);
+        return std::function<void()>([this, tracks = std::move(tracks), playNext, playNow]() mutable {
+            if (!playNow) return queueTracks(tracks, playNext);
+            if (!folderPlaysOn_ || tracks.empty()) return playTracks(tracks, 0);
+            // The folder plays at once and the folders after it follow, as for a track chosen in it.
+            auto own = std::make_shared<const std::vector<LibraryTrackRow>>(std::move(tracks));
+            playTracks(*own, 0);
+            appendFolderRest(std::move(own));
         });
     });
 }

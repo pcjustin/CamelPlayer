@@ -322,7 +322,7 @@ struct Settings {
     bool trayNoticeShown = false; // the first close to the tray has explained where CamelPlayer went
     bool firstRunDone = false;    // the first-run guide was finished or skipped
     bool autoplay = true;         // when the queue ends, random library tracks keep playing (docs/Plan.md §8.1)
-    bool folderPlaysOn = false;   // a track played from a folder goes on to the end of its library folder
+    bool folderPlaysOn = false;   // a folder, or a track in one, played goes on to the end of its library folder
     bool checkUpdates = true;     // automatic update checks at startup and daily (docs/Plan.md §8.6)
     OnlineLookup artistPictures = OnlineLookup::Ask; // from Wikimedia Commons (docs/Plan.md §7.4)
     bool folderTree = false; // the Folders page as one tree, as in foobar2000 (made for a friend of the user)

@@ -360,7 +360,7 @@
   <data name="Settings_Autoplay.Header" xml:space="preserve"><value>播完佇列後</value></data>
   <data name="Settings_Autoplay.OnContent" xml:space="preserve"><value>繼續隨機播放音樂庫的歌曲</value></data>
   <data name="Settings_Autoplay.OffContent" xml:space="preserve"><value>停止</value></data>
-  <data name="Settings_FolderPlaysOn.Header" xml:space="preserve"><value>從資料夾播放歌曲時</value></data>
+  <data name="Settings_FolderPlaysOn.Header" xml:space="preserve"><value>從資料夾播放時</value></data>
   <data name="Settings_FolderPlaysOn.OnContent" xml:space="preserve"><value>一路播到媒體庫資料夾結尾</value></data>
   <data name="Settings_FolderPlaysOn.OffContent" xml:space="preserve"><value>只播所在的資料夾</value></data>
   <data name="Queue_Autoplay.Text" xml:space="preserve"><value>播完後自動播放</value></data>
