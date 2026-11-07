@@ -42,8 +42,14 @@ const char* dsdOutputId(DsdOutput d);
 enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
 const char* resampleQualityId(ResampleQuality q);
 
-// Fixed output rates (docs/Plan.md §6): 0 follows the file.
+// Fixed output rates (docs/Plan.md §6): 0 follows the file. Also the choices of an output's highest PCM rate.
 constexpr uint32_t kFixedRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000};
+// The choices of an output's highest DSD rate, as multiples of 44.1 kHz: DSD64, DSD128 and DSD256.
+constexpr uint32_t kMaxDsdRates[] = {64, 128, 256};
+// The DSD byte frame rate of DSD`multiple`: 352800 for DSD64.
+constexpr uint32_t dsdByteRate(uint32_t multiple) {
+    return multiple / 64 * 352800;
+}
 
 enum class MmcssTask : uint8_t { ProAudio, Playback, Disabled };
 enum class MmcssPriority : uint8_t { Normal, High, Critical };
@@ -72,6 +78,10 @@ struct WasapiSettings {
     uint32_t dsdPcmRate = 176400;
     // Exclusive mode only; choosing a rate is the permission to resample PCM to it (raw DSD is never resampled).
     uint32_t fixedRate = 0;
+    // The highest PCM rate (from kFixedRates) and DSD rate (from kMaxDsdRates) to send, 0 following the device;
+    // exclusive mode only. Choosing one is the permission to convert above it (docs/Plan.md §6).
+    uint32_t maxSampleRate = 0;
+    uint32_t maxDsdRate = 0;
     double pollBufferMs = 200.0;
     MmcssTask mmcssTask = MmcssTask::ProAudio;
     MmcssPriority mmcssPriority = MmcssPriority::High;
@@ -86,6 +96,8 @@ struct AsioSettings {
     DsdOutput dsdOutput = DsdOutput::Native;
     uint32_t dsdPcmRate = 176400;
     uint32_t fixedRate = 0;
+    uint32_t maxSampleRate = 0; // as for WASAPI
+    uint32_t maxDsdRate = 0;
     PlaybackTiming timing;
     bool operator==(const AsioSettings&) const = default;
 };
@@ -103,6 +115,8 @@ struct KsSettings {
     DsdOutput dsdOutput = DsdOutput::Dop;
     uint32_t dsdPcmRate = 176400;
     uint32_t fixedRate = 0;
+    uint32_t maxSampleRate = 0; // as for WASAPI
+    uint32_t maxDsdRate = 0;
     MmcssTask mmcssTask = MmcssTask::ProAudio;
     MmcssPriority mmcssPriority = MmcssPriority::High;
     PlaybackTiming timing;
@@ -112,7 +126,8 @@ struct KsSettings {
 // A UPnP AV or OpenHome player (docs/Plan.md §5.10), kept by its UDN and never by its address.
 struct NetworkSettings {
     std::string udn;
-    uint32_t maxSampleRate = 0;              // 0 follows the player; more goes through the conversion rule
+    uint32_t maxSampleRate = 0;              // as for WASAPI
+    uint32_t maxDsdRate = 0;                 // as for WASAPI
     uint32_t maxBits = 0;                    // 0 follows the player, else 16
     DsdOutput dsdOutput = DsdOutput::Native; // Native is DSF; Pcm is the permission to convert
     uint32_t dsdPcmRate = 176400;
@@ -353,6 +368,10 @@ Settings resetInterface(const Settings& s);
 
 // The selected backend's fixed rate (0: follow the file) and timing.
 uint32_t fixedRate(const Settings& s);
+// The selected backend's highest PCM rate in Hz and highest DSD rate as a DSD byte frame rate; 0 has no limit, as for
+// WASAPI shared mode and AirPlay.
+uint32_t maxSampleRate(const Settings& s);
+uint32_t maxDsdByteRate(const Settings& s);
 const PlaybackTiming& timing(const Settings& s);
 
 std::filesystem::path dataDirectory(); // %LOCALAPPDATA%\CamelPlayer (created on demand)

@@ -32,7 +32,7 @@ public:
     struct Conversion {
         bool allow = false;
         ResampleQuality quality = ResampleQuality::High;
-        bool allowDsd = false; // DSD to PCM
+        bool allowDsd = false; // DSD to PCM, or to a lower DSD rate
     };
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`. `dsd` makes the stream native DSD or

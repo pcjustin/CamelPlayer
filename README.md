@@ -103,6 +103,8 @@ Files are recognized by their content, not their extension. Mono files are copie
 | UPnP AV, OpenHome | To the player | DSF or to PCM | Streamed at the source's format; the highest rate and bit depth can be limited for a player that declares more than it plays. |
 | AirPlay | CD format only | To PCM only | AirPlay 1: 44.1 kHz/16-bit stereo. A receiver plays about 2 seconds behind what is sent, and the position shown allows for it. |
 
+Every output except AirPlay and WASAPI shared mode can be given a highest PCM and a highest DSD sample rate, for a DAC or a converter that carries less than the device announces. PCM above the highest rate is resampled to the top rate of its own family. DSD above the highest DSD rate is modulated again at that rate, so it stays DSD, with DSP bypassed, and is shown as processed.
+
 AirPlay is a trademark of Apple Inc.
 
 DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where the device offers 1411.2 kHz. DSD becomes PCM only when you set a backend's DSD output to PCM or allow it after native DSD and DoP were refused: it is decimated to 352.8 kHz with a multistage FIR filter (100% modulation = 0 dBFS), resampled with libsoxr to 88.2, 176.4 or 352.8 kHz and quantized once. Allowed PCM conversions use libsoxr for resampling and TPDF dither for a lower bit depth.

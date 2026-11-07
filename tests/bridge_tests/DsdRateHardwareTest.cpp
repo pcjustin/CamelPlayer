@@ -141,3 +141,74 @@ TEST(DsdRateHardwareSwitch, DISABLED_AsioPlaysPcmAfterNativeDsd) {
     engine.stop();
     engine.waitIdle();
 }
+
+namespace {
+
+// An output's highest PCM or DSD rate on Chord/DAVE (docs/Plan.md §6): the source above it reaches the device at the
+// limited rate, played in real time without underruns.
+struct LimitCase {
+    const char* name;
+    Backend backend;
+    DsdOutput output;
+    uint32_t sourceMultiple; // of DSD64; 0 for PCM at `pcmRate`
+    uint32_t pcmRate;
+    uint32_t maxSampleRate;
+    uint32_t maxDsdRate;
+    uint32_t expectRate; // the device format's rate
+};
+
+const LimitCase kLimitCases[] = {
+    {"asio_native_DSD128_to_DSD64", Backend::Asio, DsdOutput::Native, 2, 0, 0, 64, 352800},
+    {"asio_native_DSD256_to_DSD64", Backend::Asio, DsdOutput::Native, 4, 0, 0, 64, 352800},
+    {"asio_native_DSD256_to_DSD128", Backend::Asio, DsdOutput::Native, 4, 0, 0, 128, 705600},
+    {"wasapi_dop_DSD128_to_DSD64", Backend::Wasapi, DsdOutput::Dop, 2, 0, 0, 64, 176400},
+    {"ks_dop_DSD256_to_DSD128", Backend::Ks, DsdOutput::Dop, 4, 0, 0, 128, 352800},
+    {"wasapi_dop_DSD128_under_192k", Backend::Wasapi, DsdOutput::Dop, 2, 0, 192000, 0, 176400},
+    {"wasapi_pcm_352k_to_176k", Backend::Wasapi, DsdOutput::Dop, 0, 352800, 192000, 0, 176400},
+    {"asio_pcm_384k_to_192k", Backend::Asio, DsdOutput::Dop, 0, 384000, 192000, 0, 192000},
+    {"ks_pcm_705k_to_176k", Backend::Ks, DsdOutput::Dop, 0, 705600, 192000, 0, 176400},
+};
+
+} // namespace
+
+class RateLimitHardware : public ::testing::TestWithParam<LimitCase> {};
+
+TEST_P(RateLimitHardware, DISABLED_PlaysAtTheLimitedRate) {
+    const auto& c = GetParam();
+    Settings settings;
+    ASSERT_TRUE(selectChord(settings, c.backend));
+    settings.convertWhenUnsupported = false; // the limit alone permits the conversion
+    settings.asio.dsdOutput = settings.ks.dsdOutput = c.output;
+    settings.wasapi.maxSampleRate = settings.asio.maxSampleRate = settings.ks.maxSampleRate = c.maxSampleRate;
+    settings.wasapi.maxDsdRate = settings.asio.maxDsdRate = settings.ks.maxDsdRate = c.maxDsdRate;
+    const auto file =
+        c.sourceMultiple ? toneFile(c.sourceMultiple) : testutil::generatedFile({c.name, c.pcmRate, 24, 2, 4.0, true, -20});
+    RecordProperty("case", c.name);
+    PlaybackEngine engine(settings);
+    engine.openAndPlay(file);
+    engine.waitIdle();
+    auto snap = engine.snapshot();
+    ASSERT_FALSE(snap.error) << snap.errorDetail;
+    ASSERT_TRUE(snap.plan && snap.output);
+    EXPECT_EQ(snap.output->sampleRate, c.expectRate);
+    EXPECT_EQ(snap.plan->state, PipelineState::Processed);
+    if (c.sourceMultiple) {
+        EXPECT_EQ(snap.plan->dsd, c.output == DsdOutput::Native ? DsdPath::Native : DsdPath::Dop);
+        EXPECT_TRUE(snap.plan->remodulate);
+    } else {
+        EXPECT_EQ(snap.plan->dsd, DsdPath::None);
+        EXPECT_TRUE(snap.plan->resample);
+    }
+    const auto position = snap.position;
+    std::this_thread::sleep_for(2s);
+    snap = engine.snapshot();
+    EXPECT_FALSE(snap.error) << snap.errorDetail;
+    EXPECT_GT(snap.position, position);
+    EXPECT_EQ(snap.underruns, 0u);
+    RecordProperty("result", describe(*snap.output) + " via " + snap.outputStatus.mode);
+    engine.stop();
+    engine.waitIdle();
+}
+
+INSTANTIATE_TEST_SUITE_P(M2, RateLimitHardware, ::testing::ValuesIn(kLimitCases),
+                         [](const ::testing::TestParamInfo<LimitCase>& info) { return std::string(info.param.name); });

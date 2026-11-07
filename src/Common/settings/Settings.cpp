@@ -161,6 +161,12 @@ static uint32_t fixedRateFrom(double rate) {
     return 0;
 }
 
+static uint32_t maxDsdRateFrom(double rate) {
+    for (uint32_t r : kMaxDsdRates)
+        if (rate == r) return r;
+    return 0;
+}
+
 static constexpr const char* kEqKindIds[] = {"peaking",  "lowShelf", "highShelf", "lowPass",
                                              "highPass", "bandPass", "notch",     "allPass"};
 static constexpr const char* kEqChannelIds[] = {"all", "left", "right"};
@@ -257,6 +263,38 @@ uint32_t fixedRate(const Settings& s) {
     return 0;
 }
 
+uint32_t maxSampleRate(const Settings& s) {
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return s.wasapi.shared ? 0 : s.wasapi.maxSampleRate;
+    case Backend::Asio:
+        return s.asio.maxSampleRate;
+    case Backend::Ks:
+        return s.ks.maxSampleRate;
+    case Backend::Network:
+        return s.network.maxSampleRate;
+    case Backend::AirPlay:
+        return 0;
+    }
+    return 0;
+}
+
+uint32_t maxDsdByteRate(const Settings& s) {
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return s.wasapi.shared ? 0 : dsdByteRate(s.wasapi.maxDsdRate);
+    case Backend::Asio:
+        return dsdByteRate(s.asio.maxDsdRate);
+    case Backend::Ks:
+        return dsdByteRate(s.ks.maxDsdRate);
+    case Backend::Network:
+        return dsdByteRate(s.network.maxDsdRate);
+    case Backend::AirPlay:
+        return 0;
+    }
+    return 0;
+}
+
 const PlaybackTiming& timing(const Settings& s) {
     return s.backend == Backend::Asio      ? s.asio.timing
            : s.backend == Backend::Ks      ? s.ks.timing
@@ -314,6 +352,8 @@ static json wasapiJson(const WasapiSettings& w) {
               {"dsdOutput", dsdOutputId(w.dsdOutput)},
               {"dsdPcmRate", w.dsdPcmRate},
               {"fixedRate", w.fixedRate},
+              {"maxSampleRate", w.maxSampleRate},
+              {"maxDsdRate", w.maxDsdRate},
               {"pollBufferMs", w.pollBufferMs},
               {"mmcssTask", mmcssTaskId(w.mmcssTask)},
               {"mmcssPriority", mmcssPriorityId(w.mmcssPriority)}};
@@ -333,6 +373,8 @@ static void readWasapi(const json& o, WasapiSettings& w) {
     if (w.dsdOutput == DsdOutput::Native) w.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
     w.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     w.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    w.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
+    w.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     w.pollBufferMs = num(o, "pollBufferMs", 200.0, 20.0, 2000.0);
     w.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
     w.mmcssPriority = mmcssPriorityFromId(str(o, "mmcssPriority", ""));
@@ -346,7 +388,9 @@ static json asioJson(const AsioSettings& a) {
               {"outRight", a.outRight},
               {"dsdOutput", dsdOutputId(a.dsdOutput)},
               {"dsdPcmRate", a.dsdPcmRate},
-              {"fixedRate", a.fixedRate}};
+              {"fixedRate", a.fixedRate},
+              {"maxSampleRate", a.maxSampleRate},
+              {"maxDsdRate", a.maxDsdRate}};
     j.update(timingJson(a.timing));
     return j;
 }
@@ -359,6 +403,8 @@ static void readAsio(const json& o, AsioSettings& a) {
     a.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Native);
     a.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     a.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    a.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
+    a.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     readTiming(o, a.timing);
 }
 
@@ -372,6 +418,8 @@ static json ksJson(const KsSettings& k) {
               {"dsdOutput", dsdOutputId(k.dsdOutput)},
               {"dsdPcmRate", k.dsdPcmRate},
               {"fixedRate", k.fixedRate},
+              {"maxSampleRate", k.maxSampleRate},
+              {"maxDsdRate", k.maxDsdRate},
               {"mmcssTask", mmcssTaskId(k.mmcssTask)},
               {"mmcssPriority", mmcssPriorityId(k.mmcssPriority)}};
     j.update(timingJson(k.timing));
@@ -389,17 +437,16 @@ static void readKs(const json& o, KsSettings& k) {
     if (k.dsdOutput == DsdOutput::Native) k.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
     k.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     k.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    k.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
+    k.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     k.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
     k.mmcssPriority = mmcssPriorityFromId(str(o, "mmcssPriority", ""));
     readTiming(o, k.timing);
 }
 
 static json networkJson(const NetworkSettings& n) {
-    json j = {{"player", n.udn},
-              {"maxSampleRate", n.maxSampleRate},
-              {"maxBits", n.maxBits},
-              {"dsdOutput", dsdOutputId(n.dsdOutput)},
-              {"dsdPcmRate", n.dsdPcmRate},
+    json j = {{"player", n.udn},      {"maxSampleRate", n.maxSampleRate},      {"maxDsdRate", n.maxDsdRate},
+              {"maxBits", n.maxBits}, {"dsdOutput", dsdOutputId(n.dsdOutput)}, {"dsdPcmRate", n.dsdPcmRate},
               {"gapless", n.gapless}};
     j.update(timingJson(n.timing));
     return j;
@@ -408,6 +455,7 @@ static json networkJson(const NetworkSettings& n) {
 static void readNetwork(const json& o, NetworkSettings& n) {
     n.udn = str(o, "player", "");
     n.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
+    n.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     n.maxBits = integer(o, "maxBits", 0, 0, 16) == 16 ? 16 : 0;
     n.dsdOutput = str(o, "dsdOutput", "") == dsdOutputId(DsdOutput::Pcm) ? DsdOutput::Pcm : DsdOutput::Native;
     n.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));

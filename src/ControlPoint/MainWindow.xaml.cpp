@@ -229,6 +229,25 @@ uint32_t dsdRateAt(int index) {
     return kDsdPcmRates[std::clamp<size_t>(size_t(index), 0, std::size(kDsdPcmRates) - 1)];
 }
 
+const wchar_t* bypassTip(const camel::audio::OutputPlan& plan) {
+    return plan.remodulate ? L"Badge_DspBypassedRemodulatedTip" : L"Badge_DspBypassedTip";
+}
+
+std::vector<hstring> maxDsdItems(hstring follow) {
+    std::vector<hstring> items{std::move(follow)};
+    for (uint32_t rate : kMaxDsdRates) items.emplace_back(L"DSD" + to_hstring(rate));
+    return items;
+}
+
+int maxDsdIndex(uint32_t rate) {
+    const auto at = std::find(std::begin(kMaxDsdRates), std::end(kMaxDsdRates), rate);
+    return at == std::end(kMaxDsdRates) ? 0 : int(at - std::begin(kMaxDsdRates)) + 1;
+}
+
+uint32_t maxDsdAt(int index) {
+    return index > 0 && size_t(index) <= std::size(kMaxDsdRates) ? kMaxDsdRates[size_t(index) - 1] : 0;
+}
+
 void showTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, const PlaybackTiming& t) {
     predecode.Value(t.predecodeSeconds);
     silence.Value(t.formatChangeSilenceMs);
@@ -592,6 +611,11 @@ void MainWindow::populateSettings() {
     const auto dsdRates = dsdRateItems();
     fill(WasapiDsdCombo(), dopOrPcm, settings_.wasapi.dsdOutput == DsdOutput::Pcm ? 1 : 0);
     fill(WasapiDsdRateCombo(), dsdRates, dsdRateIndex(settings_.wasapi.dsdPcmRate));
+    auto deviceLimits = rates;
+    deviceLimits.front() = tr(L"Limit_FollowDevice");
+    const auto deviceDsdLimits = maxDsdItems(tr(L"Limit_FollowDevice"));
+    fill(WasapiMaxRateCombo(), deviceLimits, rateIndex(settings_.wasapi.maxSampleRate));
+    fill(WasapiMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(settings_.wasapi.maxDsdRate));
     WasapiPollBufferBox().Value(settings_.wasapi.pollBufferMs);
     fill(WasapiMmcssTaskCombo(), tasks, int(settings_.wasapi.mmcssTask));
     fill(WasapiMmcssPriorityCombo(), priorities, int(settings_.wasapi.mmcssPriority));
@@ -603,6 +627,8 @@ void MainWindow::populateSettings() {
     fill(AsioRateCombo(), rates, rateIndex(settings_.asio.fixedRate));
     fill(AsioDsdCombo(), {tr(L"Dsd_Native"), tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")}, int(settings_.asio.dsdOutput));
     fill(AsioDsdRateCombo(), dsdRates, dsdRateIndex(settings_.asio.dsdPcmRate));
+    fill(AsioMaxRateCombo(), deviceLimits, rateIndex(settings_.asio.maxSampleRate));
+    fill(AsioMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(settings_.asio.maxDsdRate));
     showTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")},
@@ -614,6 +640,8 @@ void MainWindow::populateSettings() {
     fill(KsRateCombo(), rates, rateIndex(settings_.ks.fixedRate));
     fill(KsDsdCombo(), dopOrPcm, settings_.ks.dsdOutput == DsdOutput::Pcm ? 1 : 0);
     fill(KsDsdRateCombo(), dsdRates, dsdRateIndex(settings_.ks.dsdPcmRate));
+    fill(KsMaxRateCombo(), deviceLimits, rateIndex(settings_.ks.maxSampleRate));
+    fill(KsMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(settings_.ks.maxDsdRate));
     fill(KsMmcssTaskCombo(), tasks, int(settings_.ks.mmcssTask));
     fill(KsMmcssPriorityCombo(), priorities, int(settings_.ks.mmcssPriority));
     showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
@@ -624,6 +652,7 @@ void MainWindow::populateSettings() {
     fill(NetworkBitsCombo(), {tr(L"Limit_FollowPlayer"), L"16"}, settings_.network.maxBits ? 1 : 0);
     fill(NetworkDsdCombo(), {tr(L"Dsd_Dsf"), tr(L"Dsd_Pcm")}, settings_.network.dsdOutput == DsdOutput::Pcm ? 1 : 0);
     fill(NetworkDsdRateCombo(), dsdRates, dsdRateIndex(settings_.network.dsdPcmRate));
+    fill(NetworkMaxDsdCombo(), maxDsdItems(tr(L"Limit_FollowPlayer")), maxDsdIndex(settings_.network.maxDsdRate));
     NetworkGaplessSwitch().IsOn(settings_.network.gapless);
     showTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
 
@@ -990,6 +1019,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.wasapi.fixedRate = rateAt(idx(WasapiRateCombo()));
     settings_.wasapi.dsdOutput = idx(WasapiDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
     settings_.wasapi.dsdPcmRate = dsdRateAt(idx(WasapiDsdRateCombo()));
+    settings_.wasapi.maxSampleRate = rateAt(idx(WasapiMaxRateCombo()));
+    settings_.wasapi.maxDsdRate = maxDsdAt(idx(WasapiMaxDsdCombo()));
     settings_.wasapi.pollBufferMs = std::clamp(numberOr(WasapiPollBufferBox(), settings_.wasapi.pollBufferMs), 20.0, 2000.0);
     settings_.wasapi.mmcssTask = MmcssTask(std::min(idx(WasapiMmcssTaskCombo()), 2));
     settings_.wasapi.mmcssPriority = MmcssPriority(std::min(idx(WasapiMmcssPriorityCombo()), 2));
@@ -1001,6 +1032,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.asio.fixedRate = rateAt(idx(AsioRateCombo()));
     settings_.asio.dsdOutput = DsdOutput(std::min(idx(AsioDsdCombo()), 2));
     settings_.asio.dsdPcmRate = dsdRateAt(idx(AsioDsdRateCombo()));
+    settings_.asio.maxSampleRate = rateAt(idx(AsioMaxRateCombo()));
+    settings_.asio.maxDsdRate = maxDsdAt(idx(AsioMaxDsdCombo()));
     readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
 
     settings_.ks.mode = KsMode(std::min(idx(KsModeCombo()), 3));
@@ -1011,6 +1044,8 @@ void MainWindow::readSettingsFromUi() {
     settings_.ks.fixedRate = rateAt(idx(KsRateCombo()));
     settings_.ks.dsdOutput = idx(KsDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
     settings_.ks.dsdPcmRate = dsdRateAt(idx(KsDsdRateCombo()));
+    settings_.ks.maxSampleRate = rateAt(idx(KsMaxRateCombo()));
+    settings_.ks.maxDsdRate = maxDsdAt(idx(KsMaxDsdCombo()));
     settings_.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
     settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
@@ -1019,6 +1054,7 @@ void MainWindow::readSettingsFromUi() {
     settings_.network.maxBits = idx(NetworkBitsCombo()) == 1 ? 16 : 0;
     settings_.network.dsdOutput = idx(NetworkDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
     settings_.network.dsdPcmRate = dsdRateAt(idx(NetworkDsdRateCombo()));
+    settings_.network.maxDsdRate = maxDsdAt(idx(NetworkMaxDsdCombo()));
     settings_.network.gapless = NetworkGaplessSwitch().IsOn();
     readTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
@@ -1075,6 +1111,8 @@ void MainWindow::updateBackendGroups() {
     NetworkGroup().Visibility(settings_.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
     WasapiPeriodBox().IsEnabled(settings_.wasapi.period == WasapiPeriod::Custom);
     WasapiRateCombo().IsEnabled(!settings_.wasapi.shared); // the mixer sets the rate in shared mode
+    WasapiMaxRateCombo().IsEnabled(!settings_.wasapi.shared);
+    WasapiMaxDsdCombo().IsEnabled(!settings_.wasapi.shared);
     WasapiPollBufferBox().IsEnabled(!settings_.wasapi.eventDriven);
 }
 
@@ -1343,7 +1381,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                                                                          : Visibility::Collapsed);
         BypassText().Text((plan.dsd == DsdPath::Dop ? hstring(L"DoP") : hstring(L"DSD")) + L" · " +
                           tr(L"SignalPath_DspBypassed"));
-        setBadgeTip(BypassBadge(), BypassText().Text(), tr(L"Badge_DspBypassedTip"));
+        setBadgeTip(BypassBadge(), BypassText().Text(), tr(bypassTip(plan)));
         const hstring source = ui::utf8(s.format ? formatName(*s.format) : "") +
                                (plan.dsd != DsdPath::None ? L""
                                 : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
@@ -1375,6 +1413,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);
         if (plan.downmix) add(tr(L"SignalPath_Downmix"), to_hstring(s.source->channels) + L"→2 ch", PathState::Processed);
         if (plan.dsd == DsdPath::Pcm) add(tr(L"SignalPath_DsdToPcm"), L"352.8 kHz", PathState::Processed);
+        if (plan.remodulate) {
+            const uint32_t outBytes = plan.dsd == DsdPath::Dop ? s.output->sampleRate * 2 : s.output->sampleRate;
+            swprintf_s(text, L"DSD%u → DSD%u", s.source->sampleRate * 8 / 44100, outBytes * 8 / 44100);
+            add(tr(L"SignalPath_DsdRemodulate"), text, PathState::Processed);
+        }
         if (plan.resample) {
             // The decimator always produces 352.8 kHz; soxr then takes it to the output rate.
             const double from = plan.dsd == DsdPath::Pcm ? 352.8 : s.source->sampleRate / 1000.0;
@@ -1410,10 +1453,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const hstring deviceDepth = to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
         const uint32_t container = bytesPerSample(s.output->type) * 8;
         stage = PathStage::Output;
+        const PathState rawState = plan.remodulate ? PathState::Processed : PathState::BitPerfect;
         if (plan.dsd == DsdPath::Dop)
-            add(L"DoP", tr(L"SignalPath_DspBypassed"), PathState::BitPerfect);
+            add(L"DoP", tr(L"SignalPath_DspBypassed"), rawState);
         else if (plan.dsd == DsdPath::Native)
-            add(tr(L"SignalPath_NativeDsd"), tr(L"SignalPath_DspBypassed"), PathState::BitPerfect);
+            add(tr(L"SignalPath_NativeDsd"), tr(L"SignalPath_DspBypassed"), rawState);
         else if (plan.widen)
             add(tr(L"SignalPath_Float"), L"float32",
                 processed || plan.dsd == DsdPath::Pcm ? PathState::Processed : PathState::Lossless);
@@ -1455,7 +1499,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     DspButtonText().Foreground(themeBrush(dspColor_));
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch, with why the change into
     // the track did not crossfade.
-    std::wstring note = BypassBadge().Visibility() == Visibility::Visible ? std::wstring(tr(L"Badge_DspBypassedTip")) : L"";
+    std::wstring note = BypassBadge().Visibility() == Visibility::Visible && s.plan ? std::wstring(tr(bypassTip(*s.plan))) : L"";
     if (const auto skip = s.plan ? s.plan->fadeSkip : camel::audio::FadeSkip::None; skip != camel::audio::FadeSkip::None) {
         const hstring reason = tr(skip == camel::audio::FadeSkip::RawDsd   ? L"Crossfade_SkipRawDsd"
                                   : skip == camel::audio::FadeSkip::Format ? L"Crossfade_SkipFormat"

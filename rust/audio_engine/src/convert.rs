@@ -8,13 +8,15 @@
 //! duplicated to both channels bit for bit. A float-only device gets integer samples widened exactly (at most 24
 //! bits). Everything else — resampling, ITU-R BS.775 downmix, bit reduction and the decoded output of lossy sources —
 //! is processed in 64-bit float and quantized once at the end with TPDF dither. Raw DSD reaches a native DSD or DoP
-//! stream bit for bit (mono duplicated). DSD becomes PCM only with explicit permission: it is decimated to
+//! stream bit for bit (mono duplicated), or with the same permission as DSD to PCM at a lower DSD rate, modulated
+//! again (crate::dsd_remod). DSD becomes PCM only with explicit permission: it is decimated to
 //! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once. While the DSP chain changes
 //! the signal, every PCM path runs in float through it and is quantized once at the device depth; raw DSD bypasses it.
 
 use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32};
 use crate::dsd::{put_dop_sample, DOP_MARKERS, DSD_SILENCE};
 use crate::dsd2pcm::{DsdDecimator, PCM_RATE};
+use crate::dsd_remod::DsdRemodulator;
 use crate::dsp::Dsp;
 use crate::packing::pack_pcm;
 use crate::resample::Resampler;
@@ -59,6 +61,8 @@ pub(crate) struct Converter {
     /// DoP: a byte frame waiting for the one that completes its DoP frame.
     carry: Vec<u8>,
     decimator: Option<DsdDecimator>,
+    /// Raw DSD to a lower DSD rate.
+    remodulator: Option<DsdRemodulator>,
     in_rate: u32,
     out_rate: u32,
     scratch: Scratch,
@@ -124,7 +128,7 @@ impl Tpdf {
 
 impl Converter {
     /// `allow` is the "convert when unsupported" setting; a lossy source may still be quantized to its configured
-    /// depth without it. `allow_dsd` permits DSD to PCM; downmixing DSD also needs `allow`.
+    /// depth without it. `allow_dsd` permits DSD to PCM and DSD to a lower DSD rate; downmixing DSD also needs `allow`.
     pub(crate) fn new(
         info: &CamelSourceInfoV1,
         out: &AudioFormat,
@@ -188,6 +192,7 @@ impl Converter {
                     .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
                 carry: Vec::new(),
                 decimator: Some(decimator),
+                remodulator: None,
                 in_rate: info.sample_rate,
                 out_rate,
                 scratch: Scratch::default(),
@@ -195,16 +200,26 @@ impl Converter {
         }
         if in_dsd || out.stream_kind != AUDIO_PCM {
             // DSD to PCM is a separate, explicitly enabled path (docs/Plan.md §5.8).
-            let rate_matches = match out.stream_kind {
-                AUDIO_DSD => u64::from(info.sample_rate) * 8 == u64::from(out_rate),
-                AUDIO_DOP => u64::from(info.sample_rate) == 2 * u64::from(out_rate),
-                _ => false,
+            let out_byte_rate = match out.stream_kind {
+                AUDIO_DSD if out_rate.is_multiple_of(8) => out_rate / 8,
+                AUDIO_DOP => out_rate.saturating_mul(2),
+                _ => 0,
             };
             let channels_kept =
                 in_channels == out_channels || (in_channels == 1 && out_channels == 2);
-            if !in_dsd || !rate_matches || !channels_kept {
+            if !in_dsd || out_byte_rate == 0 || !channels_kept {
                 return Err(ENGINE_E_UNSUPPORTED_FORMAT);
             }
+            let remodulator = if out_byte_rate == info.sample_rate {
+                None
+            } else if allow_dsd {
+                Some(
+                    DsdRemodulator::new(info.sample_rate, out_byte_rate, in_channels)
+                        .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+                )
+            } else {
+                return Err(ENGINE_E_UNSUPPORTED_FORMAT);
+            };
             return Ok(Self {
                 mode: if out.stream_kind == AUDIO_DSD {
                     Mode::Dsd
@@ -229,6 +244,7 @@ impl Converter {
                     .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
                 carry: Vec::new(),
                 decimator: None,
+                remodulator,
                 in_rate: info.sample_rate,
                 out_rate,
                 scratch: Scratch::default(),
@@ -298,6 +314,7 @@ impl Converter {
             bytes_per_frame,
             carry: Vec::new(),
             decimator: None,
+            remodulator: None,
             in_rate: info.sample_rate,
             out_rate,
             scratch: Scratch::default(),
@@ -311,10 +328,22 @@ impl Converter {
                 u128::from(output_frames) * u128::from(self.in_rate) / u128::from(self.out_rate);
             return (frames as u64).max(1);
         }
+        let raw = if self.mode == Mode::Dop {
+            output_frames * 2
+        } else {
+            output_frames
+        };
         match &self.resampler {
             Some(r) => ((output_frames as f64 / r.ratio()).floor() as u64).max(1),
-            None if self.mode == Mode::Dop => output_frames * 2,
-            None => output_frames,
+            None if self.remodulator.is_some() => {
+                let out_byte_rate = if self.mode == Mode::Dop {
+                    self.out_rate * 2
+                } else {
+                    self.out_rate / 8
+                };
+                raw * u64::from(self.in_rate / out_byte_rate)
+            }
+            None => raw,
         }
     }
 
@@ -357,27 +386,16 @@ impl Converter {
                 self.scratch.words = stereo;
                 result
             }
-            Mode::Dsd => {
-                for frame in input.chunks_exact(self.in_channels) {
-                    for c in 0..self.out_channels {
-                        self.pending.push(frame[c.min(self.in_channels - 1)] as u8);
-                    }
-                }
-                self.pending_frames += frames as u64;
-                Ok(())
-            }
-            Mode::Dop => {
-                for frame in input.chunks_exact(self.in_channels) {
-                    let mut bytes = [0u8; MAX_DSD_CHANNELS];
-                    for (c, byte) in bytes[..self.out_channels].iter_mut().enumerate() {
-                        *byte = frame[c.min(self.in_channels - 1)] as u8;
-                    }
-                    if self.carry.is_empty() {
-                        self.carry.extend_from_slice(&bytes[..self.out_channels]);
-                    } else {
-                        self.push_dop(&bytes[..self.out_channels]);
-                    }
-                }
+            Mode::Dsd | Mode::Dop => {
+                let Some(remodulator) = self.remodulator.as_mut() else {
+                    self.push_raw(input);
+                    return Ok(());
+                };
+                let mut words = std::mem::take(&mut self.scratch.words);
+                words.clear();
+                remodulator.process(input, frames, &mut words);
+                self.push_raw(&words);
+                self.scratch.words = words;
                 Ok(())
             }
             _ => {
@@ -626,6 +644,24 @@ impl Converter {
         result
     }
 
+    // DSD byte frames of the source's channels to the pending native DSD or DoP output.
+    fn push_raw(&mut self, input: &[i32]) {
+        for frame in input.chunks_exact(self.in_channels) {
+            let mut bytes = [0u8; MAX_DSD_CHANNELS];
+            for (c, byte) in bytes[..self.out_channels].iter_mut().enumerate() {
+                *byte = frame[c.min(self.in_channels - 1)] as u8;
+            }
+            if self.mode == Mode::Dsd {
+                self.pending.extend_from_slice(&bytes[..self.out_channels]);
+                self.pending_frames += 1;
+            } else if self.carry.is_empty() {
+                self.carry.extend_from_slice(&bytes[..self.out_channels]);
+            } else {
+                self.push_dop(&bytes[..self.out_channels]);
+            }
+        }
+    }
+
     // One DoP frame from the carried byte frame and `second`. Render stamps the real markers.
     fn push_dop(&mut self, second: &[u8]) {
         let bytes_per_sample = self.bytes_per_frame / self.out_channels;
@@ -664,6 +700,9 @@ impl Converter {
         let out_channels = self.out_channels.max(2);
         self.pending.reserve_exact(output * self.bytes_per_frame);
         self.carry.reserve_exact(out_channels);
+        if let Some(remodulator) = self.remodulator.as_mut() {
+            remodulator.reserve(block);
+        }
         let scratch = &mut self.scratch;
         scratch.words.reserve_exact(output * out_channels);
         scratch
@@ -675,7 +714,7 @@ impl Converter {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{Converter, Dsp, Mode};
     use crate::decoder_host::{
         CamelSourceInfoV1, SAMPLE_ENCODING_FLOAT32, SAMPLE_ENCODING_INTEGER,
@@ -989,7 +1028,7 @@ mod tests {
     }
 
     // |X[k]|^2 of a power-of-two length block.
-    fn power_spectrum(x: &[f64]) -> Vec<f64> {
+    pub(crate) fn power_spectrum(x: &[f64]) -> Vec<f64> {
         let n = x.len();
         let bits = n.trailing_zeros();
         let mut re: Vec<f64> = (0..n)

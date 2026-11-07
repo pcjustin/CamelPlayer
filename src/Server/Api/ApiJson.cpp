@@ -240,6 +240,7 @@ json toJson(const OutputPlan& p) {
             {"widen", p.widen},
             {"reduce", p.reduce},
             {"dsd", nameOf(p.dsd, kDsdPaths)},
+            {"remodulate", p.remodulate},
             {"shared", p.shared},
             {"dsp", dspJson(p.dsp)},
             {"gainDb", p.gainDb},
@@ -259,6 +260,7 @@ OutputPlan planFrom(const json& j) {
     p.widen = value<bool>(j, "widen");
     p.reduce = value<bool>(j, "reduce");
     p.dsd = enumFrom(field(j, "dsd"), kDsdPaths, "DSD path");
+    p.remodulate = value<bool>(j, "remodulate");
     p.shared = value<bool>(j, "shared");
     for (const auto& node : array(j, "dsp")) p.dsp.push_back(enumFrom(node, kDspNodes, "DSP node"));
     p.gainDb = value<double>(j, "gainDb");

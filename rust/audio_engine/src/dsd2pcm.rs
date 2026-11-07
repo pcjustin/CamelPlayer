@@ -18,7 +18,7 @@ pub(crate) const STOPBAND_DB: f64 = 120.0;
 // Kaiser's length estimate is approximate; designing for more keeps every stage clear of STOPBAND_DB.
 const DESIGN_DB: f64 = STOPBAND_DB + 10.0;
 
-fn bessel_i0(x: f64) -> f64 {
+pub(crate) fn bessel_i0(x: f64) -> f64 {
     let mut sum = 1.0;
     let mut term = 1.0;
     for k in 1..64 {
@@ -70,16 +70,44 @@ pub(crate) fn response(taps: &[f64], frequency: f64) -> f64 {
     (re * re + im * im).sqrt()
 }
 
+/// The newest `length` values, kept twice over so they are always one slice, oldest first.
+pub(crate) struct Ring<T> {
+    values: Vec<T>,
+    at: usize,
+}
+
+impl<T: Copy> Ring<T> {
+    pub(crate) fn new(length: usize, fill: T) -> Self {
+        Self {
+            values: vec![fill; 2 * length],
+            at: 0,
+        }
+    }
+
+    /// Takes `value` as the newest and returns the window, oldest first.
+    #[inline]
+    pub(crate) fn push(&mut self, value: T) -> &[T] {
+        let length = self.values.len() / 2;
+        self.values[self.at] = value;
+        self.values[self.at + length] = value;
+        self.at += 1;
+        if self.at == length {
+            self.at = 0;
+        }
+        &self.values[self.at..self.at + length]
+    }
+}
+
 struct HalfStage {
     taps: Vec<f64>,
-    history: Vec<Vec<f64>>, // per channel, oldest first
+    history: Vec<Ring<f64>>, // per channel
     odd: bool,
 }
 
 pub(crate) struct DsdDecimator {
     channels: usize,
     tables: Vec<[f64; 256]>, // stage 1, one table per byte of the filter span, oldest byte first
-    bytes: Vec<Vec<u8>>,     // per channel, the bytes under the stage-1 filter, oldest first
+    bytes: Vec<Ring<u8>>,    // per channel, the bytes under the stage-1 filter
     halves: Vec<HalfStage>,
     frame: Vec<f64>,
 }
@@ -122,7 +150,7 @@ impl DsdDecimator {
                 let taps = design_lowpass(rate, rate / 2.0, 1);
                 rate /= 2.0;
                 HalfStage {
-                    history: vec![vec![0.0; taps.len()]; channels],
+                    history: (0..channels).map(|_| Ring::new(taps.len(), 0.0)).collect(),
                     taps,
                     odd: false,
                 }
@@ -132,7 +160,9 @@ impl DsdDecimator {
             channels,
             tables,
             // Idle pattern before the first byte, so the stream starts from silence.
-            bytes: vec![vec![crate::dsd::DSD_SILENCE; span]; channels],
+            bytes: (0..channels)
+                .map(|_| Ring::new(span, crate::dsd::DSD_SILENCE))
+                .collect(),
             halves,
             frame: vec![0.0; channels],
         })
@@ -143,13 +173,11 @@ impl DsdDecimator {
     pub(crate) fn process(&mut self, input: &[i32], frames: usize, output: &mut Vec<f64>) {
         for frame in input[..frames * self.channels].chunks_exact(self.channels) {
             for (c, &byte) in frame.iter().enumerate() {
-                let bytes = &mut self.bytes[c];
-                bytes.copy_within(1.., 0);
-                *bytes.last_mut().expect("the filter spans bytes") = byte as u8;
+                let bytes = self.bytes[c].push(byte as u8);
                 self.frame[c] = self
                     .tables
                     .iter()
-                    .zip(bytes.iter())
+                    .zip(bytes)
                     .map(|(table, &b)| table[usize::from(b)])
                     .sum();
             }
@@ -159,22 +187,38 @@ impl DsdDecimator {
         }
     }
 
-    // Runs `frame` through the 2x stages; true when the last one produced an output frame.
+    // Runs `frame` through the 2x stages; true when the last one produced an output frame. A stage filters only the
+    // inputs whose output it keeps.
     fn halve(&mut self) -> bool {
         for stage in &mut self.halves {
-            for (c, value) in self.frame.iter_mut().enumerate() {
-                let history = &mut stage.history[c];
-                history.copy_within(1.., 0);
-                *history.last_mut().expect("stages have taps") = *value;
-                *value = history.iter().zip(&stage.taps).map(|(x, h)| x * h).sum();
-            }
             stage.odd = !stage.odd;
+            for (value, history) in self.frame.iter_mut().zip(&mut stage.history) {
+                let window = history.push(*value);
+                if !stage.odd {
+                    *value = dot(window, &stage.taps);
+                }
+            }
             if stage.odd {
                 return false;
             }
         }
         true
     }
+}
+
+/// The dot product of two slices of equal length, in four running sums so the additions overlap.
+#[inline]
+pub(crate) fn dot(a: &[f64], b: &[f64]) -> f64 {
+    let (a4, a_rest) = a.as_chunks::<4>();
+    let (b4, b_rest) = b.as_chunks::<4>();
+    let mut sums = [0.0; 4];
+    for (x, y) in a4.iter().zip(b4) {
+        for i in 0..4 {
+            sums[i] += x[i] * y[i];
+        }
+    }
+    let tail: f64 = a_rest.iter().zip(b_rest).map(|(x, y)| x * y).sum();
+    (sums[0] + sums[1]) + (sums[2] + sums[3]) + tail
 }
 
 #[cfg(test)]

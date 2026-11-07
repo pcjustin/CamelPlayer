@@ -188,6 +188,7 @@
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
   <data name="Badge_Lossy.Text" xml:space="preserve"><value>有損來源</value></data>
   <data name="Badge_DspBypassedTip" xml:space="preserve"><value>原始 DSD 不經修改送往裝置；音量、ReplayGain 等所有 PCM 處理都已略過。</value></data>
+  <data name="Badge_DspBypassedRemodulatedTip" xml:space="preserve"><value>DSD 重新調變成較低的 DSD 取樣率後送往裝置；音量、ReplayGain 等所有 PCM 處理都已略過。</value></data>
   <data name="Library_SortCombo.AutomationProperties.Name" xml:space="preserve"><value>排序方式</value></data>
   <data name="Player_Position.AutomationProperties.Name" xml:space="preserve"><value>播放位置</value></data>
   <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>開啟播放中的專輯</value></data>
@@ -698,7 +699,12 @@
   <data name="SignalPath_Renderer" xml:space="preserve"><value>網路播放器</value></data>
   <data name="Lamp_BitPerfectRenderer" xml:space="preserve"><value>Bit-perfect 送達播放器</value></data>
   <data name="Settings_NetworkGroup.Text" xml:space="preserve"><value>網路播放器</value></data>
-  <data name="Settings_NetworkRate.Header" xml:space="preserve"><value>最高取樣率</value></data>
+  <data name="Settings_MaxPcmRate.Header" xml:space="preserve"><value>最高 PCM 取樣率</value></data>
+  <data name="Settings_MaxPcmRate.Description" xml:space="preserve"><value>超過時轉成同家族中較低的取樣率（顯示為已處理）。</value></data>
+  <data name="Settings_MaxDsdRate.Header" xml:space="preserve"><value>最高 DSD 取樣率</value></data>
+  <data name="Settings_MaxDsdRate.Description" xml:space="preserve"><value>超過時重新調變成這個取樣率（顯示為已處理）。</value></data>
+  <data name="Limit_FollowDevice" xml:space="preserve"><value>跟隨設備</value></data>
+  <data name="SignalPath_DsdRemodulate" xml:space="preserve"><value>DSD 重新調變</value></data>
   <data name="Settings_NetworkBits.Header" xml:space="preserve"><value>最高位元深度</value></data>
   <data name="Limit_FollowPlayer" xml:space="preserve"><value>跟隨播放器</value></data>
   <data name="Dsd_Dsf" xml:space="preserve"><value>DSF（播放器宣告支援 DSD 時）</value></data>

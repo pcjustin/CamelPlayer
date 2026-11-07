@@ -232,6 +232,8 @@
                                     <ComboBox x:Name="WasapiRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiMaxRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiMaxDsdCombo" x:Uid="Settings_MaxDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
                                         <StackPanel Spacing="12">
                                             <ComboBox x:Name="WasapiPeriodCombo" x:Uid="Settings_Period" Width="360" SelectionChanged="OnSettingChanged" />
@@ -263,6 +265,8 @@
                                     <ComboBox x:Name="AsioRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioMaxRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioMaxDsdCombo" x:Uid="Settings_MaxDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
                                         <StackPanel Spacing="12">
                                             <NumberBox x:Name="AsioBufferBox" x:Uid="Settings_AsioBuffer" Width="200" HorizontalAlignment="Left" Minimum="0" Maximum="65536"
@@ -284,6 +288,8 @@
                                     <ComboBox x:Name="KsRateCombo" x:Uid="Settings_FixedRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsMaxRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsMaxDsdCombo" x:Uid="Settings_MaxDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
                                         <StackPanel Spacing="12">
                                             <NumberBox x:Name="KsBufferBox" x:Uid="Settings_KsBuffer" Width="200" HorizontalAlignment="Left" Minimum="2" Maximum="1000"
@@ -309,10 +315,11 @@
 
                                 <StackPanel x:Name="NetworkGroup" Spacing="12">
                                     <TextBlock x:Uid="Settings_NetworkGroup" Style="{StaticResource GroupHeaderStyle}" />
-                                    <ComboBox x:Name="NetworkRateCombo" x:Uid="Settings_NetworkRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkBitsCombo" x:Uid="Settings_NetworkBits" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkMaxDsdCombo" x:Uid="Settings_MaxDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ToggleSwitch x:Name="NetworkGaplessSwitch" x:Uid="Settings_NetworkGapless" Toggled="OnNetworkGaplessToggled" />
                                     <TextBlock x:Uid="Settings_NetworkGaplessNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     <Expander x:Uid="Settings_Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">

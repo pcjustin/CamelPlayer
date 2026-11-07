@@ -8,6 +8,8 @@
 #include <random>
 #include <thread>
 
+#include <nlohmann/json.hpp>
+
 #include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/FormatRule.h"
 #include "Engine/SamplePacker.h"
@@ -18,7 +20,7 @@ using namespace camel;
 using namespace camel::audio;
 
 TEST(SamplePacker, RoundTripEveryLayoutAndDepth) {
-    std::mt19937 rng(1);
+    std::mt19937 rng(std::random_device{}()); // any samples round-trip
     for (SampleType t : {SampleType::Int16, SampleType::Int24, SampleType::Int24In32, SampleType::Int32}) {
         for (uint32_t bits : {16u, 24u}) {
             if (!canCarryBitPerfect(t, bits)) continue;
@@ -110,6 +112,37 @@ TEST(FormatRule, ConversionFollowsTheRateOrder) {
     EXPECT_EQ(plan->state, PipelineState::Processed);
 }
 
+// An output's highest PCM rate (docs/Plan.md §6): above it, the highest rate of the source's family at or below it,
+// resampled without "convert when unsupported".
+TEST(FormatRule, AHighestRateTakesTheTopRateOfTheSourcesFamily) {
+    EXPECT_EQ(limitedRate(352800, 192000), 176400u);
+    EXPECT_EQ(limitedRate(705600, 192000), 176400u);
+    EXPECT_EQ(limitedRate(384000, 192000), 192000u);
+    EXPECT_EQ(limitedRate(768000, 192000), 192000u);
+    EXPECT_EQ(limitedRate(192000, 176400), 96000u);
+    EXPECT_EQ(limitedRate(96000, 44100), 44100u); // no 48 kHz rate fits
+    EXPECT_EQ(limitedRate(96000, 192000), 96000u);
+    EXPECT_EQ(limitedRate(352800, 0), 352800u);
+
+    const auto upTo = [](uint32_t highest) {
+        return [highest](const DeviceFormat& f) { return f.type == SampleType::Int24 && f.sampleRate <= highest; };
+    };
+    const auto plan = negotiateOutput(SourceInfo{352800, 2, 24}, false, std::nullopt, false, upTo(192000), 0, 192000);
+    ASSERT_TRUE(plan);
+    EXPECT_EQ(plan->format, (DeviceFormat{176400, 2, SampleType::Int24}));
+    EXPECT_TRUE(plan->resample);
+    EXPECT_EQ(plan->state, PipelineState::Processed);
+    // Below the limit nothing changes; a device refusing the family's rate needs "convert when unsupported".
+    const auto under = negotiateOutput(SourceInfo{96000, 2, 24}, false, std::nullopt, false, upTo(192000), 0, 192000);
+    ASSERT_TRUE(under);
+    EXPECT_EQ(under->state, PipelineState::BitPerfect);
+    const auto only192 = [](const DeviceFormat& f) { return f.type == SampleType::Int24 && f.sampleRate == 192000; };
+    EXPECT_FALSE(negotiateOutput(SourceInfo{352800, 2, 24}, false, std::nullopt, false, only192, 0, 192000));
+    const auto other = negotiateOutput(SourceInfo{352800, 2, 24}, false, std::nullopt, true, only192, 0, 192000);
+    ASSERT_TRUE(other);
+    EXPECT_EQ(other->format.sampleRate, 192000u);
+}
+
 TEST(FormatRule, DownmixAndBitReductionNeedConversion) {
     auto anyRate = [](std::initializer_list<SampleType> list) {
         std::vector<SampleType> types(list);
@@ -149,6 +182,12 @@ TEST(Settings, JsonRoundTrip) {
     s.asio.bufferSize = 512;
     s.ks.mode = KsMode::Standard;
     s.ks.packetCount = 6;
+    s.wasapi.maxSampleRate = 192000;
+    s.wasapi.maxDsdRate = 64;
+    s.asio.maxDsdRate = 128;
+    s.ks.maxSampleRate = 96000;
+    s.network.maxSampleRate = 384000;
+    s.network.maxDsdRate = 256;
     s.lastFile = L"D:\\音樂\\測試.flac";
     Settings t = fromJson(toJson(s));
     EXPECT_EQ(t.backend, Backend::Ks);
@@ -156,7 +195,15 @@ TEST(Settings, JsonRoundTrip) {
     EXPECT_EQ(t.wasapi, s.wasapi);
     EXPECT_EQ(t.asio, s.asio);
     EXPECT_EQ(t.ks, s.ks);
+    EXPECT_EQ(t.network, s.network);
     EXPECT_EQ(t.lastFile, s.lastFile);
+    // Only the listed rates are kept; anything else follows the device.
+    auto odd = nlohmann::json::parse(toJson(s));
+    odd["wasapi"]["maxSampleRate"] = 100000;
+    odd["wasapi"]["maxDsdRate"] = 512;
+    const Settings u = fromJson(odd.dump());
+    EXPECT_EQ(u.wasapi.maxSampleRate, 0u);
+    EXPECT_EQ(u.wasapi.maxDsdRate, 0u);
 }
 
 TEST(Settings, CorruptFileFallsBackToDefaults) {

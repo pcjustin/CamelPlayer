@@ -6,6 +6,7 @@
 // bit for bit, with format-correct silence and continuous DoP markers; carrier rates are never assumed.
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cmath>
 #include <fstream>
 #include <functional>
@@ -312,4 +313,76 @@ TEST(DsdToPcm, KeepsTheLevelAtEveryConfiguredRate) {
         const double level = 20 * std::log10(amplitudeAt(samples, rate, 1000) / 0.5);
         EXPECT_NEAR(level, 0.0, 0.02) << rate;
     }
+}
+
+// An output's highest DSD rate (docs/Plan.md §6): DSD above it is modulated again at that rate, raw DSD still, shown as
+// processed with DSP bypassed; DoP follows the highest PCM rate, which needs 352.8 kHz for DSD128.
+TEST(DsdPlayback, AHighestRateStepsDsdDown) {
+    const SourceInfo dsd256{4 * kDsd64Frames, 2, 1, 1000};
+    const auto any = [](const DeviceFormat&) { return true; };
+    const auto native = negotiateDsd(dsd256, true, std::nullopt, any, 2 * kDsd64Frames);
+    ASSERT_TRUE(native);
+    EXPECT_EQ(native->format, (DeviceFormat{2 * kDsd64Frames, 2, SampleType::Dsd8}));
+    EXPECT_TRUE(native->remodulate);
+    EXPECT_EQ(native->state, PipelineState::Processed);
+    const auto dop = negotiateDsd(dsd256, false, std::nullopt, any, kDsd64Frames);
+    ASSERT_TRUE(dop);
+    EXPECT_EQ(dop->format.sampleRate, 176400u);
+    const auto under = negotiateDsd({kDsd64Frames, 2, 1, 1000}, false, std::nullopt, any, 2 * kDsd64Frames);
+    ASSERT_TRUE(under);
+    EXPECT_FALSE(under->remodulate);
+    EXPECT_EQ(under->state, PipelineState::BitPerfect);
+    // The PCM limit refuses the 352.8 kHz carrier of DSD128 and steps down to DSD64; native DSD ignores it.
+    const auto upTo192k = [](const DeviceFormat& f) { return f.type != SampleType::Dsd8 && f.sampleRate <= 192000; };
+    const auto stepped = negotiateDsd({2 * kDsd64Frames, 2, 1, 1000}, false, std::nullopt, upTo192k, 0, 192000);
+    ASSERT_TRUE(stepped);
+    EXPECT_EQ(stepped->format.sampleRate, 176400u);
+    EXPECT_TRUE(stepped->remodulate);
+    EXPECT_FALSE(negotiateDsd({2 * kDsd64Frames, 2, 1, 1000}, false, std::nullopt, upTo192k));
+}
+
+TEST(DsdPlayback, ALimitedOutputPlaysDsdModulatedAgain) {
+    const auto frames = size_t(2 * kDsd64Frames * 3 / 10);
+    const auto dsd128 = dsfFile("limit-dsd128", dsdSine(2 * kDsd64, 1000, 0.5, frames), 2, 2 * kDsd64);
+    const auto dop = [](const DeviceFormat& f) { return dopDevice(f, SampleType::Int24); };
+    const auto plain = play(dsd128, Settings{}, dop);
+    ASSERT_TRUE(plain.plan);
+    EXPECT_EQ(plain.plan->format.sampleRate, 352800u);
+    EXPECT_FALSE(plain.plan->remodulate);
+
+    for (const bool byPcmLimit : {false, true}) {
+        Settings limited;
+        (byPcmLimit ? limited.wasapi.maxSampleRate : limited.wasapi.maxDsdRate) = byPcmLimit ? 192000 : 64;
+        const auto played = play(dsd128, limited, dop);
+        ASSERT_FALSE(played.snapshot.error) << played.snapshot.errorDetail;
+        ASSERT_TRUE(played.plan);
+        EXPECT_EQ(played.plan->dsd, DsdPath::Dop);
+        EXPECT_TRUE(played.plan->remodulate);
+        EXPECT_EQ(played.plan->format, (DeviceFormat{176400, 2, SampleType::Int24}));
+        EXPECT_EQ(played.plan->state, PipelineState::Processed);
+        // Half the DoP frames of the source's, markers alternating, the sine's ones and zeros balanced.
+        const size_t dopFrames = played.bytes.size() / 6;
+        EXPECT_GE(dopFrames, frames / 4);
+        size_t ones = 0, bits = 0;
+        for (size_t f = 0; f < frames / 4; f++) {
+            const auto marker = uint8_t(played.bytes[f * 6 + 2]);
+            ASSERT_TRUE(marker == 0x05 || marker == 0xFA) << "frame " << f;
+            if (f) ASSERT_NE(marker, uint8_t(played.bytes[(f - 1) * 6 + 2])) << "frame " << f;
+            for (const size_t offset : {0, 1}) {
+                ones += std::popcount(uint8_t(played.bytes[f * 6 + offset]));
+                bits += 8;
+            }
+        }
+        EXPECT_NEAR(double(ones) / double(bits), 0.5, 0.01);
+    }
+
+    Settings asio;
+    asio.backend = Backend::Asio;
+    asio.asio.maxDsdRate = 64;
+    const auto native = play(dsd128, asio, [](const DeviceFormat& f) { return f.type == SampleType::Dsd8; });
+    ASSERT_FALSE(native.snapshot.error) << native.snapshot.errorDetail;
+    ASSERT_TRUE(native.plan);
+    EXPECT_EQ(native.plan->dsd, DsdPath::Native);
+    EXPECT_EQ(native.plan->format, (DeviceFormat{kDsd64Frames, 2, SampleType::Dsd8}));
+    EXPECT_TRUE(native.plan->remodulate);
 }

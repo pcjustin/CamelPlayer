@@ -188,6 +188,7 @@
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
   <data name="Badge_Lossy.Text" xml:space="preserve"><value>Lossy source</value></data>
   <data name="Badge_DspBypassedTip" xml:space="preserve"><value>Raw DSD goes to the device unchanged; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>
+  <data name="Badge_DspBypassedRemodulatedTip" xml:space="preserve"><value>DSD is modulated again at a lower DSD rate and goes to the device as DSD; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>
   <data name="Library_SortCombo.AutomationProperties.Name" xml:space="preserve"><value>Sort by</value></data>
   <data name="Player_Position.AutomationProperties.Name" xml:space="preserve"><value>Playback position</value></data>
   <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>Open the playing album</value></data>
@@ -698,7 +699,12 @@
   <data name="SignalPath_Renderer" xml:space="preserve"><value>Network player</value></data>
   <data name="Lamp_BitPerfectRenderer" xml:space="preserve"><value>Bit-perfect to the renderer</value></data>
   <data name="Settings_NetworkGroup.Text" xml:space="preserve"><value>Network player</value></data>
-  <data name="Settings_NetworkRate.Header" xml:space="preserve"><value>Highest sample rate</value></data>
+  <data name="Settings_MaxPcmRate.Header" xml:space="preserve"><value>Highest PCM sample rate</value></data>
+  <data name="Settings_MaxPcmRate.Description" xml:space="preserve"><value>Higher PCM is resampled to fit (shown as processed).</value></data>
+  <data name="Settings_MaxDsdRate.Header" xml:space="preserve"><value>Highest DSD sample rate</value></data>
+  <data name="Settings_MaxDsdRate.Description" xml:space="preserve"><value>Higher DSD is remodulated to it (shown as processed).</value></data>
+  <data name="Limit_FollowDevice" xml:space="preserve"><value>Follow the device</value></data>
+  <data name="SignalPath_DsdRemodulate" xml:space="preserve"><value>DSD remodulation</value></data>
   <data name="Settings_NetworkBits.Header" xml:space="preserve"><value>Highest bit depth</value></data>
   <data name="Limit_FollowPlayer" xml:space="preserve"><value>Follow the player</value></data>
   <data name="Dsd_Dsf" xml:space="preserve"><value>DSF, when the player declares DSD</value></data>

@@ -33,6 +33,7 @@ struct OutputPlan {
     bool widen = false;  // integers to float32
     bool reduce = false; // fewer bits than the source, with dither
     DsdPath dsd = DsdPath::None;
+    bool remodulate = false;  // raw DSD at a lower rate than the source's, modulated again
     bool shared = false;      // through the WASAPI shared-mode mixer
     std::vector<DspNode> dsp; // the DSP nodes that change the signal, in order (docs/Plan.md §5.9)
     double gainDb = 0.0;      // the track's ReplayGain
@@ -51,22 +52,34 @@ std::vector<SampleType> bitPerfectCandidates(uint32_t bits);
 // lowest other-family rate at or above it, and the highest rate. Each rate tries containers that carry the source
 // depth, then float32, then with `convert` a smaller depth. Output is always stereo: mono is duplicated, more channels
 // need `convert`. `fixedType` (from settings) restricts the container. `lossy` marks a float decode (AAC/MP3). A
-// nonzero `fixedRate` is the only rate tried, resampled without `convert`. Returns nullopt when nothing fits; the
-// caller then skips the track and tells the user.
+// nonzero `fixedRate` is the only rate tried, resampled without `convert`. A source above a nonzero `maxRate` (the
+// output's highest PCM rate) is first tried at limitedRate, resampled without `convert`. Returns nullopt when nothing
+// fits; the caller then skips the track and tells the user.
 std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std::optional<SampleType> fixedType, bool convert,
-                                          const std::function<bool(const DeviceFormat&)>& deviceSupports, uint32_t fixedRate = 0);
+                                          const std::function<bool(const DeviceFormat&)>& deviceSupports, uint32_t fixedRate = 0,
+                                          uint32_t maxRate = 0);
+
+// The highest rate of `rate`'s family (44.1 or 48 kHz) at or below `maxRate`, else the highest of either: with
+// 192 kHz, 352.8 and 705.6 kHz become 176.4 kHz and 384 and 768 kHz become 192 kHz. `rate` itself when not above.
+uint32_t limitedRate(uint32_t rate, uint32_t maxRate);
 
 // Raw DSD (`src` from the DSD Nexus decoder: byte frames, 1 bit per sample), docs/Plan.md §5.3 item 4: native DSD
 // when `native` is requested and the device takes it, else DoP at DSD rate / 16 in a 24-bit, 24-in-32 or 32-bit
 // carrier (`fixedType` restricts it). Never PCM; mono is duplicated, more channels are refused. A carrier above
-// 768 kHz (DSD512 DoP needs 1411.2 kHz) is used only if the device reports it.
+// 768 kHz (DSD512 DoP needs 1411.2 kHz) is used only if the device reports it. A source above a nonzero
+// `maxByteRate` (the output's highest DSD rate, in byte frames per second) is sent at that rate, and while the DoP
+// carrier of the rate tried is above a nonzero `maxPcmRate` the rate steps down to DSD64; a rate below the source's
+// is modulated again (`remodulate`) and Processed.
 std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::optional<SampleType> fixedType,
-                                       const std::function<bool(const DeviceFormat&)>& deviceSupports);
+                                       const std::function<bool(const DeviceFormat&)>& deviceSupports, uint32_t maxByteRate = 0,
+                                       uint32_t maxPcmRate = 0);
 
 // DSD converted to PCM: decimated to 352.8 kHz, then delivered like a 24-bit source at `rate` (the setting), with
-// `convert` governing other rates, downmix and depth exactly as for PCM. Always Processed; nullopt when nothing fits.
+// `convert` governing other rates, downmix and depth exactly as for PCM, and `maxRate` as for negotiateOutput. Always
+// Processed; nullopt when nothing fits.
 std::optional<OutputPlan> negotiateDsdToPcm(const SourceInfo& src, uint32_t rate, std::optional<SampleType> fixedType,
-                                            bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports);
+                                            bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports,
+                                            uint32_t maxRate = 0);
 
 // The DoP carrier rate for a DSD source of `byteFrameRate` byte frames per second.
 constexpr uint32_t dopCarrierRate(uint32_t byteFrameRate) {

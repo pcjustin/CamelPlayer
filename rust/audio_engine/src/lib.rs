@@ -14,6 +14,7 @@ mod crossfeed;
 mod decoder_host;
 mod dsd;
 mod dsd2pcm;
+mod dsd_remod;
 mod dsp;
 mod dts_abi;
 mod eq;
@@ -4223,11 +4224,22 @@ mod tests {
         pcm.allow_dsd_to_pcm = 1;
         let one_second = tone_source("105:352800:352800:dsd", 0, 0);
         let none = |_: *mut CamelEngine| {};
-        let heap: Vec<_> = [("native DSD", native), ("DoP", dop), ("DSD to PCM", pcm)]
+        let mut heap: Vec<_> = [("native DSD", native), ("DoP", dop), ("DSD to PCM", pcm)]
             .into_iter()
             .map(|(case, cfg)| (case, stage_heap_playing(cfg, &one_second, none, |_, _| {})))
             .filter(|(_, count)| *count > 0)
             .collect();
+        let dsd128 = tone_source("105:705600:705600:dsd", 0, 0);
+        for (case, mut cfg) in [
+            ("DSD128 to native DSD64", native),
+            ("DSD128 to DoP DSD64", dop),
+        ] {
+            cfg.allow_dsd_to_pcm = 1;
+            let count = stage_heap_playing(cfg, &dsd128, none, |_, _| {});
+            if count > 0 {
+                heap.push((case, count));
+            }
+        }
         assert!(heap.is_empty(), "{heap:?}");
     }
 
@@ -5493,9 +5505,16 @@ mod tests {
 
     // An engine for `output` playing `mock` from the start, fully prefilled.
     fn dsd_engine(output: CamelAudioFormatV1, mock: &mut DsdMock) -> Result<*mut CamelEngine, i32> {
+        dsd_engine_from(config(output), mock)
+    }
+
+    fn dsd_engine_from(
+        config: CamelEngineConfigV1,
+        mock: &mut DsdMock,
+    ) -> Result<*mut CamelEngine, i32> {
         let mut engine = ptr::null_mut();
         assert_eq!(
-            unsafe { camel_engine_create_v1(&config(output), &mut engine) },
+            unsafe { camel_engine_create_v1(&config, &mut engine) },
             ENGINE_OK
         );
         let host = CamelDecoderHostV1 {
@@ -5680,5 +5699,43 @@ mod tests {
             .err(),
             Some(ENGINE_E_UNSUPPORTED_FORMAT)
         );
+    }
+
+    // DSD128 reaches a DSD64 stream, native or DoP, only with the DSD conversion permission: modulated again, half the
+    // byte frames.
+    #[test]
+    fn raw_dsd_steps_down_to_a_lower_rate_only_with_permission() {
+        let mut native = format(AUDIO_DSD, SAMPLE_DSD_U8, 1, 8);
+        native.rate_hz = 2_822_400;
+        let dop = dop_format(SAMPLE_DOP_S24_LE, 24, 176_400);
+        for (output, units, bytes_per_unit) in [(native, 2048 * 8, 2), (dop, 1024, 6)] {
+            assert_eq!(
+                dsd_engine(output, &mut dsd_mock(4096, 2, 705_600)).err(),
+                Some(ENGINE_E_UNSUPPORTED_FORMAT)
+            );
+            let mut allowed = config(output);
+            allowed.allow_dsd_to_pcm = 1;
+            let engine = dsd_engine_from(allowed, &mut dsd_mock(4096, 2, 705_600)).unwrap();
+            assert_eq!(
+                unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+                ENGINE_OK
+            );
+            let mut rendered = 0;
+            loop {
+                let mut buf = vec![0; 512 * bytes_per_unit];
+                let mut request =
+                    render_request(if bytes_per_unit == 2 { 512 * 8 } else { 512 }, &mut buf);
+                request.output_capacity_bytes = buf.len() as u64;
+                let mut result = render_result();
+                let status = unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+                rendered += result.units_rendered;
+                if status == ENGINE_END {
+                    break;
+                }
+                assert_eq!(status, ENGINE_OK);
+            }
+            assert_eq!(rendered, units);
+            unsafe { camel_engine_destroy_v1(engine) };
+        }
     }
 }
