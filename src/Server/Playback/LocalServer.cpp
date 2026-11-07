@@ -322,6 +322,7 @@ public:
         cv_.notify_one();
         if (worker_.joinable()) worker_.join();
         discord_.reset(); // clears the activity
+        libraryReader_.reset();
         if (library_) {
             library_->backupIfDue(); // for a day that never had an idle moment
             library_->close();
@@ -1014,7 +1015,8 @@ private:
     // `idle` passes may skip a large queue for up to a second, since a scan changes the library many times a second.
     void refreshLibraryAvailability(bool idle = false) {
         if (!libraryReader_ || libraryEntries_.empty()) return;
-        const auto version = libraryReader_->scalar("PRAGMA data_version").value();
+        auto& reader = *libraryReader_;
+        const auto version = reader.scalar("PRAGMA data_version").value();
         if (version == libraryVersion_) return;
         const bool large = libraryEntries_.size() > 2000;
         const auto now = std::chrono::steady_clock::now();
@@ -1022,9 +1024,9 @@ private:
         availabilityChecked_ = now;
         libraryVersion_ = version;
         std::vector<uint64_t> deleted;
-        if (const auto deletions = libraryDeletions(*libraryReader_); deletions != libraryDeletions_) {
+        if (const auto deletions = libraryDeletions(reader); deletions != libraryDeletions_) {
             libraryDeletions_ = deletions;
-            auto exists = libraryReader_->prepare("SELECT 1 FROM files WHERE id=?");
+            auto exists = reader.prepare("SELECT 1 FROM files WHERE id=?");
             for (const auto& [id, binding] : libraryEntries_) {
                 exists.reset();
                 if (binding.file && !exists.bind(1, binding.file).step()) deleted.push_back(id);
@@ -1035,7 +1037,7 @@ private:
             }
         }
         std::vector<std::wstring> removed;
-        auto roots = libraryReader_->prepare("SELECT path FROM roots WHERE removed IS NOT NULL");
+        auto roots = reader.prepare("SELECT path FROM roots WHERE removed IS NOT NULL");
         while (roots.step()) {
             auto path = toWide(roots.text(0));
             if (!path.ends_with(L'\\')) path.push_back(L'\\');
@@ -1045,12 +1047,12 @@ private:
         // for seconds on every change of a 100k-entry queue.
         std::unordered_set<int64_t> gone;
         if (large) {
-            auto files = libraryReader_->prepare("SELECT f.id FROM files f JOIN roots r ON r.id=f.root_id "
-                                                 "WHERE f.available=0 OR r.online=0 OR r.removed IS NOT NULL");
+            auto files = reader.prepare("SELECT f.id FROM files f JOIN roots r ON r.id=f.root_id "
+                                        "WHERE f.available=0 OR r.online=0 OR r.removed IS NOT NULL");
             while (files.step()) gone.insert(files.integer(0));
         }
-        auto file = libraryReader_->prepare("SELECT f.available,r.online,r.removed FROM files f "
-                                            "JOIN roots r ON r.id=f.root_id WHERE f.id=?");
+        auto file = reader.prepare("SELECT f.available,r.online,r.removed FROM files f "
+                                   "JOIN roots r ON r.id=f.root_id WHERE f.id=?");
         for (auto& [id, binding] : libraryEntries_) {
             bool unavailable = binding.detached;
             if (binding.file && large) {

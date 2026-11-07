@@ -94,7 +94,9 @@ std::vector<std::filesystem::path> dailyBackups(const std::filesystem::path& db)
 
 void configure(sqlite::Database& db) {
     // Scan batches touch FTS and index pages across the whole database; the default 2 MiB cache rereads them per row.
-    db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -65536;");
+    // The WAL never shrinks by itself, and reading a large one is what makes opening the library slow.
+    db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -65536; "
+            "PRAGMA journal_size_limit = 67108864;");
 }
 
 } // namespace
@@ -156,6 +158,7 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
         }
     }
     configure(*db_);
+    db_->exec("PRAGMA wal_checkpoint(TRUNCATE)"); // what a crash left
     std::ofstream{marker}.close();
 
     const int version = db_->userVersion();
@@ -202,6 +205,15 @@ void LibraryStore::close() {
     }
     cv_.notify_all();
     if (writer_.joinable()) writer_.join();
+    if (db_) {
+        // A reader that outlives this connection cannot remove the WAL, so it is emptied here. A busy one leaves it for
+        // the next open, without holding up the exit.
+        try {
+            db_->exec("PRAGMA busy_timeout = 200; PRAGMA wal_checkpoint(TRUNCATE)");
+        } catch (const sqlite::Error& e) {
+            log::warn("library: cannot empty the WAL: %s", e.what());
+        }
+    }
     db_.reset();
     std::error_code ec;
     std::filesystem::remove(withSuffix(path_, L".open"), ec);

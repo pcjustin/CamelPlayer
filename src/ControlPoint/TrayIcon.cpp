@@ -114,6 +114,10 @@ LRESULT TrayIcon::handle(UINT message, WPARAM wParam, LPARAM lParam) {
         if (handlers_.open) handlers_.open();
         return 0;
     }
+    if (message == WM_COMMAND && LOWORD(wParam) == kExitCommand) { // startup measurements leave as the menu does
+        if (handlers_.exit) handlers_.exit();
+        return 0;
+    }
     if (message == taskbarCreated_ && taskbarCreated_) {
         add(); // Explorer restarted and lost every icon
         return 0;

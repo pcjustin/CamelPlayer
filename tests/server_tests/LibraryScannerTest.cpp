@@ -1116,15 +1116,39 @@ TEST_F(LibraryScannerTest, AttributeNotificationTriggersAnIncrementalScan) {
     options.coalesce = std::chrono::milliseconds(100);
     LibraryMonitor monitor(store, options);
     ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
-    const auto before = count(store, "SELECT MAX(last_seen) FROM files");
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET name=NULL"); }).get(); // what a scan fills in
     const DWORD attributes = GetFileAttributesW(file.c_str());
     auto restore = wil::scope_exit([&] { SetFileAttributesW(file.c_str(), attributes); });
     ASSERT_TRUE(SetFileAttributesW(file.c_str(), attributes | FILE_ATTRIBUTE_HIDDEN));
-    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT MAX(last_seen) FROM files") > before; }));
+    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM files WHERE name IS NULL") == 0; }));
     EXPECT_EQ(count(store), 1);
 }
 
 } // namespace
+
+TEST_F(LibraryScannerTest, AScanOfAnUnchangedLibraryWritesNoFileOrFolder) {
+    for (int i = 0; i < 20; ++i) {
+        fs::create_directories(dir / "music" / std::to_string(i));
+        std::ofstream(dir / "music" / std::to_string(i) / "words.lrc") << "lyrics";
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_EQ(count(store), 20);
+    const auto rowsWritten = [&] {
+        int64_t rows = 0;
+        store.write([&](sqlite::Database& db) { rows = db.scalar("SELECT total_changes()").value(); }).get();
+        return rows;
+    };
+    const auto before = rowsWritten();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_LE(rowsWritten() - before, 8); // the root's own rows, far from one for each of the 40
+    EXPECT_EQ(count(store), 20);
+    fs::remove(dir / "music" / "7" / "words.lrc");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store), 19);
+}
 
 TEST_F(LibraryScannerTest, AFolderScanReconcilesOnlyThatSubtree) {
     audio();

@@ -26,6 +26,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
 #include <taglib/aifffile.h>
@@ -1025,6 +1026,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
     while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
     const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
+    // What this scan found, on the writer's thread. Kept here because writing it to every row would rewrite the whole
+    // table at each scan of a library that has not changed.
+    std::unordered_set<int64_t> present;
     std::deque<Listing> pending;
     if (!partial) pending.push_back(Listing{path});
     for (const auto& folder : subtrees)
@@ -1066,7 +1070,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         batch.clear();
         submit([&, entries](sqlite::Database& db) {
             if (token.cancelled()) return;
-            auto seen = db.prepare("UPDATE files SET last_seen=?,name=coalesce(name,?) WHERE id=?");
+            auto named = db.prepare("UPDATE files SET name=? WHERE id=? AND name IS NULL");
             auto old = db.prepare("SELECT id,size,mtime,volume_serial,file_index,created,volume_key,root_id FROM files WHERE "
                                   "path=? AND available=1");
             auto folders = db.prepare("SELECT id FROM folders WHERE path=?");
@@ -1081,13 +1085,14 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 old.bind(1, p);
                 int64_t file = old.step() ? old.integer(0) : 0;
                 if (!entry.error.empty() && !entry.rejected) {
-                    if (file) db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generation).bind(2, file).run();
+                    if (file) present.insert(file);
                     continue;
                 }
                 if (file && old.integer(7) == root && library::storedVersion(old, 1) == entry.version && entry.error.empty() &&
                     !entry.digest && !entry.metadata) {
-                    seen.bind(1, generation).bind(2, toUtf8(entry.path.filename().wstring())).bind(3, file).run();
-                    seen.reset();
+                    present.insert(file);
+                    named.bind(1, toUtf8(entry.path.filename().wstring())).bind(2, file).run();
+                    named.reset();
                     // Tracks indexed by an interrupted first scan have no album yet.
                     ungrouped.reset();
                     if (ungrouped.bind(1, file).step()) trackFolders.insert(ungrouped.integer(0));
@@ -1139,6 +1144,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(11, file)
                         .run();
                 }
+                present.insert(file);
                 if (entry.digest)
                     db.prepare("UPDATE files SET content_hash=? WHERE id=?").bind(1, *entry.digest).bind(2, file).run();
                 if (entry.rejected) db.prepare("DELETE FROM tracks WHERE file_id=?").bind(1, file).run();
@@ -1188,7 +1194,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                     name = listing.path == path ? rootName : toUtf8(listing.path.filename().wstring())](sqlite::Database& db) {
                 db.prepare("INSERT INTO folders(root_id,path,parent_id,name) VALUES(?,?,(SELECT id FROM folders WHERE path=?),?) "
                            "ON CONFLICT(path) DO UPDATE SET root_id=excluded.root_id,parent_id=excluded.parent_id,"
-                           "name=excluded.name")
+                           "name=excluded.name WHERE root_id IS NOT excluded.root_id OR parent_id IS NOT "
+                           "excluded.parent_id OR name IS NOT excluded.name")
                     .bind(1, root)
                     .bind(2, folder)
                     .bind(3, parent)
@@ -1239,6 +1246,17 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 .bind(3, int64_t(report.online))
                 .run();
             if (report.complete) {
+                const auto markMissing = [&](sqlite::Statement& listed) {
+                    std::vector<int64_t> missing;
+                    while (listed.step())
+                        if (!present.contains(listed.integer(0))) missing.push_back(listed.integer(0));
+                    auto mark = db.prepare("UPDATE files SET available=0 WHERE id=?");
+                    for (const int64_t file : missing) {
+                        mark.bind(1, file).run();
+                        mark.reset();
+                    }
+                    derivedChanged = derivedChanged || !missing.empty();
+                };
                 if (!partial) {
                     db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
                     db.prepare("DELETE FROM app_state WHERE key=?").bind(1, rereadKey).run();
@@ -1246,24 +1264,17 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(1, refusedKey)
                         .bind(2, std::string(CAMEL_VERSION_STRING))
                         .run();
-                    db.prepare(
-                          "UPDATE files SET available=0 WHERE root_id=? AND available=1 AND (last_seen IS NULL OR last_seen<>?)")
-                        .bind(1, root)
-                        .bind(2, generation)
-                        .run();
-                    derivedChanged = derivedChanged || db.scalar("SELECT changes()").value_or(0) != 0;
+                    auto listed = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1");
+                    listed.bind(1, root);
+                    markMissing(listed);
                 }
                 // A path range over the unique files.path index selects a subtree without a LIKE pattern.
                 for (const auto& folder : subtrees) {
                     const auto below = key(folder);
-                    db.prepare("UPDATE files SET available=0 WHERE root_id=? AND available=1 AND "
-                               "(last_seen IS NULL OR last_seen<>?) AND path>?||'\\' AND path<?||']'")
-                        .bind(1, root)
-                        .bind(2, generation)
-                        .bind(3, below)
-                        .bind(4, below)
-                        .run();
-                    derivedChanged = derivedChanged || db.scalar("SELECT changes()").value_or(0) != 0;
+                    auto listed = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1 AND path>?||'\\' AND "
+                                             "path<?||']'");
+                    listed.bind(1, root).bind(2, below).bind(3, below);
+                    markMissing(listed);
                 }
                 std::vector<int64_t> added;
                 auto pending = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1 AND identity_state=1");

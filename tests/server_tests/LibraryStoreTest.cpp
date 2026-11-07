@@ -107,6 +107,48 @@ TEST(LibraryStore, CountsOnlyTheWritesToFilesAndRoots) {
     EXPECT_GT(store.fileChanges(), rehashed);
 }
 
+TEST(LibraryStore, TheWriteAheadLogDoesNotOutgrowItsLimit) {
+    const auto dir = freshDir("wal-limit");
+    LibraryStore store(dir);
+    auto idle = store.openReader();
+    const std::string value(1 << 20, 'x');
+    for (int i = 0; i < 120; ++i)
+        store
+            .write([&](Database& db) {
+                db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+                    .bind(1, std::string_view("large"))
+                    .bind(2, value)
+                    .run();
+            })
+            .get();
+    EXPECT_LT(std::filesystem::file_size(dir / "library.db-wal"), uintmax_t{70} << 20);
+}
+
+TEST(LibraryStore, ClosingEmptiesTheWriteAheadLogThoughAReaderOutlivesIt) {
+    const auto dir = freshDir("wal-close");
+    LibraryStore store(dir);
+    store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+    auto idle = store.openReader();
+    ASSERT_EQ(idle.scalar("SELECT COUNT(*) FROM tracks"), 1);
+    ASSERT_GT(std::filesystem::file_size(dir / "library.db-wal"), 0U);
+    store.close();
+    EXPECT_EQ(std::filesystem::file_size(dir / "library.db-wal"), 0U);
+}
+
+TEST(LibraryStore, OpeningEmptiesTheWriteAheadLogACrashLeft) {
+    const auto dir = freshDir("wal-crash");
+    const auto copy = dir / "copy";
+    std::filesystem::create_directories(copy);
+    LibraryStore store(dir);
+    store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+    for (const auto* name : {"library.db", "library.db-wal"})
+        std::filesystem::copy_file(dir / name, copy / name, std::filesystem::copy_options::overwrite_existing);
+    ASSERT_GT(std::filesystem::file_size(copy / "library.db-wal"), 0U);
+    LibraryStore reopened(copy);
+    EXPECT_EQ(std::filesystem::file_size(copy / "library.db-wal"), 0U);
+    EXPECT_EQ(reopened.openReader().scalar("SELECT COUNT(*) FROM tracks"), 1);
+}
+
 TEST(LibraryStore, IdentityRulesHold) {
     LibraryStore store(freshDir("identity"));
     store
