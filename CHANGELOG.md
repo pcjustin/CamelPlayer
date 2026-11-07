@@ -18,6 +18,9 @@ Changed since 0.2.3:
 - **The language changes at once:** choosing another language in Settings › Interface applies it straight away, without a restart, and playback goes on.
 - **Clearer settings and status:** the settings links show the section you are in, the output menu names how each output is reached, the status badges are easier to hit, and the search box fits a small window.
 - **DTS-CD is decoded by a Rust core, and FFmpeg is gone from the program:** the WAV decoders hand DTS-CD files to CamelPlayer's own decoder, which plays the 5.1 core; a DTS-ES file plays as 5.1 rather than 6.1, its rear center kept in the surrounds. FLAC, WAV and AIFF keep their other decoders, ALAC plays with Symphonia alone, and a saved FFmpeg choice falls back to the format's default.
+- **Starts sooner, with a small library log:** the log SQLite keeps beside `library.db` grew at every start and stayed after a clean exit, past a gigabyte on a large library, and reading it held up the start. It now stays small and goes when CamelPlayer closes; the first start of this version folds in what is there. On a library of 86,000 files the window appears in about 0.6 s and the library is usable in about 2 s.
+- **Scanning an unchanged library writes nothing:** every scan rewrote each file's and folder's row.
+- **Closing on a busy machine:** with every core busy a scan could hold the program open for minutes after its window closed, and starting it again seemed to do nothing. It now saves the queue first and leaves within seconds.
 - **Each output keeps its own settings:** every WASAPI endpoint, ASIO driver and Kernel Streaming pin has its own parameters and fixed or software volume, and a device chosen for the first time starts from the defaults. Following the Windows default uses the settings of whichever device is the default. Deleting a saved device clears its settings, name and place in the menu; found again, it starts from the defaults.
 
 ## 0.2.3

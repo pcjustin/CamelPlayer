@@ -32,6 +32,8 @@ The screenshots show a demo library with made-up albums and covers.
 - **Volume and ReplayGain:** volume stays fixed for your DAC or amplifier unless you choose software volume, whose vertical slider and mute open from the player bar's volume button. ReplayGain plays tracks or albums (or either, by what the queue plays) at an even loudness from their tags; tracks without tags are analyzed in the background with EBU R128 while ReplayGain is on, and the results stay in the library.
 - **Gapless playback** between tracks of the same format, and **crossfade** (1–10 s, off by default) at every other change of track, natural or chosen; an album played in order stays gapless.
 - **An output menu** in the player bar switches between the outputs you enable in Settings › Audio outputs, each with a name of your choice, and playback goes on from the audible position with the queue unchanged.
+- **Network players:** UPnP AV and OpenHome players on your network, played at the source's format with raw DSD as DSF where they declare it, gapless through the player's next-track function or OpenHome playlist, and with their own remote, app and volume still working. Windows Firewall needs one rule for them, for this program on private networks only, which CamelPlayer offers to add.
+- **AirPlay:** Apple's own receivers, including HomePods and a HomePod stereo pair, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule.
 - **Output settings for each device:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
 
 ### Library
@@ -98,6 +100,10 @@ Files are recognized by their content, not their extension. Mono files are copie
 | WASAPI shared | No | To PCM only | Always goes through the Windows mixer, so it is shown as processed. |
 | ASIO | Yes | Native or DoP | The ASIO callback thread joins MMCSS Pro Audio, and late callbacks are reported. |
 | Kernel Streaming | Yes | DoP | Windows defines no Kernel Streaming DSD format. |
+| UPnP AV, OpenHome | To the player | DSF or to PCM | Streamed at the source's format; the highest rate and bit depth can be limited for a player that declares more than it plays. |
+| AirPlay | CD format only | To PCM only | AirPlay 1: 44.1 kHz/16-bit stereo. A receiver plays about 2 seconds behind what is sent, and the position shown allows for it. |
+
+AirPlay is a trademark of Apple Inc.
 
 DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where the device offers 1411.2 kHz. DSD becomes PCM only when you set a backend's DSD output to PCM or allow it after native DSD and DoP were refused: it is decimated to 352.8 kHz with a multistage FIR filter (100% modulation = 0 dBFS), resampled with libsoxr to 88.2, 176.4 or 352.8 kHz and quantized once. Allowed PCM conversions use libsoxr for resampling and TPDF dither for a lower bit depth.
 
