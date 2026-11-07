@@ -1026,8 +1026,14 @@ private:
         if (version == libraryVersion_) return;
         const bool large = libraryEntries_.size() > 2000;
         const auto now = std::chrono::steady_clock::now();
+        // Availability comes from files and roots alone, and a large queue reads all of files: other commits, such as
+        // the queue session saved every 5 s while playing, are left for the once-a-minute pass.
+        const auto files = library_->fileChanges();
+        if (large && libraryVersion_ && files == availabilityFiles_ && now - availabilityChecked_ < std::chrono::minutes(1))
+            return;
         if (idle && large && now - availabilityChecked_ < std::chrono::seconds(1)) return;
         availabilityChecked_ = now;
+        availabilityFiles_ = files;
         libraryVersion_ = version;
         std::vector<uint64_t> deleted;
         if (const auto deletions = libraryDeletions(reader); deletions != libraryDeletions_) {
@@ -1804,6 +1810,7 @@ private:
     mutable std::mutex readsMutex_;
     _Guarded_by_(readsMutex_) std::filesystem::path queuedRead_; // the file last queued in the engine to follow
     std::chrono::steady_clock::time_point availabilityChecked_;
+    uint64_t availabilityFiles_ = 0;
     struct LibraryEntry {
         std::wstring path;
         int64_t file = 0;

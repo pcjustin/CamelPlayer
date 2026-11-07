@@ -93,8 +93,8 @@ public:
     LibraryScanProgress scanProgress() const {
         return {scanning_.load(), scanFound_.load(), scanChecked_.load(), scanFinishing_.load()};
     }
-    // Counts the rows written to files and roots, so background work over files can wait for them to change rather than
-    // for any commit, such as the queue session saved every few seconds while playing.
+    // Counts the committed writes to files and roots, so background work over files can wait for them to change rather
+    // than for any commit, such as the queue session saved every few seconds while playing.
     uint64_t fileChanges() const { return fileChanges_.load(); }
 
     // library.db.daily-YYYYMMDD.bak: a copy taken while idle, or at exit, once the last is a day old; kept only when it
@@ -109,6 +109,7 @@ private:
     std::atomic<unsigned> activeScans_{0};
     std::atomic<int64_t> scanning_{0}, scanFound_{0}, scanChecked_{0}, scanFinishing_{0};
     std::atomic<uint64_t> fileChanges_{0};
+    bool fileRowsWritten_ = false; // by the transaction on the writer thread
     // Different roots scan at the same time; scanMutex_ serializes what crosses roots (finishing a scan,
     // absorbing roots), and each root's lock (under jobsMutex_) keeps one scan per root.
     std::mutex scanMutex_;

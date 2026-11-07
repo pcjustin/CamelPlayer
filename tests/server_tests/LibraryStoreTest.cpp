@@ -107,6 +107,25 @@ TEST(LibraryStore, CountsOnlyTheWritesToFilesAndRoots) {
     EXPECT_GT(store.fileChanges(), rehashed);
 }
 
+TEST(LibraryStore, CountsAWriteToFilesOnlyOnceItCommits) {
+    LibraryStore store(freshDir("file-changes-commit"));
+    store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+    const auto before = store.fileChanges();
+    store
+        .write([&](Database& db) {
+            db.exec("UPDATE files SET available=0");
+            EXPECT_EQ(store.fileChanges(), before);
+        })
+        .get();
+    EXPECT_EQ(store.fileChanges(), before + 1);
+    auto failed = store.write([](Database& db) {
+        db.exec("UPDATE files SET available=1");
+        throw std::runtime_error("rolled back");
+    });
+    EXPECT_THROW(failed.get(), std::runtime_error);
+    EXPECT_EQ(store.fileChanges(), before + 1);
+}
+
 TEST(LibraryStore, TheWriteAheadLogDoesNotOutgrowItsLimit) {
     const auto dir = freshDir("wal-limit");
     LibraryStore store(dir);

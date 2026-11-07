@@ -1189,6 +1189,32 @@ std::vector<int32_t> capturedSamples(const std::filesystem::path& capture) {
     return samples;
 }
 
+// A queue of over 2000 entries reads availability only when files or roots change, which removing a root does.
+TEST_F(ServerTest, RemovingTheRootOfALargeQueueEmptiesIt) {
+    const auto dir = testutil::tempDir() / "server-removed-root-large";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "music");
+    const auto a = dir / "music" / "a.flac";
+    std::filesystem::copy_file(testutil::generatedFile({"removed-root-large", 48000, 16, 2, 0.3}), a);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
+                                           [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
+    Command add = command(CommandKind::QueueAdd);
+    add.sources = std::vector(2500, TrackSource(toUtf8(a.wstring())));
+    ASSERT_EQ(send(add).queue.entries.size(), 2500u);
+    Command remove = command(CommandKind::RemoveLibraryRoot);
+    remove.rootId = root;
+    ASSERT_FALSE(send(remove).commandError);
+    const auto emptied = std::chrono::steady_clock::now() + 3s;
+    while (!server->snapshot().queue.entries.empty() && std::chrono::steady_clock::now() < emptied)
+        std::this_thread::sleep_for(10ms);
+    EXPECT_TRUE(server->snapshot().queue.entries.empty());
+    server.reset();
+}
+
 TEST_F(ServerTest, RemovingThePlayingTracksRootFinishesTheTrackAndEmptiesTheQueue) {
     const auto dir = testutil::tempDir() / "server-removed-root";
     std::filesystem::remove_all(dir);
