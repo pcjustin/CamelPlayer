@@ -118,6 +118,9 @@
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>The device cannot play this format bit-perfectly; skipped</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>Driver error</value></data>
   <data name="Error_Other" xml:space="preserve"><value>Playback error</value></data>
+  <data name="Error_PlayerInUse" xml:space="preserve"><value>The player is in use by another source; press play to play here again</value></data>
+  <data name="Error_PlayerLost" xml:space="preserve"><value>The player is not connected; press play when it is back</value></data>
+  <data name="Error_PlayerDidNotPlay" xml:space="preserve"><value>The player did not start playing; check that it is on and not in standby, then press play</value></data>
   <data name="Library_Empty.Text" xml:space="preserve"><value>No music yet. Add a folder under Settings › Library; it is indexed in the background.</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>Unknown</value></data>
   <data name="Library_Albums" xml:space="preserve"><value>{0} albums</value></data>

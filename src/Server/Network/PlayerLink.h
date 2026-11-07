@@ -87,6 +87,8 @@ public:
     uint64_t positionMs() const; // in the current track, as last polled
     bool stopped() const;        // as last polled
     bool playing() const;        // as last polled
+    bool idle() const;           // stopped or without media as last polled, whether or not it played since the last load
+    bool played() const;         // reported playing since the last load
 
 private:
     struct Impl;

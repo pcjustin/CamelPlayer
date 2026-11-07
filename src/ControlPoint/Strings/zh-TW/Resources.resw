@@ -118,6 +118,9 @@
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>裝置無法以 bit-perfect 播放這個格式，已跳過</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>驅動程式錯誤</value></data>
   <data name="Error_Other" xml:space="preserve"><value>播放錯誤</value></data>
+  <data name="Error_PlayerInUse" xml:space="preserve"><value>播放器正被其他來源使用，按播放可改回這裡播放</value></data>
+  <data name="Error_PlayerLost" xml:space="preserve"><value>播放器未連接，恢復連線後按播放</value></data>
+  <data name="Error_PlayerDidNotPlay" xml:space="preserve"><value>播放器沒有開始播放，請確認它已開機且不在待機，再按播放</value></data>
   <data name="Library_Empty.Text" xml:space="preserve"><value>還沒有音樂。請到「設定 › 媒體庫」加入資料夾，會在背景建立索引。</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>未知</value></data>
   <data name="Library_Albums" xml:space="preserve"><value>{0} 張專輯</value></data>

@@ -146,7 +146,7 @@ struct PlayerLink::Impl {
     std::optional<std::string> ownSource, seenSource;
     std::string currentId; // OpenHome: the playlist entry playing
     std::atomic<uint64_t> lastPositionMs = 0;
-    std::atomic<bool> lastStopped = false, lastPlaying = false, sawPlaying = false;
+    std::atomic<bool> lastStopped = false, lastPlaying = false, lastIdle = false, sawPlaying = false;
     Clock::time_point started = Clock::now();
     std::thread working;
 
@@ -194,9 +194,17 @@ struct PlayerLink::Impl {
         report(happened);
     }
 
+    // A player still starting reports TRANSITIONING or Buffering, which is not idle.
+    std::optional<TransportState> stateOf(const std::string& text) {
+        if (text.empty()) return std::nullopt;
+        const auto state = stateFrom(text);
+        lastIdle = state == TransportState::Stopped;
+        return state;
+    }
+
     PlayerObservation fromAvTransport(const Values& values) {
         PlayerObservation seen;
-        if (const auto state = find(values, "TransportState"); !state.empty()) seen.state = stateFrom(state);
+        seen.state = stateOf(find(values, "TransportState"));
         for (const char* name : {"CurrentTrackURI", "AVTransportURI"})
             if (values.contains(name)) {
                 seen.track = find(values, name);
@@ -209,7 +217,7 @@ struct PlayerLink::Impl {
     // OpenHome tells a takeover by the player's source changing away from the one the playlist was on.
     PlayerObservation fromOpenHome(const Values& values) {
         PlayerObservation seen;
-        if (const auto state = find(values, "TransportState"); !state.empty()) seen.state = stateFrom(state);
+        seen.state = stateOf(find(values, "TransportState"));
         if (values.contains("Id")) seen.track = find(values, "Id");
         if (const auto seconds = find(values, "Seconds"); !seconds.empty()) seen.positionMs = number(seconds) * 1000;
         if (const auto source = find(values, "SourceIndex"); !source.empty()) {
@@ -258,7 +266,7 @@ struct PlayerLink::Impl {
         if (player.protocol == upnp::PlayerProtocol::OpenHome) {
             const auto state = call("Playlist", "TransportState", {});
             if (!state.ok) throw std::runtime_error("the player refused a state request");
-            seen.state = stateFrom(find(state.values, "Value"));
+            seen.state = stateOf(find(state.values, "Value"));
             const auto id = call("Playlist", "Id", {});
             if (id.ok) seen.track = find(id.values, "Value");
             const auto time = call("Time", "Time", {});
@@ -274,7 +282,7 @@ struct PlayerLink::Impl {
             const std::vector<std::pair<std::string, std::string>> instance{{"InstanceID", "0"}};
             const auto state = call("AVTransport", "GetTransportInfo", instance);
             if (!state.ok) throw std::runtime_error("the player refused a state request");
-            seen.state = stateFrom(find(state.values, "CurrentTransportState"));
+            seen.state = stateOf(find(state.values, "CurrentTransportState"));
             const auto position = call("AVTransport", "GetPositionInfo", instance);
             if (position.ok) {
                 seen.track = find(position.values, "TrackURI");
@@ -298,6 +306,7 @@ struct PlayerLink::Impl {
                 }
             } catch (const std::exception& e) {
                 log::info("network player %s: %s", player.name.c_str(), e.what());
+                lastIdle = false; // a player that does not answer says nothing of whether it started
                 if (++failures >= options.failuresUntilLost) {
                     std::vector<PlayerEvent> happened;
                     {
@@ -329,6 +338,7 @@ bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
     link.lastPositionMs = 0;
     link.lastStopped = false; // what the player reports next is about the new track
     link.lastPlaying = false;
+    link.lastIdle = false;
     link.sawPlaying = false;
     if (link.player.protocol == upnp::PlayerProtocol::OpenHome) {
         try {
@@ -420,6 +430,14 @@ bool PlayerLink::stopped() const {
 
 bool PlayerLink::playing() const {
     return impl_->lastPlaying;
+}
+
+bool PlayerLink::idle() const {
+    return impl_->lastIdle;
+}
+
+bool PlayerLink::played() const {
+    return impl_->sawPlaying;
 }
 
 } // namespace camel::server

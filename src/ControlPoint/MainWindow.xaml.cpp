@@ -1473,10 +1473,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (s.revision != shownRevision_) {
         shownRevision_ = s.revision;
         if (s.error) {
-            ErrorBar().Severity(InfoBarSeverity::Warning);
-            ErrorBar().Title(ui::errorTitle(*s.error));
-            ErrorBar().Message(ui::utf8(s.errorDetail));
-            ErrorBar().IsOpen(true);
+            showError(*s.error, s.errorDetail, snapshot.settings.backend);
         } else {
             ErrorBar().IsOpen(false);
         }
@@ -1484,12 +1481,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
 
     if (snapshot.command.id != shownCommandId_) {
         shownCommandId_ = snapshot.command.id;
-        if (snapshot.commandError) {
-            ErrorBar().Severity(InfoBarSeverity::Warning);
-            ErrorBar().Title(ui::errorTitle(snapshot.commandError->code));
-            ErrorBar().Message(ui::utf8(snapshot.commandError->detail));
-            ErrorBar().IsOpen(true);
-        }
+        if (snapshot.commandError)
+            showError(snapshot.commandError->code, snapshot.commandError->detail, snapshot.settings.backend);
     }
 
     // Status area on the settings page (docs/Plan.md §6)
@@ -1510,6 +1503,15 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         StatusDetailText().Text(clauseLines(s.outputDetail));
     }
     showStatusNotices(s);
+}
+
+// A network player's reason is said whole in its title; the engine's English detail stays in the log.
+void MainWindow::showError(ErrorCode code, const std::string& detail, Backend backend) {
+    const hstring player = isNetworkPlayer(backend) ? ui::playerErrorTitle(code) : hstring{};
+    ErrorBar().Severity(InfoBarSeverity::Warning);
+    ErrorBar().Title(player.empty() ? ui::errorTitle(code) : player);
+    ErrorBar().Message(player.empty() ? ui::utf8(detail) : hstring{});
+    ErrorBar().IsOpen(true);
 }
 
 // Requested ≠ active values and a missing saved device stay visible for as long as they apply.

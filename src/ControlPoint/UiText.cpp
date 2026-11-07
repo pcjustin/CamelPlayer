@@ -67,6 +67,20 @@ winrt::hstring errorTitle(camel::audio::ErrorCode code) {
     return tr(L"Error_Other");
 }
 
+winrt::hstring playerErrorTitle(camel::audio::ErrorCode code) {
+    using camel::audio::ErrorCode;
+    switch (code) {
+    case ErrorCode::DeviceInUse:
+        return tr(L"Error_PlayerInUse");
+    case ErrorCode::DeviceLost:
+        return tr(L"Error_PlayerLost");
+    case ErrorCode::DriverError:
+        return tr(L"Error_PlayerDidNotPlay");
+    default:
+        return {};
+    }
+}
+
 winrt::hstring utf8(const std::string& s) {
     return winrt::to_hstring(s);
 }

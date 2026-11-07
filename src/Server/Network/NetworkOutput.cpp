@@ -46,6 +46,7 @@ constexpr auto kPatience = milliseconds(1500);
 constexpr uint64_t kNearStartMs = 2000, kNearEndMs = 3000, kClockSlackMs = 2000;
 constexpr int64_t kSlowStartMs = 3000;
 constexpr auto kChangeSettles = milliseconds(3000);
+constexpr auto kStartLimit = milliseconds(5000);
 
 void putLe(std::string& out, uint64_t value, int bytes) {
     for (int i = 0; i < bytes; ++i) out.push_back(char((value >> (8 * i)) & 0xFF));
@@ -178,7 +179,9 @@ public:
             reportsPosition_ = false;
             started_ = false;
             playing_ = false;
+            released_ = false;
             playingSince_ = {};
+            askedToPlay_ = {};
             nextId_ = 0;
             queuedNext_ = 0;
             announcedBody_ = 0;
@@ -205,6 +208,7 @@ public:
             std::scoped_lock lock(mutex_);
             started_ = true;
             playing_ = true;
+            askedToPlay_ = Clock::now();
         }
         announceNext();
         if (!link_->play()) throw Error(ErrorCode::DriverError, "the player did not start");
@@ -214,11 +218,13 @@ public:
     }
 
     void pause() override {
+        bool released = false;
         {
             std::scoped_lock lock(mutex_);
             playing_ = false;
+            released = released_;
         }
-        if (link_) link_->pause();
+        if (link_ && !released) link_->pause();
     }
 
     void close() override {
@@ -238,7 +244,7 @@ public:
         connections_.clear();
         std::scoped_lock lock(mutex_);
         source_ = nullptr;
-        if (link_ && started_) link_->stop();
+        if (link_ && started_ && !released_) link_->stop();
         started_ = false;
     }
 
@@ -287,19 +293,34 @@ private:
         }
     }
 
+    // A player another source took, or one gone, is sent nothing more, not even a stop, until it is played to again.
+    void release(const Error& error) {
+        {
+            std::scoped_lock lock(mutex_);
+            if (released_) return;
+            released_ = true;
+        }
+        raiseError(error);
+    }
+
     void onPlayer(const PlayerEvent& event) {
         if (event.kind == PlayerEventKind::Lost) {
-            raiseError(Error(ErrorCode::DeviceLost, "the network player is not connected"));
+            release(Error(ErrorCode::DeviceLost, "the network player is not connected"));
             return;
         }
         if (event.kind == PlayerEventKind::TakenOver) {
-            raiseError(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+            release(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
             return;
         }
         {
             // A player still starting reports PLAYING after a stop, which is not a request to play.
             std::scoped_lock lock(mutex_);
             if (!started_) return;
+        }
+        if (event.kind == PlayerEventKind::Stopped) {
+            // Another source playing by other means than AVTransport, or the player's own remote, stopped it.
+            if (stoppedByItself()) release(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+            return;
         }
         if (event.kind == PlayerEventKind::NextTrack) {
             std::scoped_lock lock(mutex_);
@@ -321,7 +342,34 @@ private:
             }
             return;
         }
-        if (follow_ && event.kind != PlayerEventKind::Stopped) follow_(event);
+        if (follow_) follow_(event);
+    }
+
+    // Stopped after it played, while the track it plays is still being sent: neither its end nor a change of track, which
+    // come once the track is sent whole.
+    bool stoppedByItself() const {
+        std::scoped_lock lock(mutex_);
+        return playing_ && !closing_ && !released_ && link_->stopped() && !bodies_.empty() && !bodies_.front().complete &&
+               Clock::now() - askedToPlay_ >= kChangeSettles;
+    }
+
+    // Some seconds after Play, a player stopped while its track is still being sent: one that never got going, as the
+    // Essential Bravo in its standby, which reports PLAYING for a moment and then stays stopped, or one whose stop came
+    // too soon after Play for `stoppedByItself` to trust it.
+    void checkStarted() {
+        bool started = false;
+        {
+            std::scoped_lock lock(mutex_);
+            if (closing_ || released_ || !playing_ || askedToPlay_ == Clock::time_point{} ||
+                Clock::now() - askedToPlay_ < kStartLimit || bodies_.empty() || bodies_.front().complete)
+                return;
+            if (!link_->stopped() && (link_->played() || !link_->idle())) return;
+            started = link_->positionMs() != 0 || highestMs_ != 0;
+        }
+        if (started)
+            release(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+        else
+            release(Error(ErrorCode::DriverError, "the player did not start playing"));
     }
 
     _Requires_lock_held_(mutex_) uint64_t playedFrames() const {
@@ -464,7 +512,7 @@ private:
     // to read gives up on it and reopens it at the change, with a gap (the DMP-A6 does).
     void announceNext() {
         std::unique_lock lock(mutex_);
-        if (closing_ || !gapless() || !started_ || !source_) return;
+        if (closing_ || released_ || !gapless() || !started_ || !source_) return;
         if (const auto next = source_->nextStreamTrack(); next && next->sequence != queuedNext_) {
             queuedNext_ = next->sequence;
             bodies_.push_back(makeBody(*next));
@@ -481,7 +529,8 @@ private:
         std::string uri, didl;
         {
             std::scoped_lock lock(mutex_);
-            if (closing_ || !started_ || !playing_ || !link_->stopped() || bodies_.size() < 2 || !bodies_.front().complete)
+            if (closing_ || released_ || !started_ || !playing_ || !link_->stopped() || bodies_.size() < 2 ||
+                !bodies_.front().complete)
                 return;
             framesFinished_ += bodies_.front().framesWritten;
             bodies_.pop_front();
@@ -507,6 +556,7 @@ private:
             followChangeOfTrack();
             announceNext();
             startLateNext();
+            checkStarted();
             if (sent) produce();
         }
     }
@@ -800,7 +850,9 @@ private:
     _Guarded_by_(mutex_) bool started_ = false;
     _Guarded_by_(mutex_) bool playing_ = false;
     _Guarded_by_(mutex_) bool closing_ = false;
+    _Guarded_by_(mutex_) bool released_ = false;
     _Guarded_by_(mutex_) Clock::time_point playingSince_;
+    _Guarded_by_(mutex_) Clock::time_point askedToPlay_;
     _Guarded_by_(mutex_) mutable uint64_t highestMs_ = 0; // of the track playing
     _Guarded_by_(mutex_) mutable bool reportsPosition_ = false;
     _Guarded_by_(mutex_) Clock::time_point changedAt_;

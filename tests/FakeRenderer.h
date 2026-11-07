@@ -99,6 +99,8 @@ public:
     void keepReportingFirstTrack() { oldTrack_ = true; }
     // Refuses SetAVTransportURI and Insert, as a player does a format it cannot play.
     void refuseStreams() { refuseStreams_ = true; }
+    // Answers Play and stays without media, as the Essential Bravo does in its standby.
+    void stayInStandby() { standby_ = true; }
 
     std::map<std::string, std::string> received() const {
         std::scoped_lock lock(mutex_);
@@ -131,6 +133,12 @@ public:
         set("track", uri);
         set("state", "PLAYING");
         emitLastChange(R"(<CurrentTrackURI val=")" + uri + R"("/><TransportState val="PLAYING"/>)");
+    }
+    // Stops with the track still loaded, as the DMP-A6 does when a source of its own takes it over.
+    void stopOnItsOwn() {
+        stopFetch();
+        set("state", "STOPPED");
+        emitLastChange(R"(<TransportState val="STOPPED"/>)");
     }
 
     // Stops answering searches, while its other services stay.
@@ -552,6 +560,8 @@ private:
         } else if (name == "DeleteAll") {
             playlist_.clear();
             nextUri_.clear();
+        } else if (name == "Play" && standby_) {
+            state_["state"] = "NO_MEDIA_PRESENT";
         } else if (name == "Play") {
             state_["state"] = kind_ == RendererKind::OpenHome ? "Playing" : startMs_.load() ? "TRANSITIONING" : "PLAYING";
             if (!fetching_.exchange(true)) playRequested_ = true;
@@ -645,7 +655,7 @@ private:
     uint16_t httpPort_ = 0, ssdpPort_ = 0;
     std::thread httpThread_, udpThread_;
     std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
-                      refuseStreams_ = false;
+                      refuseStreams_ = false, standby_ = false;
     std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false;
     std::atomic<bool> oldTrack_ = false;
     std::atomic<uint64_t> nextTrackFill_ = 0;

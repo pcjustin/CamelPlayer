@@ -433,6 +433,154 @@ TEST(NetworkOutputTest, APlayerThatIsGoneIsNotConnected) {
 
 namespace {
 
+constexpr int kNoError = -1;
+
+// The actions sent from `from` on that only ask the player how it is.
+std::vector<std::string> controlsSince(const FakeRenderer& renderer, size_t from) {
+    std::vector<std::string> controls;
+    const auto actions = renderer.actions();
+    for (size_t i = from; i < actions.size(); ++i)
+        if (!actions[i].starts_with("Get") && actions[i] != "TransportState" && actions[i] != "Id" && actions[i] != "Time" &&
+            actions[i] != "SourceIndex")
+            controls.push_back(actions[i]);
+    return controls;
+}
+
+} // namespace
+
+TEST(NetworkOutputTest, ATakeoverSendsThePlayerNothingMore) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    const size_t before = renderer.actions().size();
+    renderer.takeOver("http://other-app/song");
+    ASSERT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceInUse); }));
+    output->pause();
+    output->close();
+    EXPECT_TRUE(controlsSince(renderer, before).empty()) << controlsSince(renderer, before).front();
+    EXPECT_EQ(renderer.state(), "PLAYING");
+}
+
+TEST(NetworkOutputTest, AnOpenHomeTakeoverSendsThePlayerNothingMore) {
+    FakeRenderer renderer(RendererKind::OpenHome);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    const size_t before = renderer.actions().size();
+    renderer.set("source", "3");
+    renderer.emitVariable("Product", "SourceIndex", "3");
+    ASSERT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceInUse); }));
+    output->close();
+    EXPECT_TRUE(controlsSince(renderer, before).empty()) << controlsSince(renderer, before).front();
+}
+
+TEST(NetworkOutputTest, AStopAskedForStillStopsThePlayer) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    const size_t before = renderer.actions().size();
+    output->close();
+    EXPECT_EQ(controlsSince(renderer, before), std::vector<std::string>{"Stop"});
+}
+
+TEST(NetworkOutputTest, APlayerThatStopsMidTrackIsInUseByAnotherSource) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    std::this_thread::sleep_for(3500ms); // past the moments after Play, when a player may still report its last state
+    ASSERT_EQ(raised, kNoError);
+    const size_t before = renderer.actions().size();
+    renderer.stopOnItsOwn();
+    ASSERT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceInUse); }));
+    output->close();
+    EXPECT_TRUE(controlsSince(renderer, before).empty()) << controlsSince(renderer, before).front();
+}
+
+TEST(NetworkOutputTest, TheEndOfTheLastTrackIsNotAStopOfItsOwn) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 4);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return renderer.played().size() == 1; }));
+    ASSERT_TRUE(waitFor([&] { return renderer.state() == "STOPPED"; }));
+    std::this_thread::sleep_for(6s); // past the time a player is given to start
+    EXPECT_EQ(raised, kNoError);
+}
+
+TEST(NetworkOutputTest, ANextTrackQueuedTooLateIsNotAStopOfItsOwn) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 4, 44100ULL * 2);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return renderer.state() == "STOPPED"; }));
+    source.queueSecond();
+    ASSERT_TRUE(waitFor([&] { return renderer.played().size() == 2; }));
+    EXPECT_EQ(raised, kNoError);
+}
+
+TEST(NetworkOutputTest, APlayerThatDoesNotStartIsReported) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.stayInStandby();
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DriverError); }));
+    const size_t before = renderer.actions().size();
+    output->close();
+    EXPECT_TRUE(controlsSince(renderer, before).empty()) << controlsSince(renderer, before).front();
+}
+
+TEST(NetworkOutputTest, APlayerThatPlaysForAMomentAndStopsIsReported) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.stayInStandby();
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    renderer.emitLastChange(R"(<TransportState val="PLAYING"/>)");
+    renderer.emitLastChange(R"(<TransportState val="STOPPED"/>)");
+    EXPECT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DriverError); }));
+}
+
+TEST(NetworkOutputTest, APlayerSlowToStartIsNotReported) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.startSlowly(6000);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    std::this_thread::sleep_for(6500ms);
+    EXPECT_EQ(raised, kNoError);
+}
+
+namespace {
+
 // Plays through the whole Server to a fake on the network, found the way a real player is.
 class StreamingTest : public ::testing::Test {
 protected:
@@ -816,7 +964,8 @@ TEST_F(StreamingTest, APlayerThatDisappearsPausesAsNotConnected) {
     ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
     renderer_.disappear();
     ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.error.has_value(); }, 20s));
-    EXPECT_NE(server->snapshot().playback.errorDetail.find("not connected"), std::string::npos);
+    EXPECT_NE(server->snapshot().playback.errorDetail.find("not connected"), std::string::npos)
+        << server->snapshot().playback.errorDetail;
     EXPECT_EQ(server->snapshot().settings.backend, Backend::Network);
     server->shutdown();
 }

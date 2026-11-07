@@ -927,10 +927,10 @@
                                 </Button.Flyout>
                             </Button>
                             <Border x:Name="SourceBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
-                                <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock x:Uid="Badge_Lossy" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
                             </Border>
                             <Border x:Name="BypassBadge" Style="{StaticResource BadgeStyle}" Visibility="Collapsed">
-                                <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock x:Name="BypassText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
                             </Border>
                             <!-- Turns each DSP node on or off and switches EQ presets; accented while the chain changes the signal. -->
                             <Button x:Name="DspButton" x:Uid="Dsp_Button" Padding="10,2" MinHeight="32" CornerRadius="16" VerticalAlignment="Center"

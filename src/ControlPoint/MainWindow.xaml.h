@@ -339,6 +339,7 @@ private:
     bool minimized_ = false;
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);
+    void showError(camel::audio::ErrorCode code, const std::string& detail, camel::Backend backend);
 
     // Playlists (docs/Plan.md §7.9, §8.3).
     void extendPlaylistMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu,
