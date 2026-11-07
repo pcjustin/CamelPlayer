@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>
+<u:GetPositionInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><Track>1</Track><TrackDuration>0:03:21.500</TrackDuration><RelTime>0:00:12</RelTime></u:GetPositionInfoResponse>
+</s:Body></s:Envelope>

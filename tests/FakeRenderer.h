@@ -12,8 +12,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -32,7 +35,8 @@ public:
         openHttp();
         udp_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         sockaddr_in address = loopback();
-        ::bind(udp_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+        if (::bind(udp_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+            throw std::runtime_error("the fake cannot bind");
         int length = sizeof(address);
         getsockname(udp_, reinterpret_cast<sockaddr*>(&address), &length);
         ssdpPort_ = ntohs(address.sin_port);
@@ -230,7 +234,8 @@ private:
     void openHttp() {
         http_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in address = loopback();
-        ::bind(http_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+        if (::bind(http_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+            throw std::runtime_error("the fake cannot bind");
         int length = sizeof(address);
         getsockname(http_, reinterpret_cast<sockaddr*>(&address), &length);
         httpPort_ = ntohs(address.sin_port);
@@ -268,7 +273,7 @@ private:
     void serveHttp() {
         for (;;) {
             const SOCKET client = accept(http_, nullptr, nullptr);
-            if (client == INVALID_SOCKET) return;
+            if (std::cmp_equal(client, INVALID_SOCKET)) return;
             std::string request;
             char buffer[8192];
             size_t headEnd = std::string::npos, total = 0;
@@ -276,9 +281,12 @@ private:
                 const int read = recv(client, buffer, sizeof(buffer), 0);
                 if (read <= 0) break;
                 request.append(buffer, size_t(read));
-                if (headEnd == std::string::npos && (headEnd = request.find("\r\n\r\n")) != std::string::npos) {
-                    const auto length = header(request.substr(0, headEnd), "content-length");
-                    total = headEnd + 4 + size_t(atoll(length.c_str()));
+                if (headEnd == std::string::npos) {
+                    headEnd = request.find("\r\n\r\n");
+                    if (headEnd != std::string::npos) {
+                        const auto length = header(request.substr(0, headEnd), "content-length");
+                        total = headEnd + 4 + size_t(std::strtoull(length.c_str(), nullptr, 10));
+                    }
                 }
                 if (headEnd != std::string::npos && request.size() >= total) break;
             }
@@ -380,7 +388,7 @@ private:
     void stopFetch() {
         fetchStop_ = true;
         const SOCKET open = fetchSocket_.exchange(INVALID_SOCKET);
-        if (open != INVALID_SOCKET) closesocket(open);
+        if (!std::cmp_equal(open, INVALID_SOCKET)) closesocket(open);
         if (fetchThread_.joinable()) fetchThread_.join();
     }
 
@@ -435,7 +443,7 @@ private:
         const SOCKET in = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         fetchSocket_ = in;
         sockaddr_in target = loopback();
-        target.sin_port = htons(uint16_t(atoi(uri.substr(colon + 1, slash - colon - 1).c_str())));
+        target.sin_port = htons(uint16_t(std::strtol(uri.substr(colon + 1, slash - colon - 1).c_str(), nullptr, 10)));
         inet_pton(AF_INET, uri.substr(hostStart, colon - hostStart).c_str(), &target.sin_addr);
         if (connect(in, reinterpret_cast<sockaddr*>(&target), sizeof(target)) != 0) return false;
         const std::string request = "GET " + uri.substr(slash) +
@@ -464,8 +472,11 @@ private:
                 }
             }
             const size_t body = data.size() - headEnd - 4;
-            if (!bytesPerSecond && body >= 44 && data.compare(headEnd + 4, 4, "RIFF") == 0)
-                bytesPerSecond = *reinterpret_cast<const uint32_t*>(data.data() + headEnd + 4 + 28);
+            if (!bytesPerSecond && body >= 44 && data.compare(headEnd + 4, 4, "RIFF") == 0) {
+                uint32_t rate = 0;
+                std::memcpy(&rate, data.data() + headEnd + 4 + 28, sizeof(rate));
+                bytesPerSecond = rate;
+            }
             if (bytesPerSecond && !noPosition_) {
                 const uint64_t ms = uint64_t(body) * 1000 / bytesPerSecond;
                 char text[32];
@@ -593,7 +604,7 @@ private:
         const auto hostStart = callback.find("://") + 3, colon = callback.find(':', hostStart), slash = callback.find('/', colon);
         const SOCKET out = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in target = loopback();
-        target.sin_port = htons(uint16_t(atoi(callback.substr(colon + 1, slash - colon - 1).c_str())));
+        target.sin_port = htons(uint16_t(std::strtol(callback.substr(colon + 1, slash - colon - 1).c_str(), nullptr, 10)));
         inet_pton(AF_INET, callback.substr(hostStart, colon - hostStart).c_str(), &target.sin_addr);
         if (connect(out, reinterpret_cast<sockaddr*>(&target), sizeof(target)) == 0) {
             const std::string body = R"(<?xml version="1.0"?><e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">)" +

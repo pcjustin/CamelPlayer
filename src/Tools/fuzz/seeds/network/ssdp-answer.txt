@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+CACHE-CONTROL: max-age=1800
+LOCATION: http://192.168.1.5:49152/description.xml
+ST: urn:schemas-upnp-org:device:MediaRenderer:1
+USN: uuid:a::urn:schemas-upnp-org:device:MediaRenderer:1
+

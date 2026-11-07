@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+<!-- One libFuzzer target, built by build.ps1 -Sanitizers with -p:CamelFuzz=true -p:CamelFuzzTarget=<name>. Not in the
+     solution, as it builds only with the instrumented modules. -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <ProjectGuid>{D2E2A0D1-7B6C-4C7E-9A52-5F1F6C4B7E31}</ProjectGuid>
+    <RootNamespace>fuzz</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <TargetName>$(CamelFuzzTarget)</TargetName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(CamelRoot)msbuild\CamelPlayer.Cpp.props" />
+  <Import Project="$(CamelRoot)msbuild\CamelPlayer.CoreLink.props" />
+  <PropertyGroup>
+    <IntDir>$(CamelRoot)build\obj\Fuzz\fuzz-$(CamelFuzzTarget)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(CamelFuzzTarget).cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

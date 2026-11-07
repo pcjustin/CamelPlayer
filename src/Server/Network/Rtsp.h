@@ -22,6 +22,8 @@ struct RtspReply {
     std::string body;
 };
 
+RtspReply parseRtspHead(std::string_view head); // a reply's status line and headers
+
 // The receiver closed the connection, as opposed to not answering.
 class RtspClosed : public std::runtime_error {
 public:

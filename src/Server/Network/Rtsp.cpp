@@ -42,7 +42,9 @@ void waitForConnection(SOCKET socket, int timeoutMs) {
         throw std::runtime_error("the receiver does not accept a connection");
 }
 
-RtspReply parseHead(std::string_view head) {
+} // namespace
+
+RtspReply parseRtspHead(std::string_view head) {
     RtspReply reply;
     const size_t firstLineEnd = head.find(kEndOfLine);
     const std::string_view status = head.substr(0, firstLineEnd);
@@ -64,8 +66,6 @@ RtspReply parseHead(std::string_view head) {
     }
     return reply;
 }
-
-} // namespace
 
 RtspClient::RtspClient(const std::string& address, uint16_t port, int timeoutMs) {
     WSADATA wsa;
@@ -139,7 +139,7 @@ RtspReply RtspClient::request(std::string_view method, std::string_view url, std
     while (received.size() <= kMaxReplyBytes) {
         const size_t headEnd = received.find(kEndOfHeaders);
         if (headEnd != std::string::npos) {
-            RtspReply reply = parseHead(std::string_view(received).substr(0, headEnd));
+            RtspReply reply = parseRtspHead(std::string_view(received).substr(0, headEnd));
             const auto length = reply.headers.find("content-length");
             const size_t bodyBytes = length == reply.headers.end() ? 0 : size_t(numberIn(length->second));
             const size_t bodyAt = headEnd + kEndOfHeaders.size();

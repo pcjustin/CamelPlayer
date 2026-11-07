@@ -32,15 +32,17 @@ std::string discordActivityJson(const DiscordActivity& activity, bool statusDisp
 // than a seek's 5 s, which position updates never do.
 bool discordActivityChanged(const std::optional<DiscordActivity>& shown, const std::optional<DiscordActivity>& next);
 
+struct DiscordClientOptions {
+    std::wstring pipePrefix = L"\\\\.\\pipe\\discord-ipc-";
+    std::string clientId = "1566326816900251688"; // the "CamelPlayer" Discord application
+    std::chrono::milliseconds reconnect{15000}, retry{5000}, merge{300}, timeout{5000};
+};
+
 // Keeps the activity Discord shows in step with show(): connects to the first of discord-ipc-0 to -9 that answers,
 // reconnects every `reconnect` while none does, merges calls within `merge`, and retries a refused update after `retry`.
 class DiscordClient {
 public:
-    struct Options {
-        std::wstring pipePrefix = L"\\\\.\\pipe\\discord-ipc-";
-        std::string clientId = "1566326816900251688"; // the "CamelPlayer" Discord application
-        std::chrono::milliseconds reconnect{15000}, retry{5000}, merge{300}, timeout{5000};
-    };
+    using Options = DiscordClientOptions;
     enum class State : uint8_t { Off, Searching, Connected };
 
     explicit DiscordClient(Options options = {});
@@ -68,7 +70,7 @@ private:
     bool dirty_ = false;   // `wanted_` has not reached Discord yet
     uint64_t version_ = 0; // counts show() and setEnabled() calls, which wake the worker
     std::optional<DiscordActivity> wanted_;
-    std::chrono::steady_clock::time_point sendAt_{}, connectAt_{};
+    std::chrono::steady_clock::time_point sendAt_, connectAt_;
     State state_ = State::Off;
     // Only the worker touches these.
     void* pipe_ = nullptr;

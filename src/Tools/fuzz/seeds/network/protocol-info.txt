@@ -1,0 +1,1 @@
+http-get:*:audio/L16;rate=44100;channels=2:DLNA.ORG_PN=LPCM,http-get:*:audio/flac:*,http-get:*:audio/x-dsd:*,http-get:*:audio/wav:*

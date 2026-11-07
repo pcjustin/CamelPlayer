@@ -9,11 +9,17 @@
   <PropertyGroup>
     <CamelRoot>$(MSBuildThisFileDirectory)</CamelRoot>
     <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset Condition="'$(CamelUbsan)' == 'true'">ClangCL</PlatformToolset>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
     <CharacterSet>Unicode</CharacterSet>
-    <OutDir>$(CamelRoot)build\$(Configuration)\$(MSBuildProjectName)\</OutDir>
-    <IntDir>$(CamelRoot)build\obj\$(Configuration)\$(MSBuildProjectName)\</IntDir>
+    <!-- build.ps1 -Asan: a tree of its own, so ordinary builds and the package never meet it. -->
+    <CamelBuildName>$(Configuration)</CamelBuildName>
+    <CamelBuildName Condition="'$(CamelAsan)' == 'true'">Asan</CamelBuildName>
+    <CamelBuildName Condition="'$(CamelFuzz)' == 'true'">Fuzz</CamelBuildName>
+    <CamelBuildName Condition="'$(CamelUbsan)' == 'true'">Ubsan</CamelBuildName>
+    <OutDir>$(CamelRoot)build\$(CamelBuildName)\$(MSBuildProjectName)\</OutDir>
+    <IntDir>$(CamelRoot)build\obj\$(CamelBuildName)\$(MSBuildProjectName)\</IntDir>
     <!-- major.minor.patch of the next or current release; GitHub tags are made from it -->
     <CamelVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</CamelVersion>
   </PropertyGroup>

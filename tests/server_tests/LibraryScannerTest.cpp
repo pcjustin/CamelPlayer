@@ -48,7 +48,7 @@ protected:
         return store.openReader().scalar(sql).value();
     }
     static bool waitFor(const std::function<bool()>& check) {
-        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         do {
             if (check()) return true;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -828,7 +828,7 @@ TEST_F(LibraryScannerTest, SlowFileDoesNotBlockPublishingOtherFilesInTheSameDire
     auto unblock = wil::scope_exit([&] {
         if (!released) release.set_value();
     });
-    EXPECT_EQ(started.get_future().wait_for(std::chrono::seconds(8)), std::future_status::ready);
+    EXPECT_EQ(started.get_future().wait_for(std::chrono::seconds(30)), std::future_status::ready);
     EXPECT_TRUE(waitFor([&] { return count(store) >= 500; }));
     release.set_value();
     released = true;

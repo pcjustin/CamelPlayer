@@ -4,6 +4,8 @@
   (docs/Plan.md §4, M0-08).
 .EXAMPLE
   .\build.ps1 -Configuration Release -Test
+.EXAMPLE
+  .\build.ps1 -Sanitizers
 #>
 
 # This Source Code Form is subject to the terms of the Mozilla Public
@@ -13,7 +15,10 @@
 param(
     [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release',
     [switch] $Test,
-    [switch] $NoPackage
+    [switch] $NoPackage,
+    [switch] $Asan,
+    [switch] $Ubsan,
+    [switch] $Sanitizers
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -35,8 +40,15 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer
 $msbuild = & $vswhere -latest -prerelease -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\amd64\MSBuild.exe' | Select-Object -First 1
 if (-not $msbuild) { throw 'MSBuild not found (Visual Studio 2026 with C++ desktop workload required)' }
 
+if ($Asan -or $Ubsan -or $Sanitizers) {
+    $run = if ($Sanitizers) { 'All' } elseif ($Asan) { 'Asan' } else { 'Ubsan' }
+    & (Join-Path $root 'msbuild\sanitizers.ps1') -MSBuild $msbuild -Run $run
+    if ($LASTEXITCODE) { throw "sanitizer checks failed ($LASTEXITCODE)" }
+    return
+}
+
 New-Item -ItemType Directory -Force (Join-Path $root 'build\logs') | Out-Null
-$log = Join-Path $root "build\logs\build-$Configuration.log"
+$log =Join-Path $root "build\logs\build-$Configuration.log"
 & $msbuild (Join-Path $root 'CamelPlayer.slnx') -restore '-p:RestorePackagesConfig=true' -m -nologo -v:m `
     "-p:Configuration=$Configuration" '-p:Platform=x64' "-flp:logfile=$log;verbosity=normal"
 if ($LASTEXITCODE) { throw "build failed ($LASTEXITCODE), see $log" }

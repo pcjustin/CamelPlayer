@@ -25,6 +25,40 @@
       <PreprocessorDefinitions>CAMEL_VERSION=$(CamelVersion);CAMEL_VERSION_COMMAS=$(CamelVersion.Replace('.', ',')),0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
   </ItemDefinitionGroup>
+  <PropertyGroup Condition="'$(CamelAsan)' == 'true' or '$(CamelFuzz)' == 'true'">
+    <EnableASAN>true</EnableASAN>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(CamelFuzz)' == 'true'">
+    <ClCompile>
+      <AdditionalOptions>/fsanitize=fuzzer %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(CamelAsan)' == 'true' or '$(CamelFuzz)' == 'true'">
+    <ClCompile>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <!-- The vcpkg libraries are not built with ASan, and every object must agree on the containers' layout. -->
+      <PreprocessorDefinitions>_DISABLE_STRING_ANNOTATION;_DISABLE_VECTOR_ANNOTATION;_DISABLE_OPTIONAL_ANNOTATION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <PropertyGroup Condition="'$(CamelUbsan)' == 'true'">
+    <!-- vcpkg links lib\*.lib, which only MSVC's linker expands, so it stops linking at all under ClangCL. -->
+    <UseLldLink>false</UseLldLink>
+    <LinkToolExe>link.exe</LinkToolExe>
+    <VcpkgAutoLink>true</VcpkgAutoLink>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(CamelUbsan)' == 'true'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <AdditionalOptions>-fsanitize=undefined %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(LLVMInstallDir)\lib\clang\$(LLVMIncludeVersion)\lib\windows;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>clang_rt.ubsan_standalone-x86_64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- Every object asks for the _cxx runtime, which exists only for the static CRT and which nothing here calls. -->
+      <IgnoreSpecificDefaultLibraries>libcmt.lib;clang_rt.ubsan_standalone_cxx-x86_64.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
     <ClCompile>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
