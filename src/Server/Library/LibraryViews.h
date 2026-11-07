@@ -202,6 +202,8 @@ std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t fol
 // `track` and every visible track after it in its library folder, in the order of folderTracks; empty when the track is
 // not visible.
 std::vector<LibraryTrackRow> folderTracksFrom(const LibraryStore& store, int64_t track, const CancellationToken& token = {});
+// The ids of the folders from `file`'s library folder down to the folder that holds it; empty for an unknown file.
+std::vector<int64_t> fileFolders(const LibraryStore& store, int64_t file);
 
 // A stored root key as people write it: the volume or share's own spelling without the extended-length prefix.
 std::string libraryDisplayPath(const std::string& key);

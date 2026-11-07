@@ -127,8 +127,8 @@ void PlaylistView::hide() {
     PlaylistList().ItemsSource(nullptr);
 }
 
-void PlaylistView::showNowPlaying(int64_t was) {
-    entries_->forEachItem([was](Windows::Foundation::IInspectable const& value) {
+void PlaylistView::showNowPlaying(const ui::NowPlaying& was) {
+    entries_->forEachItem([&was](Windows::Foundation::IInspectable const& value) {
         get_self<BrowseItem>(value.as<CamelPlayer::BrowseItem>())->playingChanged(was);
     });
 }

@@ -470,6 +470,11 @@ INSERT INTO tracks(id,file_id,title) VALUES(7,7,'Loose'),(8,8,'Nested'),(9,9,'Ow
     EXPECT_TRUE(from(5).empty()); // an unavailable file
     EXPECT_TRUE(from(6).empty()); // an offline library folder
     EXPECT_TRUE(from(99).empty());
+    // A file's folders, as the Folders page marks them while it plays.
+    EXPECT_EQ(fileFolders(*store, 8), (std::vector<int64_t>{1, 6, 7}));
+    EXPECT_EQ(fileFolders(*store, 9), (std::vector<int64_t>{1, 6}));
+    EXPECT_EQ(fileFolders(*store, 7), (std::vector<int64_t>{1}));
+    EXPECT_TRUE(fileFolders(*store, 99).empty());
     // A folder played plays on the same way: its tracks lead what follows from its first track.
     for (const int64_t folder : {1, 2, 6, 7}) {
         std::vector<int64_t> own;

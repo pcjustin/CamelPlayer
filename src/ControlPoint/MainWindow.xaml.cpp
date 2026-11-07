@@ -1244,9 +1244,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                            [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
     // Library and playlist rows mark the track the queue is on, until playback stops.
     const bool onTrack = s.state != PlaybackState::Stopped && currentEntry != snapshot.queue.entries.end();
-    if (const auto was = ui::setNowPlaying({onTrack ? currentEntry->file : 0, s.state == PlaybackState::Paused})) {
-        get_self<LibraryView>(Library())->showNowPlaying(was->file);
-        get_self<PlaylistView>(Playlists())->showNowPlaying(was->file);
+    // The playing track's album and the folders on its path are marked too; the folders are read once per track.
+    const int64_t playingFile = onTrack ? currentEntry->file : 0;
+    std::vector<int64_t> playingFolders =
+        playingFile == ui::nowPlaying().file ? ui::nowPlaying().folders : std::vector<int64_t>{};
+    if (const auto was = ui::setNowPlaying(
+            {playingFile, s.state == PlaybackState::Paused, onTrack ? currentEntry->albumId : 0, std::move(playingFolders)})) {
+        showNowPlaying(*was);
+        if (playingFile != 0 && playingFile != was->file) readPlayingFolders(playingFile);
     }
     if (s.pathUtf8.empty()) {
         TitleText().Text(tr(L"NoFile"));
@@ -1503,6 +1508,32 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         StatusDetailText().Text(clauseLines(s.outputDetail));
     }
     showStatusNotices(s);
+}
+
+void MainWindow::showNowPlaying(const ui::NowPlaying& was) {
+    get_self<LibraryView>(Library())->showNowPlaying(was);
+    get_self<PlaylistView>(Playlists())->showNowPlaying(was);
+}
+
+winrt::fire_and_forget MainWindow::readPlayingFolders(int64_t file) {
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    const auto server = server_;
+    co_await winrt::resume_background();
+    auto folders = std::make_shared<std::vector<int64_t>>();
+    try {
+        *folders = server->fileFolders(file);
+    } catch (const std::exception& e) {
+        camel::log::warn("window: playing track's folders: %s", e.what());
+        co_return;
+    }
+    queue.TryEnqueue([weak, file, folders] {
+        const auto self = weak.get();
+        if (!self || ui::nowPlaying().file != file) return;
+        auto playing = ui::nowPlaying();
+        playing.folders = std::move(*folders);
+        if (const auto was = ui::setNowPlaying(std::move(playing))) self->showNowPlaying(*was);
+    });
 }
 
 // A network player's reason is said whole in its title; the engine's English detail stays in the log.
@@ -2257,6 +2288,17 @@ std::function<void()> MainWindow::openLibraryOverPage() {
     get_self<PlaylistView>(Playlists())->hide();
     Library().Visibility(Visibility::Visible);
     return [this, tag] { returnToPage(tag); };
+}
+
+// On a library page, the playing track there; elsewhere its album's page.
+void MainWindow::OnGoToPlayingAccelerator(Input::KeyboardAccelerator const&,
+                                          Input::KeyboardAcceleratorInvokedEventArgs const& e) {
+    e.Handled(true);
+    if (ui::nowPlaying().file == 0) return;
+    auto* library = get_self<LibraryView>(Library());
+    if (Library().Visibility() == Visibility::Visible) return library->goToPlaying();
+    library->selectPlayingWhenLoaded();
+    OnAlbumLinkClick(nullptr, nullptr);
 }
 
 void MainWindow::OnSearchAccelerator(Input::KeyboardAccelerator const&, Input::KeyboardAcceleratorInvokedEventArgs const& e) {

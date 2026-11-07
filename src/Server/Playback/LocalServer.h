@@ -60,6 +60,7 @@ public:
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryTrackRow> folderTracksFrom(int64_t track, const CancellationToken& token = {}) const override;
+    std::vector<int64_t> fileFolders(int64_t file) const override;
     std::vector<LibraryRootInfo> libraryRoots() const override;
     LibraryRootContents libraryRootContents(int64_t root) const override;
     LibraryScanProgress libraryScanProgress() const override;

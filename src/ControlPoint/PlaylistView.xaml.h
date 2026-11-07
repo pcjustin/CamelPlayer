@@ -30,7 +30,7 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
     void reload(int64_t playlist);
     int64_t shown() const { return playlist_; }
     // Marks the playing track afresh after ui::setNowPlaying, given the file that played before.
-    void showNowPlaying(int64_t was);
+    void showNowPlaying(const ui::NowPlaying& was);
 
     void OnTextTrimmedChanged(Microsoft::UI::Xaml::Controls::TextBlock const& text,
                               Microsoft::UI::Xaml::Controls::IsTextTrimmedChangedEventArgs const&);

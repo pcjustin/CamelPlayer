@@ -92,9 +92,16 @@
                         <FontIcon Glyph="&#xE8B7;" FontSize="28" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <Image x:Name="FolderCover" Width="40" Height="40" Stretch="UniformToFill" Loaded="OnArtworkLoaded"
                                Unloaded="OnArtworkUnloaded" DataContextChanged="OnArtworkContextChanged" />
+                        <Border Visibility="{x:Bind IsPlaying, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                Margin="-4" Padding="3" CornerRadius="9" Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}">
+                            <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        </Border>
                     </Grid>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
+                                   Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
+                                   FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
                         <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
@@ -157,8 +164,11 @@
                     <Run Text="{x:Bind Title, Mode=OneWay}" /><Run Text=" " /><Run Text="{x:Bind Detail, Mode=OneWay}"
                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </TextBlock>
-                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
-                           FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
+                <TextBlock Grid.Column="2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"
+                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind IsPlaying, Mode=OneWay}">
+                    <Run Text="{x:Bind Title, Mode=OneWay}" /><Run Text=" " /><Run Text="{x:Bind Detail, Mode=OneWay}"
+                         FontWeight="Normal" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </TextBlock>
             </Grid>
         </DataTemplate>
         <DataTemplate x:Key="AlbumTemplate" x:DataType="local:BrowseItem">
@@ -170,6 +180,10 @@
                             <FontIcon Glyph="&#xE93C;" FontSize="40" Opacity="0.4" />
                             <Image Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
                                    DataContextChanged="OnArtworkContextChanged" />
+                            <Border Visibility="{x:Bind IsPlaying, Mode=OneWay}" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                    Margin="6" Padding="5" CornerRadius="12" Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}">
+                                <FontIcon Glyph="{x:Bind PlayingGlyph, Mode=OneWay}" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            </Border>
                             <Border Visibility="{x:Bind IsFavorite, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                     Margin="6" Padding="5" CornerRadius="12" Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}">
                                 <FontIcon Glyph="&#xE00B;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
@@ -177,7 +191,10 @@
                         </Grid>
                     </Border>
                     <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
-                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                               Style="{StaticResource BodyStrongTextBlockStyle}" Visibility="{x:Bind IsNotPlaying, Mode=OneWay}" />
+                    <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                               Visibility="{x:Bind IsPlaying, Mode=OneWay}" />
                     <TextBlock Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
                                Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
@@ -198,6 +215,7 @@
         <Grid Grid.ColumnSpan="2" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
@@ -365,6 +383,11 @@
             <ToggleButton x:Name="DescendingToggle" Grid.Column="2" VerticalAlignment="Center" Click="OnDescendingClick">
                 <SymbolIcon Symbol="Sort" />
             </ToggleButton>
+            <!-- Goes to the playing track on this page (Ctrl+L). -->
+            <Button x:Name="GoToPlayingButton" x:Uid="Library_GoToPlaying" Grid.Column="3" VerticalAlignment="Center"
+                    IsEnabled="False" Click="OnGoToPlayingClick">
+                <FontIcon Glyph="&#xE81D;" FontSize="16" />
+            </Button>
         </Grid>
 
         <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"

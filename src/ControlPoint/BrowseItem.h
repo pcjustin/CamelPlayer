@@ -5,6 +5,7 @@
 #pragma once
 
 #include "ArtistAvatar.h"
+#include "UiText.h"
 #include "BrowseItem.g.h"
 
 namespace ui {
@@ -16,6 +17,7 @@ struct BrowseRow {
     winrt::hstring title, subtitle, detail, trailing;
     winrt::hstring number, fileName; // a track's place on its album, and its file on a folder page
     bool folder = false;
+    bool album = false;       // an album's card
     int64_t file = 0;         // a track's file, which playlists refer to
     bool unavailable = false; // a playlist entry whose file is missing or offline
     bool marks = false;       // shows the track's favorite heart
@@ -30,7 +32,14 @@ struct BrowseRow {
 struct NowPlaying {
     int64_t file = 0; // 0: stopped, or a file outside the library
     bool paused = false;
+    int64_t album = 0;
+    std::vector<int64_t> folders; // the file's library folder down to its own folder, once read
     bool operator==(const NowPlaying&) const = default;
+    // Whether `row` is the track, its album or a folder on its path.
+    bool marks(const BrowseRow& row) const {
+        return (row.file != 0 && row.file == file) || (row.album && row.id != 0 && row.id == album) ||
+               (row.folder && std::ranges::find(folders, row.id) != folders.end());
+    }
 };
 
 const NowPlaying& nowPlaying();
@@ -51,7 +60,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring Number() const { return row_.number; }
     hstring FileName() const { return row_.fileName; }
     bool ShowsNumber() const { return !row_.number.empty() && !IsPlaying(); }
-    bool IsPlaying() const { return row_.file != 0 && row_.file == ui::nowPlaying().file; }
+    bool IsPlaying() const { return ui::nowPlaying().marks(row_); }
     bool IsNotPlaying() const { return !IsPlaying(); }
     hstring PlayingGlyph() const { return ui::nowPlaying().paused ? L"\xE769" : L"\xE767"; }
     bool IsFolder() const { return row_.folder; }
@@ -71,7 +80,9 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     // What a screen reader announces for the tile or row.
     hstring ToString() const {
         const auto title = row_.number.empty() ? row_.title : row_.number + L" " + row_.title;
-        return row_.subtitle.empty() ? title : title + L", " + row_.subtitle;
+        const auto named = row_.subtitle.empty() ? title : title + L", " + row_.subtitle;
+        if (!IsPlaying()) return named;
+        return named + L", " + ui::tr(ui::nowPlaying().paused ? L"Library_PausedMark" : L"Library_PlayingMark");
     }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
@@ -83,8 +94,8 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     void fill(const ui::BrowseRow& row);
     void setFavorite(bool favorite);
     void setExpanded(bool expanded);
-    // Updates the playing mark when this row is the track that played before, `was`, or the one that plays now.
-    void playingChanged(int64_t was);
+    // Updates the playing mark when this row was marked for what played before, `was`, or is for what plays now.
+    void playingChanged(const ui::NowPlaying& was);
 
 private:
     ui::BrowseRow row_;

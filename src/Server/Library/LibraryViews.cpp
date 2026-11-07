@@ -824,6 +824,17 @@ std::vector<LibraryTrackRow> folderTracksFrom(const LibraryStore& store, int64_t
     return tracks;
 }
 
+std::vector<int64_t> fileFolders(const LibraryStore& store, int64_t file) {
+    auto db = store.openReader();
+    auto rows = db.prepare("WITH RECURSIVE up(id,parent,depth) AS (SELECT d.id,d.parent_id,0 FROM files f JOIN folders d ON "
+                           "d.id=f.folder_id WHERE f.id=? UNION ALL SELECT d.id,d.parent_id,up.depth+1 FROM folders d JOIN up ON "
+                           "d.id=up.parent) SELECT id FROM up ORDER BY depth DESC");
+    rows.bind(1, file);
+    std::vector<int64_t> out;
+    while (rows.step()) out.push_back(rows.integer(0));
+    return out;
+}
+
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store) {
     auto db = store.openReader();
     auto rows = db.prepare("SELECT id,path,online,coalesce(last_scan,0),coalesce(display,''),coalesce(location,'') FROM roots "

@@ -48,7 +48,12 @@ struct LibraryView : LibraryViewT<LibraryView> {
     // Stops refreshing while the window sits in the notification area; the view keeps its place.
     void setActive(bool active);
     // Marks the playing track afresh after ui::setNowPlaying, given the file that played before.
-    void showNowPlaying(int64_t was);
+    void showNowPlaying(const ui::NowPlaying& was);
+    // Shows the playing track where the page is: its album on the album wall, its row in a track list, its folder on the
+    // Folders page; on any other page its album's page.
+    void goToPlaying();
+    // Selects and shows the playing track in the next track list that loads.
+    void selectPlayingWhenLoaded() { pendingTrack_ = ui::nowPlaying().file; }
     // Whether Back has somewhere to go; `changed` hears it after every page change. The window's title bar shows Back.
     bool canGoBack() const;
     void goBack();
@@ -70,6 +75,7 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void OnPlayNextAlbumClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayAlbumClick(Microsoft::UI::Xaml::Controls::SplitButton const&,
                           Microsoft::UI::Xaml::Controls::SplitButtonClickEventArgs const&);
+    void OnGoToPlayingClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayFolderClick(Microsoft::UI::Xaml::Controls::SplitButton const&,
                            Microsoft::UI::Xaml::Controls::SplitButtonClickEventArgs const&);
     void OnPlayNextFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -153,6 +159,12 @@ private:
     void open(View view, bool push);
     void showList(Mode mode);
     Microsoft::UI::Xaml::Controls::ListViewBase listOf(Mode mode);
+    void openPlayingAlbum();
+    void openPlayingFolder(std::vector<int64_t> folders);
+    void scrollToIndex(int64_t index);
+    // Selects the row of `pendingTrack_` in `list` and scrolls to it, if the list has it.
+    void selectPendingTrack(Microsoft::UI::Xaml::Controls::ListViewBase const& list);
+    int64_t pendingTrack_ = 0;
     // Scrolls a list reopened by Back to where it was, once its items are there.
     void restoreOffset();
     void fillSortChoices();

@@ -364,6 +364,8 @@ public:
     virtual std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const = 0;
     // A track and every track after it in its library folder, in the same order (see folderTracksFrom).
     virtual std::vector<LibraryTrackRow> folderTracksFrom(int64_t track, const CancellationToken& token = {}) const = 0;
+    // The folders from a file's library folder down to its own (see fileFolders).
+    virtual std::vector<int64_t> fileFolders(int64_t file) const = 0;
     virtual std::vector<LibraryRootInfo> libraryRoots() const = 0;
     virtual LibraryRootContents libraryRootContents(int64_t root) const = 0;
     virtual LibraryScanProgress libraryScanProgress() const = 0;

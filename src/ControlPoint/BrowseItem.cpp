@@ -46,8 +46,8 @@ void BrowseItem::setExpanded(bool expanded) {
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"ChevronGlyph"));
 }
 
-void BrowseItem::playingChanged(int64_t was) {
-    if (row_.file == 0 || (row_.file != was && row_.file != ui::nowPlaying().file)) return;
+void BrowseItem::playingChanged(const ui::NowPlaying& was) {
+    if (!was.marks(row_) && !ui::nowPlaying().marks(row_)) return;
     for (const auto* name : {L"ShowsNumber", L"IsPlaying", L"IsNotPlaying", L"PlayingGlyph"})
         changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(name));
 }

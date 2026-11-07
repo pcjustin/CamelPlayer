@@ -100,6 +100,7 @@ ui::BrowsePage albumPage(const LibraryAlbumPage& page, const Texts& texts) {
     for (const auto& a : page.albums) {
         out.rows.push_back({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, counted(texts.tracks, a.tracks)});
         out.rows.back().favorite = a.favorite;
+        out.rows.back().album = true;
     }
     return out;
 }
@@ -355,8 +356,11 @@ void LibraryView::loadSearchGroups() {
         auto results = std::make_shared<LibrarySearchResults>(server->searchLibrary(query, 0, kShown, std::nullopt));
         return std::function<void()>([this, results, texts, requested] {
             auto albums = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
-            for (const auto& a : results->albums)
-                albums.Append(item({a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, {}}));
+            for (const auto& a : results->albums) {
+                ui::BrowseRow row{a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, {}};
+                row.album = true;
+                albums.Append(item(row));
+            }
             auto artists = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
             for (const auto& name : results->artists) artists.Append(item({0, name, orUnknown(name, texts), {}, {}, {}}));
             SearchAlbums().ItemsSource(albums);
@@ -404,11 +408,14 @@ void LibraryView::showEmpty(int64_t total) {
     EmptyText().Visibility(Visibility::Visible);
 }
 
-void LibraryView::showNowPlaying(int64_t was) {
-    const auto mark = [was](Windows::Foundation::IInspectable const& value) {
+void LibraryView::showNowPlaying(const ui::NowPlaying& was) {
+    GoToPlayingButton().IsEnabled(ui::nowPlaying().file != 0);
+    const auto mark = [&was](Windows::Foundation::IInspectable const& value) {
         if (const auto item = value.try_as<CamelPlayer::BrowseItem>()) get_self<BrowseItem>(item)->playingChanged(was);
     };
-    std::vector<Windows::Foundation::IInspectable> sources{FolderList().ItemsSource(), FolderTree().ItemsSource()};
+    std::vector<Windows::Foundation::IInspectable> sources{FolderList().ItemsSource(), FolderTree().ItemsSource(),
+                                                           SearchAlbums().ItemsSource(), ArtistOwn().ItemsSource(),
+                                                           ArtistGuest().ItemsSource()};
     // A paged collection is visited only through the rows it has made; reading it whole would load every page.
     if (collection_)
         collection_->forEachItem(mark);
@@ -532,6 +539,107 @@ ListViewBase LibraryView::listOf(Mode mode) {
     if (mode == Mode::Albums) return AlbumGrid();
     if (mode == Mode::Folders) return folderTree_ ? FolderTree().as<ListViewBase>() : FolderList().as<ListViewBase>();
     return RowList().as<ListViewBase>();
+}
+
+void LibraryView::OnGoToPlayingClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    goToPlaying();
+}
+
+void LibraryView::goToPlaying() {
+    constexpr int64_t kFindPage = 500; // the most a library page holds
+    const auto playing = ui::nowPlaying();
+    if (!server_ || playing.file == 0) return;
+    if (current_.mode == Mode::Albums && collection_ && !current_.fetch) {
+        background([this, server = server_, playing, total = int64_t(collection_->Size()), favorites = current_.favoriteAlbums,
+                    sort = albumSort_, filter = current_.filter] {
+            int64_t index = -1;
+            for (int64_t offset = 0; offset < total && index < 0; offset += kFindPage) {
+                const auto page = favorites ? server->favoriteAlbums(offset, kFindPage, std::nullopt)
+                                            : server->browseAlbums(sort, filter, offset, kFindPage, std::nullopt);
+                const auto found = std::ranges::find(page.albums, playing.album, &LibraryAlbum::id);
+                if (found != page.albums.end()) index = offset + (found - page.albums.begin());
+                if (page.albums.empty()) break;
+            }
+            return std::function<void()>([this, index] { index < 0 ? openPlayingAlbum() : scrollToIndex(index); });
+        });
+        return;
+    }
+    if (current_.mode == Mode::Tracks && collection_ && !current_.fetch && !current_.smart) {
+        background([this, server = server_, playing, total = int64_t(collection_->Size()), sort = trackSort_,
+                    descending = descending_, filter = current_.filter] {
+            int64_t index = -1;
+            for (int64_t offset = 0; offset < total && index < 0; offset += kFindPage) {
+                const auto page = server->browseTrackRows(sort, descending, filter, offset, kFindPage, std::nullopt);
+                const auto found =
+                    std::ranges::find_if(page.tracks, [&](const LibraryTrackRow& t) { return t.track.file == playing.file; });
+                if (found != page.tracks.end()) index = offset + (found - page.tracks.begin());
+                if (page.tracks.empty()) break;
+            }
+            return std::function<void()>([this, index] { index < 0 ? openPlayingAlbum() : scrollToIndex(index); });
+        });
+        return;
+    }
+    if (current_.mode == Mode::Folders) {
+        if (!playing.folders.empty()) return openPlayingFolder(playing.folders);
+        background([this, server = server_, file = playing.file] {
+            auto folders = server->fileFolders(file);
+            return std::function<void()>([this, folders = std::move(folders)]() mutable {
+                if (!folders.empty()) openPlayingFolder(std::move(folders));
+            });
+        });
+        return;
+    }
+    if (current_.mode == Mode::AlbumDetail && current_.album == playing.album) {
+        pendingTrack_ = playing.file;
+        return selectPendingTrack(RowList());
+    }
+    openPlayingAlbum();
+}
+
+void LibraryView::openPlayingAlbum() {
+    const auto playing = ui::nowPlaying();
+    if (playing.album <= 0) return;
+    pendingTrack_ = playing.file;
+    View view;
+    view.mode = Mode::AlbumDetail;
+    view.album = playing.album;
+    open(std::move(view), true);
+}
+
+void LibraryView::openPlayingFolder(std::vector<int64_t> folders) {
+    pendingTrack_ = ui::nowPlaying().file;
+    if (folderTree_) {
+        openFolders_.insert(folders.begin(), folders.end());
+        saveOpenFolders();
+        loadFolder();
+        return;
+    }
+    View view;
+    view.mode = Mode::Folders;
+    view.folder = folders.back();
+    view.title = current_.title;
+    open(std::move(view), true);
+}
+
+void LibraryView::scrollToIndex(int64_t index) {
+    if (!collection_ || std::cmp_greater_equal(index, collection_->Size())) return;
+    const auto list = listOf(current_.mode);
+    const auto item = collection_->GetAt(uint32_t(index));
+    list.ScrollIntoView(item, ScrollIntoViewAlignment::Leading);
+    if (current_.mode == Mode::Tracks) list.SelectedItem(item);
+}
+
+void LibraryView::selectPendingTrack(ListViewBase const& list) {
+    if (!pendingTrack_) return;
+    const auto items = list.ItemsSource().try_as<Windows::Foundation::Collections::IVector<Windows::Foundation::IInspectable>>();
+    if (!items) return;
+    for (const auto& value : items) {
+        if (ui::LibraryCollection::rowOf(value).file != pendingTrack_) continue;
+        pendingTrack_ = 0;
+        list.SelectedItem(value);
+        list.ScrollIntoView(value, ScrollIntoViewAlignment::Leading);
+        return;
+    }
 }
 
 void LibraryView::restoreOffset() {
@@ -688,6 +796,7 @@ void LibraryView::loadAlbumDetail() {
             showListColumns(!oneArtist, true);
             detailTracks_ = std::move(detail->tracks);
             RowList().ItemsSource(items);
+            selectPendingTrack(RowList());
         });
     });
 }
@@ -796,6 +905,7 @@ void LibraryView::expandTree(CamelPlayer::BrowseItem const& parent) {
                 treeTracks_[*folder] = listing->tracks;
             }
             for (const auto& node : open) expandTree(node);
+            selectPendingTrack(FolderTree());
         });
     });
 }
@@ -972,6 +1082,7 @@ void LibraryView::loadFolder() {
             folderTracks_ = listing->tracks;
             FolderList().ItemsSource(items);
             restoreOffset();
+            selectPendingTrack(FolderList());
             if (listing->trail.empty()) return;
             auto names = single_threaded_vector<Windows::Foundation::IInspectable>();
             for (const auto& step : listing->trail) names.Append(box_value(ui::utf8(step.name)));

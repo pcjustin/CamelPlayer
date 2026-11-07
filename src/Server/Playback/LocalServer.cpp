@@ -2010,6 +2010,9 @@ std::vector<LibraryTrackRow> LocalServer::folderTracks(int64_t folder, const Can
 std::vector<LibraryTrackRow> LocalServer::folderTracksFrom(int64_t track, const CancellationToken& token) const {
     return camel::server::folderTracksFrom(impl_->library(), track, token);
 }
+std::vector<int64_t> LocalServer::fileFolders(int64_t file) const {
+    return camel::server::fileFolders(impl_->library(), file);
+}
 std::vector<LibraryRootInfo> LocalServer::libraryRoots() const {
     return camel::server::libraryRoots(impl_->library());
 }

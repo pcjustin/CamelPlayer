@@ -41,6 +41,8 @@ struct MainWindow : MainWindowT<MainWindow> {
                                 Microsoft::UI::Xaml::Controls::AutoSuggestBoxQuerySubmittedEventArgs const&);
     void OnSearchAccelerator(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&,
                              Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const&);
+    void OnGoToPlayingAccelerator(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&,
+                                  Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const&);
     winrt::fire_and_forget OnResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnOpenDataFolderClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnDiagnosticBundleClick(Windows::Foundation::IInspectable const&,
@@ -340,6 +342,8 @@ private:
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);
     void showError(camel::audio::ErrorCode code, const std::string& detail, camel::Backend backend);
+    void showNowPlaying(const ui::NowPlaying& was);
+    winrt::fire_and_forget readPlayingFolders(int64_t file);
 
     // Playlists (docs/Plan.md §7.9, §8.3).
     void extendPlaylistMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu,
