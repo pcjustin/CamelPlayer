@@ -1028,12 +1028,12 @@ private:
         const auto now = std::chrono::steady_clock::now();
         // Availability comes from files and roots alone, and a large queue reads all of files: other commits, such as
         // the queue session saved every 5 s while playing, are left for the once-a-minute pass.
-        const auto files = library_->fileChanges();
-        if (large && libraryVersion_ && files == availabilityFiles_ && now - availabilityChecked_ < std::chrono::minutes(1))
+        const auto fileChanges = library_->fileChanges();
+        if (large && libraryVersion_ && fileChanges == availabilityFiles_ && now - availabilityChecked_ < std::chrono::minutes(1))
             return;
         if (idle && large && now - availabilityChecked_ < std::chrono::seconds(1)) return;
         availabilityChecked_ = now;
-        availabilityFiles_ = files;
+        availabilityFiles_ = fileChanges;
         libraryVersion_ = version;
         std::vector<uint64_t> deleted;
         if (const auto deletions = libraryDeletions(reader); deletions != libraryDeletions_) {
