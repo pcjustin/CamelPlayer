@@ -308,19 +308,25 @@ public:
 
     _No_competing_thread_ ~Impl() { shutdown(); }
 
-    // The cover warmer and the loudness analysis stop before the worker releases the engine they read; the worker saves
-    // the queue on its way out.
+    // The worker saves the queue first, as a scan at background priority can wait minutes for the CPU on a busy machine.
+    // Scans, the cover warmer and the loudness analysis then stop before the worker releases the engine they read.
     void shutdown() {
-        loudness_.reset();
-        libraryMonitor_.reset();
-        coverWarmer_ = {};
+        if (libraryMonitor_) libraryMonitor_->cancel();
         {
             std::lock_guard lock(mutex_);
             closing_ = true;
             listener_ = {};
         }
         cv_.notify_one();
-        if (worker_.joinable()) worker_.join();
+        const bool working = worker_.joinable();
+        if (working) queueSaved_.get_future().wait();
+        loudness_.reset();
+        libraryMonitor_.reset();
+        coverWarmer_ = {};
+        if (working) {
+            backgroundStopped_.set_value();
+            worker_.join();
+        }
         discord_.reset(); // clears the activity
         libraryReader_.reset();
         if (library_) {
@@ -1769,6 +1775,8 @@ private:
         }
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
+        queueSaved_.set_value();
+        backgroundStopped_.get_future().wait();
         engine_.reset();
         if (SUCCEEDED(initialized)) CoUninitialize();
     }
@@ -1817,6 +1825,7 @@ private:
     _Guarded_by_(mutex_) CommandStamp issued_;
     _Guarded_by_(mutex_) uint64_t processed_ = 0;
     _Guarded_by_(mutex_) bool closing_ = false;
+    std::promise<void> queueSaved_, backgroundStopped_;
     Snapshot published_, state_;
     QueuePolicy policy_;
     std::vector<QueueEntry> entries_;

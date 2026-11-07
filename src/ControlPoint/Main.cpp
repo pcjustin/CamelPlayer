@@ -9,7 +9,9 @@
 
 #include <shobjidl.h>
 
+#include <chrono>
 #include <filesystem>
+#include <future>
 
 #include "TrayIcon.h"
 #include "UiText.h"
@@ -119,8 +121,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     ::winrt::Microsoft::UI::Xaml::Application::Start(
         [server](auto&&) { ::winrt::make<::winrt::CamelPlayer::implementation::App>(server); });
     // Parts of the UI, such as artwork loads waiting for the stopped UI thread, may still hold the Server, so it is shut
-    // down explicitly: the queue is saved and the library closed cleanly.
-    server->shutdown();
+    // down explicitly: the queue is saved and the library closed cleanly. The next start waits for this process, so
+    // background work a busy machine leaves no CPU for is abandoned; the library recovers at that start.
+    auto stopping = std::async(std::launch::async, [&server] { server->shutdown(); });
+    if (stopping.wait_for(std::chrono::seconds(5)) == std::future_status::timeout) {
+        camel::log::warn("CamelPlayer stopped before its background work");
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+    stopping.get();
     camel::log::info("CamelPlayer stopped");
     return 0;
 }

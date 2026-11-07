@@ -1491,11 +1491,15 @@ public:
         });
     }
     ~Impl() {
+        cancel();
+        worker_.join();
+        fingerprints_.join();
+    }
+
+    void cancel() {
         worker_.request_stop();
         fingerprints_.request_stop();
         token_.cancel();
-        worker_.join();
-        fingerprints_.join();
     }
 
     void refreshRoots() { refresh_ = true; }
@@ -1698,6 +1702,10 @@ private:
 LibraryMonitor::LibraryMonitor(LibraryStore& store) : LibraryMonitor(store, Options{}) {}
 LibraryMonitor::LibraryMonitor(LibraryStore& store, const Options& options) : impl_(std::make_unique<Impl>(store, options)) {}
 LibraryMonitor::~LibraryMonitor() = default;
+
+void LibraryMonitor::cancel() {
+    impl_->cancel();
+}
 void LibraryMonitor::refreshRoots() {
     impl_->refreshRoots();
 }

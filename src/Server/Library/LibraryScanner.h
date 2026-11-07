@@ -95,6 +95,8 @@ public:
     void refreshRoots();
     // Scans every online root now.
     void rescanAll();
+    // Stops scanning without waiting, which the destructor does.
+    void cancel();
 
 private:
     class Impl;
