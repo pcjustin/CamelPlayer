@@ -483,6 +483,7 @@ static json outputJson(const SavedOutput& o) {
                       : o.backend == Backend::Asio    ? asioJson(o.asio)
                       : o.backend == Backend::Ks      ? ksJson(o.ks)
                                                       : wasapiJson(o.wasapi);
+    if (!o.speakers.empty()) j["speakers"] = o.speakers;
     return j;
 }
 
@@ -494,6 +495,9 @@ static std::optional<SavedOutput> outputFrom(const json& o) {
     saved.alias = str(o, "alias", "");
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));
+    if (o.contains("speakers") && o["speakers"].is_array())
+        for (const auto& speaker : o["speakers"])
+            if (speaker.is_string()) saved.speakers.push_back(speaker.get<std::string>());
     const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
     if (saved.backend == Backend::Network)
         readNetwork(parameters, saved.network);

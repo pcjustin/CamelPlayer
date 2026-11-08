@@ -275,11 +275,16 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
     for (const auto& [id, lead] : leads) {
         const std::string group = textOf(lead->airplay, "gpn");
         std::vector<Speaker> others;
+        std::vector<std::string> speakers{lead->deviceId};
         for (const auto& member : announced)
-            if (member.deviceId != lead->deviceId && textOf(member.airplay, "tsid") == id)
+            if (member.deviceId != lead->deviceId && textOf(member.airplay, "tsid") == id) {
                 others.push_back({member.address, member.port});
+                speakers.push_back(member.deviceId);
+            }
+        if (others.empty()) speakers.clear();
+        std::ranges::sort(speakers);
         receivers.push_back({id, group.empty() ? lead->name : group, lead->address, lead->port, textOf(lead->raop, "vs"),
-                             supportFrom(lead->raop), std::move(others)});
+                             supportFrom(lead->raop), std::move(others), std::move(speakers)});
     }
     std::ranges::sort(receivers, {}, [](const Receiver& r) { return std::pair(r.name, r.id); });
     return receivers;

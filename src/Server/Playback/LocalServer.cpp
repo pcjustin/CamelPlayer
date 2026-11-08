@@ -1550,7 +1550,7 @@ private:
             });
         }
         for (const auto& receiver : airplayFinder_->receivers())
-            catalog.airplay.push_back({receiver.id, receiver.name, airplay::supportId(receiver.support)});
+            catalog.airplay.push_back({receiver.id, receiver.name, airplay::supportId(receiver.support), receiver.speakers});
     }
 
     void checkEnabledReceivers(const std::vector<SavedOutput>& before) {

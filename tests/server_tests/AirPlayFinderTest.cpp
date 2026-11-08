@@ -159,7 +159,9 @@ TEST(AirPlayTest, AStereoPairIsOneReceiverReachedThroughItsLeader) {
     EXPECT_EQ(receivers[1].name, "主臥");
     EXPECT_EQ(receivers[1].address, "192.168.0.222");
     EXPECT_EQ(receivers[1].others, (std::vector<Speaker>{{"192.168.0.220", 7000}}));
+    EXPECT_EQ(receivers[1].speakers, (std::vector<std::string>{"32FBAAAB399D", "FAE2708FA125"}));
     EXPECT_TRUE(receivers[0].others.empty());
+    EXPECT_TRUE(receivers[0].speakers.empty());
 }
 
 TEST(AirPlayTest, APairMissingAMemberKeepsItsIdentity) {
@@ -170,6 +172,7 @@ TEST(AirPlayTest, APairMissingAMemberKeepsItsIdentity) {
     EXPECT_EQ(receivers[0].id, "GROUP");
     EXPECT_EQ(receivers[0].address, "192.168.0.220");
     EXPECT_TRUE(receivers[0].others.empty());
+    EXPECT_TRUE(receivers[0].speakers.empty());
 }
 
 TEST_F(AirPlayFinderTest, FindsAReceiverAndAsksOnlyOptions) {
@@ -316,6 +319,14 @@ TEST_F(AirPlayFinderTest, AStereoPairIsListedOnce) {
     EXPECT_TRUE(waitFor([&] { return receivers().size() == 1 && receivers().front().id == "GROUP"; }));
     EXPECT_TRUE(waitFor([&] { return receivers().front().port == second.port(); }));
     EXPECT_EQ(receivers().front().name, "Pair");
+    EXPECT_EQ(receivers().front().speakers, (std::vector<std::string>{"32FBAAAB399D", "FAE2708FA125"}));
+}
+
+TEST_F(AirPlayFinderTest, OneReceiverHasNoSpeakersListed) {
+    mdns_.add(record(rtsp_));
+    start();
+    ASSERT_TRUE(found(1));
+    EXPECT_TRUE(receivers().front().speakers.empty());
 }
 
 TEST(RtspClientTest, AReceiverThatDoesNotAnswerThrows) {
@@ -388,6 +399,74 @@ TEST(AirPlayOutputsTest, ARenamedReceiverKeepsItsSettings) {
     EXPECT_TRUE(row.selected);
     EXPECT_EQ(s.airplay.deviceId, "800A805D016B");
     EXPECT_EQ(s.airplay.timing.releaseAfterPauseSeconds, 30);
+}
+
+// The Home app gives a stereo pair a new ID each time it pairs it.
+TEST(AirPlayOutputsTest, AStereoPairPairedAgainKeepsItsSettings) {
+    const std::vector<std::string> speakers{"32FBAAAB399D", "FAE2708FA125"};
+    DeviceCatalog paired;
+    paired.revision = 1;
+    paired.airplay = {{"EB1DD2A4", "主臥", "", speakers}};
+    Settings s;
+    s.adoptOutputSets = false;
+    setOutputEnabled(s, Backend::AirPlay, "EB1DD2A4", true, paired);
+    renameOutput(s, Backend::AirPlay, "EB1DD2A4", "Bedroom", paired);
+    selectOutput(s, Backend::AirPlay, "EB1DD2A4", paired);
+    s.airplay.timing.releaseAfterPauseSeconds = 30;
+    s.airplayLevels["EB1DD2A4"] = {50, false};
+    syncOutputs(s, paired);
+    s = fromJson(toJson(s));
+
+    DeviceCatalog separated;
+    separated.revision = 2;
+    separated.airplay = {{"32FBAAAB399D", "主臥"}, {"FAE2708FA125", "主臥 (2)"}};
+    selectOutput(s, Backend::AirPlay, "32FBAAAB399D", separated);
+    const auto rows = outputRows(s, separated);
+    const auto row = [&](const std::vector<OutputRow>& list, const std::string& id) {
+        return *std::ranges::find_if(list, [&](const OutputRow& r) { return r.id == id; });
+    };
+    EXPECT_FALSE(row(rows, "EB1DD2A4").connected); // the pair waits for its speakers
+    EXPECT_TRUE(row(rows, "32FBAAAB399D").selected);
+    selectOutput(s, Backend::AirPlay, "EB1DD2A4", separated);
+
+    DeviceCatalog again;
+    again.revision = 3;
+    again.airplay = {{"F2C47A35", "主臥", "", speakers}};
+    syncOutputs(s, again);
+    const auto after = outputRows(s, again);
+    EXPECT_EQ(std::ranges::count_if(after, [](const OutputRow& r) { return r.id == "EB1DD2A4"; }), 0);
+    const auto pair = row(after, "F2C47A35");
+    EXPECT_TRUE(pair.connected);
+    EXPECT_TRUE(pair.selected);
+    EXPECT_TRUE(pair.enabled);
+    EXPECT_EQ(pair.name, "Bedroom");
+    EXPECT_EQ(s.airplay.deviceId, "F2C47A35");
+    EXPECT_EQ(s.airplay.timing.releaseAfterPauseSeconds, 30);
+    EXPECT_EQ(s.airplayLevels.count("EB1DD2A4"), 0u);
+    EXPECT_EQ(s.airplayLevels.at("F2C47A35").level, 50u);
+    EXPECT_FALSE(row(after, "32FBAAAB399D").connected); // the speaker played alone keeps its own entry
+}
+
+// A pair saved before its speakers were recorded is known again by its name, and a speaker's own entry is not taken.
+TEST(AirPlayOutputsTest, APairSavedWithoutItsSpeakersIsKnownByItsName) {
+    DeviceCatalog before;
+    before.revision = 1;
+    before.airplay = {{"EB1DD2A4", "主臥"}, {"32FBAAAB399D", "主臥"}};
+    Settings s;
+    s.adoptOutputSets = false;
+    setOutputEnabled(s, Backend::AirPlay, "EB1DD2A4", true, before);
+    setOutputEnabled(s, Backend::AirPlay, "32FBAAAB399D", true, before);
+    renameOutput(s, Backend::AirPlay, "32FBAAAB399D", "Left", before);
+    DeviceCatalog again;
+    again.revision = 2;
+    again.airplay = {{"F2C47A35", "主臥", "", {"32FBAAAB399D", "FAE2708FA125"}}};
+    syncOutputs(s, again);
+    const auto rows = outputRows(s, again);
+    ASSERT_EQ(rows.size(), 3u); // Windows default, the pair and the speaker
+    EXPECT_EQ(rows[1].id, "F2C47A35");
+    EXPECT_TRUE(rows[1].enabled);
+    EXPECT_EQ(rows[2].id, "32FBAAAB399D");
+    EXPECT_EQ(rows[2].name, "Left");
 }
 
 TEST(AirPlayOutputsTest, AnUnsupportedReceiverSaysWhyAndDoesNotStayEnabled) {

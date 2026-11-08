@@ -123,6 +123,34 @@ const DeviceInfo* findDevice(const DeviceCatalog& devices, Backend backend, cons
     return found == list.end() ? nullptr : &*found;
 }
 
+bool holds(const std::vector<std::string>& ids, const std::string& id) {
+    return std::ranges::find(ids, id) != ids.end();
+}
+
+// A stereo pair paired again in the Home app comes back under a new ID. It is known by a speaker it shares with a saved
+// pair, or by its name for one saved before its speakers were, and takes over what was saved under the old ID.
+void followRepairedPairs(Settings& s, const DeviceCatalog& devices) {
+    for (const auto& device : devices.airplay) {
+        if (device.speakers.size() < 2) continue;
+        const auto old = std::ranges::find_if(s.outputs, [&](const SavedOutput& o) {
+            if (o.backend != Backend::AirPlay || o.id.empty() || findDevice(devices, Backend::AirPlay, o.id)) return false;
+            if (o.speakers.empty()) return o.name == device.name && !holds(device.speakers, o.id);
+            return std::ranges::any_of(o.speakers, [&](const std::string& id) { return holds(device.speakers, id); });
+        });
+        if (old == s.outputs.end()) continue;
+        const std::string from = old->id;
+        if (findOutput(s, Backend::AirPlay, device.id))
+            s.outputs.erase(old);
+        else
+            old->id = old->airplay.deviceId = device.id;
+        if (s.backend == Backend::AirPlay && s.airplay.deviceId == from) s.airplay.deviceId = device.id;
+        if (auto level = s.airplayLevels.extract(from); level && !s.airplayLevels.contains(device.id)) {
+            level.key() = device.id;
+            s.airplayLevels.insert(std::move(level));
+        }
+    }
+}
+
 } // namespace
 
 std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& devices) {
@@ -155,6 +183,7 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
 void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     if (devices.revision == 0) return;
     adoptSets(s, devices);
+    followRepairedPairs(s, devices);
     if (followsDefault(s) && !devices.defaultWasapi.empty() && s.followedDefault != devices.defaultWasapi) {
         keepParameters(s, Backend::Wasapi, s.followedDefault);
         loadParameters(s, Backend::Wasapi, devices.defaultWasapi, {});
@@ -165,6 +194,7 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     for (auto& saved : s.outputs)
         if (const auto* device = findDevice(devices, saved.backend, saved.id)) {
             saved.name = device->name;
+            if (!device->speakers.empty()) saved.speakers = device->speakers;
             const bool inUse = saved.backend == s.backend && saved.id == selectedId(s);
             if (!device->unsupported.empty() && !inUse) saved.enabled = false;
         }

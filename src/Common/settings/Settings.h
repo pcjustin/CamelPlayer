@@ -311,6 +311,8 @@ struct SavedOutput {
     NetworkSettings network;
     AirPlaySettings airplay;
     VolumeMode volumeMode = VolumeMode::Fixed;
+    // An AirPlay stereo pair's speakers by their own device IDs, which stay when pairing it again gives it a new ID.
+    std::vector<std::string> speakers;
     bool operator==(const SavedOutput&) const = default;
 };
 
