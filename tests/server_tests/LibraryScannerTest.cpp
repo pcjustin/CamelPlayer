@@ -553,6 +553,54 @@ TEST_F(LibraryScannerTest, AnEstimatedMp3LengthIsEstimatedAgainOncePerVersion) {
     EXPECT_EQ(length(), estimate + 50000);
 }
 
+// The once-per-version reading ends only with a complete scan; a scan after an interrupted one reads only what this
+// version has not read yet.
+TEST_F(LibraryScannerTest, AnInterruptedReadingAgainGoesOnWhereItStopped) {
+    using namespace camel::audio::testaudio;
+    const auto album = dir / "music" / "album";
+    const auto pcm = makeSignal({"short", 44100, 16, 2, 3.0});
+    testutil::writeMp3(album / "read.mp3", pcm, 44100, 16, 2, false);
+    testutil::writeMp3(album / "left.mp3", pcm, 44100, 16, 2, false);
+    testutil::writeMp3(album / "info.mp3", pcm, 44100, 16, 2, true);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto length = [&](const std::string& name) {
+        return count(
+            store,
+            ("SELECT total_frames FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.path LIKE '%" + name + "'").c_str());
+    };
+    const auto estimate = length("read.mp3");
+    ASSERT_GT(estimate, 0);
+    const auto overestimate = [&] {
+        store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET total_frames=total_frames+50000"); }).get();
+    };
+    store
+        .write(
+            [](sqlite::Database& db) { db.exec("UPDATE app_state SET value='0.0.1' WHERE key LIKE 'library_refused_read:%'"); })
+        .get();
+    overestimate();
+    const auto infoSeen = [&] { return count(store, "SELECT last_seen FROM files WHERE path LIKE '%info.mp3'"); };
+    const auto infoBefore = infoSeen();
+    const auto blocked = audio("blocked.flac");
+    wil::unique_handle handle(CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    ASSERT_TRUE(handle);
+    ASSERT_FALSE(scanner.scan(root).complete);
+    handle.reset();
+    ASSERT_EQ(length("read.mp3"), estimate);
+    ASSERT_EQ(length("left.mp3"), estimate);
+    EXPECT_GT(infoSeen(), infoBefore); // its declared length checked by its first frame
+    // As if the interrupted scan had read only the first of them.
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET last_seen=last_seen-1 WHERE path LIKE '%left.mp3'"); })
+        .get();
+    overestimate();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(length("read.mp3"), estimate + 50000); // not read again
+    EXPECT_EQ(length("left.mp3"), estimate);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM app_state WHERE key LIKE 'library_refused_from:%'"), 0);
+}
+
 // An earlier version marked the estimated length of an MP3 with a VBRI header as exact, so a complete scan estimates it
 // again once per version; a length its header declares stays.
 TEST_F(LibraryScannerTest, AVbriLengthMarkedExactIsEstimatedAgainOncePerVersion) {

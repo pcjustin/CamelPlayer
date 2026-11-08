@@ -418,6 +418,7 @@ struct Entry {
     bool rejected = false;
     std::optional<std::vector<uint8_t>> digest;
     bool listedVersion = false;
+    bool lengthChecked = false; // its first frame showed its length marked exact is right
 };
 
 enum class ListedIds { Unknown, Accepted, Rejected };
@@ -649,6 +650,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
             if (!read && lengthMarkedExact.contains(fileKey)) {
                 if (!directoryValid()) break;
                 read = audio::vbriSamples(child) != 0;
+                entry.lengthChecked = !read;
             }
             if (read) {
                 if (!directoryValid()) break;
@@ -915,7 +917,8 @@ std::future<void> LibraryScanner::deleteRemovedRoots() {
                 "DELETE FROM roots WHERE removed IS NOT NULL");
         auto state = db.prepare("DELETE FROM app_state WHERE key=?");
         for (const auto root : roots)
-            for (const auto* prefix : {"library_derived_dirty:", "library_refused_read:", "library_reread:"}) {
+            for (const auto* prefix :
+                 {"library_derived_dirty:", "library_refused_read:", "library_refused_from:", "library_reread:"}) {
                 state.reset();
                 state.bind(1, prefix + std::to_string(root)).run();
             }
@@ -1004,15 +1007,34 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     // of an MP3 without a header better, so a complete scan reads them again once per version. An earlier one also
     // marked the estimated length of an MP3 with a VBRI header as exact; such a file shows by its first frame.
     const auto refusedKey = "library_refused_read:" + std::to_string(root);
+    // The scan generation at which this version began reading them, so a scan after an interrupted one leaves out the
+    // files this version has read or checked since: each is written with its scan's generation.
+    const auto refusedFromKey = "library_refused_from:" + std::to_string(root);
+    const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
     std::set<std::string> readAgain, lengthMarkedExact;
     auto refusedVersion = reader.prepare("SELECT value FROM app_state WHERE key=?");
     refusedVersion.bind(1, refusedKey);
     if (!partial && (!refusedVersion.step() || refusedVersion.text(0) != CAMEL_VERSION_STRING)) {
+        const std::string prefix = std::string(CAMEL_VERSION_STRING) + " ";
+        auto from = reader.prepare("SELECT value FROM app_state WHERE key=?");
+        from.bind(1, refusedFromKey);
+        int64_t since = generation;
+        if (from.step() && from.text(0).starts_with(prefix))
+            since = std::stoll(from.text(0).substr(prefix.size()));
+        else
+            store_
+                .write([&](sqlite::Database& db) {
+                    db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,?)")
+                        .bind(1, refusedFromKey)
+                        .bind(2, prefix + std::to_string(generation))
+                        .run();
+                })
+                .get();
         auto rows = reader.prepare("SELECT path,EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id AND t.format='mp3' AND "
                                    "t.length_estimated=0) FROM files f WHERE root_id=? AND available=1 AND kind='audio' AND "
-                                   "(NOT EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id) OR "
+                                   "COALESCE(last_seen,0)<? AND (NOT EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id) OR "
                                    "EXISTS(SELECT 1 FROM tracks t WHERE t.file_id=f.id AND t.format='mp3'))");
-        rows.bind(1, root);
+        rows.bind(1, root).bind(2, since);
         while (rows.step()) (rows.integer(1) ? lengthMarkedExact : readAgain).insert(rows.text(0));
     }
     // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist.
@@ -1025,7 +1047,6 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     std::set<TrustedIdentity> trusted;
     auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
     while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
-    const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
     // What this scan found, on the writer's thread. Kept here because writing it to every row would rewrite the whole
     // table at each scan of a library that has not changed.
     std::unordered_set<int64_t> present;
@@ -1093,6 +1114,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                     present.insert(file);
                     named.bind(1, toUtf8(entry.path.filename().wstring())).bind(2, file).run();
                     named.reset();
+                    if (entry.lengthChecked)
+                        db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generation).bind(2, file).run();
                     // Tracks indexed by an interrupted first scan have no album yet.
                     ungrouped.reset();
                     if (ungrouped.bind(1, file).step()) trackFolders.insert(ungrouped.integer(0));
@@ -1264,6 +1287,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(1, refusedKey)
                         .bind(2, std::string(CAMEL_VERSION_STRING))
                         .run();
+                    db.prepare("DELETE FROM app_state WHERE key=?").bind(1, refusedFromKey).run();
                     auto listed = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1");
                     listed.bind(1, root);
                     markMissing(listed);
