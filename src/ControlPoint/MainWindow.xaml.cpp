@@ -507,9 +507,12 @@ void MainWindow::InitializeComponent() {
         tray_.reset();
         artworkToken_.cancel();
         updateToken_.cancel();
+        // A timer that ticked on would reach the closed window's elements, which throw.
         updateTimer_.Stop();
-        uiTimer_.Stop();
         seekTimer_.Stop();
+        eqTimer_.Stop();
+        noticeTimer_.Stop();
+        setRefreshing(false); // the pages' timers and the UI timer
         if (replaced_) return;
         server_->setListener({});
         Command pause; // silences the device first; a stop would also forget the position the next start restores
