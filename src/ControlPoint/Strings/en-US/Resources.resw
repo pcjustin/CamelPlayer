@@ -687,7 +687,6 @@
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>Not supported: asks for a password</value></data>
   <data name="Output_AirPlayFormat" xml:space="preserve"><value>Not supported: does not take this audio format</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>Not supported: refuses this connection</value></data>
-  <data name="Lamp_BitPerfectReceiver" xml:space="preserve"><value>Bit-perfect to the receiver</value></data>
   <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay receiver</value></data>
   <data name="Volume_NoteAirPlay" xml:space="preserve"><value>The receiver's volume moves its own level, and the stream stays bit-perfect. AirPlay cannot read the level back, so CamelPlayer remembers the last one you set for each receiver and a change on the receiver itself is not shown.</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>Network players</value></data>
@@ -697,7 +696,6 @@
   <data name="Firewall_Notice.Title" xml:space="preserve"><value>The firewall rule is missing</value></data>
   <data name="Firewall_Notice.Message" xml:space="preserve"><value>Network players cannot reach CamelPlayer until the rule for private networks is added.</value></data>
   <data name="SignalPath_Renderer" xml:space="preserve"><value>Network player</value></data>
-  <data name="Lamp_BitPerfectRenderer" xml:space="preserve"><value>Bit-perfect to the renderer</value></data>
   <data name="Settings_NetworkGroup.Text" xml:space="preserve"><value>Network player</value></data>
   <data name="Settings_MaxPcmRate.Header" xml:space="preserve"><value>Highest PCM sample rate</value></data>
   <data name="Settings_MaxPcmRate.Description" xml:space="preserve"><value>Higher PCM is resampled to fit (shown as processed).</value></data>

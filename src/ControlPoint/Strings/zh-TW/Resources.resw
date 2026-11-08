@@ -687,7 +687,6 @@
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>不支援：需要密碼</value></data>
   <data name="Output_AirPlayFormat" xml:space="preserve"><value>不支援：不接受此音訊格式</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>不支援：拒絕此連線</value></data>
-  <data name="Lamp_BitPerfectReceiver" xml:space="preserve"><value>Bit-perfect 到接收器</value></data>
   <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay 接收器</value></data>
   <data name="Volume_NoteAirPlay" xml:space="preserve"><value>播放器音量會調整接收器本身的音量，串流維持 bit-perfect。AirPlay 無法讀回音量，所以 CamelPlayer 會記住你為每台接收器設定的最後音量；在接收器上調整的變動不會顯示在這裡。</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>網路播放器</value></data>
@@ -697,7 +696,6 @@
   <data name="Firewall_Notice.Title" xml:space="preserve"><value>缺少防火牆規則</value></data>
   <data name="Firewall_Notice.Message" xml:space="preserve"><value>新增私人網路的規則之前，網路播放器無法連到 CamelPlayer。</value></data>
   <data name="SignalPath_Renderer" xml:space="preserve"><value>網路播放器</value></data>
-  <data name="Lamp_BitPerfectRenderer" xml:space="preserve"><value>Bit-perfect 送達播放器</value></data>
   <data name="Settings_NetworkGroup.Text" xml:space="preserve"><value>網路播放器</value></data>
   <data name="Settings_MaxPcmRate.Header" xml:space="preserve"><value>最高 PCM 取樣率</value></data>
   <data name="Settings_MaxPcmRate.Description" xml:space="preserve"><value>超過時轉成同家族中較低的取樣率（顯示為已處理）。</value></data>

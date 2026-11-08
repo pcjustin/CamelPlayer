@@ -1361,9 +1361,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         switch (plan.state) {
         case PipelineState::BitPerfect:
             lampColor_ = L"SystemFillColorSuccessBrush";
-            setAnnounced(LampText(), tr(s.backend == Backend::Network   ? L"Lamp_BitPerfectRenderer"
-                                        : s.backend == Backend::AirPlay ? L"Lamp_BitPerfectReceiver"
-                                                                        : L"Lamp_BitPerfect"));
+            setAnnounced(LampText(), tr(L"Lamp_BitPerfect"));
             break;
         case PipelineState::LosslessConversion:
             lampColor_ = L"SystemFillColorCautionBrush";
