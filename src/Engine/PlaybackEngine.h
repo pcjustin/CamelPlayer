@@ -37,6 +37,8 @@ struct EngineSnapshot {
     DecoderKind decoder = DecoderKind::Sndfile; // for the current file; FLAC's choice before a file is known
     OutputStatus outputStatus;
     uint64_t underruns = 0;
+    // Paused until a source read slower than it plays is buffered far enough ahead: about this many seconds left.
+    std::optional<uint32_t> bufferingSeconds;
     // Playing with the decode ring full a moment ago or the files decoded to their end, so other reads from its storage
     // cannot starve it (docs/Plan.md §7.7).
     bool ahead = false;

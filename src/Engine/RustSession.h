@@ -86,6 +86,14 @@ public:
     // Safe on the output callback thread.
     Transitions transitions() const noexcept;
 
+    // In source frames of the file being decoded, which is the audible one until the decoder moves on to a queued one.
+    struct Buffered {
+        uint64_t decoded = 0;
+        uint64_t submitted = 0; // handed to the device
+        uint64_t total = 0;     // of the audible file
+    };
+    Buffered buffered() const noexcept;
+
     // For the audible track, even while the decoder already reads the queued one.
     Md5State md5State() const noexcept;
     // The audible track's length in source frames, 0 while unknown; a decoder may learn it while the track plays.

@@ -1220,7 +1220,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
 
     // The play button and the repeat button are named for what they do or show now.
-    if (const Symbol symbol = s.state == PlaybackState::Playing ? Symbol::Pause : Symbol::Play;
+    if (const Symbol symbol = s.state == PlaybackState::Playing || s.bufferingSeconds ? Symbol::Pause : Symbol::Play;
         PlayPauseIcon().Symbol() != symbol) {
         PlayPauseIcon().Symbol(symbol);
         const hstring tip = tr(symbol == Symbol::Pause ? L"Tip_Pause" : L"Tip_Play");
@@ -1232,7 +1232,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         PositionSlider().Value(std::min(pos, std::max(1.0, total)));
         sliderUpdating_ = false;
     }
-    TimeText().Text(ui::formatTime(pos) + L" / " + ui::formatTime(total));
+    // The time beside the slider always has room, which the status badges may not on a narrow window.
+    TimeText().Text(s.bufferingSeconds && !s.error ? ui::format(L"State_Buffering", {std::to_wstring(*s.bufferingSeconds)})
+                                                   : hstring(ui::formatTime(pos) + L" / " + ui::formatTime(total)));
     const bool hasTrack = !s.pathUtf8.empty();
     PlayPauseButton().IsEnabled(hasTrack);
     StopButton().IsEnabled(hasTrack);
@@ -1330,10 +1332,17 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const wchar_t* glyph = L"\xE71A";
         const wchar_t* key = L"State_Stopped";
         const wchar_t* color = L"TextFillColorSecondaryBrush";
+        hstring text;
+        buffering_ = !s.error && s.bufferingSeconds;
         if (s.error) {
             glyph = L"\xE783";
             key = L"State_Error";
             color = L"SystemFillColorCriticalBrush";
+        } else if (buffering_) {
+            glyph = L"\xE916"; // stopwatch
+            key = L"State_Buffering";
+            color = L"AccentTextFillColorPrimaryBrush";
+            text = ui::format(key, {std::to_wstring(*s.bufferingSeconds)});
         } else if (s.state == PlaybackState::Playing) {
             glyph = L"\xE768";
             key = L"State_Playing";
@@ -1346,8 +1355,12 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         StateIcon().Glyph(glyph);
         stateColor_ = color;
         StateIcon().Foreground(themeBrush(stateColor_));
-        setAnnounced(StateText(), tr(key));
-        setBadgeTip(StateBadge(), tr(key), s.error ? ui::utf8(s.errorDetail) : hstring{});
+        if (text.empty()) text = tr(key);
+        setAnnounced(StateText(), text);
+        setBadgeTip(StateBadge(), text,
+                    s.error      ? ui::utf8(s.errorDetail)
+                    : buffering_ ? tr(L"State_BufferingDetail")
+                                 : hstring{});
     }
 
     // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
@@ -1378,8 +1391,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         }
         // Source lossiness is its own field; a processed lossy file shows both (docs/Plan.md §5.2).
         SourceBadge().Visibility(lossy && plan.state != PipelineState::LossySource ? Visibility::Visible : Visibility::Collapsed);
-        BypassBadge().Visibility(plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native ? Visibility::Visible
-                                                                                         : Visibility::Collapsed);
+        // While buffering, the bar has room for how long playback waits rather than how DSD will play.
+        BypassBadge().Visibility((plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native) && !buffering_
+                                     ? Visibility::Visible
+                                     : Visibility::Collapsed);
         BypassText().Text((plan.dsd == DsdPath::Dop ? hstring(L"DoP") : hstring(L"DSD")) + L" · " +
                           tr(L"SignalPath_DspBypassed"));
         setBadgeTip(BypassBadge(), BypassText().Text(), tr(bypassTip(plan)));
@@ -3583,6 +3598,7 @@ void MainWindow::OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const
 }
 
 // Where the badges do not fit the state badge gives way, then the lamp's words; the dot stays and opens the signal path.
+// While buffering, the state badge says how long playback waits, so the lamp's words give way first.
 void MainWindow::fitStatus() {
     const auto fits = [this] {
         StatusBadges().Measure({std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()});
@@ -3591,8 +3607,10 @@ void MainWindow::fitStatus() {
     StateBadge().Visibility(Visibility::Visible);
     LampText().Visibility(Visibility::Visible);
     if (StatusArea().ActualWidth() == 0 || fits()) return;
-    StateBadge().Visibility(Visibility::Collapsed);
-    if (!fits()) LampText().Visibility(Visibility::Collapsed);
+    UIElement first = StateBadge(), second = LampText();
+    if (buffering_) std::swap(first, second);
+    first.Visibility(Visibility::Collapsed);
+    if (!fits()) second.Visibility(Visibility::Collapsed);
 }
 
 void MainWindow::showReplayGain() {

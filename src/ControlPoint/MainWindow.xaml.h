@@ -285,6 +285,7 @@ private:
     bool populating_ = false;                                   // ignore control events while filling controls
     bool sliderUpdating_ = false;                               // ignore slider events caused by position updates
     bool queueOpen_ = false;
+    bool buffering_ = false; // waiting for a slow source; the state badge keeps its place in the bar
     bool navCompacted_ = false;
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;

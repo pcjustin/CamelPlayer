@@ -111,6 +111,8 @@ const MAX_PREFILL_FRAMES: u64 = 4_096;
 // limit.
 const DEFAULT_PREBUFFER_MS: u64 = 10_000;
 const MAX_RING_BYTES: u64 = 64 << 20;
+// A configuration asking for more than the default buffers ahead of a source read slower than it plays.
+const MAX_BUFFERING_RING_BYTES: u64 = 1 << 30;
 // How far device bytes are prepared ahead of the output, which is how soon a DSP change is heard. The device ring
 // also holds at least MIN_DEVICE_RING_FRAMES, the largest period an output requests at once.
 const DSP_LEAD_MS: u64 = 250;
@@ -1374,7 +1376,8 @@ fn whole_units(format: &AudioFormat, units: u64) -> u64 {
 
 // The decoded ring: `prebuffer_ms` (0: DEFAULT_PREBUFFER_MS) of source frames at the device rate and channel count,
 // as 32-bit sample words for PCM and as bytes for raw DSD, at least one prefill of the widest source and at most
-// MAX_RING_BYTES. A source with more channels or a higher rate than the device fits fewer milliseconds.
+// MAX_RING_BYTES, or MAX_BUFFERING_RING_BYTES when more than the default is asked for. A source with more channels or a
+// higher rate than the device fits fewer milliseconds.
 fn source_ring_capacity(format: &AudioFormat, rate_hz: u32, prebuffer_ms: u32) -> Option<usize> {
     let milliseconds = match u64::from(prebuffer_ms) {
         0 => DEFAULT_PREBUFFER_MS,
@@ -1390,7 +1393,12 @@ fn source_ring_capacity(format: &AudioFormat, rate_hz: u32, prebuffer_ms: u32) -
             .unwrap_or(u64::MAX)
     };
     let minimum = MAX_PREFILL_FRAMES * MAX_SOURCE_FRAME_BYTES;
-    usize::try_from(prebuffer.min(MAX_RING_BYTES).max(minimum)).ok()
+    let limit = if milliseconds > DEFAULT_PREBUFFER_MS {
+        MAX_BUFFERING_RING_BYTES
+    } else {
+        MAX_RING_BYTES
+    };
+    usize::try_from(prebuffer.min(limit).max(minimum)).ok()
 }
 
 // The device ring: DSP_LEAD_MS of device frames, at least MIN_DEVICE_RING_FRAMES.
@@ -5230,6 +5238,15 @@ mod tests {
         assert_eq!(
             source_ring_capacity(&pcm, 768_000 * 4, 0),
             Some(MAX_RING_BYTES as usize)
+        );
+        // Buffering ahead of a slow source: past 64 MiB, up to 1 GiB.
+        assert_eq!(
+            source_ring_capacity(&pcm, 176_400, 120_000),
+            Some(176_400 * 120 * 8)
+        );
+        assert_eq!(
+            source_ring_capacity(&pcm, 768_000 * 4, 600_000),
+            Some(MAX_BUFFERING_RING_BYTES as usize)
         );
         assert_eq!(
             source_ring_capacity(&pcm, 1, 0),

@@ -174,7 +174,8 @@ struct PlaybackSnapshot {
     std::vector<std::string> outputAdjustments; // saved output parameters replaced by device defaults (requested ≠ active)
     uint32_t bufferFrames = 0;
     uint64_t underruns = 0;
-    std::optional<uint32_t> playerVolume; // the network player's own level, 0-100; nothing without one to follow
+    std::optional<uint32_t> bufferingSeconds; // paused until a slow source is buffered: about this many seconds left
+    std::optional<uint32_t> playerVolume;     // the network player's own level, 0-100; nothing without one to follow
     bool playerMuted = false;
     std::optional<audio::ErrorCode> error;
     std::string errorDetail;

@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -23,6 +24,7 @@
 #include "Engine/Dsp.h"
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
+#include "Engine/SlowSource.h"
 #include "OutputBridge/OutputBridge.h"
 #include "OutputBridge/OutputChoices.h"
 #include "Common/util/Log.h"
@@ -33,6 +35,9 @@ namespace camel::audio {
 
 namespace {
 constexpr double kStartFillSeconds = 0.5; // buffered before the output starts
+// Playing a slow source pauses to buffer again when less than this is buffered ahead.
+constexpr double kLowWaterSeconds = 1.5;
+constexpr auto kFillWindow = std::chrono::seconds(2); // how long the read rate is measured over while it plays
 
 std::optional<SampleType> fixedSampleType(const Settings& s) {
     switch (s.backend) {
@@ -351,8 +356,10 @@ public:
     }
 
     void play() {
+        buffering_ = false;
         if (active_) {
             if (state_ == PlayState::Paused) {
+                if (!openDeferredOutput()) return;
                 startRust();
                 output_->start();
                 setState(PlayState::Playing);
@@ -364,6 +371,7 @@ public:
 
     void pause() {
         resumeOnDefault_ = false;
+        if (buffering_.exchange(false)) publish();
         if (active_ && state_ == PlayState::Playing) {
             output_->pause();
             leadSilence_ = 0;
@@ -475,7 +483,7 @@ public:
     }
 
     bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb, uint32_t fadeMs) {
-        if (!active_ || rust_->transitions().nextQueued || !output_->gapless()) return false;
+        if (!active_ || rust_->transitions().nextQueued || !output_->gapless() || readsWhole()) return false;
         const auto next = prepareNext(file, requested);
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
         queued_.push_back(
@@ -680,8 +688,9 @@ private:
                 refreshNextSlot();
                 refreshMd5();
                 refreshTotal();
+                checkBuffering();
             }
-            if (active_ && state_ == PlayState::Paused) releaseAfterPause();
+            if (active_ && state_ == PlayState::Paused && !buffering_) releaseAfterPause();
         }
         CoUninitialize();
     }
@@ -689,7 +698,8 @@ private:
     // The decoder empties the slot when it moves on to a queued file, seconds before that file is heard; the Server
     // polls this and queues the one after it.
     void refreshNextSlot() {
-        const bool free = !rust_->transitions().nextQueued;
+        // Reading a slow source's next file would share the network with the player the audio goes to (readsWhole()).
+        const bool free = !rust_->transitions().nextQueued && !readsWhole();
         std::lock_guard lock(snapMutex_);
         snap_.nextSlotFree = free;
     }
@@ -871,6 +881,128 @@ private:
         publish();
     }
 
+    // A network player or AirPlay receiver takes the audio over the network the slow source is read from, and plays in
+    // pieces while both share it: such a source is read to its end before it plays, and its next file only once it ends.
+    bool readsWhole() const { return readRate_ && isNetworkPlayer(settings_.backend); }
+
+    // The bytes per second `file` plays at, from its size and length; 0 when either is unknown.
+    static double playedBytesPerSecond(const std::wstring& file, uint64_t frames, uint32_t rate) {
+        std::error_code error;
+        const uint64_t bytes = std::filesystem::file_size(file, error);
+        const double seconds = framesToSeconds(frames, rate);
+        return error || !bytes || seconds <= 0 ? 0.0 : double(bytes) / seconds;
+    }
+
+    // A file on a network share that plays at kMeasuredBytesPerSecond or more is read for a moment first; one read slower
+    // than it plays gets a ring that can hold what the rest of it needs buffered, and play waits for that. Returns the
+    // seconds to predecode.
+    uint32_t measureSource(const SourceInfo& src, uint64_t shown, uint64_t startFrame) {
+        readRate_.reset();
+        const uint32_t configured = predecodeSeconds();
+        if (!shown || !onNetworkShare(file_)) return configured;
+        const double needed = playedBytesPerSecond(file_, shown, src.sampleRate);
+        if (needed < kMeasuredBytesPerSecond) return configured;
+        const uint64_t from = std::min(startFrame, shown);
+        std::error_code error;
+        const uint64_t size = std::filesystem::file_size(file_, error);
+        const uint64_t at = error ? 0 : uint64_t(double(size) * double(from) / double(shown));
+        const auto read = measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
+        if (!read) return configured;
+        const double left = framesToSeconds(shown - from, src.sampleRate);
+        double wait = bufferSeconds(left, *read / needed);
+        log::info("engine: %s reads at %.2f MB/s, plays at %.2f MB/s%s", toUtf8(file_).c_str(), *read / 1e6, needed / 1e6,
+                  wait <= 0                            ? ""
+                  : isNetworkPlayer(settings_.backend) ? "; reading it to the end before it plays"
+                                                       : "; buffering before it plays");
+        if (wait <= 0) return configured;
+        if (isNetworkPlayer(settings_.backend)) wait = left + 1.0;
+        readRate_ = *read;
+        neededRate_ = needed;
+        neededFor_ = file_;
+        fillAt_ = {};
+        // The decoded ring stores a DSD source converted to PCM as DSD bytes, more per second than the PCM it sizes for.
+        double scale = 1.0;
+        if (src.bitsPerSample == 1 && plan_.dsd != DsdPath::Native && plan_.dsd != DsdPath::Dop && fmt_.sampleRate)
+            scale = std::max(1.0, double(src.sampleRate) * src.channels / (double(fmt_.sampleRate) * fmt_.channels * 4.0));
+        return uint32_t(std::ceil((wait + configured) * scale));
+    }
+
+    // While a slow source is buffered: plays once enough is buffered to reach the end of the file, or when the ring is
+    // full. While it plays: pauses to buffer again when the buffer runs low, as when a queued file reads slower than the
+    // one measured.
+    void checkBuffering() {
+        if (!readRate_ || !rust_) return;
+        const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
+        const auto b = rust_->buffered();
+        const bool decodingNext = queued_.size() > (rust_->transitions().nextQueued ? 1u : 0u);
+        const double decoded = framesToSeconds(b.decoded, in), submitted = framesToSeconds(b.submitted, out);
+        if (decodingNext || decodeDone_.load(std::memory_order_acquire) || decoded < submitted || !in || !out) {
+            fillAt_ = {}; // the rest of the audible file is decoded
+            if (buffering_) resumeBuffered();
+            return;
+        }
+        if (neededFor_ != file_) {
+            neededFor_ = file_;
+            if (const double needed = playedBytesPerSecond(file_, b.total, in); needed > 0) neededRate_ = needed;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const bool full = now.time_since_epoch().count() - fullAt_.load(std::memory_order_relaxed) <
+                          std::chrono::steady_clock::duration(std::chrono::milliseconds(250)).count();
+        if (fillAt_ == std::chrono::steady_clock::time_point{} || full) {
+            fillAt_ = now;
+            fillFrom_ = b.decoded;
+        } else if (now - fillAt_ >= kFillWindow && b.decoded >= fillFrom_) {
+            const double rate =
+                framesToSeconds(b.decoded - fillFrom_, in) / std::chrono::duration<double>(now - fillAt_).count() * neededRate_;
+            readRate_ = *readRate_ * 0.7 + rate * 0.3;
+            fillAt_ = now;
+            fillFrom_ = b.decoded;
+        }
+        const double ratio = *readRate_ / neededRate_;
+        const double ahead = decoded - submitted;
+        const double left = std::max(0.0, framesToSeconds(b.total, in) - submitted);
+        const double wanted = readsWhole() ? left + 1.0 : bufferSeconds(left, ratio);
+        if (buffering_) {
+            if (ahead >= wanted || full) return resumeBuffered();
+            const auto shownSeconds = uint32_t(std::ceil((wanted - ahead) / std::max(ratio, 0.05)));
+            if (shownSeconds != bufferingShown_) {
+                bufferingShown_ = shownSeconds;
+                publish();
+            }
+        } else if (state_ == PlayState::Playing && ahead < kLowWaterSeconds && left > ahead + 1.0 && wanted > 0) {
+            log::info("engine: %.1f s buffered at %.1f s of %s; buffering again", ahead, submitted, toUtf8(file_).c_str());
+            pause();
+            buffering_ = true;
+            bufferingShown_ = uint32_t(std::ceil(wanted / std::max(ratio, 0.05)));
+            publish();
+        }
+    }
+
+    void resumeBuffered() {
+        log::info("engine: buffered %s", toUtf8(file_).c_str());
+        buffering_ = false;
+        if (state_ == PlayState::Paused)
+            play();
+        else
+            publish();
+    }
+
+    // Opens the network player a buffered session kept waiting; false when it failed and the session ended paused.
+    bool openDeferredOutput() {
+        if (outputOpen_) return true;
+        try {
+            output_->open(fmt_, this);
+            outputOpen_ = true;
+            return true;
+        } catch (const Error& e) {
+            const uint64_t at = sourcePosition();
+            teardown();
+            position_ = at;
+            fail(e, PlayState::Paused);
+            return false;
+        }
+    }
+
     // `deviceChange`: reopening after the Windows default changed; a device that cannot play pauses instead of ending the
     // track, so the user can resume (docs/Plan.md §2). `keepOutput`: a manual change, which plays on the open device when
     // the new file takes its format.
@@ -978,11 +1110,17 @@ private:
         bpf_ = fmt_.bytesPerFrame();
         sourceRate_ = src.sampleRate;
         outputRate_ = fmt_.sampleRate;
+        const uint32_t predecode = measureSource(src, shown, startFrame);
+        if (readRate_ && playNow) {
+            playNow = false; // play() follows once checkBuffering() finds enough buffered
+            buffering_ = true;
+            bufferingShown_ = 0;
+        }
         dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         stages_[3] = measure::now();
         try {
-            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, conversion(), plan_.dsd, predecodeSeconds(),
-                                                  plan_.gainDb);
+            rust_ =
+                std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, conversion(), plan_.dsd, predecode, plan_.gainDb);
             rust_->setDsp(chainFor(plan_));
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;
@@ -1026,6 +1164,8 @@ private:
         for (int i = 0; i < 600 && bufferedFrames() < startFrames && !decodeDone_; i++) Sleep(5);
         stages_[5] = measure::now();
 
+        // A kept device would play silence until the buffer is ready; it opens again when playback starts.
+        if (buffering_ && switching_) closeOutput();
         // The handlers report to the session the device plays for, which a kept device changes while it runs.
         const bool kept = switching_;
         outputSession_ = session;
@@ -1050,8 +1190,12 @@ private:
             streamTrack_.leadFrames = silenceFrames();
         }
         try {
-            if (!kept) output_->open(fmt_, this);
-            outputOpen_ = true;
+            // A network player hears of the track only when it is to play it, not minutes earlier while the source is
+            // read (openDeferredOutput()).
+            if (!buffering_ || !isNetworkPlayer(settings_.backend)) {
+                if (!kept) output_->open(fmt_, this);
+                outputOpen_ = true;
+            }
             stages_[6] = measure::now();
         } catch (const Error& e) {
             rawDsd_ = false;
@@ -1190,6 +1334,8 @@ private:
         ended_ = false;
         transitionPending_ = false;
         queued_.clear();
+        readRate_.reset();
+        buffering_ = false;
         std::lock_guard lock(snapMutex_);
         snap_.output.reset();
         snap_.plan.reset();
@@ -1348,6 +1494,7 @@ private:
             std::lock_guard lock(snapMutex_);
             snap_.state = state_;
             snap_.position = currentPosition();
+            snap_.bufferingSeconds = buffering_ ? std::optional(bufferingShown_.load()) : std::nullopt;
             snap_.revision++;
             if (!active_) snap_.underruns = 0;
             l = listener_;
@@ -1448,6 +1595,14 @@ private:
     std::wstring refusedFile_;           // the last file that could not follow in the open format, and why
     FadeSkip refusedSkip_ = FadeSkip::None;
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
+    // A source read slower than it plays (Engine/SlowSource.h).
+    std::optional<double> readRate_; // bytes per second: measured, then followed while the ring fills
+    double neededRate_ = 0;          // bytes per second neededFor_ plays at
+    std::wstring neededFor_;
+    std::chrono::steady_clock::time_point fillAt_; // where the read rate is being measured from
+    uint64_t fillFrom_ = 0;
+    std::atomic<bool> buffering_{false}; // paused until enough is buffered ahead
+    std::atomic<uint32_t> bufferingShown_{0};
     std::thread decodeThread_, dspThread_;
     std::mutex decodeErrMutex_;
     _Guarded_by_(decodeErrMutex_) std::optional<Error> decodeError_;
@@ -1489,7 +1644,8 @@ void PlaybackEngine::pause() {
 }
 void PlaybackEngine::togglePause() {
     impl_->post([this] {
-        if (impl_->snapshot().state == PlayState::Playing)
+        // Waiting for the buffer counts as playing: the button that pauses stops the wait.
+        if (const auto s = impl_->snapshot(); s.state == PlayState::Playing || s.bufferingSeconds)
             impl_->pause();
         else
             impl_->play();

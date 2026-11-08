@@ -183,6 +183,8 @@
   <data name="Queue_CountWindowed" xml:space="preserve"><value>{0} 首，列出目前曲目附近的 {1} 首</value></data>
   <data name="State_Playing" xml:space="preserve"><value>播放中</value></data>
   <data name="State_Paused" xml:space="preserve"><value>已暫停</value></data>
+  <data name="State_Buffering" xml:space="preserve"><value>緩衝中，約 {0} 秒</value></data>
+  <data name="State_BufferingDetail" xml:space="preserve"><value>來源讀取速度比播放慢，先緩衝再播，避免斷斷續續。</value></data>
   <data name="State_Stopped" xml:space="preserve"><value>已停止</value></data>
   <data name="State_Error" xml:space="preserve"><value>錯誤</value></data>
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>

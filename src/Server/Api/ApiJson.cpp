@@ -295,6 +295,7 @@ json toJson(const PlaybackSnapshot& p) {
             {"outputAdjustments", p.outputAdjustments},
             {"bufferFrames", p.bufferFrames},
             {"underruns", p.underruns},
+            {"bufferingSeconds", p.bufferingSeconds ? json(*p.bufferingSeconds) : json(nullptr)},
             {"playerVolume", p.playerVolume ? json(*p.playerVolume) : json(nullptr)},
             {"playerMuted", p.playerMuted},
             {"error", p.error ? json(nameOf(*p.error, kErrorCodes)) : json(nullptr)},
@@ -325,6 +326,10 @@ PlaybackSnapshot playbackFrom(const json& j) {
     }
     p.bufferFrames = value<uint32_t>(j, "bufferFrames");
     p.underruns = value<uint64_t>(j, "underruns");
+    p.bufferingSeconds = optional<uint32_t>(j, "bufferingSeconds", [](const json& v) {
+        if (!v.is_number_unsigned()) invalid("bufferingSeconds is not a number");
+        return v.get<uint32_t>();
+    });
     p.playerVolume = optional<uint32_t>(j, "playerVolume", [](const json& v) {
         if (!v.is_number_unsigned()) invalid("playerVolume is not a number");
         return v.get<uint32_t>();

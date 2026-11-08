@@ -86,6 +86,7 @@ Snapshot fullSnapshot() {
     p.outputAdjustments = {"Fixed sample rate: requested 96000 Hz, using 44100 Hz"};
     p.bufferFrames = 512;
     p.underruns = 2;
+    p.bufferingSeconds = 37;
     p.playerVolume = 48;
     p.playerMuted = true;
     p.error = ErrorCode::DeviceLost;

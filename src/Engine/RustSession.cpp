@@ -246,6 +246,12 @@ uint64_t RustSession::totalFrames() const noexcept {
     return camel_engine_get_state_v1(engine_, &state) == CAMEL_ENGINE_OK ? state.total_frames : 0;
 }
 
+RustSession::Buffered RustSession::buffered() const noexcept {
+    CamelEngineTimelineV1 timeline{sizeof(CamelEngineTimelineV1), CAMEL_ENGINE_ABI_VERSION};
+    if (camel_engine_get_timeline_v1(engine_, &timeline) != CAMEL_ENGINE_OK) return {};
+    return {timeline.decoded_position_frames, timeline.submitted_position_frames, timeline.total_frames};
+}
+
 RustSession::Transitions RustSession::transitions() const noexcept {
     Transitions result;
     uint32_t queued = 0;
