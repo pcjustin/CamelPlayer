@@ -267,7 +267,7 @@ TEST(FormatDecoderPolicy, RealSamplesAgreeAcrossDecoders) {
     }
 }
 
-TEST(FormatDecoderPolicy, LibsndfileOpensAFlacWithoutReadingItsCover) {
+TEST(FormatDecoderPolicy, LibsndfileAndSymphoniaOpenAFlacWithoutReadingItsCover) {
     const testaudio::GenSpec spec{"cover", 96000, 24, 2, 1.0};
     const auto plain = testutil::tempDir() / "cover-plain.flac", covered = testutil::tempDir() / "cover-3mb.flac";
     testaudio::writeFlac(plain, spec);
@@ -285,18 +285,21 @@ TEST(FormatDecoderPolicy, LibsndfileOpensAFlacWithoutReadingItsCover) {
     bytes.insert(bytes.begin() + 8 + 34, picture.begin(), picture.end());
     std::ofstream(covered, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
 
-    IO_COUNTERS before{}, after{};
-    GetProcessIoCounters(GetCurrentProcess(), &before);
-    auto decoder = openDecoder(DecoderKind::Sndfile, covered);
-    GetProcessIoCounters(GetCurrentProcess(), &after);
-    EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, 512u * 1024);
     const auto expected = testaudio::makeSignal(spec);
-    EXPECT_EQ(decoder->info().totalFrames, expected.size() / spec.channels);
-    const auto got = readAll(*decoder);
-    EXPECT_TRUE(got == expected);
-    const uint64_t target = 30000;
-    decoder->seek(target);
-    std::vector<int32_t> buffer(size_t(1000) * spec.channels);
-    ASSERT_EQ(decoder->read(buffer.data(), 1000), 1000u);
-    EXPECT_TRUE(std::equal(buffer.begin(), buffer.end(), expected.begin() + std::ptrdiff_t(target * spec.channels)));
+    for (const auto kind : {DecoderKind::Sndfile, DecoderKind::Symphonia, DecoderKind::DrFlac}) {
+        IO_COUNTERS before{}, after{};
+        GetProcessIoCounters(GetCurrentProcess(), &before);
+        auto decoder = openDecoder(kind, covered);
+        GetProcessIoCounters(GetCurrentProcess(), &after);
+        EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, 512u * 1024) << decoderName(kind);
+        EXPECT_EQ(decoder->info().totalFrames, expected.size() / spec.channels) << decoderName(kind);
+        const auto got = readAll(*decoder);
+        EXPECT_TRUE(got == expected) << decoderName(kind);
+        const uint64_t target = 30000;
+        decoder->seek(target);
+        std::vector<int32_t> buffer(size_t(1000) * spec.channels);
+        ASSERT_EQ(decoder->read(buffer.data(), 1000), 1000u) << decoderName(kind);
+        EXPECT_TRUE(std::equal(buffer.begin(), buffer.end(), expected.begin() + std::ptrdiff_t(target * spec.channels)))
+            << decoderName(kind);
+    }
 }

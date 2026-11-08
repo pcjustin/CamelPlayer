@@ -5,12 +5,14 @@
 //! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF and AAC decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
+mod flac_view;
 mod hidden_tags;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use flac_view::FlacView;
 use hidden_tags::HiddenTags;
 use symphonia::core::audio::conv::ConvertibleSample;
 use symphonia::core::audio::sample::i24;
@@ -200,7 +202,10 @@ unsafe fn open_decoder(
     info: *mut SymInfo,
 ) -> i32 {
     let path = CStr::from_ptr(path).to_string_lossy().into_owned();
-    let source = match std::fs::File::open(&path).and_then(HiddenTags::new) {
+    let source = match std::fs::File::open(&path)
+        .and_then(FlacView::new)
+        .and_then(HiddenTags::new)
+    {
         Ok(s) => s,
         Err(_) => return SYM_E_IO,
     };
