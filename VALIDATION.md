@@ -1,36 +1,28 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2 and 0.2.3 were checked beyond their ordinary automated tests: on audio hardware, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0, 0.2.1 or 0.2.2. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3 and 0.3.0 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0, 0.2.1, 0.2.2 or 0.3.0. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
 
-On 2026-11-04 and 2026-11-05, for 0.2.3, every C++ project and the Rust crates were rebuilt from scratch in Debug and Release. A full Debug run passed all 743 enabled C++ tests, the 100k-track search latency target included. An earlier Debug run passed 742: the queue-restore test failed when the restarted Server's scan was still reading the file the test renames back. The test now waits for the scan to let the file go, and its group then passed 5 runs of 20 tests each. A full Release run passed all 743 enabled C++ tests, and all 89 Rust Engine tests and 2 Symphonia bridge tests passed. After the fix to the fingerprint pass found in the app (below), a full Release run passed all 745 enabled C++ tests and the 89 Rust Engine tests; the fix was not run in Debug. Run alone, the test of a manual change during a crossfade failed 2 to 4 times in 10 with the CPU at 75–78 %, and passed 10 times out of 10 at 27–54 %.
+On 2026-11-08, for 0.3.0, a full Release run of the release build passed all 904 enabled C++ tests, the 100k-track search latency target included, and all 95 Rust Engine tests passed. The whole Rust workspace passed 826 tests; the one left out is a measurement of the DSD remodulator, run by hand. No Debug run was made for 0.3.0.
 
-On 2026-11-03, for 0.2.2, every C++ project and the Rust crates were rebuilt from scratch in Release and Debug. After the last change, a full Release run passed all 729 enabled C++ tests, including the 100k-track search latency target, and all 89 Rust Engine tests and 2 Symphonia bridge tests passed. A full Debug run passed 728 of 729, the latency test again failing only unoptimized (first page p95 107.3 ms).
+The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt`, the program reports version 0.3.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started on an empty data folder and closed through the tray at 6–20 s, it exited cleanly every time. Before the fix to exiting, 3 of 8 such runs crashed on exit.
 
-On 2026-11-01 and 2026-11-02, for 0.2.1, every C++ project was rebuilt from scratch in Release and Debug. A full Release run passed all 731 enabled C++ tests, including the 100k-track search latency target, and all 88 Rust Engine tests. A full Debug run passed 730 of 731, the latency test again failing only unoptimized (first page p95 102.6 ms, broad suggestions 481 ms). After the last change, a WASAPI fix that no automated test reaches, a second Release run passed 730: the test of a manual change during a crossfade reopened the device once under the full suite's load and passed 10 times out of 10 alone.
+## Sanitizers
 
-On 2026-11-01, for 0.2.0, a full Release run passed all 715 enabled C++ tests, including the 100k-track search latency target, and all 88 Rust Engine tests. A full Debug run passed 714 of 715: unoptimized, the latency test measured a first-page p95 of 102.9 ms and a broad-suggestion p95 of 483 ms against its 100 ms target for optimized builds. 112 tests are disabled in ordinary runs because they play audio on named devices or scan a NAS.
+From 0.3.0 on, every release runs `build.ps1 -Sanitizers` before it is published. On 2026-11-08, for 0.3.0, on `cf62206` with VERSION at 0.3.0, the code of the release, all 8 checks passed in 4,820 s:
 
-On 2026-10-31, for 0.1.0, a full Release run passed all 661 enabled C++ tests, including the latency target, and all 47 Rust Engine tests.
+- `/analyze` on the four files with annotated locks;
+- Loom on the Engine's ring, and Miri on the DTS C ABI and the ring;
+- the C++ suite under AddressSanitizer, 902 tests: the 100k-track latency target and the whole-library queue's time limit are left out, as an instrumented build does not meet them and the Release suite holds them;
+- the C++ suite under UndefinedBehaviorSanitizer, all 904 tests;
+- 600 s each of fuzzing: the DTS frame reader 68,091 runs, the format probe 67,995 and the network messages 211,670, none failing.
 
-Earlier targeted runs:
-
-- Artwork regressions passed 14/14, including covers in CD subfolders and images with misleading extensions, and every cover displayed correctly in the app.
-- Library identity and playback-gating regressions passed 137/137 in Debug.
-- Search and sorting regressions passed 80/80 in Debug and Release, and the final text and ordering checks 3/3 in both.
-- Three Server concurrency and listener tests passed 20 repetitions each (60 runs).
-- The NAS follow-up changes passed their 30 related tests in Debug and Release.
-- A full Debug run passed 562 of 563: the 100k-track search latency target (p95 under 100 ms) applies to optimized builds and measured 332 ms unoptimized.
-
-What the decoding tests check:
-
-- Server capture tests compare 16- and 24-bit PCM from all four FLAC decoders with an independent libFLAC decode.
-- Complete decodes from frame zero verify an available STREAMINFO MD5 and enforce known frame counts; after a seek, the remaining frame count is checked instead of comparing a partial digest with the whole-file MD5.
-- Generated 20- and 32-bit FLAC files check that unsupported depths are refused cleanly.
-- MP3 test files are encoded with LAME inside the test program only.
+Two earlier runs that day also passed all 8: on `52449ef`, before Symphonia left FLAC covers out, in 4,884 s, and on `c245561`, before the three fixes ahead of that; `/analyze` had found a local variable shadowing another in `LocalServer.cpp`, renamed in `c245561`. A first run before that stopped in the AddressSanitizer step when the disk filled.
 
 ## Hardware
+
+On 2026-11-08, before 0.3.0, all 97 hardware tests passed twice on the release build, in 184 and 183 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
 
 On 2026-11-05, before 0.2.3, all 97 hardware tests passed twice on the release build, in 200 and 196 seconds.
 
@@ -48,7 +40,30 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 - The Cirrus codec takes 24-in-32-bit samples up to 192 kHz, a container the DAVE refuses. It has no DSD mode, so it receives DSD only converted to PCM, never DoP or native DSD.
 - A separate DAVE run of the output parameters (polling buffer, MMCSS, fixed sample rate, silence after a DoP-to-PCM switch and release after a pause) passed 5/5.
 
+## Network players and AirPlay receivers
+
+Checked on 2026-11-07 and 2026-11-08 for 0.3.0 with the owner at home, in Release builds started from Explorer on a copy of the owner's library and settings, music on a NAS over Wi-Fi. The players:
+
+- **Eversolo DMP-A6**, wired: UPnP AV, no DSD among its 392 protocolInfo entries, so DSD goes to it as DoP in WAV. Over AirPlay (`et=0,1`, `vs=105.1`, `pw=false`) it takes an unencrypted session.
+- **Essential Bravo ID E620** (the owner's KECES, a Linkplay MUZO Cobblestone module, firmware `p20.Linkplay.4.6.529755`): UPnP AV. Its AirPlay receiver (`et=0,4`, `vs=366.0`) answers OPTIONS and refuses ANNOUNCE with 403, so it is listed as not supported and stays on UPnP.
+- **Chord Mojo 2 with Poly**: UPnP AV, declaring DSF and DSD.
+- **HomePod mini stereo pair** (two `AudioAccessory5,1`, `et=0,3,5`, `vs=1005.13.2`, `ov=27.2`, both announcing the pair's name in `gpn`): AirPlay 1 at 44.1 kHz / 16 bits, a session to each speaker.
+- **MacBook Air** (macOS 26, `et=0,3,5`): refuses the connection with 403 and is listed as not supported.
+
+Over UPnP, each of the three players played FLAC from the NAS with seeks and gapless changes, no gap or noise heard; a DSP change restarted the stream after a short pause; a pause from the player's own remote or app was followed at the same position; another source taking the player stopped CamelPlayer with "in use by another source" while the other source played on. DSD64 went to the DMP-A6 as DoP, shown as DSD64 on the player, to the Poly as native DSF, bit-perfect, and to the Bravo as 176.4 kHz PCM, its setting; all three were heard. The DMP-A6's volume was read and followed (32); the Poly's read 100 and was never written. The Bravo, set to fixed volume by JPLAY, reports volume 100 while playing and 0 with mute while paused or in standby; CamelPlayer showed each as read and wrote none. In its standby the Bravo answers Play and then stays stopped, and CamelPlayer reports "did not start playing" 5 s later. Play after CamelPlayer released a player at 60 s paused went on from the same place.
+
+The HomePod pair played from the NAS with a seek, a pause, a track change, a DSP change, the receiver's own volume and a language change that did not stop the music, both speakers heard and no noise; an iPhone taking it over stopped CamelPlayer with "in use by another source". It then played 2 hours and 3 minutes unbroken, 27 CD-format tracks in order, "bit-perfect to the receiver" throughout and no AirPlay warning, error or resend in the log, and the owner heard the two speakers still in step afterwards. Separated in the Home app, one HomePod alone was found and played. Paired again, the pair came back under a new device ID; on 2026-11-08 the release build found it and moved the saved pair's entry, enabled state and volume (29) to the new ID, recording its two speakers, and the old entry went.
+
 ## In the app
+
+Checked by hand on 2026-11-07 and 2026-11-08 in Release builds for 0.3.0, on a copy of the owner's library and settings (ASIO on the Chord DAVE, music on a NAS over Wi-Fi):
+
+- The first sound on the DAVE over ASIO from the NAS, warm, with 0%, 50% and 100% of the cores kept busy, from the press to the sound the driver took: the first play 0.21–0.62 s; a change to a track of the same format 0.1–0.6 s, once 1.2 s, to 96 or 192 kHz 0.9–1.4 s, about 450 ms of it reopening the ASIO driver at the new rate, and to DSD64 1.8–2.4 s, the DAVE switching to DSD. A first reading of 1.4–2.2 s for the first play took the time of the engine's log line, written up to a second after the sound. One album's first play still took 1.5–2.0 s: Symphonia read its 3.3 MB embedded cover before the audio, which 0.3.0 now leaves out; on discs of that album not yet read, with the queue panel closed and half the cores busy, the first play took 0.27–0.34 s against 0.31–0.68 s before.
+- A DSD256 tone limited to DSD64 on the DAVE showed DSD256 → DSD64, native DSD, processed, in the signal path.
+- With "when playing from a folder" on to the end of its library folder, playing a folder from its page and from the tree queued its 16 tracks and then the folders after it, 55,583 entries in all; with it off, the 16 tracks only.
+- Go to playing, with 残夢 playing: the album wall went to its card in about a second, the 71,437-track list selected the track in 1.8 s and the closed tree opened down to it in 0.6 s.
+- Measuring the load of playback with that 55,583-entry queue found the check of the queue's files reading the whole file table every 5 seconds while a track played, 26 MB each time: the queue position saved every 5 seconds counted as a library change. After the fix, it reads again only when files or library folders change, and once a minute; reads while playing fell from 28 MB to about 2.5 MB per 5 s.
+- The first complete scan by 0.3.0 reads every MP3 and every file an earlier version refused again, 3,744 files there: it took 414 s, against about 30 s for an unchanged scan. Closed at 212 s, the next start read them all again in 400 s, as only the end of the scan recorded the version. After the fix, closed at 210 s with 2,008 of the 3,744 done, the next start finished in 228 s.
 
 Checked by hand on 2026-11-05 in the 0.2.3 Release build, on a copy of the owner's library and settings (ASIO on the Chord DAVE, music on a NAS over Wi-Fi):
 
@@ -110,3 +125,6 @@ A Release run on a real SMB share on 2026-10-23 and 2026-10-24 passed:
 
 - In that NAS environment, tag edits did not reach the index through change notifications within 120 seconds; a test-only 2-second polling interval recovered them. Network shares are polled every 6 hours and local folders every 30 minutes, so a change that notifications miss can stay stale until the next poll.
 - A physical network interruption during a scan remains untested.
+- On this computer's Wi-Fi the NAS gives 0.7–2.3 MB/s, and DSD256 needs 2.82 MB/s, so DSD256 from the NAS breaks up on any output, as DoP or converted to PCM; DSD128 fits.
+- While the DMP-A6 plays, the log records "network player volume: HTTP request failed (12152)" now and then.
+- In English, the playback bar has no room for the state badge beside "Processed".
