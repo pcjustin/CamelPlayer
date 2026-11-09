@@ -9,7 +9,6 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <winrt/Microsoft.UI.Interop.h>
-#include <winrt/Windows.ApplicationModel.DataTransfer.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -53,15 +52,6 @@ hstring joined(const std::vector<std::string>& values, const wchar_t* separator)
         if (!out.empty()) out += separator;
         out += wide(value);
     }
-    return hstring(out);
-}
-
-// The values on one line, as Copy all writes a row.
-hstring oneLine(const std::vector<std::string>& values) {
-    std::wstring out(joined(values, L"; "));
-    const auto lineBreak = [](wchar_t c) { return c == L'\r' || c == L'\n'; };
-    while (!out.empty() && lineBreak(out.back())) out.pop_back();
-    std::ranges::replace_if(out, lineBreak, L' ');
     return hstring(out);
 }
 
@@ -190,32 +180,6 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
     else
         root_.Background(themeBrush(L"SolidBackgroundFillColorBaseBrush"));
 
-    menu_ = MenuFlyout();
-    copy_ = MenuFlyoutItem();
-    copy_.Text(tr(L"FileDetails_Copy"));
-    copy_.Click([this](auto&&, auto&&) {
-        if (const auto target = menu_.Target().try_as<TextBlock>()) target.CopySelectionToClipboard();
-    });
-    selectAll_ = MenuFlyoutItem();
-    selectAll_.Text(tr(L"FileDetails_SelectAll"));
-    selectAll_.Click([this](auto&&, auto&&) {
-        if (const auto target = menu_.Target().try_as<TextBlock>()) target.SelectAll();
-    });
-    MenuFlyoutItem copyAll;
-    copyAll.Text(tr(L"FileDetails_CopyAll"));
-    copyAll.Click([this](auto&&, auto&&) {
-        Windows::ApplicationModel::DataTransfer::DataPackage package;
-        package.SetText(allText());
-        Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(package);
-    });
-    for (const auto& item : {copy_, selectAll_, copyAll}) menu_.Items().Append(item);
-    menu_.Opening([this](auto&&, auto&&) {
-        const auto target = menu_.Target().try_as<TextBlock>();
-        copy_.IsEnabled(target && !target.SelectedText().empty());
-        selectAll_.IsEnabled(bool(target));
-    });
-    root_.ContextFlyout(menu_);
-
     const auto app = window_.AppWindow();
     app.TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
     wchar_t executable[MAX_PATH]{};
@@ -251,7 +215,6 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
         window_ = nullptr;
         root_ = nullptr;
         content_ = nullptr;
-        menu_ = nullptr;
         details_.reset();
     });
 }
@@ -276,7 +239,6 @@ TextBlock FileDetailsWindow::text(hstring const& value) {
     block.Text(value);
     block.IsTextSelectionEnabled(true);
     block.TextWrapping(TextWrapping::Wrap);
-    block.ContextFlyout(menu_);
     return block;
 }
 
@@ -343,7 +305,6 @@ UIElement FileDetailsWindow::sectionView(const Section& section) {
 void FileDetailsWindow::render() {
     if (!content_) return;
     content_.Children().Clear();
-    sections_.clear();
     auto title = text(title_);
     title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
     content_.Children().Append(title);
@@ -360,6 +321,7 @@ void FileDetailsWindow::render() {
         return;
     }
     const auto& d = *details_;
+    std::vector<Section> sections;
     Grid path;
     path.ColumnSpacing(12);
     path.ColumnDefinitions().Append(ColumnDefinition());
@@ -402,16 +364,15 @@ void FileDetailsWindow::render() {
         for (const auto& tag : tags.tags) {
             std::optional<hstring> library;
             if (tag.library) library = tag.library->empty() ? tr(L"FileDetails_None") : utf8(*tag.library);
-            section.rows.push_back({fieldName(tag.field, tag.key), joined(tag.values, L"\n"), oneLine(tag.values), library});
+            section.rows.push_back({fieldName(tag.field, tag.key), joined(tag.values, L"\n"), library});
         }
-        sections_.push_back(std::move(section));
+        sections.push_back(std::move(section));
     }
     if (!d.library.empty()) {
         Section section{tr(L"FileDetails_Library"), {}};
         for (const auto& tag : d.library)
-            section.rows.push_back(
-                {fieldName(tag.field, tag.key, false), joined(tag.values, L"\n"), oneLine(tag.values), std::nullopt});
-        sections_.push_back(std::move(section));
+            section.rows.push_back({fieldName(tag.field, tag.key, false), joined(tag.values, L"\n"), std::nullopt});
+        sections.push_back(std::move(section));
     }
     std::vector<std::pair<hstring, hstring>> technical;
     if (!d.format.empty()) technical.emplace_back(tr(L"FileDetails_Format"), utf8(d.format));
@@ -433,30 +394,12 @@ void FileDetailsWindow::render() {
     addGain(technical, tr(L"FileDetails_AnalysisAlbumPeak"), d.analysisAlbumPeak, true);
     if (!technical.empty()) {
         Section section{tr(L"FileDetails_Technical"), {}};
-        for (auto& [name, value] : technical) section.rows.push_back({name, value, value, std::nullopt});
-        sections_.push_back(std::move(section));
+        for (auto& [name, value] : technical) section.rows.push_back({name, value, std::nullopt});
+        sections.push_back(std::move(section));
     }
     if (d.problem == FileDetails::Problem::None && d.sections.empty())
         content_.Children().Append(text(tr(L"FileDetails_NoTags")));
-    for (const auto& section : sections_) content_.Children().Append(sectionView(section));
-}
-
-std::wstring FileDetailsWindow::allText() const {
-    std::wstring out(title_);
-    if (!details_) return out;
-    out += L"\r\n" + std::wstring(tr(L"FileDetails_Path")) + L": " + wide(details_->path) + L"\r\n";
-    if (details_->problem == FileDetails::Problem::Missing) out += std::wstring(tr(L"FileDetails_Missing")) + L"\r\n";
-    if (details_->problem == FileDetails::Problem::Unreadable)
-        out += std::wstring(format(L"FileDetails_Unreadable", {wide(details_->reason)})) + L"\r\n";
-    for (const auto& section : sections_) {
-        out += L"\r\n" + std::wstring(section.heading) + L"\r\n";
-        for (const auto& row : section.rows) {
-            out += std::wstring(row.name) + L": " + std::wstring(row.copied);
-            if (row.library) out += L" (" + std::wstring(format(L"FileDetails_InLibrary", {std::wstring(*row.library)})) + L")";
-            out += L"\r\n";
-        }
-    }
-    return out;
+    for (const auto& section : sections) content_.Children().Append(sectionView(section));
 }
 
 // File Explorer opens the folder with the file selected, or the folder alone once the file is gone.

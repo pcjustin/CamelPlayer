@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // A track's file details (docs/Task-breakdown.md FD-R01): a window of its own beside the main window, one at a time, with
-// a section for each tag format and the technical data, names and values in columns of selectable text, Open folder
-// beside the path and Copy all in the context menu.
+// a section for each tag format and the technical data, names and values in columns of selectable text and Open folder
+// beside the path.
 #pragma once
 #include <functional>
 #include <memory>
@@ -28,7 +28,7 @@ public:
 
 private:
     struct Row {
-        winrt::hstring name, value, copied; // the value as shown, and in one line for Copy all
+        winrt::hstring name, value;
         std::optional<winrt::hstring> library;
     };
     struct Section {
@@ -41,18 +41,14 @@ private:
     void render();
     winrt::Microsoft::UI::Xaml::Controls::TextBlock text(winrt::hstring const& value);
     winrt::Microsoft::UI::Xaml::UIElement sectionView(const Section& section);
-    std::wstring allText() const;
     void openFolder() const;
 
     winrt::Microsoft::UI::Xaml::Window window_{nullptr};
     winrt::Microsoft::UI::Xaml::Controls::Grid root_{nullptr};
     winrt::Microsoft::UI::Xaml::Controls::StackPanel content_{nullptr};
-    winrt::Microsoft::UI::Xaml::Controls::MenuFlyout menu_{nullptr};
-    winrt::Microsoft::UI::Xaml::Controls::MenuFlyoutItem copy_{nullptr}, selectAll_{nullptr};
     std::shared_ptr<uint64_t> generation_ = std::make_shared<uint64_t>(0);
     winrt::hstring title_;
     std::optional<camel::server::FileDetails> details_;
-    std::vector<Section> sections_;
 };
 
 // Opens the details of the track at `pathUtf8`, titled `title`; the main window sets what opens them.

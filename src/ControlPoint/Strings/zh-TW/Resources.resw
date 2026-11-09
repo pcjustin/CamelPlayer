@@ -742,10 +742,6 @@
   <data name="FileDetails_Library" xml:space="preserve"><value>媒體庫中的資料</value></data>
   <data name="FileDetails_InLibrary" xml:space="preserve"><value>媒體庫顯示：{0}</value></data>
   <data name="FileDetails_None" xml:space="preserve"><value>（無）</value></data>
-  <data name="FileDetails_Copy" xml:space="preserve"><value>複製</value></data>
-  <data name="FileDetails_SelectAll" xml:space="preserve"><value>全選</value></data>
-  <data name="FileDetails_CopyAll" xml:space="preserve"><value>全部複製</value></data>
-  <data name="FileDetails_Path" xml:space="preserve"><value>路徑</value></data>
   <data name="FileDetails_Format" xml:space="preserve"><value>格式</value></data>
   <data name="FileDetails_SampleRate" xml:space="preserve"><value>取樣率</value></data>
   <data name="FileDetails_BitDepth" xml:space="preserve"><value>位元深度</value></data>
