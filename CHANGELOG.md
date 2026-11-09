@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Upgrading from 0.3.0: the library gains a table for waveforms (library schema 21), and a copy of the library as it was is kept beside it as `library.db.v20.bak`. 0.3.0 refuses the newer library, so to go back to it, close CamelPlayer and, in `%LOCALAPPDATA%\CamelPlayer`, replace `library.db` with that copy. The settings keep their schema.
+
+Background library work now goes at the Low scan speed, for libraries that were scanned before too: set Settings › Library › Scan speed to High for the speed of 0.3.0. Waveforms for the tracks you have are made in the background between 01:00 and 05:00, or at once when a track plays; ReplayGain analysis's own speed setting is gone.
+
+As with every new version, the first complete library scan reads every MP3, and every file an earlier version could not read, once more.
 
 Changed since 0.3.0:
 
