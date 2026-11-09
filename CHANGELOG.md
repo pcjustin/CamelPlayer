@@ -19,6 +19,7 @@ Changed since 0.3.0:
 - **Start with Windows:** Settings › Interface can have Windows start CamelPlayer at sign-in, in the notification area and paused; the entry follows a moved folder, and one turned off in Windows' startup settings is shown as off and left so.
 - **AirPlay to several receivers at once:** while a receiver plays, the output menu checks others into the group, in step and while it plays; the volume panel moves the group in proportion with a slider for each receiver; a receiver taken by another source or gone leaves with a notice while the others play on; the group comes back with any of its receivers and after a restart. A single receiver can play Stereo, Left or Right from its gear in Settings › Audio outputs, so two single HomePods make a stereo pair.
 - **The output menu takes a mouse click every time:** a click on an output could leave it drawn pressed without choosing it, for the rest of the session, while the keyboard still chose; the menu is now built anew each time it opens and a click chooses on the press.
+- **Go to playing in a folder tree with many folders open:** the button and Ctrl+L read every open folder again and showed the track before the folders above it had opened, which then pushed it out of view; the tree now opens only the closed folders on the way and shows the track once they are open.
 
 ## 0.3.0
 

@@ -269,6 +269,7 @@ private:
     std::unordered_map<int64_t, std::vector<camel::server::LibraryTrackRow>> treeTracks_; // by folder, as listed
     std::set<int64_t> openFolders_; // kept in the data folder, so the tree opens as it was left
     bool openFoldersRead_ = false;
+    int treeOpening_ = 0; // folders of treeItems_ being read; the pending track is selected once none is
     // The track artists of the album or artist page split into names, by credit; empty on other pages.
     std::unordered_map<std::string, std::vector<camel::server::LibraryNamePart>> credits_;
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;

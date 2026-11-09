@@ -612,7 +612,21 @@ void LibraryView::openPlayingFolder(std::vector<int64_t> folders) {
     if (folderTree_) {
         openFolders_.insert(folders.begin(), folders.end());
         saveOpenFolders();
-        loadFolder();
+        if (!treeItems_) return loadFolder();
+        // Opening the first closed folder on the way opens the rest, as they are now remembered open.
+        for (const auto id : folders) {
+            CamelPlayer::BrowseItem node{nullptr};
+            for (const auto& value : treeItems_) {
+                const auto& row = ui::LibraryCollection::rowOf(value);
+                if (row.folder && row.id == id) {
+                    node = value.as<CamelPlayer::BrowseItem>();
+                    break;
+                }
+            }
+            if (!node) return treeOpening_ > 0 ? void() : loadFolder();
+            if (!get_self<BrowseItem>(node)->row().expanded) return expandTree(node);
+        }
+        if (treeOpening_ == 0) selectPendingTrack(FolderTree());
         return;
     }
     View view;
@@ -876,37 +890,44 @@ void LibraryView::expandTree(CamelPlayer::BrowseItem const& parent) {
         depth = node->row().depth + 1;
         node->setExpanded(true);
     }
-    background([this, server = server_, folder, depth, parent, texts = Texts{}] {
-        auto listing = std::make_shared<LibraryFolderListing>(server->browseFolder(folder));
-        return std::function<void()>([this, listing, folder, depth, parent, texts] {
-            if (!treeItems_) return;
+    ++treeOpening_;
+    background([this, server = server_, items = treeItems_, folder, depth, parent, texts = Texts{}] {
+        auto listing = std::make_shared<LibraryFolderListing>();
+        try {
+            *listing = server->browseFolder(folder);
+        } catch (const std::exception& e) {
+            camel::log::warn("library view: %s", e.what());
+        }
+        return std::function<void()>([this, items, listing, folder, depth, parent, texts] {
+            if (!items || items != treeItems_) return; // a reload counts its own
             uint32_t at = 0;
-            if (parent) {
-                // Closed again, or gone with a reload, while it was read.
-                if (!treeItems_.IndexOf(parent, at) || !get_self<BrowseItem>(parent)->row().expanded) return;
-                ++at;
-            }
-            std::vector<CamelPlayer::BrowseItem> open;
-            for (const auto& child : listing->folders) {
-                ui::BrowseRow row{child.id, child.path, ui::utf8(child.name), {}, L"(" + to_hstring(child.tracks) + L")"};
-                row.folder = true;
-                row.depth = depth;
-                const auto node = item(row);
-                treeItems_.InsertAt(at++, node);
-                if (openFolders_.contains(child.id)) open.push_back(node.as<CamelPlayer::BrowseItem>());
-            }
-            if (folder) {
-                for (const auto& t : listing->tracks) {
-                    auto row = trackRow(t, texts);
-                    if (!t.name.empty()) row.title = ui::utf8(t.name);
-                    row.subtitle = row.detail = row.trailing = {};
+            // Closed again while it was read.
+            const bool shown = !parent || (treeItems_.IndexOf(parent, at) && get_self<BrowseItem>(parent)->row().expanded);
+            if (shown) {
+                if (parent) ++at;
+                std::vector<CamelPlayer::BrowseItem> open;
+                for (const auto& child : listing->folders) {
+                    ui::BrowseRow row{child.id, child.path, ui::utf8(child.name), {}, L"(" + to_hstring(child.tracks) + L")"};
+                    row.folder = true;
                     row.depth = depth;
-                    treeItems_.InsertAt(at++, item(row));
+                    const auto node = item(row);
+                    treeItems_.InsertAt(at++, node);
+                    if (openFolders_.contains(child.id)) open.push_back(node.as<CamelPlayer::BrowseItem>());
                 }
-                treeTracks_[*folder] = listing->tracks;
+                if (folder) {
+                    for (const auto& t : listing->tracks) {
+                        auto row = trackRow(t, texts);
+                        if (!t.name.empty()) row.title = ui::utf8(t.name);
+                        row.subtitle = row.detail = row.trailing = {};
+                        row.depth = depth;
+                        treeItems_.InsertAt(at++, item(row));
+                    }
+                    treeTracks_[*folder] = listing->tracks;
+                }
+                for (const auto& node : open) expandTree(node);
             }
-            for (const auto& node : open) expandTree(node);
-            selectPendingTrack(FolderTree());
+            // Folders above the playing track still opening would push it out of view.
+            if (--treeOpening_ == 0) selectPendingTrack(FolderTree());
         });
     });
 }
@@ -1061,6 +1082,7 @@ void LibraryView::loadFolder() {
             openFoldersRead_ = true;
         }
         treeItems_ = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
+        treeOpening_ = 0;
         FolderTree().ItemsSource(treeItems_);
         expandTree(nullptr);
         return;
