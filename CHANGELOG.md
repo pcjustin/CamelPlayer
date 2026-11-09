@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+Upgrading from 0.4.0 changes nothing in the library or the settings.
+
+Changed since 0.4.0:
+
+- **A double-click on a folder no longer closes CamelPlayer:** on the Folders page, a double-click on a folder further down a scrolled list opened the folder with its first click, and the second click, landing as the list was replaced, named no row; CamelPlayer read it anyway and closed, in every version since 0.1.0. A click that names no row is now ignored, in the folder, album, artist, track and playlist lists alike.
+
 ## 0.4.0
 
 Upgrading from 0.3.0: the library gains a table for waveforms (library schema 21), and a copy of the library as it was is kept beside it as `library.db.v20.bak`. 0.3.0 refuses the newer library, so to go back to it, close CamelPlayer and, in `%LOCALAPPDATA%\CamelPlayer`, replace `library.db` with that copy. The settings keep their schema.
