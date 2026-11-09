@@ -473,6 +473,15 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
                     "WHEN new.available=1 AND new.missing_since IS NOT NULL "
                     "BEGIN UPDATE files SET missing_since=NULL WHERE id=new.id; END;");
         },
+        // A track's waveform for the playback bar (docs/Task-breakdown.md M6.6-R07), kept per file and dropped when the
+        // file changes, so it is computed again.
+        [](sqlite::Database& db) {
+            db.exec("CREATE TABLE waveforms (file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE, "
+                    "peaks BLOB NOT NULL);"
+                    "CREATE TRIGGER waveforms_file_changed AFTER UPDATE OF size, mtime ON files "
+                    "WHEN old.size IS NOT new.size OR old.mtime IS NOT new.mtime "
+                    "BEGIN DELETE FROM waveforms WHERE file_id=new.id; END;");
+        },
     };
     return migrations;
 }

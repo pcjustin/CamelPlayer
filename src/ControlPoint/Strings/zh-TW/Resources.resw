@@ -851,4 +851,12 @@
   <data name="Library_ScanFolderOffline" xml:space="preserve"><value>這個資料夾所在的磁碟或 NAS 分享目前離線，現在無法掃描。恢復連線後會再自動掃描。</value></data>
   <data name="Library_ScanAllOffline" xml:space="preserve"><value>所有媒體庫資料夾都離線，現在無法掃描。恢復連線後會再自動掃描。</value></data>
   <data name="Library_ScanOfflineClose" xml:space="preserve"><value>確定</value></data>
+  <data name="Settings_Waveform.OnContent" xml:space="preserve"><value>播放列顯示波形</value></data>
+  <data name="Settings_Waveform.OffContent" xml:space="preserve"><value>播放列顯示波形</value></data>
+  <data name="Settings_AnalysisAnyTime.Header" xml:space="preserve"><value>背景音訊分析</value></data>
+  <data name="Settings_AnalysisAnyTime.OnContent" xml:space="preserve"><value>任何時間</value></data>
+  <data name="Settings_AnalysisAnyTime.OffContent" xml:space="preserve"><value>只在以下時段</value></data>
+  <data name="Settings_AnalysisFrom.Header" xml:space="preserve"><value>開始</value></data>
+  <data name="Settings_AnalysisTo.Header" xml:space="preserve"><value>結束</value></data>
+  <data name="Settings_AnalysisNote.Text" xml:space="preserve"><value>整個媒體庫的波形會在媒體庫掃描完成後於背景產生，只在這個時段（預設 01:00 到 05:00）進行，速度依照掃描速度。播放還沒有波形的歌時會當下產生，ReplayGain 分析讀到的歌也會同時產生波形。</value></data>
 </root>

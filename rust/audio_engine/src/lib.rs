@@ -14,6 +14,7 @@ mod crossfeed;
 mod decoder_host;
 mod dsd;
 mod dsd2pcm;
+mod dsd_pcm_abi;
 mod dsd_remod;
 mod dsp;
 mod dts_abi;

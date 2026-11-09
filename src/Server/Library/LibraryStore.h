@@ -62,7 +62,7 @@ enum class BackgroundPace : uint8_t { Full, One, Wait };
 BackgroundPace backgroundPace(const PlaybackReads& reads, const std::filesystem::path& storage);
 
 // The kinds of background library work, each with its own number of workers at High.
-enum class BackgroundWork : uint8_t { Scan, Fingerprints, Covers, Loudness };
+enum class BackgroundWork : uint8_t { Scan, Fingerprints, Covers, Loudness, Waveforms };
 
 class LibraryStore {
 public:

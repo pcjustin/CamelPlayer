@@ -205,6 +205,14 @@
                                     <ComboBoxItem x:Uid="Settings_ScanSpeedHigh" />
                                 </ComboBox>
                                 <TextBlock x:Uid="Settings_ScanSpeedNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <ToggleSwitch x:Name="AnalysisAnyTimeSwitch" x:Uid="Settings_AnalysisAnyTime" Toggled="OnAnalysisWindowToggled" />
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TimePicker x:Name="AnalysisFromPicker" x:Uid="Settings_AnalysisFrom" ClockIdentifier="24HourClock"
+                                                MinuteIncrement="15" SelectedTimeChanged="OnAnalysisTimeChanged" />
+                                    <TimePicker x:Name="AnalysisToPicker" x:Uid="Settings_AnalysisTo" ClockIdentifier="24HourClock"
+                                                MinuteIncrement="15" SelectedTimeChanged="OnAnalysisTimeChanged" />
+                                </StackPanel>
+                                <TextBlock x:Uid="Settings_AnalysisNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button x:Uid="Settings_AddFolder" Click="OnAddFolderClick" Style="{StaticResource AccentButtonStyle}" />
                                     <Button x:Uid="Settings_RemoveFolder" Click="OnRemoveFolderClick" />
@@ -552,6 +560,7 @@
                                 <TextBlock x:Name="DiscordStatusText" TextWrapping="Wrap" Visibility="Collapsed"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ToggleSwitch x:Name="FolderTreeSwitch" x:Uid="Settings_FolderTree" Toggled="OnFolderTreeToggled" />
+                                <ToggleSwitch x:Name="WaveformSwitch" x:Uid="Settings_Waveform" Toggled="OnFolderTreeToggled" />
                                 <Button x:Uid="Settings_Guide" Click="OnGuideClick" />
                             </StackPanel>
                         </Border>
@@ -815,8 +824,12 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Slider x:Name="PositionSlider" x:Uid="Player_Position" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
-                        VerticalAlignment="Center" ValueChanged="OnSliderValueChanged" />
+                <!-- The playing track's waveform lies under the slider, which keeps the clicks and drags. -->
+                <Grid>
+                    <Grid x:Name="WaveformLayer" Height="26" Margin="10,0,10,0" VerticalAlignment="Center" />
+                    <Slider x:Name="PositionSlider" x:Uid="Player_Position" Minimum="0" Maximum="1" StepFrequency="0.1" IsThumbToolTipEnabled="False"
+                            VerticalAlignment="Center" ValueChanged="OnSliderValueChanged" PointerMoved="OnPositionPointerMoved" />
+                </Grid>
                 <TextBlock x:Name="TimeText" Grid.Column="1" VerticalAlignment="Center" MinWidth="100" TextAlignment="Right"
                            Text="0:00 / 0:00"
                            Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

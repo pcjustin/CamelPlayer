@@ -283,6 +283,19 @@ struct ReplayGainSettings {
 // kind can use; a scan the user starts, and the work following it, runs at High whatever this is.
 enum class ScanSpeed : uint8_t { Low, Medium, High };
 
+// The waveform in the playback bar (docs/Task-breakdown.md M6.6-R07), on by default. The background analysis that makes
+// it for the whole library runs only between `fromMinute` and `toMinute` of the day (01:00 to 05:00 by default; a span
+// past midnight when `fromMinute` is the later), or at any time; a playing track's is made at once.
+struct WaveformSettings {
+    bool enabled = true;
+    bool anyTime = false;
+    int fromMinute = 60;
+    int toMinute = 300;
+    bool operator==(const WaveformSettings&) const = default;
+};
+// Whether the background analysis may run at `minute` of the day.
+bool inAnalysisWindow(const WaveformSettings& settings, int minute);
+
 // Crossfade (docs/Plan.md §5.4), off by default; an album played in order stays gapless.
 struct CrossfadeSettings {
     static constexpr double kMinSeconds = 1.0, kMaxSeconds = 10.0;
@@ -352,6 +365,7 @@ struct Settings {
     OnlineLookup artistPictures = OnlineLookup::Ask; // from Wikimedia Commons (docs/Plan.md §7.4)
     bool folderTree = false; // the Folders page as one tree, as in foobar2000 (made for a friend of the user)
     ScanSpeed scanSpeed = ScanSpeed::Low;
+    WaveformSettings waveform;
     TrackColumns trackColumns;
     DiscordSettings discord;
     std::string skippedVersion; // the release the automatic check no longer offers

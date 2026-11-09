@@ -312,6 +312,11 @@ void MainWindow::InitializeComponent() {
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
     SettingsScroller().SizeChanged([this](auto&&, auto&&) { markSettingsSection(); });
+    waveformBar_ = std::make_unique<ui::WaveformBar>(WaveformLayer(), PositionSlider());
+    // Resting the pointer on the position slider shows the time there.
+    positionTip_ = ToolTip();
+    positionTip_.Placement(Controls::Primitives::PlacementMode::Mouse);
+    ToolTipService::SetToolTip(PositionSlider(), positionTip_);
     eqEditor_ = std::make_unique<ui::EqEditor>(EqCurve(), EqBands(), EqAddBandButton(),
                                                [this](const camel::EqSettings&, bool final) { eqChanged(final); });
     // The acrylic over the lyrics' cover keeps what it last saw beneath it, so a new cover is shown by hiding it a moment.
@@ -639,6 +644,12 @@ void MainWindow::populateSettings() {
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     FolderTreeSwitch().IsOn(settings_.folderTree);
     ScanSpeedCombo().SelectedIndex(int(settings_.scanSpeed));
+    WaveformSwitch().IsOn(settings_.waveform.enabled);
+    AnalysisAnyTimeSwitch().IsOn(settings_.waveform.anyTime);
+    AnalysisFromPicker().SelectedTime(Windows::Foundation::TimeSpan(std::chrono::minutes(settings_.waveform.fromMinute)));
+    AnalysisToPicker().SelectedTime(Windows::Foundation::TimeSpan(std::chrono::minutes(settings_.waveform.toMinute)));
+    AnalysisFromPicker().IsEnabled(!settings_.waveform.anyTime);
+    AnalysisToPicker().IsEnabled(!settings_.waveform.anyTime);
     DiscordSwitch().IsOn(settings_.discord.enabled);
     DiscordCoversSwitch().IsOn(settings_.discord.covers);
     DiscordCoversSwitch().IsEnabled(settings_.discord.enabled);
@@ -1083,6 +1094,17 @@ void MainWindow::readSettingsFromUi() {
         settings_.artistPictures = camel::OnlineLookup::Refused;
     settings_.folderTree = FolderTreeSwitch().IsOn();
     if (const int speed = ScanSpeedCombo().SelectedIndex(); speed >= 0) settings_.scanSpeed = camel::ScanSpeed(speed);
+    settings_.waveform.enabled = WaveformSwitch().IsOn();
+    settings_.waveform.anyTime = AnalysisAnyTimeSwitch().IsOn();
+    const auto minuteOf = [](TimePicker const& picker, int fallback) {
+        const auto time = picker.SelectedTime();
+        return time ? int(std::chrono::duration_cast<std::chrono::minutes>(time.Value()).count()) % 1440 : fallback;
+    };
+    settings_.waveform.fromMinute = minuteOf(AnalysisFromPicker(), settings_.waveform.fromMinute);
+    settings_.waveform.toMinute = minuteOf(AnalysisToPicker(), settings_.waveform.toMinute);
+    AnalysisFromPicker().IsEnabled(!settings_.waveform.anyTime);
+    AnalysisToPicker().IsEnabled(!settings_.waveform.anyTime);
+    if (!settings_.waveform.enabled) waveformBar_->clear();
     settings_.discord.enabled = DiscordSwitch().IsOn();
     settings_.discord.covers = DiscordCoversSwitch().IsOn();
     settings_.eq.enabled = EqSwitch().IsOn();
@@ -1340,6 +1362,17 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const hstring tip = tr(symbol == Symbol::Pause ? L"Tip_Pause" : L"Tip_Play");
         setBadgeTip(PlayPauseButton(), tip, tip);
     }
+    // The waveform appears once the Server has it: made at once for the playing track, asked for every 2 seconds.
+    if (s.pathUtf8 != waveformPath_) {
+        waveformPath_ = s.pathUtf8;
+        waveformBar_->clear();
+        waveformAsked_ = {};
+    }
+    if (!waveformPath_.empty() && settings_.waveform.enabled && !waveformBar_->shown() && !waveformFetching_ &&
+        std::chrono::steady_clock::now() - waveformAsked_ > std::chrono::seconds(2))
+        fetchWaveform();
+    positionTotal_ = total;
+    waveformBar_->setPlayed(total > 0 ? pos / total : 0.0);
     if (!seekTimer_.IsRunning()) { // do not fight the user while they drag
         sliderUpdating_ = true;
         PositionSlider().Maximum(std::max(1.0, total));
@@ -2217,6 +2250,7 @@ void MainWindow::applyTheme() {
 // Colors set from code take the theme's brushes again once the window shows another theme.
 void MainWindow::repaintTheme() {
     ui::setTheme(Content().as<FrameworkElement>().ActualTheme());
+    if (waveformBar_) waveformBar_->repaint();
     StateIcon().Foreground(themeBrush(stateColor_));
     Lamp().Fill(themeBrush(lampColor_));
     PathVerdictDot().Fill(themeBrush(lampColor_));
@@ -3659,6 +3693,40 @@ void MainWindow::OnArtistPicturesToggled(Windows::Foundation::IInspectable const
 
 void MainWindow::OnFolderTreeToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     settingsChanged();
+}
+
+void MainWindow::OnAnalysisWindowToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settingsChanged();
+}
+
+void MainWindow::OnAnalysisTimeChanged(TimePicker const&, TimePickerSelectedValueChangedEventArgs const&) {
+    settingsChanged();
+}
+
+void MainWindow::OnPositionPointerMoved(Windows::Foundation::IInspectable const&, Input::PointerRoutedEventArgs const& e) {
+    const double width = PositionSlider().ActualWidth() - 20.0; // the thumb's travel, inside half a thumb at each end
+    if (width <= 0 || positionTotal_ <= 0) return;
+    const double x = e.GetCurrentPoint(PositionSlider()).Position().X - 10.0;
+    positionTip_.Content(box_value(hstring(ui::formatTime(std::clamp(x / width, 0.0, 1.0) * positionTotal_))));
+}
+
+winrt::fire_and_forget MainWindow::fetchWaveform() {
+    auto strong = get_strong();
+    waveformFetching_ = true;
+    waveformAsked_ = std::chrono::steady_clock::now();
+    const auto path = waveformPath_;
+    auto server = server_;
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    std::optional<std::vector<uint8_t>> peaks;
+    try {
+        peaks = server->waveform(path);
+    } catch (const std::exception& e) {
+        camel::log::warn("waveform: %s", e.what());
+    }
+    co_await foreground;
+    waveformFetching_ = false;
+    if (peaks && !peaks->empty() && path == waveformPath_ && settings_.waveform.enabled) waveformBar_->show(std::move(*peaks));
 }
 
 void MainWindow::OnFolderPlaysOnToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

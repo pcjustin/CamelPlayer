@@ -17,6 +17,7 @@
 #include "MediaControls.h"
 #include "EqEditor.h"
 #include "FileDetailsWindow.h"
+#include "WaveformBar.h"
 #include "Engine/ImpulseResponse.h"
 
 namespace winrt::CamelPlayer::implementation {
@@ -103,6 +104,11 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDiscordToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnFolderTreeToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnAnalysisWindowToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnAnalysisTimeChanged(Microsoft::UI::Xaml::Controls::TimePicker const&,
+                               Microsoft::UI::Xaml::Controls::TimePickerSelectedValueChangedEventArgs const&);
+    void OnPositionPointerMoved(Windows::Foundation::IInspectable const&,
+                                Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
     void OnFolderPlaysOnToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqPresetChanged(Windows::Foundation::IInspectable const&,
@@ -264,6 +270,13 @@ private:
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer eqTimer_{nullptr};
     std::unique_ptr<ui::EqEditor> eqEditor_;
+    std::unique_ptr<ui::WaveformBar> waveformBar_;
+    std::string waveformPath_;
+    std::chrono::steady_clock::time_point waveformAsked_;
+    bool waveformFetching_ = false;
+    double positionTotal_ = 0.0;
+    Microsoft::UI::Xaml::Controls::ToolTip positionTip_{nullptr};
+    winrt::fire_and_forget fetchWaveform();
     ui::FileDetailsWindow fileDetails_;
     Microsoft::UI::Xaml::Controls::MenuFlyout playerTrackMenu_{nullptr};
     void showFileDetails(const std::string& pathUtf8, hstring const& title);

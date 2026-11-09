@@ -851,4 +851,12 @@
   <data name="Library_ScanFolderOffline" xml:space="preserve"><value>This folder's drive or NAS share is offline, so it cannot be scanned now. It is scanned again when it comes back.</value></data>
   <data name="Library_ScanAllOffline" xml:space="preserve"><value>Every library folder is offline, so nothing can be scanned now. Each is scanned again when it comes back.</value></data>
   <data name="Library_ScanOfflineClose" xml:space="preserve"><value>OK</value></data>
+  <data name="Settings_Waveform.OnContent" xml:space="preserve"><value>Waveform in the playback bar</value></data>
+  <data name="Settings_Waveform.OffContent" xml:space="preserve"><value>Waveform in the playback bar</value></data>
+  <data name="Settings_AnalysisAnyTime.Header" xml:space="preserve"><value>Background audio analysis</value></data>
+  <data name="Settings_AnalysisAnyTime.OnContent" xml:space="preserve"><value>At any time</value></data>
+  <data name="Settings_AnalysisAnyTime.OffContent" xml:space="preserve"><value>Only between these times</value></data>
+  <data name="Settings_AnalysisFrom.Header" xml:space="preserve"><value>From</value></data>
+  <data name="Settings_AnalysisTo.Header" xml:space="preserve"><value>To</value></data>
+  <data name="Settings_AnalysisNote.Text" xml:space="preserve"><value>Waveforms for the whole library are made in the background once the library is scanned, only in this window (01:00 to 05:00 by default), at the scan speed. A track that plays without one gets it at once, and ReplayGain analysis makes the waveforms of the tracks it reads.</value></data>
 </root>

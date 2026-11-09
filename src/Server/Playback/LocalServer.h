@@ -84,6 +84,7 @@ public:
     DiscordStatus discordStatus() const override;
     Lyrics lyrics(const std::string& pathUtf8) const override;
     FileDetails fileDetails(const std::string& pathUtf8) const override;
+    std::optional<std::vector<uint8_t>> waveform(const std::string& pathUtf8) const override;
     LibraryScanStart scanLibraryNow(std::optional<int64_t> folder) override;
     void setDiscordTexts(const DiscordTexts& texts) override;
     // Where to look for network players; before the first device scan.

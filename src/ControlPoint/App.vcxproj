@@ -121,6 +121,7 @@
     <ClInclude Include="TrackMarks.h" />
     <ClInclude Include="EqEditor.h" />
     <ClInclude Include="FileDetailsWindow.h" />
+    <ClInclude Include="WaveformBar.h" />
     <ClInclude Include="PlaylistCollection.h" />
     <ClInclude Include="PlaylistView.xaml.h">
       <DependentUpon>PlaylistView.xaml</DependentUpon>
@@ -149,6 +150,7 @@
     <ClCompile Include="TrackMarks.cpp" />
     <ClCompile Include="EqEditor.cpp" />
     <ClCompile Include="FileDetailsWindow.cpp" />
+    <ClCompile Include="WaveformBar.cpp" />
     <ClCompile Include="TrayIcon.cpp" />
     <ClCompile Include="GlobalHotkeys.cpp" />
     <ClCompile Include="MediaControls.cpp" />

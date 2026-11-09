@@ -9,6 +9,7 @@
 
 #include <array>
 #include <atomic>
+#include <map>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -39,10 +40,11 @@ struct AlbumLoudness {
 
 // An album's files measured one at a time. A run cut short keeps the files it finished and the next run goes on from
 // there. The album's value comes from a histogram of every file's 400 ms blocks, so no file's measurement is kept
-// open, however long the album. A mono file counts as dual mono, as it plays on both speakers.
+// open, however long the album. A mono file counts as dual mono, as it plays on both speakers. With `waveforms`, the
+// same decoding also gives each file's waveform (Library/Waveform.h).
 class AlbumMeasure {
 public:
-    explicit AlbumMeasure(std::vector<std::filesystem::path> files);
+    explicit AlbumMeasure(std::vector<std::filesystem::path> files, bool waveforms = false);
 
     // Decodes the files not yet done with the decoders `decoders` choose, on up to `threads` threads; `cancelled` stops
     // the reading between chunks. `measured(i, loudness)` is called for each file as it finishes, one at a time, with no
@@ -50,25 +52,39 @@ public:
     bool run(const DecoderByFormat& decoders, unsigned threads, const std::function<bool()>& cancelled = {},
              const std::function<void(size_t, const std::optional<Loudness>&)>& measured = {});
 
-    AlbumLoudness result() const; // the files done so far and the album over them
+    AlbumLoudness result() const;                     // the files done so far and the album over them
+    std::vector<uint8_t> waveform(size_t file) const; // empty when not asked for or not read
 
 private:
     std::vector<std::filesystem::path> files_;
+    bool waveforms_;
+    std::vector<std::vector<uint8_t>> peaks_;
     std::vector<bool> done_;
     std::vector<std::optional<Loudness>> tracks_;
     std::array<uint64_t, 1000> blocks_{}; // libebur128's histogram: -70 to +30 LUFS in 0.1 LU steps
     double peak_ = 0.0;
     mutable std::mutex mutex_;
+    std::mutex measuredMutex_;
 };
 
-// Analyzes the library's tracks that lack a track or album value, while the settings ask for ReplayGain.
+// The library's audio analysis, as Roon's (docs/Task-breakdown.md M6.6-R07): loudness for the tracks that lack a track
+// or album value while the settings ask for ReplayGain, at any hour, queued tracks first; and waveforms, at once for the
+// playing track and the next, and in the background for every other track only after the library scan and in the
+// settings' window. Each decoding gives whatever the track still lacks, so no track is decoded twice for the two.
 class LoudnessAnalyzer {
 public:
+    struct PlayingTrack {
+        int64_t file = 0; // 0 outside the library: its waveform is kept here, not stored
+        std::filesystem::path path;
+    };
     struct Options {
         std::function<ReplayGainSettings()> settings;
         std::function<DecoderByFormat()> decoders;
         std::function<std::vector<int64_t>()> queued; // file ids of the current and upcoming queue entries
         std::function<PlaybackReads()> playback;
+        std::function<WaveformSettings()> waveform;         // none: no waveforms
+        std::function<std::vector<PlayingTrack>()> playing; // the playing track and the next
+        std::function<int()> minuteOfDay;                   // the local time's; tests set it
     };
 
     LoudnessAnalyzer(LibraryStore& store, Options options);
@@ -77,6 +93,8 @@ public:
     LoudnessAnalyzer& operator=(const LoudnessAnalyzer&) = delete;
 
     LoudnessProgress progress() const;
+    // The waveform made for a playing track outside the library.
+    std::optional<std::vector<uint8_t>> playingWaveform(const std::filesystem::path& path) const;
 
 private:
     struct Track {
@@ -84,13 +102,22 @@ private:
         std::filesystem::path path;
     };
     void run(const std::stop_token& stop);
-    std::vector<Track> nextAlbum();
+    std::vector<Track> nextAlbum(bool queuedOnly);
+    bool analyzeAlbum(const std::stop_token& stop, bool queuedOnly, bool waveforms);
+    bool waveformsNow(const std::stop_token& stop);
+    bool waveformsInBackground(const std::stop_token& stop);
+    std::function<bool()> givingWay(const std::stop_token& stop, const std::filesystem::path& path) const;
+    bool waveformsOn() const;
+    int minuteOfDay() const;
     void count();
 
     LibraryStore& store_;
     Options options_;
-    std::set<int64_t> failed_;                // files that could not be read this session
-    std::unique_ptr<AlbumMeasure> measuring_; // the album cut short last, with its files' ids
+    std::set<int64_t> failed_;         // files that could not be read this session
+    std::set<int64_t> waveformFailed_; // the same for waveforms
+    mutable std::mutex playingMutex_;
+    std::map<std::filesystem::path, std::vector<uint8_t>> playingWaveforms_; // playing tracks outside the library
+    std::unique_ptr<AlbumMeasure> measuring_;                                // the album cut short last, with its files' ids
     std::vector<int64_t> measuringFiles_;
     std::atomic<int64_t> analyzed_ = 0, total_ = 0;
     mutable std::atomic<int64_t> progressAsked_ = 0; // steady_clock ticks of the last progress() call

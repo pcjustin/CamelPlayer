@@ -19,6 +19,7 @@
 #include "Common/util/Text.h"
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
+#include "Server/Library/Waveform.h"
 
 namespace camel::server {
 namespace {
@@ -73,11 +74,13 @@ double gainFor(double lufs) {
 struct Measured {
     Loudness loudness;
     Blocks blocks{};
+    std::vector<uint8_t> peaks; // with `waveform`
 };
 
-// One file's loudness and 400 ms blocks; none when it cannot be read or `cancelled` stopped the reading.
+// One file's loudness and 400 ms blocks, and with `waveform` its waveform from the same decoding; none when it cannot be
+// read or `cancelled` stopped the reading.
 std::optional<Measured> measure(const std::filesystem::path& file, const DecoderByFormat& decoders,
-                                const std::function<bool()>& cancelled) {
+                                const std::function<bool()>& cancelled, bool waveform) {
     const auto format = audio::probeFormat(file);
     if (format == audio::AudioFormat::Dsd) return std::nullopt;
     const auto decoder = audio::openDecoder(decoderFor(decoders, format), file);
@@ -89,6 +92,8 @@ std::optional<Measured> measure(const std::filesystem::path& file, const Decoder
     if (!state) return std::nullopt;
     if (info.channels == 1) ebur128_set_channel(state.get(), 0, EBUR128_DUAL_MONO);
     Measured out;
+    std::optional<PeakCollector> peaks;
+    if (waveform) peaks.emplace(info.sampleRate, info.channels);
     // libebur128 ends a 400 ms block every 100 ms from 400 ms on; the frames go in up to each end, where the momentary
     // loudness is that block's.
     const size_t step = (info.sampleRate + 5) / 10;
@@ -107,6 +112,7 @@ std::optional<Measured> measure(const std::filesystem::path& file, const Decoder
             for (size_t i = 0; i < frames * info.channels; ++i) floats[i] = float(integers[i]) * scale;
         }
         if (frames == 0) break;
+        if (peaks) peaks->add(floats.data(), frames);
         for (size_t at = 0; at < frames;) {
             const size_t n = std::min(frames - at, step - fed % step);
             ebur128_add_frames_float(state.get(), floats.data() + at * info.channels, n);
@@ -121,6 +127,7 @@ std::optional<Measured> measure(const std::filesystem::path& file, const Decoder
     double lufs = 0.0;
     ebur128_loudness_global(state.get(), &lufs);
     out.loudness = {gainFor(lufs), truePeak(state.get())};
+    if (peaks) out.peaks = peaks->peaks();
     return out;
 }
 
@@ -130,8 +137,8 @@ constexpr const char* kNeedsAnalysis =
 
 } // namespace
 
-AlbumMeasure::AlbumMeasure(std::vector<std::filesystem::path> files)
-    : files_(std::move(files)), done_(files_.size()), tracks_(files_.size()) {}
+AlbumMeasure::AlbumMeasure(std::vector<std::filesystem::path> files, bool waveforms)
+    : files_(std::move(files)), waveforms_(waveforms), peaks_(files_.size()), done_(files_.size()), tracks_(files_.size()) {}
 
 bool AlbumMeasure::run(const DecoderByFormat& decoders, unsigned threads, const std::function<bool()>& cancelled,
                        const std::function<void(size_t, const std::optional<Loudness>&)>& measured) {
@@ -144,19 +151,28 @@ bool AlbumMeasure::run(const DecoderByFormat& decoders, unsigned threads, const 
             const size_t file = left[at];
             std::optional<Measured> result;
             try {
-                result = measure(files_[file], decoders, cancelled);
+                result = measure(files_[file], decoders, cancelled, waveforms_);
             } catch (const std::exception& e) {
                 log::warn("loudness: %s: %s", toUtf8(files_[file].wstring()).c_str(), e.what());
             }
             if (cancelled && cancelled()) return;
-            std::lock_guard lock(mutex_);
-            done_[file] = true;
-            if (result) {
-                tracks_[file] = result->loudness;
-                for (size_t i = 0; i < blocks_.size(); ++i) blocks_[i] += result->blocks[i];
-                peak_ = std::max(peak_, result->loudness.peak);
+            std::optional<Loudness> track;
+            {
+                std::lock_guard lock(mutex_);
+                done_[file] = true;
+                if (result) {
+                    tracks_[file] = result->loudness;
+                    peaks_[file] = std::move(result->peaks);
+                    for (size_t i = 0; i < blocks_.size(); ++i) blocks_[i] += result->blocks[i];
+                    peak_ = std::max(peak_, result->loudness.peak);
+                }
+                track = tracks_[file];
             }
-            if (measured) measured(file, tracks_[file]);
+            // One file at a time, and outside the lock, so the callback may read this file's waveform.
+            if (measured) {
+                std::lock_guard serial(measuredMutex_);
+                measured(file, track);
+            }
         }
     };
     std::vector<std::future<void>> workers;
@@ -174,6 +190,11 @@ AlbumLoudness AlbumMeasure::result() const {
     if (std::ranges::any_of(tracks_, [](const auto& t) { return t.has_value(); }))
         out.album = Loudness{gainFor(gatedLoudness(blocks_)), peak_};
     return out;
+}
+
+std::vector<uint8_t> AlbumMeasure::waveform(size_t file) const {
+    std::lock_guard lock(mutex_);
+    return file < peaks_.size() ? peaks_[file] : std::vector<uint8_t>{};
 }
 
 LoudnessAnalyzer::LoudnessAnalyzer(LibraryStore& store, Options options)
@@ -200,8 +221,35 @@ void LoudnessAnalyzer::count() {
     }
 }
 
-// The album of the first queued track that needs analysis, else of any such track; a track outside an album alone.
-std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum() {
+std::optional<std::vector<uint8_t>> LoudnessAnalyzer::playingWaveform(const std::filesystem::path& path) const {
+    std::lock_guard lock(playingMutex_);
+    const auto found = playingWaveforms_.find(path);
+    return found == playingWaveforms_.end() ? std::nullopt : std::optional(found->second);
+}
+
+int LoudnessAnalyzer::minuteOfDay() const {
+    if (options_.minuteOfDay) return options_.minuteOfDay();
+    const auto local = std::chrono::current_zone()->to_local(std::chrono::system_clock::now());
+    return int(std::chrono::duration_cast<std::chrono::minutes>(local - std::chrono::floor<std::chrono::days>(local)).count());
+}
+
+bool LoudnessAnalyzer::waveformsOn() const {
+    return options_.waveform && options_.waveform().enabled;
+}
+
+// A decoding's check between chunks: it waits while playback needs the file's storage (docs/Plan.md §7.7), and stops
+// for good when the analysis ends or waveforms are turned off.
+std::function<bool()> LoudnessAnalyzer::givingWay(const std::stop_token& stop, const std::filesystem::path& path) const {
+    return [this, stop, path] {
+        while (!stop.stop_requested() && backgroundPace(options_.playback(), path) == BackgroundPace::Wait)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return stop.stop_requested() || !waveformsOn();
+    };
+}
+
+// The album of the first queued track that needs analysis, else (unless `queuedOnly`) of any such track; a track
+// outside an album alone.
+std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum(bool queuedOnly) {
     auto db = store_.openReader();
     std::optional<int64_t> chosen;
     auto needs =
@@ -213,7 +261,7 @@ std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum() {
             break;
         }
     }
-    if (!chosen) {
+    if (!chosen && !queuedOnly) {
         auto any = db.prepare(std::string("SELECT t.file_id FROM tracks t JOIN files f ON f.id=t.file_id WHERE ") +
                               kNeedsAnalysis + " ORDER BY t.album_id,t.file_id LIMIT 200");
         while (any.step())
@@ -236,7 +284,7 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
     using namespace std::chrono_literals;
     auto counted = std::chrono::steady_clock::time_point{};
     while (!stop.stop_requested()) {
-        for (int i = 0; i < 20 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(100ms);
+        for (int i = 0; i < 10 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(100ms);
         try {
             // Counting reads every track, so it runs only while someone reads the progress.
             const auto now = std::chrono::steady_clock::now();
@@ -245,83 +293,189 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 count();
                 counted = std::chrono::steady_clock::now();
             }
-            const auto settings = options_.settings();
-            if (settings.mode == ReplayGainMode::Off) store_.caughtUp(BackgroundWork::Loudness);
-            if (settings.mode == ReplayGainMode::Off || store_.scanProgress().scans > 0) {
-                running_ = false;
+            const bool loudness = options_.settings().mode != ReplayGainMode::Off;
+            if (!loudness) store_.caughtUp(BackgroundWork::Loudness);
+            const bool scanning = store_.scanProgress().scans > 0;
+            const bool waveforms = waveformsOn();
+            if (!waveforms) store_.caughtUp(BackgroundWork::Waveforms);
+            // Queued tracks' loudness first, as playing volume depends on it; then the playing track's waveform; then
+            // the rest of the library's loudness; then the background waveforms, after the scan and in their window.
+            if (loudness && !scanning && analyzeAlbum(stop, true, waveforms)) continue;
+            if (waveforms && waveformsNow(stop)) continue;
+            if (loudness && !scanning && analyzeAlbum(stop, false, waveforms)) {
+                count();
+                counted = std::chrono::steady_clock::now();
                 continue;
             }
-            const auto album = nextAlbum();
-            if (album.empty()) {
-                store_.caughtUp(BackgroundWork::Loudness);
-                running_ = false;
+            if (loudness && !scanning) store_.caughtUp(BackgroundWork::Loudness);
+            if (waveforms && !scanning && inAnalysisWindow(options_.waveform(), minuteOfDay()) && waveformsInBackground(stop))
                 continue;
-            }
-            // Playback comes first (docs/Plan.md §7.7): the analysis waits while the engine is not ahead on the same
-            // storage, and goes on with one thread while anything plays; otherwise it takes the scan speed's threads of
-            // the cores. An album begun with more threads than either allows starts again with fewer.
-            const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-            const auto allowed = [&] {
-                const auto pace = backgroundPace(options_.playback(), album.front().path);
-                return pace == BackgroundPace::Wait  ? 0u
-                       : pace == BackgroundPace::One ? 1u
-                                                     : store_.backgroundWorkers(BackgroundWork::Loudness, cores);
-            };
-            const unsigned threads = std::max(1u, allowed());
-            const auto yield = [&] {
-                if (stop.stop_requested() || options_.settings().mode == ReplayGainMode::Off) return true;
-                return threads > allowed();
-            };
-            running_ = !yield();
-            if (!running_) continue;
-            std::vector<int64_t> ids;
-            std::vector<std::filesystem::path> files;
-            for (const auto& t : album) {
-                ids.push_back(t.file);
-                files.push_back(t.path);
-            }
-            if (!measuring_ || measuringFiles_ != ids) {
-                measuring_ = std::make_unique<AlbumMeasure>(files);
-                measuringFiles_ = ids;
-            }
-            // Each track's value is kept as it is measured; the album's once every track is.
-            const bool complete =
-                measuring_->run(options_.decoders(), threads, yield, [&](size_t i, const std::optional<Loudness>& track) {
-                    if (!track) {
-                        failed_.insert(ids[i]);
-                        return;
-                    }
-                    store_
-                        .write([&](sqlite::Database& db) {
-                            db.prepare("UPDATE tracks SET rg_analysis_gain=?,rg_analysis_peak=? WHERE file_id=?")
-                                .bind(1, track->gainDb)
-                                .bind(2, track->peak)
-                                .bind(3, ids[i])
-                                .run();
-                        })
-                        .get();
-                });
-            if (!complete) continue;
-            const auto result = measuring_->result();
-            measuring_.reset();
-            if (result.album)
-                store_
-                    .write([&](sqlite::Database& db) {
-                        auto update =
-                            db.prepare("UPDATE tracks SET rg_analysis_album_gain=?,rg_analysis_album_peak=? WHERE file_id=?");
-                        for (size_t i = 0; i < ids.size(); ++i) {
-                            if (!result.tracks[i]) continue;
-                            update.reset();
-                            update.bind(1, result.album->gainDb).bind(2, result.album->peak).bind(3, ids[i]).run();
-                        }
-                    })
-                    .get();
-            count();
-            counted = std::chrono::steady_clock::now();
+            running_ = false;
         } catch (const std::exception& e) {
-            log::warn("loudness: %s", e.what());
+            log::warn("audio analysis: %s", e.what());
         }
     }
+}
+
+// The next album's loudness, with the waveforms of its files from the same decoding; false when no album needs it.
+bool LoudnessAnalyzer::analyzeAlbum(const std::stop_token& stop, bool queuedOnly, bool waveforms) {
+    const auto album = nextAlbum(queuedOnly);
+    if (album.empty()) return false;
+    // Playback comes first (docs/Plan.md §7.7): the analysis waits while the engine is not ahead on the same storage, and
+    // goes on with one thread while anything plays; otherwise it takes the scan speed's threads of the cores. An album
+    // begun with more threads than either allows starts again with fewer.
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    const auto allowed = [&] {
+        const auto pace = backgroundPace(options_.playback(), album.front().path);
+        return pace == BackgroundPace::Wait  ? 0u
+               : pace == BackgroundPace::One ? 1u
+                                             : store_.backgroundWorkers(BackgroundWork::Loudness, cores);
+    };
+    const unsigned threads = std::max(1u, allowed());
+    const auto yield = [&] {
+        if (stop.stop_requested() || options_.settings().mode == ReplayGainMode::Off) return true;
+        return threads > allowed();
+    };
+    running_ = !yield();
+    if (!running_) return true;
+    std::vector<int64_t> ids;
+    std::vector<std::filesystem::path> files;
+    for (const auto& t : album) {
+        ids.push_back(t.file);
+        files.push_back(t.path);
+    }
+    if (!measuring_ || measuringFiles_ != ids) {
+        measuring_ = std::make_unique<AlbumMeasure>(files, waveforms);
+        measuringFiles_ = ids;
+    }
+    // Each track's value and waveform are kept as it is measured; the album's value once every track is.
+    const bool complete =
+        measuring_->run(options_.decoders(), threads, yield, [&](size_t i, const std::optional<Loudness>& track) {
+            if (!track) {
+                failed_.insert(ids[i]);
+                return;
+            }
+            const auto peaks = measuring_->waveform(i);
+            store_
+                .write([&](sqlite::Database& db) {
+                    db.prepare("UPDATE tracks SET rg_analysis_gain=?,rg_analysis_peak=? WHERE file_id=?")
+                        .bind(1, track->gainDb)
+                        .bind(2, track->peak)
+                        .bind(3, ids[i])
+                        .run();
+                    if (!peaks.empty()) storeWaveform(db, ids[i], peaks);
+                })
+                .get();
+        });
+    if (!complete) return true;
+    const auto result = measuring_->result();
+    measuring_.reset();
+    if (result.album)
+        store_
+            .write([&](sqlite::Database& db) {
+                auto update = db.prepare("UPDATE tracks SET rg_analysis_album_gain=?,rg_analysis_album_peak=? WHERE file_id=?");
+                for (size_t i = 0; i < ids.size(); ++i) {
+                    if (!result.tracks[i]) continue;
+                    update.reset();
+                    update.bind(1, result.album->gainDb).bind(2, result.album->peak).bind(3, ids[i]).run();
+                }
+            })
+            .get();
+    return true;
+}
+
+// The playing track's waveform, then the next one's, at once whatever the hour or the scan; false when both have one.
+bool LoudnessAnalyzer::waveformsNow(const std::stop_token& stop) {
+    const auto playing = options_.playing ? options_.playing() : std::vector<PlayingTrack>{};
+    {
+        // Waveforms of tracks outside the library are kept only while they are playing or next.
+        std::lock_guard lock(playingMutex_);
+        std::erase_if(playingWaveforms_, [&](const auto& kept) {
+            return std::ranges::none_of(playing, [&](const PlayingTrack& t) { return t.path == kept.first; });
+        });
+    }
+    for (const auto& track : playing) {
+        if (track.file) {
+            if (waveformFailed_.contains(track.file)) continue;
+            auto db = store_.openReader();
+            if (storedWaveform(db, track.file)) continue;
+        } else if (playingWaveform(track.path)) {
+            continue;
+        }
+        running_ = true;
+        std::optional<std::vector<uint8_t>> peaks;
+        try {
+            peaks = readWaveform(track.path, options_.decoders(), givingWay(stop, track.path));
+        } catch (const std::exception& e) {
+            log::warn("waveform: %s: %s", toUtf8(track.path.wstring()).c_str(), e.what());
+        }
+        if (stop.stop_requested() || !waveformsOn()) return true;
+        if (!peaks) {
+            if (track.file) waveformFailed_.insert(track.file);
+            continue;
+        }
+        if (track.file) {
+            store_.write([&](sqlite::Database& db) { storeWaveform(db, track.file, *peaks); }).get();
+        } else {
+            std::lock_guard lock(playingMutex_);
+            playingWaveforms_[track.path] = std::move(*peaks);
+        }
+        return true;
+    }
+    return false;
+}
+
+// The waveforms of library tracks that have none, at the scan speed; each worker finishes its track when the window
+// closes, a scan starts or waveforms are turned off, and takes no other. False when every track has one.
+bool LoudnessAnalyzer::waveformsInBackground(const std::stop_token& stop) {
+    std::vector<Track> tracks;
+    {
+        auto db = store_.openReader();
+        auto rows = db.prepare("SELECT f.id,f.path FROM tracks t JOIN files f ON f.id=t.file_id LEFT JOIN waveforms w "
+                               "ON w.file_id=f.id WHERE f.available=1 AND w.file_id IS NULL ORDER BY t.album_id,f.id LIMIT 200");
+        while (rows.step())
+            if (!waveformFailed_.contains(rows.integer(0)))
+                tracks.push_back({rows.integer(0), std::filesystem::path(toWide(rows.text(1)))});
+    }
+    if (tracks.empty()) {
+        store_.caughtUp(BackgroundWork::Waveforms);
+        return false;
+    }
+    running_ = true;
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    const auto open = [&] {
+        return !stop.stop_requested() && waveformsOn() && store_.scanProgress().scans == 0 &&
+               inAnalysisWindow(options_.waveform(), minuteOfDay());
+    };
+    std::atomic<size_t> next = 0;
+    std::mutex failedMutex;
+    const auto work = [&](unsigned worker) {
+        for (size_t at; open() && (at = next++) < tracks.size();) {
+            const auto& track = tracks[at];
+            // While anything plays, one worker goes on; one on the playing storage waits for the engine to be ahead.
+            if (worker > 0 && backgroundPace(options_.playback(), track.path) != BackgroundPace::Full) return;
+            if (worker >= store_.backgroundWorkers(BackgroundWork::Waveforms, cores)) return;
+            std::optional<std::vector<uint8_t>> peaks;
+            try {
+                peaks = readWaveform(track.path, options_.decoders(), givingWay(stop, track.path));
+            } catch (const std::exception& e) {
+                log::warn("waveform: %s: %s", toUtf8(track.path.wstring()).c_str(), e.what());
+            }
+            if (stop.stop_requested() || !waveformsOn()) return;
+            if (!peaks) {
+                std::lock_guard lock(failedMutex);
+                waveformFailed_.insert(track.file);
+                continue;
+            }
+            store_.write([&](sqlite::Database& db) { storeWaveform(db, track.file, *peaks); }).get();
+        }
+    };
+    const unsigned threads = store_.backgroundWorkers(BackgroundWork::Waveforms, cores);
+    std::vector<std::future<void>> workers;
+    for (unsigned i = 1; i < threads && i < tracks.size(); ++i) workers.push_back(std::async(std::launch::async, work, i));
+    work(0);
+    for (auto& w : workers) w.get();
+    return true;
 }
 
 } // namespace camel::server

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -349,6 +350,15 @@ CamelEngineStatus camel_engine_get_dsp_clipped_v1(CamelEngine* engine, uint64_t*
 // chain acts and its preamp.
 CamelEngineStatus camel_dsp_analyze_v1(const CamelDspV1* dsp, uint32_t rate_hz, const double* frequencies, uint32_t points,
                                        double* left_db, double* right_db, CamelDspSummaryV1* summary);
+// DSD to 352.8 kHz PCM as playback converts it, for work outside playback such as the waveform analysis. Null for a
+// rate or channel count playback does not convert. process writes at most `frames` frames, interleaved, at full scale
+// 1.0, so `capacity` must hold `frames`.
+typedef struct CamelDsdToPcm CamelDsdToPcm;
+CamelDsdToPcm* camel_dsd_to_pcm_create_v1(uint32_t dsd_rate, uint32_t channels);
+uint32_t camel_dsd_to_pcm_rate_v1(void);
+CamelEngineStatus camel_dsd_to_pcm_process_v1(CamelDsdToPcm* converter, const uint8_t* input, size_t frames, float* output,
+                                              size_t capacity, size_t* produced);
+void camel_dsd_to_pcm_destroy_v1(CamelDsdToPcm* converter);
 CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
                                                uint64_t* frames_read);
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,

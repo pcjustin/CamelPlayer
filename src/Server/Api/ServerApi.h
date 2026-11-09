@@ -66,6 +66,7 @@ struct SettingsDto {
     OnlineLookup artistPictures = OnlineLookup::Ask;
     bool folderTree = false;
     ScanSpeed scanSpeed = ScanSpeed::Low;
+    WaveformSettings waveform;
     TrackColumns trackColumns;
     DiscordSettings discord;
     std::string skippedVersion;
@@ -471,6 +472,8 @@ public:
     virtual Lyrics lyrics(const std::string& pathUtf8) const = 0;
     // Reads the file on the caller's thread, which may wait on a NAS; nothing is written to it.
     virtual FileDetails fileDetails(const std::string& pathUtf8) const = 0;
+    // The track's waveform for the playback bar (Library/Waveform.h), once made; none while waveforms are off.
+    virtual std::optional<std::vector<uint8_t>> waveform(const std::string& pathUtf8) const = 0;
     // The path states' names in the app's language, for the activity's small image; the Server has no strings of its own.
     virtual void setDiscordTexts(const DiscordTexts& texts) = 0;
 };

@@ -546,6 +546,10 @@ std::string toJson(const Settings& s) {
                                                                       : "ask";
     j["folderTree"] = s.folderTree;
     j["scanSpeed"] = kScanSpeedIds[int(s.scanSpeed)];
+    j["waveform"] = {{"enabled", s.waveform.enabled},
+                     {"anyTime", s.waveform.anyTime},
+                     {"from", s.waveform.fromMinute},
+                     {"to", s.waveform.toMinute}};
     j["trackColumns"] = {s.trackColumns.title, s.trackColumns.artist, s.trackColumns.album};
     j["discord"] = {{"enabled", s.discord.enabled}, {"covers", s.discord.covers}};
     j["skippedVersion"] = s.skippedVersion;
@@ -628,6 +632,16 @@ Settings fromJson(const std::string& text) {
     s.folderTree = boolean(j, "folderTree", false);
     const auto speed = std::ranges::find(kScanSpeedIds, str(j, "scanSpeed", "low"));
     s.scanSpeed = speed == std::end(kScanSpeedIds) ? ScanSpeed::Low : ScanSpeed(speed - std::begin(kScanSpeedIds));
+    if (const auto w = j.find("waveform"); w != j.end() && w->is_object()) {
+        s.waveform.enabled = boolean(*w, "enabled", true);
+        s.waveform.anyTime = boolean(*w, "anyTime", false);
+        const auto minute = [&](const char* key, int fallback) {
+            const auto value = w->find(key);
+            return value != w->end() && value->is_number_integer() ? std::clamp(value->get<int>(), 0, 1439) : fallback;
+        };
+        s.waveform.fromMinute = minute("from", 60);
+        s.waveform.toMinute = minute("to", 300);
+    }
     if (const auto columns = j.find("trackColumns");
         columns != j.end() && columns->is_array() && columns->size() == 3 &&
         std::all_of(columns->begin(), columns->end(),
@@ -773,6 +787,7 @@ Settings resetPlayback(const Settings& s) {
     reset.artistPictures = s.artistPictures;
     reset.folderTree = s.folderTree;
     reset.scanSpeed = s.scanSpeed;
+    reset.waveform = s.waveform;
     reset.trackColumns = s.trackColumns;
     reset.discord = s.discord;
     reset.skippedVersion = s.skippedVersion;
@@ -793,9 +808,17 @@ Settings resetInterface(const Settings& s) {
     reset.checkUpdates = defaults.checkUpdates;
     reset.artistPictures = defaults.artistPictures;
     reset.folderTree = defaults.folderTree;
+    reset.waveform.enabled = defaults.waveform.enabled;
     reset.trackColumns = defaults.trackColumns;
     reset.discord = defaults.discord;
     return reset;
+}
+
+bool inAnalysisWindow(const WaveformSettings& settings, int minute) {
+    if (settings.anyTime) return true;
+    if (settings.fromMinute == settings.toMinute) return false;
+    if (settings.fromMinute < settings.toMinute) return minute >= settings.fromMinute && minute < settings.toMinute;
+    return minute >= settings.fromMinute || minute < settings.toMinute;
 }
 
 std::filesystem::path settingsPath() {

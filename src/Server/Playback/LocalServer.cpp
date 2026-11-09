@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Library/FileDetails.h"
+#include "Server/Library/Waveform.h"
 #include "Server/Library/Lyrics.h"
 #include "Server/Playback/LocalServer.h"
 #include <fstream>
@@ -269,6 +270,14 @@ public:
                 return queuedFiles_;
             };
             loudness.playback = [this] { return playbackReads(); };
+            loudness.waveform = [this] {
+                std::lock_guard lock(loudnessMutex_);
+                return waveformSettings_;
+            };
+            loudness.playing = [this] {
+                std::lock_guard lock(loudnessMutex_);
+                return playingTracks_;
+            };
             loudness_ = std::make_unique<LoudnessAnalyzer>(*library_, std::move(loudness));
         }
         if (library_ && [&] {
@@ -400,6 +409,19 @@ public:
         lyrics_ = read;
         return read;
     }
+    std::optional<std::vector<uint8_t>> waveform(const std::string& pathUtf8) const {
+        if (!library_ || !loudness_) return std::nullopt;
+        {
+            std::lock_guard lock(loudnessMutex_);
+            if (!waveformSettings_.enabled) return std::nullopt;
+        }
+        const std::filesystem::path given(toWide(pathUtf8));
+        auto db = library_->openReader();
+        auto file = db.prepare("SELECT id FROM files WHERE path=? AND available=1");
+        if (file.bind(1, toUtf8(spelledLibraryPath(given).wstring())).step()) return storedWaveform(db, file.integer(0));
+        return loudness_->playingWaveform(given);
+    }
+
     FileDetails fileDetails(const std::string& pathUtf8) const {
         if (!library_) return readFileDetails(pathUtf8, nullptr);
         auto reader = library_->openReader();
@@ -1398,19 +1420,24 @@ private:
         return replayGainDb(settings_.replayGain, loudness, album);
     }
 
-    // What the loudness analysis reads from another thread: the ReplayGain settings, the decoders and the files of the
-    // current and next queue entries, which it analyzes first.
+    // What the audio analysis reads from another thread: the ReplayGain and waveform settings, the decoders, the files of
+    // the current and next queue entries, which it analyzes first, and the playing track and the next for their waveforms.
     void shareLoudnessInputs() {
         std::vector<int64_t> files;
+        std::vector<LoudnessAnalyzer::PlayingTrack> playing;
         auto at = std::ranges::find(entries_, state_.queueEntryId, &QueueEntry::id);
         if (at == entries_.end()) at = entries_.begin();
-        for (; at != entries_.end() && files.size() < 20; ++at)
+        for (; at != entries_.end() && files.size() < 20; ++at) {
             if (at->file) files.push_back(at->file);
+            if (playing.size() < 2) playing.push_back({at->file, std::filesystem::path(toWide(at->source.pathUtf8()))});
+        }
         if (library_) library_->setScanSpeed(settings_.scanSpeed);
         std::lock_guard lock(loudnessMutex_);
         loudnessSettings_ = settings_.replayGain;
         loudnessDecoders_ = settings_.decoderByFormat;
         queuedFiles_ = std::move(files);
+        waveformSettings_ = settings_.waveform;
+        playingTracks_ = std::move(playing);
     }
 
     // Natural completion plays the next eligible entry; a track-local failure marks the entry and skips it.
@@ -1942,6 +1969,8 @@ private:
     _Guarded_by_(loudnessMutex_) ReplayGainSettings loudnessSettings_;
     _Guarded_by_(loudnessMutex_) DecoderByFormat loudnessDecoders_;
     _Guarded_by_(loudnessMutex_) std::vector<int64_t> queuedFiles_;
+    _Guarded_by_(loudnessMutex_) WaveformSettings waveformSettings_;
+    _Guarded_by_(loudnessMutex_) std::vector<LoudnessAnalyzer::PlayingTrack> playingTracks_;
     std::unique_ptr<LoudnessAnalyzer> loudness_; // uses the four above, library_ and engine_
     std::optional<sqlite::Database> libraryReader_;
     int64_t libraryVersion_ = 0;
@@ -2235,6 +2264,9 @@ DiscordStatus LocalServer::discordStatus() const {
 }
 Lyrics LocalServer::lyrics(const std::string& pathUtf8) const {
     return impl_->lyrics(pathUtf8);
+}
+std::optional<std::vector<uint8_t>> LocalServer::waveform(const std::string& pathUtf8) const {
+    return impl_->waveform(pathUtf8);
 }
 FileDetails LocalServer::fileDetails(const std::string& pathUtf8) const {
     return impl_->fileDetails(pathUtf8);

@@ -138,8 +138,8 @@ void LibraryStore::userScanStarted() {
 
 void LibraryStore::userScanEnded() {
     if (--userScans_ == 0)
-        followingUserScan_ =
-            uint8_t(bitOf(BackgroundWork::Fingerprints) | bitOf(BackgroundWork::Covers) | bitOf(BackgroundWork::Loudness));
+        followingUserScan_ = uint8_t(bitOf(BackgroundWork::Fingerprints) | bitOf(BackgroundWork::Covers) |
+                                     bitOf(BackgroundWork::Loudness) | bitOf(BackgroundWork::Waveforms));
 }
 
 void LibraryStore::caughtUp(BackgroundWork kind) {
