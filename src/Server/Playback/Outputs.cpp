@@ -144,6 +144,13 @@ void followRepairedPairs(Settings& s, const DeviceCatalog& devices) {
         else
             old->id = old->airplay.deviceId = device.id;
         if (s.backend == Backend::AirPlay && s.airplay.deviceId == from) s.airplay.deviceId = device.id;
+        for (auto& member : s.airplayGroup)
+            if (member == from) member = device.id;
+        std::erase_if(s.airplayGroup, [&, seen = std::vector<std::string>()](const std::string& id) mutable {
+            if (holds(seen, id)) return true;
+            seen.push_back(id);
+            return false;
+        });
         if (auto level = s.airplayLevels.extract(from); level && !s.airplayLevels.contains(device.id)) {
             level.key() = device.id;
             s.airplayLevels.insert(std::move(level));
@@ -168,6 +175,11 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
         row.enabled = saved && saved->enabled;
         row.alias = saved ? saved->alias : std::string();
         row.name = !row.alias.empty() ? row.alias : saved && deviceName.empty() ? saved->name : deviceName;
+        if (backend == Backend::AirPlay) {
+            row.grouped = s.backend == Backend::AirPlay && holds(s.airplayGroup, id);
+            const DeviceInfo* device = findDevice(devices, backend, id);
+            row.pair = (device ? device->speakers.size() : saved ? saved->speakers.size() : 0) > 1;
+        }
         rows.push_back(std::move(row));
     };
     for (const Backend backend : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network, Backend::AirPlay}) {
@@ -191,6 +203,8 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     }
     keepParameters(s, s.backend, deviceInUse(s));
     if (s.backend == Backend::Wasapi || !selectedId(s).empty()) savedOutput(s, s.backend, selectedId(s)).enabled = true;
+    if (s.backend == Backend::AirPlay && !s.airplay.deviceId.empty() && !holds(s.airplayGroup, s.airplay.deviceId))
+        s.airplayGroup.insert(s.airplayGroup.begin(), s.airplay.deviceId);
     for (auto& saved : s.outputs)
         if (const auto* device = findDevice(devices, saved.backend, saved.id)) {
             saved.name = device->name;
@@ -239,7 +253,30 @@ void selectOutput(Settings& s, Backend backend, const std::string& id, const Dev
     loadParameters(s, backend, following ? devices.defaultWasapi : id, id);
     s.followedDefault = following ? devices.defaultWasapi : std::string();
     savedOutput(s, backend, id).enabled = true;
+    if (backend == Backend::AirPlay && !holds(s.airplayGroup, id)) s.airplayGroup = {id};
     syncOutputs(s, devices);
+}
+
+void setInAirPlayGroup(Settings& s, const std::string& id, bool in, const DeviceCatalog& devices) {
+    if (s.backend != Backend::AirPlay || id.empty() || holds(s.airplayGroup, id) == in) return;
+    if (in) {
+        s.airplayGroup.push_back(id);
+        savedOutput(s, Backend::AirPlay, id).enabled = true;
+    } else {
+        if (s.airplayGroup.size() < 2) return;
+        std::erase(s.airplayGroup, id);
+        if (s.airplay.deviceId == id) {
+            keepParameters(s, Backend::AirPlay, id);
+            loadParameters(s, Backend::AirPlay, s.airplayGroup.front(), s.airplayGroup.front());
+        }
+    }
+    syncOutputs(s, devices);
+}
+
+AirPlayChannels airplayChannels(const Settings& s, const std::string& id) {
+    if (s.backend == Backend::AirPlay && s.airplay.deviceId == id) return s.airplay.channels;
+    const SavedOutput* saved = findOutput(s, Backend::AirPlay, id);
+    return saved ? saved->airplay.channels : AirPlayChannels::Stereo;
 }
 
 void setOutputEnabled(Settings& s, Backend backend, const std::string& id, bool enabled, const DeviceCatalog& devices) {
@@ -257,6 +294,7 @@ void deleteOutput(Settings& s, Backend backend, const std::string& id, const Dev
     if (id.empty()) return;
     std::erase_if(s.outputs, [&](const SavedOutput& o) { return o.backend == backend && o.id == id; });
     if (s.backend == backend && deviceInUse(s) == id) loadParameters(s, backend, id, selectedId(s));
+    if (backend == Backend::AirPlay && (s.backend != backend || selectedId(s) != id)) std::erase(s.airplayGroup, id);
     syncOutputs(s, devices);
 }
 

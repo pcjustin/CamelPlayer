@@ -282,8 +282,12 @@ private:
     std::optional<uint32_t> playerVolume_; // the network player's own level, as the Server last reported it
     bool playerMuted_ = false;
     std::chrono::steady_clock::time_point playerVolumeMovedAt_; // until it settles, the slider stays where the user left it
-    bool populating_ = false;                                   // ignore control events while filling controls
-    bool sliderUpdating_ = false;                               // ignore slider events caused by position updates
+    std::vector<camel::server::ReceiverState> receivers_;       // the AirPlay group in use
+    std::map<std::string, std::chrono::steady_clock::time_point> receiverMovedAt_;
+    uint64_t shownReceiverLeft_ = 0;
+    void showReceiverVolumes();
+    bool populating_ = false;     // ignore control events while filling controls
+    bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;
     bool buffering_ = false; // waiting for a slow source; the state badge keeps its place in the bar
     bool navCompacted_ = false;

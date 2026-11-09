@@ -65,7 +65,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 30> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 31> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -94,7 +94,10 @@ constexpr Names<CommandKind, 30> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::SetAlbumFavorite, "setAlbumFavorite"},
                                                   {CommandKind::SetArtistFavorite, "setArtistFavorite"},
                                                   {CommandKind::SetPlayerVolume, "setPlayerVolume"},
-                                                  {CommandKind::SetPlayerMute, "setPlayerMute"}};
+                                                  {CommandKind::SetPlayerMute, "setPlayerMute"},
+                                                  {CommandKind::SetReceiverVolume, "setReceiverVolume"}};
+constexpr Names<AirPlayChannels, 3> kAirPlayChannels = {
+    {AirPlayChannels::Stereo, "stereo"}, {AirPlayChannels::Left, "left"}, {AirPlayChannels::Right, "right"}};
 constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},
                                                        {LibraryGroupField::Composer, "composer"}};
 constexpr Names<RepeatMode, 3> kRepeatModes = {{RepeatMode::Off, "off"}, {RepeatMode::One, "one"}, {RepeatMode::All, "all"}};
@@ -277,6 +280,18 @@ template <class T> json optionalJson(const std::optional<T>& v) {
 }
 
 json toJson(const PlaybackSnapshot& p) {
+    json receivers = json::array();
+    for (const auto& r : p.receivers)
+        receivers.push_back({{"id", r.id},
+                             {"name", r.name},
+                             {"level", r.level},
+                             {"muted", r.muted},
+                             {"channels", nameOf(r.channels, kAirPlayChannels)}});
+    const json left = p.receiverLeft ? json{{"serial", p.receiverLeft->serial},
+                                            {"name", p.receiverLeft->name},
+                                            {"code", nameOf(p.receiverLeft->code, kErrorCodes)},
+                                            {"detail", p.receiverLeft->detail}}
+                                     : json(nullptr);
     return {{"state", nameOf(p.state, kPlaybackStates)},
             {"path", p.pathUtf8},
             {"position", p.position},
@@ -298,6 +313,8 @@ json toJson(const PlaybackSnapshot& p) {
             {"bufferingSeconds", p.bufferingSeconds ? json(*p.bufferingSeconds) : json(nullptr)},
             {"playerVolume", p.playerVolume ? json(*p.playerVolume) : json(nullptr)},
             {"playerMuted", p.playerMuted},
+            {"receivers", receivers},
+            {"receiverLeft", left},
             {"error", p.error ? json(nameOf(*p.error, kErrorCodes)) : json(nullptr)},
             {"errorDetail", p.errorDetail},
             {"revision", p.revision}};
@@ -335,6 +352,14 @@ PlaybackSnapshot playbackFrom(const json& j) {
         return v.get<uint32_t>();
     });
     p.playerMuted = value<bool>(j, "playerMuted");
+    if (j.contains("receivers"))
+        for (const auto& r : array(j, "receivers"))
+            p.receivers.push_back({value<std::string>(r, "id"), value<std::string>(r, "name"), value<uint32_t>(r, "level"),
+                                   value<bool>(r, "muted"), enumFrom(field(r, "channels"), kAirPlayChannels, "channels")});
+    p.receiverLeft = optional<ReceiverLeft>(j, "receiverLeft", [](const json& v) {
+        return ReceiverLeft{value<uint64_t>(v, "serial"), value<std::string>(v, "name"),
+                            enumFrom(field(v, "code"), kErrorCodes, "error code"), value<std::string>(v, "detail")};
+    });
     p.error = optional<ErrorCode>(j, "error", [](const json& v) { return enumFrom(v, kErrorCodes, "error code"); });
     p.errorDetail = value<std::string>(j, "errorDetail");
     p.revision = value<uint64_t>(j, "revision");
@@ -448,7 +473,8 @@ json toJson(const Command& c) {
             {"albums", c.albums},
             {"artists", artists},
             {"playerVolume", c.playerVolume ? json(*c.playerVolume) : json(nullptr)},
-            {"playerMute", c.playerMute ? json(*c.playerMute) : json(nullptr)}};
+            {"playerMute", c.playerMute ? json(*c.playerMute) : json(nullptr)},
+            {"receiver", c.receiver}};
 }
 
 Command commandFromJson(const json& j) {
@@ -488,6 +514,7 @@ Command commandFromJson(const json& j) {
         if (!v.is_boolean()) invalid("playerMute is not a boolean");
         return v.get<bool>();
     });
+    if (j.contains("receiver") || c.kind == CommandKind::SetReceiverVolume) c.receiver = value<std::string>(j, "receiver");
     return c;
 }
 

@@ -136,9 +136,14 @@ struct NetworkSettings {
     bool operator==(const NetworkSettings&) const = default;
 };
 
+// What an AirPlay receiver plays: both channels, or one of them in both of its own, so that a single speaker plays
+// the whole of it or two make a stereo pair (docs/Plan.md §5.10). A stereo pair always plays both.
+enum class AirPlayChannels : uint8_t { Stereo, Left, Right };
+
 // The format is always 44.1 kHz/16-bit, so a receiver has no limit, DSD or silence settings (docs/Plan.md §6).
 struct AirPlaySettings {
     std::string deviceId;
+    AirPlayChannels channels = AirPlayChannels::Stereo;
     PlaybackTiming timing{.releaseAfterPauseSeconds = 60};
     bool operator==(const AirPlaySettings&) const = default;
 };
@@ -355,6 +360,9 @@ struct Settings {
     ReplayGainSettings replayGain;
     CrossfadeSettings crossfade;
     std::vector<SavedOutput> outputs;
+    // The AirPlay receivers playing together, the one in `airplay` among them; kept when another output is chosen, so
+    // choosing any of them again brings the group back.
+    std::vector<std::string> airplayGroup;
     std::map<std::string, AirPlayLevel> airplayLevels; // by receiver, only the Server's
     std::string followedDefault; // the endpoint whose parameters are in `wasapi` while it follows the Windows default
     std::wstring lastFile;

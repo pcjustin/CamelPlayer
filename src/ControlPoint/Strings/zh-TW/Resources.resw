@@ -716,4 +716,14 @@
   <data name="Volume_PlayerUnknown" xml:space="preserve"><value>無法讀取播放器音量</value></data>
   <data name="SignalPath_PlayerVolume" xml:space="preserve"><value>播放器音量</value></data>
   <data name="SignalPath_GaplessOff" xml:space="preserve"><value>無縫播放已關閉</value></data>
+  <data name="Settings_AirPlayChannels.Header" xml:space="preserve"><value>聲道</value></data>
+  <data name="Settings_AirPlayChannelsNote.Text" xml:space="preserve"><value>選左聲道或右聲道時，這台接收器的兩個喇叭都播放該聲道，兩顆單獨的喇叭放在同一個群組就能當立體聲。在「家庭」App 裡組成的立體聲配對一律播放雙聲道。</value></data>
+  <data name="Channels_Stereo" xml:space="preserve"><value>立體聲</value></data>
+  <data name="Channels_Left" xml:space="preserve"><value>左聲道</value></data>
+  <data name="Channels_Right" xml:space="preserve"><value>右聲道</value></data>
+  <data name="Channels_LeftBoth" xml:space="preserve"><value>左聲道送到雙聲道</value></data>
+  <data name="Channels_RightBoth" xml:space="preserve"><value>右聲道送到雙聲道</value></data>
+  <data name="SignalPath_OneChannel" xml:space="preserve"><value>單一聲道</value></data>
+  <data name="Output_ReceiverLeft" xml:space="preserve"><value>{0} 已離開 AirPlay 群組</value></data>
+  <data name="Volume_ReceiverSlider" xml:space="preserve"><value>{0} 的音量</value></data>
 </root>

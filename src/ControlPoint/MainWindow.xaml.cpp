@@ -658,6 +658,8 @@ void MainWindow::populateSettings() {
     fill(NetworkMaxDsdCombo(), maxDsdItems(tr(L"Limit_FollowPlayer")), maxDsdIndex(settings_.network.maxDsdRate));
     NetworkGaplessSwitch().IsOn(settings_.network.gapless);
     showTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
+    fill(AirPlayChannelsCombo(), {tr(L"Channels_Stereo"), tr(L"Channels_Left"), tr(L"Channels_Right")},
+         int(settings_.airplay.channels));
 
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
@@ -771,7 +773,7 @@ void MainWindow::populateOutputs() {
             remove.Click([this, row, label](auto&&, auto&&) { askDeleteOutput(row.backend, row.id, label); });
             actions.Items().Append(remove);
         }
-        if (row.backend != Backend::AirPlay) {
+        if (row.backend != Backend::AirPlay || !row.pair) { // a stereo pair has nothing to set
             Button gear;
             FontIcon gearIcon;
             gearIcon.Glyph(L"\xE713");
@@ -963,8 +965,24 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
                         true);
         menu.Items().Append(item);
     };
-    for (const auto& row : camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices)) {
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
+    const auto grouped = std::ranges::count_if(rows, &camel::server::OutputRow::grouped);
+    for (const auto& row : rows) {
         if (!row.enabled) continue;
+        if (row.backend == Backend::AirPlay && settings_.backend == Backend::AirPlay) {
+            // Receivers join and leave the group in use; the last one stays.
+            ToggleMenuFlyoutItem item;
+            item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
+            item.IsChecked(row.grouped);
+            item.IsEnabled(row.connected && !(row.grouped && grouped < 2));
+            add(item, [this, row] {
+                changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                    camel::server::setInAirPlayGroup(s, row.id, !row.grouped, devices);
+                });
+                populateSettings();
+            });
+            continue;
+        }
         RadioMenuFlyoutItem item;
         item.GroupName(L"Outputs");
         item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
@@ -1080,6 +1098,7 @@ void MainWindow::readSettingsFromUi() {
     settings_.network.maxDsdRate = maxDsdAt(idx(NetworkMaxDsdCombo()));
     settings_.network.gapless = NetworkGaplessSwitch().IsOn();
     readTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
+    settings_.airplay.channels = AirPlayChannels(std::clamp(idx(AirPlayChannelsCombo()), 0, 2));
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
     settings_.theme = Theme(std::clamp(idx(ThemeCombo()), 0, 2));
 }
@@ -1132,6 +1151,7 @@ void MainWindow::updateBackendGroups() {
     AsioGroup().Visibility(settings_.backend == Backend::Asio ? Visibility::Visible : Visibility::Collapsed);
     KsGroup().Visibility(settings_.backend == Backend::Ks ? Visibility::Visible : Visibility::Collapsed);
     NetworkGroup().Visibility(settings_.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
+    AirPlayGroup().Visibility(settings_.backend == Backend::AirPlay ? Visibility::Visible : Visibility::Collapsed);
     WasapiPeriodBox().IsEnabled(settings_.wasapi.period == WasapiPeriod::Custom);
     WasapiRateCombo().IsEnabled(!settings_.wasapi.shared); // the mixer sets the rate in shared mode
     WasapiMaxRateCombo().IsEnabled(!settings_.wasapi.shared);
@@ -1208,6 +1228,8 @@ void MainWindow::showOutputsOf(const SettingsDto& server) {
     settings_.asio = server.asio;
     settings_.ks = server.ks;
     settings_.volume.mode = server.volume.mode;
+    settings_.airplay = server.airplay;
+    settings_.airplayGroup = server.airplayGroup;
     if (parameters)
         populateSettings();
     else
@@ -1222,9 +1244,21 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
     if (!server_ || !cursor_.accept(snapshot)) return;
     shown_ = snapshot;
-    if (snapshot.devices.revision != shownDevicesRevision_) {
+    if (snapshot.devices.revision != shownDevicesRevision_ || snapshot.settings.airplayGroup != settings_.airplayGroup ||
+        snapshot.settings.airplay.deviceId != settings_.airplay.deviceId) {
         shownDevicesRevision_ = snapshot.devices.revision;
         showOutputsOf(snapshot.settings);
+    }
+    if (snapshot.playback.receivers != receivers_) {
+        receivers_ = snapshot.playback.receivers;
+        showReceiverVolumes();
+    }
+    if (const auto& left = snapshot.playback.receiverLeft; left && left->serial != shownReceiverLeft_) {
+        shownReceiverLeft_ = left->serial;
+        const hstring why = ui::playerErrorTitle(left->code);
+        ReceiverBar().Title(ui::format(L"Output_ReceiverLeft", {std::wstring(ui::utf8(left->name))}));
+        ReceiverBar().Message(why.empty() ? ui::errorTitle(left->code) : why);
+        ReceiverBar().IsOpen(true);
     }
     const auto& s = snapshot.playback;
     if (artworkPath_ != s.pathUtf8) {
@@ -1507,10 +1541,18 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                   : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
                                   : plan.state == PipelineState::LossySource        ? PathState::Lossy
                                                                                     : PathState::Processed;
-        add(tr(s.backend == Backend::Network   ? L"SignalPath_Renderer"
-               : s.backend == Backend::AirPlay ? L"SignalPath_Receiver"
-                                               : L"SignalPath_Device"),
-            ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
+        if (s.backend == Backend::AirPlay && !s.receivers.empty()) {
+            for (const auto& receiver : s.receivers) {
+                add(tr(L"SignalPath_Receiver"), ui::utf8(receiver.name) + L" · " + ui::utf8(describe(*s.output)), reached);
+                if (receiver.channels != AirPlayChannels::Stereo)
+                    add(tr(L"SignalPath_OneChannel"),
+                        tr(receiver.channels == AirPlayChannels::Left ? L"Channels_LeftBoth" : L"Channels_RightBoth"),
+                        PathState::Processed);
+            }
+        } else {
+            add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
+                ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
+        }
         if (s.backend == Backend::Network && !settings_.network.gapless)
             add(tr(L"SignalPath_GaplessOff"), {}, PathState::AtTrackChanges);
         if (s.playerVolume)
@@ -3723,6 +3765,59 @@ void MainWindow::OnPlayerVolumeChanged(Windows::Foundation::IInspectable const&,
     command.kind = CommandKind::SetPlayerVolume;
     command.playerVolume = uint32_t(PlayerVolumeSlider().Value());
     submitCommand(std::move(command));
+}
+
+// Under the group's slider, one for each receiver of an AirPlay group; a slider the user moves stays where it was left
+// until the level settles.
+void MainWindow::showReceiverVolumes() {
+    const bool group = receivers_.size() > 1;
+    ReceiverVolumes().Visibility(group ? Visibility::Visible : Visibility::Collapsed);
+    auto rows = ReceiverVolumes().Children();
+    const bool same = group && rows.Size() == receivers_.size() &&
+                      std::ranges::all_of(std::views::iota(size_t{0}, receivers_.size()), [&](size_t i) {
+                          return unbox_value_or<hstring>(rows.GetAt(uint32_t(i)).as<FrameworkElement>().Tag(), L"") ==
+                                 ui::utf8(receivers_[i].id);
+                      });
+    if (!same) rows.Clear();
+    if (!group) return;
+    const auto now = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < receivers_.size(); ++i) {
+        const auto& receiver = receivers_[i];
+        if (same) {
+            const auto moved = receiverMovedAt_.find(receiver.id);
+            if (moved != receiverMovedAt_.end() && now - moved->second < kPlayerVolumeSettles) continue;
+            const auto slider = rows.GetAt(uint32_t(i)).as<StackPanel>().Children().GetAt(1).as<Slider>();
+            const bool wasPopulating = std::exchange(populating_, true);
+            slider.Value(receiver.level);
+            populating_ = wasPopulating;
+            continue;
+        }
+        StackPanel row;
+        row.Tag(box_value(ui::utf8(receiver.id)));
+        TextBlock name;
+        name.Text(ui::utf8(receiver.name));
+        name.Style(unbox_value<Microsoft::UI::Xaml::Style>(
+            Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle"))));
+        Slider slider;
+        slider.Width(160);
+        slider.Minimum(0);
+        slider.Maximum(100);
+        slider.StepFrequency(1);
+        slider.Value(receiver.level);
+        Automation::AutomationProperties::SetName(slider, ui::format(L"Volume_ReceiverSlider", {std::wstring(name.Text())}));
+        slider.ValueChanged([this, id = receiver.id](auto&&, Primitives::RangeBaseValueChangedEventArgs const& e) {
+            if (populating_ || !server_) return;
+            receiverMovedAt_[id] = std::chrono::steady_clock::now();
+            Command command;
+            command.kind = CommandKind::SetReceiverVolume;
+            command.receiver = id;
+            command.playerVolume = uint32_t(e.NewValue());
+            submitCommand(std::move(command));
+        });
+        row.Children().Append(name);
+        row.Children().Append(slider);
+        rows.Append(row);
+    }
 }
 
 void MainWindow::OnPlayerMuteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

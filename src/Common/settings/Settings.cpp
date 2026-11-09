@@ -463,14 +463,20 @@ static void readNetwork(const json& o, NetworkSettings& n) {
     readTiming(o, n.timing);
 }
 
+static const char* const kAirPlayChannelIds[] = {"stereo", "left", "right"};
+
 static json airplayJson(const AirPlaySettings& a) {
-    json j = {{"receiver", a.deviceId}};
+    json j = {{"receiver", a.deviceId}, {"channels", kAirPlayChannelIds[int(a.channels)]}};
     j.update(timingJson(a.timing));
     return j;
 }
 
 static void readAirPlay(const json& o, AirPlaySettings& a) {
     a.deviceId = str(o, "receiver", "");
+    const std::string channels = str(o, "channels", "stereo");
+    a.channels = channels == "left"    ? AirPlayChannels::Left
+                 : channels == "right" ? AirPlayChannels::Right
+                                       : AirPlayChannels::Stereo;
     readTiming(o, a.timing);
 }
 
@@ -569,6 +575,7 @@ std::string toJson(const Settings& s) {
     j["airplay"] = airplayJson(s.airplay);
     j["outputs"] = json::array();
     for (const auto& output : s.outputs) j["outputs"].push_back(outputJson(output));
+    if (!s.airplayGroup.empty()) j["airplayGroup"] = s.airplayGroup;
     if (!s.airplayLevels.empty()) {
         j["airplayLevels"] = json::object();
         for (const auto& [id, level] : s.airplayLevels) j["airplayLevels"][id] = {{"level", level.level}, {"muted", level.muted}};
@@ -722,6 +729,10 @@ Settings fromJson(const std::string& text) {
     if (j.contains("outputs") && j["outputs"].is_array())
         for (const auto& item : j["outputs"])
             if (auto output = outputFrom(item)) s.outputs.push_back(std::move(*output));
+    if (j.contains("airplayGroup") && j["airplayGroup"].is_array())
+        for (const auto& id : j["airplayGroup"])
+            if (id.is_string() && std::ranges::find(s.airplayGroup, id.get<std::string>()) == s.airplayGroup.end())
+                s.airplayGroup.push_back(id.get<std::string>());
     if (j.contains("airplayLevels") && j["airplayLevels"].is_object())
         for (const auto& [id, level] : j["airplayLevels"].items())
             if (level.is_object())

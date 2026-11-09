@@ -716,4 +716,14 @@
   <data name="Volume_PlayerUnknown" xml:space="preserve"><value>The player's volume cannot be read</value></data>
   <data name="SignalPath_PlayerVolume" xml:space="preserve"><value>Player volume</value></data>
   <data name="SignalPath_GaplessOff" xml:space="preserve"><value>Gapless off</value></data>
+  <data name="Settings_AirPlayChannels.Header" xml:space="preserve"><value>Channels</value></data>
+  <data name="Settings_AirPlayChannelsNote.Text" xml:space="preserve"><value>Left or Right plays that channel on both of this receiver's speakers, so that two single speakers grouped together play as a stereo pair. A stereo pair made in the Home app always plays both channels.</value></data>
+  <data name="Channels_Stereo" xml:space="preserve"><value>Stereo</value></data>
+  <data name="Channels_Left" xml:space="preserve"><value>Left</value></data>
+  <data name="Channels_Right" xml:space="preserve"><value>Right</value></data>
+  <data name="Channels_LeftBoth" xml:space="preserve"><value>Left channel to both</value></data>
+  <data name="Channels_RightBoth" xml:space="preserve"><value>Right channel to both</value></data>
+  <data name="SignalPath_OneChannel" xml:space="preserve"><value>One channel</value></data>
+  <data name="Output_ReceiverLeft" xml:space="preserve"><value>{0} left the AirPlay group</value></data>
+  <data name="Volume_ReceiverSlider" xml:space="preserve"><value>Volume of {0}</value></data>
 </root>

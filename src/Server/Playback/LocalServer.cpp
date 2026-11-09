@@ -86,7 +86,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetPlayerMute)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetReceiverVolume)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -98,7 +98,8 @@ void validate(const Command& c) {
         (c.entryId != 0) != (c.kind == CommandKind::QueueSelect) ||
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
-        c.playerVolume.has_value() != (c.kind == CommandKind::SetPlayerVolume) || (c.playerVolume && *c.playerVolume > 100) ||
+        c.playerVolume.has_value() != (c.kind == CommandKind::SetPlayerVolume || c.kind == CommandKind::SetReceiverVolume) ||
+        (c.playerVolume && *c.playerVolume > 100) || c.receiver.empty() == (c.kind == CommandKind::SetReceiverVolume) ||
         c.playerMute.has_value() != (c.kind == CommandKind::SetPlayerMute) ||
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) || c.tracks.empty() == trackKeys ||
         c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
@@ -808,6 +809,14 @@ private:
                 else if (receiverVolumeWanted())
                     changeReceiverLevel([&](AirPlayLevel& level) { level.muted = *c.playerMute; });
                 break;
+            case CommandKind::SetReceiverVolume:
+                if (receiverVolumeWanted() && c.playerVolume &&
+                    std::ranges::find(settings_.airplayGroup, c.receiver) != settings_.airplayGroup.end()) {
+                    settings_.airplayLevels.try_emplace(c.receiver).first->second.level = std::min(*c.playerVolume, 100u);
+                    groupBaseline_.reset();
+                    persist();
+                }
+                break;
             case CommandKind::ResetPlayStatistics:
             case CommandKind::ResetAllPlayStatistics:
                 if (!library_) throw std::logic_error("Server library is not configured");
@@ -849,6 +858,7 @@ private:
                     settings_.adoptOutputSets = adoptOutputSets;
                     syncOutputs(settings_, state_.devices);
                     checkEnabledReceivers(outputs);
+                    followAirPlayGroup();
                     engine_->applySettings(settings_);
                     discord_->configure(settings_.discord);
                     shareLoudnessInputs();
@@ -1458,6 +1468,11 @@ private:
     void publish(bool completed) {
         shareLoudnessInputs();
         auto p = playback(engine_->snapshot());
+        if (settings_.backend == Backend::AirPlay) {
+            std::scoped_lock lock(groupMutex_);
+            p.receivers = airplayStates_;
+        }
+        p.receiverLeft = receiverLeft_;
         if (receiverVolumeWanted()) {
             const auto level = receiverLevel();
             p.playerVolume = level.level;
@@ -1476,7 +1491,8 @@ private:
         }
         if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
             p.underruns == state_.playback.underruns && p.playerVolume == state_.playback.playerVolume &&
-            p.playerMuted == state_.playback.playerMuted && state_.devices.revision == published_.devices.revision)
+            p.playerMuted == state_.playback.playerMuted && p.receivers == state_.playback.receivers &&
+            p.receiverLeft == state_.playback.receiverLeft && state_.devices.revision == published_.devices.revision)
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
@@ -1563,48 +1579,130 @@ private:
         }
     }
 
-    std::unique_ptr<audio::IOutput> airplayOutput(const Settings& settings) {
-        std::optional<airplay::Receiver> receiver;
+    // The receivers of the group in use as the output asks for them, from any thread (AirPlayOutput.h).
+    std::unique_ptr<audio::IOutput> airplayOutput(const Settings&) {
         {
-            std::scoped_lock lock(finderMutex_);
-            if (airplayFinder_)
-                for (auto& found : airplayFinder_->receivers())
-                    if (found.id == settings.airplay.deviceId) receiver = std::move(found);
+            std::scoped_lock lock(groupMutex_);
+            if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); }))
+                throw airplayRefused_ ? audio::Error(audio::ErrorCode::FormatNotSupported, "the receiver refuses this connection")
+                                      : audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
         }
-        if (!receiver) throw audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
-        if (receiver->support != airplay::Support::Supported)
-            throw audio::Error(audio::ErrorCode::FormatNotSupported, "the receiver refuses this connection");
         AirPlayOutputOptions options;
         options.details = [this](const std::wstring& file) { return trackDetails(file); };
-        options.volumeDb = [this]() -> std::optional<double> {
-            const double db = receiverDb_.load(std::memory_order_acquire);
-            return std::isnan(db) ? std::nullopt : std::optional(db);
+        options.members = [this] {
+            std::scoped_lock lock(groupMutex_);
+            return airplayMembers_;
         };
-        return createAirPlayOutput(std::move(*receiver), std::move(options));
+        options.memberLeft = [this](const std::string& id, const audio::Error& why) {
+            std::scoped_lock lock(groupMutex_);
+            airplayLeft_.emplace_back(id, why);
+        };
+        return createAirPlayGroupOutput(std::move(options));
     }
 
     bool receiverVolumeWanted() const {
         return settings_.backend == Backend::AirPlay && settings_.volume.mode == VolumeMode::Player;
     }
 
-    AirPlayLevel receiverLevel() const {
-        const auto found = settings_.airplayLevels.find(settings_.airplay.deviceId);
+    AirPlayLevel levelOf(const std::string& id) const {
+        const auto found = settings_.airplayLevels.find(id);
         return found == settings_.airplayLevels.end() ? AirPlayLevel{} : found->second;
     }
 
+    std::vector<std::string> airplayGroup() const {
+        if (settings_.backend != Backend::AirPlay) return {};
+        return settings_.airplayGroup.empty() ? std::vector{settings_.airplay.deviceId} : settings_.airplayGroup;
+    }
+
+    // A group's level is its loudest receiver's, muted when every receiver is.
+    AirPlayLevel receiverLevel() const {
+        const auto group = airplayGroup();
+        if (group.size() < 2) return levelOf(settings_.airplay.deviceId);
+        AirPlayLevel loudest{0, true};
+        for (const auto& id : group) {
+            const auto level = levelOf(id);
+            loudest.level = std::max(loudest.level, level.level);
+            loudest.muted = loudest.muted && level.muted;
+        }
+        return loudest;
+    }
+
+    // The group's slider moves every receiver in proportion, and its mute mutes or unmutes them all. The proportions
+    // are taken from the levels before the slider started moving, so the many steps of one drag round only once.
     void changeReceiverLevel(const std::function<void(AirPlayLevel&)>& change) {
-        AirPlayLevel level = receiverLevel();
-        change(level);
-        settings_.airplayLevels[settings_.airplay.deviceId] = level;
+        const AirPlayLevel was = receiverLevel();
+        AirPlayLevel wanted = was;
+        change(wanted);
+        const auto now = std::chrono::steady_clock::now();
+        if (!groupBaseline_ || now - groupBaseline_->at > kGroupDragSettles) groupBaseline_ = GroupBaseline{was.level, {}, now};
+        groupBaseline_->at = now;
+        for (const auto& id : airplayGroup()) {
+            AirPlayLevel& level = settings_.airplayLevels.try_emplace(id).first->second;
+            const uint32_t base = groupBaseline_->levels.try_emplace(id, level.level).first->second;
+            if (wanted.level != was.level)
+                level.level = groupBaseline_->master
+                                  ? std::min(100u, uint32_t(std::lround(double(base) * wanted.level / groupBaseline_->master)))
+                                  : wanted.level;
+            if (wanted.muted != was.muted) level.muted = wanted.muted;
+        }
         persist();
     }
 
-    // What the output tells the receiver, from any thread.
-    void followReceiverVolume() {
-        const auto level = receiverLevel();
-        receiverDb_.store(receiverVolumeWanted() ? airplay::volumeDb(level.level, level.muted)
-                                                 : std::numeric_limits<double>::quiet_NaN(),
-                          std::memory_order_release);
+    std::string receiverName(const std::string& id, const std::vector<airplay::Receiver>& found) const {
+        const auto saved = std::ranges::find_if(
+            settings_.outputs, [&](const SavedOutput& o) { return o.backend == Backend::AirPlay && o.id == id; });
+        if (saved != settings_.outputs.end() && !saved->alias.empty()) return saved->alias;
+        const auto receiver = std::ranges::find(found, id, &airplay::Receiver::id);
+        if (receiver != found.end()) return receiver->name;
+        return saved != settings_.outputs.end() && !saved->name.empty() ? saved->name : id;
+    }
+
+    // What the output reads from any thread: the group's receivers as found, their channels and levels. A receiver
+    // that left while the others play on leaves the group, which says why.
+    void followAirPlayGroup() {
+        std::vector<std::pair<std::string, audio::Error>> left;
+        {
+            std::scoped_lock lock(groupMutex_);
+            left.swap(airplayLeft_);
+        }
+        std::vector<airplay::Receiver> found;
+        {
+            std::scoped_lock lock(finderMutex_);
+            if (airplayFinder_) found = airplayFinder_->receivers();
+        }
+        for (const auto& [id, why] : left) {
+            if (std::ranges::find(settings_.airplayGroup, id) == settings_.airplayGroup.end() ||
+                settings_.airplayGroup.size() < 2)
+                continue;
+            receiverLeft_ =
+                ReceiverLeft{receiverLeft_ ? receiverLeft_->serial + 1 : 1, receiverName(id, found), why.code(), why.what()};
+            setInAirPlayGroup(settings_, id, false, state_.devices);
+            engine_->applySettings(settings_);
+            persist();
+        }
+        std::vector<AirPlayMember> members;
+        std::vector<ReceiverState> states;
+        bool refused = false;
+        const bool player = receiverVolumeWanted();
+        for (const auto& id : airplayGroup()) {
+            AirPlayMember member{id};
+            const auto receiver = std::ranges::find(found, id, &airplay::Receiver::id);
+            if (receiver != found.end()) {
+                if (receiver->support == airplay::Support::Supported)
+                    member.receiver = *receiver;
+                else
+                    refused = true;
+            }
+            member.channels = airplayChannels(settings_, id);
+            const AirPlayLevel level = levelOf(id);
+            if (player) member.volumeDb = airplay::volumeDb(level.level, level.muted);
+            states.push_back({id, receiverName(id, found), level.level, level.muted, member.channels});
+            members.push_back(std::move(member));
+        }
+        std::scoped_lock lock(groupMutex_);
+        airplayMembers_ = std::move(members);
+        airplayStates_ = std::move(states);
+        airplayRefused_ = refused;
     }
 
     std::unique_ptr<audio::IOutput> networkOutput(const Settings& settings) {
@@ -1740,6 +1838,7 @@ private:
                 try {
                     updatePlaySession();
                     refreshLibraryAvailability();
+                    followAirPlayGroup();
                     execute(*pending);
                 } catch (const audio::Error& e) {
                     state_.commandError = Failure{e.code(), e.what()};
@@ -1759,7 +1858,7 @@ private:
                 updatePlaySession();
                 refreshDevicesAfterChange();
                 followPlayerVolume();
-                followReceiverVolume();
+                followAirPlayGroup();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -1880,7 +1979,19 @@ private:
     std::mutex finderMutex_;
     _Guarded_by_(finderMutex_) std::unique_ptr<PlayerFinder> finder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
-    std::atomic<double> receiverDb_{std::numeric_limits<double>::quiet_NaN()};
+    std::mutex groupMutex_; // the AirPlay group, as the output reads it
+    _Guarded_by_(groupMutex_) std::vector<AirPlayMember> airplayMembers_;
+    _Guarded_by_(groupMutex_) std::vector<ReceiverState> airplayStates_;
+    _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
+    _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, audio::Error>> airplayLeft_;
+    std::optional<ReceiverLeft> receiverLeft_;
+    struct GroupBaseline {
+        uint32_t master = 0;
+        std::map<std::string, uint32_t> levels;
+        std::chrono::steady_clock::time_point at;
+    };
+    static constexpr auto kGroupDragSettles = std::chrono::seconds(3);
+    std::optional<GroupBaseline> groupBaseline_;   // the levels a moving group slider scales from
     std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan
     std::unique_ptr<PlayerVolume> playerVolume_;
     std::optional<upnp::PlayerDescription> volumePlayer_;

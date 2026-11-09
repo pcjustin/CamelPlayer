@@ -62,7 +62,25 @@ struct Packet {
     uint64_t number = 0; // from the start of the stream
     uint16_t sequence = 0;
     uint32_t rtpTime = 0;
-    std::string alac;
+    std::string pcm;
+    std::array<std::string, 3> alac{}; // by AirPlayChannels, made when a receiver first needs it
+
+    const std::string& frame(AirPlayChannels channels) {
+        auto& made = alac[size_t(channels)];
+        if (made.empty()) made = alacFrame(reinterpret_cast<const uint8_t*>(oneChannel(pcm, channels).data()));
+        return made;
+    }
+
+    // One channel in both, as a receiver set to it plays.
+    static std::string oneChannel(std::string pcm, AirPlayChannels channels) {
+        if (channels == AirPlayChannels::Stereo) return pcm;
+        const size_t from = channels == AirPlayChannels::Left ? 0 : 2, to = 2 - from;
+        for (size_t at = 0; at + 4 <= pcm.size(); at += 4) {
+            pcm[at + to] = pcm[at + from];
+            pcm[at + to + 1] = pcm[at + from + 1];
+        }
+        return pcm;
+    }
 };
 
 struct TrackNotice {
@@ -80,6 +98,28 @@ struct Connected {
     Destination destination;
     uint32_t latency = kDefaultAudioLatency;
 };
+
+// A receiver of the group: one session for it, or one for each speaker of a stereo pair.
+struct Member {
+    std::string id, name;
+    AirPlayChannels channels = AirPlayChannels::Stereo;
+    std::vector<std::unique_ptr<RtspClient>> sessions;
+    std::vector<Destination> destinations;
+    uint32_t latency = kDefaultAudioLatency;
+    std::optional<double> volumeSent;
+};
+
+// A speaker as the stream sends to it.
+struct Target {
+    std::string member;
+    Destination destination;
+    AirPlayChannels channels = AirPlayChannels::Stereo;
+    bool firstSync = true, firstPacket = true; // since its RECORD or the last start
+};
+
+bool sameAddress(const sockaddr_in& a, const sockaddr_in& b) {
+    return a.sin_addr.s_addr == b.sin_addr.s_addr && a.sin_port == b.sin_port;
+}
 
 SOCKET boundUdp(uint16_t& port) {
     const SOCKET udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -112,8 +152,7 @@ void check(const RtspReply& reply, std::string_view step) {
 
 class AirPlayOutput final : public audio::IOutput {
 public:
-    AirPlayOutput(Receiver receiver, AirPlayOutputOptions options)
-        : receiver_(std::move(receiver)), options_(std::move(options)) {
+    explicit AirPlayOutput(AirPlayOutputOptions options) : options_(std::move(options)) {
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
         audio_ = boundUdp(audioPort_);
@@ -175,7 +214,7 @@ public:
         nextPacket_ = runPacket_;
         runStart_ = nextSync_ = Clock::now();
         runRtp_ = rtpNext_;
-        firstPacket_ = true;
+        for (auto& target : targets_) target.firstSync = target.firstPacket = true;
         running_ = true;
         moved_.notify_all();
     }
@@ -213,8 +252,8 @@ public:
 
     OutputStatus status() const override {
         OutputStatus status;
-        status.mode = "AirPlay · " + receiver_.name;
         std::scoped_lock lock(mutex_);
+        status.mode = "AirPlay · " + names_;
         status.heldFrames = rendered_ - std::min(rendered_, heard(Clock::now()));
         return status;
     }
@@ -222,28 +261,72 @@ public:
 private:
     // ---- the RTSP session ----
 
+    // Every receiver of the group that is found; the stream opens when one of them takes it, and the others are told
+    // as leaving. With none, the first one's reason is the output's.
     void startSession() {
         std::scoped_lock lock(rtspMutex_);
         closeAt_ = Clock::time_point::max();
-        if (!sessions_.empty()) return;
-        std::vector<Connected> connected;
-        connected.push_back(connectToSpeaker({receiver_.address, receiver_.port}));
-        for (const auto& speaker : receiver_.others) connected.push_back(connectToSpeaker(speaker));
-        {
-            std::scoped_lock streaming(mutex_);
-            destinations_.clear();
-            audioLatency_ = kDefaultAudioLatency;
-            for (const auto& speaker : connected) {
-                destinations_.push_back(speaker.destination);
-                audioLatency_ = std::max(audioLatency_, speaker.latency);
+        if (!members_.empty()) return;
+        std::vector<std::pair<std::string, Error>> refused;
+        for (const auto& wanted : options_.members()) {
+            if (!wanted.receiver) continue;
+            try {
+                members_.push_back(connectMember(wanted));
+            } catch (const Error& e) {
+                refused.emplace_back(wanted.id, e);
             }
         }
-        for (auto& speaker : connected) sessions_.push_back(std::move(speaker.client));
+        if (members_.empty()) throw refused.empty() ? Error(ErrorCode::DeviceNotFound, kNotConnected) : refused.front().second;
+        for (const auto& [id, why] : refused) tellLeft(id, why);
+        publishTargets();
         nextHeartbeat_ = Clock::now() + options_.heartbeat;
-        volumeSent_ = std::nullopt;
     }
 
-    Connected connectToSpeaker(const Speaker& speaker) {
+    Member connectMember(const AirPlayMember& wanted) {
+        const Receiver& receiver = *wanted.receiver;
+        Member member{wanted.id, receiver.name, receiver.others.empty() ? wanted.channels : AirPlayChannels::Stereo};
+        std::vector<Speaker> speakers{{receiver.address, receiver.port}};
+        speakers.insert(speakers.end(), receiver.others.begin(), receiver.others.end());
+        for (const auto& speaker : speakers) {
+            auto connected = connectToSpeaker(speaker, receiver.name);
+            member.sessions.push_back(std::move(connected.client));
+            member.destinations.push_back(connected.destination);
+            member.latency = std::max(member.latency, connected.latency);
+        }
+        return member;
+    }
+
+    // The stream's view of the members: where to send, in which channels, and the longest latency.
+    _Requires_lock_held_(rtspMutex_) void publishTargets() {
+        std::string names;
+        for (const auto& member : members_) names += (names.empty() ? "" : " + ") + member.name;
+        std::scoped_lock lock(mutex_);
+        std::vector<Target> targets;
+        uint32_t latency = kDefaultAudioLatency;
+        bool added = false;
+        for (const auto& member : members_) {
+            latency = std::max(latency, member.latency);
+            for (const auto& destination : member.destinations) {
+                const auto was = std::ranges::find_if(targets_, [&](const Target& t) {
+                    return t.member == member.id && sameAddress(t.destination.audio, destination.audio);
+                });
+                Target target = was == targets_.end() ? Target{member.id, destination} : *was;
+                target.channels = member.channels;
+                added |= was == targets_.end();
+                targets.push_back(std::move(target));
+            }
+        }
+        targets_ = std::move(targets);
+        audioLatency_ = latency;
+        names_ = std::move(names);
+        if (added) nextSync_ = Clock::now(); // a receiver added hears the clock before its first packet
+    }
+
+    void tellLeft(const std::string& id, const Error& why) const {
+        if (options_.memberLeft) options_.memberLeft(id, why);
+    }
+
+    Connected connectToSpeaker(const Speaker& speaker, const std::string& name) {
         try {
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
             check(client->request("OPTIONS", "*"), "OPTIONS");
@@ -267,7 +350,7 @@ private:
         } catch (const Error&) {
             throw;
         } catch (const std::exception& e) {
-            log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what());
+            log::info("AirPlay receiver %s: %s", name.c_str(), e.what());
             throw Error(ErrorCode::DeviceNotFound, kNotConnected);
         }
     }
@@ -294,42 +377,54 @@ private:
 
     void flush() {
         std::scoped_lock lock(rtspMutex_);
-        if (sessions_.empty() || !sentSinceFlush_.exchange(false)) return;
-        try {
-            for (const auto& client : sessions_)
-                client->request("FLUSH", client->url(), {}, {}, std::format("Range: npt=0-\r\n{}", rtpInfo()));
-        } catch (const std::exception& e) {
-            log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what()); // the service thread finds out why
+        if (members_.empty() || !sentSinceFlush_.exchange(false)) return;
+        for (const auto& member : members_) {
+            try {
+                for (const auto& client : member.sessions)
+                    client->request("FLUSH", client->url(), {}, {}, std::format("Range: npt=0-\r\n{}", rtpInfo()));
+            } catch (const std::exception& e) {
+                log::info("AirPlay receiver %s: %s", member.name.c_str(), e.what()); // the session thread finds out why
+            }
+        }
+    }
+
+    static void teardown(const Member& member) {
+        for (const auto& client : member.sessions) {
+            try {
+                client->request("TEARDOWN", client->url());
+            } catch (const std::exception& e) {
+                log::info("AirPlay receiver %s: %s", member.name.c_str(), e.what());
+            }
         }
     }
 
     _Requires_lock_held_(rtspMutex_) void endSession() {
-        for (const auto& client : sessions_) {
-            try {
-                client->request("TEARDOWN", client->url());
-            } catch (const std::exception& e) {
-                log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what());
-            }
+        for (const auto& member : members_) teardown(member);
+        members_.clear();
+        publishTargets();
+    }
+
+    // A receiver lost leaves the group; with the last one the stream ends with its reason.
+    _Requires_lock_held_(rtspMutex_) void lose(const std::string& id, ErrorCode code, const char* why) {
+        std::erase_if(members_, [&](const Member& m) { return m.id == id; });
+        publishTargets();
+        if (members_.empty()) {
+            if (opened_) raiseError(Error(code, why));
+        } else {
+            tellLeft(id, Error(code, why));
         }
-        sessions_.clear();
     }
 
-    _Requires_lock_held_(rtspMutex_) void lose(ErrorCode code, const char* why) {
-        sessions_.clear();
-        if (opened_) raiseError(Error(code, why));
-    }
-
-    _Requires_lock_held_(rtspMutex_) void tellVolume() {
-        const auto wanted = options_.volumeDb ? options_.volumeDb() : std::nullopt;
-        if (!wanted || wanted == volumeSent_) return;
-        for (const auto& client : sessions_)
+    static void tellVolume(Member& member, const std::optional<double>& wanted) {
+        if (!wanted || wanted == member.volumeSent) return;
+        for (const auto& client : member.sessions)
             client->request("SET_PARAMETER", client->url(), "text/parameters", std::format("volume: {:.6f}\r\n", *wanted));
-        volumeSent_ = wanted;
+        member.volumeSent = wanted;
     }
 
-    _Requires_lock_held_(rtspMutex_) void tellTrack(const TrackNotice& notice, const TrackDetails& details) {
+    static void tellTrack(const Member& member, const TrackNotice& notice, const TrackDetails& details) {
         const auto at = std::format("RTP-Info: rtptime={}\r\n", notice.rtpTime);
-        for (const auto& client : sessions_) {
+        for (const auto& client : member.sessions) {
             const std::string url = client->url();
             client->request("SET_PARAMETER", url, "application/x-dmap-tagged",
                             dmapTags(details.title, details.artist, details.album), at);
@@ -343,28 +438,64 @@ private:
         }
     }
 
+    // The receivers the Server wants: those left go, those added join the stream, channels follow.
+    _Requires_lock_held_(rtspMutex_) void followMembers(const std::vector<AirPlayMember>& wanted) {
+        bool changed = false;
+        for (auto it = members_.begin(); it != members_.end();) {
+            if (std::ranges::none_of(wanted, [&](const AirPlayMember& w) { return w.id == it->id; })) {
+                teardown(*it);
+                it = members_.erase(it);
+                changed = true;
+            } else {
+                ++it;
+            }
+        }
+        for (const auto& w : wanted) {
+            const auto member = std::ranges::find_if(members_, [&](const Member& m) { return m.id == w.id; });
+            if (member != members_.end()) {
+                const auto channels = member->destinations.size() > 1 ? AirPlayChannels::Stereo : w.channels;
+                changed |= std::exchange(member->channels, channels) != channels;
+                continue;
+            }
+            if (!w.receiver || !opened_) continue;
+            try {
+                members_.push_back(connectMember(w));
+                changed = true;
+            } catch (const Error& e) {
+                tellLeft(w.id, e);
+            }
+        }
+        if (changed) publishTargets();
+    }
+
     // A connection the receiver closes means another sender took it; one that stops answering means it has gone.
     void tendSession(const std::optional<TrackNotice>& notice, const TrackDetails& details) {
         std::scoped_lock lock(rtspMutex_);
-        if (sessions_.empty()) return;
-        try {
-            for (const auto& client : sessions_)
-                if (client->closed()) throw RtspClosed();
-            tellVolume();
-            if (notice) tellTrack(*notice, details);
-            const auto now = Clock::now();
-            if (now >= closeAt_.load()) {
-                endSession();
-            } else if (now >= nextHeartbeat_) {
-                nextHeartbeat_ = now + options_.heartbeat;
-                for (const auto& client : sessions_) client->request("OPTIONS", "*");
+        if (members_.empty()) return;
+        const auto wanted = options_.members();
+        followMembers(wanted);
+        const auto now = Clock::now();
+        const bool heartbeat = now >= nextHeartbeat_;
+        if (heartbeat) nextHeartbeat_ = now + options_.heartbeat;
+        std::vector<std::pair<std::string, ErrorCode>> lost;
+        for (auto& member : members_) {
+            try {
+                for (const auto& client : member.sessions)
+                    if (client->closed()) throw RtspClosed();
+                const auto w = std::ranges::find_if(wanted, [&](const AirPlayMember& m) { return m.id == member.id; });
+                if (w != wanted.end()) tellVolume(member, w->volumeDb);
+                if (notice) tellTrack(member, *notice, details);
+                if (heartbeat)
+                    for (const auto& client : member.sessions) client->request("OPTIONS", "*");
+            } catch (const RtspClosed&) {
+                lost.emplace_back(member.id, ErrorCode::DeviceInUse);
+            } catch (const std::exception& e) {
+                log::info("AirPlay receiver %s: %s", member.name.c_str(), e.what());
+                lost.emplace_back(member.id, ErrorCode::DeviceLost);
             }
-        } catch (const RtspClosed&) {
-            lose(ErrorCode::DeviceInUse, kInUse);
-        } catch (const std::exception& e) {
-            log::info("AirPlay receiver %s: %s", receiver_.name.c_str(), e.what());
-            lose(ErrorCode::DeviceLost, kNotConnected);
         }
+        for (const auto& [id, code] : lost) lose(id, code, code == ErrorCode::DeviceInUse ? kInUse : kNotConnected);
+        if (!members_.empty() && now >= closeAt_.load()) endSession();
     }
 
     std::optional<TrackNotice> nextNotice() {
@@ -406,11 +537,17 @@ private:
         const auto request = parseResend(std::string_view(buffer.data(), size_t(got)));
         if (!request) return;
         std::scoped_lock lock(mutex_);
+        // The speaker asking, by its control port, else by its address alone.
+        auto asking = std::ranges::find_if(targets_, [&](const Target& t) { return sameAddress(t.destination.control, from); });
+        if (asking == targets_.end())
+            asking = std::ranges::find_if(
+                targets_, [&](const Target& t) { return t.destination.control.sin_addr.s_addr == from.sin_addr.s_addr; });
+        const AirPlayChannels channels = asking == targets_.end() ? AirPlayChannels::Stereo : asking->channels;
         for (uint16_t i = 0; i < request->count; ++i) {
             const auto sequence = uint16_t(request->first + i);
             const auto found = std::ranges::find_if(history_, [&](const Packet& p) { return p.sequence == sequence; });
             if (found == history_.end()) continue;
-            const auto packet = resendPacket(sequence, rtpPacket(sequence, found->rtpTime, ssrc_, false, found->alac));
+            const auto packet = resendPacket(sequence, rtpPacket(sequence, found->rtpTime, ssrc_, false, found->frame(channels)));
             sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&from), sizeof(from));
         }
     }
@@ -459,10 +596,12 @@ private:
 
     _Requires_lock_held_(mutex_) void sendSync(Clock::time_point now) {
         const uint32_t head = runRtp_ + uint32_t(framesDue(now));
-        const auto packet = syncPacket(firstPacket_, head - kSyncLatency, ntpNow(), head);
-        for (const auto& destination : destinations_)
-            sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&destination.control),
-                   sizeof(destination.control));
+        const uint64_t ntp = ntpNow();
+        for (auto& target : targets_) {
+            const auto packet = syncPacket(std::exchange(target.firstSync, false), head - kSyncLatency, ntp, head);
+            sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&target.destination.control),
+                   sizeof(target.destination.control));
+        }
         nextSync_ = now + kSyncEvery;
     }
 
@@ -495,7 +634,7 @@ private:
         ended_ = ended;
         if (pendingFrames_ < kFramesPerPacket && (!ended || !pendingFrames_)) return false;
         std::fill(pcm_.begin() + std::ptrdiff_t(pendingFrames_ * kBytesPerFrame), pcm_.end(), uint8_t(0));
-        history_.push_back({endPacket_++, 0, 0, alacFrame(pcm_.data())});
+        history_.push_back({endPacket_++, 0, 0, std::string(pcm_.begin(), pcm_.end())});
         if (history_.size() > kHistoryPackets) history_.pop_front();
         pendingFrames_ = 0;
         return true;
@@ -516,9 +655,9 @@ private:
         packet.sequence = sequence_++;
         packet.rtpTime = rtpNext_;
         rtpNext_ += kFramesPerPacket;
-        const auto rtp = rtpPacket(packet.sequence, packet.rtpTime, ssrc_, firstPacket_, packet.alac);
-        for (const auto& destination : destinations_) sendTo(destination.audio, rtp);
-        firstPacket_ = false;
+        for (auto& target : targets_)
+            sendTo(target.destination.audio, rtpPacket(packet.sequence, packet.rtpTime, ssrc_,
+                                                       std::exchange(target.firstPacket, false), packet.frame(target.channels)));
         sentSinceFlush_ = true;
         ++nextPacket_;
         return true;
@@ -543,7 +682,6 @@ private:
         moved_.notify_all();
     }
 
-    Receiver receiver_;
     AirPlayOutputOptions options_;
     SOCKET audio_ = INVALID_SOCKET;
     SOCKET control_ = INVALID_SOCKET;
@@ -554,22 +692,21 @@ private:
     std::thread service_, session_, sender_;
     std::atomic<bool> stopping_ = false, opened_ = false, sentSinceFlush_ = false;
 
-    std::mutex rtspMutex_;                                                       // taken before `mutex_`
-    _Guarded_by_(rtspMutex_) std::vector<std::unique_ptr<RtspClient>> sessions_; // one for each speaker
-    _Guarded_by_(rtspMutex_) std::optional<double> volumeSent_;
+    std::mutex rtspMutex_; // taken before `mutex_`
+    _Guarded_by_(rtspMutex_) std::vector<Member> members_;
     _Guarded_by_(rtspMutex_) Clock::time_point nextHeartbeat_;
     std::atomic<Clock::time_point> closeAt_ = Clock::time_point::max();
 
     mutable std::mutex mutex_;
     std::condition_variable moved_;
     _Guarded_by_(mutex_) IRenderSource* source_ = nullptr;
-    _Guarded_by_(mutex_) std::vector<Destination> destinations_;
+    _Guarded_by_(mutex_) std::vector<Target> targets_;
+    _Guarded_by_(mutex_) std::string names_; // the members', for the status
     _Guarded_by_(mutex_) uint32_t audioLatency_ = kDefaultAudioLatency;
     _Guarded_by_(mutex_) bool running_ = false;
     _Guarded_by_(mutex_) bool parked_ = false;
     _Guarded_by_(mutex_) bool closing_ = false;
     _Guarded_by_(mutex_) bool ended_ = false;
-    _Guarded_by_(mutex_) bool firstPacket_ = true;
     _Guarded_by_(mutex_) uint16_t sequence_ = 0;
     _Guarded_by_(mutex_) uint32_t rtpNext_ = 0;
     _Guarded_by_(mutex_) uint32_t ssrc_ = 0;
@@ -592,7 +729,14 @@ private:
 } // namespace
 
 std::unique_ptr<audio::IOutput> createAirPlayOutput(airplay::Receiver receiver, AirPlayOutputOptions options) {
-    return std::make_unique<AirPlayOutput>(std::move(receiver), std::move(options));
+    options.members = [receiver = std::move(receiver), volumeDb = options.volumeDb] {
+        return std::vector<AirPlayMember>{{receiver.id, receiver, AirPlayChannels::Stereo, volumeDb ? volumeDb() : std::nullopt}};
+    };
+    return std::make_unique<AirPlayOutput>(std::move(options));
+}
+
+std::unique_ptr<audio::IOutput> createAirPlayGroupOutput(AirPlayOutputOptions options) {
+    return std::make_unique<AirPlayOutput>(std::move(options));
 }
 
 } // namespace camel::server

@@ -33,7 +33,7 @@ The screenshots show a demo library with made-up albums and covers.
 - **Gapless playback** between tracks of the same format, and **crossfade** (1–10 s, off by default) at every other change of track, natural or chosen; an album played in order stays gapless.
 - **An output menu** in the player bar switches between the outputs you enable in Settings › Audio outputs, each with a name of your choice, and playback goes on from the audible position with the queue unchanged.
 - **Network players:** UPnP AV and OpenHome players on your network, played at the source's format with raw DSD as DSF where they declare it, gapless through the player's next-track function or OpenHome playlist, and with their own remote, app and volume still working. Windows Firewall needs one rule for them, for this program on private networks only, which CamelPlayer offers to add.
-- **AirPlay:** Apple's own receivers, including HomePods and a HomePod stereo pair, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule.
+- **AirPlay:** Apple's own receivers, including HomePods and a HomePod stereo pair, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule. Several receivers play together in step, each with its own volume under the group's slider, and a single speaker can play the left or the right channel alone, so that two make a stereo pair.
 - **Output settings for each device:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
 
 ### Library

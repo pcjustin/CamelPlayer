@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 #include "Common/util/Text.h"
@@ -705,4 +707,388 @@ TEST(AirPlaySettingsTest, LevelsSurviveInTheSettingsFile) {
     ASSERT_TRUE(read.airplayLevels.contains("800A805D016B"));
     EXPECT_EQ(read.airplayLevels.at("800A805D016B"), (AirPlayLevel{12, true}));
     EXPECT_TRUE(fromJson(toJson(Settings{})).airplayLevels.empty());
+}
+
+namespace {
+
+// Receivers grouped in one stream, as the Server asks for them.
+class AirPlayGroupOutputTest : public ::testing::Test {
+protected:
+    static AirPlayMember member(const FakeRtsp& rtsp, const std::string& id, AirPlayChannels channels = AirPlayChannels::Stereo,
+                                std::optional<double> db = {}) {
+        return {id, airplay::Receiver{id, id, "127.0.0.1", rtsp.port(), "105.1", airplay::Support::Supported, {}}, channels, db};
+    }
+
+    void want(std::vector<AirPlayMember> members) {
+        std::scoped_lock lock(mutex_);
+        members_ = std::move(members);
+    }
+
+    std::vector<std::pair<std::string, audio::ErrorCode>> left() {
+        std::scoped_lock lock(mutex_);
+        return left_;
+    }
+
+    std::unique_ptr<audio::IOutput> output() {
+        AirPlayOutputOptions options;
+        options.details = sampleDetails;
+        options.members = [this] {
+            std::scoped_lock lock(mutex_);
+            return members_;
+        };
+        options.memberLeft = [this](const std::string& id, const audio::Error& e) {
+            std::scoped_lock lock(mutex_);
+            left_.emplace_back(id, e.code());
+        };
+        options.requestTimeoutMs = 500;
+        options.heartbeat = 50ms;
+        options.closeSessionAfter = 300ms;
+        auto created = createAirPlayGroupOutput(options);
+        created->setErrorHandler([this](const audio::Error& e) { error_ = int(e.code()) + 1; });
+        return created;
+    }
+
+    static bool sameStream(const FakeRtsp& one, const FakeRtsp& other) {
+        const auto a = one.packets();
+        const auto b = other.packets();
+        size_t matched = 0;
+        for (const auto& packet : b) {
+            const auto same = std::ranges::find(a, packet.sequence, &testutil::FakeRtp::sequence);
+            if (same == a.end()) continue;
+            if (same->rtpTime != packet.rtpTime || same->alac != packet.alac) return false;
+            ++matched;
+        }
+        return matched >= 10;
+    }
+
+    static bool told(const FakeRtsp& rtsp, const std::string& text) {
+        return waitFor([&] {
+            return std::ranges::any_of(rtsp.requestsOf("SET_PARAMETER"),
+                                       [&](const std::string& r) { return r.find(text) != std::string::npos; });
+        });
+    }
+
+    FakeRtsp a_, b_;
+    std::mutex mutex_;
+    std::vector<AirPlayMember> members_;
+    std::vector<std::pair<std::string, audio::ErrorCode>> left_;
+    std::atomic<int> error_ = 0;
+};
+
+bool oneChannel(const testutil::FakeRtp& p) {
+    const std::string pcm = pcmOfAlac(p.alac);
+    for (size_t at = 0; at + 4 <= pcm.size(); at += 4)
+        if (pcm[at] != pcm[at + 2] || pcm[at + 1] != pcm[at + 3]) return false;
+    return !pcm.empty();
+}
+
+} // namespace
+
+TEST_F(AirPlayGroupOutputTest, AReceiverAddedWhilePlayingJoinsTheSameStream) {
+    want({member(a_, "A")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 40; }));
+    EXPECT_EQ(b_.count("RECORD"), 0);
+    want({member(a_, "A"), member(b_, "B")});
+    ASSERT_TRUE(waitFor([&] { return b_.packetCount() >= 40; }));
+    EXPECT_EQ(a_.count("SETUP"), 1);
+    EXPECT_EQ(a_.count("FLUSH"), 0);
+    const auto joined = b_.packets();
+    EXPECT_TRUE(joined.front().marker);
+    // Packets sent while it was joining come after the sequence its RECORD named; it asks for those again.
+    const std::string record = b_.requestsOf("RECORD").front();
+    const size_t seq = record.find("RTP-Info: seq=");
+    ASSERT_NE(seq, std::string::npos);
+    const auto named = uint16_t(std::stoul(record.substr(seq + 14)));
+    EXPECT_LT(uint16_t(joined.front().sequence - named), 50);
+    EXPECT_TRUE(sameStream(a_, b_));
+    ASSERT_FALSE(b_.controlPackets().empty());
+    EXPECT_EQ(uint8_t(b_.controlPackets().front()[0]), 0x90);
+    EXPECT_EQ(error_, 0);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, EveryReceiverIsSentTheSameClock) {
+    want({member(a_, "A"), member(b_, "B")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.controlPackets().size() >= 3 && b_.controlPackets().size() >= 3; }));
+    out->close();
+    const auto a = a_.controlPackets();
+    const auto b = b_.controlPackets();
+    for (size_t i = 0; i < 3; ++i) {
+        ASSERT_EQ(a[i].size(), 20U);
+        EXPECT_EQ(a[i].substr(4), b[i].substr(4)) << i; // the same frame at the same NTP time
+    }
+    EXPECT_TRUE(sameStream(a_, b_));
+}
+
+TEST_F(AirPlayGroupOutputTest, AReceiverTakenOutIsLetGoAndTheOthersPlayOn) {
+    want({member(a_, "A"), member(b_, "B")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return b_.packetCount() >= 20; }));
+    want({member(a_, "A")});
+    ASSERT_TRUE(waitFor([&] { return b_.count("TEARDOWN") == 1; }));
+    const size_t sent = a_.packetCount();
+    EXPECT_TRUE(waitFor([&] { return a_.packetCount() > sent + 20; }));
+    EXPECT_EQ(a_.count("TEARDOWN"), 0);
+    EXPECT_EQ(error_, 0);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, LeftAndRightEachFillBothChannels) {
+    want({member(a_, "A", AirPlayChannels::Left), member(b_, "B", AirPlayChannels::Right)});
+    CountingSource source(kSecond * 4);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 20 && b_.packetCount() >= 20; }));
+    out->close();
+    const auto left = a_.packets(), right = b_.packets();
+    for (size_t i = 0; i < 20; ++i) {
+        const std::string l = pcmOfAlac(left[i].alac), r = pcmOfAlac(right[i].alac);
+        ASSERT_EQ(l.size(), 1408U);
+        ASSERT_EQ(r.size(), 1408U);
+        for (size_t frame = 0; frame < 352; ++frame) {
+            const uint64_t at = i * 1408 + frame * 4;
+            for (size_t b = 0; b < 2; ++b) {
+                ASSERT_EQ(uint8_t(l[frame * 4 + b]), CountingSource::byteAt(at + b)) << i << " " << frame;
+                ASSERT_EQ(uint8_t(l[frame * 4 + 2 + b]), CountingSource::byteAt(at + b)) << i << " " << frame;
+                ASSERT_EQ(uint8_t(r[frame * 4 + b]), CountingSource::byteAt(at + 2 + b)) << i << " " << frame;
+                ASSERT_EQ(uint8_t(r[frame * 4 + 2 + b]), CountingSource::byteAt(at + 2 + b)) << i << " " << frame;
+            }
+        }
+    }
+}
+
+TEST_F(AirPlayGroupOutputTest, AChannelChangeWhilePlayingReachesThatReceiverAlone) {
+    want({member(a_, "A"), member(b_, "B")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return b_.packetCount() >= 10; }));
+    want({member(a_, "A"), member(b_, "B", AirPlayChannels::Left)});
+    ASSERT_TRUE(waitFor([&] { return oneChannel(b_.packets().back()); }));
+    EXPECT_FALSE(oneChannel(a_.packets().back()));
+    EXPECT_EQ(b_.count("FLUSH"), 0);
+    EXPECT_EQ(b_.count("SETUP"), 1);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, APairPlaysBothChannelsWhateverItIsSet) {
+    FakeRtsp second;
+    AirPlayMember pair = member(a_, "PAIR", AirPlayChannels::Left);
+    pair.receiver->others = {{"127.0.0.1", second.port()}};
+    want({pair});
+    CountingSource source(kSecond * 4);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 10 && second.packetCount() >= 10; }));
+    out->close();
+    const std::string pcm = pcmOfAlac(a_.packets().front().alac);
+    ASSERT_EQ(pcm.size(), 1408U);
+    for (size_t b = 0; b < pcm.size(); ++b) ASSERT_EQ(uint8_t(pcm[b]), CountingSource::byteAt(b)) << b;
+}
+
+TEST_F(AirPlayGroupOutputTest, EachReceiverIsToldItsOwnLevel) {
+    want({member(a_, "A", AirPlayChannels::Stereo, -10.0), member(b_, "B", AirPlayChannels::Stereo, -20.1)});
+    CountingSource source(kSecond * 4);
+    auto out = output();
+    out->open(kCd, &source);
+    EXPECT_TRUE(told(a_, "volume: -10.000000"));
+    EXPECT_TRUE(told(b_, "volume: -20.100000"));
+    for (const auto& request : a_.requestsOf("SET_PARAMETER")) EXPECT_EQ(request.find("-20.1"), std::string::npos);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, AReceiverTakenByAnotherSourceLeavesAndTheOthersPlayOn) {
+    want({member(a_, "A"), member(b_, "B")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return b_.packetCount() >= 10; }));
+    b_.takeOver();
+    ASSERT_TRUE(waitFor([&] { return !left().empty(); }));
+    EXPECT_EQ(left().front(), std::make_pair(std::string("B"), audio::ErrorCode::DeviceInUse));
+    const size_t sent = a_.packetCount();
+    EXPECT_TRUE(waitFor([&] { return a_.packetCount() > sent + 20; }));
+    EXPECT_EQ(error_, 0);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, AReceiverThatCannotJoinIsToldAsLeaving) {
+    b_.answer("SETUP", 453);
+    want({member(a_, "A")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 10; }));
+    want({member(a_, "A"), member(b_, "B")});
+    ASSERT_TRUE(waitFor([&] { return !left().empty(); }));
+    EXPECT_EQ(left().front(), std::make_pair(std::string("B"), audio::ErrorCode::DeviceInUse));
+    EXPECT_EQ(error_, 0);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, OnlyTheLastReceiverLostEndsTheStream) {
+    want({member(a_, "A"), member(b_, "B")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return b_.packetCount() >= 10; }));
+    b_.takeOver();
+    ASSERT_TRUE(waitFor([&] { return !left().empty(); }));
+    EXPECT_EQ(error_, 0);
+    want({member(a_, "A")});
+    a_.takeOver();
+    EXPECT_TRUE(waitFor([&] { return error_ == int(audio::ErrorCode::DeviceInUse) + 1; }));
+    out->close();
+}
+
+namespace {
+
+// Two receivers found on the network, grouped through the Server.
+class AirPlayGroupStreamingTest : public AirPlayStreamingTest {
+protected:
+    std::unique_ptr<LocalServer> groupServer(Settings settings = {}) {
+        FakeReceiverRecord record;
+        record.deviceId = "FAE2708FA125";
+        record.name = "Bedroom (2)";
+        record.host = "bedroom2";
+        record.port = second_.port();
+        mdns_.add(record);
+        auto server = serverFor(std::move(settings));
+        EXPECT_TRUE(waitFor([&] {
+            Command again;
+            again.kind = CommandKind::RefreshDevices;
+            server->submit(std::move(again));
+            server->waitIdle();
+            return server->snapshot().devices.airplay.size() == 2;
+        }));
+        return server;
+    }
+
+    static void change(LocalServer& server, const std::function<void(Settings&, const DeviceCatalog&)>& edit) {
+        auto s = nativeSettings(server.snapshot().settings);
+        edit(s, server.snapshot().devices);
+        Command apply;
+        apply.kind = CommandKind::ApplySettings;
+        apply.settings = settingsDto(s);
+        server.submit(std::move(apply));
+        server.waitIdle();
+    }
+
+    static Command volume(uint32_t level, std::string receiver = {}) {
+        Command c;
+        c.kind = receiver.empty() ? CommandKind::SetPlayerVolume : CommandKind::SetReceiverVolume;
+        c.playerVolume = level;
+        c.receiver = std::move(receiver);
+        return c;
+    }
+
+    static bool told(const FakeRtsp& rtsp, const std::string& text) {
+        return waitFor([&] {
+            return std::ranges::any_of(rtsp.requestsOf("SET_PARAMETER"),
+                                       [&](const std::string& r) { return r.find(text) != std::string::npos; });
+        });
+    }
+
+    FakeRtsp second_;
+};
+
+} // namespace
+
+TEST_F(AirPlayGroupStreamingTest, BothReceiversPlayTheGroupAndItIsRemembered) {
+    const auto file = testutil::generatedFile({"airplay-group", 44100, 16, 2, 4.0});
+    auto server = groupServer();
+    change(*server, [](Settings& s, const DeviceCatalog& d) { setInAirPlayGroup(s, "FAE2708FA125", true, d); });
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.packetCount() > 40 && second_.packetCount() > 40; }))
+        << server->snapshot().playback.errorDetail;
+    const auto playback = server->snapshot().playback;
+    ASSERT_EQ(playback.receivers.size(), 2U);
+    EXPECT_EQ(playback.receivers[0].id, "800A805D016B");
+    EXPECT_EQ(playback.receivers[1].name, "Bedroom (2)");
+    EXPECT_TRUE(waitFor([&] { return server->snapshot().playback.outputMode.find("DMP-A6 + Bedroom (2)") != std::string::npos; }))
+        << server->snapshot().playback.outputMode;
+    EXPECT_EQ(nativeSettings(server->snapshot().settings).airplayGroup,
+              (std::vector<std::string>{"800A805D016B", "FAE2708FA125"}));
+    server->shutdown();
+}
+
+TEST_F(AirPlayGroupStreamingTest, TheGroupSliderMovesEveryReceiverInProportion) {
+    const auto file = testutil::generatedFile({"airplay-group-volume", 44100, 16, 2, 4.0});
+    auto server = groupServer();
+    change(*server, [](Settings& s, const DeviceCatalog& d) { setInAirPlayGroup(s, "FAE2708FA125", true, d); });
+    server->submit(volume(40, "800A805D016B"));
+    server->submit(volume(20, "FAE2708FA125"));
+    EXPECT_TRUE(waitFor([&] { return server->snapshot().playback.playerVolume == 40U; }));
+    server->submit(volume(80));
+    ASSERT_TRUE(waitFor([&] {
+        const auto r = server->snapshot().playback.receivers;
+        return r.size() == 2 && r[0].level == 80 && r[1].level == 40;
+    }));
+    EXPECT_EQ(server->snapshot().playback.playerVolume, 80U);
+    server->submit(queue({file}));
+    EXPECT_TRUE(told(rtsp_, std::format("volume: {:.6f}", airplay::volumeDb(80, false))));
+    EXPECT_TRUE(told(second_, std::format("volume: {:.6f}", airplay::volumeDb(40, false))));
+    server->shutdown();
+}
+
+TEST_F(AirPlayGroupStreamingTest, ADragInManyStepsKeepsTheProportions) {
+    auto server = groupServer();
+    change(*server, [](Settings& s, const DeviceCatalog& d) { setInAirPlayGroup(s, "FAE2708FA125", true, d); });
+    server->submit(volume(10, "800A805D016B"));
+    server->submit(volume(5, "FAE2708FA125"));
+    for (uint32_t level = 11; level <= 20; ++level) server->submit(volume(level));
+    ASSERT_TRUE(waitFor([&] {
+        const auto r = server->snapshot().playback.receivers;
+        return r.size() == 2 && r[0].level == 20;
+    }));
+    EXPECT_EQ(server->snapshot().playback.receivers[1].level, 10U);
+    server->shutdown();
+}
+
+TEST_F(AirPlayGroupStreamingTest, AReceiverTakenLeavesTheGroupSayingWhyAndTheOtherPlaysOn) {
+    const auto file = testutil::generatedFile({"airplay-group-leave", 44100, 16, 2, 6.0});
+    auto server = groupServer();
+    change(*server, [](Settings& s, const DeviceCatalog& d) { setInAirPlayGroup(s, "FAE2708FA125", true, d); });
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return second_.packetCount() > 20; })) << server->snapshot().playback.errorDetail;
+    second_.takeOver();
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.receiverLeft.has_value(); }));
+    const auto left = *server->snapshot().playback.receiverLeft;
+    EXPECT_EQ(left.name, "Bedroom (2)");
+    EXPECT_EQ(left.code, audio::ErrorCode::DeviceInUse);
+    EXPECT_TRUE(waitFor([&] { return server->snapshot().playback.receivers.size() == 1; }));
+    EXPECT_EQ(nativeSettings(server->snapshot().settings).airplayGroup, (std::vector<std::string>{"800A805D016B"}));
+    const size_t sent = rtsp_.packetCount();
+    EXPECT_TRUE(waitFor([&] { return rtsp_.packetCount() > sent + 20; }));
+    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
+    server->shutdown();
+}
+
+TEST_F(AirPlayGroupStreamingTest, ChoosingAReceiverOfTheLastGroupPlaysToThemAll) {
+    const auto file = testutil::generatedFile({"airplay-group-restore", 44100, 16, 2, 4.0});
+    Settings settings;
+    settings.airplayGroup = {"FAE2708FA125", "800A805D016B"};
+    auto server = groupServer(settings);
+    EXPECT_EQ(nativeSettings(server->snapshot().settings).airplayGroup.size(), 2U);
+    server->submit(queue({file}));
+    EXPECT_TRUE(waitFor([&] { return rtsp_.packetCount() > 20 && second_.packetCount() > 20; }))
+        << server->snapshot().playback.errorDetail;
+    server->shutdown();
 }

@@ -77,6 +77,7 @@ struct SettingsDto {
     ReplayGainSettings replayGain;
     CrossfadeSettings crossfade;
     std::vector<SavedOutput> outputs;
+    std::vector<std::string> airplayGroup;
     std::string followedDefault;
     std::string lastFileUtf8;
     bool operator==(const SettingsDto&) const = default;
@@ -121,8 +122,9 @@ enum class CommandKind : uint8_t {
     SetFavorite,       // tracks + favorite
     SetAlbumFavorite,  // albums + favorite: marks or clears every track of the albums
     SetArtistFavorite, // artists + favorite: artists and composers by name
-    SetPlayerVolume,   // playerVolume: the network player's own level, 0-100
-    SetPlayerMute      // playerMute: the network player's own mute
+    SetPlayerVolume,   // playerVolume: the network player's own level, 0-100; an AirPlay group's loudest receiver
+    SetPlayerMute,     // playerMute: the network player's own mute; every receiver of an AirPlay group
+    SetReceiverVolume  // receiver + playerVolume: one receiver of the AirPlay group in use
 };
 
 struct Command {
@@ -145,10 +147,29 @@ struct Command {
     std::vector<LibraryGroupFilter> artists;
     std::optional<uint32_t> playerVolume;
     std::optional<bool> playerMute;
+    std::string receiver; // an AirPlay receiver's device ID
     bool operator==(const Command&) const = default;
 };
 
 enum class PlaybackState : uint8_t { Stopped, Playing, Paused };
+
+// A receiver of the AirPlay group in use.
+struct ReceiverState {
+    std::string id, name;
+    uint32_t level = 0; // 0-100
+    bool muted = false;
+    AirPlayChannels channels = AirPlayChannels::Stereo;
+    bool operator==(const ReceiverState&) const = default;
+};
+
+// The last receiver to leave the group while the others played on.
+struct ReceiverLeft {
+    uint64_t serial = 0; // counts every departure, so the same receiver leaving again is told again
+    std::string name;
+    audio::ErrorCode code = audio::ErrorCode::DeviceLost;
+    std::string detail;
+    bool operator==(const ReceiverLeft&) const = default;
+};
 
 struct Failure {
     audio::ErrorCode code = audio::ErrorCode::Other;
@@ -177,6 +198,8 @@ struct PlaybackSnapshot {
     std::optional<uint32_t> bufferingSeconds; // paused until a slow source is buffered: about this many seconds left
     std::optional<uint32_t> playerVolume;     // the network player's own level, 0-100; nothing without one to follow
     bool playerMuted = false;
+    std::vector<ReceiverState> receivers;     // the AirPlay group in use, the one in use first; empty otherwise
+    std::optional<ReceiverLeft> receiverLeft; // the last receiver that left the group
     std::optional<audio::ErrorCode> error;
     std::string errorDetail;
     uint64_t revision = 0;

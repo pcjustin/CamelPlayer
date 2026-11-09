@@ -333,6 +333,12 @@
                                         </StackPanel>
                                     </Expander>
                                 </StackPanel>
+
+                                <StackPanel x:Name="AirPlayGroup" Spacing="12">
+                                    <TextBlock Text="AirPlay" Style="{StaticResource GroupHeaderStyle}" />
+                                    <ComboBox x:Name="AirPlayChannelsCombo" x:Uid="Settings_AirPlayChannels" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <TextBlock x:Uid="Settings_AirPlayChannelsNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
                                 </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -766,7 +772,11 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <InfoBar x:Name="ErrorBar" Severity="Warning" IsOpen="False" IsClosable="True" />
+            <StackPanel>
+                <InfoBar x:Name="ErrorBar" Severity="Warning" IsOpen="False" IsClosable="True" />
+                <!-- An AirPlay receiver that left the group while the others play on. -->
+                <InfoBar x:Name="ReceiverBar" Severity="Warning" IsOpen="False" IsClosable="True" />
+            </StackPanel>
             <Grid Grid.Row="1" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -992,6 +1002,8 @@
                                                     HorizontalAlignment="Center">
                                                 <FontIcon x:Name="PlayerMuteIcon" Glyph="&#xE767;" FontSize="16" />
                                             </Button>
+                                            <!-- Each receiver of an AirPlay group, under the group's slider. -->
+                                            <StackPanel x:Name="ReceiverVolumes" Spacing="4" Visibility="Collapsed" />
                                         </StackPanel>
                                     </Grid>
                                 </Flyout>

@@ -40,6 +40,7 @@ SettingsDto settingsDto(const Settings& s) {
             s.replayGain,
             s.crossfade,
             s.outputs,
+            s.airplayGroup,
             s.followedDefault,
             toUtf8(s.lastFile)};
 }
@@ -77,6 +78,7 @@ Settings nativeSettings(const SettingsDto& s) {
             s.replayGain,
             s.crossfade,
             s.outputs,
+            s.airplayGroup,
             {},
             s.followedDefault,
             toWide(s.lastFileUtf8)};

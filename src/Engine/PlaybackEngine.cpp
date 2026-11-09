@@ -137,8 +137,8 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
         return sameOutput(a.ks, b.ks);
     case Backend::Network: // the rest is a choice of path, which reopens only when the path differs
         return a.network.udn == b.network.udn && a.network.gapless == b.network.gapless;
-    case Backend::AirPlay:
-        return a.airplay.deviceId == b.airplay.deviceId;
+    case Backend::AirPlay: // the receivers come and go in the one stream (AirPlayOutput.h)
+        return true;
     }
     return false;
 }

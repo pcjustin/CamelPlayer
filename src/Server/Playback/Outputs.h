@@ -23,6 +23,8 @@ struct OutputRow {
     bool selected = false;   // the output in use
     bool saved = false;      // has anything to delete
     std::string unsupported; // why an AirPlay receiver cannot be enabled; empty when it can
+    bool grouped = false;    // an AirPlay receiver of the group in use, the one in use among them
+    bool pair = false;       // an AirPlay stereo pair, which always plays both channels
     bool operator==(const OutputRow&) const = default;
 };
 
@@ -34,7 +36,13 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
 // and disables any other that cannot be used. Does nothing before the first device scan.
 void syncOutputs(Settings& s, const DeviceCatalog& devices);
 
+// Choosing a receiver of the AirPlay group last played brings the whole group back; any other starts a group of one.
 void selectOutput(Settings& s, Backend backend, const std::string& id, const DeviceCatalog& devices);
+// While AirPlay is in use: adds a receiver to the group, or takes one out, the last one staying. When the one in use
+// leaves, the next takes its place in Settings' AirPlay fields.
+void setInAirPlayGroup(Settings& s, const std::string& id, bool in, const DeviceCatalog& devices);
+// A group receiver's channels: the one in use from Settings' fields, the others from their saved outputs.
+AirPlayChannels airplayChannels(const Settings& s, const std::string& id);
 // `s` as it would be with this output in use, for showing its parameters without leaving the one in use.
 Settings withOutputParameters(Settings s, Backend backend, const std::string& id, const DeviceCatalog& devices);
 // Takes this output's parameters from `edited`, which came from withOutputParameters. An output not in use only keeps them.

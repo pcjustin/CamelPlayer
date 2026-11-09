@@ -648,3 +648,91 @@ TEST(OutputParametersTest, TheWindowsDefaultEntryKeepsThemUnderTheDeviceItFollow
     EXPECT_EQ(withOutputParameters(s, Backend::Wasapi, "", catalog()).wasapi.customPeriodMs, 27.0);
     EXPECT_EQ(s.backend, Backend::Asio);
 }
+
+namespace {
+
+DeviceCatalog withReceivers() {
+    DeviceCatalog devices = catalog();
+    devices.airplay = {{"HP-A", "Bedroom"}, {"HP-B", "Bedroom (2)"}, {"PAIR", "Living room", {}, {"P-1", "P-2"}}};
+    return devices;
+}
+
+std::vector<std::string> group(const Settings& s) {
+    return s.airplayGroup;
+}
+
+} // namespace
+
+TEST(AirPlayGroupTest, ChoosingAReceiverStartsAGroupOfOne) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+    const auto rows = outputRows(s, withReceivers());
+    EXPECT_TRUE(row(rows, Backend::AirPlay, "HP-A").grouped);
+    EXPECT_FALSE(row(rows, Backend::AirPlay, "HP-B").grouped);
+    EXPECT_TRUE(row(rows, Backend::AirPlay, "PAIR").pair);
+    EXPECT_FALSE(row(rows, Backend::AirPlay, "HP-A").pair);
+}
+
+TEST(AirPlayGroupTest, ReceiversAreAddedAndTakenOutTheLastOneStaying) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A", "HP-B"}));
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "HP-B")->enabled);
+    EXPECT_TRUE(row(outputRows(s, withReceivers()), Backend::AirPlay, "HP-B").grouped);
+    setInAirPlayGroup(s, "HP-B", false, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+    setInAirPlayGroup(s, "HP-A", false, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+    EXPECT_EQ(s.airplay.deviceId, "HP-A");
+}
+
+TEST(AirPlayGroupTest, TheReceiverInUseLeavingHandsOverToTheNext) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    s.airplay.channels = AirPlayChannels::Left;
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    setInAirPlayGroup(s, "HP-A", false, withReceivers());
+    EXPECT_EQ(s.backend, Backend::AirPlay);
+    EXPECT_EQ(s.airplay.deviceId, "HP-B");
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-B"}));
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-A")->airplay.channels, AirPlayChannels::Left);
+    EXPECT_EQ(airplayChannels(s, "HP-A"), AirPlayChannels::Left);
+    EXPECT_EQ(airplayChannels(s, "HP-B"), AirPlayChannels::Stereo);
+}
+
+TEST(AirPlayGroupTest, ChoosingAnyReceiverOfTheLastGroupBringsItBack) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    selectOutput(s, Backend::Asio, "a-dave", withReceivers());
+    EXPECT_FALSE(row(outputRows(s, withReceivers()), Backend::AirPlay, "HP-B").grouped);
+    selectOutput(s, Backend::AirPlay, "HP-B", withReceivers());
+    EXPECT_EQ(s.airplay.deviceId, "HP-B");
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A", "HP-B"}));
+    selectOutput(s, Backend::Asio, "a-dave", withReceivers());
+    selectOutput(s, Backend::AirPlay, "PAIR", withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"PAIR"}));
+}
+
+TEST(AirPlayGroupTest, AReceiverDeletedLeavesTheGroup) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    deleteOutput(s, Backend::AirPlay, "HP-B", withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+}
+
+TEST(AirPlayGroupTest, ChannelsAndTheGroupSurviveInTheSettingsFile) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    s.airplay.channels = AirPlayChannels::Right;
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    const Settings read = fromJson(toJson(s));
+    EXPECT_EQ(read.airplayGroup, (std::vector<std::string>{"HP-A", "HP-B"}));
+    EXPECT_EQ(read.airplay.channels, AirPlayChannels::Right);
+    EXPECT_EQ(saved(read, Backend::AirPlay, "HP-A")->airplay.channels, AirPlayChannels::Right);
+    EXPECT_TRUE(fromJson(toJson(Settings{})).airplayGroup.empty());
+    EXPECT_EQ(fromJson(toJson(Settings{})).airplay.channels, AirPlayChannels::Stereo);
+}
