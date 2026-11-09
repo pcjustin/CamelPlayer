@@ -605,12 +605,16 @@ void HomeView::OnRowSizeChanged(Windows::Foundation::IInspectable const& sender,
 }
 
 void HomeView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
-    const auto& row = get_self<BrowseItem>(e.ClickedItem().as<CamelPlayer::BrowseItem>())->row();
+    const auto clicked = e.ClickedItem().as<CamelPlayer::BrowseItem>();
+    if (!clicked) return; // a click landing as the list is replaced names no item
+    const auto& row = get_self<BrowseItem>(clicked)->row();
     if (row.id > 0 && handlers_.openAlbum) handlers_.openAlbum(row.id, row.title);
 }
 
 void HomeView::OnArtistClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
-    const auto& row = get_self<BrowseItem>(e.ClickedItem().as<CamelPlayer::BrowseItem>())->row();
+    const auto clicked = e.ClickedItem().as<CamelPlayer::BrowseItem>();
+    if (!clicked) return;
+    const auto& row = get_self<BrowseItem>(clicked)->row();
     if (!row.value.empty() && handlers_.openArtist) handlers_.openArtist(ui::utf8(row.value));
 }
 
@@ -634,7 +638,9 @@ void HomeView::OnArtistContextRequested(UIElement const& sender, Input::ContextR
 }
 
 void HomeView::OnTrackClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
-    const auto& row = get_self<BrowseItem>(e.ClickedItem().as<CamelPlayer::BrowseItem>())->row();
+    const auto clicked = e.ClickedItem().as<CamelPlayer::BrowseItem>();
+    if (!clicked) return;
+    const auto& row = get_self<BrowseItem>(clicked)->row();
     if (row.value.empty() || row.unavailable || !handlers_.submit) return;
     Command command;
     command.kind = CommandKind::QueueReplace;

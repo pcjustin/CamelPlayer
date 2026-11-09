@@ -409,7 +409,9 @@ winrt::fire_and_forget PlaylistView::OnImportClick(Windows::Foundation::IInspect
 }
 
 void PlaylistView::OnPlaylistClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
-    const auto& row = get_self<BrowseItem>(e.ClickedItem().as<CamelPlayer::BrowseItem>())->row();
+    const auto clicked = e.ClickedItem().as<CamelPlayer::BrowseItem>();
+    if (!clicked) return; // a click landing as the list is replaced names no item
+    const auto& row = get_self<BrowseItem>(clicked)->row();
     if (handlers_.open && row.id) handlers_.open(row.id);
 }
 

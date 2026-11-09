@@ -2088,7 +2088,9 @@ void LibraryView::OnTrackColumnClick(Windows::Foundation::IInspectable const& se
 
 void LibraryView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
     if (selecting()) return;
-    const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
+    const auto clicked = e.ClickedItem();
+    if (!clicked) return; // a click landing as the list is replaced names no item
+    const auto& row = ui::LibraryCollection::rowOf(clicked);
     if (!row.id) return; // still a placeholder
     View view;
     view.mode = Mode::AlbumDetail;
@@ -2099,7 +2101,9 @@ void LibraryView::OnAlbumClick(Windows::Foundation::IInspectable const&, ItemCli
 
 void LibraryView::OnRowClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
     if (selecting()) return;
-    const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
+    const auto clicked = e.ClickedItem();
+    if (!clicked) return;
+    const auto& row = ui::LibraryCollection::rowOf(clicked);
     if (current_.mode == Mode::Groups) {
         if (row.value.empty()) return;
         const auto field = row.composer ? LibraryGroupField::Composer : current_.field;
@@ -2131,7 +2135,9 @@ void LibraryView::OnSearchRowScroll(Windows::Foundation::IInspectable const& sen
 }
 
 void LibraryView::OnSearchArtistClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
-    const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
+    const auto clicked = e.ClickedItem();
+    if (!clicked) return;
+    const auto& row = ui::LibraryCollection::rowOf(clicked);
     if (row.value.empty()) return;
     openGroup(LibraryGroupField::Artist, row.value, row.title, {}, true);
 }
@@ -2165,7 +2171,9 @@ void LibraryView::OnTrailClicked(BreadcrumbBar const&, BreadcrumbBarItemClickedE
 
 void LibraryView::OnFolderItemClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& e) {
     if (selecting()) return;
-    const auto& row = ui::LibraryCollection::rowOf(e.ClickedItem());
+    const auto clicked = e.ClickedItem();
+    if (!clicked) return;
+    const auto& row = ui::LibraryCollection::rowOf(clicked);
     if (row.folder) {
         View view;
         view.mode = Mode::Folders;
