@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
+#include <memory>
 #include <mutex>
 #include <optional>
 
@@ -15,10 +16,11 @@ namespace testutil {
 class StartedSnapshot {
 public:
     explicit StartedSnapshot(camel::audio::PlaybackEngine& engine) : engine_(engine) {
-        engine_.setListener([this] {
-            auto s = engine_.snapshot();
-            std::lock_guard lock(mutex_);
-            if (s.plan && !snapshot_) snapshot_ = std::move(s);
+        // The engine calls a copy of its listener outside its lock, so a call can outlive setListener({}).
+        engine_.setListener([&engine, state = state_] {
+            auto s = engine.snapshot();
+            std::lock_guard lock(state->mutex);
+            if (s.plan && !state->snapshot) state->snapshot = std::move(s);
         });
     }
     ~StartedSnapshot() { engine_.setListener({}); }
@@ -26,18 +28,21 @@ public:
     StartedSnapshot& operator=(const StartedSnapshot&) = delete;
 
     std::optional<camel::audio::EngineSnapshot> get() const {
-        std::lock_guard lock(mutex_);
-        return snapshot_;
+        std::lock_guard lock(state_->mutex);
+        return state_->snapshot;
     }
     void reset() {
-        std::lock_guard lock(mutex_);
-        snapshot_.reset();
+        std::lock_guard lock(state_->mutex);
+        state_->snapshot.reset();
     }
 
 private:
+    struct State {
+        std::mutex mutex;
+        std::optional<camel::audio::EngineSnapshot> snapshot;
+    };
     camel::audio::PlaybackEngine& engine_;
-    mutable std::mutex mutex_;
-    std::optional<camel::audio::EngineSnapshot> snapshot_;
+    std::shared_ptr<State> state_ = std::make_shared<State>();
 };
 
 } // namespace testutil

@@ -1054,6 +1054,7 @@ TEST_F(LibraryScannerTest, AlbumsAppearWithEachBatchOfAFirstScan) {
         testaudio::writeWav(dir / "music" / "first" / (std::to_string(i) + ".wav"), signal, 44100, 16, 2);
     testaudio::writeWav(dir / "music" / "late" / "late.wav", signal, 44100, 16, 2);
     LibraryStore store(dir / "db");
+    store.setScanSpeed(camel::ScanSpeed::High); // 500 files on the one worker of Low outlast the wait under ASan
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(dir / "music");
     auto scan = std::async(std::launch::async, [&] { return scanner.scan(root); });
