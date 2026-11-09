@@ -5,6 +5,7 @@
 Changed since 0.3.0:
 
 - **A file read slower than it plays waits instead of breaking up:** a file on a network share that plays at 1 MB/s or more, such as DSD256 at 2.8 MB/s over Wi-Fi, is read for a moment before it plays. If it reads slower than it plays, playback waits, with a yellow "Buffering, about N s" bar above the player bar, until the rest will arrive in time, then plays without a break, buffering up to 1 GB in memory; should reading fall behind later, it pauses to buffer again rather than play in pieces. A network player or AirPlay receiver takes the audio over the same network, so for one of those the file is read at less than its full speed while it plays, the wait is longer, and the next track is read when the current one ends. Pause stops the wait.
+- **The output menu takes a mouse click every time:** a click on an output could leave it drawn pressed without choosing it, for the rest of the session, while the keyboard still chose; the menu is now built anew each time it opens and a click chooses on the press.
 
 ## 0.3.0
 

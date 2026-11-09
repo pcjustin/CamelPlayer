@@ -939,9 +939,30 @@ winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string 
     populateSettings();
 }
 
-void MainWindow::OnOutputMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
-    auto items = OutputMenu().Items();
-    items.Clear();
+// A new menu at every opening, and the mouse chooses on its press: WinUI at times leaves a menu where a click only
+// draws the item pressed, for the rest of the session, while the keyboard still chooses.
+void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    MenuFlyout menu;
+    menu.Placement(Primitives::FlyoutPlacementMode::Top);
+    const winrt::weak_ref<MenuFlyout> weakMenu = menu;
+    const auto chosen = std::make_shared<bool>(false);
+    const auto add = [&](MenuFlyoutItem const& item, std::function<void()> choose) {
+        const auto once = [weakMenu, chosen, choose = std::move(choose)] {
+            if (*chosen) return;
+            *chosen = true;
+            if (const auto shown = weakMenu.get()) shown.Hide();
+            choose();
+        };
+        item.Click([once](auto&&, auto&&) { once(); });
+        item.AddHandler(UIElement::PointerPressedEvent(),
+                        box_value(Input::PointerEventHandler([once](auto&&, Input::PointerRoutedEventArgs const& e) {
+                            if (e.Pointer().PointerDeviceType() == Microsoft::UI::Input::PointerDeviceType::Mouse &&
+                                e.GetCurrentPoint(nullptr).Properties().IsLeftButtonPressed())
+                                once();
+                        })),
+                        true);
+        menu.Items().Append(item);
+    };
     for (const auto& row : camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices)) {
         if (!row.enabled) continue;
         RadioMenuFlyoutItem item;
@@ -949,20 +970,19 @@ void MainWindow::OnOutputMenuOpening(Windows::Foundation::IInspectable const&, W
         item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
         item.IsChecked(row.selected);
         item.IsEnabled(row.connected);
-        item.Click([this, row](auto&&, auto&&) {
+        add(item, [this, row] {
             if (row.selected) return;
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::selectOutput(s, row.backend, row.id, devices);
             });
             populateSettings();
         });
-        items.Append(item);
     }
-    items.Append(MenuFlyoutSeparator());
+    menu.Items().Append(MenuFlyoutSeparator());
     MenuFlyoutItem open;
     open.Text(tr(L"Output_MenuSettings"));
-    open.Click([this](auto&&, auto&&) { showSettingsCard(OutputsCard()); });
-    items.Append(open);
+    add(open, [this] { showSettingsCard(OutputsCard()); });
+    menu.ShowAt(OutputButton());
 }
 
 std::array<std::pair<ComboBox, AudioFormat>, 3> MainWindow::decoderCombos() {

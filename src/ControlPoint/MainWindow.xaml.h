@@ -110,7 +110,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqExportClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
-    void OnOutputMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
+    void OnOutputButtonClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
