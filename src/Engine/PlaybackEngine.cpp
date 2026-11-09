@@ -38,6 +38,9 @@ constexpr double kStartFillSeconds = 0.5; // buffered before the output starts
 // Playing a slow source pauses to buffer again when less than this is buffered ahead.
 constexpr double kLowWaterSeconds = 1.5;
 constexpr auto kFillWindow = std::chrono::seconds(2); // how long the read rate is measured over while it plays
+// A network player or AirPlay receiver takes the audio over the network a slow source is read from, and stops when
+// reading leaves it too little: while it plays, the source is read at this share of the rate measured.
+constexpr double kStreamReadShare = 0.4;
 
 std::optional<SampleType> fixedSampleType(const Settings& s) {
     switch (s.backend) {
@@ -483,7 +486,7 @@ public:
     }
 
     bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb, uint32_t fadeMs) {
-        if (!active_ || rust_->transitions().nextQueued || !output_->gapless() || readsWhole()) return false;
+        if (!active_ || rust_->transitions().nextQueued || !output_->gapless() || streamsSlowSource()) return false;
         const auto next = prepareNext(file, requested);
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
         queued_.push_back(
@@ -698,8 +701,9 @@ private:
     // The decoder empties the slot when it moves on to a queued file, seconds before that file is heard; the Server
     // polls this and queues the one after it.
     void refreshNextSlot() {
-        // Reading a slow source's next file would share the network with the player the audio goes to (readsWhole()).
-        const bool free = !rust_->transitions().nextQueued && !readsWhole();
+        // Reading a slow source's next file would share the network with the file being buffered, or with the player the
+        // audio goes to (streamsSlowSource()).
+        const bool free = !rust_->transitions().nextQueued && !buffering_ && !streamsSlowSource();
         std::lock_guard lock(snapMutex_);
         snap_.nextSlotFree = free;
     }
@@ -881,9 +885,8 @@ private:
         publish();
     }
 
-    // A network player or AirPlay receiver takes the audio over the network the slow source is read from, and plays in
-    // pieces while both share it: such a source is read to its end before it plays, and its next file only once it ends.
-    bool readsWhole() const { return readRate_ && isNetworkPlayer(settings_.backend); }
+    // Its next file is read only once it ends, as reading it would take the network from the stream.
+    bool streamsSlowSource() const { return readRate_ && isNetworkPlayer(settings_.backend); }
 
     // The bytes per second `file` plays at, from its size and length; 0 when either is unknown.
     static double playedBytesPerSecond(const std::wstring& file, uint64_t frames, uint32_t rate) {
@@ -898,6 +901,8 @@ private:
     // seconds to predecode.
     uint32_t measureSource(const SourceInfo& src, uint64_t shown, uint64_t startFrame) {
         readRate_.reset();
+        streamRate_ = 0;
+        streamPace_ = 0;
         const uint32_t configured = predecodeSeconds();
         if (!shown || !onNetworkShare(file_)) return configured;
         const double needed = playedBytesPerSecond(file_, shown, src.sampleRate);
@@ -909,14 +914,18 @@ private:
         const auto read = measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
         if (!read) return configured;
         const double left = framesToSeconds(shown - from, src.sampleRate);
-        double wait = bufferSeconds(left, *read / needed);
+        const bool streamed = isNetworkPlayer(settings_.backend);
+        const double wait = bufferSeconds(left, *read / needed) <= 0
+                                ? 0.0
+                                : bufferSeconds(left, *read * (streamed ? kStreamReadShare : 1.0) / needed);
         log::info("engine: %s reads at %.2f MB/s, plays at %.2f MB/s%s", toUtf8(file_).c_str(), *read / 1e6, needed / 1e6,
-                  wait <= 0                            ? ""
-                  : isNetworkPlayer(settings_.backend) ? "; reading it to the end before it plays"
-                                                       : "; buffering before it plays");
+                  wait <= 0  ? ""
+                  : streamed ? "; buffering before it plays, then reading it slower while it streams"
+                             : "; buffering before it plays");
         if (wait <= 0) return configured;
-        if (isNetworkPlayer(settings_.backend)) wait = left + 1.0;
         readRate_ = *read;
+        streamRate_ = streamed ? *read * kStreamReadShare : 0.0;
+        streamPace_ = streamRate_ / needed;
         neededRate_ = needed;
         neededFor_ = file_;
         fillAt_ = {};
@@ -958,10 +967,12 @@ private:
             fillAt_ = now;
             fillFrom_ = b.decoded;
         }
+        // Buffered at the rate it reads, played while it reads no faster than a stream leaves it.
         const double ratio = *readRate_ / neededRate_;
+        const double playRatio = (streamRate_ > 0 ? std::min(*readRate_, streamRate_) : *readRate_) / neededRate_;
         const double ahead = decoded - submitted;
         const double left = std::max(0.0, framesToSeconds(b.total, in) - submitted);
-        const double wanted = readsWhole() ? left + 1.0 : bufferSeconds(left, ratio);
+        const double wanted = bufferSeconds(left, playRatio);
         if (buffering_) {
             if (ahead >= wanted || full) return resumeBuffered();
             const auto shownSeconds = uint32_t(std::ceil((wanted - ahead) / std::max(ratio, 0.05)));
@@ -1161,7 +1172,7 @@ private:
 
         // Let the decoder get ahead before the device starts pulling.
         const auto startFrames = uint64_t(fmt_.sampleRate * kStartFillSeconds);
-        for (int i = 0; i < 600 && bufferedFrames() < startFrames && !decodeDone_; i++) Sleep(5);
+        for (int i = 0; i < 600 && !buffering_ && bufferedFrames() < startFrames && !decodeDone_; i++) Sleep(5);
         stages_[5] = measure::now();
 
         // A kept device would play silence until the buffer is ready; it opens again when playback starts.
@@ -1247,8 +1258,21 @@ private:
 
     void decodeMain() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+        std::optional<std::pair<std::chrono::steady_clock::time_point, double>> pacedFrom;
         try {
             while (!stopDecode_) {
+                if (const double pace = streamPace_.load(std::memory_order_relaxed); pace > 0 && playing_) {
+                    const auto now = std::chrono::steady_clock::now();
+                    const double decoded =
+                        framesToSeconds(rust_->buffered().decoded, sourceRate_.load(std::memory_order_relaxed));
+                    if (!pacedFrom) pacedFrom.emplace(now, decoded);
+                    if (decoded - pacedFrom->second > std::chrono::duration<double>(now - pacedFrom->first).count() * pace) {
+                        Sleep(20);
+                        continue;
+                    }
+                } else {
+                    pacedFrom.reset();
+                }
                 uint64_t frames = 0;
                 const auto result = rust_->prefill(frames);
                 if (result == RustSession::Prefill::End) {
@@ -1335,6 +1359,8 @@ private:
         transitionPending_ = false;
         queued_.clear();
         readRate_.reset();
+        streamRate_ = 0;
+        streamPace_ = 0;
         buffering_ = false;
         std::lock_guard lock(snapMutex_);
         snap_.output.reset();
@@ -1596,8 +1622,10 @@ private:
     FadeSkip refusedSkip_ = FadeSkip::None;
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     // A source read slower than it plays (Engine/SlowSource.h).
-    std::optional<double> readRate_; // bytes per second: measured, then followed while the ring fills
-    double neededRate_ = 0;          // bytes per second neededFor_ plays at
+    std::optional<double> readRate_;    // bytes per second: measured, then followed while the ring fills
+    double neededRate_ = 0;             // bytes per second neededFor_ plays at
+    double streamRate_ = 0;             // bytes per second it is read at while it streams; 0 when it does not
+    std::atomic<double> streamPace_{0}; // seconds of it decoded per second while it streams; 0 when unpaced
     std::wstring neededFor_;
     std::chrono::steady_clock::time_point fillAt_; // where the read rate is being measured from
     uint64_t fillFrom_ = 0;

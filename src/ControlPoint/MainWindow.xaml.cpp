@@ -1232,9 +1232,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         PositionSlider().Value(std::min(pos, std::max(1.0, total)));
         sliderUpdating_ = false;
     }
-    // The time beside the slider always has room, which the status badges may not on a narrow window.
-    TimeText().Text(s.bufferingSeconds && !s.error ? ui::format(L"State_Buffering", {std::to_wstring(*s.bufferingSeconds)})
-                                                   : hstring(ui::formatTime(pos) + L" / " + ui::formatTime(total)));
+    TimeText().Text(ui::formatTime(pos) + L" / " + ui::formatTime(total));
     const bool hasTrack = !s.pathUtf8.empty();
     PlayPauseButton().IsEnabled(hasTrack);
     StopButton().IsEnabled(hasTrack);
@@ -1539,6 +1537,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownRevision_ = s.revision;
         if (s.error) {
             showError(*s.error, s.errorDetail, snapshot.settings.backend);
+        } else if (buffering_) {
+            // Pause ends the wait, and with it the bar.
+            ErrorBar().Severity(InfoBarSeverity::Warning);
+            ErrorBar().Title(ui::format(L"State_Buffering", {std::to_wstring(*s.bufferingSeconds)}));
+            ErrorBar().Message(tr(L"State_BufferingDetail"));
+            ErrorBar().IsClosable(false);
+            ErrorBar().IsOpen(true);
         } else {
             ErrorBar().IsOpen(false);
         }
@@ -1600,6 +1605,7 @@ winrt::fire_and_forget MainWindow::readPlayingFolders(int64_t file) {
 void MainWindow::showError(ErrorCode code, const std::string& detail, Backend backend) {
     const hstring player = isNetworkPlayer(backend) ? ui::playerErrorTitle(code) : hstring{};
     ErrorBar().Severity(InfoBarSeverity::Warning);
+    ErrorBar().IsClosable(true);
     ErrorBar().Title(player.empty() ? ui::errorTitle(code) : player);
     ErrorBar().Message(player.empty() ? ui::utf8(detail) : hstring{});
     ErrorBar().IsOpen(true);
