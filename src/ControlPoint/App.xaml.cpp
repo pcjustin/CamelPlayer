@@ -14,7 +14,8 @@ using namespace Microsoft::UI::Xaml;
 
 namespace winrt::CamelPlayer::implementation {
 
-App::App(std::shared_ptr<camel::server::IServer> server) : server_(std::move(server)) {
+App::App(std::shared_ptr<camel::server::IServer> server, bool startHidden)
+    : server_(std::move(server)), startHidden_(startHidden) {
     if (!server_) server_ = camel::server::createLocalServer();
     // Colors set from code come from the theme dictionaries, of which only the application's own is loaded at the start.
     const auto theme = server_->snapshot().settings.theme;
@@ -32,7 +33,10 @@ void App::OnLaunched(LaunchActivatedEventArgs const&) {
     // The column widths every track list shares (docs/Plan.md §8.2), for the window's lists to bind to.
     Resources().Insert(box_value(L"TrackColumns"), make<TrackColumnWidths>());
     openWindow(std::move(server_));
-    window_.Activate();
+    if (startHidden_)
+        get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>())->startInTray();
+    else
+        window_.Activate();
     hangWatch_.emplace([queue = window_.DispatcherQueue()](
                            std::function<void()> ping) { return queue.TryEnqueue([ping = std::move(ping)] { ping(); }); },
                        std::chrono::seconds(10));

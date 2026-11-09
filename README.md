@@ -61,7 +61,7 @@ The screenshots show a demo library with made-up albums and covers.
 ### Windows
 
 - **Media keys**, the volume flyout and the lock screen show and control playback, and system-wide hotkeys can be changed.
-- **The notification area** keeps CamelPlayer running after its window closes, and only one copy runs at a time.
+- **The notification area** keeps CamelPlayer running after its window closes, and only one copy runs at a time. **Start with Windows** in Settings › Interface starts it at sign-in in the notification area, paused; turn it off before deleting CamelPlayer's folder, as Windows otherwise keeps an entry for a program that is gone.
 - **Light and dark themes** or the Windows setting, and an English and Traditional Chinese interface.
 
 ### Reliability

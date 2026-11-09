@@ -14,7 +14,7 @@ The first start opens a short guide: choose a light or dark look (or the Windows
 
 Settings › Interface › **Theme** switches between light, dark and the Windows setting at any time.
 
-Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface.
+Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface. **Start with Windows**, beside it, starts CamelPlayer when you sign in to Windows, in the notification area without a window, with the queue and position restored and paused; click the tray icon to open it. CamelPlayer points the entry at its own folder at every start, so a moved folder keeps working. Turn the switch off before deleting the folder: Windows otherwise keeps an entry for a program that is gone. If Windows' startup settings (Settings › Apps › Startup, or Task Manager) have turned CamelPlayer off, the switch shows off and says so, and only turning it on there starts it again.
 
 ## Getting around
 

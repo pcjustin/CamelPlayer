@@ -35,6 +35,7 @@
 #include "Common/settings/Settings.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
+#include "Common/util/StartWithWindows.h"
 #include "Common/util/Text.h"
 #include "Common/Version.h"
 #include "Engine/Dsp.h"
@@ -542,6 +543,32 @@ void MainWindow::hideToTray() {
     }
 }
 
+// The switch follows Windows' own record, which its startup settings may have turned off; CamelPlayer then leaves it.
+void MainWindow::showStartWithWindows() {
+    const auto state = camel::startup::state();
+    const bool wasPopulating = std::exchange(populating_, true);
+    StartWithWindowsSwitch().IsOn(state.on());
+    StartWithWindowsSwitch().IsEnabled(!state.disabledInWindows);
+    StartWithWindowsNote().Visibility(state.disabledInWindows ? Visibility::Visible : Visibility::Collapsed);
+    populating_ = wasPopulating;
+}
+
+void MainWindow::OnStartWithWindowsToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (populating_) return;
+    wchar_t program[MAX_PATH];
+    if (StartWithWindowsSwitch().IsOn() && GetModuleFileNameW(nullptr, program, MAX_PATH))
+        camel::startup::enable(program);
+    else
+        camel::startup::disable();
+    showStartWithWindows();
+}
+
+void MainWindow::startInTray() {
+    inTray_ = true;
+    AppWindow().Hide(); // maximizing at construction showed it, before anything was drawn
+    setRefreshing(false);
+}
+
 void MainWindow::showFromTray() {
     const bool wasInTray = inTray_;
     inTray_ = false;
@@ -664,6 +691,7 @@ void MainWindow::populateSettings() {
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
     fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
+    showStartWithWindows();
     fill(ThemeCombo(), {tr(L"Theme_System"), tr(L"Theme_Light"), tr(L"Theme_Dark")}, int(settings_.theme));
     populateOutputs();
     populating_ = false;
@@ -2586,6 +2614,7 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
         settings_ = settingsDto(camel::resetPlayback(nativeSettings(settings_)));
         applySettingsNow();
     } else if (kind == L"interface") {
+        camel::startup::disable();
         settings_ = settingsDto(camel::resetInterface(nativeSettings(settings_)));
         queueOpen_ = false;
         updateQueuePanel();

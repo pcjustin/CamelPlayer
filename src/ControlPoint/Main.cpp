@@ -19,6 +19,7 @@
 #include "Common/util/CrashDump.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
+#include "Common/util/StartWithWindows.h"
 #include "Common/util/Text.h"
 
 namespace {
@@ -57,8 +58,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         MessageBoxW(nullptr, ui::tr(L"Error_NoDataFolder").c_str(), L"CamelPlayer", MB_ICONERROR | MB_OK);
         return 1;
     }
+    // Started by Windows at sign-in (Settings › Interface): the window stays in the notification area.
+    const bool background = camel::startup::isBackgroundStart(commandLine);
     // One instance per Windows user (docs/Plan.md §8.4), decided before the Server opens the library: a second launch
-    // shows the running instance's window, even from the notification area, and exits.
+    // shows the running instance's window, even from the notification area, and exits; a background start just exits.
     HANDLE instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
     // After a full reset the previous instance is still exiting; wait for it rather than activating it.
     if (instance && GetLastError() == ERROR_ALREADY_EXISTS && wcsstr(commandLine, L"--after-reset")) {
@@ -69,7 +72,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         }
     }
     if (instance && GetLastError() == ERROR_ALREADY_EXISTS) {
-        for (int attempt = 0; attempt < 50; ++attempt) { // the first instance may still be starting
+        for (int attempt = 0; attempt < 50 && camel::startup::launchFor(background, true) == camel::startup::Launch::ShowRunning;
+             ++attempt) { // the first instance may still be starting
             if (const HWND tray = FindWindowW(ui::TrayIcon::kWindowClass, nullptr)) {
                 DWORD process = 0;
                 GetWindowThreadProcessId(tray, &process);
@@ -92,6 +96,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
 
     SetCurrentProcessExplicitAppUserModelID(L"CamelPlayer.CamelPlayer");
     registerAppUserModelId(L"CamelPlayer.CamelPlayer");
+    // An unzipped copy moved to another folder keeps starting with Windows.
+    if (wchar_t program[MAX_PATH]; GetModuleFileNameW(nullptr, program, MAX_PATH)) camel::startup::follow(program);
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     if (camel::measure::measuring())
         camel::log::info("measure: opening the server %.0f ms after process start", camel::measure::sinceProcessStart());
@@ -119,7 +125,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         camel::log::warn("language override failed: 0x%08X", static_cast<unsigned>(e.code()));
     }
     ::winrt::Microsoft::UI::Xaml::Application::Start(
-        [server](auto&&) { ::winrt::make<::winrt::CamelPlayer::implementation::App>(server); });
+        [server, background](auto&&) { ::winrt::make<::winrt::CamelPlayer::implementation::App>(server, background); });
     // Parts of the UI, such as artwork loads waiting for the stopped UI thread, may still hold the Server, so it is shut
     // down explicitly: the queue is saved and the library closed cleanly. The next start waits for this process, so
     // background work a busy machine leaves no CPU for is abandoned; the library recovers at that start.

@@ -11,7 +11,7 @@
 namespace winrt::CamelPlayer::implementation {
 
 struct App : AppT<App> {
-    explicit App(std::shared_ptr<camel::server::IServer> server = {});
+    explicit App(std::shared_ptr<camel::server::IServer> server = {}, bool startHidden = false);
     void OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&);
 
 private:
@@ -19,6 +19,7 @@ private:
     void replaceWindow(std::shared_ptr<camel::server::IServer> server);
 
     std::shared_ptr<camel::server::IServer> server_;
+    bool startHidden_ = false; // started with Windows: the window waits in the notification area
     Microsoft::UI::Xaml::Window window_{nullptr};
     std::optional<camel::HangWatch> hangWatch_;
 };

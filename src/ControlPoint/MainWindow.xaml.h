@@ -111,6 +111,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnOutputButtonClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnStartWithWindowsToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -286,6 +287,7 @@ private:
     std::map<std::string, std::chrono::steady_clock::time_point> receiverMovedAt_;
     uint64_t shownReceiverLeft_ = 0;
     void showReceiverVolumes();
+    void showStartWithWindows();
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;
@@ -326,6 +328,12 @@ private:
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();
     void showFromTray();
+
+public:
+    // Started with Windows: the window is not shown until the tray opens it.
+    void startInTray();
+
+private:
     // Hidden or minimized, the window stops refreshing what it shows.
     void setRefreshing(bool refreshing);
     std::unique_ptr<ui::TrayIcon> tray_;

@@ -532,6 +532,12 @@
                                 <ComboBox x:Name="LanguageCombo" x:Uid="Settings_Language" Width="360" SelectionChanged="OnLanguageChanged" />
                                 <ComboBox x:Name="ThemeCombo" x:Uid="Settings_Theme" Width="360" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="CloseActionCombo" x:Uid="Settings_CloseAction" Width="360" SelectionChanged="OnSettingChanged" />
+                                <!-- Windows starts CamelPlayer at sign-in in the notification area; its own startup settings can turn it off. -->
+                                <StackPanel Spacing="4">
+                                    <ToggleSwitch x:Name="StartWithWindowsSwitch" x:Uid="Settings_StartWithWindows" Toggled="OnStartWithWindowsToggled" />
+                                    <TextBlock x:Name="StartWithWindowsNote" x:Uid="Settings_StartWithWindowsDisabled" TextWrapping="Wrap"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                                </StackPanel>
                                 <ToggleSwitch x:Name="AutoUpdateSwitch" x:Uid="Settings_AutoUpdate" Toggled="OnUpdateSwitchToggled" />
                                 <ToggleSwitch x:Name="ArtistPicturesSwitch" x:Uid="Settings_ArtistPictures" Toggled="OnArtistPicturesToggled" />
                                 <!-- Discord Rich Presence (docs/Plan.md §8.4); the cover goes out through a tunnel, so it has a switch

@@ -726,4 +726,6 @@
   <data name="SignalPath_OneChannel" xml:space="preserve"><value>單一聲道</value></data>
   <data name="Output_ReceiverLeft" xml:space="preserve"><value>{0} 已離開 AirPlay 群組</value></data>
   <data name="Volume_ReceiverSlider" xml:space="preserve"><value>{0} 的音量</value></data>
+  <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>隨 Windows 啟動</value></data>
+  <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>已在 Windows 的啟動設定中關閉（設定 › 應用程式 › 啟動，或工作管理員）。請在那裡開啟，CamelPlayer 才會隨 Windows 啟動。</value></data>
 </root>

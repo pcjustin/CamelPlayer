@@ -726,4 +726,6 @@
   <data name="SignalPath_OneChannel" xml:space="preserve"><value>One channel</value></data>
   <data name="Output_ReceiverLeft" xml:space="preserve"><value>{0} left the AirPlay group</value></data>
   <data name="Volume_ReceiverSlider" xml:space="preserve"><value>Volume of {0}</value></data>
+  <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>Start with Windows</value></data>
+  <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>Turned off in Windows' startup settings (Settings › Apps › Startup, or Task Manager). Turn it on there to start CamelPlayer with Windows.</value></data>
 </root>
