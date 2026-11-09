@@ -846,7 +846,8 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid Grid.Column="0" ColumnSpacing="8" MinWidth="0" SizeChanged="OnArtistCreditSizeChanged">
+                <Grid Grid.Column="0" ColumnSpacing="8" MinWidth="0" SizeChanged="OnArtistCreditSizeChanged"
+                      ContextRequested="OnPlayerTrackContextRequested">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="68" />
                         <ColumnDefinition x:Name="PlayerTextColumn" Width="*" />

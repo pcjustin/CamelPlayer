@@ -731,4 +731,120 @@
   <data name="Lyrics_Show" xml:space="preserve"><value>顯示歌詞</value></data>
   <data name="Lyrics_Hide" xml:space="preserve"><value>隱藏歌詞</value></data>
   <data name="Lyrics_None.Text" xml:space="preserve"><value>這首歌沒有歌詞</value></data>
+  <data name="Library_MenuFileDetails" xml:space="preserve"><value>檔案詳細資訊</value></data>
+  <data name="FileDetails_Title" xml:space="preserve"><value>檔案詳細資訊</value></data>
+  <data name="FileDetails_OpenFolder" xml:space="preserve"><value>開啟資料夾</value></data>
+  <data name="FileDetails_Reading" xml:space="preserve"><value>正在讀取檔案…</value></data>
+  <data name="FileDetails_Missing" xml:space="preserve"><value>找不到這個檔案：可能已被移動或刪除，或是所在的磁碟或 NAS 離線。以下是媒體庫保存的資料。</value></data>
+  <data name="FileDetails_Unreadable" xml:space="preserve"><value>無法讀取這個檔案：{0}。以下是媒體庫保存的資料。</value></data>
+  <data name="FileDetails_NoTags" xml:space="preserve"><value>這個檔案沒有文字標籤。</value></data>
+  <data name="FileDetails_Technical" xml:space="preserve"><value>技術資料</value></data>
+  <data name="FileDetails_Library" xml:space="preserve"><value>媒體庫中的資料</value></data>
+  <data name="FileDetails_InLibrary" xml:space="preserve"><value>媒體庫顯示：{0}</value></data>
+  <data name="FileDetails_None" xml:space="preserve"><value>（無）</value></data>
+  <data name="FileDetails_Copy" xml:space="preserve"><value>複製</value></data>
+  <data name="FileDetails_SelectAll" xml:space="preserve"><value>全選</value></data>
+  <data name="FileDetails_CopyAll" xml:space="preserve"><value>全部複製</value></data>
+  <data name="FileDetails_Path" xml:space="preserve"><value>路徑</value></data>
+  <data name="FileDetails_Format" xml:space="preserve"><value>格式</value></data>
+  <data name="FileDetails_SampleRate" xml:space="preserve"><value>取樣率</value></data>
+  <data name="FileDetails_BitDepth" xml:space="preserve"><value>位元深度</value></data>
+  <data name="FileDetails_Channels" xml:space="preserve"><value>聲道數</value></data>
+  <data name="FileDetails_Length" xml:space="preserve"><value>長度</value></data>
+  <data name="FileDetails_Frames" xml:space="preserve"><value>每聲道取樣數</value></data>
+  <data name="FileDetails_Bitrate" xml:space="preserve"><value>位元率</value></data>
+  <data name="FileDetails_Size" xml:space="preserve"><value>檔案大小</value></data>
+  <data name="FileDetails_Bytes" xml:space="preserve"><value>{0} 位元組</value></data>
+  <data name="FileDetails_Modified" xml:space="preserve"><value>修改時間</value></data>
+  <data name="FileDetails_AnalysisTrackGain" xml:space="preserve"><value>曲目增益（分析）</value></data>
+  <data name="FileDetails_AnalysisTrackPeak" xml:space="preserve"><value>曲目峰值（分析）</value></data>
+  <data name="FileDetails_AnalysisAlbumGain" xml:space="preserve"><value>專輯增益（分析）</value></data>
+  <data name="FileDetails_AnalysisAlbumPeak" xml:space="preserve"><value>專輯峰值（分析）</value></data>
+  <data name="FileField_TITLE" xml:space="preserve"><value>標題</value></data>
+  <data name="FileField_SUBTITLE" xml:space="preserve"><value>副標題</value></data>
+  <data name="FileField_ALBUM" xml:space="preserve"><value>專輯</value></data>
+  <data name="FileField_ARTIST" xml:space="preserve"><value>演出者</value></data>
+  <data name="FileField_ARTISTS" xml:space="preserve"><value>演出者（多位）</value></data>
+  <data name="FileField_ALBUMARTIST" xml:space="preserve"><value>專輯演出者</value></data>
+  <data name="FileField_TRACKNUMBER" xml:space="preserve"><value>曲目編號</value></data>
+  <data name="FileField_TRACKTOTAL" xml:space="preserve"><value>曲目總數</value></data>
+  <data name="FileField_DISCNUMBER" xml:space="preserve"><value>光碟編號</value></data>
+  <data name="FileField_DISCTOTAL" xml:space="preserve"><value>光碟總數</value></data>
+  <data name="FileField_DISCSUBTITLE" xml:space="preserve"><value>光碟副標題</value></data>
+  <data name="FileField_DATE" xml:space="preserve"><value>日期</value></data>
+  <data name="FileField_ORIGINALDATE" xml:space="preserve"><value>原始日期</value></data>
+  <data name="FileField_RELEASEDATE" xml:space="preserve"><value>發行日期</value></data>
+  <data name="FileField_GENRE" xml:space="preserve"><value>類型</value></data>
+  <data name="FileField_COMMENT" xml:space="preserve"><value>註解</value></data>
+  <data name="FileField_DESCRIPTION" xml:space="preserve"><value>描述</value></data>
+  <data name="FileField_COMPOSER" xml:space="preserve"><value>作曲者</value></data>
+  <data name="FileField_LYRICIST" xml:space="preserve"><value>作詞者</value></data>
+  <data name="FileField_WRITER" xml:space="preserve"><value>詞曲作者</value></data>
+  <data name="FileField_CONDUCTOR" xml:space="preserve"><value>指揮</value></data>
+  <data name="FileField_PERFORMER" xml:space="preserve"><value>演奏者</value></data>
+  <data name="FileField_ARRANGER" xml:space="preserve"><value>編曲者</value></data>
+  <data name="FileField_REMIXER" xml:space="preserve"><value>重混者</value></data>
+  <data name="FileField_ENGINEER" xml:space="preserve"><value>錄音工程師</value></data>
+  <data name="FileField_PRODUCER" xml:space="preserve"><value>製作人</value></data>
+  <data name="FileField_DJMIXER" xml:space="preserve"><value>DJ 混音</value></data>
+  <data name="FileField_MIXER" xml:space="preserve"><value>混音工程師</value></data>
+  <data name="FileField_ISRC" xml:space="preserve"><value>ISRC</value></data>
+  <data name="FileField_BARCODE" xml:space="preserve"><value>條碼</value></data>
+  <data name="FileField_CATALOGNUMBER" xml:space="preserve"><value>目錄編號</value></data>
+  <data name="FileField_LABEL" xml:space="preserve"><value>唱片公司</value></data>
+  <data name="FileField_COPYRIGHT" xml:space="preserve"><value>版權</value></data>
+  <data name="FileField_ENCODEDBY" xml:space="preserve"><value>編碼者</value></data>
+  <data name="FileField_ENCODING" xml:space="preserve"><value>編碼軟體</value></data>
+  <data name="FileField_ENCODERSETTINGS" xml:space="preserve"><value>編碼設定</value></data>
+  <data name="FileField_BPM" xml:space="preserve"><value>BPM</value></data>
+  <data name="FileField_MOOD" xml:space="preserve"><value>情緒</value></data>
+  <data name="FileField_MEDIA" xml:space="preserve"><value>媒體</value></data>
+  <data name="FileField_LANGUAGE" xml:space="preserve"><value>語言</value></data>
+  <data name="FileField_WORK" xml:space="preserve"><value>作品</value></data>
+  <data name="FileField_MOVEMENTNAME" xml:space="preserve"><value>樂章</value></data>
+  <data name="FileField_MOVEMENTNUMBER" xml:space="preserve"><value>樂章編號</value></data>
+  <data name="FileField_MOVEMENTCOUNT" xml:space="preserve"><value>樂章總數</value></data>
+  <data name="FileField_GROUPING" xml:space="preserve"><value>分組</value></data>
+  <data name="FileField_COMPILATION" xml:space="preserve"><value>合輯</value></data>
+  <data name="FileField_TITLESORT" xml:space="preserve"><value>標題排序</value></data>
+  <data name="FileField_ALBUMSORT" xml:space="preserve"><value>專輯排序</value></data>
+  <data name="FileField_ARTISTSORT" xml:space="preserve"><value>演出者排序</value></data>
+  <data name="FileField_ALBUMARTISTSORT" xml:space="preserve"><value>專輯演出者排序</value></data>
+  <data name="FileField_COMPOSERSORT" xml:space="preserve"><value>作曲者排序</value></data>
+  <data name="FileField_ORIGINALALBUM" xml:space="preserve"><value>原始專輯</value></data>
+  <data name="FileField_ORIGINALARTIST" xml:space="preserve"><value>原始演出者</value></data>
+  <data name="FileField_ORIGINALLYRICIST" xml:space="preserve"><value>原始作詞者</value></data>
+  <data name="FileField_RELEASECOUNTRY" xml:space="preserve"><value>發行國家</value></data>
+  <data name="FileField_RELEASESTATUS" xml:space="preserve"><value>發行狀態</value></data>
+  <data name="FileField_RELEASETYPE" xml:space="preserve"><value>發行類型</value></data>
+  <data name="FileField_ASIN" xml:space="preserve"><value>ASIN</value></data>
+  <data name="FileField_SCRIPT" xml:space="preserve"><value>文字書寫系統</value></data>
+  <data name="FileField_OWNER" xml:space="preserve"><value>擁有者</value></data>
+  <data name="FileField_RATING" xml:space="preserve"><value>評分</value></data>
+  <data name="FileField_REPLAYGAIN_TRACK_GAIN" xml:space="preserve"><value>曲目增益</value></data>
+  <data name="FileField_REPLAYGAIN_TRACK_PEAK" xml:space="preserve"><value>曲目峰值</value></data>
+  <data name="FileField_REPLAYGAIN_ALBUM_GAIN" xml:space="preserve"><value>專輯增益</value></data>
+  <data name="FileField_REPLAYGAIN_ALBUM_PEAK" xml:space="preserve"><value>專輯峰值</value></data>
+  <data name="FileField_MUSICBRAINZ_TRACKID" xml:space="preserve"><value>MusicBrainz 錄音 ID</value></data>
+  <data name="FileField_MUSICBRAINZ_ALBUMID" xml:space="preserve"><value>MusicBrainz 發行 ID</value></data>
+  <data name="FileField_MUSICBRAINZ_ARTISTID" xml:space="preserve"><value>MusicBrainz 演出者 ID</value></data>
+  <data name="FileField_MUSICBRAINZ_ALBUMARTISTID" xml:space="preserve"><value>MusicBrainz 專輯演出者 ID</value></data>
+  <data name="FileField_MUSICBRAINZ_RELEASEGROUPID" xml:space="preserve"><value>MusicBrainz 發行群組 ID</value></data>
+  <data name="FileField_MUSICBRAINZ_RELEASETRACKID" xml:space="preserve"><value>MusicBrainz 曲目 ID</value></data>
+  <data name="FileField_MUSICBRAINZ_WORKID" xml:space="preserve"><value>MusicBrainz 作品 ID</value></data>
+  <data name="FileField_ACOUSTID_ID" xml:space="preserve"><value>AcoustID</value></data>
+  <data name="FileField_ACOUSTID_FINGERPRINT" xml:space="preserve"><value>AcoustID 指紋</value></data>
+  <data name="FileField_MUSICIP_PUID" xml:space="preserve"><value>MusicIP PUID</value></data>
+  <data name="FileField_ARTISTWEBPAGE" xml:space="preserve"><value>演出者網頁</value></data>
+  <data name="FileField_FILEWEBPAGE" xml:space="preserve"><value>檔案網頁</value></data>
+  <data name="FileField_AUDIOSOURCEWEBPAGE" xml:space="preserve"><value>音源網頁</value></data>
+  <data name="FileField_COPYRIGHTURL" xml:space="preserve"><value>版權網址</value></data>
+  <data name="FileField_PAYMENTWEBPAGE" xml:space="preserve"><value>付款網頁</value></data>
+  <data name="FileField_PUBLISHERWEBPAGE" xml:space="preserve"><value>發行商網頁</value></data>
+  <data name="FileField_RADIOSTATIONWEBPAGE" xml:space="preserve"><value>電台網頁</value></data>
+  <data name="FileField_URL" xml:space="preserve"><value>網頁</value></data>
+  <data name="FileField_PODCAST" xml:space="preserve"><value>Podcast</value></data>
+  <data name="FileField_LENGTH" xml:space="preserve"><value>長度</value></data>
+  <data name="FileField_INITIALKEY" xml:space="preserve"><value>調性</value></data>
+  <data name="FileField_ORIGINALFILENAME" xml:space="preserve"><value>原始檔名</value></data>
 </root>

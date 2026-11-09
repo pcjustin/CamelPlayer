@@ -166,6 +166,39 @@ struct Lyrics {
     bool operator==(const Lyrics&) const = default;
 };
 
+// A text tag of a file as its tag format holds it (Library/FileDetails.h).
+struct FileTag {
+    std::string key;   // as the format names it: TPE1, TXXX:MusicBrainz Album Id, ©ART, IART
+    std::string field; // TagLib's property name, such as ARTIST; empty when it has none
+    std::vector<std::string> values;
+    std::optional<std::string> library; // what the library shows for the field, when that is not what this tag reads
+    bool operator==(const FileTag&) const = default;
+};
+
+struct FileTagSection {
+    std::string format; // ID3v2.4, ID3v1, APEv2, Vorbis comment, MP4, RIFF INFO, DIIN
+    std::vector<FileTag> tags;
+    bool operator==(const FileTagSection&) const = default;
+};
+
+struct FileDetails {
+    enum class Problem : uint8_t { None, Missing, Unreadable };
+    std::string path; // as the library spells it, else as asked for
+    Problem problem = Problem::None;
+    std::string reason;         // why the file could not be read
+    bool folderPresent = false; // the file's folder can be opened
+    bool inLibrary = false;
+    std::vector<FileTagSection> sections;
+    std::vector<FileTag> library; // the library's fields, when the file could not be read
+    std::string format;           // formatName
+    uint32_t sampleRate = 0, bitsPerSample = 0, channels = 0, bitrateKbps = 0;
+    uint64_t frames = 0, lengthMs = 0;
+    std::optional<uint64_t> size;
+    std::optional<int64_t> modified;                                  // Unix seconds
+    std::optional<double> trackGain, trackPeak, albumGain, albumPeak; // the ReplayGain tags as read
+    std::optional<double> analysisTrackGain, analysisTrackPeak, analysisAlbumGain, analysisAlbumPeak; // the library's
+};
+
 // A receiver of the AirPlay group in use.
 struct ReceiverState {
     std::string id, name;
@@ -430,6 +463,8 @@ public:
     virtual DiscordStatus discordStatus() const = 0;
     // The lyrics of a track, read once per track from its tags or a .lrc beside it; the playing track's are kept.
     virtual Lyrics lyrics(const std::string& pathUtf8) const = 0;
+    // Reads the file on the caller's thread, which may wait on a NAS; nothing is written to it.
+    virtual FileDetails fileDetails(const std::string& pathUtf8) const = 0;
     // The path states' names in the app's language, for the activity's small image; the Server has no strings of its own.
     virtual void setDiscordTexts(const DiscordTexts& texts) = 0;
 };

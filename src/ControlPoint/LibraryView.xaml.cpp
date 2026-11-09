@@ -25,6 +25,7 @@
 #include "CardSize.h"
 #include "CreditText.h"
 #include "DialogPlacement.h"
+#include "FileDetailsWindow.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
 #include "TrimmedText.h"
@@ -1639,6 +1640,9 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
         rowMenu_.Items().Append(reset);
         rowMarks_.push_back(reset);
         rowArtistMarks_ = ui::appendArtistFavoriteMenu(rowMenu_, [this](bool favorite) { markArtists(favorite); });
+        for (const auto& entry :
+             ui::appendFileDetailsMenu(rowMenu_, [this] { ui::openFileDetails(menuRow_.value, menuRow_.title); }))
+            rowMarks_.push_back(entry);
     }
     for (const auto& entry : rowMarks_) entry.Visibility(item.IsTrack() ? Visibility::Visible : Visibility::Collapsed);
     const bool named = group && (row.composer || current_.field == LibraryGroupField::Artist);

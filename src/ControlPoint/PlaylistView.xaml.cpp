@@ -21,6 +21,7 @@
 #include "Common/util/Text.h"
 #include "TrackMarks.h"
 #include "DialogPlacement.h"
+#include "FileDetailsWindow.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 
@@ -484,6 +485,10 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
                 if (row.file && std::ranges::find(tracks, LibraryTrackKey{row.file}) == tracks.end())
                     tracks.push_back({row.file});
             if (!tracks.empty()) submitMarks(ui::favoriteCommand(tracks, favorite));
+        });
+        ui::appendFileDetailsMenu(entryMenu_, [this] {
+            const auto& row = ui::PlaylistCollection::rowOf(menuItem_);
+            ui::openFileDetails(row.value, row.title);
         });
     }
     Primitives::FlyoutShowOptions options;

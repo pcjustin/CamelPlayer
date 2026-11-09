@@ -26,6 +26,7 @@
 
 #include "CreditText.h"
 #include "DialogPlacement.h"
+#include "FileDetailsWindow.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
 #include "TrackColumns.h"
@@ -304,7 +305,9 @@ void MainWindow::InitializeComponent() {
     Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) {
         colorCaptionButtons();
         repaintTheme();
+        fileDetails_.setTheme(Content().as<FrameworkElement>().ActualTheme());
     });
+    ui::setFileDetailsOpener([this](const std::string& path, hstring const& title) { showFileDetails(path, title); });
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
@@ -527,6 +530,7 @@ void MainWindow::InitializeComponent() {
     });
 
     Closed([this](auto&&, auto&&) {
+        fileDetails_.close(); // the app ends once its last window closes
         tray_.reset();
         artworkToken_.cancel();
         updateToken_.cancel();
@@ -2116,6 +2120,12 @@ void MainWindow::OnWindowKeyDown(Windows::Foundation::IInspectable const&, Input
         e.Handled(true);
         return;
     }
+    if (key == VirtualKey::Enter && GetKeyState(VK_MENU) < 0 && !capturing_) {
+        // Taken wherever the focus is, so a list does not take it for Enter and play the row.
+        if (!e.KeyStatus().WasKeyDown) openFocusedFileDetails();
+        e.Handled(true);
+        return;
+    }
     if (key != VirtualKey::Space && key != VirtualKey::Left && key != VirtualKey::Right) return;
     if (capturing_ || !server_ || !Content().XamlRoot()) return;
     if (Media::VisualTreeHelper::GetOpenPopupsForXamlRoot(Content().XamlRoot()).Size() > 0) return;
@@ -2970,10 +2980,62 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
             }
             if (!tracks.empty()) submitCommand(ui::favoriteCommand(tracks, favorite));
         });
+        ui::appendFileDetailsMenu(queueMenu_, [this] {
+            const auto item = queueMenuItem_.as<CamelPlayer::QueueItem>();
+            const auto path = item.Path();
+            showFileDetails(toUtf8(std::wstring_view(path.c_str(), path.size())), item.Title());
+        });
     }
     Primitives::FlyoutShowOptions options;
     if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
     queueMenu_.ShowAt(element, options);
+    e.Handled(true);
+}
+
+void MainWindow::showFileDetails(const std::string& pathUtf8, hstring const& title) {
+    if (!server_ || pathUtf8.empty()) return;
+    fileDetails_.show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), title,
+                      Content().as<FrameworkElement>().ActualTheme(),
+                      [server = server_, pathUtf8] { return server->fileDetails(pathUtf8); });
+}
+
+// Alt+Enter opens the details of the track row the focus is on, or is in.
+bool MainWindow::openFocusedFileDetails() {
+    if (!Content().XamlRoot()) return false;
+    auto element = Input::FocusManager::GetFocusedElement(Content().XamlRoot()).try_as<DependencyObject>();
+    for (; element; element = Media::VisualTreeHelper::GetParent(element)) {
+        const auto container = element.try_as<Primitives::SelectorItem>();
+        if (!container) continue;
+        const auto item = container.Content() ? container.Content() : container.DataContext();
+        if (const auto queued = item.try_as<CamelPlayer::QueueItem>()) {
+            const auto path = queued.Path();
+            showFileDetails(toUtf8(std::wstring_view(path.c_str(), path.size())), queued.Title());
+            return true;
+        }
+        if (const auto browse = item.try_as<CamelPlayer::BrowseItem>(); browse && browse.IsTrack()) {
+            const auto& row = get_self<BrowseItem>(browse)->row();
+            showFileDetails(row.value, row.title);
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+void MainWindow::OnPlayerTrackContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
+    if (!server_ || server_->snapshot().playback.pathUtf8.empty()) return;
+    if (!playerTrackMenu_) {
+        playerTrackMenu_ = MenuFlyout();
+        ui::appendFileDetailsMenu(playerTrackMenu_, [this] {
+            if (server_) showFileDetails(server_->snapshot().playback.pathUtf8, TitleText().Text());
+        });
+        playerTrackMenu_.Items().RemoveAt(0);                                                       // the separator
+        playerTrackMenu_.Items().GetAt(0).as<MenuFlyoutItem>().KeyboardAcceleratorTextOverride({}); // Alt+Enter is for rows
+    }
+    const auto element = sender.as<FrameworkElement>();
+    Primitives::FlyoutShowOptions options;
+    if (Windows::Foundation::Point point; e.TryGetPosition(element, point)) options.Position(point);
+    playerTrackMenu_.ShowAt(element, options);
     e.Handled(true);
 }
 

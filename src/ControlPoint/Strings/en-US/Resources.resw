@@ -731,4 +731,120 @@
   <data name="Lyrics_Show" xml:space="preserve"><value>Show the lyrics</value></data>
   <data name="Lyrics_Hide" xml:space="preserve"><value>Hide the lyrics</value></data>
   <data name="Lyrics_None.Text" xml:space="preserve"><value>This track has no lyrics</value></data>
+  <data name="Library_MenuFileDetails" xml:space="preserve"><value>File details</value></data>
+  <data name="FileDetails_Title" xml:space="preserve"><value>File details</value></data>
+  <data name="FileDetails_OpenFolder" xml:space="preserve"><value>Open folder</value></data>
+  <data name="FileDetails_Reading" xml:space="preserve"><value>Reading the file…</value></data>
+  <data name="FileDetails_Missing" xml:space="preserve"><value>The file is not there: it was moved or deleted, or its drive or NAS is offline. These are the details the library keeps.</value></data>
+  <data name="FileDetails_Unreadable" xml:space="preserve"><value>The file could not be read: {0}. These are the details the library keeps.</value></data>
+  <data name="FileDetails_NoTags" xml:space="preserve"><value>The file carries no text tags.</value></data>
+  <data name="FileDetails_Technical" xml:space="preserve"><value>Technical</value></data>
+  <data name="FileDetails_Library" xml:space="preserve"><value>In the library</value></data>
+  <data name="FileDetails_InLibrary" xml:space="preserve"><value>The library shows: {0}</value></data>
+  <data name="FileDetails_None" xml:space="preserve"><value>(none)</value></data>
+  <data name="FileDetails_Copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="FileDetails_SelectAll" xml:space="preserve"><value>Select all</value></data>
+  <data name="FileDetails_CopyAll" xml:space="preserve"><value>Copy all</value></data>
+  <data name="FileDetails_Path" xml:space="preserve"><value>Path</value></data>
+  <data name="FileDetails_Format" xml:space="preserve"><value>Format</value></data>
+  <data name="FileDetails_SampleRate" xml:space="preserve"><value>Sample rate</value></data>
+  <data name="FileDetails_BitDepth" xml:space="preserve"><value>Bit depth</value></data>
+  <data name="FileDetails_Channels" xml:space="preserve"><value>Channels</value></data>
+  <data name="FileDetails_Length" xml:space="preserve"><value>Length</value></data>
+  <data name="FileDetails_Frames" xml:space="preserve"><value>Samples per channel</value></data>
+  <data name="FileDetails_Bitrate" xml:space="preserve"><value>Bitrate</value></data>
+  <data name="FileDetails_Size" xml:space="preserve"><value>File size</value></data>
+  <data name="FileDetails_Bytes" xml:space="preserve"><value>{0} bytes</value></data>
+  <data name="FileDetails_Modified" xml:space="preserve"><value>Modified</value></data>
+  <data name="FileDetails_AnalysisTrackGain" xml:space="preserve"><value>Track gain, analyzed</value></data>
+  <data name="FileDetails_AnalysisTrackPeak" xml:space="preserve"><value>Track peak, analyzed</value></data>
+  <data name="FileDetails_AnalysisAlbumGain" xml:space="preserve"><value>Album gain, analyzed</value></data>
+  <data name="FileDetails_AnalysisAlbumPeak" xml:space="preserve"><value>Album peak, analyzed</value></data>
+  <data name="FileField_TITLE" xml:space="preserve"><value>Title</value></data>
+  <data name="FileField_SUBTITLE" xml:space="preserve"><value>Subtitle</value></data>
+  <data name="FileField_ALBUM" xml:space="preserve"><value>Album</value></data>
+  <data name="FileField_ARTIST" xml:space="preserve"><value>Artist</value></data>
+  <data name="FileField_ARTISTS" xml:space="preserve"><value>Artists</value></data>
+  <data name="FileField_ALBUMARTIST" xml:space="preserve"><value>Album artist</value></data>
+  <data name="FileField_TRACKNUMBER" xml:space="preserve"><value>Track number</value></data>
+  <data name="FileField_TRACKTOTAL" xml:space="preserve"><value>Total tracks</value></data>
+  <data name="FileField_DISCNUMBER" xml:space="preserve"><value>Disc number</value></data>
+  <data name="FileField_DISCTOTAL" xml:space="preserve"><value>Total discs</value></data>
+  <data name="FileField_DISCSUBTITLE" xml:space="preserve"><value>Disc subtitle</value></data>
+  <data name="FileField_DATE" xml:space="preserve"><value>Date</value></data>
+  <data name="FileField_ORIGINALDATE" xml:space="preserve"><value>Original date</value></data>
+  <data name="FileField_RELEASEDATE" xml:space="preserve"><value>Release date</value></data>
+  <data name="FileField_GENRE" xml:space="preserve"><value>Genre</value></data>
+  <data name="FileField_COMMENT" xml:space="preserve"><value>Comment</value></data>
+  <data name="FileField_DESCRIPTION" xml:space="preserve"><value>Description</value></data>
+  <data name="FileField_COMPOSER" xml:space="preserve"><value>Composer</value></data>
+  <data name="FileField_LYRICIST" xml:space="preserve"><value>Lyricist</value></data>
+  <data name="FileField_WRITER" xml:space="preserve"><value>Writer</value></data>
+  <data name="FileField_CONDUCTOR" xml:space="preserve"><value>Conductor</value></data>
+  <data name="FileField_PERFORMER" xml:space="preserve"><value>Performer</value></data>
+  <data name="FileField_ARRANGER" xml:space="preserve"><value>Arranger</value></data>
+  <data name="FileField_REMIXER" xml:space="preserve"><value>Remixer</value></data>
+  <data name="FileField_ENGINEER" xml:space="preserve"><value>Engineer</value></data>
+  <data name="FileField_PRODUCER" xml:space="preserve"><value>Producer</value></data>
+  <data name="FileField_DJMIXER" xml:space="preserve"><value>DJ mixer</value></data>
+  <data name="FileField_MIXER" xml:space="preserve"><value>Mixer</value></data>
+  <data name="FileField_ISRC" xml:space="preserve"><value>ISRC</value></data>
+  <data name="FileField_BARCODE" xml:space="preserve"><value>Barcode</value></data>
+  <data name="FileField_CATALOGNUMBER" xml:space="preserve"><value>Catalog number</value></data>
+  <data name="FileField_LABEL" xml:space="preserve"><value>Label</value></data>
+  <data name="FileField_COPYRIGHT" xml:space="preserve"><value>Copyright</value></data>
+  <data name="FileField_ENCODEDBY" xml:space="preserve"><value>Encoded by</value></data>
+  <data name="FileField_ENCODING" xml:space="preserve"><value>Encoder</value></data>
+  <data name="FileField_ENCODERSETTINGS" xml:space="preserve"><value>Encoder settings</value></data>
+  <data name="FileField_BPM" xml:space="preserve"><value>BPM</value></data>
+  <data name="FileField_MOOD" xml:space="preserve"><value>Mood</value></data>
+  <data name="FileField_MEDIA" xml:space="preserve"><value>Media</value></data>
+  <data name="FileField_LANGUAGE" xml:space="preserve"><value>Language</value></data>
+  <data name="FileField_WORK" xml:space="preserve"><value>Work</value></data>
+  <data name="FileField_MOVEMENTNAME" xml:space="preserve"><value>Movement</value></data>
+  <data name="FileField_MOVEMENTNUMBER" xml:space="preserve"><value>Movement number</value></data>
+  <data name="FileField_MOVEMENTCOUNT" xml:space="preserve"><value>Movements</value></data>
+  <data name="FileField_GROUPING" xml:space="preserve"><value>Grouping</value></data>
+  <data name="FileField_COMPILATION" xml:space="preserve"><value>Compilation</value></data>
+  <data name="FileField_TITLESORT" xml:space="preserve"><value>Title for sorting</value></data>
+  <data name="FileField_ALBUMSORT" xml:space="preserve"><value>Album for sorting</value></data>
+  <data name="FileField_ARTISTSORT" xml:space="preserve"><value>Artist for sorting</value></data>
+  <data name="FileField_ALBUMARTISTSORT" xml:space="preserve"><value>Album artist for sorting</value></data>
+  <data name="FileField_COMPOSERSORT" xml:space="preserve"><value>Composer for sorting</value></data>
+  <data name="FileField_ORIGINALALBUM" xml:space="preserve"><value>Original album</value></data>
+  <data name="FileField_ORIGINALARTIST" xml:space="preserve"><value>Original artist</value></data>
+  <data name="FileField_ORIGINALLYRICIST" xml:space="preserve"><value>Original lyricist</value></data>
+  <data name="FileField_RELEASECOUNTRY" xml:space="preserve"><value>Release country</value></data>
+  <data name="FileField_RELEASESTATUS" xml:space="preserve"><value>Release status</value></data>
+  <data name="FileField_RELEASETYPE" xml:space="preserve"><value>Release type</value></data>
+  <data name="FileField_ASIN" xml:space="preserve"><value>ASIN</value></data>
+  <data name="FileField_SCRIPT" xml:space="preserve"><value>Script</value></data>
+  <data name="FileField_OWNER" xml:space="preserve"><value>Owner</value></data>
+  <data name="FileField_RATING" xml:space="preserve"><value>Rating</value></data>
+  <data name="FileField_REPLAYGAIN_TRACK_GAIN" xml:space="preserve"><value>Track gain</value></data>
+  <data name="FileField_REPLAYGAIN_TRACK_PEAK" xml:space="preserve"><value>Track peak</value></data>
+  <data name="FileField_REPLAYGAIN_ALBUM_GAIN" xml:space="preserve"><value>Album gain</value></data>
+  <data name="FileField_REPLAYGAIN_ALBUM_PEAK" xml:space="preserve"><value>Album peak</value></data>
+  <data name="FileField_MUSICBRAINZ_TRACKID" xml:space="preserve"><value>MusicBrainz recording ID</value></data>
+  <data name="FileField_MUSICBRAINZ_ALBUMID" xml:space="preserve"><value>MusicBrainz release ID</value></data>
+  <data name="FileField_MUSICBRAINZ_ARTISTID" xml:space="preserve"><value>MusicBrainz artist ID</value></data>
+  <data name="FileField_MUSICBRAINZ_ALBUMARTISTID" xml:space="preserve"><value>MusicBrainz album artist ID</value></data>
+  <data name="FileField_MUSICBRAINZ_RELEASEGROUPID" xml:space="preserve"><value>MusicBrainz release group ID</value></data>
+  <data name="FileField_MUSICBRAINZ_RELEASETRACKID" xml:space="preserve"><value>MusicBrainz track ID</value></data>
+  <data name="FileField_MUSICBRAINZ_WORKID" xml:space="preserve"><value>MusicBrainz work ID</value></data>
+  <data name="FileField_ACOUSTID_ID" xml:space="preserve"><value>AcoustID</value></data>
+  <data name="FileField_ACOUSTID_FINGERPRINT" xml:space="preserve"><value>AcoustID fingerprint</value></data>
+  <data name="FileField_MUSICIP_PUID" xml:space="preserve"><value>MusicIP PUID</value></data>
+  <data name="FileField_ARTISTWEBPAGE" xml:space="preserve"><value>Artist web page</value></data>
+  <data name="FileField_FILEWEBPAGE" xml:space="preserve"><value>File web page</value></data>
+  <data name="FileField_AUDIOSOURCEWEBPAGE" xml:space="preserve"><value>Audio source web page</value></data>
+  <data name="FileField_COPYRIGHTURL" xml:space="preserve"><value>Copyright URL</value></data>
+  <data name="FileField_PAYMENTWEBPAGE" xml:space="preserve"><value>Payment web page</value></data>
+  <data name="FileField_PUBLISHERWEBPAGE" xml:space="preserve"><value>Publisher web page</value></data>
+  <data name="FileField_RADIOSTATIONWEBPAGE" xml:space="preserve"><value>Radio station web page</value></data>
+  <data name="FileField_URL" xml:space="preserve"><value>Web page</value></data>
+  <data name="FileField_PODCAST" xml:space="preserve"><value>Podcast</value></data>
+  <data name="FileField_LENGTH" xml:space="preserve"><value>Length</value></data>
+  <data name="FileField_INITIALKEY" xml:space="preserve"><value>Initial key</value></data>
+  <data name="FileField_ORIGINALFILENAME" xml:space="preserve"><value>Original file name</value></data>
 </root>

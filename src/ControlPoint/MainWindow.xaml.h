@@ -16,6 +16,7 @@
 #include "GlobalHotkeys.h"
 #include "MediaControls.h"
 #include "EqEditor.h"
+#include "FileDetailsWindow.h"
 #include "Engine/ImpulseResponse.h"
 
 namespace winrt::CamelPlayer::implementation {
@@ -61,6 +62,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnQueueDragItemsCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                    Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
     void OnCoverClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayerTrackContextRequested(Microsoft::UI::Xaml::UIElement const&,
+                                       Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
     void OnPlaybackFavoriteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void showPlaybackFavorite(bool favorite);
     void OnAlbumLinkClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -260,6 +263,10 @@ private:
     Microsoft::UI::Dispatching::DispatcherQueueTimer seekTimer_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer eqTimer_{nullptr};
     std::unique_ptr<ui::EqEditor> eqEditor_;
+    ui::FileDetailsWindow fileDetails_;
+    Microsoft::UI::Xaml::Controls::MenuFlyout playerTrackMenu_{nullptr};
+    void showFileDetails(const std::string& pathUtf8, hstring const& title);
+    bool openFocusedFileDetails();
     // The impulse response the DSP card shows, read for `impulseRate_`; `impulseLoads_` drops a superseded read.
     camel::audio::Impulse impulse_;
     std::string impulseFile_;

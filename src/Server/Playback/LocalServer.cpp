@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include "Server/Library/FileDetails.h"
 #include "Server/Library/Lyrics.h"
 #include "Server/Playback/LocalServer.h"
 #include <fstream>
@@ -397,6 +398,11 @@ public:
         lyricsPath_ = pathUtf8;
         lyrics_ = read;
         return read;
+    }
+    FileDetails fileDetails(const std::string& pathUtf8) const {
+        if (!library_) return readFileDetails(pathUtf8, nullptr);
+        auto reader = library_->openReader();
+        return readFileDetails(pathUtf8, &reader);
     }
     void setDiscordTexts(const DiscordTexts& texts) {
         if (discord_) discord_->setTexts(texts);
@@ -2207,6 +2213,9 @@ DiscordStatus LocalServer::discordStatus() const {
 }
 Lyrics LocalServer::lyrics(const std::string& pathUtf8) const {
     return impl_->lyrics(pathUtf8);
+}
+FileDetails LocalServer::fileDetails(const std::string& pathUtf8) const {
+    return impl_->fileDetails(pathUtf8);
 }
 void LocalServer::setDiscordTexts(const DiscordTexts& texts) {
     impl_->setDiscordTexts(texts);
