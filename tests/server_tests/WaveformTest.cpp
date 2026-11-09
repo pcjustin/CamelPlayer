@@ -163,6 +163,20 @@ TEST(Waveform, AFileAndADsdFileAreRead) {
     EXPECT_LT((*dsd)[kWaveformPeaks * 3 / 4], 30); // silence after it
 }
 
+// A FLAC that ends short of its STREAMINFO length, or fails its MD5 at the end, still has what was decoded: playback
+// plays it, so its waveform and its loudness are made from it.
+TEST(Waveform, AFileThatFailsOnlyAtItsEndIsStillRead) {
+    for (const char* name : {"truncated", "damaged"}) {
+        const auto file = testutil::testFile(name);
+        const auto peaks = readWaveform(file, {});
+        ASSERT_TRUE(peaks.has_value()) << name;
+        EXPECT_EQ(*std::ranges::max_element(*peaks), 255) << name;
+        AlbumMeasure measure({file});
+        ASSERT_TRUE(measure.run({}, 1));
+        EXPECT_TRUE(measure.result().tracks.front().has_value()) << name;
+    }
+}
+
 TEST(Waveform, StoredPerFileAndDroppedWhenTheFileChanges) {
     const auto dir = freshDir("store");
     LibraryStore store(dir);

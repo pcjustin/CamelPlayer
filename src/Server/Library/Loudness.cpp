@@ -102,16 +102,25 @@ std::optional<Measured> measure(const std::filesystem::path& file, const Decoder
     std::vector<float> floats(kFrames * info.channels);
     std::vector<int32_t> integers(decoder->readsFloat() ? 0 : kFrames * info.channels);
     const float scale = 1.0f / float(1u << (std::clamp(info.bitsPerSample, 8u, 32u) - 1));
+    uint64_t decoded = 0;
     for (;;) {
         if (cancelled && cancelled()) return std::nullopt;
         size_t frames = 0;
-        if (decoder->readsFloat()) {
-            frames = decoder->readFloat(floats.data(), kFrames);
-        } else {
-            frames = decoder->read(integers.data(), kFrames);
-            for (size_t i = 0; i < frames * info.channels; ++i) floats[i] = float(integers[i]) * scale;
+        try {
+            if (decoder->readsFloat()) {
+                frames = decoder->readFloat(floats.data(), kFrames);
+            } else {
+                frames = decoder->read(integers.data(), kFrames);
+                for (size_t i = 0; i < frames * info.channels; ++i) floats[i] = float(integers[i]) * scale;
+            }
+        } catch (const audio::Error&) {
+            // A FLAC whose length or MD5 disagrees with its STREAMINFO fails only at its end, as playback reports;
+            // what was decoded before stands.
+            if (decoded == 0) throw;
+            break;
         }
         if (frames == 0) break;
+        decoded += frames;
         if (peaks) peaks->add(floats.data(), frames);
         for (size_t at = 0; at < frames;) {
             const size_t n = std::min(frames - at, step - fed % step);

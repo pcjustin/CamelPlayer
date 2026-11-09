@@ -93,7 +93,7 @@ function Test-Loom {
 }
 
 function Test-Miri {
-    foreach ($module in 'ring', 'dts_abi') {
+    foreach ($module in 'ring', 'dts_abi', 'dsd_pcm_abi') {
         Invoke-Logged "miri-$module" 'cargo' @('+nightly', 'miri', 'test', '--locked', '--manifest-path', "`"$rust`"",
             '-p', 'camel_audio_engine', "${module}::")
     }
