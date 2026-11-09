@@ -85,6 +85,7 @@ public:
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
         std::function<bool()> coversShown;
         std::function<PlaybackReads()> playback;
+        bool watchChanges = true; // off in tests, standing for a share whose change notifications are missed
     };
     explicit LibraryMonitor(LibraryStore& store);
     LibraryMonitor(LibraryStore& store, const Options& options);
@@ -97,6 +98,10 @@ public:
     void rescanAll();
     // Scans a root the user just added, at High.
     void scanAdded(int64_t root);
+    // Scan now and Scan this folder: every online root, or `folder` of `root` and everything below it, finding only what
+    // changed, at High as the user asked for it; a root whose scan runs already is left to it.
+    void scanAll();
+    void scanFolder(int64_t root, const std::filesystem::path& folder);
     // Stops scanning without waiting, which the destructor does.
     void cancel();
 

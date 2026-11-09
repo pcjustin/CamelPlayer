@@ -97,6 +97,7 @@ struct MainWindow : MainWindowT<MainWindow> {
                                             Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRemoveFolderClick(Windows::Foundation::IInspectable const&,
                                                Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnScanNowClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     // Automatic updates (docs/Plan.md §8.6).
     void OnUpdateSwitchToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnArtistPicturesToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

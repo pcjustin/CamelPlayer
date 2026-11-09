@@ -40,7 +40,7 @@ The screenshots show a demo library with made-up albums and covers.
 
 ### Library
 
-- **Local folders and NAS shares**, several added at once, scanned in the background at a scan speed you choose (low by default, so the NAS and the network stay free) and followed as files change. Offline folders keep their tracks, and moved files keep their history, favorites and playlist entries.
+- **Local folders and NAS shares**, several added at once, scanned in the background at a scan speed you choose (low by default, so the NAS and the network stay free) and followed as files change, with Scan now and Scan this folder for a change a share did not report. Offline folders keep their tracks, and moved files keep their history, favorites and playlist entries.
 - **Browsing:** Home, an album wall sorted by title, artist, year or date added, artists, composers, genres, years, a sortable track list, album details by disc with format badges, and folder pages that play the whole folder and show each track's number and file name, all with covers. Album covers are sized so that every row fills the window.
 - **A jump bar** beside the album, artist, composer and genre lists goes straight to #, A–Z, kana or Han.
 - **A folder tree** in foobar2000's style, if you turn it on in Settings: folders open in place with their track counts, tracks show their file names, and the tree opens as you left it.

@@ -1544,6 +1544,11 @@ public:
         }
         refresh_ = true;
     }
+    void scanAll() { scanAll_ = true; }
+    void scanFolder(int64_t root, const Path& folder) {
+        std::lock_guard lock(userMutex_);
+        folderRequests_.emplace_back(root, folder);
+    }
 
 private:
     struct Watch {
@@ -1647,14 +1652,14 @@ private:
                                     w.prepare("UPDATE roots SET online=1 WHERE id=?").bind(1, id).run();
                                 })
                                 .get();
-                        if (!watches.contains(id) || !watches.at(id)->pending) {
+                        if (!watches.contains(id) || (options_.watchChanges && !watches.at(id)->pending)) {
                             watches.erase(id);
                             auto watch = std::make_unique<Watch>();
                             watch->pace = scanner_.pace(path);
                             watch->directory =
                                 openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
                             watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-                            if (watch->directory && watch->event) watch->arm();
+                            if (watch->directory && watch->event && options_.watchChanges) watch->arm();
                             watch->root = path;
                             watch->due = time;
                             watch->lastPoll = time;
@@ -1673,6 +1678,27 @@ private:
                     std::erase_if(watches, [&](const auto& pair) { return !live.contains(pair.first); });
                 }
                 const bool rescan = rescan_.exchange(false);
+                // Scan now and Scan this folder start no second scan of a root that scans already.
+                const bool everyRoot = scanAll_.exchange(false);
+                std::vector<std::pair<int64_t, Path>> folderRequests;
+                {
+                    std::lock_guard lock(userMutex_);
+                    folderRequests.swap(folderRequests_);
+                    // A scan that has just ended counts as ended, though its entry goes later in this pass.
+                    const auto scanning = [&](int64_t id) {
+                        const auto scan = scans.find(id);
+                        return scan != scans.end() && scan->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+                    };
+                    for (const auto& [id, watch] : watches)
+                        if (!scanning(id) &&
+                            (everyRoot || std::ranges::any_of(folderRequests, [id](const auto& r) { return r.first == id; }))) {
+                            watch->due = Clock::now();
+                            if (everyRoot) watch->full = true;
+                            for (const auto& [root, folder] : folderRequests)
+                                if (root == id) watch->changed.insert(folder);
+                            userRoots_.insert(id);
+                        }
+                }
                 for (auto& [id, ptr] : watches) {
                     auto& watch = *ptr;
                     if (rescan) {
@@ -1750,6 +1776,8 @@ private:
     std::atomic<bool> rescan_ = false;
     std::mutex userMutex_;
     std::set<int64_t> userRoots_; // roots whose next scan the user asked for
+    std::vector<std::pair<int64_t, Path>> folderRequests_;
+    std::atomic<bool> scanAll_ = false;
     std::jthread worker_;
     std::jthread fingerprints_;
 };
@@ -1769,6 +1797,12 @@ void LibraryMonitor::rescanAll() {
 }
 void LibraryMonitor::scanAdded(int64_t root) {
     impl_->scanAdded(root);
+}
+void LibraryMonitor::scanAll() {
+    impl_->scanAll();
+}
+void LibraryMonitor::scanFolder(int64_t root, const std::filesystem::path& folder) {
+    impl_->scanFolder(root, folder);
 }
 
 int64_t libraryDeletions(sqlite::Database& db) {

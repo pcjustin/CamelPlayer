@@ -1285,6 +1285,31 @@ void LibraryView::resetSelection() {
     });
 }
 
+winrt::fire_and_forget LibraryView::scanNow(std::shared_ptr<IServer> server, std::optional<int64_t> folder,
+                                            Microsoft::UI::Xaml::XamlRoot root) {
+    if (!server) co_return;
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    auto started = LibraryScanStart::Running;
+    try {
+        started = server->scanLibraryNow(folder);
+    } catch (const std::exception& e) {
+        camel::log::warn("scan now: %s", e.what());
+        co_return;
+    }
+    if (started != LibraryScanStart::Offline) co_return;
+    co_await foreground;
+    ContentDialog dialog;
+    ui::placeDialog(dialog, root);
+    dialog.Title(box_value(tr(L"Library_ScanOfflineTitle")));
+    TextBlock text;
+    text.Text(tr(folder ? L"Library_ScanFolderOffline" : L"Library_ScanAllOffline"));
+    text.TextWrapping(TextWrapping::Wrap);
+    dialog.Content(text);
+    dialog.CloseButtonText(tr(L"Library_ScanOfflineClose"));
+    co_await dialog.ShowAsync();
+}
+
 winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tracks) {
     auto strong = get_strong();
     ContentDialog dialog;
@@ -1643,6 +1668,27 @@ void LibraryView::OnRowContextRequested(UIElement const& sender, Input::ContextR
         for (const auto& entry :
              ui::appendFileDetailsMenu(rowMenu_, [this] { ui::openFileDetails(menuRow_.value, menuRow_.title); }))
             rowMarks_.push_back(entry);
+        rowScanSeparator_ = MenuFlyoutSeparator();
+        rowMenu_.Items().Append(rowScanSeparator_);
+        rowScan_ = MenuFlyoutItem();
+        rowScan_.Text(tr(L"Library_MenuScanFolder"));
+        FontIcon scanIcon;
+        scanIcon.Glyph(L"\xE895");
+        rowScan_.Icon(scanIcon);
+        rowScan_.Click([this](auto&&, auto&&) { scanNow(server_, menuRow_.id, XamlRoot()); });
+        rowMenu_.Items().Append(rowScan_);
+    }
+    // A scan already running leaves the folder's scan unavailable until it ends.
+    const bool folderRow = menuRow_.folder && current_.mode == Mode::Folders;
+    rowScanSeparator_.Visibility(folderRow ? Visibility::Visible : Visibility::Collapsed);
+    rowScan_.Visibility(folderRow ? Visibility::Visible : Visibility::Collapsed);
+    if (folderRow) {
+        bool scanning = false;
+        try {
+            scanning = server_ && server_->libraryScanProgress().scans > 0;
+        } catch (const std::exception&) {
+        }
+        rowScan_.IsEnabled(!scanning);
     }
     for (const auto& entry : rowMarks_) entry.Visibility(item.IsTrack() ? Visibility::Visible : Visibility::Collapsed);
     const bool named = group && (row.composer || current_.field == LibraryGroupField::Artist);

@@ -167,6 +167,9 @@ struct Lyrics {
     bool operator==(const Lyrics&) const = default;
 };
 
+// What a scan the user asked for did: started, or not, as one runs already or its library folders are offline.
+enum class LibraryScanStart : uint8_t { Started, Running, Offline };
+
 // A text tag of a file as its tag format holds it (Library/FileDetails.h).
 struct FileTag {
     std::string key;   // as the format names it: TPE1, TXXX:MusicBrainz Album Id, ©ART, IART
@@ -394,6 +397,8 @@ public:
     // Settings › Reset (docs/Plan.md §8.2): reread every tag of every root, keeping play statistics and playlists;
     // delete the generated cover thumbnails.
     virtual void rereadLibrary() = 0;
+    // Scan now (no folder) and Scan this folder (a folder of the Folders page): only what changed, at High.
+    virtual LibraryScanStart scanLibraryNow(std::optional<int64_t> folder) = 0;
     virtual void clearArtworkCache() = 0;
     // Home (docs/Plan.md §8.2): albums by their latest play, newest first.
     virtual LibraryAlbumPage recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token = {}) const = 0;

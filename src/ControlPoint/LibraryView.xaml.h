@@ -29,6 +29,9 @@ struct LibraryView : LibraryViewT<LibraryView> {
     // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:favoriteArtists, smart:neverPlayed); starts a
     // fresh navigation history.
     void show(hstring const& tag, hstring const& title);
+    // Scan now (no folder) and Scan this folder; says so when the library folders, or the folder's, are offline.
+    static winrt::fire_and_forget scanNow(std::shared_ptr<camel::server::IServer> server, std::optional<int64_t> folder,
+                                          Microsoft::UI::Xaml::XamlRoot root);
     // `leave`, when set, is what Back runs: return to the page the album or artist was opened from. `keepHistory` opens
     // it over the current library view instead, so Back returns there.
     void showAlbum(int64_t album, hstring const& title, std::function<void()> leave = nullptr, bool keepHistory = false);
@@ -271,6 +274,8 @@ private:
     std::vector<camel::server::LibraryFolderEntry> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};
+    Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase rowScanSeparator_{nullptr};
+    Microsoft::UI::Xaml::Controls::MenuFlyoutItem rowScan_{nullptr};          // Scan this folder, for folders only
     std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowMarks_; // favorites and statistics, for tracks only
     // Favorite artist entries, for artist and composer rows and artist chips only.
     std::vector<Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase> rowArtistMarks_, cardArtistMarks_;

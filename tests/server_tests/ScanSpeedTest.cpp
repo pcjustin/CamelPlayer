@@ -9,9 +9,18 @@
 #include <functional>
 #include <thread>
 
+#include <wil/resource.h>
+
+#include <future>
+
+#include "Common/DecoderRegistry.h"
+#include "Engine/decode/IDecoder.h"
 #include "Common/settings/Settings.h"
+#include "Common/util/Text.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryStore.h"
+#include "Server/Playback/LocalServer.h"
+#include "Tools/testaudio/TestAudio.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -143,4 +152,122 @@ TEST(ScanSpeed, RescanningAndAddingAFolderAreTheUsersScans) {
     monitor.scanAdded(scanner.addRoot(dir / "more"));
     EXPECT_TRUE(waitFor([&] { return store.backgroundWorkers(BackgroundWork::Covers, 4) == 4U; }));
     EXPECT_TRUE(waitFor([&] { return filesIn(store) == 2; }));
+}
+
+namespace {
+
+int64_t availableLike(LibraryStore& store, const char* name) {
+    auto row = store.openReader().prepare("SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE ?");
+    row.bind(1, std::string("%") + name);
+    row.step();
+    return row.integer(0);
+}
+
+fs::path storedRoot(LibraryStore& store) {
+    auto row = store.openReader().prepare("SELECT path FROM roots");
+    row.step();
+    return fs::path(toWide(row.text(0)));
+}
+
+} // namespace
+
+// Scan now finds what a share's missed notifications left out: a file added, one changed and one removed.
+TEST(ScanningByHand, ScanNowFindsWhatChangedWithoutNotifications) {
+    const auto dir = freshDir("scan-now");
+    const auto album = dir / "music" / "album";
+    fs::create_directories(album);
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "kept.flac");
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "gone.flac");
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "changed.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    auto options = quietMonitor();
+    options.watchChanges = false;
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return filesIn(store) == 3 && store.scanProgress().scans == 0; }));
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "added.flac");
+    fs::remove(album / "gone.flac");
+    fs::copy_file(testutil::testFile("24-96k"), album / "changed.flac", fs::copy_options::overwrite_existing);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(filesIn(store), 3); // nothing noticed it
+    monitor.scanAll();
+    EXPECT_TRUE(waitFor([&] { return availableLike(store, "added.flac") == 1 && availableLike(store, "gone.flac") == 0; }));
+    EXPECT_TRUE(waitFor([&] {
+        return store.openReader().scalar("SELECT sample_rate FROM tracks JOIN files ON files.id=tracks.file_id "
+                                         "WHERE files.path LIKE '%changed.flac'") == 96000;
+    }));
+    EXPECT_EQ(store.backgroundWorkers(BackgroundWork::Covers, 4), 4U); // the user's scan
+}
+
+// Scan this folder finds the changes in that folder and below it, and leaves the rest of the library folder alone.
+// The files differ, so the library does not take one for another moved.
+TEST(ScanningByHand, ScanThisFolderScansOnlyThatFolder) {
+    const auto dir = freshDir("scan-folder");
+    fs::create_directories(dir / "music" / "album" / "disc 2");
+    fs::create_directories(dir / "music" / "other");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "album" / "one.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    auto options = quietMonitor();
+    options.watchChanges = false;
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return filesIn(store) == 1 && store.scanProgress().scans == 0; }));
+    fs::copy_file(testutil::testFile("24-96k"), dir / "music" / "album" / "disc 2" / "below.flac");
+    fs::copy_file(testutil::testFile("no-md5"), dir / "music" / "other" / "elsewhere.flac");
+    fs::remove(dir / "music" / "album" / "one.flac");
+    monitor.scanFolder(root, storedRoot(store) / "album");
+    EXPECT_TRUE(waitFor([&] { return availableLike(store, "below.flac") == 1 && availableLike(store, "one.flac") == 0; }));
+    ASSERT_TRUE(waitFor([&] { return store.scanProgress().scans == 0; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(availableLike(store, "elsewhere.flac"), 0); // "other" was not scanned
+    monitor.scanFolder(root, storedRoot(store) / "other");
+    EXPECT_TRUE(waitFor([&] { return availableLike(store, "elsewhere.flac") == 1; }));
+}
+
+// Scan now and Scan this folder start nothing while a scan runs; once it ends they start.
+TEST(ScanningByHand, ASecondRequestWhileAScanRunsStartsNothing) {
+    const auto dir = freshDir("second-request");
+    using namespace camel::audio;
+    testaudio::writeWav(dir / "music" / "slow.wav", testaudio::makeSignal({"short", 44100, 16, 2, 0.1}), 44100, 16, 2);
+    openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k")); // fills the registry before its opener is replaced
+    const auto id = decoderId(DecoderKind::Sndfile);
+    const auto opener = decoderRegistry().find(id).value().open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener(id, opener); });
+    std::promise<void> release, started;
+    auto gate = release.get_future().share();
+    std::atomic<bool> first = true;
+    decoderRegistry().setOpener(id, [&, opener](const fs::path& path, std::string_view format, uint32_t bits) {
+        if (path.filename() == "slow.wav" && first.exchange(false)) {
+            started.set_value();
+            gate.wait();
+        }
+        return opener(path, format, bits);
+    });
+    int64_t folder = 0;
+    {
+        LibraryStore store(dir / "db");
+        LibraryScanner scanner(store);
+        scanner.addRoot(dir / "music");
+    }
+    LocalServer server(Settings{}, dir / "db" / "settings.json");
+    auto unblock = wil::scope_exit([&] {
+        if (first.load()) return;
+        try {
+            release.set_value();
+        } catch (const std::future_error&) {
+        }
+    });
+    ASSERT_EQ(started.get_future().wait_for(std::chrono::seconds(10)), std::future_status::ready); // the scan at start
+    folder = sqlite::Database(dir / "db" / "library.db", sqlite::Database::Mode::ReadOnly)
+                 .scalar("SELECT id FROM folders WHERE parent_id IS NULL")
+                 .value();
+    EXPECT_EQ(server.scanLibraryNow(std::nullopt), LibraryScanStart::Running);
+    EXPECT_EQ(server.scanLibraryNow(folder), LibraryScanStart::Running);
+    release.set_value();
+    ASSERT_TRUE(waitFor([&] { return server.libraryScanProgress().scans == 0; }));
+    EXPECT_EQ(server.scanLibraryNow(folder), LibraryScanStart::Started);
+    ASSERT_TRUE(waitFor([&] { return server.libraryScanProgress().scans == 0; }));
+    EXPECT_EQ(server.scanLibraryNow(std::nullopt), LibraryScanStart::Started);
 }

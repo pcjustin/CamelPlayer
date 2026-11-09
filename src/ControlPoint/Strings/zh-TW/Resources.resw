@@ -845,4 +845,10 @@
   <data name="Settings_ScanSpeedMedium.Content" xml:space="preserve"><value>中</value></data>
   <data name="Settings_ScanSpeedHigh.Content" xml:space="preserve"><value>高</value></data>
   <data name="Settings_ScanSpeedNote.Text" xml:space="preserve"><value>背景媒體庫工作（掃描、封面、指紋和 ReplayGain 分析）佔用網路、NAS 和這台電腦的程度。低速每種工作只用一個執行緒，中速用一半，高速用到每種工作能用的最多。新增資料夾或重建媒體庫時一律用高速；任何速度下都以播放優先。</value></data>
+  <data name="Settings_ScanNow.Content" xml:space="preserve"><value>立即掃描</value></data>
+  <data name="Library_MenuScanFolder" xml:space="preserve"><value>掃描這個資料夾</value></data>
+  <data name="Library_ScanOfflineTitle" xml:space="preserve"><value>離線</value></data>
+  <data name="Library_ScanFolderOffline" xml:space="preserve"><value>這個資料夾所在的磁碟或 NAS 分享目前離線，現在無法掃描。恢復連線後會再自動掃描。</value></data>
+  <data name="Library_ScanAllOffline" xml:space="preserve"><value>所有媒體庫資料夾都離線，現在無法掃描。恢復連線後會再自動掃描。</value></data>
+  <data name="Library_ScanOfflineClose" xml:space="preserve"><value>確定</value></data>
 </root>

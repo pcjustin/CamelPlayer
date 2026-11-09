@@ -457,6 +457,24 @@ public:
         if (libraryMonitor_) libraryMonitor_->rescanAll();
     }
 
+    LibraryScanStart scanLibraryNow(std::optional<int64_t> folder) {
+        auto db = library().openReader();
+        if (!libraryMonitor_) throw std::logic_error("Server library is not configured");
+        if (library().scanProgress().scans > 0) return LibraryScanStart::Running;
+        if (!folder) {
+            if (db.scalar("SELECT COUNT(*) FROM roots WHERE removed IS NULL AND online=1").value_or(0) == 0)
+                return LibraryScanStart::Offline;
+            libraryMonitor_->scanAll();
+            return LibraryScanStart::Started;
+        }
+        auto row = db.prepare("SELECT f.path,f.root_id,r.online FROM folders f JOIN roots r ON r.id=f.root_id "
+                              "WHERE f.id=? AND r.removed IS NULL");
+        if (!row.bind(1, *folder).step()) throw std::invalid_argument("unknown library folder");
+        if (row.integer(2) == 0) return LibraryScanStart::Offline;
+        libraryMonitor_->scanFolder(row.integer(1), std::filesystem::path(toWide(row.text(0))));
+        return LibraryScanStart::Started;
+    }
+
     void clearArtworkCache() {
         if (artwork_) artwork_->clear();
     }
@@ -2066,6 +2084,9 @@ PlayStatistics LocalServer::playStatistics(const PlayStatisticsQuery& query, con
 }
 void LocalServer::rereadLibrary() {
     impl_->rereadLibrary();
+}
+LibraryScanStart LocalServer::scanLibraryNow(std::optional<int64_t> folder) {
+    return impl_->scanLibraryNow(folder);
 }
 
 void LocalServer::clearArtworkCache() {

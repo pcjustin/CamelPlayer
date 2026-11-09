@@ -1229,6 +1229,8 @@ void MainWindow::showScanProgress() {
     } catch (const std::exception&) {
         return; // no library configured
     }
+    // A scan already running leaves Scan now unavailable until it ends.
+    ScanNowButton().IsEnabled(progress.scans == 0);
     std::wstring text;
     if (progress.scans && progress.finishing == progress.scans) {
         text = tr(L"Library_Finishing");
@@ -1961,6 +1963,11 @@ winrt::fire_and_forget MainWindow::OnAddFolderClick(Windows::Foundation::IInspec
         submitCommand(std::move(command));
     }
     if (!folders.empty()) refreshRoots();
+}
+
+void MainWindow::OnScanNowClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    ScanNowButton().IsEnabled(false);
+    LibraryView::scanNow(server_, std::nullopt, ContentLayout().XamlRoot());
 }
 
 winrt::fire_and_forget MainWindow::OnRemoveFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

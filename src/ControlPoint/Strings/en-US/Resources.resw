@@ -845,4 +845,10 @@
   <data name="Settings_ScanSpeedMedium.Content" xml:space="preserve"><value>Medium</value></data>
   <data name="Settings_ScanSpeedHigh.Content" xml:space="preserve"><value>High</value></data>
   <data name="Settings_ScanSpeedNote.Text" xml:space="preserve"><value>How much of the network, the NAS and this computer background library work takes: scanning, covers, fingerprints and ReplayGain analysis. Low uses one worker of each, Medium half, High as many as each can use. Adding a folder or rebuilding the library always runs at High, and playback still comes first at every speed.</value></data>
+  <data name="Settings_ScanNow.Content" xml:space="preserve"><value>Scan now</value></data>
+  <data name="Library_MenuScanFolder" xml:space="preserve"><value>Scan this folder</value></data>
+  <data name="Library_ScanOfflineTitle" xml:space="preserve"><value>Offline</value></data>
+  <data name="Library_ScanFolderOffline" xml:space="preserve"><value>This folder's drive or NAS share is offline, so it cannot be scanned now. It is scanned again when it comes back.</value></data>
+  <data name="Library_ScanAllOffline" xml:space="preserve"><value>Every library folder is offline, so nothing can be scanned now. Each is scanned again when it comes back.</value></data>
+  <data name="Library_ScanOfflineClose" xml:space="preserve"><value>OK</value></data>
 </root>
