@@ -1,14 +1,27 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3 and 0.3.0 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance and NAS runs were not repeated for 0.2.0, 0.2.1, 0.2.2 or 0.3.0. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3, 0.3.0 and 0.4.0 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.0, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2 or 0.3.0. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
+
+On 2026-11-09, for 0.4.0, a full Release run of the release build on `f839cdf` passed all 976 enabled C++ tests, the 100k-track search latency target included, and all 97 Rust Engine tests passed. Two tests changed after it, in `6456d47`, for the AddressSanitizer run below; the program did not. No Debug run was made for 0.4.0.
+
+The package was checked on 2026-11-10: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt` by path, size and hash, the program reports version 0.4.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started through Explorer on an empty data folder, it recorded the installation as checked for 0.4.0, and closed through the tray at 12 s it exited in 2 s.
 
 On 2026-11-08, for 0.3.0, a full Release run of the release build passed all 904 enabled C++ tests, the 100k-track search latency target included, and all 95 Rust Engine tests passed. The whole Rust workspace passed 826 tests; the one left out is a measurement of the DSD remodulator, run by hand. No Debug run was made for 0.3.0.
 
 The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt`, the program reports version 0.3.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started on an empty data folder and closed through the tray at 6–20 s, it exited cleanly every time. Before the fix to exiting, 3 of 8 such runs crashed on exit.
 
 ## Sanitizers
+
+On 2026-11-09, for 0.4.0, on `f839cdf` with VERSION at 0.4.0, 7 of the 8 checks passed in 3,086 s:
+
+- `/analyze` on the four files with annotated locks;
+- Loom on the Engine's ring, and Miri on the DTS and DSD-to-PCM C ABIs and the ring;
+- the C++ suite under UndefinedBehaviorSanitizer, all 976 tests;
+- 600 s each of fuzzing: the DTS frame reader 54,171 runs, the format probe 59,522 and the network messages 165,462, none failing.
+
+The C++ suite under AddressSanitizer stopped on a use after scope in a test helper: the engine calls a copy of its listener outside its lock, and the helper that records the first started snapshot was destroyed while such a call wrote into it. With the helper's state shared with the listener, and a first-scan test given the High scan speed it had before Low became the default, the suite under AddressSanitizer passed on `6456d47` on 2026-11-10, 974 tests in 857 s, the same two time limits left out; the seven test files that use the helper had passed 20 runs in a row under it. Two runs between failed on time limits only, the first-scan test and once an AirPlay group test, while a stray search held one of the cores; each passed alone.
 
 From 0.3.0 on, every release runs `build.ps1 -Sanitizers` before it is published. On 2026-11-08, for 0.3.0, on `cf62206` with VERSION at 0.3.0, the code of the release, all 8 checks passed in 4,820 s:
 
@@ -21,6 +34,8 @@ From 0.3.0 on, every release runs `build.ps1 -Sanitizers` before it is published
 Two earlier runs that day also passed all 8: on `52449ef`, before Symphonia left FLAC covers out, in 4,884 s, and on `c245561`, before the three fixes ahead of that; `/analyze` had found a local variable shadowing another in `LocalServer.cpp`, renamed in `c245561`. A first run before that stopped in the AddressSanitizer step when the disk filled.
 
 ## Hardware
+
+On 2026-11-09, before 0.4.0, all 97 hardware tests passed twice on the release candidate, in 196 and 185 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
 
 On 2026-11-08, before 0.3.0, all 97 hardware tests passed twice on the release build, in 184 and 183 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
 
@@ -55,6 +70,12 @@ Over UPnP, each of the three players played FLAC from the NAS with seeks and gap
 The HomePod pair played from the NAS with a seek, a pause, a track change, a DSP change, the receiver's own volume and a language change that did not stop the music, both speakers heard and no noise; an iPhone taking it over stopped CamelPlayer with "in use by another source". It then played 2 hours and 3 minutes unbroken, 27 CD-format tracks in order, "bit-perfect to the receiver" throughout and no AirPlay warning, error or resend in the log, and the owner heard the two speakers still in step afterwards. Separated in the Home app, one HomePod alone was found and played. Paired again, the pair came back under a new device ID; on 2026-11-08 the release build found it and moved the saved pair's entry, enabled state and volume (29) to the new ID, recording its two speakers, and the old entry went.
 
 ## In the app
+
+Checked by hand on 2026-11-09 in Release builds for 0.4.0:
+
+- On a local library of 13 files of every format copied from the NAS, on the Chord DAVE: the ReplayGain analysis measured every untagged track and made its waveform in the same pass. DSD64 played as native DSD with its waveform made while it played, in about 18 s, and no underrun; a click on the waveform seeked, and the pointer showed the time there. The signal path showed ReplayGain −7.4 dB from the analysis, −4.1 dB from a tag and +13.7 dB, not clipping at a peak of 0.17. With the window set to any time, the rest got their waveforms, DSD128 and DFF included.
+- Two FLAC tracks of an album in the owner's library, whose frame count does not match their STREAMINFO, played but got no waveform; the ReplayGain analysis had given up on such files since 0.3.0. Both now keep what was decoded before the end.
+- Go to playing in the folder tree, on a generated library of 160 folders and 720 WAV files with every folder open: the 0.4.0 package before the fix stopped eight rows above the playing track. After it, the track was shown from the button, from Ctrl+L at the top of the tree, and with the library folder closed, so that all 160 folders opened again at once.
 
 Checked by hand on 2026-11-07 and 2026-11-08 in Release builds for 0.3.0, on a copy of the owner's library and settings (ASIO on the Chord DAVE, music on a NAS over Wi-Fi):
 
@@ -111,6 +132,15 @@ Measured on 2026-10-24 after the scan speed-up, in Release with caches not flush
 The run before the speed-up, earlier the same day, measured a 100k-track search first page at p95 85.4 ms and one- and two-character fallback searches at p95 1,146 and 939 ms. Its synthetic first scan took 897.3 s, with the first 500-file batch at 633.3 s; the same NAS share took 10,507 s to scan fully (147 diagnostics) and 192.7 s to rescan unchanged (no updates, 4 diagnostics). Fingerprinting then hashed whole files: a run over that share was stopped after 157 of 86,680 files (3.21 GB) in 438 s, a rate that projected about 109 hours for its 2.87 TB, and the local index passed the SQLite integrity check afterwards. Fingerprints have since been sampled from the first and last 64 KiB of each file.
 
 ## NAS
+
+On 2026-11-09, for 0.4.0, the release candidate played from the NAS on the Chord DAVE over ASIO, on a copy of the owner's library and settings with the library still at schema 20, so that the start upgraded it. The first startup scan of the 86,565 files took 593 s, as the first complete scan of a new version reads every MP3 and every file an earlier version refused again; the next start's scan took 113 s, at the Low scan speed. No underrun was logged, and the FLAC played bit-perfect with its waveform shown. Measured on the process, with the CPU as a share of one core:
+
+| Span | Seconds | Read (MB) | Network (MB) | CPU |
+|---|---|---|---|---|
+| Idle after the scan | 34 | 54.9 | 11.9 | 48.3% |
+| A FLAC 16/44.1 track | 93 | 167.5 | 80.4 | 32.7% |
+| A DSD64 track | 88 | 320.4 | 168.8 | 30.5% |
+| An MP3 track | 69 | 82.8 | 29.2 | 19.6% |
 
 On 2026-11-05, for 0.2.3, a track played from the NAS on the Chord DAVE over ASIO while Settings › Rebuild library reread a copy of the owner's 86,479-file library from it. No underrun occurred, and the median start, seek, track change, pause, play, queue, settings, album wall and search suggestion took 47, 1,199, 836, 467, 15, 15, 5, 20 and 47 ms, against 63, 1,220, 885, 464, 15, 15, 12, 27 and 51 ms with the library idle. The rebuild read 1,201 files in 162 s while playing. The share answered slowly that night: the app's startup scan took 374.5 s at 00:45 and 28–63 s after 06:30, against 32–33 s on 2026-11-03.
 
