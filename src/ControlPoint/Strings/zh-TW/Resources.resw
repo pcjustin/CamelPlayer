@@ -193,7 +193,7 @@
   <data name="Badge_DspBypassedRemodulatedTip" xml:space="preserve"><value>DSD 重新調變成較低的 DSD 取樣率後送往裝置；音量、ReplayGain 等所有 PCM 處理都已略過。</value></data>
   <data name="Library_SortCombo.AutomationProperties.Name" xml:space="preserve"><value>排序方式</value></data>
   <data name="Player_Position.AutomationProperties.Name" xml:space="preserve"><value>播放位置</value></data>
-  <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>開啟播放中的專輯</value></data>
+  <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>顯示歌詞</value></data>
   <data name="Settings_Advanced.Header" xml:space="preserve"><value>緩衝與時序</value></data>
   <data name="Settings_Decoders.Text" xml:space="preserve"><value>解碼器</value></data>
   <data name="Status_Output.Text" xml:space="preserve"><value>輸出格式</value></data>
@@ -643,7 +643,7 @@
   <data name="Tip_RepeatOff" xml:space="preserve"><value>循環：關閉</value></data>
   <data name="Tip_RepeatOne" xml:space="preserve"><value>循環：單曲</value></data>
   <data name="Tip_RepeatAll" xml:space="preserve"><value>循環：佇列</value></data>
-  <data name="Player_Cover.ToolTipService.ToolTip" xml:space="preserve"><value>開啟播放中的專輯</value></data>
+  <data name="Player_Cover.ToolTipService.ToolTip" xml:space="preserve"><value>顯示歌詞</value></data>
   <data name="Library_PlayButton.Text" xml:space="preserve"><value>播放</value></data>
   <data name="Settings_VolumeCard.Text" xml:space="preserve"><value>音量與 ReplayGain</value></data>
   <data name="Settings_DspChain.Text" xml:space="preserve"><value>DSP 處理</value></data>
@@ -728,4 +728,7 @@
   <data name="Volume_ReceiverSlider" xml:space="preserve"><value>{0} 的音量</value></data>
   <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>隨 Windows 啟動</value></data>
   <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>已在 Windows 的啟動設定中關閉（設定 › 應用程式 › 啟動，或工作管理員）。請在那裡開啟，CamelPlayer 才會隨 Windows 啟動。</value></data>
+  <data name="Lyrics_Show" xml:space="preserve"><value>顯示歌詞</value></data>
+  <data name="Lyrics_Hide" xml:space="preserve"><value>隱藏歌詞</value></data>
+  <data name="Lyrics_None.Text" xml:space="preserve"><value>這首歌沒有歌詞</value></data>
 </root>

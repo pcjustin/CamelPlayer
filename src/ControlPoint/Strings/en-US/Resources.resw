@@ -193,7 +193,7 @@
   <data name="Badge_DspBypassedRemodulatedTip" xml:space="preserve"><value>DSD is modulated again at a lower DSD rate and goes to the device as DSD; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>
   <data name="Library_SortCombo.AutomationProperties.Name" xml:space="preserve"><value>Sort by</value></data>
   <data name="Player_Position.AutomationProperties.Name" xml:space="preserve"><value>Playback position</value></data>
-  <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>Open the playing album</value></data>
+  <data name="Player_Cover.AutomationProperties.Name" xml:space="preserve"><value>Show the lyrics</value></data>
   <data name="Settings_Advanced.Header" xml:space="preserve"><value>Buffers and timing</value></data>
   <data name="Settings_Decoders.Text" xml:space="preserve"><value>Decoders</value></data>
   <data name="Status_Output.Text" xml:space="preserve"><value>Output format</value></data>
@@ -643,7 +643,7 @@
   <data name="Tip_RepeatOff" xml:space="preserve"><value>Repeat: off</value></data>
   <data name="Tip_RepeatOne" xml:space="preserve"><value>Repeat: this track</value></data>
   <data name="Tip_RepeatAll" xml:space="preserve"><value>Repeat: the queue</value></data>
-  <data name="Player_Cover.ToolTipService.ToolTip" xml:space="preserve"><value>Open the playing album</value></data>
+  <data name="Player_Cover.ToolTipService.ToolTip" xml:space="preserve"><value>Show the lyrics</value></data>
   <data name="Library_PlayButton.Text" xml:space="preserve"><value>Play</value></data>
   <data name="Settings_VolumeCard.Text" xml:space="preserve"><value>Volume and ReplayGain</value></data>
   <data name="Settings_DspChain.Text" xml:space="preserve"><value>DSP processing</value></data>
@@ -728,4 +728,7 @@
   <data name="Volume_ReceiverSlider" xml:space="preserve"><value>Volume of {0}</value></data>
   <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>Start with Windows</value></data>
   <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>Turned off in Windows' startup settings (Settings › Apps › Startup, or Task Manager). Turn it on there to start CamelPlayer with Windows.</value></data>
+  <data name="Lyrics_Show" xml:space="preserve"><value>Show the lyrics</value></data>
+  <data name="Lyrics_Hide" xml:space="preserve"><value>Hide the lyrics</value></data>
+  <data name="Lyrics_None.Text" xml:space="preserve"><value>This track has no lyrics</value></data>
 </root>

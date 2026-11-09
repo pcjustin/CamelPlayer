@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include "Server/Library/Lyrics.h"
 #include "Server/Playback/LocalServer.h"
 #include <fstream>
 
@@ -384,6 +385,19 @@ public:
     }
 
     DiscordStatus discordStatus() const { return discord_ ? discord_->status() : DiscordStatus{}; }
+
+    // Read on the caller's thread, which is never the Server's: a file on a NAS can take a moment.
+    Lyrics lyrics(const std::string& pathUtf8) const {
+        {
+            std::scoped_lock lock(lyricsMutex_);
+            if (lyricsPath_ == pathUtf8) return lyrics_;
+        }
+        Lyrics read = readLyrics(std::filesystem::path(toWide(pathUtf8)));
+        std::scoped_lock lock(lyricsMutex_);
+        lyricsPath_ = pathUtf8;
+        lyrics_ = read;
+        return read;
+    }
     void setDiscordTexts(const DiscordTexts& texts) {
         if (discord_) discord_->setTexts(texts);
     }
@@ -1985,6 +1999,9 @@ private:
     _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, audio::Error>> airplayLeft_;
     std::optional<ReceiverLeft> receiverLeft_;
+    mutable std::mutex lyricsMutex_;
+    _Guarded_by_(lyricsMutex_) mutable std::string lyricsPath_;
+    _Guarded_by_(lyricsMutex_) mutable Lyrics lyrics_;
     struct GroupBaseline {
         uint32_t master = 0;
         std::map<std::string, uint32_t> levels;
@@ -2187,6 +2204,9 @@ DataRecovery LocalServer::dataRecovery() const {
 }
 DiscordStatus LocalServer::discordStatus() const {
     return impl_->discordStatus();
+}
+Lyrics LocalServer::lyrics(const std::string& pathUtf8) const {
+    return impl_->lyrics(pathUtf8);
 }
 void LocalServer::setDiscordTexts(const DiscordTexts& texts) {
     impl_->setDiscordTexts(texts);

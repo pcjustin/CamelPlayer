@@ -153,6 +153,19 @@ struct Command {
 
 enum class PlaybackState : uint8_t { Stopped, Playing, Paused };
 
+// A line of a track's lyrics (Library/Lyrics.h).
+struct LyricLine {
+    std::optional<uint32_t> ms; // when it is sung; nothing in unsynced lyrics
+    std::string text;
+    bool operator==(const LyricLine&) const = default;
+};
+
+struct Lyrics {
+    bool synced = false;
+    std::vector<LyricLine> lines; // synced ones by time, the lines of one stamp in the order written; empty for none
+    bool operator==(const Lyrics&) const = default;
+};
+
 // A receiver of the AirPlay group in use.
 struct ReceiverState {
     std::string id, name;
@@ -415,6 +428,8 @@ public:
     virtual DataRecovery dataRecovery() const = 0;
     // Discord Rich Presence (docs/Plan.md §8.4): how far the connection and the cover tunnel are.
     virtual DiscordStatus discordStatus() const = 0;
+    // The lyrics of a track, read once per track from its tags or a .lrc beside it; the playing track's are kept.
+    virtual Lyrics lyrics(const std::string& pathUtf8) const = 0;
     // The path states' names in the app's language, for the activity's small image; the Server has no strings of its own.
     virtual void setDiscordTexts(const DiscordTexts& texts) = 0;
 };

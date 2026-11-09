@@ -36,6 +36,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/StartWithWindows.h"
+#include "Server/Library/Lyrics.h"
 #include "Common/util/Text.h"
 #include "Common/Version.h"
 #include "Engine/Dsp.h"
@@ -310,6 +311,27 @@ void MainWindow::InitializeComponent() {
     SettingsScroller().SizeChanged([this](auto&&, auto&&) { markSettingsSection(); });
     eqEditor_ = std::make_unique<ui::EqEditor>(EqCurve(), EqBands(), EqAddBandButton(),
                                                [this](const camel::EqSettings&, bool final) { eqChanged(final); });
+    // The acrylic over the lyrics' cover keeps what it last saw beneath it, so a new cover is shown by hiding it a moment.
+    LyricsBackdrop().RegisterPropertyChangedCallback(Image::SourceProperty(), [this](auto&&, auto&&) {
+        if (!LyricsBackdrop().Source()) return;
+        LyricsBackdrop().Visibility(Visibility::Collapsed);
+        LyricsAcrylic().Visibility(Visibility::Collapsed);
+        DispatcherQueue().TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [weak = get_weak()] {
+            if (const auto self = weak.get()) {
+                self->LyricsBackdrop().Visibility(Visibility::Visible);
+                self->LyricsAcrylic().Visibility(Visibility::Visible);
+            }
+        });
+    });
+    // Scrolling the lyrics by hand stops them following the music for a few seconds.
+    const auto scrolledByHand = [this] {
+        lyricsScrolledAt_ = std::chrono::steady_clock::now();
+        lyricsCentered_ = false;
+    };
+    LyricsScroller().AddHandler(UIElement::PointerWheelChangedEvent(),
+                                box_value(Input::PointerEventHandler([scrolledByHand](auto&&, auto&&) { scrolledByHand(); })),
+                                true);
+    LyricsScroller().DirectManipulationStarted([scrolledByHand](auto&&, auto&&) { scrolledByHand(); });
     Content().AddHandler(UIElement::PointerPressedEvent(),
                          box_value(Input::PointerEventHandler([this](auto&&, Input::PointerRoutedEventArgs const& e) {
                              if (e.GetCurrentPoint(nullptr).Properties().IsXButton1Pressed() && goBack()) e.Handled(true);
@@ -1293,13 +1315,16 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         artworkPath_ = s.pathUtf8;
         artworkToken_.cancel();
         artworkToken_ = {};
-        PlaybackCover().Source(nullptr);
-        if (!artworkPath_.empty())
-            ui::loadArtwork(PlaybackCover(), server_, {ArtworkKind::Track, 0, artworkPath_}, artworkToken_);
+        for (const auto& image : {PlaybackCover(), LyricsBackdrop(), LyricsNoneCover()}) {
+            image.Source(nullptr);
+            if (!artworkPath_.empty()) ui::loadArtwork(image, server_, {ArtworkKind::Track, 0, artworkPath_}, artworkToken_);
+        }
     }
     const uint32_t rate = s.source ? s.source->sampleRate : 0;
     const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
     const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
+    if (s.pathUtf8 != lyricsPath_) loadLyrics(s.pathUtf8);
+    followLyrics(pos);
 
     // The play button and the repeat button are named for what they do or show now.
     if (const Symbol symbol = s.state == PlaybackState::Playing || s.bufferingSeconds ? Symbol::Pause : Symbol::Play;
@@ -2086,6 +2111,11 @@ void MainWindow::showHotkeys() {
 void MainWindow::OnWindowKeyDown(Windows::Foundation::IInspectable const&, Input::KeyRoutedEventArgs const& e) {
     using Windows::System::VirtualKey;
     const auto key = e.Key();
+    if (key == VirtualKey::Escape && lyricsOpen_) {
+        openLyrics(false);
+        e.Handled(true);
+        return;
+    }
     if (key != VirtualKey::Space && key != VirtualKey::Left && key != VirtualKey::Right) return;
     if (capturing_ || !server_ || !Content().XamlRoot()) return;
     if (Media::VisualTreeHelper::GetOpenPopupsForXamlRoot(Content().XamlRoot()).Size() > 0) return;
@@ -2258,7 +2288,8 @@ void MainWindow::OnSettingsScrolled(Windows::Foundation::IInspectable const&, Sc
 
 void MainWindow::showTitleBack() {
     AppTitleBar().IsBackButtonVisible(
-        listeningShown() || (Library().Visibility() == Visibility::Visible && get_self<LibraryView>(Library())->canGoBack()));
+        lyricsOpen_ || listeningShown() ||
+        (Library().Visibility() == Visibility::Visible && get_self<LibraryView>(Library())->canGoBack()));
 }
 
 // Listening opens from Home's month card and keeps Home selected in the navigation pane; Back returns to Home.
@@ -2271,6 +2302,10 @@ void MainWindow::OnTitleBackRequested(TitleBar const&, Windows::Foundation::IIns
 }
 
 bool MainWindow::goBack() {
+    if (lyricsOpen_) {
+        openLyrics(false);
+        return true;
+    }
     if (!AppTitleBar().IsBackButtonVisible()) return false;
     if (listeningShown())
         showPage(L"home");
@@ -3271,18 +3306,127 @@ void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsComplet
 }
 
 void MainWindow::OnCoverClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    if (!server_ || server_->snapshot().playback.pathUtf8.empty()) return;
-    const auto snapshot = server_->snapshot();
-    const auto current = std::find_if(snapshot.queue.entries.begin(), snapshot.queue.entries.end(),
-                                      [&](const auto& entry) { return entry.id == snapshot.queueEntryId; });
-    if (current != snapshot.queue.entries.end() && current->albumId > 0) {
-        auto leave = openLibraryOverPage();
-        const bool keepHistory = !leave;
-        get_self<LibraryView>(Library())->showAlbum(current->albumId, ui::utf8(current->album), std::move(leave), keepHistory);
-    } else {
-        selectPage(L"albums");
-        showPage(L"albums");
+    openLyrics(!lyricsOpen_);
+}
+
+constexpr auto kLyricsFollowAgain = std::chrono::seconds(3);
+constexpr double kLyricsDimmed = 0.45;
+
+void MainWindow::openLyrics(bool open) {
+    lyricsOpen_ = open;
+    LyricsView().Visibility(open ? Visibility::Visible : Visibility::Collapsed);
+    const hstring tip = tr(open ? L"Lyrics_Hide" : L"Lyrics_Show");
+    ToolTipService::SetToolTip(CoverButton(), box_value(tip));
+    Automation::AutomationProperties::SetName(CoverButton(), tip);
+    showTitleBack();
+    if (!open) return;
+    lyricsCentered_ = false;
+    lyricsScrolledAt_ = {};
+    const auto path = server_ ? server_->snapshot().playback.pathUtf8 : std::string();
+    if (path != lyricsPath_) loadLyrics(path);
+    showLyrics();
+}
+
+// Asked when a track starts, open or not, so that opening finds them; the Server reads them off this thread.
+winrt::fire_and_forget MainWindow::loadLyrics(std::string path) {
+    auto strong = get_strong();
+    lyricsPath_ = path;
+    lyrics_ = {};
+    if (lyricsOpen_) showLyrics();
+    if (path.empty() || !server_) co_return;
+    auto server = server_;
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    auto read = server->lyrics(path);
+    co_await foreground;
+    if (lyricsPath_ != path) co_return;
+    lyrics_ = std::move(read);
+    if (lyricsOpen_) showLyrics();
+}
+
+void MainWindow::showLyrics() {
+    lyricsLit_.reset();
+    lyricsCentered_ = false;
+    auto lines = LyricsLines().Children();
+    lines.Clear();
+    const bool none = lyrics_.lines.empty();
+    LyricsNone().Visibility(none ? Visibility::Visible : Visibility::Collapsed);
+    LyricsScroller().Visibility(none ? Visibility::Collapsed : Visibility::Visible);
+    if (none) {
+        LyricsNoneTitle().Text(TitleText().Text());
+        hstring artist;
+        if (server_) {
+            const auto snapshot = server_->snapshot();
+            const auto current = std::ranges::find(snapshot.queue.entries, snapshot.queueEntryId, &QueueEntry::id);
+            if (current != snapshot.queue.entries.end()) artist = ui::utf8(current->artist);
+        }
+        LyricsNoneArtist().Text(artist);
+        return;
     }
+    for (const auto& line : lyrics_.lines) {
+        TextBlock text;
+        text.Text(ui::utf8(line.text));
+        text.FontSize(lyrics_.synced ? 30 : 24);
+        text.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+        text.Foreground(Media::SolidColorBrush(Windows::UI::Colors::White()));
+        text.TextAlignment(TextAlignment::Center);
+        text.HorizontalAlignment(HorizontalAlignment::Center);
+        text.TextWrapping(TextWrapping::Wrap);
+        text.Opacity(lyrics_.synced ? kLyricsDimmed : 0.9);
+        if (line.ms) {
+            text.Tapped([this, ms = *line.ms](auto&&, auto&&) {
+                const auto s = server_ ? server_->snapshot().playback : PlaybackSnapshot{};
+                if (!s.source) return;
+                Command seek;
+                seek.kind = CommandKind::Seek;
+                seek.frame = secondsToFrames(ms / 1000.0, s.source->sampleRate);
+                submitCommand(std::move(seek));
+                lyricsScrolledAt_ = {};
+                lyricsCentered_ = false;
+            });
+        }
+        lines.Append(text);
+    }
+    LyricsScroller().ChangeView(nullptr, 0.0, nullptr, true);
+    // Paused, no snapshot follows to light the line, so the position is read once the lines are laid out.
+    DispatcherQueue().TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [weak = get_weak()] {
+        const auto self = weak.get();
+        if (!self || !self->server_) return;
+        const auto s = self->server_->snapshot().playback;
+        if (s.source && s.source->sampleRate) self->followLyrics(framesToSeconds(s.position, s.source->sampleRate));
+    });
+}
+
+// The lines of the stamp being sung lit and brought to the middle, unless the user scrolled in the last seconds.
+void MainWindow::followLyrics(double seconds) {
+    if (!lyricsOpen_ || !lyrics_.synced || lyrics_.lines.empty()) return;
+    const auto at = camel::server::lyricLineAt(lyrics_, uint32_t(std::max(0.0, seconds) * 1000));
+    auto lines = LyricsLines().Children();
+    if (at != lyricsLit_) {
+        lyricsLit_ = at;
+        lyricsCentered_ = false;
+        for (uint32_t i = 0; i < lines.Size(); ++i) {
+            const bool lit = at && lyrics_.lines[i].ms == lyrics_.lines[*at].ms;
+            lines.GetAt(i).as<TextBlock>().Opacity(lit ? 1.0 : kLyricsDimmed);
+        }
+    }
+    if (!at || lyricsCentered_ || std::chrono::steady_clock::now() - lyricsScrolledAt_ < kLyricsFollowAgain) return;
+    size_t last = *at;
+    while (last + 1 < lyrics_.lines.size() && lyrics_.lines[last + 1].ms == lyrics_.lines[*at].ms) ++last;
+    const auto first = lines.GetAt(uint32_t(*at)).as<FrameworkElement>();
+    const auto end = lines.GetAt(uint32_t(last)).as<FrameworkElement>();
+    const auto top = first.TransformToVisual(LyricsLines()).TransformPoint({0, 0}).Y;
+    const auto bottom = end.TransformToVisual(LyricsLines()).TransformPoint({0, 0}).Y + float(end.ActualHeight());
+    const double middle = (top + bottom) / 2.0 - LyricsScroller().ViewportHeight() / 2.0;
+    LyricsScroller().ChangeView(nullptr, std::max(0.0, middle), nullptr, false);
+    lyricsCentered_ = true;
+}
+
+void MainWindow::OnLyricsScrollerSizeChanged(Windows::Foundation::IInspectable const&, SizeChangedEventArgs const& e) {
+    // Room above the first line and below the last, so that either can stand in the middle.
+    const double half = e.NewSize().Height / 2;
+    LyricsLines().Padding(ThicknessHelper::FromLengths(32, half, 32, half));
+    lyricsCentered_ = false;
 }
 
 void MainWindow::OnAlbumLinkClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

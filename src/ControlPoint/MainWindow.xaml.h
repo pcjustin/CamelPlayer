@@ -112,6 +112,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnOutputButtonClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnStartWithWindowsToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnLyricsScrollerSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -288,6 +289,17 @@ private:
     uint64_t shownReceiverLeft_ = 0;
     void showReceiverVolumes();
     void showStartWithWindows();
+    // The lyrics view (docs/Plan.md §8.1).
+    void openLyrics(bool open);
+    winrt::fire_and_forget loadLyrics(std::string path);
+    void showLyrics();
+    void followLyrics(double seconds);
+    bool lyricsOpen_ = false;
+    std::string lyricsPath_; // the track whose lyrics are shown or asked for
+    camel::server::Lyrics lyrics_;
+    std::optional<size_t> lyricsLit_; // the first line of the stamp being sung
+    bool lyricsCentered_ = false;     // the lit line was brought to the middle since the user last scrolled
+    std::chrono::steady_clock::time_point lyricsScrolledAt_;
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;

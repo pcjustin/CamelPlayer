@@ -82,6 +82,7 @@ public:
                                const std::string& appVersion) const override;
     DataRecovery dataRecovery() const override;
     DiscordStatus discordStatus() const override;
+    Lyrics lyrics(const std::string& pathUtf8) const override;
     void setDiscordTexts(const DiscordTexts& texts) override;
     // Where to look for network players; before the first device scan.
     void setFinderOptions(const FinderOptions& options);
