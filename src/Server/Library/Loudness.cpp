@@ -246,25 +246,31 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 counted = std::chrono::steady_clock::now();
             }
             const auto settings = options_.settings();
+            if (settings.mode == ReplayGainMode::Off) store_.caughtUp(BackgroundWork::Loudness);
             if (settings.mode == ReplayGainMode::Off || store_.scanProgress().scans > 0) {
                 running_ = false;
                 continue;
             }
             const auto album = nextAlbum();
             if (album.empty()) {
+                store_.caughtUp(BackgroundWork::Loudness);
                 running_ = false;
                 continue;
             }
-            const bool throttled = settings.speed == AnalysisSpeed::Throttled;
             // Playback comes first (docs/Plan.md §7.7): the analysis waits while the engine is not ahead on the same
-            // storage, and goes on with one thread while anything plays; an album begun with more starts again with one.
-            // Throttled analysis waits while anything plays.
-            const auto full = backgroundPace(options_.playback(), album.front().path) == BackgroundPace::Full;
-            const unsigned threads = throttled || !full ? 1u : std::max(1u, std::thread::hardware_concurrency());
+            // storage, and goes on with one thread while anything plays; otherwise it takes the scan speed's threads of
+            // the cores. An album begun with more threads than either allows starts again with fewer.
+            const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+            const auto allowed = [&] {
+                const auto pace = backgroundPace(options_.playback(), album.front().path);
+                return pace == BackgroundPace::Wait  ? 0u
+                       : pace == BackgroundPace::One ? 1u
+                                                     : store_.backgroundWorkers(BackgroundWork::Loudness, cores);
+            };
+            const unsigned threads = std::max(1u, allowed());
             const auto yield = [&] {
                 if (stop.stop_requested() || options_.settings().mode == ReplayGainMode::Off) return true;
-                const auto pace = backgroundPace(options_.playback(), album.front().path);
-                return pace == BackgroundPace::Wait || (pace == BackgroundPace::One && (throttled || threads > 1));
+                return threads > allowed();
             };
             running_ = !yield();
             if (!running_) continue;

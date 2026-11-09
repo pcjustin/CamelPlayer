@@ -14,6 +14,7 @@
 #include <future>
 #include <map>
 #include <set>
+#include <thread>
 #include <utility>
 #include "Common/util/Md5.h"
 #include "Server/Library/LibraryIdentity.h"
@@ -408,16 +409,22 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
         while (rows.step()) albums.push_back(rows.integer(0));
     }
     if (yield && yield()) return 0;
-    // Four covers at a time: on a NAS each mostly waits for the disk. When `yield` asks for the storage (playback, a
-    // scan, a cover being shown), the reads in flight stop at their next chunk.
+    // Four covers at a time at High: on a NAS each mostly waits for the disk. When `yield` asks for the storage (playback,
+    // a scan, a cover being shown), the reads in flight stop at their next chunk. A worker the scan speed leaves out waits.
     auto reading = token.child();
     std::atomic<size_t> next = 0, made = 0;
-    constexpr int kWorkers = 4;
+    constexpr unsigned kWorkers = 4;
     std::vector<std::future<void>> workers;
     workers.reserve(kWorkers);
-    for (int i = 0; i < kWorkers; ++i)
-        workers.push_back(std::async(std::launch::async, [&] {
-            for (size_t at; !reading.cancelled() && (at = next++) < albums.size();) {
+    for (unsigned i = 0; i < kWorkers; ++i)
+        workers.push_back(std::async(std::launch::async, [&, i] {
+            const auto turn = [&] {
+                while (!reading.cancelled() && next < albums.size() &&
+                       i >= store.backgroundWorkers(BackgroundWork::Covers, kWorkers))
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                return !reading.cancelled();
+            };
+            for (size_t at; turn() && (at = next++) < albums.size();) {
                 auto db = store.openReader();
                 const auto cover = albumCover(db, albums[at]);
                 std::error_code ec;

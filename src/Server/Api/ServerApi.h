@@ -65,6 +65,7 @@ struct SettingsDto {
     bool checkUpdates = true;
     OnlineLookup artistPictures = OnlineLookup::Ask;
     bool folderTree = false;
+    ScanSpeed scanSpeed = ScanSpeed::Low;
     TrackColumns trackColumns;
     DiscordSettings discord;
     std::string skippedVersion;

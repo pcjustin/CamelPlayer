@@ -601,9 +601,6 @@
   <data name="Settings_ReplayGainClip.Header" xml:space="preserve"><value>防止削波</value></data>
   <data name="Settings_ReplayGainClip.OnContent" xml:space="preserve"><value>峰值會超過滿刻度時，自動少加一點增益</value></data>
   <data name="Settings_ReplayGainClip.OffContent" xml:space="preserve"><value>峰值會超過滿刻度時，自動少加一點增益</value></data>
-  <data name="Settings_LoudnessSpeed.Header" xml:space="preserve"><value>背景分析</value></data>
-  <data name="Settings_LoudnessThrottled.Content" xml:space="preserve"><value>節流（單一執行緒）</value></data>
-  <data name="Settings_LoudnessFast.Content" xml:space="preserve"><value>快速（使用所有核心）</value></data>
   <data name="Settings_ReplayGainNote.Text" xml:space="preserve"><value>自動模式在佇列依序播放同一張專輯時用專輯增益，其他情況（包括隨機播放）用曲目增益。數值來自檔案的 ReplayGain 標籤；沒有標籤的曲目會在 ReplayGain 開啟時於背景分析（EBU R128），先分析佇列中的曲目；節流分析在播放同一磁碟或網路共用的音樂時暫停。結果只存在音樂庫，不寫回檔案。設定變更從下一首開始生效。</value></data>
   <data name="Volume_Slider.AutomationProperties.Name" xml:space="preserve"><value>音量</value></data>
   <data name="Volume_Mute" xml:space="preserve"><value>靜音</value></data>
@@ -843,4 +840,9 @@
   <data name="FileField_LENGTH" xml:space="preserve"><value>長度</value></data>
   <data name="FileField_INITIALKEY" xml:space="preserve"><value>調性</value></data>
   <data name="FileField_ORIGINALFILENAME" xml:space="preserve"><value>原始檔名</value></data>
+  <data name="Settings_ScanSpeed.Header" xml:space="preserve"><value>掃描速度</value></data>
+  <data name="Settings_ScanSpeedLow.Content" xml:space="preserve"><value>低</value></data>
+  <data name="Settings_ScanSpeedMedium.Content" xml:space="preserve"><value>中</value></data>
+  <data name="Settings_ScanSpeedHigh.Content" xml:space="preserve"><value>高</value></data>
+  <data name="Settings_ScanSpeedNote.Text" xml:space="preserve"><value>背景媒體庫工作（掃描、封面、指紋和 ReplayGain 分析）佔用網路、NAS 和這台電腦的程度。低速每種工作只用一個執行緒，中速用一半，高速用到每種工作能用的最多。新增資料夾或重建媒體庫時一律用高速；任何速度下都以播放優先。</value></data>
 </root>

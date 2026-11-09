@@ -638,6 +638,7 @@ void MainWindow::populateSettings() {
     AutoUpdateSwitch().IsOn(settings_.checkUpdates);
     ArtistPicturesSwitch().IsOn(settings_.artistPictures == camel::OnlineLookup::Allowed);
     FolderTreeSwitch().IsOn(settings_.folderTree);
+    ScanSpeedCombo().SelectedIndex(int(settings_.scanSpeed));
     DiscordSwitch().IsOn(settings_.discord.enabled);
     DiscordCoversSwitch().IsOn(settings_.discord.covers);
     DiscordCoversSwitch().IsEnabled(settings_.discord.enabled);
@@ -1081,6 +1082,7 @@ void MainWindow::readSettingsFromUi() {
     else if (settings_.artistPictures == camel::OnlineLookup::Allowed)
         settings_.artistPictures = camel::OnlineLookup::Refused;
     settings_.folderTree = FolderTreeSwitch().IsOn();
+    if (const int speed = ScanSpeedCombo().SelectedIndex(); speed >= 0) settings_.scanSpeed = camel::ScanSpeed(speed);
     settings_.discord.enabled = DiscordSwitch().IsOn();
     settings_.discord.covers = DiscordCoversSwitch().IsOn();
     settings_.eq.enabled = EqSwitch().IsOn();
@@ -1099,7 +1101,6 @@ void MainWindow::readSettingsFromUi() {
     rg.preampDb = preamp(ReplayGainPreampBox().Value(), rg.preampDb);
     rg.noValuePreampDb = preamp(ReplayGainNoValueBox().Value(), rg.noValuePreampDb);
     rg.preventClipping = ReplayGainClipSwitch().IsOn();
-    rg.speed = LoudnessSpeedCombo().SelectedIndex() == 1 ? camel::AnalysisSpeed::Fast : camel::AnalysisSpeed::Throttled;
     settings_.crossfade.enabled = CrossfadeSwitch().IsOn();
     if (const double seconds = CrossfadeSecondsBox().Value(); !std::isnan(seconds))
         settings_.crossfade.seconds =
@@ -3923,7 +3924,6 @@ void MainWindow::showReplayGain() {
     ReplayGainPreampBox().Value(rg.preampDb);
     ReplayGainNoValueBox().Value(rg.noValuePreampDb);
     ReplayGainClipSwitch().IsOn(rg.preventClipping);
-    LoudnessSpeedCombo().SelectedIndex(rg.speed == camel::AnalysisSpeed::Fast ? 1 : 0);
     populating_ = wasPopulating;
     enableDependentFields();
     showLoudnessProgress();
@@ -3933,8 +3933,8 @@ void MainWindow::showReplayGain() {
 // A feature's own fields are disabled while it is off, so what depends on what shows.
 void MainWindow::enableDependentFields() {
     const bool replayGain = ReplayGainModeCombo().SelectedIndex() > 0;
-    for (const Control control : {Control(ReplayGainPreampBox()), Control(ReplayGainNoValueBox()),
-                                  Control(ReplayGainClipSwitch()), Control(LoudnessSpeedCombo())})
+    for (const Control control :
+         {Control(ReplayGainPreampBox()), Control(ReplayGainNoValueBox()), Control(ReplayGainClipSwitch())})
         control.IsEnabled(replayGain);
     CrossfadeSecondsBox().IsEnabled(CrossfadeSwitch().IsOn());
 }

@@ -110,6 +110,42 @@ BackgroundPace backgroundPace(const PlaybackReads& reads, const std::filesystem:
     return BackgroundPace::One;
 }
 
+namespace {
+
+uint8_t bitOf(BackgroundWork kind) {
+    return uint8_t(1u << unsigned(kind));
+}
+
+} // namespace
+
+unsigned LibraryStore::backgroundWorkers(BackgroundWork kind, unsigned high) const {
+    high = std::max(1u, high);
+    if (userScans_.load() > 0 || (followingUserScan_.load() & bitOf(kind)) != 0) return high;
+    switch (scanSpeed_.load()) {
+    case ScanSpeed::Low:
+        return 1;
+    case ScanSpeed::Medium:
+        return std::max(1u, high / 2);
+    case ScanSpeed::High:
+        break;
+    }
+    return high;
+}
+
+void LibraryStore::userScanStarted() {
+    ++userScans_;
+}
+
+void LibraryStore::userScanEnded() {
+    if (--userScans_ == 0)
+        followingUserScan_ =
+            uint8_t(bitOf(BackgroundWork::Fingerprints) | bitOf(BackgroundWork::Covers) | bitOf(BackgroundWork::Loudness));
+}
+
+void LibraryStore::caughtUp(BackgroundWork kind) {
+    if (userScans_.load() == 0) followingUserScan_ &= uint8_t(~bitOf(kind));
+}
+
 bool isNetworkPath(const std::filesystem::path& path) {
     const std::wstring text = std::filesystem::absolute(path).wstring();
     if (_wcsnicmp(text.c_str(), L"\\\\?\\UNC\\", 8) == 0) return true;

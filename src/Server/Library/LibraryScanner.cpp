@@ -1184,9 +1184,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     };
     while ((!pending.empty() || !active.empty()) && !token.cancelled()) {
         const auto turn = pace();
-        while (!pending.empty() && active.size() < (turn == BackgroundPace::Full  ? idleWorkers
-                                                    : turn == BackgroundPace::One ? 1u
-                                                                                  : 0u)) {
+        const unsigned workers = turn == BackgroundPace::Full  ? store_.backgroundWorkers(BackgroundWork::Scan, idleWorkers)
+                                 : turn == BackgroundPace::One ? 1u
+                                                               : 0u;
+        while (!pending.empty() && active.size() < workers) {
             auto work = std::move(pending.front());
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
@@ -1435,7 +1436,8 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         digests.clear();
     };
     // On a NAS each file mostly waits for network round trips (7.5 files a second one by one), so sixteen are hashed at
-    // once there, as the scan reads them; four on a local disk; one while playback or covers share the time.
+    // once there at High, as the scan reads them; four on a local disk; one while playback or covers share the time. A
+    // lower speed set meanwhile stops the workers it leaves out after their file; a higher one adds them at the next batch.
     struct Result {
         std::optional<std::vector<uint8_t>> digest;
         std::string error;
@@ -1447,13 +1449,17 @@ FingerprintReport LibraryScanner::fingerprint(int64_t root, const CancellationTo
         const size_t count = std::min(kBatch, pending.size() - first);
         std::vector<Result> results(count);
         std::atomic<size_t> next = 0;
-        const int threads = pace() != BackgroundPace::Full ? 1 : network ? 16 : 4;
+        const unsigned high = network ? 16 : 4;
+        const auto allowed = [&] {
+            return pace() != BackgroundPace::Full ? 1u : store_.backgroundWorkers(BackgroundWork::Fingerprints, high);
+        };
+        const unsigned threads = allowed();
         std::vector<std::future<void>> workers;
         workers.reserve(threads);
-        for (int i = 0; i < threads; ++i)
-            workers.push_back(std::async(std::launch::async, [&] {
+        for (unsigned i = 0; i < threads; ++i)
+            workers.push_back(std::async(std::launch::async, [&, i] {
                 const bool background = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
-                for (size_t at; (at = next++) < count;) {
+                for (size_t at; (i == 0 || i < allowed()) && (at = next++) < count;) {
                     const auto& file = pending[first + at];
                     try {
                         results[at].digest = library::fileDigest(Path(toWide(file.path)), file.version, token, backgroundBlocked);
@@ -1506,7 +1512,10 @@ public:
                         const auto report = scanner_.fingerprint(id, token_);
                         complete = (report.complete || !report.diagnostics.empty()) && complete;
                     }
-                    if (complete) settled = version;
+                    if (complete) {
+                        settled = version;
+                        store_.caughtUp(BackgroundWork::Fingerprints);
+                    }
                 } catch (const std::exception& e) {
                     log::warn("library fingerprints: %s", e.what());
                 }
@@ -1528,6 +1537,13 @@ public:
 
     void refreshRoots() { refresh_ = true; }
     void rescanAll() { rescan_ = true; }
+    void scanAdded(int64_t root) {
+        {
+            std::lock_guard lock(userMutex_);
+            userRoots_.insert(root);
+        }
+        refresh_ = true;
+    }
 
 private:
     struct Watch {
@@ -1659,7 +1675,11 @@ private:
                 const bool rescan = rescan_.exchange(false);
                 for (auto& [id, ptr] : watches) {
                     auto& watch = *ptr;
-                    if (rescan) watch.due = Clock::now(), watch.full = true;
+                    if (rescan) {
+                        watch.due = Clock::now(), watch.full = true;
+                        std::lock_guard lock(userMutex_);
+                        userRoots_.insert(id);
+                    }
                     if (watch.deferred && watch.pace() == BackgroundPace::Full) {
                         watch.deferred = false;
                         watch.due = Clock::now();
@@ -1680,10 +1700,19 @@ private:
                     if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested() &&
                         !scans.contains(id)) {
                         watch.due = {};
-                        scans.emplace(id, std::async(std::launch::async, [this, id, folders = watch.take()] {
+                        bool user = false;
+                        {
+                            std::lock_guard lock(userMutex_);
+                            user = userRoots_.erase(id) > 0;
+                        }
+                        // A scan the user asked for runs at High, and the work following it until it catches up.
+                        if (user) store_.userScanStarted();
+                        scans.emplace(id, std::async(std::launch::async, [this, id, user, folders = watch.take()] {
                                           SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
-                                          auto normal = wil::scope_exit(
-                                              [] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
+                                          auto normal = wil::scope_exit([this, user] {
+                                              SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+                                              if (user) store_.userScanEnded();
+                                          });
                                           return scanner_.scan(id, token_, folders);
                                       }));
                     }
@@ -1719,6 +1748,8 @@ private:
     CancellationToken token_;
     std::atomic<bool> refresh_ = false;
     std::atomic<bool> rescan_ = false;
+    std::mutex userMutex_;
+    std::set<int64_t> userRoots_; // roots whose next scan the user asked for
     std::jthread worker_;
     std::jthread fingerprints_;
 };
@@ -1735,6 +1766,9 @@ void LibraryMonitor::refreshRoots() {
 }
 void LibraryMonitor::rescanAll() {
     impl_->rescanAll();
+}
+void LibraryMonitor::scanAdded(int64_t root) {
+    impl_->scanAdded(root);
 }
 
 int64_t libraryDeletions(sqlite::Database& db) {

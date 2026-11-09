@@ -93,8 +93,10 @@ public:
     LibraryMonitor& operator=(const LibraryMonitor&) = delete;
     // Rereads the registered roots on the next pass instead of after the availability interval.
     void refreshRoots();
-    // Scans every online root now.
+    // Scans every online root now, at High as the user asked for it.
     void rescanAll();
+    // Scans a root the user just added, at High.
+    void scanAdded(int64_t root);
     // Stops scanning without waiting, which the destructor does.
     void cancel();
 

@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 
+#include "Common/settings/Settings.h"
 #include "Server/Library/LibrarySchema.h"
 #include "Server/Library/Sqlite.h"
 #include "Server/Artwork/ArtworkProvider.h"
@@ -59,6 +60,9 @@ struct PlaybackReads {
 // until the engine is ahead again.
 enum class BackgroundPace : uint8_t { Full, One, Wait };
 BackgroundPace backgroundPace(const PlaybackReads& reads, const std::filesystem::path& storage);
+
+// The kinds of background library work, each with its own number of workers at High.
+enum class BackgroundWork : uint8_t { Scan, Fingerprints, Covers, Loudness };
 
 class LibraryStore {
 public:
@@ -101,6 +105,16 @@ public:
     // passes quick_check. A damaged database is replaced by it before the migration backups. True when one was made.
     bool backupIfDue();
 
+    // How many workers background work of `kind` takes while playback leaves it the storage, of the `high` it takes at
+    // High: one at Low, half at Medium (at least one), all at High (docs/Task-breakdown.md SC-R01). While a scan the
+    // user started runs, and until each kind of work has caught up with what it found, every kind takes all.
+    unsigned backgroundWorkers(BackgroundWork kind, unsigned high) const;
+    void setScanSpeed(ScanSpeed speed) { scanSpeed_ = speed; }
+    void userScanStarted();
+    void userScanEnded();
+    // The work of `kind` has nothing left to do; after a scan the user started, it goes back to the scan speed.
+    void caughtUp(BackgroundWork kind);
+
     static constexpr int kKeptBackups = 3;
     static constexpr int kKeptDailyBackups = 1;
 
@@ -109,7 +123,10 @@ private:
     std::atomic<unsigned> activeScans_{0};
     std::atomic<int64_t> scanning_{0}, scanFound_{0}, scanChecked_{0}, scanFinishing_{0};
     std::atomic<uint64_t> fileChanges_{0};
-    bool fileRowsWritten_ = false; // by the transaction on the writer thread
+    std::atomic<ScanSpeed> scanSpeed_{ScanSpeed::Low};
+    std::atomic<int> userScans_{0};
+    std::atomic<uint8_t> followingUserScan_{0}; // a bit per BackgroundWork still at High after a user's scan
+    bool fileRowsWritten_ = false;              // by the transaction on the writer thread
     // Different roots scan at the same time; scanMutex_ serializes what crosses roots (finishing a scan,
     // absorbing roots), and each root's lock (under jobsMutex_) keeps one scan per root.
     std::mutex scanMutex_;

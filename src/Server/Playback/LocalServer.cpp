@@ -248,6 +248,7 @@ public:
                         }
                         if (const auto made = artwork_->prepare(*library_, busy))
                             log::info("artwork: prepared %zu album covers", made);
+                        if (!busy()) library_->caughtUp(BackgroundWork::Covers);
                     } catch (const std::exception& e) {
                         log::warn("artwork: %s", e.what());
                     }
@@ -780,8 +781,7 @@ private:
                 break;
             case CommandKind::AddLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                LibraryScanner(*library_).addRoot(std::filesystem::path(toWide(c.path)));
-                libraryMonitor_->refreshRoots();
+                libraryMonitor_->scanAdded(LibraryScanner(*library_).addRoot(std::filesystem::path(toWide(c.path))));
                 break;
             case CommandKind::RemoveLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
@@ -1388,6 +1388,7 @@ private:
         if (at == entries_.end()) at = entries_.begin();
         for (; at != entries_.end() && files.size() < 20; ++at)
             if (at->file) files.push_back(at->file);
+        if (library_) library_->setScanSpeed(settings_.scanSpeed);
         std::lock_guard lock(loudnessMutex_);
         loudnessSettings_ = settings_.replayGain;
         loudnessDecoders_ = settings_.decoderByFormat;

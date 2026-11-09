@@ -173,6 +173,7 @@ static constexpr const char* kEqChannelIds[] = {"all", "left", "right"};
 static constexpr const char* kCrossfeedPresetIds[] = {"default", "chuMoy", "janMeier", "custom"};
 static constexpr const char* kDspNodeIds[] = {"eq", "crossfeed", "convolution"};
 static constexpr const char* kReplayGainModeIds[] = {"off", "track", "album", "auto"};
+static constexpr const char* kScanSpeedIds[] = {"low", "medium", "high"};
 
 double volumeDb(const VolumeSettings& volume) {
     if (volume.mode != VolumeMode::Software) return 0.0;
@@ -544,6 +545,7 @@ std::string toJson(const Settings& s) {
                           : s.artistPictures == OnlineLookup::Refused ? "refused"
                                                                       : "ask";
     j["folderTree"] = s.folderTree;
+    j["scanSpeed"] = kScanSpeedIds[int(s.scanSpeed)];
     j["trackColumns"] = {s.trackColumns.title, s.trackColumns.artist, s.trackColumns.album};
     j["discord"] = {{"enabled", s.discord.enabled}, {"covers", s.discord.covers}};
     j["skippedVersion"] = s.skippedVersion;
@@ -562,8 +564,7 @@ std::string toJson(const Settings& s) {
     j["replayGain"] = {{"mode", kReplayGainModeIds[int(s.replayGain.mode)]},
                        {"preamp", s.replayGain.preampDb},
                        {"noValuePreamp", s.replayGain.noValuePreampDb},
-                       {"preventClipping", s.replayGain.preventClipping},
-                       {"analysis", s.replayGain.speed == AnalysisSpeed::Fast ? "fast" : "throttled"}};
+                       {"preventClipping", s.replayGain.preventClipping}};
     j["crossfade"] = {{"enabled", s.crossfade.enabled}, {"seconds", s.crossfade.seconds}};
     j["dspOrder"] = json::array();
     for (const auto node : s.dspOrder) j["dspOrder"].push_back(kDspNodeIds[int(node) - 1]);
@@ -625,6 +626,8 @@ Settings fromJson(const std::string& text) {
                        : pictures == "refused" ? OnlineLookup::Refused
                                                : OnlineLookup::Ask;
     s.folderTree = boolean(j, "folderTree", false);
+    const auto speed = std::ranges::find(kScanSpeedIds, str(j, "scanSpeed", "low"));
+    s.scanSpeed = speed == std::end(kScanSpeedIds) ? ScanSpeed::Low : ScanSpeed(speed - std::begin(kScanSpeedIds));
     if (const auto columns = j.find("trackColumns");
         columns != j.end() && columns->is_array() && columns->size() == 3 &&
         std::all_of(columns->begin(), columns->end(),
@@ -699,7 +702,6 @@ Settings fromJson(const std::string& text) {
         s.replayGain.noValuePreampDb =
             bounded(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
         s.replayGain.preventClipping = boolean(r, "preventClipping", true);
-        s.replayGain.speed = str(r, "analysis", "throttled") == "fast" ? AnalysisSpeed::Fast : AnalysisSpeed::Throttled;
     }
     if (j.contains("crossfade") && j["crossfade"].is_object()) {
         const json& c = j["crossfade"];
@@ -770,6 +772,7 @@ Settings resetPlayback(const Settings& s) {
     reset.checkUpdates = s.checkUpdates;
     reset.artistPictures = s.artistPictures;
     reset.folderTree = s.folderTree;
+    reset.scanSpeed = s.scanSpeed;
     reset.trackColumns = s.trackColumns;
     reset.discord = s.discord;
     reset.skippedVersion = s.skippedVersion;

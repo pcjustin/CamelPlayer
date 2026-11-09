@@ -266,9 +266,8 @@ struct VolumeSettings {
 double volumeDb(const VolumeSettings& volume);
 
 // ReplayGain (docs/Plan.md §5.9), off by default. Tracks without a value in their tags are analyzed in the background
-// while it is on, at the speed set here.
+// while it is on, at the scan speed.
 enum class ReplayGainMode : uint8_t { Off, Track, Album, Auto };
-enum class AnalysisSpeed : uint8_t { Throttled, Fast };
 
 struct ReplayGainSettings {
     static constexpr double kMinPreampDb = -15.0, kMaxPreampDb = 15.0;
@@ -276,9 +275,13 @@ struct ReplayGainSettings {
     double preampDb = 0.0;        // tracks with a value
     double noValuePreampDb = 0.0; // tracks without one
     bool preventClipping = true;
-    AnalysisSpeed speed = AnalysisSpeed::Throttled;
     bool operator==(const ReplayGainSettings&) const = default;
 };
+
+// How much of the network, the storage and this computer background library work takes: scans, covers and thumbnails,
+// fingerprints and loudness analysis. Low uses one worker of each kind, Medium half of High's, High as many as each
+// kind can use; a scan the user starts, and the work following it, runs at High whatever this is.
+enum class ScanSpeed : uint8_t { Low, Medium, High };
 
 // Crossfade (docs/Plan.md §5.4), off by default; an album played in order stays gapless.
 struct CrossfadeSettings {
@@ -348,6 +351,7 @@ struct Settings {
     bool checkUpdates = true;     // automatic update checks at startup and daily (docs/Plan.md §8.6)
     OnlineLookup artistPictures = OnlineLookup::Ask; // from Wikimedia Commons (docs/Plan.md §7.4)
     bool folderTree = false; // the Folders page as one tree, as in foobar2000 (made for a friend of the user)
+    ScanSpeed scanSpeed = ScanSpeed::Low;
     TrackColumns trackColumns;
     DiscordSettings discord;
     std::string skippedVersion; // the release the automatic check no longer offers

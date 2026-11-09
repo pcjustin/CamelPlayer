@@ -32,7 +32,7 @@ Settings configuredButOff() {
     s.crossfeed = {false, CrossfeedPreset::JanMeier};
     s.convolution = {false, "C:\\Filters\\room.wav"};
     s.volume = {VolumeMode::Fixed, -20.0, false};
-    s.replayGain = {ReplayGainMode::Off, 6.0, -6.0, false, AnalysisSpeed::Fast};
+    s.replayGain = {ReplayGainMode::Off, 6.0, -6.0, false};
     s.crossfade = {false, 5.0};
     return s;
 }

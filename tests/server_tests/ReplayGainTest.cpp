@@ -69,11 +69,10 @@ TEST(ReplayGainSettings, VolumeAndReplayGainRoundTripAndFallBack) {
     EXPECT_EQ(volumeDb(defaults.volume), 0.0);
     EXPECT_EQ(defaults.replayGain.mode, ReplayGainMode::Off);
     EXPECT_TRUE(defaults.replayGain.preventClipping);
-    EXPECT_EQ(defaults.replayGain.speed, AnalysisSpeed::Throttled);
 
     Settings settings;
     settings.volume = {VolumeMode::Software, -23.5, true};
-    settings.replayGain = {ReplayGainMode::Auto, 3.5, -6.0, false, AnalysisSpeed::Fast};
+    settings.replayGain = {ReplayGainMode::Auto, 3.5, -6.0, false};
     const auto back = fromJson(toJson(settings));
     EXPECT_EQ(back.volume, settings.volume);
     EXPECT_EQ(back.replayGain, settings.replayGain);

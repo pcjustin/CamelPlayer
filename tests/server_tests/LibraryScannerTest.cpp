@@ -835,6 +835,7 @@ TEST_F(LibraryScannerTest, SlowDirectoryDoesNotBlockCompletedWorkers) {
     fs::create_directory(dir / "music" / "01-fast");
     for (int i = 0; i < 500; i++) std::ofstream(dir / "music" / "01-fast" / (std::to_string(i) + ".lrc")) << "words";
     LibraryStore store(dir / "db");
+    store.setScanSpeed(camel::ScanSpeed::High); // several workers, which the default Low would not give
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(dir / "music");
     auto job = std::async(std::launch::async, [&] { return scanner.scan(root); });
@@ -1133,6 +1134,7 @@ TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcur
     });
     bool playing = true;
     LibraryStore store(dir / "db");
+    store.setScanSpeed(camel::ScanSpeed::High); // the paused passes take more than the one worker of Low
     LibraryScanner scanner(store, [&] { return playing; });
     const auto root = scanner.addRoot(dir / "music");
     for (int pass = 0; pass < 2; ++pass) {

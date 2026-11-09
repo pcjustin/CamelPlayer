@@ -601,9 +601,6 @@
   <data name="Settings_ReplayGainClip.Header" xml:space="preserve"><value>Clipping prevention</value></data>
   <data name="Settings_ReplayGainClip.OnContent" xml:space="preserve"><value>Lower a gain so the track's peak stays below full scale</value></data>
   <data name="Settings_ReplayGainClip.OffContent" xml:space="preserve"><value>Lower a gain so the track's peak stays below full scale</value></data>
-  <data name="Settings_LoudnessSpeed.Header" xml:space="preserve"><value>Background analysis</value></data>
-  <data name="Settings_LoudnessThrottled.Content" xml:space="preserve"><value>Throttled (one thread)</value></data>
-  <data name="Settings_LoudnessFast.Content" xml:space="preserve"><value>Fast (all cores)</value></data>
   <data name="Settings_ReplayGainNote.Text" xml:space="preserve"><value>Auto uses album gain while the queue plays an album's tracks in order, and track gain otherwise, including shuffle. Values come from the files' ReplayGain tags; tracks without them are analyzed in the background (EBU R128) while ReplayGain is on, queued tracks first; throttled analysis pauses while music plays from the same drive or share. The results stay in the library, never in the files. A change applies from the next track.</value></data>
   <data name="Volume_Slider.AutomationProperties.Name" xml:space="preserve"><value>Volume</value></data>
   <data name="Volume_Mute" xml:space="preserve"><value>Mute</value></data>
@@ -843,4 +840,9 @@
   <data name="FileField_LENGTH" xml:space="preserve"><value>Length</value></data>
   <data name="FileField_INITIALKEY" xml:space="preserve"><value>Initial key</value></data>
   <data name="FileField_ORIGINALFILENAME" xml:space="preserve"><value>Original file name</value></data>
+  <data name="Settings_ScanSpeed.Header" xml:space="preserve"><value>Scan speed</value></data>
+  <data name="Settings_ScanSpeedLow.Content" xml:space="preserve"><value>Low</value></data>
+  <data name="Settings_ScanSpeedMedium.Content" xml:space="preserve"><value>Medium</value></data>
+  <data name="Settings_ScanSpeedHigh.Content" xml:space="preserve"><value>High</value></data>
+  <data name="Settings_ScanSpeedNote.Text" xml:space="preserve"><value>How much of the network, the NAS and this computer background library work takes: scanning, covers, fingerprints and ReplayGain analysis. Low uses one worker of each, Medium half, High as many as each can use. Adding a folder or rebuilding the library always runs at High, and playback still comes first at every speed.</value></data>
 </root>

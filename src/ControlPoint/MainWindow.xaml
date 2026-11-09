@@ -199,6 +199,12 @@
                                           BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
                                 <TextBlock x:Name="ScanText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
                                            Visibility="Collapsed" />
+                                <ComboBox x:Name="ScanSpeedCombo" x:Uid="Settings_ScanSpeed" Width="240" SelectionChanged="OnSettingChanged">
+                                    <ComboBoxItem x:Uid="Settings_ScanSpeedLow" />
+                                    <ComboBoxItem x:Uid="Settings_ScanSpeedMedium" />
+                                    <ComboBoxItem x:Uid="Settings_ScanSpeedHigh" />
+                                </ComboBox>
+                                <TextBlock x:Uid="Settings_ScanSpeedNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button x:Uid="Settings_AddFolder" Click="OnAddFolderClick" Style="{StaticResource AccentButtonStyle}" />
                                     <Button x:Uid="Settings_RemoveFolder" Click="OnRemoveFolderClick" />
@@ -392,10 +398,6 @@
                                                ValueChanged="OnReplayGainValueChanged" />
                                 </StackPanel>
                                 <ToggleSwitch x:Name="ReplayGainClipSwitch" x:Uid="Settings_ReplayGainClip" Toggled="OnReplayGainToggled" />
-                                <ComboBox x:Name="LoudnessSpeedCombo" x:Uid="Settings_LoudnessSpeed" Width="240" SelectionChanged="OnReplayGainChanged">
-                                    <ComboBoxItem x:Uid="Settings_LoudnessThrottled" />
-                                    <ComboBoxItem x:Uid="Settings_LoudnessFast" />
-                                </ComboBox>
                                 <TextBlock x:Name="LoudnessProgressText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock x:Name="ReplayGainNote" x:Uid="Settings_ReplayGainNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
