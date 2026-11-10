@@ -10,15 +10,21 @@ It is built with C++20, WinUI 3 and Rust, and is a separate project from the ear
 
 ## Screenshots
 
-The screenshots show a demo library with made-up albums and covers.
+The screenshots show a demo library with made-up albums, covers and lyrics.
 
 | ![Home](assets/screenshots/home.png) | ![Album wall](assets/screenshots/albums.png) |
 |:---:|:---:|
-| Home: recently played and recently added albums | The album wall with its jump bar |
+| Home: recently played and recently added albums, the playing track's waveform in the player bar | The album wall with its jump bar |
 | ![Album details](assets/screenshots/album.png) | ![Queue and signal path](assets/screenshots/playback.png) |
 | Album details with format badges and favorites | The queue and the signal path of bit-perfect ASIO playback |
+| ![Lyrics](assets/screenshots/lyrics.png) | ![File details](assets/screenshots/file-details.png) |
+| Lyrics over the window, a translation lit with its line | File details: every tag and the technical data |
+| ![Output menu](assets/screenshots/output-menu.png) | ![Audio outputs](assets/screenshots/outputs.png) |
+| The output menu: a DAC, network players and AirPlay | Settings: audio outputs with names of your choice |
+| ![Parametric EQ](assets/screenshots/dsp.png) | ![Folder tree](assets/screenshots/folders.png) |
+| The parametric EQ, shown as processed | The folder tree with the playing track marked |
 | ![Listening](assets/screenshots/listening.png) | ![Output status](assets/screenshots/settings.png) |
-| Listening: this month's time, plays and most played | Settings: the output status during playback |
+| Listening: this year's time, plays and chart | Settings: the output status during playback |
 
 ## Features
 
@@ -31,11 +37,9 @@ The screenshots show a demo library with made-up albums and covers.
 - **DSP** in Settings › DSP: a parametric EQ (five bands to start, up to ten in the editor, eight filter types and per-channel bands on a draggable curve, presets, and Equalizer APO and AutoEq import and export), bs2b headphone crossfeed, and convolution with an impulse response from a mono, stereo or true-stereo .wav or a .zip with one per sample rate. Their order can be changed, one automatic preamp keeps the whole chain from clipping, and changes are heard within a quarter of a second without a gap. While nothing changes the signal, playback stays bit-perfect.
 - **Volume and ReplayGain:** volume stays fixed for your DAC or amplifier unless you choose software volume, whose vertical slider and mute open from the player bar's volume button. ReplayGain plays tracks or albums (or either, by what the queue plays) at an even loudness from their tags; tracks without tags are analyzed in the background with EBU R128 while ReplayGain is on, and the results stay in the library.
 - **Gapless playback** between tracks of the same format, and **crossfade** (1–10 s, off by default) at every other change of track, natural or chosen; an album played in order stays gapless.
+- **Slow network sources play without breaks:** a file read slower than it plays, such as DSD256 from a NAS over Wi-Fi, is read ahead before it starts, with a notice of how long the wait is, and buffers again rather than play in pieces.
 - **An output menu** in the player bar switches between the outputs you enable in Settings › Audio outputs, each with a name of your choice, and playback goes on from the audible position with the queue unchanged.
 - **Network players:** UPnP AV and OpenHome players on your network, played at the source's format with raw DSD as DSF where they declare it, gapless through the player's next-track function or OpenHome playlist, and with their own remote, app and volume still working. Windows Firewall needs one rule for them, for this program on private networks only, which CamelPlayer offers to add.
-- **A waveform in the playback bar** as in Roon, from an audio analysis made at once for the playing track and in the background for the library, in a nightly window by default.
-- **File details** of any track in a window of its own: every text tag under each tag format the file carries, with its own key, a mark where the library shows a field otherwise, and the technical data, all selectable, with Open folder.
-- **Lyrics** from the player bar's cover, over the whole window as in Roon: embedded or from a `.lrc` beside the file, synced lines following what you hear with a translation under the same stamp lit together, a click on a line playing from there.
 - **AirPlay:** Apple's own receivers, including HomePods and a HomePod stereo pair, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule. Several receivers play together in step, each with its own volume under the group's slider, and a single speaker can play the left or the right channel alone, so that two make a stereo pair.
 - **Output settings for each device:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
 
@@ -53,12 +57,15 @@ The screenshots show a demo library with made-up albums and covers.
 
 ### Queue, playlists and favorites
 
-- **A queue** with play next, add to the end, reordering, shuffle, repeat and history, restored at the next start. Every list marks the track it is on. When it ends, autoplay keeps random library tracks playing.
+- **A queue** with play next, add to the end, reordering, shuffle, repeat and history, restored at the next start. Every list marks the track it is on, and the album wall, the Folders page and the folder tree mark the album or folder that holds it; Go to playing (Ctrl+L) scrolls to it, opening the folders on the way. When it ends, autoplay keeps random library tracks playing.
 - **Playlists** made from any selection, with M3U8 import and export.
 - **Favorite tracks, albums, artists and composers**, and smart lists: recently added, most played, last played, favorites and never played. A favorite artist is kept by name, so it stays one through rescans and moves.
 
 ### Listening
 
+- **Lyrics** from the player bar's cover, over the whole window as in Roon: embedded or from a `.lrc` beside the file, synced lines following what you hear with a translation under the same stamp lit together, a click on a line playing from there.
+- **A waveform in the playback bar** as in Roon, from an audio analysis made at once for the playing track and in the background for the library, in a nightly window by default.
+- **File details** of any track in a window of its own: every text tag under each tag format the file carries, with its own key, a mark where the library shows a field otherwise, and the technical data, all selectable, with Open folder.
 - **Home** shows this month's listening time, plays and most played album, and opens the **Listening** page: totals for today, this week, this month, this year and all time, a listening-time chart, the most played albums, artists and tracks, and the play history.
 
 ### Windows
@@ -121,6 +128,8 @@ DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where t
 | Ctrl+Shift+→ / Ctrl+Shift+← | Forward or back 10 seconds |
 | Alt+← or the mouse back button | Back, like the title bar's Back button |
 | Ctrl+F | Search the library |
+| Ctrl+L | Go to the playing track |
+| Alt+Enter | File details of the selected track |
 | Delete | Remove the selected queue or playlist entries |
 | Ctrl-click, Shift-click | Select several rows for their right-click menu |
 
@@ -154,7 +163,7 @@ Each build also writes `build/compile_commands.json`, so clangd (for example in 
 
 ## Testing
 
-`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. `.\build.cmd -Sanitizers` runs the checks every release needs, each in a build of its own that never reaches the package: the C++ suite under MSVC AddressSanitizer and under clang-cl's UndefinedBehaviorSanitizer, `/analyze` on the annotated locks, Loom on the Engine's ring, Miri on its `unsafe` code, and ten minutes each of fuzzing on the DTS frame reader, the format probe and the UPnP, SSDP, mDNS and RTSP messages. It needs Visual Studio's "C++ Clang Compiler for Windows" and "MSBuild support for LLVM (clang-cl) toolset" components, and the nightly Rust toolchain with Miri and `cargo-fuzz`. The shipped program stays built by MSVC. `.\build.cmd -Asan` and `.\build.cmd -Ubsan` run those two suites alone. Windows has no ThreadSanitizer, so no tool here finds every race in the C++ code. On 2026-11-08 a full Release run passed all 904 enabled C++ tests, including the 100k-track search latency target, and all 826 Rust tests, with one measurement left to be run by hand.
+`.\build.cmd -Test` runs the ordinary C++ tests; `cargo test --workspace` in `rust/` runs the Rust Engine tests. `.\build.cmd -Sanitizers` runs the checks every release needs, each in a build of its own that never reaches the package: the C++ suite under MSVC AddressSanitizer and under clang-cl's UndefinedBehaviorSanitizer, `/analyze` on the annotated locks, Loom on the Engine's ring, Miri on its `unsafe` code, and ten minutes each of fuzzing on the DTS frame reader, the format probe and the UPnP, SSDP, mDNS and RTSP messages. It needs Visual Studio's "C++ Clang Compiler for Windows" and "MSBuild support for LLVM (clang-cl) toolset" components, and the nightly Rust toolchain with Miri and `cargo-fuzz`. The shipped program stays built by MSVC. `.\build.cmd -Asan` and `.\build.cmd -Ubsan` run those two suites alone. Windows has no ThreadSanitizer, so no tool here finds every race in the C++ code. On 2026-11-10, for 0.4.1, a full Release run passed all 976 enabled C++ tests, including the 100k-track search latency target, and all 97 Rust Engine tests.
 
 The 113 disabled tests play audio on named devices, scan a NAS or read the network players on your network, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
 
