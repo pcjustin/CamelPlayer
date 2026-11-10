@@ -191,6 +191,50 @@ fn damaged_frames_never_panic() {
     }
 }
 
+/// The frame with its source-PCM-resolution code (PCMR, 3 bits after the header's 13 flag bits, the optional header
+/// CRC and 7 more bits) set to `code`.
+fn with_pcm_resolution(frame: &[u8], code: u8) -> Vec<u8> {
+    let mut out = frame.to_vec();
+    let crc_present = out[4] & 0x02 != 0;
+    let first = 95 + if crc_present { 16 } else { 0 };
+    for bit in 0..3 {
+        let at = first + bit;
+        let mask = 0x80_u8 >> (at % 8);
+        if code & (0b100 >> bit) != 0 {
+            out[at / 8] |= mask;
+        } else {
+            out[at / 8] &= !mask;
+        }
+    }
+    out
+}
+
+#[test]
+fn every_source_resolution_decodes_at_the_same_level() {
+    let frames = big_endian(SURROUND);
+    let expected = pcm_of(&decode_all(&frames));
+    for code in [1_u8, 2, 3, 5, 6] {
+        let rewritten: Vec<Vec<u8>> = frames
+            .iter()
+            .map(|frame| with_pcm_resolution(frame, code))
+            .collect();
+        assert_eq!(
+            dts_core::parse_frame_header(&rewritten[0])
+                .expect("parses")
+                .source_pcm_resolution_index,
+            code
+        );
+        let pcm = pcm_of(&decode_all(&rewritten));
+        assert_eq!(pcm.len(), expected.len());
+        let peak = pcm
+            .iter()
+            .zip(&expected)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(peak < 1e-6, "PCMR {code}: peak difference {peak}");
+    }
+}
+
 #[test]
 fn output_stays_within_full_scale() {
     for frame in pcm_of(&decode_all(&big_endian(SURROUND))) {

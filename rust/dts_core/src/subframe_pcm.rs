@@ -120,6 +120,10 @@ pub const PCM_PER_SUBBAND_ROW: usize = NUM_SUBBAND;
 /// unity), instead of documenting the ratio test-side.
 pub const OUTPUT_LEVEL_CALIBRATION: f64 = std::f64::consts::SQRT_2;
 
+/// [`DtsFrameHeader::output_r_scale`] of a 16-bit source, the gain the
+/// synthesis applies whatever `PCMR` declares.
+const SIXTEEN_BIT_R_SCALE: f64 = 32_768.0;
+
 /// Errors from the §5.5 + §C.2.5 end-to-end subframe→PCM bridge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -489,15 +493,16 @@ impl SubframePcmDecoder {
         // The §C.2.5 output rScale must be defined (PCMR not reserved)
         // before any decode work runs, so a reserved-PCMR frame fails
         // cleanly without disturbing the persistent filter state.
-        let Some(r_scale) = header.output_r_scale() else {
+        if header.output_r_scale().is_none() {
             return Err(SubframePcmError::ReservedPcmResolution {
                 pcmr: header.source_pcm_resolution_index,
             });
-        };
-        // The header accessor gives the PCMR full-scale gain; the
-        // decoder's own output level is that times the calibration
-        // constant (see OUTPUT_LEVEL_CALIBRATION).
-        let r_scale = r_scale * OUTPUT_LEVEL_CALIBRATION;
+        }
+        // PCMR tells what the source was, not how the core's samples
+        // are scaled: every resolution decodes at the 16-bit one's
+        // level, as the reference decoder does and as the LFE plane's
+        // fixed calibration assumes.
+        let r_scale = SIXTEEN_BIT_R_SCALE * OUTPUT_LEVEL_CALIBRATION;
         let filter: FilterBankSelection = header.filter_bank_selection();
 
         // Joint-intensity subband coding (JOINX > 0) is applied below
