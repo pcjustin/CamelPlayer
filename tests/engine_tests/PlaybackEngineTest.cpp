@@ -31,6 +31,7 @@ struct OutputProbe {
     bool accepts = true;
     std::optional<ErrorCode> openError, startError, pauseError;
     bool unexpectedStartError = false;
+    std::atomic<bool> statusFails = false;
 };
 
 class ManualOutput final : public IOutput {
@@ -57,7 +58,10 @@ public:
         ++probe_.closes;
         probe_.source = nullptr;
     }
-    OutputStatus status() const override { return {"Manual test output", 256, "No hardware"}; }
+    OutputStatus status() const override {
+        if (probe_.statusFails) throw std::runtime_error("injected status failure");
+        return {"Manual test output", 256, "No hardware"};
+    }
     void fail(ErrorCode code) { raiseError(Error(code, "injected asynchronous failure")); }
     void restart() { raiseRestart(); }
 
@@ -682,6 +686,23 @@ TEST_F(EngineStateTest, UnexpectedCommandExceptionIsPublished) {
     EXPECT_EQ(engine->snapshot().error, ErrorCode::Other);
     EXPECT_EQ(engine->snapshot().state, PlayState::Stopped);
     EXPECT_EQ(probe.source, nullptr);
+}
+
+// The control thread's work between commands (following the output, transitions, buffering) fails as a command does,
+// instead of ending the program.
+TEST_F(EngineStateTest, ExceptionBetweenCommandsIsPublished) {
+    open();
+    ASSERT_EQ(engine->snapshot().state, PlayState::Playing);
+    probe.statusFails = true;
+    ASSERT_TRUE(engine->waitForState(PlayState::Stopped, 2s));
+    probe.statusFails = false;
+    const auto failed = engine->snapshot();
+    EXPECT_EQ(failed.error, ErrorCode::Other);
+    EXPECT_NE(failed.errorDetail.find("injected status failure"), std::string::npos) << failed.errorDetail;
+    EXPECT_EQ(probe.source, nullptr);
+    engine->play();
+    engine->waitIdle();
+    EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
 }
 
 TEST_F(EngineStateTest, ResumeFailureIsPublished) {

@@ -661,41 +661,49 @@ private:
                     break;
                 }
             }
-            if (fn) {
-                try {
-                    fn();
-                } catch (const Error& e) {
-                    teardown();
-                    output_.reset();
-                    fail(e, e.code() == ErrorCode::DeviceLost || e.code() == ErrorCode::DeviceInUse ? PlayState::Paused
-                                                                                                    : PlayState::Stopped);
-                } catch (const std::exception& e) {
-                    teardown();
-                    output_.reset();
-                    fail(Error(ErrorCode::Other, e.what()), PlayState::Stopped);
-                }
-            }
-            if (active_ && leadDone_.load()) {
-                if (state_ == PlayState::Playing) rust_->play();
-                leadDone_ = false;
-            }
-            if (active_ && transitionPending_.load() && !stillHeld()) {
-                transitionPending_ = false;
-                onTransition();
-            }
-            if (active_ && ended_.load() && !transitionPending_.load() && heldFrames() == 0) onEnded();
-            if (active_) {
-                logFirstAudio();
-                logUnderruns();
-                reportAudible();
-                refreshNextSlot();
-                refreshMd5();
-                refreshTotal();
-                checkBuffering();
-            }
-            if (active_ && state_ == PlayState::Paused && !buffering_) releaseAfterPause();
+            if (fn) guarded(fn);
+            guarded([this] { follow(); });
         }
         CoUninitialize();
+    }
+
+    // An exception leaving this thread would end the program: it ends the session instead.
+    template <typename Work> void guarded(const Work& work) {
+        try {
+            work();
+        } catch (const Error& e) {
+            teardown();
+            output_.reset();
+            fail(e, e.code() == ErrorCode::DeviceLost || e.code() == ErrorCode::DeviceInUse ? PlayState::Paused
+                                                                                            : PlayState::Stopped);
+        } catch (const std::exception& e) {
+            teardown();
+            output_.reset();
+            fail(Error(ErrorCode::Other, e.what()), PlayState::Stopped);
+        }
+    }
+
+    // The session's work between commands.
+    void follow() {
+        if (active_ && leadDone_.load()) {
+            if (state_ == PlayState::Playing) rust_->play();
+            leadDone_ = false;
+        }
+        if (active_ && transitionPending_.load() && !stillHeld()) {
+            transitionPending_ = false;
+            onTransition();
+        }
+        if (active_ && ended_.load() && !transitionPending_.load() && heldFrames() == 0) onEnded();
+        if (active_) {
+            logFirstAudio();
+            logUnderruns();
+            reportAudible();
+            refreshNextSlot();
+            refreshMd5();
+            refreshTotal();
+            checkBuffering();
+        }
+        if (active_ && state_ == PlayState::Paused && !buffering_) releaseAfterPause();
     }
 
     // The decoder empties the slot when it moves on to a queued file, seconds before that file is heard; the Server
