@@ -343,6 +343,38 @@ size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added) {
         merge(db, prior, current);
         moved++;
     }
+    // A file written anew and renamed over the one at its path, as taggers do, has another ID and other content: it takes
+    // over the record its path had, unless that file is still in the library elsewhere, which the moves above follow.
+    for (const auto current : added) {
+        auto next = db.prepare("SELECT path,kind,size,mtime,volume_serial,file_index,created,volume_key "
+                               "FROM files WHERE id=? AND available=1");
+        if (!next.bind(1, current).step()) continue;
+        auto stats = db.prepare("SELECT 1 FROM stats WHERE file_id=? UNION ALL SELECT 1 FROM play_events WHERE file_id=?");
+        if (stats.bind(1, current).bind(2, current).step()) continue;
+        const auto destination = next.text(0);
+        auto old = db.prepare("SELECT files.id,roots.path,files.size,files.mtime,volume_serial,file_index,created,volume_key "
+                              "FROM files JOIN roots ON roots.id=files.root_id WHERE files.path=? AND files.kind=? "
+                              "AND files.available=0 AND files.identity_state<>2 AND roots.removed IS NULL");
+        if (!old.bind(1, destination).bind(2, next.text(1)).step()) continue;
+        const int64_t prior = old.integer(0);
+        const auto root = old.text(1);
+        const auto priorVersion = storedVersion(old, 2);
+        if (old.step()) continue;
+        if (!priorVersion.volumeKey.empty()) {
+            auto elsewhere = db.prepare("SELECT 1 FROM files WHERE available=1 AND volume_key=? AND file_index=? AND created=?");
+            if (elsewhere.bind(1, priorVersion.volumeKey).bind(2, priorVersion.index).bind(3, priorVersion.created).step())
+                continue;
+        }
+        try {
+            if (fileVersion(std::filesystem::path(toWide(destination))) != storedVersion(next, 2) ||
+                !sourceGone(destination, destination, root, priorVersion))
+                continue;
+        } catch (const std::exception&) {
+            continue;
+        }
+        merge(db, prior, current);
+        moved++;
+    }
     return moved;
 }
 

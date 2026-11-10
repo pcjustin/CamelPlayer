@@ -149,6 +149,38 @@ TEST_F(LibraryIdentityTest, ReplacementAndSizeTimeCollisionNeverInheritHistory) 
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM stats"), 1);
 }
 
+// A tagger writes the file anew and renames it over the original: another file ID and other content at the same path.
+TEST_F(LibraryIdentityTest, AFileRewrittenInPlaceKeepsItsHistory) {
+    const auto song = music / "song.flac";
+    fs::copy_file(testutil::testFile("16-44.1k"), song);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto original = id(store, "song.flac");
+    const auto before = library::fileVersion(song);
+    rate(store, original);
+    store
+        .write([=](sqlite::Database& db) {
+            db.exec("INSERT INTO playlists(id,name,created,modified) VALUES(1,'Kept',0,0)");
+            db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
+                .bind(1, original)
+                .run();
+        })
+        .get();
+    const auto written = music / "song.tmp";
+    camel::audio::testaudio::writeFlac(written, {"retagged", 44100, 16, 2, 0.05});
+    fs::rename(written, song);
+    ASSERT_FALSE(library::fileVersion(song).sameFile(before));
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(id(store, "song.flac"), original);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files WHERE available=1"), 1);
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM tracks"), 1);
+    EXPECT_EQ(scalar(store, "SELECT play_count FROM stats"), 17);
+    EXPECT_EQ(scalar(store, "SELECT favorite FROM stats"), 1);
+    EXPECT_EQ(scalar(store, "SELECT file_id FROM playlist_items"), original);
+}
+
 TEST_F(LibraryIdentityTest, UniqueRecordedHashRecoversUntrustedOrCrossVolumeIdentity) {
     const auto source = file("old.lrc");
     LibraryStore store(dir / "db");
