@@ -193,6 +193,31 @@ TEST(Loudness, AnAlbumCutShortGoesOnWhereItStopped) {
 }
 
 // Counting reads every track of the library, so it waits until someone reads the progress (the Settings page).
+// DSD is not analyzed, so it is not counted either: with it the analysis would never reach its total.
+TEST(Loudness, DsdTracksAreLeftOutOfTheAnalysis) {
+    const auto directory = testutil::tempDir() / "loudness-dsd";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES"
+                    "(1,1,1,'C:/music/one.flac','audio',1,1,1),(2,1,1,'C:/music/two.dsf','audio',1,1,1);");
+            db.prepare("INSERT INTO tracks(id,file_id,title,format) VALUES(1,1,'One',?),(2,2,'Two',?)")
+                .bind(1, std::string(audio::formatId(audio::AudioFormat::Flac)))
+                .bind(2, std::string(audio::formatId(audio::AudioFormat::Dsd)))
+                .run();
+        })
+        .get();
+    LoudnessAnalyzer analyzer(store, {[] { return ReplayGainSettings{}; }, [] { return DecoderByFormat{}; },
+                                      [] { return std::vector<int64_t>{}; }, [] { return PlaybackReads{}; }});
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (analyzer.progress().total == 0 && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(analyzer.progress().total, 1);
+}
+
 TEST(Loudness, TheAnalyzerCountsTracksOnlyWhileItsProgressIsRead) {
     const auto directory = testutil::tempDir() / "loudness-count";
     std::filesystem::remove_all(directory);

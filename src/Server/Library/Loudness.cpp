@@ -140,9 +140,16 @@ std::optional<Measured> measure(const std::filesystem::path& file, const Decoder
     return out;
 }
 
-constexpr const char* kNeedsAnalysis =
-    "f.available=1 AND coalesce(t.format,'')<>'DSD' AND (coalesce(t.rg_track_gain,t.rg_analysis_gain) IS NULL OR "
-    "(t.album_id IS NOT NULL AND coalesce(t.rg_album_gain,t.rg_analysis_album_gain) IS NULL))";
+// DSD is not analyzed; tracks.format holds formatId().
+std::string notDsd() {
+    return std::string("coalesce(t.format,'')<>'") + audio::formatId(audio::AudioFormat::Dsd) + "'";
+}
+
+std::string needsAnalysis() {
+    return "f.available=1 AND " + notDsd() +
+           " AND (coalesce(t.rg_track_gain,t.rg_analysis_gain) IS NULL OR "
+           "(t.album_id IS NOT NULL AND coalesce(t.rg_album_gain,t.rg_analysis_album_gain) IS NULL))";
+}
 
 } // namespace
 
@@ -223,7 +230,8 @@ void LoudnessAnalyzer::count() {
     auto db = store_.openReader();
     auto row = db.prepare("SELECT count(*),count(CASE WHEN coalesce(t.rg_track_gain,t.rg_analysis_gain) IS NOT NULL "
                           "THEN 1 END) FROM tracks t JOIN files f ON f.id=t.file_id "
-                          "WHERE f.available=1 AND coalesce(t.format,'')<>'DSD'");
+                          "WHERE f.available=1 AND " +
+                          notDsd());
     if (row.step()) {
         total_ = row.integer(0);
         analyzed_ = row.integer(1);
@@ -261,8 +269,7 @@ std::function<bool()> LoudnessAnalyzer::givingWay(const std::stop_token& stop, c
 std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum(bool queuedOnly) {
     auto db = store_.openReader();
     std::optional<int64_t> chosen;
-    auto needs =
-        db.prepare(std::string("SELECT 1 FROM tracks t JOIN files f ON f.id=t.file_id WHERE t.file_id=? AND ") + kNeedsAnalysis);
+    auto needs = db.prepare("SELECT 1 FROM tracks t JOIN files f ON f.id=t.file_id WHERE t.file_id=? AND " + needsAnalysis());
     for (const auto file : options_.queued()) {
         needs.reset();
         if (!failed_.contains(file) && needs.bind(1, file).step()) {
@@ -272,7 +279,7 @@ std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum(bool queuedOnly
     }
     if (!chosen && !queuedOnly) {
         auto any = db.prepare(std::string("SELECT t.file_id FROM tracks t JOIN files f ON f.id=t.file_id WHERE ") +
-                              kNeedsAnalysis + " ORDER BY t.album_id,t.file_id LIMIT 200");
+                              needsAnalysis() + " ORDER BY t.album_id,t.file_id LIMIT 200");
         while (any.step())
             if (!failed_.contains(any.integer(0))) {
                 chosen = any.integer(0);
@@ -281,9 +288,10 @@ std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum(bool queuedOnly
     }
     if (!chosen) return {};
     std::vector<Track> tracks;
-    auto members = db.prepare("SELECT f.id,f.path FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.available=1 AND "
-                              "coalesce(t.format,'')<>'DSD' AND (t.file_id=?1 OR t.album_id=(SELECT album_id FROM tracks "
-                              "WHERE file_id=?1)) ORDER BY f.id");
+    auto members =
+        db.prepare("SELECT f.id,f.path FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.available=1 AND " + notDsd() +
+                   " AND (t.file_id=?1 OR t.album_id=(SELECT album_id FROM tracks "
+                   "WHERE file_id=?1)) ORDER BY f.id");
     members.bind(1, *chosen);
     while (members.step()) tracks.push_back({members.integer(0), std::filesystem::path(toWide(members.text(1)))});
     return tracks;
