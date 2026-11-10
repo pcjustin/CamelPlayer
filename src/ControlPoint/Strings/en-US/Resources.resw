@@ -706,6 +706,8 @@
   <data name="Limit_FollowPlayer" xml:space="preserve"><value>Follow the player</value></data>
   <data name="Dsd_Dsf" xml:space="preserve"><value>DSF, when the player declares DSD</value></data>
   <data name="Settings_NetworkGapless.Header" xml:space="preserve"><value>Gapless playback</value></data>
+  <data name="Settings_NetworkGapless.OnContent" xml:space="preserve"><value>Give this player the next track before each change</value></data>
+  <data name="Settings_NetworkGapless.OffContent" xml:space="preserve"><value>Give this player the next track before each change</value></data>
   <data name="Settings_NetworkGaplessNote.Text" xml:space="preserve"><value>Off, this player gets one track at a time, with a short pause at each change. Turn it off only if the player handles the next track badly.</value></data>
   <data name="Volume_ModePlayer" xml:space="preserve"><value>The player's volume</value></data>
   <data name="Volume_ModeSoftware" xml:space="preserve"><value>Software</value></data>
@@ -724,6 +726,8 @@
   <data name="Output_ReceiverLeft" xml:space="preserve"><value>{0} left the AirPlay group</value></data>
   <data name="Volume_ReceiverSlider" xml:space="preserve"><value>Volume of {0}</value></data>
   <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>Start with Windows</value></data>
+  <data name="Settings_StartWithWindows.OnContent" xml:space="preserve"><value>Start CamelPlayer at sign-in, in the notification area</value></data>
+  <data name="Settings_StartWithWindows.OffContent" xml:space="preserve"><value>Start CamelPlayer at sign-in, in the notification area</value></data>
   <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>Turned off in Windows' startup settings (Settings › Apps › Startup, or Task Manager). Turn it on there to start CamelPlayer with Windows.</value></data>
   <data name="Lyrics_Show" xml:space="preserve"><value>Show the lyrics</value></data>
   <data name="Lyrics_Hide" xml:space="preserve"><value>Hide the lyrics</value></data>
