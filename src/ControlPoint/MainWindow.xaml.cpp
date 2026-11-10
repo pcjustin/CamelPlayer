@@ -915,7 +915,7 @@ winrt::fire_and_forget MainWindow::askFirewallRule() {
     dialog.PrimaryButtonText(tr(L"Firewall_AddButton/Content"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Primary);
-    if (co_await dialog.ShowAsync() == ContentDialogResult::Primary)
+    if (co_await ui::showDialog(dialog) == ContentDialogResult::Primary)
         addFirewallRule();
     else
         populateOutputs();
@@ -957,7 +957,7 @@ winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::stri
     dialog.Title(box_value(label));
     dialog.Content(scroller);
     dialog.CloseButtonText(tr(L"Output_SettingsClose"));
-    co_await dialog.ShowAsync();
+    co_await ui::showDialog(dialog);
     scroller.Content(nullptr);
     OutputSettingsHost().Child(panel);
     settings_ = editingOutput_->real;
@@ -979,7 +979,7 @@ winrt::fire_and_forget MainWindow::askRenameOutput(Backend backend, std::string 
     dialog.PrimaryButtonText(tr(L"Output_Rename"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Primary);
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
     std::wstring text(name.Text());
     text.erase(0, text.find_first_not_of(L" \t"));
     text.erase(text.find_last_not_of(L" \t") + 1);
@@ -1001,7 +1001,7 @@ winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string 
     dialog.PrimaryButtonText(tr(L"Output_Delete"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Close);
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
     changeOutputs(
         [&](camel::Settings& s, const DeviceCatalog& devices) { camel::server::deleteOutput(s, backend, id, devices); });
     populateSettings();
@@ -2032,7 +2032,7 @@ winrt::fire_and_forget MainWindow::OnRemoveFolderClick(Windows::Foundation::IIns
     dialog.PrimaryButtonText(ui::tr(L"Settings_RemoveFolderPrimary"));
     dialog.CloseButtonText(ui::tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Close);
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
     Command command;
     command.kind = CommandKind::RemoveLibraryRoot;
     command.rootId = root.id;
@@ -2695,7 +2695,7 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
         understood.Checked([dialog](auto&&, auto&&) { dialog.IsPrimaryButtonEnabled(true); });
         understood.Unchecked([dialog](auto&&, auto&&) { dialog.IsPrimaryButtonEnabled(false); });
     }
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
 
     if (kind == L"playback") {
         settings_ = settingsDto(camel::resetPlayback(nativeSettings(settings_)));
@@ -2870,7 +2870,7 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
         show();
     });
     show();
-    const auto result = co_await dialog.ShowAsync();
+    const auto result = co_await ui::showDialog(dialog);
     guideFolders_ = nullptr;
 
     // Finishing applies the chosen output; skipping keeps the defaults. Either way the guide is done.
@@ -3158,7 +3158,7 @@ winrt::fire_and_forget MainWindow::applyPlaylistAction(std::vector<PlaylistSourc
         dialog.PrimaryButtonText(tr(playlist ? L"Playlist_ConfirmAdd" : L"Playlist_ConfirmCreate"));
         dialog.CloseButtonText(tr(L"Playlist_Cancel"));
         dialog.DefaultButton(ContentDialogButton::Primary);
-        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+        if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
     }
     auto server = server_;
     auto weak = get_weak();
@@ -3191,7 +3191,7 @@ winrt::fire_and_forget MainWindow::askNewPlaylist(ui::SourceFetch fetch) {
     dialog.PrimaryButtonText(tr(L"Playlist_ConfirmCreate"));
     dialog.CloseButtonText(tr(L"Playlist_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Primary);
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
     const auto text = name.Text();
     runPlaylistAction(std::move(fetch), std::nullopt, toUtf8(std::wstring_view(text.c_str(), text.size())));
 }
@@ -3821,7 +3821,7 @@ winrt::fire_and_forget MainWindow::OnEqSavePresetClick(Windows::Foundation::IIns
     dialog.PrimaryButtonText(tr(L"Eq_Save"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Primary);
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
     std::wstring text(name.Text());
     text.erase(0, text.find_first_not_of(L" \t"));
     text.erase(text.find_last_not_of(L" \t") + 1);
@@ -3871,7 +3871,7 @@ void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, Route
     const std::string text((std::istreambuf_iterator<char>(in)), {});
     const auto bands = camel::parseEqualizerApo(text);
     if (bands.empty()) {
-        textDialog(ContentLayout().XamlRoot(), tr(L"Eq_ImportTitle"), tr(L"Eq_ImportFailed")).ShowAsync();
+        ui::showDialog(textDialog(ContentLayout().XamlRoot(), tr(L"Eq_ImportTitle"), tr(L"Eq_ImportFailed")));
         return;
     }
     const auto name = camel::toUtf8(file.stem().wstring());
@@ -4730,9 +4730,8 @@ winrt::fire_and_forget MainWindow::OnUpdateNotesClick(Windows::Foundation::IInsp
     auto strong = get_strong();
     if (!release_) co_return;
     const auto release = *release_;
-    co_await textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_NotesTitle", {toWide(release.version)}),
-                        ui::utf8(release.notes))
-        .ShowAsync();
+    co_await ui::showDialog(textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_NotesTitle", {toWide(release.version)}),
+                                       ui::utf8(release.notes)));
 }
 
 void MainWindow::OnUpdateSkipClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -4758,7 +4757,7 @@ winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, std:
         dialog.PrimaryButtonText(tr(repair ? L"Repair_ConfirmPrimary" : L"Update_ConfirmPrimary"));
         dialog.CloseButtonText(tr(L"Update_ConfirmCancel"));
         dialog.DefaultButton(ContentDialogButton::Primary);
-        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) {
+        if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) {
             if (repair) showRepairOffer();
             co_return;
         }
@@ -4964,7 +4963,7 @@ winrt::fire_and_forget MainWindow::OnRepairDetailsClick(Windows::Foundation::IIn
         text += std::wstring(tr(L"Repair_Missing")) + L"  " + path.generic_wstring() + L"\n";
     for (const auto& path : installCheck_->damaged)
         text += std::wstring(tr(L"Repair_Damaged")) + L"  " + path.generic_wstring() + L"\n";
-    co_await textDialog(ContentLayout().XamlRoot(), tr(L"Repair_DetailsTitle"), hstring(text)).ShowAsync();
+    co_await ui::showDialog(textDialog(ContentLayout().XamlRoot(), tr(L"Repair_DetailsTitle"), hstring(text)));
 }
 
 void MainWindow::OnRepairSkipClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -4994,9 +4993,8 @@ winrt::fire_and_forget MainWindow::showUpdateResult() {
         }
         std::ifstream in(programDirectory() / L"CHANGELOG.md", std::ios::binary);
         const std::string changelog{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-        co_await textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_InstalledTitle", {version}),
-                            ui::utf8(update::changelogSince(changelog, result->previous, result->version)))
-            .ShowAsync();
+        co_await ui::showDialog(textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_InstalledTitle", {version}),
+                                           ui::utf8(update::changelogSince(changelog, result->previous, result->version))));
         co_return;
     }
     update::removeResult(data);

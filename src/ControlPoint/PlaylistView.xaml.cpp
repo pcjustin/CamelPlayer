@@ -304,7 +304,7 @@ winrt::fire_and_forget PlaylistView::OnRenameClick(Windows::Foundation::IInspect
     name.Text(name_);
     name.SelectAll();
     box.Content(name);
-    if (co_await box.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(box) != ContentDialogResult::Primary) co_return;
     const auto text = name.Text();
     if (text.empty() || text == name_) co_return;
     PlaylistEdit change;
@@ -319,7 +319,7 @@ winrt::fire_and_forget PlaylistView::OnDeleteClick(Windows::Foundation::IInspect
     auto box = dialog(XamlRoot(), ui::format(L"Playlist_DeleteTitle", {std::wstring(name_)}), tr(L"Playlist_DeletePrimary"));
     box.Content(box_value(tr(L"Playlist_DeleteText")));
     box.DefaultButton(ContentDialogButton::Close);
-    if (co_await box.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(box) != ContentDialogResult::Primary) co_return;
     PlaylistEdit change;
     change.kind = PlaylistEdit::Kind::Delete;
     change.playlist = playlist_;
@@ -339,7 +339,7 @@ winrt::fire_and_forget PlaylistView::OnColumnClick(Windows::Foundation::IInspect
     auto box = dialog(XamlRoot(), tr(L"Playlist_SortTitle"), tr(L"Playlist_SortPrimary"));
     box.Content(
         box_value(ui::format(descending ? L"Playlist_SortTextDescending" : L"Playlist_SortText", {std::wstring(column)})));
-    if (co_await box.ShowAsync() != ContentDialogResult::Primary) co_return;
+    if (co_await ui::showDialog(box) != ContentDialogResult::Primary) co_return;
     sortKey_ = key;
     sortDescending_ = descending;
     PlaylistEdit change;

@@ -1331,7 +1331,7 @@ winrt::fire_and_forget LibraryView::scanNow(std::shared_ptr<IServer> server, std
     text.TextWrapping(TextWrapping::Wrap);
     dialog.Content(text);
     dialog.CloseButtonText(tr(L"Library_ScanOfflineClose"));
-    co_await dialog.ShowAsync();
+    co_await ui::showDialog(dialog);
 }
 
 winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tracks) {
@@ -1343,7 +1343,7 @@ winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tr
     dialog.PrimaryButtonText(tr(L"Library_ResetStatisticsPrimary"));
     dialog.CloseButtonText(tr(L"Playlist_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Close);
-    if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || !submit_) co_return;
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary || !submit_) co_return;
     Command command;
     command.kind = CommandKind::ResetPlayStatistics;
     command.tracks = std::move(tracks);
