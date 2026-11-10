@@ -54,22 +54,29 @@ public:
 
     size_t render(uint8_t* destination, size_t frames) noexcept override {
         boundary_ = kNoBoundary;
-        const uint64_t total = first_ + second_;
+        const uint64_t second = second_.load();
+        const uint64_t total = first_ + second;
         const uint64_t at = at_.load();
         const size_t n = size_t(std::min<uint64_t>(frames, total - at));
         for (size_t i = 0; i < n * bytesPerFrame_; ++i) destination[i] = uint8_t(((at * bytesPerFrame_) + i) * 7 >> 3);
-        if (second_ && at < first_ && at + n >= first_) boundary_ = size_t(first_ - at);
+        if (second && at < first_ && at + n >= first_) boundary_ = size_t(first_ - at);
         at_ += n;
         return n;
     }
     size_t boundaryInLastRender() const noexcept override { return boundary_; }
-    bool renderEnded() const noexcept override { return at_.load() == first_ + second_; }
+    bool renderEnded() const noexcept override { return at_.load() == first_ + second_.load(); }
     audio::StreamTrack streamTrack() const override { return {L"first.flac", first_, 0, 1}; }
     std::optional<audio::StreamTrack> nextStreamTrack() const override {
-        if (!second_ || !queued_) return std::nullopt;
-        return audio::StreamTrack{L"second.flac", second_, 0, 2};
+        const uint64_t second = second_.load();
+        if (!second || !queued_) return std::nullopt;
+        return audio::StreamTrack{L"second.flac", second, 0, 2};
     }
     void queueSecond() { queued_ = true; }
+    // As the Engine taking back the queued track before any of it was rendered.
+    void withdrawSecond() {
+        queued_ = false;
+        second_ = 0;
+    }
     uint64_t rendered() const { return at_.load(); }
 
     std::string expected(uint64_t from, uint64_t frames) const {
@@ -80,7 +87,8 @@ public:
 
 private:
     uint32_t bytesPerFrame_;
-    uint64_t first_, second_;
+    uint64_t first_;
+    std::atomic<uint64_t> second_;
     std::atomic<uint64_t> at_ = 0;
     size_t boundary_ = kNoBoundary;
     std::atomic<bool> queued_ = false;
@@ -325,6 +333,28 @@ TEST(NetworkOutputTest, ThePlayerHearsOfTheNextTrackOnlyOnceThatTrackHasData) {
     EXPECT_EQ(told(), 0);
     EXPECT_TRUE(waitFor([&] { return told() == 1; }, 5s));
     EXPECT_GE(source.rendered(), first);
+}
+
+TEST(NetworkOutputTest, ANextTrackTakenBackIsNeitherFilledNorAnnounced) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
+    constexpr uint64_t first = 44100ULL * 4;
+    CountingSource source(k16.bytesPerFrame(), first, 44100ULL * 2);
+    source.queueSecond();
+    NetworkOutputOptions options;
+    options.ahead = 1000ms;
+    options.aheadBeforePlay = 1000ms;
+    options.nextTrackLead = 1000ms;
+    OutputRun output(renderer, source, k16, options);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    std::this_thread::sleep_for(300ms); // the queued track has its body by now
+    ASSERT_LT(source.rendered(), first);
+    source.withdrawSecond();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() == first; }, 10s));
+    std::this_thread::sleep_for(6s); // the first plays out
+    EXPECT_EQ(renderer.played().size(), 1U);
+    EXPECT_EQ(std::ranges::count(renderer.actions(), "SetNextAVTransportURI"), 0);
 }
 
 TEST(NetworkOutputTest, TheNextTrackIsFetchableAheadOnceTheFirstIsSent) {

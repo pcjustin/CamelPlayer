@@ -513,7 +513,15 @@ private:
     void announceNext() {
         std::unique_lock lock(mutex_);
         if (closing_ || released_ || !gapless() || !started_ || !source_) return;
-        if (const auto next = source_->nextStreamTrack(); next && next->sequence != queuedNext_) {
+        const auto next = source_->nextStreamTrack();
+        // A next track the Engine took back, or put another in place of, goes with its body. The Engine can do so only
+        // before rendering any of it, and the player hears of a body only once it has data, so it never heard of this one.
+        if (bodies_.size() > 1 && !bodies_.back().framesWritten && !bodies_.back().complete &&
+            (!next || next->sequence != bodies_.back().track.sequence)) {
+            bodies_.pop_back();
+            queuedNext_ = 0;
+        }
+        if (next && next->sequence != queuedNext_) {
             queuedNext_ = next->sequence;
             bodies_.push_back(makeBody(*next));
         }
