@@ -408,6 +408,8 @@ Details: {0}</value></data>
   <data name="Reset_StatisticsTitle.Text" xml:space="preserve"><value>Listening statistics</value></data>
   <data name="Reset_StatisticsText.Text" xml:space="preserve"><value>Deletes every recorded play; all counts start from zero.</value></data>
   <data name="Reset_StatisticsConfirm" xml:space="preserve"><value>Every recorded play is deleted and all counts start from zero. Favorites, playlists and the library are not touched. This cannot be undone.</value></data>
+  <data name="Library_SelectionChangedTitle" xml:space="preserve"><value>The list changed</value></data>
+  <data name="Library_SelectionChangedText" xml:space="preserve"><value>The library changed after you selected, so nothing was done. Select again and try once more.</value></data>
   <data name="Marks_AddFavorite" xml:space="preserve"><value>Add to favorites</value></data>
   <data name="Marks_RemoveFavorite" xml:space="preserve"><value>Remove from favorites</value></data>
   <data name="Marks_AddFavoriteAlbum" xml:space="preserve"><value>Add to favorite albums</value></data>

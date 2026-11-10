@@ -408,6 +408,8 @@
   <data name="Reset_StatisticsTitle.Text" xml:space="preserve"><value>聆聽統計</value></data>
   <data name="Reset_StatisticsText.Text" xml:space="preserve"><value>刪除所有播放紀錄，所有次數從零開始。</value></data>
   <data name="Reset_StatisticsConfirm" xml:space="preserve"><value>所有播放紀錄都會被刪除，所有次數從零開始。最愛、播放清單和媒體庫不受影響。此動作無法復原。</value></data>
+  <data name="Library_SelectionChangedTitle" xml:space="preserve"><value>清單已經變動</value></data>
+  <data name="Library_SelectionChangedText" xml:space="preserve"><value>你選取之後音樂庫有變動，所以沒有做任何變更。請重新選取，再試一次。</value></data>
   <data name="Marks_AddFavorite" xml:space="preserve"><value>加入最愛</value></data>
   <data name="Marks_RemoveFavorite" xml:space="preserve"><value>從最愛移除</value></data>
   <data name="Marks_AddFavoriteAlbum" xml:space="preserve"><value>加入最愛專輯</value></data>

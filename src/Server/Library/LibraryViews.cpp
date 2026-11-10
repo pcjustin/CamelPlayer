@@ -45,7 +45,7 @@ struct Query {
             const_cast<CancellationToken*>(&token));
         db.exec("BEGIN");
         revision = uint64_t(db.scalar("SELECT value FROM library_revision WHERE id=1").value_or(0));
-        if (expected && *expected != revision) throw std::runtime_error("library query revision changed");
+        if (expected && *expected != revision) throw LibraryRevisionChanged();
     }
     ~Query() {
         try {

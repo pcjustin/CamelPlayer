@@ -408,7 +408,8 @@ void MainWindow::InitializeComponent() {
         [this](bool allow) {
             settings_.artistPictures = allow ? camel::OnlineLookup::Allowed : camel::OnlineLookup::Refused;
             applySettingsNow();
-        });
+        },
+        [this] { showSelectionChanged(); });
     get_self<PlaylistView>(Playlists())
         ->attach(server_,
                  {[this](Command command) { submitCommand(std::move(command)); }, [this] { refreshPlaylists(); },
@@ -3130,16 +3131,21 @@ void MainWindow::runPlaylistAction(ui::SourceFetch fetch, std::optional<int64_t>
     std::thread([weak, dispatcher, server = server_, fetch = std::move(fetch), playlist, name = std::move(name)] {
         std::vector<PlaylistSource> sources;
         std::optional<SelectionPreview> preview;
+        bool changed = false;
         try {
             sources = fetch();
             preview = sources.empty() ? SelectionPreview{} : server->previewSelection(sources);
+        } catch (const camel::server::LibraryRevisionChanged&) {
+            changed = true;
         } catch (const std::exception& e) {
             camel::log::warn("playlist selection: %s", e.what());
         }
-        dispatcher.TryEnqueue([weak, sources = std::move(sources), preview, playlist, name] {
+        dispatcher.TryEnqueue([weak, sources = std::move(sources), preview, playlist, name, changed] {
             auto self = weak.get();
             if (!self) return;
-            if (!preview)
+            if (changed)
+                self->showSelectionChanged();
+            else if (!preview)
                 self->showPlaylistNotice(tr(L"Playlist_Failed"), {}, true);
             else if (preview->tracks == 0)
                 self->showPlaylistNotice(tr(L"Playlist_NothingAdded"), tr(L"Playlist_NothingAddedText"), false);
@@ -3221,6 +3227,11 @@ void MainWindow::showPlaylistChange(const PlaylistChange& change, bool created) 
         refreshPlaylists([this, id = change.playlist] { renameInNavigation(id); });
     else
         refreshPlaylists();
+}
+
+void MainWindow::showSelectionChanged() {
+    showPlaylistNotice(tr(L"Library_SelectionChangedTitle"), tr(L"Library_SelectionChangedText"), false);
+    PlaylistNotice().Severity(InfoBarSeverity::Warning);
 }
 
 void MainWindow::showPlaylistNotice(hstring const& title, hstring const& message, bool error, std::optional<PlaylistUndo> undo,

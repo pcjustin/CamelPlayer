@@ -48,6 +48,9 @@ public:
         if (!refreshing_) load(0, std::nullopt, true);
     }
 
+    // The library state the rows shown come from; none before the first page.
+    std::optional<uint64_t> revision() const { return listing_.revision(); }
+
     uint32_t Size() const { return uint32_t(std::min<int64_t>(listing_.size(), UINT32_MAX)); }
 
     IInspectable GetAt(uint32_t index) {

@@ -44,6 +44,12 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// A listing asked for at a library state that has changed since: its rows would not be the ones asked for.
+class LibraryRevisionChanged : public std::runtime_error {
+public:
+    LibraryRevisionChanged() : std::runtime_error("library query revision changed") {}
+};
+
 // The scans in progress (none when idle), summed over roots: files their listings found so far, files they checked,
 // and how many have checked everything and are finishing (regrouping albums).
 struct LibraryScanProgress {

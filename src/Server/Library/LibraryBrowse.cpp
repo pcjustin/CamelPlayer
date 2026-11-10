@@ -172,7 +172,7 @@ LibraryTrackPage page(const LibraryStore& store, std::string_view filter, int64_
     cancellable(db, token);
     db.exec("BEGIN");
     const auto revision = uint64_t(db.scalar("SELECT value FROM library_revision WHERE id=1").value_or(0));
-    if (expectedRevision && *expectedRevision != revision) throw std::runtime_error("library query revision changed");
+    if (expectedRevision && *expectedRevision != revision) throw LibraryRevisionChanged();
     auto result = tracks(db, plan(db, filter, offset, limit), offset, limit, true, token);
     result.revision = revision;
     if (token.cancelled()) throw std::runtime_error("library query cancelled");
@@ -202,7 +202,7 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
     cancellable(db, token);
     db.exec("BEGIN");
     result.revision = uint64_t(db.scalar("SELECT value FROM library_revision WHERE id=1").value_or(0));
-    if (expectedRevision && *expectedRevision != result.revision) throw std::runtime_error("library query revision changed");
+    if (expectedRevision && *expectedRevision != result.revision) throw LibraryRevisionChanged();
     const auto search = plan(db, normalized, offset, limit);
     result.tracks = tracks(db, search, offset, limit, totals, token);
     result.tracks.revision = result.revision;

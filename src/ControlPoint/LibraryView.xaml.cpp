@@ -187,8 +187,9 @@ void LibraryView::InitializeComponent() {
 
 void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu,
                          std::function<void(ui::SourceFetch, std::string)> savePlaylist, std::function<HWND()> window,
-                         std::function<void(bool)> answerArtistPictures) {
+                         std::function<void(bool)> answerArtistPictures, std::function<void()> listChanged) {
     server_ = std::move(server);
+    listChanged_ = std::move(listChanged);
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
     // The format badges are colored from code, so they follow a change of theme.
@@ -1222,11 +1223,12 @@ LibraryView::selectionRows(ListViewBase const& list, Windows::Foundation::IInspe
     }
     if (!clickedSelected) return [row = ui::LibraryCollection::rowOf(clicked)] { return std::vector<ui::BrowseRow>{row}; };
     if (paged && fetch_) {
-        return [ranges, fetch = fetch_] {
+        // The rows at those indexes in the library state the list shows; a library changed since refuses the action.
+        return [ranges, fetch = fetch_, revision = collection_ ? collection_->revision() : std::nullopt] {
             std::vector<ui::BrowseRow> rows;
             for (const auto& [first, count] : ranges)
                 for (int64_t offset = first; offset < first + count; offset += 500) {
-                    auto page = fetch(offset, std::min<int64_t>(500, first + count - offset), std::nullopt);
+                    auto page = fetch(offset, std::min<int64_t>(500, first + count - offset), revision);
                     rows.insert(rows.end(), page.rows.begin(), page.rows.end());
                     if (page.rows.empty()) break;
                 }
@@ -1789,6 +1791,14 @@ winrt::fire_and_forget LibraryView::background(std::function<std::function<void(
     std::function<void()> apply;
     try {
         apply = work();
+    } catch (const camel::server::LibraryRevisionChanged&) {
+        queue.TryEnqueue([weak] {
+            auto self = weak.get();
+            if (!self) return;
+            if (self->collection_) self->collection_->refresh();
+            if (self->listChanged_) self->listChanged_();
+        });
+        co_return;
     } catch (const std::exception& e) {
         camel::log::warn("library view: %s", e.what());
         co_return;

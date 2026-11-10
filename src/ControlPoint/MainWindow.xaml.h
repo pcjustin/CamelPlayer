@@ -401,6 +401,8 @@ private:
                                                std::string name);
     winrt::fire_and_forget askNewPlaylist(ui::SourceFetch fetch);
     void showPlaylistChange(const camel::server::PlaylistChange& change, bool created);
+    // An action on a library selection was refused: the library changed after the selection was made.
+    void showSelectionChanged();
     void showPlaylistNotice(winrt::hstring const& title, winrt::hstring const& message, bool error,
                             std::optional<camel::server::PlaylistUndo> undo = std::nullopt, int64_t playlist = 0);
     void undoPlaylistNotice();

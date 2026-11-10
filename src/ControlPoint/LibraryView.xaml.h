@@ -21,10 +21,11 @@ struct LibraryView : LibraryViewT<LibraryView> {
 
     // The window supplies the Server, the command path its player bar follows, the playlist menu entries, how a smart
     // list is saved as a playlist named after it, its handle for file dialogs and where the answer to looking artist
-    // pictures up online goes.
+    // pictures up online goes; `listChanged` tells that an action on a selection was refused, the library having changed.
     void attach(std::shared_ptr<camel::server::IServer> server, std::function<void(camel::server::Command)> submit,
                 ui::PlaylistMenu playlistMenu, std::function<void(ui::SourceFetch, std::string name)> savePlaylist,
-                std::function<HWND()> window, std::function<void(bool allow)> answerArtistPictures);
+                std::function<HWND()> window, std::function<void(bool allow)> answerArtistPictures,
+                std::function<void()> listChanged);
     // albums, artists, composers, genres, years, tracks, folders or a smart list (smart:added, smart:mostPlayed,
     // smart:recentlyPlayed, smart:favorites, smart:favoriteAlbums, smart:favoriteArtists, smart:neverPlayed); starts a
     // fresh navigation history.
@@ -249,6 +250,7 @@ private:
     std::function<void(ui::SourceFetch, std::string)> savePlaylist_;
     std::function<HWND()> window_;
     std::function<void(bool)> answerArtistPictures_;
+    std::function<void()> listChanged_;
     uint64_t generation_ = 0; // changes whenever another view opens
     camel::server::AlbumSort albumSort_ = camel::server::AlbumSort::Title;
     camel::server::TrackSort trackSort_ = camel::server::TrackSort::Title;
