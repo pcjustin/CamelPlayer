@@ -677,16 +677,17 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 entry.digest = library::fileDigest(child, entry.version, token, busy, hashSizes.at(entry.version.size));
                 if (!entry.digest) {
                     out.deferred = true;
+                    out.complete = false;
                     throw std::runtime_error("fingerprint deferred while cancelled or playing");
                 }
             }
+            // A file that cannot be read keeps its record as it was, or is not added yet, and is read again by the next
+            // scan; the folder was listed through, so the scan stays complete.
         } catch (const audio::Error& e) {
             entry.error = e.what();
             entry.rejected = e.code() == audio::ErrorCode::UnsupportedStream;
-            if (!entry.rejected) out.complete = false;
         } catch (const std::exception& e) {
             entry.error = e.what();
-            out.complete = false;
         }
     }
     if (aliasError) {

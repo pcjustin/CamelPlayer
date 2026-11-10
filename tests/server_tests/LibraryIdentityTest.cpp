@@ -685,9 +685,11 @@ TEST_F(LibraryIdentityTest, PartialScanDefersMoveResolutionUntilACompleteRetry) 
     const auto original = id(store, "old.lrc");
     rate(store, original);
     fs::rename(source, music / "new.lrc");
-    const auto blocked = music / "blocked.flac";
-    fs::copy_file(testutil::testFile("16-44.1k"), blocked);
-    HANDLE handle = CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    // A folder that cannot be listed leaves the scan incomplete.
+    const auto held = music / "held";
+    fs::create_directory(held);
+    fs::copy_file(testutil::testFile("16-44.1k"), held / "blocked.flac");
+    HANDLE handle = CreateFileW(held.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     ASSERT_NE(handle, INVALID_HANDLE_VALUE);
     const auto partial = scanner.scan(root);
     CloseHandle(handle);
@@ -718,9 +720,11 @@ TEST_F(LibraryIdentityTest, NewUserHistoryOnAProvisionalIdentityPreventsMerging)
     const auto original = id(store, "old.lrc");
     rate(store, original);
     fs::rename(source, music / "new.lrc");
-    const auto blocked = music / "blocked.flac";
-    fs::copy_file(testutil::testFile("16-44.1k"), blocked);
-    HANDLE handle = CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    // A folder that cannot be listed leaves the scan incomplete.
+    const auto held = music / "held";
+    fs::create_directory(held);
+    fs::copy_file(testutil::testFile("16-44.1k"), held / "blocked.flac");
+    HANDLE handle = CreateFileW(held.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     ASSERT_NE(handle, INVALID_HANDLE_VALUE);
     const auto partial = scanner.scan(root);
     CloseHandle(handle);

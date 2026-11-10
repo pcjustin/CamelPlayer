@@ -44,6 +44,13 @@ protected:
         fs::copy_file(testutil::testFile("16-44.1k"), dest, fs::copy_options::overwrite_existing);
         return dest;
     }
+    // A folder held with no sharing cannot be listed, which leaves a scan incomplete until it is let go.
+    wil::unique_handle heldFolder() const {
+        const auto folder = dir / "music" / "held";
+        fs::create_directories(folder);
+        return wil::unique_handle(
+            CreateFileW(folder.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+    }
     static int64_t count(LibraryStore& store, const char* sql = "SELECT COUNT(*) FROM files WHERE available=1") {
         return store.openReader().scalar(sql).value();
     }
@@ -440,6 +447,29 @@ TEST_F(LibraryScannerTest, Mp3MetadataUsesDeclaredLengthsAndEstimatesTheRestWith
     EXPECT_EQ(count(store, ("SELECT total_frames FROM tracks WHERE file_id=" + std::to_string(tagged)).c_str()), 441001);
 }
 
+// A file another program holds (an antivirus, a backup tool) cannot be read, but the folders were listed through: what
+// the scan found missing is still marked so.
+TEST_F(LibraryScannerTest, AFileThatCannotBeReadLeavesTheScanComplete) {
+    const auto gone = audio("gone.flac");
+    audio("kept.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    fs::remove(gone);
+    const auto held = audio("held.flac");
+    wil::unique_handle handle(CreateFileW(held.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    ASSERT_TRUE(handle);
+    const auto report = scanner.scan(root);
+    EXPECT_TRUE(report.complete);
+    EXPECT_EQ(report.diagnostics.size(), 1u);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE path LIKE '%gone.flac' AND available=1"), 0);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE path LIKE '%kept.flac' AND available=1"), 1);
+    handle.reset();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE path LIKE '%held.flac' AND available=1"), 1);
+}
+
 TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResumesAfterFailure) {
     const auto path = audio();
     LibraryStore store(dir / "db");
@@ -455,8 +485,7 @@ TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResu
         ASSERT_TRUE(tags.save());
     }
     fs::last_write_time(path, fs::last_write_time(path) + std::chrono::seconds(2));
-    const auto blocked = audio("blocked.flac");
-    wil::unique_handle handle(CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    auto handle = heldFolder();
     ASSERT_TRUE(handle);
     EXPECT_FALSE(scanner.scan(root).complete);
     handle.reset();
@@ -583,8 +612,7 @@ TEST_F(LibraryScannerTest, AnInterruptedReadingAgainGoesOnWhereItStopped) {
     overestimate();
     const auto infoSeen = [&] { return count(store, "SELECT last_seen FROM files WHERE path LIKE '%info.mp3'"); };
     const auto infoBefore = infoSeen();
-    const auto blocked = audio("blocked.flac");
-    wil::unique_handle handle(CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    auto handle = heldFolder();
     ASSERT_TRUE(handle);
     ASSERT_FALSE(scanner.scan(root).complete);
     handle.reset();
@@ -739,12 +767,13 @@ TEST_F(LibraryScannerTest, OfflineCancelledAndPartialScansRetainUnseenFiles) {
     cancelled.cancel();
     EXPECT_FALSE(scanner.scan(root, cancelled).complete);
     EXPECT_EQ(count(store), 1);
-    // A sharing violation simulates an unreadable file during an otherwise accessible scan.
-    const auto blocked = audio("blocked.flac");
-    HANDLE handle = CreateFileW(blocked.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-    ASSERT_NE(handle, INVALID_HANDLE_VALUE);
+    // A folder that cannot be listed during an otherwise accessible scan; the file in it is not seen.
+    fs::create_directories(dir / "music" / "held");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "held" / "blocked.flac");
+    auto handle = heldFolder();
+    ASSERT_TRUE(handle);
     const auto partial = scanner.scan(root);
-    CloseHandle(handle);
+    handle.reset();
     EXPECT_FALSE(partial.complete);
     EXPECT_EQ(count(store), 1);
     fs::rename(dir / "music", dir / "offline");
