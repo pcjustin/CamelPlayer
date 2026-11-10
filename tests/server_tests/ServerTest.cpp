@@ -741,6 +741,39 @@ protected:
     }
 };
 
+// The window's background reads go on while the Server closes; the parts they read are never freed under them.
+// A use after free shows under ASan.
+TEST_F(LibraryPlaybackTest, ReadsWhileTheServerClosesFindItsPartsOrNothing) {
+    const auto music = setUp({testutil::generatedFile({"closing-reads", 44100, 16, 2, 0.5})});
+    const std::string path = toUtf8((music / "closing-reads.flac").wstring());
+    std::atomic<bool> closed = false;
+    std::atomic<int> reads = 0;
+    constexpr int kReaders = 4;
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+    for (int r = 0; r < kReaders; ++r)
+        readers.emplace_back([&] {
+            while (!closed) {
+                try {
+                    (void)server->loudnessProgress();
+                    (void)server->discordStatus();
+                    server->setDiscordTexts({});
+                    (void)server->waveform(path);
+                    server->rereadLibrary();
+                } catch (const std::exception&) {
+                    // a closed library may refuse a read; it must not crash
+                }
+                ++reads;
+            }
+        });
+    std::this_thread::sleep_for(200ms);
+    server->shutdown();
+    std::this_thread::sleep_for(50ms);
+    closed = true;
+    for (auto& reader : readers) reader.join();
+    EXPECT_GT(reads.load(), 0);
+}
+
 TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
     setUp({});
     const auto second = dir / "second";

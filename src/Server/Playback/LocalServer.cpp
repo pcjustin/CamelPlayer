@@ -30,6 +30,7 @@
 #include <unordered_set>
 #include <mutex>
 #include <map>
+#include <shared_mutex>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -334,19 +335,27 @@ public:
         cv_.notify_one();
         const bool working = worker_.joinable();
         if (working) queueSaved_.get_future().wait();
-        loudness_.reset();
-        libraryMonitor_.reset();
+        release(loudness_);
+        release(libraryMonitor_);
         coverWarmer_ = {};
         if (working) {
             backgroundStopped_.set_value();
             worker_.join();
         }
-        discord_.reset(); // clears the activity
+        release(discord_); // clears the activity
         libraryReader_.reset();
         if (library_) {
             library_->backupIfDue(); // for a day that never had an idle moment
             library_->close();
         }
+    }
+
+    // Other threads may be reading the part; it goes once none is, and outside the lock, as stopping it can call back.
+    template <typename Part> void release(std::unique_ptr<Part>& part) {
+        std::unique_ptr<Part> gone;
+        std::unique_lock lock(partsMutex_);
+        gone = std::move(part);
+        lock.unlock();
     }
 
     CommandStamp enqueue(Command c, bool restore = false) {
@@ -395,7 +404,10 @@ public:
         server::writeDiagnosticBundle(file, input);
     }
 
-    DiscordStatus discordStatus() const { return discord_ ? discord_->status() : DiscordStatus{}; }
+    DiscordStatus discordStatus() const {
+        std::shared_lock parts(partsMutex_);
+        return discord_ ? discord_->status() : DiscordStatus{};
+    }
 
     // Read on the caller's thread, which is never the Server's: a file on a NAS can take a moment.
     Lyrics lyrics(const std::string& pathUtf8) const {
@@ -410,6 +422,7 @@ public:
         return read;
     }
     std::optional<std::vector<uint8_t>> waveform(const std::string& pathUtf8) const {
+        std::shared_lock parts(partsMutex_);
         if (!library_ || !loudness_) return std::nullopt;
         {
             std::lock_guard lock(loudnessMutex_);
@@ -428,6 +441,7 @@ public:
         return readFileDetails(pathUtf8, &reader);
     }
     void setDiscordTexts(const DiscordTexts& texts) {
+        std::shared_lock parts(partsMutex_);
         if (discord_) discord_->setTexts(texts);
     }
 
@@ -476,11 +490,13 @@ public:
 
     void rereadLibrary() {
         requestMetadataReread(library());
+        std::shared_lock parts(partsMutex_);
         if (libraryMonitor_) libraryMonitor_->rescanAll();
     }
 
     LibraryScanStart scanLibraryNow(std::optional<int64_t> folder) {
         auto db = library().openReader();
+        std::shared_lock parts(partsMutex_);
         if (!libraryMonitor_) throw std::logic_error("Server library is not configured");
         if (library().scanProgress().scans > 0) return LibraryScanStart::Running;
         if (!folder) {
@@ -515,7 +531,10 @@ public:
         return *library_;
     }
 
-    LoudnessProgress loudnessProgress() const { return loudness_ ? loudness_->progress() : LoudnessProgress{}; }
+    LoudnessProgress loudnessProgress() const {
+        std::shared_lock parts(partsMutex_);
+        return loudness_ ? loudness_->progress() : LoudnessProgress{};
+    }
 
     // Reading every credit takes a moment on a large library, so the names are kept until the library changes.
     std::shared_ptr<const LibraryCreditNames> creditNames(const CancellationToken& token) const {
@@ -2046,6 +2065,8 @@ private:
     std::future<void> sessionWrite_;
     std::function<void(const Event&)> listener_;
     std::unique_ptr<DiscordPresence> discord_;
+    // Held shared by other threads while they use loudness_, libraryMonitor_ or discord_; shutdown takes them away.
+    mutable std::shared_mutex partsMutex_;
     static constexpr std::chrono::seconds kDevicesSettle{1};
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
     FinderOptions finderOptions_;
