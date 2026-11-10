@@ -6,6 +6,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -39,6 +40,14 @@ struct Reply {
 };
 Reply send(const std::string& method, const std::string& url, const std::string& headers, const std::string& body, int timeoutMs,
            size_t maxBytes);
+
+// The parts of `url` that `get` and `send` connect with, as WinHTTP reads them. Nothing when it is not a URL.
+struct UrlParts {
+    bool plainHttp = false;
+    bool userInfo = false; // a user name or a password, before an '@'
+    std::string host;
+};
+std::optional<UrlParts> crackUrl(const std::string& url);
 
 // Percent-encodes UTF-8 text for a query value or a path segment.
 std::string encode(std::string_view text);

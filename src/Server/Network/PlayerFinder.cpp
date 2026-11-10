@@ -30,8 +30,8 @@ constexpr auto kPollSockets = std::chrono::milliseconds(100);
 constexpr int kRetryAfterSearches = 10; // an address that did not answer waits this long, as asking it takes seconds
 constexpr size_t kMaxRefusedAddresses = 256;
 
-std::optional<upnp::PlayerDescription> fetchDescription(const std::string& location) {
-    if (!upnp::isLanUrl(location)) return std::nullopt;
+std::optional<upnp::PlayerDescription> fetchDescription(const std::string& location, bool loopback) {
+    if (!upnp::isLanUrl(location, loopback)) return std::nullopt;
     try {
         const auto reply = http::send("GET", location, "", "", kDescriptionTimeoutMs, upnp::kMaxMessageBytes);
         if (reply.status == 200) return upnp::parseDescription(reply.body, location);
@@ -59,6 +59,12 @@ struct PlayerFinder::Impl {
     std::map<std::string, Clock::time_point> refused; // only the finder's thread
     std::atomic<bool> stopping = false, searchWanted = true;
     std::thread thread;
+
+    // Players answer on this machine itself only when it is where they are looked for.
+    bool loopback() const {
+        in_addr address{};
+        return inet_pton(AF_INET, options.searchHost.c_str(), &address) == 1 && (ntohl(address.s_addr) >> 24) == 127;
+    }
 
     Impl(FinderOptions finderOptions, std::function<void()> changed)
         : options(std::move(finderOptions)), onChange(std::move(changed)) {
@@ -144,7 +150,7 @@ struct PlayerFinder::Impl {
             failed != refused.end() && Clock::now() - failed->second < kRetryAfterSearches * options.searchInterval)
             return;
         // Outside the lock, as a player that does not answer takes seconds.
-        auto description = fetchDescription(message.location);
+        auto description = fetchDescription(message.location, loopback());
         if (!description || description->udn != message.udn) {
             if (refused.size() >= kMaxRefusedAddresses) refused.clear();
             refused[message.location] = Clock::now();
@@ -166,7 +172,7 @@ struct PlayerFinder::Impl {
         char buffer[8192];
         const int length = recv(from, buffer, sizeof(buffer), 0);
         if (length <= 0) return;
-        const auto message = upnp::parseSsdp(std::string_view(buffer, size_t(length)));
+        const auto message = upnp::parseSsdp(std::string_view(buffer, size_t(length)), loopback());
         if (!message) return;
         if (message->kind == upnp::SsdpKind::ByeBye)
             forget(message->udn);
@@ -186,7 +192,7 @@ struct PlayerFinder::Impl {
             std::optional<upnp::PlayerDescription> description;
             std::string location;
             for (const auto& candidate : player.locations) {
-                description = fetchDescription(candidate);
+                description = fetchDescription(candidate, loopback());
                 if (description) {
                     location = candidate;
                     break;

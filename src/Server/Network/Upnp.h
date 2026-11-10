@@ -55,13 +55,14 @@ struct SsdpMessage {
     std::string udn, location;
     bool operator==(const SsdpMessage&) const = default;
 };
-// Nothing for messages about anything but a media renderer or an OpenHome product.
-std::optional<SsdpMessage> parseSsdp(std::string_view text);
+// Nothing for messages about anything but a media renderer or an OpenHome product, or with a location `isLanUrl` refuses.
+std::optional<SsdpMessage> parseSsdp(std::string_view text, bool loopback = false);
 std::vector<std::string> searchRequests(const std::string& host, uint16_t port); // one M-SEARCH for each kind of player
 
-// Only plain HTTP to an address on the local network: a message on the network must not make CamelPlayer fetch anything
-// else.
-bool isLanUrl(const std::string& url);
+// Only plain HTTP to an address on the local network, read as WinHTTP reads it and without a user name or password: a
+// message on the network must not make CamelPlayer fetch anything else. This machine's own addresses only with `loopback`,
+// for players looked for on this machine.
+bool isLanUrl(const std::string& url, bool loopback = false);
 std::string hostOf(const std::string& url);
 
 std::string soapRequest(std::string_view serviceType, std::string_view action,

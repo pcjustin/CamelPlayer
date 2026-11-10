@@ -41,6 +41,18 @@ std::string userAgent() {
     return "CamelPlayer/" CAMEL_VERSION_STRING " (https://github.com/pcjustin/CamelPlayer)";
 }
 
+std::optional<UrlParts> crackUrl(const std::string& url) {
+    const std::wstring wide = toWide(url);
+    URL_COMPONENTS parts{};
+    parts.dwStructSize = sizeof(parts);
+    parts.dwHostNameLength = DWORD(-1);
+    parts.dwUserNameLength = DWORD(-1);
+    parts.dwPasswordLength = DWORD(-1);
+    if (!WinHttpCrackUrl(wide.c_str(), DWORD(wide.size()), 0, &parts)) return std::nullopt;
+    return UrlParts{parts.nScheme == INTERNET_SCHEME_HTTP, parts.dwUserNameLength != 0 || parts.dwPasswordLength != 0,
+                    toUtf8(std::wstring_view(parts.lpszHostName, parts.dwHostNameLength))};
+}
+
 unsigned get(const std::string& url, const char* accept, const CancellationToken& token,
              const std::function<void(unsigned status, uint64_t length)>& onStart,
              const std::function<void(const char*, size_t)>& sink) {

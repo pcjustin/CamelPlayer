@@ -16,6 +16,7 @@
 #include <cstdio>
 
 #include "Common/util/Text.h"
+#include "Server/Support/Http.h"
 
 #pragma comment(lib, "xmllite.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -190,7 +191,7 @@ std::optional<PlayerDescription> parseDescription(std::string_view xml, const st
     return player;
 }
 
-std::optional<SsdpMessage> parseSsdp(std::string_view text) {
+std::optional<SsdpMessage> parseSsdp(std::string_view text, bool loopback) {
     if (text.size() > kMaxMessageBytes) return std::nullopt;
     const auto headers = headersOf(text);
     if (!headers) return std::nullopt;
@@ -219,7 +220,7 @@ std::optional<SsdpMessage> parseSsdp(std::string_view text) {
     const auto usn = value("usn");
     message.udn = usn.substr(0, usn.find("::"));
     message.location = value("location");
-    if (message.udn.empty() || (message.kind != SsdpKind::ByeBye && !isLanUrl(message.location))) return std::nullopt;
+    if (message.udn.empty() || (message.kind != SsdpKind::ByeBye && !isLanUrl(message.location, loopback))) return std::nullopt;
     return message;
 }
 
@@ -239,12 +240,14 @@ std::string hostOf(const std::string& url) {
     return url.substr(start, end == std::string::npos ? std::string::npos : end - start);
 }
 
-bool isLanUrl(const std::string& url) {
-    if (!url.starts_with("http://")) return false;
+bool isLanUrl(const std::string& url, bool loopback) {
+    const auto parts = http::crackUrl(url);
+    if (!parts || !parts->plainHttp || parts->userInfo) return false;
     in_addr address{};
-    if (inet_pton(AF_INET, hostOf(url).c_str(), &address) != 1) return false;
+    if (inet_pton(AF_INET, parts->host.c_str(), &address) != 1) return false;
     const uint32_t ip = ntohl(address.s_addr);
-    return (ip >> 24) == 10 || (ip >> 24) == 127 || (ip >> 20) == 0xAC1 || (ip >> 16) == 0xC0A8 || (ip >> 16) == 0xA9FE;
+    if ((ip >> 24) == 127) return loopback;
+    return (ip >> 24) == 10 || (ip >> 20) == 0xAC1 || (ip >> 16) == 0xC0A8 || (ip >> 16) == 0xA9FE;
 }
 
 std::string soapRequest(std::string_view serviceType, std::string_view action,

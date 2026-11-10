@@ -158,10 +158,32 @@ TEST(UpnpMessages, ALocationOutsideTheLocalNetworkIsIgnored) {
             std::string("HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:a\r\nLOCATION: ") +
             location + "\r\n\r\n"))
             << location;
-    for (const char* location :
-         {"http://10.0.0.1/", "http://172.16.0.1/", "http://192.168.0.1:80/", "http://169.254.1.1/", "http://127.0.0.1/"})
+    for (const char* location : {"http://10.0.0.1/", "http://172.16.0.1/", "http://192.168.0.1:80/", "http://169.254.1.1/"})
         EXPECT_TRUE(isLanUrl(location)) << location;
     EXPECT_FALSE(isLanUrl("http://172.32.0.1/"));
+}
+
+// WinHTTP takes what comes before an '@' for a user name and password, and connects to the host after it.
+TEST(UpnpMessages, ALocationWithUserInfoIsIgnored) {
+    for (const char* location : {"http://192.168.1.5:80@example.com/desc.xml", "http://192.168.1.5@example.com/desc.xml",
+                                 "http://user:secret@192.168.1.5/desc.xml"}) {
+        EXPECT_FALSE(isLanUrl(location)) << location;
+        EXPECT_FALSE(parseSsdp(
+            std::string("HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:a\r\nLOCATION: ") +
+            location + "\r\n\r\n"))
+            << location;
+    }
+}
+
+// A message on the network must not make CamelPlayer ask this machine's own services for anything.
+TEST(UpnpMessages, ALoopbackLocationIsIgnored) {
+    for (const char* location : {"http://127.0.0.1/", "http://127.1.2.3:8080/d.xml"}) {
+        EXPECT_FALSE(isLanUrl(location)) << location;
+        EXPECT_FALSE(parseSsdp(
+            std::string("HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:a\r\nLOCATION: ") +
+            location + "\r\n\r\n"))
+            << location;
+    }
 }
 
 TEST(UpnpMessages, ADocumentTypeDefinitionIsRefused) {
