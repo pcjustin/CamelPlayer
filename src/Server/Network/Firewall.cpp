@@ -61,13 +61,22 @@ std::wstring firewallRuleArguments(const std::wstring& program) {
            L"\" profile=private enable=yes";
 }
 
+std::wstring firewallTool() {
+    wchar_t system[MAX_PATH];
+    const UINT length = GetSystemDirectoryW(system, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return {};
+    return std::wstring(system, length) + L"\\netsh.exe";
+}
+
 bool addFirewallRule() {
+    const std::wstring tool = firewallTool();
+    if (tool.empty()) return false;
     const std::wstring arguments = firewallRuleArguments(programPath());
     SHELLEXECUTEINFOW execute{};
     execute.cbSize = sizeof(execute);
     execute.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
     execute.lpVerb = L"runas";
-    execute.lpFile = L"netsh.exe";
+    execute.lpFile = tool.c_str();
     execute.lpParameters = arguments.c_str();
     execute.nShow = SW_HIDE;
     if (!ShellExecuteExW(&execute) || !execute.hProcess) return false;

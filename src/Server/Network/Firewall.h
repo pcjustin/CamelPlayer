@@ -14,6 +14,8 @@ namespace camel::server {
 bool firewallRuleExists();
 // What netsh is given for `program`.
 std::wstring firewallRuleArguments(const std::wstring& program);
+// The netsh that is started.
+std::wstring firewallTool();
 // Asks for elevation and waits. False when it was declined or failed.
 bool addFirewallRule();
 

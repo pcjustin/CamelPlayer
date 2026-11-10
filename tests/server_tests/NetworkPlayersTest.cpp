@@ -210,6 +210,15 @@ TEST(FirewallTest, TheRuleIsForThisProgramOnPrivateNetworksOnly) {
     EXPECT_EQ(arguments.find(L"profile=public"), std::wstring::npos);
 }
 
+// Started elevated, so it is never looked for where others could have put one of that name, the current directory first.
+TEST(FirewallTest, NetshIsStartedFromTheSystemDirectory) {
+    wchar_t system[MAX_PATH];
+    const UINT length = GetSystemDirectoryW(system, MAX_PATH);
+    ASSERT_GT(length, 0U);
+    EXPECT_EQ(firewallTool(), std::wstring(system, length) + L"\\netsh.exe");
+    EXPECT_EQ(GetFileAttributesW(firewallTool().c_str()) & FILE_ATTRIBUTE_DIRECTORY, 0U) << "it is there";
+}
+
 TEST(PlayerFollowerTest, FollowsThePlayersOwnPausePlayAndStop) {
     PlayerFollower follower;
     follower.expect({"a", "b", ""});
