@@ -943,6 +943,27 @@ TEST_F(StreamingTest, ThePlayersOwnPauseAndPlayAreFollowed) {
     server->shutdown();
 }
 
+// What the player reports while CamelPlayer closes is dropped; it does not end the program.
+TEST_F(StreamingTest, ThePlayersReportsWhileClosingAreDropped) {
+    const auto file = testutil::generatedFile({"network-closing", 44100, 16, 2, 8.0});
+    renderer_.limitFetch(4ULL * 44100);
+    auto server = serverFor();
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
+    std::atomic<bool> closed = false;
+    std::thread reports([&] {
+        for (bool paused = true; !closed; paused = !paused) {
+            renderer_.emitLastChange(paused ? R"(<TransportState val="PAUSED_PLAYBACK"/>)"
+                                            : R"(<TransportState val="PLAYING"/>)");
+            std::this_thread::sleep_for(2ms);
+        }
+    });
+    std::this_thread::sleep_for(100ms);
+    server->shutdown();
+    closed = true;
+    reports.join();
+}
+
 TEST_F(StreamingTest, ATakeoverStopsWithItsReason) {
     const auto file = testutil::generatedFile({"network-takeover", 44100, 16, 2, 8.0});
     renderer_.limitFetch(4ULL * 44100);

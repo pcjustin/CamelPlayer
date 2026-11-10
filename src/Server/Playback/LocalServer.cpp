@@ -1864,7 +1864,12 @@ private:
         default:
             return;
         }
-        enqueue(std::move(command));
+        // It runs on the output's own thread, which an exception would leave; one that comes while closing is dropped.
+        try {
+            enqueue(std::move(command));
+        } catch (const std::exception& e) {
+            log::info("network player: %s; its report is dropped", e.what());
+        }
     }
 
     // A DAC switched on or off raises several endpoint events, and its KS pin and ASIO device can follow later; the
