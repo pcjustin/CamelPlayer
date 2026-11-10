@@ -1454,6 +1454,90 @@ TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
     std::filesystem::remove(capture);
 }
 
+TEST(ServerGaplessTest, ARemovedEntryAlreadyDecodingIsNotHeardAndTheNextPlays) {
+    const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
+                                                      testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3}),
+                                                      testutil::generatedFile({"gapless-c-24-96k", 96000, 24, 2, 0.4})};
+    const auto capture = testutil::tempDir() / "server-gapless-remove.raw";
+    CaptureOptions options;
+    options.file = capture;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true;
+    std::atomic<int> opens = 0;
+    {
+        LocalServer server(withoutAutoplay(), {}, [&](const Settings&) {
+            return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
+        });
+        std::vector<TrackSource> sources;
+        sources.reserve(files.size());
+        for (const auto& file : files) sources.emplace_back(toUtf8(file.wstring()));
+        server.submit(queueReplace(sources));
+        server.waitIdle();
+        const auto ids = entryIds(server.snapshot());
+        std::this_thread::sleep_for(500ms); // b is already decoding behind a
+        Command remove = command(CommandKind::QueueRemove);
+        remove.entryIds = {ids[1]};
+        server.submit(remove);
+        const auto deadline = std::chrono::steady_clock::now() + 30s;
+        Snapshot s = server.snapshot();
+        while ((s.queueEntryId != ids[2] || s.playback.state != PlaybackState::Stopped) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(10ms);
+            s = server.snapshot();
+        }
+        EXPECT_EQ(s.queueEntryId, ids[2]);
+        EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+        EXPECT_FALSE(s.commandError);
+    }
+    // Dropping a file the Engine already decodes restarts the stream where a is, and the capture with it: what it holds
+    // is the rest of a, then c.
+    const auto got = capturedSamples(capture);
+    const auto a = concatenatedReferences({files[0]});
+    const auto c = concatenatedReferences({files[2]});
+    ASSERT_GE(got.size(), c.size());
+    const auto restOfA = std::ptrdiff_t(got.size() - c.size());
+    EXPECT_TRUE(std::equal(c.begin(), c.end(), got.begin() + restOfA));
+    ASSERT_LE(restOfA, std::ptrdiff_t(a.size()));
+    EXPECT_TRUE(std::equal(got.begin(), got.begin() + restOfA, a.end() - restOfA));
+    std::filesystem::remove(capture);
+}
+
+TEST(ServerGaplessTest, ClearingTheQueueDropsTheEntryAlreadyDecoding) {
+    const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
+                                                      testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3})};
+    const auto capture = testutil::tempDir() / "server-gapless-clear.raw";
+    CaptureOptions options;
+    options.file = capture;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    options.realtime = true;
+    std::atomic<int> opens = 0;
+    {
+        LocalServer server(withoutAutoplay(), {}, [&](const Settings&) {
+            return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
+        });
+        server.submit(queueReplace({TrackSource(toUtf8(files[0].wstring())), TrackSource(toUtf8(files[1].wstring()))}));
+        server.waitIdle();
+        const auto ids = entryIds(server.snapshot());
+        std::this_thread::sleep_for(500ms); // b is already decoding behind a
+        server.submit(command(CommandKind::QueueClear));
+        const auto deadline = std::chrono::steady_clock::now() + 30s;
+        Snapshot s = server.snapshot();
+        while (s.playback.state != PlaybackState::Stopped && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(10ms);
+            s = server.snapshot();
+        }
+        EXPECT_EQ(s.queueEntryId, ids[0]);
+        EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+        EXPECT_FALSE(s.commandError);
+    }
+    // The capture starts again where a was when the stream restarted, and holds the rest of a alone.
+    const auto got = capturedSamples(capture);
+    const auto a = concatenatedReferences({files[0]});
+    ASSERT_LE(got.size(), a.size());
+    EXPECT_TRUE(std::equal(got.begin(), got.end(), a.end() - std::ptrdiff_t(got.size())));
+    std::filesystem::remove(capture);
+}
+
 TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
     const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
                                                       testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3})};

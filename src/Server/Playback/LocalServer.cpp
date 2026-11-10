@@ -1084,7 +1084,19 @@ private:
         refreshLibraryAvailability();
     }
 
+    // The Engine may already decode entries about to leave the queue; it drops them while the queue still knows them,
+    // so a transition already heard becomes current first.
+    void discardPreloads(const std::function<bool(uint64_t)>& leaving) {
+        if (std::ranges::none_of(chain_, leaving)) return;
+        engine_->discardPreloads();
+        commitTransition();
+        chain_.clear();
+        attempted_ = {};
+        checked_ = {};
+    }
+
     void removeQueue(const std::vector<uint64_t>& ids) {
+        discardPreloads([&](uint64_t id) { return std::ranges::find(ids, id) != ids.end(); });
         policy_.remove(ids);
         if (restored_ && std::find(ids.begin(), ids.end(), state_.queueEntryId) != ids.end()) {
             restored_.reset();
@@ -1096,6 +1108,7 @@ private:
     }
 
     void clearQueue() {
+        discardPreloads([](uint64_t) { return true; });
         const uint64_t current = state_.queueEntryId;
         const auto keep = std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == current; });
         policy_.clearExcept(keep == entries_.end() ? std::nullopt : std::optional(current));
@@ -1168,15 +1181,7 @@ private:
             }
             queueChanged_ = policy_.setUnavailable(id, unavailable) || queueChanged_;
         }
-        if (std::any_of(chain_.begin(), chain_.end(), [&](uint64_t id) {
-                return policy_.unavailable(id) || std::find(deleted.begin(), deleted.end(), id) != deleted.end();
-            })) {
-            engine_->discardPreloads();
-            commitTransition();
-            chain_.clear();
-            attempted_ = {};
-            checked_ = {};
-        }
+        discardPreloads([&](uint64_t id) { return policy_.unavailable(id); });
     }
 
     void reorderQueue(const std::vector<uint64_t>& ids) {
