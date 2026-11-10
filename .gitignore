@@ -27,6 +27,9 @@ Generated Files/
 # Local development probes and UI automation
 /tools/
 
+# Local code index (CodeGraph)
+.codegraph/
+
 # Only the ASIO headers used by the MVP are vendored
 /third_party/asiosdk/*
 !/third_party/asiosdk/LICENSE.txt
