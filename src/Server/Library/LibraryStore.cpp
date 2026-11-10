@@ -39,12 +39,21 @@ bool healthy(sqlite::Database& db) {
     return check.step() && check.text(0) == "ok";
 }
 
+// Only damage is repaired. A database another program holds, a full disk or a failing read says nothing about the
+// file, which is left as it is and reported.
+void unlessDamaged(const std::filesystem::path& path, const sqlite::Error& e) {
+    const int primary = e.code() & 0xff;
+    if (primary != SQLITE_CORRUPT && primary != SQLITE_NOTADB)
+        throw LibraryUnavailableError("library.db cannot be opened, and was left as it is: " + std::string(e.what()));
+    log::warn("library: %s is damaged: %s", toUtf8(path.wstring()).c_str(), e.what());
+}
+
 std::optional<sqlite::Database> openIfHealthy(const std::filesystem::path& path) {
     try {
         sqlite::Database db(path);
         if (healthy(db)) return db;
     } catch (const sqlite::Error& e) {
-        log::warn("library: cannot open %s: %s", toUtf8(path.wstring()).c_str(), e.what());
+        unlessDamaged(path, e);
     }
     return std::nullopt;
 }
@@ -56,7 +65,7 @@ std::optional<sqlite::Database> openIfReadable(const std::filesystem::path& path
         db.userVersion();
         return db;
     } catch (const sqlite::Error& e) {
-        log::warn("library: cannot open %s: %s", toUtf8(path.wstring()).c_str(), e.what());
+        unlessDamaged(path, e);
     }
     return std::nullopt;
 }

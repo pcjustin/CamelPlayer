@@ -265,6 +265,14 @@
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer 找不到或無法建立 %LOCALAPPDATA% 中的資料夾，因此無法啟動。請確認該資料夾存在且你的帳號可以寫入。</value></data>
   <data name="Error_NewerData" xml:space="preserve"><value>這份 CamelPlayer 資料是由較新的版本建立的，這個版本無法使用。請改用較新版本的 CamelPlayer；資料都沒有變動。</value></data>
   <data name="Error_DataFailed" xml:space="preserve"><value>CamelPlayer 無法開啟它的資料，因此無法啟動：{0}。資料都沒有變動。回報這個問題時，請附上 {1} 中的紀錄檔。</value></data>
+  <data name="Error_LibraryUnavailableTitle" xml:space="preserve"><value>CamelPlayer 目前無法開啟音樂庫</value></data>
+  <data name="Error_LibraryUnavailable" xml:space="preserve"><value>可能有其他程式（例如防毒或備份軟體）正在使用它，或磁碟空間已滿。
+
+音樂庫沒有任何變動。請關閉那個程式或稍候片刻，再試一次。
+
+詳細資訊：{0}</value></data>
+  <data name="Error_LibraryRetry" xml:space="preserve"><value>再試一次</value></data>
+  <data name="Error_LibraryClose" xml:space="preserve"><value>關閉</value></data>
   <data name="Recovery_Title" xml:space="preserve"><value>CamelPlayer 修復了損毀的資料</value></data>
   <data name="Recovery_SettingsRestored" xml:space="preserve"><value>設定檔損毀，已用上次啟動時保存的副本還原。</value></data>
   <data name="Recovery_SettingsReset" xml:space="preserve"><value>設定檔損毀且沒有可用的副本，設定已回到預設值。</value></data>

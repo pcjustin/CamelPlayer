@@ -7,11 +7,14 @@
 
 #include "App.xaml.h"
 
+#include <CommCtrl.h>
 #include <shobjidl.h>
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <future>
+#include <iterator>
 
 #include "TrayIcon.h"
 #include "UiText.h"
@@ -48,6 +51,43 @@ void registerAppUserModelId(const wchar_t* id) {
     RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"DisplayName", REG_SZ, name.c_str(),
                     DWORD((name.size() + 1) * sizeof(wchar_t)));
     RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"IconUri", REG_SZ, icon.c_str(), DWORD((icon.size() + 1) * sizeof(wchar_t)));
+}
+
+// The interface language saved in settings.json, applied to the text shown before the Server opens; the file is only
+// read, never repaired or migrated.
+void applySavedLanguage() {
+    std::ifstream in(camel::settingsPath(), std::ios::binary);
+    if (!in) return;
+    try {
+        const auto language = camel::fromJson(std::string(std::istreambuf_iterator<char>(in), {})).language;
+        if (language.empty()) return;
+        winrt::Microsoft::Windows::Globalization::ApplicationLanguages::PrimaryLanguageOverride(winrt::to_hstring(language));
+        ui::reloadText();
+    } catch (const std::exception& e) {
+        camel::log::warn("saved language unreadable: %s", e.what());
+    } catch (const winrt::hresult_error& e) {
+        camel::log::warn("language override failed: 0x%08X", static_cast<unsigned>(e.code()));
+    }
+}
+
+// Asks whether to try opening the library again, with buttons in the interface language rather than Windows'.
+bool askToRetry(const std::wstring& details) {
+    const auto title = ui::tr(L"Error_LibraryUnavailableTitle");
+    const auto text = ui::format(L"Error_LibraryUnavailable", {details});
+    const auto retry = ui::tr(L"Error_LibraryRetry");
+    const auto close = ui::tr(L"Error_LibraryClose");
+    const TASKDIALOG_BUTTON buttons[] = {{IDRETRY, retry.c_str()}, {IDCLOSE, close.c_str()}};
+    TASKDIALOGCONFIG config{.cbSize = sizeof(TASKDIALOGCONFIG)};
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    config.pszWindowTitle = L"CamelPlayer";
+    config.pszMainIcon = TD_WARNING_ICON;
+    config.pszMainInstruction = title.c_str();
+    config.pszContent = text.c_str();
+    config.cButtons = UINT(std::size(buttons));
+    config.pButtons = buttons;
+    config.nDefaultButton = IDRETRY;
+    int chosen = 0;
+    return SUCCEEDED(TaskDialogIndirect(&config, &chosen, nullptr, nullptr)) && chosen == IDRETRY;
 }
 
 } // namespace
@@ -103,16 +143,23 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         camel::log::info("measure: opening the server %.0f ms after process start", camel::measure::sinceProcessStart());
     // Data that cannot be opened is left as it is, and the user learns why instead of the program vanishing.
     std::shared_ptr<camel::server::IServer> server;
-    try {
-        server = camel::server::createLocalServer();
-    } catch (const std::exception& e) {
-        camel::log::error("cannot open the data: %s", e.what());
-        const bool newer =
-            dynamic_cast<const camel::NewerSettingsError*>(&e) || dynamic_cast<const camel::server::NewerLibraryError*>(&e);
-        const auto text =
-            newer ? ui::tr(L"Error_NewerData") : ui::format(L"Error_DataFailed", {camel::toWide(e.what()), logs.wstring()});
-        MessageBoxW(nullptr, text.c_str(), L"CamelPlayer", MB_ICONERROR | MB_OK);
-        return 1;
+    while (!server) {
+        try {
+            server = camel::server::createLocalServer();
+        } catch (const camel::server::LibraryUnavailableError& e) {
+            // Often a moment's hold by another program: the user can let it go and try again without restarting.
+            camel::log::error("cannot open the library: %s", e.what());
+            applySavedLanguage();
+            if (!askToRetry(camel::toWide(e.what()))) return 1;
+        } catch (const std::exception& e) {
+            camel::log::error("cannot open the data: %s", e.what());
+            const bool newer =
+                dynamic_cast<const camel::NewerSettingsError*>(&e) || dynamic_cast<const camel::server::NewerLibraryError*>(&e);
+            const auto text =
+                newer ? ui::tr(L"Error_NewerData") : ui::format(L"Error_DataFailed", {camel::toWide(e.what()), logs.wstring()});
+            MessageBoxW(nullptr, text.c_str(), L"CamelPlayer", MB_ICONERROR | MB_OK);
+            return 1;
+        }
     }
     if (camel::measure::measuring())
         camel::log::info("measure: server opened %.0f ms after process start", camel::measure::sinceProcessStart());

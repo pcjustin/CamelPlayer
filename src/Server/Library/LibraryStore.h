@@ -37,6 +37,13 @@ public:
     using MigrationError::MigrationError;
 };
 
+// library.db could not be opened for a reason other than damage (another program holds it, the disk is full, a read
+// failed); it was left as it is, and opening it again later may work.
+class LibraryUnavailableError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 // The scans in progress (none when idle), summed over roots: files their listings found so far, files they checked,
 // and how many have checked everything and are finishing (regrouping albums).
 struct LibraryScanProgress {
@@ -75,7 +82,8 @@ public:
     };
 
     // Opens or creates `directory`/library.db, which must be on a local disk. Throws MigrationError (after restoring the
-    // database as it was) when a migration fails, NewerLibraryError when the schema is newer than `migrations`.
+    // database as it was) when a migration fails, NewerLibraryError when the schema is newer than `migrations`, and
+    // LibraryUnavailableError when it cannot be opened though it is not damaged.
     explicit LibraryStore(const std::filesystem::path& directory, const std::vector<Migration>& migrations = libraryMigrations());
     ~LibraryStore();
     LibraryStore(const LibraryStore&) = delete;

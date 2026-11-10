@@ -5,6 +5,7 @@
 // library.db (docs/Plan.md §7.6, M3-R01): schema migrations, identity rules, the single writer, migrations with backup and
 // restore, recovery from a damaged file, and refusal of network locations.
 #include <gtest/gtest.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <chrono>
@@ -495,6 +496,31 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
     EXPECT_TRUE(store.report().damaged);
     EXPECT_FALSE(store.report().restoredBackup);
     EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks"), 0);
+}
+
+// A database another program holds (an antivirus, a backup tool) is not damaged: it is reported and left as it is, with
+// what an earlier repair kept aside.
+TEST(LibraryStore, ADatabaseThatCannotBeOpenedIsLeftAsItIs) {
+    const auto dir = freshDir("held");
+    {
+        LibraryStore store(dir);
+        store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "Kept"); }).get();
+    }
+    std::ofstream(dir / "library.db.bad", std::ios::binary) << "kept aside earlier";
+    const auto read = [](const std::filesystem::path& file) {
+        std::ifstream in(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    const std::string before = read(dir / "library.db");
+    HANDLE held = CreateFileW((dir / "library.db").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    EXPECT_THROW(LibraryStore{dir}, LibraryUnavailableError);
+    CloseHandle(held);
+    EXPECT_EQ(read(dir / "library.db.bad"), "kept aside earlier");
+    EXPECT_EQ(read(dir / "library.db"), before);
+    LibraryStore store(dir);
+    EXPECT_FALSE(store.report().damaged);
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
 }
 
 namespace {
