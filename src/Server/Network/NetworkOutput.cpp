@@ -242,10 +242,16 @@ public:
         announcer_.join();
         for (auto& connection : connections_) connection.join();
         connections_.clear();
-        std::scoped_lock lock(mutex_);
-        source_ = nullptr;
-        if (link_ && started_ && !released_) link_->stop();
-        started_ = false;
+        std::unique_ptr<PlayerLink> ended;
+        {
+            std::scoped_lock lock(mutex_);
+            source_ = nullptr;
+            if (link_ && started_ && !released_) link_->stop();
+            started_ = false;
+            ended = std::move(link_);
+        }
+        // Its thread may be reporting to onPlayer, which takes the lock, until it ends.
+        ended.reset();
     }
 
     OutputStatus status() const override {

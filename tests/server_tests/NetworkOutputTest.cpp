@@ -545,6 +545,22 @@ TEST(NetworkOutputTest, AStopAskedForStillStopsThePlayer) {
     EXPECT_EQ(controlsSince(renderer, before), std::vector<std::string>{"Stop"});
 }
 
+TEST(NetworkOutputTest, AStoppedOutputLeavesThePlayerAlone) {
+    for (const auto kind : {RendererKind::UpnpAv, RendererKind::OpenHome}) {
+        FakeRenderer renderer(kind);
+        renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+        CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+        OutputRun output(renderer, source, k16);
+        output->start();
+        ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+        output->close();
+        const size_t before = renderer.actions().size();
+        std::this_thread::sleep_for(2s);
+        EXPECT_EQ(renderer.actions().size() - before, 0U) << (kind == RendererKind::OpenHome ? "OpenHome" : "UPnP AV");
+        EXPECT_EQ(renderer.subscribers(), 0U) << (kind == RendererKind::OpenHome ? "OpenHome" : "UPnP AV");
+    }
+}
+
 TEST(NetworkOutputTest, APlayerThatStopsMidTrackIsInUseByAnotherSource) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
