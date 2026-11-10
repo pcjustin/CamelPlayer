@@ -255,7 +255,7 @@
   <data name="Guide_FoldersTitle" xml:space="preserve"><value>Add your music folders</value></data>
   <data name="Guide_Folders" xml:space="preserve"><value>Add as many folders as you like, on this computer or a NAS. CamelPlayer builds the library in the background.</value></data>
   <data name="Guide_OutputTitle" xml:space="preserve"><value>Choose the output</value></data>
-  <data name="Guide_Output" xml:space="preserve"><value>WASAPI following the Windows default device works everywhere. Pick ASIO or Kernel Streaming, or a fixed device, for your DAC.</value></data>
+  <data name="Guide_Output" xml:space="preserve"><value>WASAPI following the Windows default device works everywhere. Pick ASIO or Kernel Streaming, or a fixed device, for your DAC, or a network player or AirPlay receiver on your network.</value></data>
   <data name="Guide_DoneTitle" xml:space="preserve"><value>Ready</value></data>
   <data name="Guide_Done" xml:space="preserve"><value>The library is being scanned in the background; albums appear as it goes. Settings can change these choices or open this guide again.</value></data>
   <data name="Guide_Next" xml:space="preserve"><value>Next</value></data>

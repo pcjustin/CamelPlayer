@@ -2809,29 +2809,38 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     ComboBox backend;
     backend.Header(box_value(tr(L"Settings_Backend/Header")));
     backend.Width(320);
-    for (const auto* name : {L"WASAPI", L"ASIO", L"Kernel Streaming"}) backend.Items().Append(box_value(hstring(name)));
+    // In Backend's order, so an index is its Backend.
+    for (const auto& name : {hstring(L"WASAPI"), hstring(L"ASIO"), hstring(L"Kernel Streaming"),
+                             tr(L"Settings_NetworkGroup/Text"), hstring(L"AirPlay")})
+        backend.Items().Append(box_value(name));
     ComboBox device;
     device.Header(box_value(tr(L"Settings_Device/Header")));
     device.Width(420);
     auto devices = std::make_shared<std::vector<std::string>>(); // ids in the order shown
     const auto fillDevices = [this, device, devices](Backend chosen) {
         const auto catalog = server_->snapshot().devices;
-        const auto& list = chosen == Backend::Wasapi ? catalog.wasapi : chosen == Backend::Asio ? catalog.asio : catalog.ks;
-        const std::string& saved = chosen == Backend::Wasapi ? settings_.wasapi.deviceId
-                                   : chosen == Backend::Asio ? settings_.asio.driverClsid
-                                                             : settings_.ks.deviceId;
+        const auto* list =
+            std::array{&catalog.wasapi, &catalog.asio, &catalog.ks, &catalog.network, &catalog.airplay}[size_t(chosen)];
+        const std::string saved = *std::array{&settings_.wasapi.deviceId, &settings_.asio.driverClsid, &settings_.ks.deviceId,
+                                              &settings_.network.udn, &settings_.airplay.deviceId}[size_t(chosen)];
         device.Items().Clear();
         devices->clear();
         if (chosen == Backend::Wasapi) {
             device.Items().Append(box_value(tr(L"Device_Default")));
             devices->emplace_back();
         }
-        for (const auto& entry : list) {
+        for (const auto& entry : *list) {
+            if (!entry.unsupported.empty()) continue;
             device.Items().Append(box_value(ui::utf8(entry.name)));
             devices->push_back(entry.id);
         }
+        // A player or receiver not found now is still the output; nothing chosen keeps it.
+        const bool network = chosen == Backend::Network || chosen == Backend::AirPlay;
         const auto selected = std::find(devices->begin(), devices->end(), saved);
-        device.SelectedIndex(devices->empty() ? -1 : selected == devices->end() ? 0 : int32_t(selected - devices->begin()));
+        device.SelectedIndex(devices->empty()             ? -1
+                             : selected != devices->end() ? int32_t(selected - devices->begin())
+                             : network                    ? -1
+                                                          : 0);
     };
     backend.SelectionChanged(
         [fillDevices, backend](auto&&, auto&&) { fillDevices(Backend(std::max(0, backend.SelectedIndex()))); });

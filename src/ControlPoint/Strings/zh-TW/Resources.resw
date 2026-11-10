@@ -255,7 +255,7 @@
   <data name="Guide_FoldersTitle" xml:space="preserve"><value>加入音樂資料夾</value></data>
   <data name="Guide_Folders" xml:space="preserve"><value>可以加入多個資料夾，本機或 NAS 都可以。CamelPlayer 會在背景建立媒體庫。</value></data>
   <data name="Guide_OutputTitle" xml:space="preserve"><value>選擇輸出</value></data>
-  <data name="Guide_Output" xml:space="preserve"><value>WASAPI 跟隨 Windows 預設裝置適用所有電腦；若要用 DAC，可改選 ASIO、Kernel Streaming 或指定裝置。</value></data>
+  <data name="Guide_Output" xml:space="preserve"><value>WASAPI 跟隨 Windows 預設裝置適用所有電腦；若要用 DAC，可改選 ASIO、Kernel Streaming 或指定裝置，也可以選網路上的網路播放器或 AirPlay 接收器。</value></data>
   <data name="Guide_DoneTitle" xml:space="preserve"><value>準備就緒</value></data>
   <data name="Guide_Done" xml:space="preserve"><value>媒體庫正在背景掃描，專輯會陸續出現。之後可在「設定」修改這些選項或重新開啟這個引導。</value></data>
   <data name="Guide_Next" xml:space="preserve"><value>下一步</value></data>
