@@ -392,9 +392,12 @@ public:
         setState(PlayState::Stopped);
     }
 
+    // A restarted session plays on when it played, or was buffering to play; one the user paused stays paused.
+    bool playsOn() const { return state_ == PlayState::Playing || buffering_; }
+
     void seek(uint64_t frame) {
         if (active_)
-            startSession(frame, state_ == PlayState::Playing);
+            startSession(frame, playsOn());
         else {
             position_ = frame;
             publish();
@@ -461,7 +464,7 @@ public:
                                 volumeDb(settings_.volume) != volumeDb(s.volume);
         const bool crossfadeChanged = settings_.crossfade != s.crossfade;
         const bool wasActive = active_;
-        const bool wasPlaying = state_ == PlayState::Playing;
+        const bool wasPlaying = playsOn();
         const uint64_t pos = currentPosition();
         // What a network player holds cannot change, so a new chain is heard only from a new stream.
         const bool restart = outputChanged || decoderChanged || (dspChanged && s.backend == Backend::Network);
@@ -600,7 +603,7 @@ public:
         closeOutput();
         onTransition();
         const auto position = currentPosition();
-        const bool playing = state_ == PlayState::Playing;
+        const bool playing = playsOn();
         teardown();
         startSession(position, playing);
     }
@@ -1482,7 +1485,7 @@ private:
         if (!followsDefault()) return;
         log::info("engine: Windows default output device changed");
         if (active_) {
-            const bool wasPlaying = state_ == PlayState::Playing;
+            const bool wasPlaying = playsOn();
             const uint64_t pos = currentPosition();
             teardown();
             output_.reset();
@@ -1497,7 +1500,7 @@ private:
     }
 
     void onRestart() {
-        const bool wasPlaying = state_ == PlayState::Playing;
+        const bool wasPlaying = playsOn();
         const uint64_t pos = currentPosition();
         teardown();
         output_.reset();
