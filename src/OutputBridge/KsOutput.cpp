@@ -675,14 +675,25 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
         hdr[i].DataUsed = pktBytes;
         hdr[i].Data = bufs[i].data();
         ResetEvent(ov[i].hEvent);
-        BOOL ok = DeviceIoControl(pin, IOCTL_KS_WRITE_STREAM, nullptr, 0, &hdr[i], sizeof hdr[i], nullptr, &ov[i]);
-        return ok || GetLastError() == ERROR_IO_PENDING;
+        if (DeviceIoControl(pin, IOCTL_KS_WRITE_STREAM, nullptr, 0, &hdr[i], sizeof hdr[i], nullptr, &ov[i]) ||
+            GetLastError() == ERROR_IO_PENDING)
+            return true;
+        const DWORD error = GetLastError();
+        SetEvent(ov[i].hEvent); // nothing is pending on it
+        SetLastError(error);
+        return false;
     };
-    auto drain = [&] { // STOP cancels queued packets; wait for their completion
+    // STOP cancels queued packets; each one is done before its buffer, header and OVERLAPPED go.
+    auto drain = [&] {
         setState(pin, KSSTATE_PAUSE);
         setState(pin, KSSTATE_ACQUIRE);
         setState(pin, KSSTATE_STOP);
-        for (auto& o : ov) WaitForSingleObject(o.hEvent, 1000);
+        for (auto& o : ov) {
+            if (WaitForSingleObject(o.hEvent, 1000) == WAIT_OBJECT_0) continue;
+            CancelIoEx(pin, &o);
+            DWORD transferred = 0;
+            GetOverlappedResult(pin, &o, &transferred, TRUE);
+        }
     };
 
     DWORD err = 0;
@@ -705,6 +716,7 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
                 if (!submit(i)) err = GetLastError();
             if (err || !setState(pin, KSSTATE_RUN)) {
                 if (!err) err = GetLastError();
+                drain(); // the packets queued before the failure
                 break;
             }
             cur = 0;
