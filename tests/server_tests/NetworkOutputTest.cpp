@@ -496,6 +496,26 @@ TEST(NetworkOutputTest, ATakeoverSendsThePlayerNothingMore) {
     EXPECT_EQ(renderer.state(), "PLAYING");
 }
 
+TEST(NetworkOutputTest, APlayerBackAfterItWasLostIsFollowedAgain) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    renderer.refuseSoap(true);
+    ASSERT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceLost); }));
+    renderer.refuseSoap(false);
+    output->close();
+    CountingSource again(k16.bytesPerFrame(), 44100ULL * 60);
+    output->open(k16, &again);
+    output->start();
+    renderer.emitLastChange(R"(<TransportState val="PAUSED_PLAYBACK"/>)");
+    EXPECT_TRUE(waitFor([&] { return std::ranges::count(output.events(), PlayerEvent{PlayerEventKind::Paused}) > 0; }, 5s));
+}
+
 TEST(NetworkOutputTest, AnOpenHomeTakeoverSendsThePlayerNothingMore) {
     FakeRenderer renderer(RendererKind::OpenHome);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);

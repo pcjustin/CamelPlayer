@@ -285,7 +285,8 @@ private:
     }
 
     void ensureLink() {
-        if (link_) return;
+        if (link_ && !link_->lost()) return;
+        link_.reset();
         try {
             link_ = std::make_unique<PlayerLink>(player_, [this](const PlayerEvent& event) { onPlayer(event); }, options_.link);
         } catch (const std::exception& e) {

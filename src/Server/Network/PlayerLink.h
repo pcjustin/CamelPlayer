@@ -89,6 +89,7 @@ public:
     bool playing() const;        // as last polled
     bool idle() const;           // stopped or without media as last polled, whether or not it played since the last load
     bool played() const;         // reported playing since the last load
+    bool lost() const;           // the player stopped answering; the link follows it no more
 
 private:
     struct Impl;

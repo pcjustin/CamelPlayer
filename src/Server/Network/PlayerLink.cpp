@@ -140,7 +140,7 @@ struct PlayerLink::Impl {
     std::function<void(const PlayerEvent&)> onEvent;
     LinkOptions options;
     PlayerEvents events;
-    std::atomic<bool> stopping = false;
+    std::atomic<bool> stopping = false, lost = false;
     std::mutex mutex; // the follower and the source
     PlayerFollower follower;
     std::optional<std::string> ownSource, seenSource;
@@ -314,6 +314,7 @@ struct PlayerLink::Impl {
                         happened = follower.lost();
                     }
                     report(happened);
+                    lost = true;
                     return;
                 }
             }
@@ -387,6 +388,10 @@ bool PlayerLink::loadNext(const std::string& uri, const std::string& metadata) {
     std::scoped_lock lock(link.mutex);
     link.follower.expectNext(track);
     return true;
+}
+
+bool PlayerLink::lost() const {
+    return impl_->lost;
 }
 
 bool PlayerLink::play() {
