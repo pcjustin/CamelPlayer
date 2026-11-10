@@ -652,6 +652,8 @@ void LibraryView::selectPendingTrack(ListViewBase const& list) {
         if (ui::LibraryCollection::rowOf(value).file != pendingTrack_) continue;
         pendingTrack_ = 0;
         list.SelectedItem(value);
+        // Rows just inserted (folders opened on the way) are measured first, or the list scrolls without drawing them.
+        list.UpdateLayout();
         list.ScrollIntoView(value, ScrollIntoViewAlignment::Leading);
         return;
     }
