@@ -6,12 +6,18 @@
 // and what the chain does for the path and the headroom.
 #include <gtest/gtest.h>
 #include <windows.h>
+#include <psapi.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <numeric>
+#include <thread>
 
 #include "Common/settings/Settings.h"
 #include "Engine/Dsp.h"
@@ -198,6 +204,65 @@ TEST(ImpulseResponse, ALongerResponseThanTheLimitAtThePlayingRateIsRefused) {
     EXPECT_TRUE(loadImpulse(file, 48000).impulse);
     // At 96 kHz the same response needs twice the taps.
     EXPECT_EQ(problemOf(file, 96000), ImpulseProblem::TooLong);
+}
+
+namespace {
+
+// The most private memory the process used above what it used before `work`, sampled while it runs.
+size_t peakPrivateGrowth(const std::function<void()>& work) {
+    const auto usage = [] {
+        PROCESS_MEMORY_COUNTERS_EX counters{};
+        GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof counters);
+        return counters.PrivateUsage;
+    };
+    const size_t before = usage();
+    std::atomic<size_t> peak = before;
+    std::atomic<bool> done = false;
+    std::thread sampler([&] {
+        while (!done) {
+            peak = std::max(peak.load(), usage());
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    work();
+    done = true;
+    sampler.join();
+    return peak - before;
+}
+
+} // namespace
+
+// A response is refused by the length its header gives before any of it is decoded, and a refused file is not read
+// again while it stays as it is.
+TEST(ImpulseResponse, AResponseTooLongIsRefusedFromItsHeaderAndOnlyOnce) {
+    DataFolder data;
+    constexpr uint32_t kFrames = uint32_t(1) << 24; // 16 times the limit, mono 16-bit: 32 MB, 128 MB decoded
+    std::filesystem::path file;
+    {
+        std::string bytes;
+        const auto put = [&](uint32_t value, int count) {
+            for (int i = 0; i < count; ++i) bytes.push_back(char((value >> (8 * i)) & 0xff));
+        };
+        bytes += "RIFF";
+        put(36 + kFrames * 2, 4);
+        bytes += "WAVEfmt ";
+        put(16, 4);
+        put(1, 2); // PCM
+        put(1, 2);
+        put(44100, 4);
+        put(44100 * 2, 4);
+        put(2, 2);
+        put(16, 2);
+        bytes += "data";
+        put(kFrames * 2, 4);
+        bytes.resize(bytes.size() + size_t(kFrames) * 2, '\x01');
+        file = write("too-long.wav", bytes);
+    }
+    constexpr size_t kMegabyte = size_t(1) << 20;
+    const size_t first = peakPrivateGrowth([&] { EXPECT_EQ(problemOf(file, 44100), ImpulseProblem::TooLong); });
+    EXPECT_LT(first, 100 * kMegabyte) << "the response was decoded before its length was checked";
+    const size_t again = peakPrivateGrowth([&] { EXPECT_EQ(problemOf(file, 44100), ImpulseProblem::TooLong); });
+    EXPECT_LT(again, 16 * kMegabyte) << "the refused file was read again";
 }
 
 TEST(DspChain, TheActingNodesFollowTheOrderAndRawDsdHasNone) {

@@ -117,7 +117,7 @@ std::optional<Wav> readCache(const std::filesystem::path& file, uint32_t rate) {
     uint32_t header[4] = {};
     uint64_t frames = 0;
     if (!in.read(reinterpret_cast<char*>(header), sizeof header) || !in.read(reinterpret_cast<char*>(&frames), sizeof frames) ||
-        header[0] != kCacheMagic || header[1] != rate || !(header[2] == 1 || header[2] == 2 || header[2] == 4) || frames == 0 ||
+        header[0] != kCacheMagic || header[1] != rate || (header[2] != 1 && header[2] != 2 && header[2] != 4) || frames == 0 ||
         frames > kMaxImpulseTaps)
         return std::nullopt;
     Wav wav{rate, header[2], frames, std::vector<double>(size_t(frames) * header[2])};
@@ -214,12 +214,17 @@ LoadedImpulse load(const std::filesystem::path& file, uint32_t rateHz) {
     std::ranges::sort(loaded.info.rates);
     const uint32_t sourceRate = nearestRate(loaded.info.rates, rateHz);
     const auto chosen = std::ranges::find(sources, sourceRate, &std::pair<uint32_t, const std::string*>::first)->second;
+    // Refused by its header before a long file is decoded.
+    const auto refuse = [&](const Wav& w) {
+        if (w.channels != 1 && w.channels != 2 && w.channels != 4)
+            throw ImpulseError(ImpulseProblem::Layout, std::to_string(w.channels) + " channels");
+        const auto atRate = uint64_t(std::ceil(double(w.frames) * rateHz / sourceRate));
+        if (atRate > kMaxImpulseTaps) throw ImpulseError(ImpulseProblem::TooLong, std::to_string(atRate) + " frames");
+    };
+    if (const auto header = readWav(*chosen, false)) refuse(*header);
     auto wav = readWav(*chosen, true);
     if (!wav) throw ImpulseError(ImpulseProblem::Unreadable, "the .wav cannot be read");
-    if (wav->channels != 1 && wav->channels != 2 && wav->channels != 4)
-        throw ImpulseError(ImpulseProblem::Layout, std::to_string(wav->channels) + " channels");
-    const auto atRate = uint64_t(std::ceil(double(wav->frames) * rateHz / sourceRate));
-    if (atRate > kMaxImpulseTaps) throw ImpulseError(ImpulseProblem::TooLong, std::to_string(atRate) + " frames");
+    refuse(*wav);
     loaded.info.sourceRate = sourceRate;
     loaded.info.channels = wav->channels;
     if (sourceRate != rateHz) {
@@ -245,6 +250,7 @@ struct MemoryEntry {
     uintmax_t size = 0;
     uint32_t rate = 0;
     LoadedImpulse loaded;
+    std::optional<ImpulseError> refused; // too long or of another layout, which only another file changes
 };
 
 } // namespace
@@ -263,14 +269,22 @@ LoadedImpulse loadImpulse(const std::filesystem::path& file, uint32_t rateHz) {
         });
         if (hit != recent.end()) {
             recent.splice(recent.begin(), recent, hit);
+            if (hit->refused) throw *hit->refused;
             return hit->loaded;
         }
     }
-    auto loaded = load(file, rateHz);
+    MemoryEntry entry{file, written, size, rateHz, {}, std::nullopt};
+    try {
+        entry.loaded = load(file, rateHz);
+    } catch (const ImpulseError& e) {
+        if (e.problem() == ImpulseProblem::Unreadable) throw;
+        entry.refused = e;
+    }
     std::lock_guard lock(mutex);
-    recent.push_front({file, written, size, rateHz, loaded});
+    recent.push_front(entry);
     if (recent.size() > kMemoryEntries) recent.pop_back();
-    return loaded;
+    if (entry.refused) throw *entry.refused;
+    return entry.loaded;
 }
 
 } // namespace camel::audio
