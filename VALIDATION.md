@@ -1,8 +1,12 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3, 0.3.0 and 0.4.0 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.0, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2 or 0.3.0. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3, 0.3.0, 0.4.0 and 0.4.1 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0, 0.4.0 or 0.4.1, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.1. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
+
+On 2026-11-10, for 0.4.1, a full Release run of the release build on `49c54d8` passed all 976 enabled C++ tests, the 100k-track search latency target included, and all 97 Rust Engine tests passed. No Debug run was made for 0.4.1.
+
+The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt` by path, size and hash, the program reports version 0.4.1 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started through Explorer on an empty data folder, it recorded the installation as checked for 0.4.1, and closed through the tray at 12 s it exited in 1 s.
 
 On 2026-11-09, for 0.4.0, a full Release run of the release build on `f839cdf` passed all 976 enabled C++ tests, the 100k-track search latency target included, and all 97 Rust Engine tests passed. Two tests changed after it, in `6456d47`, for the AddressSanitizer run below; the program did not. No Debug run was made for 0.4.0.
 
@@ -13,6 +17,14 @@ On 2026-11-08, for 0.3.0, a full Release run of the release build passed all 904
 The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt`, the program reports version 0.3.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started on an empty data folder and closed through the tray at 6–20 s, it exited cleanly every time. Before the fix to exiting, 3 of 8 such runs crashed on exit.
 
 ## Sanitizers
+
+On 2026-11-10, for 0.4.1, on `49c54d8`, all 8 checks passed in 6,136 s:
+
+- `/analyze` on the four files with annotated locks;
+- Loom on the Engine's ring, and Miri on the DTS and DSD-to-PCM C ABIs and the ring;
+- the C++ suite under AddressSanitizer, 974 tests, the 100k-track latency target and the whole-library queue's time limit left out;
+- the C++ suite under UndefinedBehaviorSanitizer, all 976 tests;
+- 600 s each of fuzzing: the DTS frame reader 66,243 runs, the format probe 68,824 and the network messages 180,014, none failing.
 
 On 2026-11-09, for 0.4.0, on `f839cdf` with VERSION at 0.4.0, 7 of the 8 checks passed in 3,086 s:
 
@@ -34,6 +46,8 @@ From 0.3.0 on, every release runs `build.ps1 -Sanitizers` before it is published
 Two earlier runs that day also passed all 8: on `52449ef`, before Symphonia left FLAC covers out, in 4,884 s, and on `c245561`, before the three fixes ahead of that; `/analyze` had found a local variable shadowing another in `LocalServer.cpp`, renamed in `c245561`. A first run before that stopped in the AddressSanitizer step when the disk filled.
 
 ## Hardware
+
+On 2026-11-10, before 0.4.1, all 97 hardware tests passed twice on the release build, in 184 and 183 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
 
 On 2026-11-09, before 0.4.0, all 97 hardware tests passed twice on the release candidate, in 196 and 185 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
 
@@ -70,6 +84,10 @@ Over UPnP, each of the three players played FLAC from the NAS with seeks and gap
 The HomePod pair played from the NAS with a seek, a pause, a track change, a DSP change, the receiver's own volume and a language change that did not stop the music, both speakers heard and no noise; an iPhone taking it over stopped CamelPlayer with "in use by another source". It then played 2 hours and 3 minutes unbroken, 27 CD-format tracks in order, "bit-perfect to the receiver" throughout and no AirPlay warning, error or resend in the log, and the owner heard the two speakers still in step afterwards. Separated in the Home app, one HomePod alone was found and played. Paired again, the pair came back under a new device ID; on 2026-11-08 the release build found it and moved the saved pair's entry, enabled state and volume (29) to the new ID, recording its two speakers, and the old entry went.
 
 ## In the app
+
+Checked by hand on 2026-11-10 in Release builds for 0.4.1:
+
+- On the Folders page of a demo library of 17 albums, a double-click on a folder further down the scrolled list: the published 0.4.0 closed with an access violation in the folder click handler, twice in two tries. After the fix, four such double-clicks, one on the album wall and one on Home opened what they clicked, and CamelPlayer stayed open.
 
 Checked by hand on 2026-11-09 in Release builds for 0.4.0:
 
