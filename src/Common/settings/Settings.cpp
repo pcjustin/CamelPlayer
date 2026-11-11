@@ -13,6 +13,7 @@
 #include <cmath>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <thread>
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
@@ -828,10 +829,22 @@ std::filesystem::path settingsPath() {
 
 namespace {
 
-// Nothing for a missing file; throws NewerSettingsError, or another exception for a corrupt file.
+constexpr int kOpenAttempts = 10; // 200 ms apart: a backup or antivirus program's hold is often that short
+
+// Nothing for a missing file; throws NewerSettingsError, SettingsUnavailableError for a file that exists and still
+// cannot be opened after a moment, or another exception for a corrupt file.
 std::optional<Settings> readSettings(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) return std::nullopt;
+    std::ifstream in;
+    for (int attempt = 0;; ++attempt) {
+        in.open(path, std::ios::binary);
+        if (in) break;
+        std::error_code error;
+        if (std::filesystem::status(path, error).type() == std::filesystem::file_type::not_found) return std::nullopt;
+        if (attempt == kOpenAttempts)
+            throw SettingsUnavailableError(toUtf8(path.filename().wstring()) + " cannot be opened, and was left as it is");
+        in.clear();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
     std::stringstream ss;
     ss << in.rdbuf();
     in.close();
@@ -866,6 +879,8 @@ Settings loadSettings(const std::filesystem::path& path) {
         return readSettings(path).value_or(Settings{});
     } catch (const NewerSettingsError&) {
         throw;
+    } catch (const SettingsUnavailableError&) {
+        throw;
     } catch (const std::exception& e) {
         keepAsBad(path, e);
         return {};
@@ -882,6 +897,8 @@ Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recov
         return settings.value_or(Settings{});
     } catch (const NewerSettingsError&) {
         throw;
+    } catch (const SettingsUnavailableError&) {
+        throw;
     } catch (const std::exception& e) {
         keepAsBad(path, e);
     }
@@ -893,6 +910,8 @@ Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recov
             return *settings;
         }
     } catch (const NewerSettingsError&) {
+        throw;
+    } catch (const SettingsUnavailableError&) {
         throw;
     } catch (const std::exception& e) {
         log::warn("settings: settings.json.last-good is unusable too (%s)", e.what());

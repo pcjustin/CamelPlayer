@@ -67,10 +67,11 @@ void applySavedLanguage() {
     }
 }
 
-// Asks whether to try opening the library again, with buttons in the interface language rather than Windows'.
-bool askToRetry(const std::wstring& details) {
-    const auto title = ui::tr(L"Error_LibraryUnavailableTitle");
-    const auto text = ui::format(L"Error_LibraryUnavailable", {details});
+// Asks whether to try opening the library or the settings again, with buttons in the interface language rather than
+// Windows'.
+bool askToRetry(const wchar_t* titleKey, const wchar_t* textKey, const std::wstring& details) {
+    const auto title = ui::tr(titleKey);
+    const auto text = ui::format(textKey, {details});
     const auto retry = ui::tr(L"Error_LibraryRetry");
     const auto close = ui::tr(L"Error_LibraryClose");
     const TASKDIALOG_BUTTON buttons[] = {{IDRETRY, retry.c_str()}, {IDCLOSE, close.c_str()}};
@@ -148,7 +149,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
             // Often a moment's hold by another program: the user can let it go and try again without restarting.
             camel::log::error("cannot open the library: %s", e.what());
             applySavedLanguage();
-            if (!askToRetry(camel::toWide(e.what()))) return 1;
+            if (!askToRetry(L"Error_LibraryUnavailableTitle", L"Error_LibraryUnavailable", camel::toWide(e.what()))) return 1;
+        } catch (const camel::SettingsUnavailableError& e) {
+            camel::log::error("cannot open the settings: %s", e.what());
+            applySavedLanguage();
+            if (!askToRetry(L"Error_SettingsUnavailableTitle", L"Error_SettingsUnavailable", camel::toWide(e.what()))) return 1;
         } catch (const std::exception& e) {
             camel::log::error("cannot open the data: %s", e.what());
             const bool newer =

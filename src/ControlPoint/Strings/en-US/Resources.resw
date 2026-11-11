@@ -271,6 +271,12 @@
 Your library has not been changed. Close that program or wait a moment, then try again.
 
 Details: {0}</value></data>
+  <data name="Error_SettingsUnavailableTitle" xml:space="preserve"><value>CamelPlayer cannot open your settings right now</value></data>
+  <data name="Error_SettingsUnavailable" xml:space="preserve"><value>Another program, such as antivirus or backup software, may be using settings.json, or it may not be readable for your account.
+
+Your settings have not been changed. Close that program or wait a moment, then try again.
+
+Details: {0}</value></data>
   <data name="Error_LibraryRetry" xml:space="preserve"><value>Try again</value></data>
   <data name="Error_LibraryClose" xml:space="preserve"><value>Close</value></data>
   <data name="Recovery_Title" xml:space="preserve"><value>CamelPlayer repaired damaged data</value></data>

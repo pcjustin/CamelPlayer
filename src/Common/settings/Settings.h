@@ -411,12 +411,20 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-// Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad). Throws NewerSettingsError.
+// A settings.json that exists but cannot be read, held by another program or refused by its permissions: it is left
+// as it is, never taken for a first run.
+class SettingsUnavailableError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad). Throws NewerSettingsError,
+// and SettingsUnavailableError once a file that cannot be opened has been tried again for a moment.
 Settings loadSettings(const std::filesystem::path& path = settingsPath());
 
 enum class SettingsRecovery : uint8_t { None, RestoredLastGood, Reset };
 // loadSettings at the program's start: a readable file is also copied to settings.json.last-good, and that copy replaces
-// a corrupt file before the defaults would. `recovery` tells which happened. Throws NewerSettingsError.
+// a corrupt file before the defaults would. `recovery` tells which happened. Throws as loadSettings does.
 Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recovery);
 // Atomic replace (write temp file, then MoveFileEx).
 void saveSettings(const Settings& s, const std::filesystem::path& path = settingsPath());

@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include <windows.h>
+// windows.h comes first
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -217,6 +219,40 @@ TEST(Settings, CorruptFileFallsBackToDefaults) {
     EXPECT_FALSE(std::filesystem::exists(p)); // moved aside as .bad
     EXPECT_TRUE(std::filesystem::exists(std::filesystem::path(p).concat(L".bad")));
     std::filesystem::remove(std::filesystem::path(p).concat(L".bad"));
+}
+
+// A settings.json held open by a backup program, or refused by its permissions, is not a first run: it is tried again
+// for a moment and then reported, and never replaced by the defaults.
+TEST(Settings, AFileThatCannotBeOpenedIsNotTakenForMissing) {
+    const auto p = testutil::tempDir() / L"settings-held.json";
+    const auto lastGood = std::filesystem::path(p).concat(L".last-good");
+    const auto bad = std::filesystem::path(p).concat(L".bad");
+    for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
+    Settings saved;
+    saved.backend = Backend::Asio;
+    saveSettings(saved, p);
+    const auto hold = [&] { return CreateFileW(p.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr); };
+    auto recovery = SettingsRecovery::Reset;
+    {
+        const HANDLE held = hold();
+        ASSERT_NE(held, INVALID_HANDLE_VALUE);
+        EXPECT_THROW(openSettings(p, recovery), SettingsUnavailableError);
+        EXPECT_THROW(loadSettings(p), SettingsUnavailableError);
+        CloseHandle(held);
+    }
+    EXPECT_FALSE(std::filesystem::exists(bad));
+    EXPECT_EQ(loadSettings(p).backend, Backend::Asio) << "the file is as it was";
+
+    const HANDLE held = hold();
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    std::jthread release([held] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CloseHandle(held);
+    });
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Asio) << "a moment's hold is waited for";
+    EXPECT_EQ(recovery, SettingsRecovery::None);
+    release.join();
+    for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
 }
 
 TEST(Settings, OpeningKeepsALastGoodCopyThatReplacesACorruptFile) {
