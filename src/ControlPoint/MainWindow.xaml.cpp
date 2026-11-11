@@ -2174,6 +2174,13 @@ void MainWindow::OnWindowKeyDown(Windows::Foundation::IInspectable const&, Input
     if (focused && (focused.try_as<TextBox>() || focused.try_as<PasswordBox>() || focused.try_as<RichEditBox>() ||
                     focused.try_as<NumberBox>() || focused.try_as<AutoSuggestBox>()))
         return;
+    // A control reached by the keyboard takes Space as its own press; one the pointer left focused does not, so Space
+    // after a click on Next still plays or pauses.
+    if (const auto control = focused.try_as<Control>();
+        key == VirtualKey::Space && control && control.FocusState() != FocusState::Pointer &&
+        (focused.try_as<Primitives::ButtonBase>() || focused.try_as<ToggleSwitch>() || focused.try_as<ComboBox>() ||
+         focused.try_as<Primitives::SelectorItem>()))
+        return;
     const bool control = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
     if (GetKeyState(VK_MENU) < 0 || GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) return;
     if (key == VirtualKey::Space && !control && !shift) {
