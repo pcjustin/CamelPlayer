@@ -11,6 +11,7 @@
 #include "TestUtil.h"
 #include "Server/Library/LibraryNames.h"
 #include "Server/Library/LibraryText.h"
+#include "Server/Library/LibraryViews.h"
 
 using namespace camel::server;
 
@@ -197,4 +198,55 @@ TEST(LibraryText, ALocaleSwitchedBackMidRebuildLeavesNoOtherKeys) {
     ASSERT_LT(rewritten, 20000) << "the rebuild finished before it was switched back";
     index.waitIdle();
     EXPECT_EQ(count(stroke), 20000);
+}
+
+// Albums listed while their sort keys are rebuilt for another locale: once the rebuild ends, the list is in the new order.
+TEST(LibraryText, AlbumsListedDuringARebuildFollowTheNewOrder) {
+    const auto directory = testutil::tempDir() / "library-album-rebuild";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    constexpr int64_t kAlbums = 20000;
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music/album');"
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000) "
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) SELECT "
+                    "x,1,1,'C:/music/'||x||'.flac','audio',1,1 FROM n;"
+                    "INSERT INTO albums(id,folder_id,grouping_key,title,added) "
+                    "SELECT id,1,'k'||id,CASE id%2 WHEN 1 THEN '一' ELSE '阿' END,0 FROM files;"
+                    "INSERT INTO tracks(id,file_id,album_id,title,album) SELECT id,id,id,'t',title FROM albums;");
+        })
+        .get();
+    const auto bopomofo = librarySortKey("一", L"zh-TW_pronun");
+    ASSERT_NE(librarySortKey("一", L"zh-TW"), bopomofo);
+    const auto order = [&] {
+        std::vector<int64_t> ids;
+        for (int64_t offset = 0; offset < kAlbums; offset += 500)
+            for (const auto& album : browseAlbums(store, AlbumSort::Title, std::nullopt, offset, 500).albums)
+                ids.push_back(album.id);
+        return ids;
+    };
+    const auto keyOf = [&](int64_t album) {
+        auto reader = store.openReader();
+        auto row = reader.prepare("SELECT sort_key FROM albums WHERE id=?");
+        row.bind(1, album);
+        return row.step() ? row.blob(0) : std::vector<uint8_t>{};
+    };
+    LibraryTextIndex index(store, [](std::wstring_view) { return std::vector<uint8_t>{1}; });
+    index.setLocale(L"zh-TW");
+    index.waitIdle();
+    ASSERT_EQ(order().front(), 1);
+    index.setLocale(L"zh-TW_pronun");
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (keyOf(1) != bopomofo && std::chrono::steady_clock::now() < until) {
+    }
+    ASSERT_EQ(keyOf(1), bopomofo);
+    browseAlbums(store, AlbumSort::Title, std::nullopt, 0, 1); // caches the whole order
+    ASSERT_NE(keyOf(kAlbums - 1), bopomofo) << "the album keys were rebuilt before they were listed";
+    index.waitIdle();
+    std::vector<int64_t> expected;
+    for (int64_t id = 2; id <= kAlbums; id += 2) expected.push_back(id);
+    for (int64_t id = 1; id < kAlbums; id += 2) expected.push_back(id);
+    EXPECT_EQ(order(), expected);
 }

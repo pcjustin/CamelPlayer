@@ -266,6 +266,8 @@ void LibraryTextIndex::run(std::stop_token stop) {
                                         updateLibraryAlbumText(db, id, locale);
                                     after = id;
                                 }
+                                // Tracks raise the revision by trigger; albums have none, and listings are cached by it.
+                                if (table == "albums" && count) db.exec("UPDATE library_revision SET value=value+1 WHERE id=1");
                             })
                             .get();
                         if (count < 100) break;
