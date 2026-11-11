@@ -245,8 +245,9 @@ struct AirPlayFinder::Impl {
         }
         for (const auto& receiver : receivers) {
             if (stopping) return;
-            if (receiver.support != Support::Supported) continue;
             const bool session = wanted.contains(receiver.id);
+            // What it answered before is asked again when the user asks, as its own setting may have changed since.
+            if (receiver.support != Support::Supported && !(session && verdicts.contains(receiver.id))) continue;
             std::string& last = lastAsked[receiver.id];
             if (!session && last == askedAt(receiver)) continue;
             last = askedAt(receiver);

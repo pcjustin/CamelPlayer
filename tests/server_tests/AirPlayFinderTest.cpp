@@ -271,6 +271,20 @@ TEST_F(AirPlayFinderTest, AnEnabledReceiverIsAskedForASessionThatItRefuses) {
     EXPECT_EQ(std::ranges::count(methods, "TEARDOWN"), 0);
 }
 
+// A HomePod that refused while it let only people of the home play is asked again when it is turned on again.
+TEST_F(AirPlayFinderTest, AReceiverThatRefusedIsAskedAgainWhenTheUserTurnsItOn) {
+    rtsp_.answer("ANNOUNCE", 403);
+    mdns_.add(record(rtsp_));
+    start();
+    ASSERT_TRUE(found(1));
+    finder_->check("800A805D016B");
+    ASSERT_TRUE(waitFor([&] { return supportOf() == Support::Refused; }));
+    rtsp_.answer("ANNOUNCE", 200);
+    finder_->check("800A805D016B");
+    EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Supported; }));
+    EXPECT_EQ(std::ranges::count(rtsp_.methods(), "ANNOUNCE"), 2);
+}
+
 TEST_F(AirPlayFinderTest, ASessionThatIsTakenIsClosedAtOnceAndNeverStarted) {
     mdns_.add(record(rtsp_));
     start();
