@@ -293,6 +293,19 @@ TEST(NetworkOutputTest, OneUrlForEachTrackWithTheBoundaryExactlyWhereItBelongs) 
 }
 
 // A track told shorter than it renders: the player gets the length it was told, and the next track its own audio.
+// A connection reset before it is served, as a port probe's, leaves the next track served.
+TEST(NetworkOutputTest, AConnectionResetBeforeItIsServedLeavesTheStreamServed) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
+    CountingSource source(k16.bytesPerFrame(), 30000, 20000);
+    source.queueSecond();
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.currentUri().empty(); }));
+    for (int i = 0; i < 20; ++i) FakeRenderer::resetConnectionTo(renderer.currentUri());
+    EXPECT_TRUE(waitFor([&] { return renderer.played().size() == 2; }));
+}
+
 TEST(NetworkOutputTest, ATrackToldTooShortLeavesTheNextTrackItsOwnBody) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time

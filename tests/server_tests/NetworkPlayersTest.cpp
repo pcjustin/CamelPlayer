@@ -592,6 +592,21 @@ TEST(PlayerLinkTest, FollowsAnOpenHomePlayer) {
     EXPECT_EQ(events->find(PlayerEventKind::Seeked)->positionMs, 200000U);
 }
 
+// A connection reset before it is read, as a port probe's, leaves the player's events coming.
+TEST(PlayerLinkTest, AConnectionResetBeforeItIsReadLeavesEventsComing) {
+    FakeRenderer renderer(RendererKind::OpenHome);
+    renderer.set("track", "7");
+    renderer.set("state", "Playing");
+    auto events = std::make_shared<Events>();
+    PlayerLink link(describe(renderer), into(events), {60s, 2, 1800, 500});
+    ASSERT_TRUE(waitFor([&] { return renderer.subscribers() == 3; }));
+    link.expect({"7", "8", "6"});
+    ASSERT_TRUE(events->waitFor(PlayerEventKind::Playing));
+    for (int i = 0; i < 20; ++i) FakeRenderer::resetConnectionTo(renderer.callback("Playlist"));
+    renderer.emitVariable("Playlist", "TransportState", "Paused");
+    EXPECT_TRUE(events->waitFor(PlayerEventKind::Paused));
+}
+
 TEST(PlayerLinkTest, ASourceChangeOnAnOpenHomePlayerIsATakeover) {
     FakeRenderer renderer(RendererKind::OpenHome);
     auto events = std::make_shared<Events>();

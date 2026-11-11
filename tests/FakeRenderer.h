@@ -208,6 +208,25 @@ public:
         std::scoped_lock lock(mutex_);
         return subscribers_.size();
     }
+    // Where a subscriber to `service` asked for its events.
+    std::string callback(const std::string& service) const {
+        std::scoped_lock lock(mutex_);
+        const auto found = subscribers_.find(service);
+        return found == subscribers_.end() ? std::string() : found->second.callback;
+    }
+    // Connects to the host and port of `url` and resets the connection before sending anything, as a port probe can.
+    static void resetConnectionTo(const std::string& url) {
+        const auto hostStart = url.find("://") + 3, colon = url.find(':', hostStart), slash = url.find('/', colon);
+        const SOCKET probe = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in target = loopback();
+        target.sin_port = htons(uint16_t(std::strtol(url.substr(colon + 1, slash - colon - 1).c_str(), nullptr, 10)));
+        inet_pton(AF_INET, url.substr(hostStart, colon - hostStart).c_str(), &target.sin_addr);
+        if (connect(probe, reinterpret_cast<sockaddr*>(&target), sizeof(target)) == 0) {
+            const linger reset{1, 0};
+            setsockopt(probe, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&reset), sizeof(reset));
+        }
+        closesocket(probe);
+    }
     int searches() const { return searches_; }
 
 private:
