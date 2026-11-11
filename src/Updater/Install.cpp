@@ -269,6 +269,33 @@ void writeResult(const std::filesystem::path& data, const wchar_t* kind, const s
     out << L'\n';
 }
 
+// Split by hand: CommandLineToArgvW reads a backslash before a quote as an escape, which turns a drive's root, "D:\",
+// into the start of everything after it. The player's arguments are paths and words without quotes in them.
+std::map<std::wstring, std::wstring> readArguments(const std::wstring& commandLine, bool& elevated) {
+    std::vector<std::wstring> words;
+    for (size_t at = 0; at < commandLine.size();) {
+        if (commandLine[at] == L' ' || commandLine[at] == L'\t') {
+            ++at;
+            continue;
+        }
+        const bool quoted = commandLine[at] == L'"';
+        const size_t from = quoted ? at + 1 : at;
+        const size_t end = quoted ? commandLine.find(L'"', from) : commandLine.find_first_of(L" \t", from);
+        words.push_back(commandLine.substr(from, end == std::wstring::npos ? std::wstring::npos : end - from));
+        at = end == std::wstring::npos ? commandLine.size() : end + (quoted ? 1 : 0);
+    }
+    std::map<std::wstring, std::wstring> values;
+    for (size_t i = 1; i < words.size(); ++i) {
+        if (words[i] == L"--elevated")
+            elevated = true;
+        else if (words[i].starts_with(L"--") && i + 1 < words.size()) {
+            values[words[i].substr(2)] = words[i + 1];
+            ++i;
+        }
+    }
+    return values;
+}
+
 // By the file, not its path's spelling: a SUBST drive, an 8.3 name or a junction names the same file otherwise.
 bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b) {
     std::error_code error;

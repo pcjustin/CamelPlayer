@@ -552,3 +552,21 @@ TEST(Update, ThePlayerIsKnownByItsFileWhateverItsPathsSpelling) {
     EXPECT_FALSE(camel::updater::sameFile(dir / "real" / "CamelPlayer.exe", dir / "real" / "Gone.exe"));
     DefineDosDeviceW(DDD_REMOVE_DEFINITION, drive.c_str(), nullptr);
 }
+
+// A program at a drive's root is passed as --app "D:\": read as Windows reads a command line, the backslash takes the
+// quote with it, the arguments after it run into the app's, and the updater exited without a word.
+TEST(Update, TheUpdatersArgumentsArePathsReadAsTheyAreWritten) {
+    bool elevated = false;
+    auto args = camel::updater::readArguments(
+        LR"("C:\Temp\CamelPlayer.Updater.exe" --pid 12 --app "D:\" --files "C:\Temp\new files" --data "C:\Data" )"
+        LR"(--version 0.4.2 --from 0.4.1 --manifest ab12 --elevated)",
+        elevated);
+    EXPECT_EQ(args[L"app"], LR"(D:\)");
+    EXPECT_EQ(args[L"files"], LR"(C:\Temp\new files)");
+    EXPECT_EQ(args[L"data"], LR"(C:\Data)");
+    EXPECT_EQ(args[L"version"], L"0.4.2");
+    EXPECT_EQ(args[L"from"], L"0.4.1");
+    EXPECT_EQ(args[L"manifest"], L"ab12");
+    EXPECT_EQ(args[L"pid"], L"12");
+    EXPECT_TRUE(elevated);
+}

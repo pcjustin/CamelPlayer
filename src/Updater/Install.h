@@ -8,6 +8,7 @@
 #pragma once
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <functional>
 #include <string>
 
@@ -38,6 +39,9 @@ enum class Outcome { Installed, RolledBack };
 
 // Expects the old player to have exited. Writes the update-result file the started player reads.
 Outcome install(const Options& options, const Host& host);
+
+// The --name value pairs of the updater's command line; --elevated sets `elevated`.
+std::map<std::wstring, std::wstring> readArguments(const std::wstring& commandLine, bool& elevated);
 
 // Whether two paths name the player's program.
 bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b);

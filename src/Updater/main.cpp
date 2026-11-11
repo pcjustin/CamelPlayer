@@ -145,19 +145,27 @@ std::vector<HANDLE> players(const fs::path& exe) {
     return found;
 }
 
-std::map<std::wstring, std::wstring> arguments(bool& elevatedRun) {
-    std::map<std::wstring, std::wstring> values;
-    int count = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &count);
-    for (int i = 1; i < count; ++i) {
-        const std::wstring name = argv[i];
-        if (name == L"--elevated")
-            elevatedRun = true;
-        else if (name.starts_with(L"--") && i + 1 < count)
-            values[name.substr(2)] = argv[++i];
-    }
-    LocalFree(static_cast<HLOCAL>(static_cast<void*>(argv)));
-    return values;
+// The player's data folder when the arguments do not say: the one it passed on, or its default.
+fs::path playerData() {
+    wchar_t text[MAX_PATH * 4];
+    const DWORD length = GetEnvironmentVariableW(L"CAMELPLAYER_DATA", text, DWORD(std::size(text)));
+    if (length && length < std::size(text)) return text;
+    PWSTR base = nullptr;
+    fs::path data;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base))) data = fs::path(base) / L"CamelPlayer";
+    CoTaskMemFree(base);
+    return data;
+}
+
+// The program of the player that started the updater, while it still runs.
+fs::path playerProgram(const std::wstring& pid) {
+    const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(_wtoi(pid.c_str())));
+    if (!process) return {};
+    wchar_t path[MAX_PATH * 4];
+    auto size = DWORD(std::size(path));
+    const bool read = QueryFullProcessImageNameW(process, 0, path, &size) != FALSE;
+    CloseHandle(process);
+    return read ? fs::path(path) : fs::path();
 }
 
 } // namespace
@@ -167,8 +175,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // /DEPENDENTLOADFLAG does the same for what it imports.
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     bool elevatedRun = false;
-    auto args = arguments(elevatedRun);
-    if (args[L"app"].empty() || args[L"files"].empty() || args[L"data"].empty() || args[L"version"].empty()) return 2;
+    auto args = camel::updater::readArguments(GetCommandLineW(), elevatedRun);
+    if (args[L"app"].empty() || args[L"files"].empty() || args[L"data"].empty() || args[L"version"].empty()) {
+        // The player has exited for the update: it is told where it reads the result, and started again.
+        const fs::path data = args[L"data"].empty() ? playerData() : fs::path(args[L"data"]);
+        if (!data.empty()) {
+            openLog(data);
+            log(L"the updater could not read its arguments: " + std::wstring(GetCommandLineW()));
+            camel::updater::writeResult(data, L"failed", args[L"version"]);
+        }
+        const fs::path player = args[L"app"].empty() ? playerProgram(args[L"pid"]) : fs::path(args[L"app"]) / files::kPlayer;
+        if (!player.empty()) startProcess(player);
+        return 2;
+    }
     wchar_t self[MAX_PATH * 4];
     GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
     camel::updater::Options options{args[L"app"],     args[L"files"],
