@@ -93,6 +93,27 @@ TEST_F(LibraryIdentityTest, LocalRenamePreservesTracksStatsPlaylistAndQueue) {
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM tracks"), 1);
 }
 
+// The record a rename keeps names the file as it is now, as a playlist exported from it does.
+TEST_F(LibraryIdentityTest, ARenamedFileCarriesItsNewName) {
+    const auto source = music / "old.flac";
+    fs::copy_file(testutil::testFile("16-44.1k"), source);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto original = id(store, "old.flac");
+    fs::rename(source, music / "new.flac");
+    ASSERT_EQ(scanner.scan(root).moved, 1);
+    ASSERT_EQ(id(store, "new.flac"), original);
+    auto db = store.openReader();
+    auto name = db.prepare("SELECT name FROM files WHERE id=?");
+    ASSERT_TRUE(name.bind(1, original).step());
+    EXPECT_EQ(name.text(0), "new.flac");
+    const auto stored = libraryStoredPath(db, original);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(stored->ends_with("\\new.flac")) << *stored;
+}
+
 TEST_F(LibraryIdentityTest, MoveAcrossRegisteredRootsDoesNotNeedTheSourceRootToBeRescanned) {
     const auto source = file("old.lrc");
     const auto other = dir / "other";

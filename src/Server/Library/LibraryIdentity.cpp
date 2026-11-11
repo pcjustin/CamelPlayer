@@ -124,9 +124,9 @@ void merge(sqlite::Database& db, int64_t prior, int64_t current) {
     for (const auto* table : {"covers", "playlist_items", "queue"})
         db.prepare(std::string("UPDATE ") + table + " SET file_id=? WHERE file_id=?").bind(1, prior).bind(2, current).run();
     db.prepare("UPDATE files SET available=0 WHERE id=?").bind(1, current).run();
-    db.prepare("UPDATE files SET (folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,created,volume_key,last_seen)="
-               "(SELECT folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,created,volume_key,last_seen "
-               "FROM files WHERE id=?),content_hash=CASE WHEN size=(SELECT size FROM files WHERE id=?) "
+    db.prepare("UPDATE files SET (folder_id,root_id,path,name,kind,size,mtime,volume_serial,file_index,created,volume_key,"
+               "last_seen)=(SELECT folder_id,root_id,path,name,kind,size,mtime,volume_serial,file_index,created,volume_key,"
+               "last_seen FROM files WHERE id=?),content_hash=CASE WHEN size=(SELECT size FROM files WHERE id=?) "
                "AND mtime=(SELECT mtime FROM files WHERE id=?) THEN COALESCE((SELECT content_hash FROM files WHERE "
                "id=?),content_hash) "
                "ELSE (SELECT content_hash FROM files WHERE id=?) END,available=1 WHERE id=?")
