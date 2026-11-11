@@ -47,12 +47,14 @@ public:
 
     // Returns true when the page started a new revision: the view must then reread its size and every item.
     bool deliver(int64_t page, uint64_t revision, int64_t total, std::vector<T> items) {
+        if (revision_ && revision < *revision_) return false; // an older answer that raced a refresh
         inFlight_.erase(page);
         const bool reset = !revision_ || *revision_ != revision;
         if (reset) {
-            if (revision_ && revision < *revision_) return false; // an older answer that raced a refresh
             pages_.clear();
             order_.clear();
+            // What is in flight was asked under the old revision, so the view's reads after this ask for it again.
+            inFlight_.clear();
             revision_ = revision;
             total_ = total;
         }

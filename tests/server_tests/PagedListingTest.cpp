@@ -11,6 +11,7 @@ namespace {
 
 std::vector<int> page(int first, int count) {
     std::vector<int> out;
+    out.reserve(size_t(count));
     for (int i = 0; i < count; ++i) out.push_back(first + i);
     return out;
 }
@@ -54,10 +55,31 @@ TEST(PagedListing, ANewerRevisionReplacesEveryPageAndAnOlderOneIsIgnored) {
     EXPECT_EQ(listing.revision(), 6u);
 }
 
+// A scan that changes the library while a page is fetched: the view reads every row again, and the page in flight
+// under the old revision is asked for again under the new one, its old answer being dropped.
+TEST(PagedListing, APageInFlightWhenTheRevisionChangesIsAskedForAgain) {
+    PagedListing<int> listing(10);
+    listing.at(0);
+    listing.takeWanted();
+    listing.deliver(0, 1, 30, page(0, 10));
+    EXPECT_EQ(listing.at(15), nullptr);
+    EXPECT_EQ(listing.takeWanted(), (std::vector<int64_t>{1})); // in flight under revision 1
+    listing.at(0);
+    listing.takeWanted();
+    ASSERT_TRUE(listing.deliver(0, 2, 30, page(100, 10))); // revision 2: the view reads every row again
+    EXPECT_EQ(listing.at(15), nullptr);
+    EXPECT_EQ(listing.takeWanted(), (std::vector<int64_t>{1}));
+    EXPECT_FALSE(listing.deliver(1, 1, 30, page(10, 10))); // the old answer
+    EXPECT_EQ(listing.at(15), nullptr);
+    EXPECT_TRUE(listing.takeWanted().empty()); // still in flight under revision 2
+    EXPECT_FALSE(listing.deliver(1, 2, 30, page(110, 10)));
+    EXPECT_EQ(*listing.at(15), 115);
+}
+
 TEST(PagedListing, MemoryStaysBoundedAndFailedPagesAreRetried) {
     PagedListing<int> listing(10, 3);
     for (int p = 0; p < 5; ++p) {
-        listing.at(p * 10);
+        listing.at(int64_t{p} * 10);
         listing.takeWanted();
         listing.deliver(p, 1, 50, page(p * 10, 10));
     }
