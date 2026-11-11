@@ -549,11 +549,19 @@ private:
                 return;
             framesFinished_ += bodies_.front().framesWritten;
             bodies_.pop_front();
+            highestMs_ = 0;
+            changedAt_ = Clock::now();
             uri = bodies_.front().uri;
             didl = bodies_.front().didl;
         }
-        if (!link_->load(uri, didl) || !link_->play())
-            log::warn("network player %s refused the next track", player_.name.c_str());
+        if (link_->load(uri, didl)) {
+            {
+                std::scoped_lock lock(mutex_);
+                askedToPlay_ = Clock::now();
+            }
+            if (link_->play()) return;
+        }
+        log::warn("network player %s refused the next track", player_.name.c_str());
     }
 
     // Renders on once every track is sent, for the Engine to reach its end or its next track.

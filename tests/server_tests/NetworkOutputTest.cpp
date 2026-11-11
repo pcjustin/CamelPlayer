@@ -629,6 +629,26 @@ TEST(NetworkOutputTest, ANextTrackQueuedTooLateIsNotAStopOfItsOwn) {
     EXPECT_EQ(raised, kNoError);
 }
 
+// A late next track has the time to start that any start has: the stop a player still reports as it begins is no takeover.
+TEST(NetworkOutputTest, ALateNextTrackIsGivenTheTimeToStart) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 6, 44100ULL * 10);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return renderer.state() == "STOPPED"; }, 15s));
+    const auto loads = [&] { return std::ranges::count(renderer.actions(), std::string("SetAVTransportURI")); };
+    source.queueSecond();
+    ASSERT_TRUE(waitFor([&] { return loads() == 2; }));
+    renderer.emitLastChange(R"(<TransportState val="STOPPED"/>)"); // its word on the track before, as it starts this one
+    std::this_thread::sleep_for(6s);                               // past the time a start is given
+    EXPECT_EQ(raised, kNoError);
+    EXPECT_TRUE(waitFor([&] { return renderer.played().size() == 2; }, 10s)); // played to its end
+    EXPECT_EQ(raised, kNoError);
+}
+
 TEST(NetworkOutputTest, APlayerThatDoesNotStartIsReported) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.stayInStandby();
