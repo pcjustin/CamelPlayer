@@ -17,8 +17,13 @@ namespace camel {
 
 // The filters of `text`: PK, LS/LSC, HS/HSC, LP/LPQ, HP/HPQ, BP, NO and AP, with "Channel: L", "R" or "ALL" applying
 // to the filters that follow. OFF filters are kept disabled; lines it does not know, and the preamp (CamelPlayer sets
-// its own headroom), are ignored.
-std::vector<EqBand> parseEqualizerApo(std::string_view text);
+// its own headroom), are ignored. Values are held to EqBand's ranges; a filter whose frequency or Q is not above zero,
+// or any of whose values is not finite, is left out. `notes` names those lines, from 1.
+struct EqImportNotes {
+    std::vector<int> held;    // lines whose values were held to the settings' ranges
+    std::vector<int> dropped; // filter lines left out, their values not finite or not usable
+};
+std::vector<EqBand> parseEqualizerApo(std::string_view text, EqImportNotes* notes = nullptr);
 
 // `bands` as Equalizer APO text with `preampDb` as its preamp. A steeper low- or high-pass than 12 dB/oct has no APO
 // filter and is written as a 12 dB/oct one.

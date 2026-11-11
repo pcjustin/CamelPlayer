@@ -558,6 +558,8 @@ Details: {0}</value></data>
   <data name="Eq_PresetName" xml:space="preserve"><value>Name</value></data>
   <data name="Eq_Save" xml:space="preserve"><value>Save</value></data>
   <data name="Eq_ImportTitle" xml:space="preserve"><value>Import EQ</value></data>
+  <data name="Eq_ImportHeld" xml:space="preserve"><value>Values outside what the EQ keeps (gain -60 to 60 dB, Q 0.01 to 100, frequency 1 Hz to 1 MHz) were held to its limits on lines {0}.</value></data>
+  <data name="Eq_ImportDropped" xml:space="preserve"><value>Lines {0} were left out: their values are not numbers the EQ can use.</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>The file has no filters CamelPlayer can read. Choose an Equalizer APO configuration or an AutoEq ParametricEQ.txt file.</value></data>
   <data name="SignalPath_Eq" xml:space="preserve"><value>Parametric EQ</value></data>
   <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP: ReplayGain, equalizer, crossfeed and convolution</value></data>

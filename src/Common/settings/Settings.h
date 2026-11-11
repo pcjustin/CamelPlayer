@@ -196,6 +196,10 @@ enum class EqKind : uint8_t { Peaking = 1, LowShelf, HighShelf, LowPass, HighPas
 enum class EqChannels : uint8_t { All, Left, Right };
 
 struct EqBand {
+    // The ranges settings.json keeps; a value outside is not read back.
+    static constexpr double kMinFrequencyHz = 1.0, kMaxFrequencyHz = 1e6;
+    static constexpr double kMinGainDb = -60.0, kMaxGainDb = 60.0;
+    static constexpr double kMinQ = 0.01, kMaxQ = 100.0;
     EqKind kind = EqKind::Peaking;
     EqChannels channels = EqChannels::All;
     uint32_t slope = 12; // low- and high-pass dB per octave, 6 to 48 in steps of 6; 12 uses q

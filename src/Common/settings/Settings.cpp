@@ -235,9 +235,9 @@ static std::vector<EqBand> eqBandsFrom(const json& list, const std::vector<EqBan
         };
         const double slope = number("slope", 12, 6, 48);
         band.slope = std::fmod(slope, 6.0) == 0.0 ? uint32_t(slope) : 12;
-        band.frequencyHz = number("frequency", 1000.0, 1.0, 1e6);
-        band.gainDb = number("gain", 0.0, -60.0, 60.0);
-        band.q = number("q", 0.71, 0.01, 100.0);
+        band.frequencyHz = number("frequency", 1000.0, EqBand::kMinFrequencyHz, EqBand::kMaxFrequencyHz);
+        band.gainDb = number("gain", 0.0, EqBand::kMinGainDb, EqBand::kMaxGainDb);
+        band.q = number("q", 0.71, EqBand::kMinQ, EqBand::kMaxQ);
         band.enabled = !item.contains("enabled") || !item["enabled"].is_boolean() || item["enabled"].get<bool>();
         bands.push_back(band);
     }

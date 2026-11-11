@@ -558,6 +558,8 @@
   <data name="Eq_PresetName" xml:space="preserve"><value>名稱</value></data>
   <data name="Eq_Save" xml:space="preserve"><value>儲存</value></data>
   <data name="Eq_ImportTitle" xml:space="preserve"><value>匯入等化器</value></data>
+  <data name="Eq_ImportHeld" xml:space="preserve"><value>第 {0} 行的數值超出等化器保留的範圍（增益 -60 到 60 dB、Q 0.01 到 100、頻率 1 Hz 到 1 MHz），已調整到範圍邊界。</value></data>
+  <data name="Eq_ImportDropped" xml:space="preserve"><value>第 {0} 行已略過：數值不是等化器能使用的數字。</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>檔案裡沒有 CamelPlayer 能讀取的濾波器。請選擇 Equalizer APO 設定檔或 AutoEq 的 ParametricEQ.txt。</value></data>
   <data name="SignalPath_Eq" xml:space="preserve"><value>參數式等化器</value></data>
   <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP：ReplayGain、等化器、crossfeed 與卷積</value></data>

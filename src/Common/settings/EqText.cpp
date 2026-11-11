@@ -4,6 +4,7 @@
 
 #include "Common/settings/EqText.h"
 
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -62,11 +63,13 @@ const char* codeOf(EqKind kind) {
 
 } // namespace
 
-std::vector<EqBand> parseEqualizerApo(std::string_view text) {
+std::vector<EqBand> parseEqualizerApo(std::string_view text, EqImportNotes* notes) {
     std::vector<EqBand> bands;
     auto channels = EqChannels::All;
     std::istringstream lines{std::string(text)};
+    int lineNumber = 0;
     for (std::string line; std::getline(lines, line);) {
+        ++lineNumber;
         std::istringstream words(upper(line));
         std::vector<std::string> tokens;
         for (std::string word; words >> word;) tokens.push_back(word);
@@ -89,19 +92,36 @@ std::vector<EqBand> parseEqualizerApo(std::string_view text) {
         band.channels = channels;
         band.enabled = tokens[at + 1] == "ON";
         bool frequency = false;
+        bool usable = true;
+        bool held = false;
+        const auto hold = [&](double value, double low, double high) {
+            const double kept = std::clamp(value, low, high);
+            held = held || kept != value;
+            return kept;
+        };
         for (size_t i = at + 3; i + 1 < tokens.size(); ++i) {
             const auto value = number(tokens[i + 1]);
             if (!value) continue;
-            if (tokens[i] == "FC") {
-                band.frequencyHz = *value;
+            const bool known = tokens[i] == "FC" || tokens[i] == "GAIN" || tokens[i] == "Q";
+            if (known && !std::isfinite(*value)) {
+                usable = false;
+            } else if (tokens[i] == "FC") {
+                usable = usable && *value > 0;
+                band.frequencyHz = hold(*value, EqBand::kMinFrequencyHz, EqBand::kMaxFrequencyHz);
                 frequency = true;
             } else if (tokens[i] == "GAIN") {
-                band.gainDb = *value;
+                band.gainDb = hold(*value, EqBand::kMinGainDb, EqBand::kMaxGainDb);
             } else if (tokens[i] == "Q") {
-                band.q = *value;
+                usable = usable && *value > 0;
+                band.q = hold(*value, EqBand::kMinQ, EqBand::kMaxQ);
             }
         }
-        if (frequency && band.frequencyHz > 0 && band.q > 0) bands.push_back(band);
+        if (!frequency || !usable) {
+            if (notes) notes->dropped.push_back(lineNumber);
+            continue;
+        }
+        if (held && notes) notes->held.push_back(lineNumber);
+        bands.push_back(band);
     }
     return bands;
 }

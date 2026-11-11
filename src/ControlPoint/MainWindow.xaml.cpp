@@ -3889,7 +3889,8 @@ void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, Route
     CoTaskMemFree(path);
     std::ifstream in(file, std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(in)), {});
-    const auto bands = camel::parseEqualizerApo(text);
+    camel::EqImportNotes notes;
+    const auto bands = camel::parseEqualizerApo(text, &notes);
     if (bands.empty()) {
         ui::showDialog(textDialog(ContentLayout().XamlRoot(), tr(L"Eq_ImportTitle"), tr(L"Eq_ImportFailed")));
         return;
@@ -3906,6 +3907,16 @@ void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, Route
     settings_.eq.enabled = true;
     showEq();
     settingsChanged();
+    const auto lines = [](const std::vector<int>& numbers) {
+        std::wstring text;
+        for (const int number : numbers) text += (text.empty() ? L"" : L", ") + std::to_wstring(number);
+        return text;
+    };
+    std::wstring changes;
+    if (!notes.held.empty()) changes += ui::format(L"Eq_ImportHeld", {lines(notes.held)}).c_str();
+    if (!notes.dropped.empty())
+        changes += (changes.empty() ? L"" : L"\n\n") + std::wstring(ui::format(L"Eq_ImportDropped", {lines(notes.dropped)}));
+    if (!changes.empty()) ui::showDialog(textDialog(ContentLayout().XamlRoot(), tr(L"Eq_ImportTitle"), hstring(changes)));
 }
 
 void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

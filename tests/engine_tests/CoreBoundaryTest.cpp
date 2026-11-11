@@ -453,6 +453,29 @@ TEST(EqText, ReadsAutoEqAndEqualizerApoFilters) {
     EXPECT_TRUE(parseEqualizerApo("nothing to see\n").empty());
 }
 
+// What a file brings is held to the ranges the settings keep, so a preset sounds the same after a restart, and what
+// is not a finite number never reaches the Engine.
+TEST(EqText, AnImportIsHeldToTheSettingsRanges) {
+    EqImportNotes notes;
+    const auto bands = parseEqualizerApo("Filter 1: ON PK Fc 1000 Hz Gain nan dB Q 1\n"
+                                         "Filter 2: ON PK Fc inf Hz Gain 3 dB Q 1\n"
+                                         "Filter 3: ON PK Fc 1000 Hz Gain 120 dB Q 0.001\n"
+                                         "Filter 4: ON PK Fc 2000000 Hz Gain -80 dB Q 500\n"
+                                         "Filter 5: ON PK Fc 500 Hz Gain 2 dB Q 1\n"
+                                         "Filter 6: ON PK Fc 0.5 Hz Gain 2 dB Q 1\n",
+                                         &notes);
+    ASSERT_EQ(bands.size(), 4u);
+    EXPECT_EQ(bands[0], (EqBand{EqKind::Peaking, EqChannels::All, 12, 1000.0, 60.0, 0.01, true}));
+    EXPECT_EQ(bands[1], (EqBand{EqKind::Peaking, EqChannels::All, 12, 1e6, -60.0, 100.0, true}));
+    EXPECT_EQ(bands[2], (EqBand{EqKind::Peaking, EqChannels::All, 12, 500.0, 2.0, 1.0, true}));
+    EXPECT_EQ(bands[3], (EqBand{EqKind::Peaking, EqChannels::All, 12, 1.0, 2.0, 1.0, true}));
+    EXPECT_EQ(notes.held, (std::vector<int>{3, 4, 6}));
+    EXPECT_EQ(notes.dropped, (std::vector<int>{1, 2}));
+    Settings settings;
+    settings.eq.bands = bands;
+    EXPECT_EQ(fromJson(toJson(settings)).eq.bands, bands) << "saved and read back as imported";
+}
+
 TEST(EqText, WritesWhatItReads) {
     const std::vector<EqBand> bands{{EqKind::Peaking, EqChannels::Left, 12, 1000.0, -4.5, 2.0, true},
                                     {EqKind::Notch, EqChannels::Right, 12, 60.0, 0.0, 8.0, false},
