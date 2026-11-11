@@ -17,6 +17,7 @@
 #include "ArtworkLoader.h"
 #include "BrowseItem.h"
 #include "CardSize.h"
+#include "PeriodPage.h"
 #include "TrackMarks.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
@@ -667,34 +668,35 @@ ui::BrowseFetch HomeView::periodFetch(std::wstring_view list) {
     // Rankings come whole from the Server, up to the 500 it allows, and are paged here.
     const bool byTime = metric() == PlayMetric::ListeningTime;
     return [server, period, byTime, list = std::wstring(list)](int64_t offset, int64_t limit, std::optional<uint64_t>) {
-        PlayStatisticsQuery query;
-        query.period = period;
-        query.metric = byTime ? PlayMetric::ListeningTime : PlayMetric::Plays;
-        query.topLimit = std::clamp<int64_t>(offset + limit, 1, 500);
-        query.historyLimit = 0;
-        const auto stats = server->playStatistics(query);
-        std::vector<ui::BrowseRow> rows;
-        if (list == L"topAlbums") {
-            for (const auto& a : stats.albums)
-                if (counted(byTime, a.plays, a.listenedMs))
-                    rows.push_back(
-                        {a.album, {}, ui::utf8(a.name), ui::utf8(a.artist), {}, measured(byTime, a.plays, a.listenedMs)});
-        } else if (list == L"topArtists") {
-            for (const auto& a : stats.artists)
-                if (counted(byTime, a.plays, a.listenedMs))
-                    rows.push_back({0, a.name, ui::utf8(a.name), {}, {}, measured(byTime, a.plays, a.listenedMs)});
-        } else {
-            for (const auto& t : stats.tracks) {
-                if (!counted(byTime, t.plays, t.listenedMs)) continue;
-                rows.push_back({t.track.file, t.path, titleOf(t.title, t.name, t.path), ui::utf8(t.artist), ui::utf8(t.album),
-                                measured(byTime, t.plays, t.listenedMs)});
-                rows.back().file = t.track.file;
-                rows.back().unavailable = !t.available;
+        const auto page = ui::periodPage<ui::BrowseRow>(offset, limit, [&](int64_t topLimit) {
+            PlayStatisticsQuery query;
+            query.period = period;
+            query.metric = byTime ? PlayMetric::ListeningTime : PlayMetric::Plays;
+            query.topLimit = topLimit;
+            query.historyLimit = 0;
+            const auto stats = server->playStatistics(query);
+            std::vector<ui::BrowseRow> rows;
+            if (list == L"topAlbums") {
+                for (const auto& a : stats.albums)
+                    if (counted(byTime, a.plays, a.listenedMs))
+                        rows.push_back(
+                            {a.album, {}, ui::utf8(a.name), ui::utf8(a.artist), {}, measured(byTime, a.plays, a.listenedMs)});
+            } else if (list == L"topArtists") {
+                for (const auto& a : stats.artists)
+                    if (counted(byTime, a.plays, a.listenedMs))
+                        rows.push_back({0, a.name, ui::utf8(a.name), {}, {}, measured(byTime, a.plays, a.listenedMs)});
+            } else {
+                for (const auto& t : stats.tracks) {
+                    if (!counted(byTime, t.plays, t.listenedMs)) continue;
+                    rows.push_back({t.track.file, t.path, titleOf(t.title, t.name, t.path), ui::utf8(t.artist), ui::utf8(t.album),
+                                    measured(byTime, t.plays, t.listenedMs)});
+                    rows.back().file = t.track.file;
+                    rows.back().unavailable = !t.available;
+                }
             }
-        }
-        ui::BrowsePage out{0, int64_t(rows.size()), {}};
-        for (auto i = size_t(offset); i < rows.size() && std::cmp_less(i, offset + limit); ++i) out.rows.push_back(rows[i]);
-        return out;
+            return rows;
+        });
+        return ui::BrowsePage{0, page.total, page.rows};
     };
 }
 

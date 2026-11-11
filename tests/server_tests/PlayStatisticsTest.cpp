@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "Server/Library/LibraryIdentity.h"
+#include "ControlPoint/PeriodPage.h"
 #include "Server/Library/PlayStatistics.h"
 #include "TestUtil.h"
 
@@ -192,8 +193,8 @@ TEST_F(PlayStatisticsTest, RankingsCreditEveryArtistAndFollowTheMetric) {
 
 TEST_F(PlayStatisticsTest, PeriodsAndBucketsUseTheRecordedLocalDay) {
     // 2025-10-23T20:00Z is 2025-10-24 04:00 in UTC+8 but still 2025-10-23 in UTC.
-    event(1, k20251024 - 4 * 3'600'000, 480, 1000, true);
-    event(2, k20251024 - 4 * 3'600'000, 0, 2000, true);
+    event(1, k20251024 - int64_t{4} * 3'600'000, 480, 1000, true);
+    event(2, k20251024 - int64_t{4} * 3'600'000, 0, 2000, true);
     event(3, k20251024 + 30 * kDay, 480, 3000, true); // 2025-11-23, a Sunday
     PlayStatisticsQuery query;
     auto days = playStatistics(*store, query).buckets;
@@ -286,6 +287,27 @@ TEST_F(PlayStatisticsTest, ANewFileWithPlaysIsNotMergedIntoAMovedIdentity) {
         })
         .get();
     EXPECT_EQ(scalar("SELECT COUNT(*) FROM play_events WHERE file_id=3"), 1);
+}
+
+// View all of a period's ranking reads it a page of 100 at a time: the second page and those after it are reached, up to
+// the 500 the Server ranks.
+TEST(PeriodPage, AListOfAPeriodShowsEveryRankedRowUpToItsLimit) {
+    std::vector<int64_t> asked;
+    const auto rank = [&](int64_t limit) {
+        asked.push_back(limit);
+        std::vector<int> ranked;
+        for (int i = 0; i < std::min<int64_t>(limit, 250); ++i) ranked.push_back(i);
+        return ranked;
+    };
+    auto page = ui::periodPage<int>(0, 100, rank);
+    EXPECT_EQ(page.total, 250);
+    ASSERT_EQ(page.rows.size(), 100u);
+    EXPECT_EQ(page.rows.front(), 0);
+    page = ui::periodPage<int>(200, 100, rank);
+    EXPECT_EQ(page.total, 250);
+    ASSERT_EQ(page.rows.size(), 50u);
+    EXPECT_EQ(page.rows.front(), 200);
+    EXPECT_LE(*std::max_element(asked.begin(), asked.end()), ui::kPeriodRankingLimit);
 }
 
 } // namespace
