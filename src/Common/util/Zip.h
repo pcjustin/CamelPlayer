@@ -16,7 +16,8 @@ struct ZipEntry {
     std::string data;
 };
 
-// Every entry of the archive `data`; throws std::runtime_error naming what is wrong.
+// Every entry of the archive `data`; throws std::runtime_error naming what is wrong, also for an entry that says it
+// holds more than its data can, or more than 1 GB.
 std::vector<ZipEntry> readZip(const std::string& data);
 
 } // namespace camel

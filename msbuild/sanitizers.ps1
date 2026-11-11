@@ -127,6 +127,7 @@ if ($Run -eq 'All') {
     $checks['Fuzz the DTS frame reader'] = { Test-CargoFuzz }
     $checks['Fuzz the format probe'] = { Test-CppFuzz 'probe' (Join-Path $root 'tests\fixtures') }
     $checks['Fuzz the network messages'] = { Test-CppFuzz 'network' (Join-Path $root 'src\Tools\fuzz\seeds\network') }
+    $checks['Fuzz the zip reader'] = { Test-CppFuzz 'zip' (Join-Path $root 'src\Tools\fuzz\seeds\zip') }
 }
 
 New-Item -ItemType Directory -Force $logs | Out-Null

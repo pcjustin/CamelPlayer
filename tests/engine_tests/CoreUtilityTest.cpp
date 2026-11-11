@@ -14,7 +14,11 @@
 
 #include "Tools/testaudio/TestAudio.h"
 #include "Common/util/CrashDump.h"
+#include "Common/util/Zip.h"
+#include "Server/Support/ZipWriter.h"
 #include "TestUtil.h"
+// after windows.h, which TestUtil.h includes
+#include <psapi.h>
 
 using namespace camel;
 using namespace camel::audio;
@@ -245,6 +249,81 @@ TEST(CrashDump, ACrashThatHoldsTheHeapEndsWithoutWaitingForItsDump) {
     EXPECT_EQ(exitCode, 3u) << "the code abort() ends with";
     std::error_code error;
     std::filesystem::remove_all(directory, error);
+}
+
+// An entry declaring nearly 4 GB over a few bytes, as a damaged or tampered impulse-response zip or update can: it is
+// refused with the documented error, and nothing near that size is allocated first. Read in a child process, whose
+// peak memory is its own.
+TEST(Zip, AnEntryDeclaringMoreThanItsDataCanHoldIsRefusedBeforeItIsAllocated) {
+    constexpr wchar_t marker[] = L"CAMELPLAYER_ZIPSIZE_TEST_CHILD";
+    wchar_t childFile[32768];
+    const DWORD length = GetEnvironmentVariableW(marker, childFile, DWORD(std::size(childFile)));
+    if (length && length < std::size(childFile)) {
+        std::ifstream in(childFile, std::ios::binary);
+        const std::string zip{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        UINT code = 1;
+        try {
+            readZip(zip);
+        } catch (const std::runtime_error&) {
+            code = 0;
+        } catch (...) {
+            code = 2;
+        }
+        PROCESS_MEMORY_COUNTERS counters{};
+        counters.cb = sizeof counters;
+        GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof counters);
+        if (code == 0 && counters.PeakPagefileUsage > size_t(256) * 1024 * 1024) code = 3;
+        ExitProcess(code);
+    }
+    const auto file = testutil::tempDir() / "zip-declared-size.zip";
+    std::string large(size_t(1) << 20, '\0');
+    for (size_t i = 0; i < large.size(); ++i) large[i] = char(i * 7 % 251);
+    {
+        server::ZipWriter zip(file);
+        zip.add("large.bin", large);
+        zip.finish();
+    }
+    {
+        std::ifstream in(file, std::ios::binary);
+        const auto entries = readZip(std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
+        ASSERT_EQ(entries.size(), 1u);
+        EXPECT_EQ(entries[0].data, large) << "an entry larger than the first output grows to its whole size";
+    }
+    {
+        server::ZipWriter zip(file);
+        zip.add("filter 48000.wav", std::string(4096, 'a'));
+        zip.finish();
+    }
+    std::string zip;
+    {
+        std::ifstream in(file, std::ios::binary);
+        zip.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto central = zip.find(std::string("PK\x01\x02", 4));
+    ASSERT_NE(central, std::string::npos);
+    for (int i = 0; i < 4; ++i) zip[central + 24 + i] = char(i == 0 ? 0xFE : 0xFF); // the uncompressed size
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << zip;
+    ASSERT_TRUE(SetEnvironmentVariableW(marker, file.c_str()));
+    wchar_t executable[32768];
+    ASSERT_NE(GetModuleFileNameW(nullptr, executable, DWORD(std::size(executable))), 0u);
+    std::wstring command = L"\"" + std::wstring(executable) +
+                           L"\" --gtest_filter=Zip.AnEntryDeclaringMoreThanItsDataCanHoldIsRefusedBeforeItIsAllocated";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof startup;
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                                        &startup, &process);
+    SetEnvironmentVariableW(marker, nullptr);
+    ASSERT_TRUE(created);
+    const DWORD waited = WaitForSingleObject(process.hProcess, 60000);
+    if (waited != WAIT_OBJECT_0) TerminateProcess(process.hProcess, 4);
+    DWORD exitCode = 4;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    EXPECT_EQ(exitCode, 0u) << "1: read without an error, 2: an error other than std::runtime_error, 3: more than "
+                               "256 MB of memory committed on the way, 4: still reading after a minute";
+    std::filesystem::remove(file);
 }
 
 TEST(CrashDump, UnansweredPingWritesOneHangDump) {
