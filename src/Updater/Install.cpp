@@ -29,6 +29,13 @@ namespace {
 namespace fs = std::filesystem;
 namespace files = camel::updatefiles;
 
+std::string toUtf8(const std::wstring& text) {
+    std::string narrow(text.size() * 3, '\0');
+    narrow.resize(size_t(
+        WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), narrow.data(), int(narrow.size()), nullptr, nullptr)));
+    return narrow;
+}
+
 std::wstring fromUtf8(const std::string& text) {
     std::wstring wide(text.size(), L'\0');
     wide.resize(size_t(MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), wide.data(), int(wide.size()))));
@@ -104,6 +111,17 @@ std::string sha256Of(const fs::path& file) {
     return sha256Of(std::move(*bytes));
 }
 
+void writeThrough(const fs::path& file, const std::string& text) {
+    const HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) throw std::runtime_error("the update's journal cannot be written");
+    DWORD written = 0;
+    const bool ok = WriteFile(handle, text.data(), DWORD(text.size()), &written, nullptr) && written == text.size() &&
+                    FlushFileBuffers(handle);
+    CloseHandle(handle);
+    if (!ok) throw std::runtime_error("the update's journal cannot be written");
+}
+
 std::vector<fs::path> filesIn(const fs::path& folder) {
     std::vector<fs::path> found;
     for (const auto& entry : fs::recursive_directory_iterator(folder))
@@ -131,24 +149,33 @@ public:
 
     Outcome run() {
         log(L"installing " + o_.version + L" into " + o_.app.wstring());
+        if (!recover()) {
+            log(L"an earlier update could not be put right; update-backup is left as it is");
+            writeResult(o_.data, L"failed", o_.version);
+            host_.startPlayer(o_.app / files::kPlayer);
+            return Outcome::RolledBack;
+        }
         try {
             snapshotData();
-            fs::remove_all(backup_);
+            fs::remove_all(backup_); // without a journal, what is left of an install that finished
             fs::create_directory(backup_);
             // Only the package's files move: the release zip has no top folder, so other files may lie beside them.
             incoming_ = filesIn(o_.files);
             if (!o_.manifestSha256.empty()) checkList();
             auto owned = listedFiles(o_.app);
             owned.insert(incoming_.begin(), incoming_.end());
+            std::erase_if(owned, [&](const fs::path& name) { return !fs::is_regular_file(o_.app / name); });
+            writeJournal(owned);
             for (const auto& name : owned) {
-                if (!fs::is_regular_file(o_.app / name)) continue;
                 fs::create_directories((backup_ / name).parent_path());
+                if (host_.step) host_.step();
                 fs::rename(o_.app / name, backup_ / name);
                 moved_.push_back(name);
             }
             copying_ = true;
             for (const auto& name : incoming_) {
                 fs::create_directories((o_.app / name).parent_path());
+                if (host_.step) host_.step();
                 fs::copy_file(o_.files / name, o_.app / name, fs::copy_options::overwrite_existing);
                 // Checked once copied, where only the updater can change it.
                 if (!expected_.empty() && sha256Of(o_.app / name) != expected_.at(name))
@@ -161,6 +188,13 @@ public:
         }
         std::error_code error;
         fs::remove(o_.data / files::kStarted, error);
+        try {
+            journal_ += "starting\n";
+            writeThrough(o_.app / files::kJournal, journal_);
+        } catch (const std::exception& e) {
+            log(L"installing failed: " + describe(e));
+            return rollBack();
+        }
         writeResult(o_.data, L"installed", o_.version, o_.previous);
         host_.startPlayer(o_.app / files::kPlayer);
         if (!started()) {
@@ -168,6 +202,7 @@ public:
             if (host_.playerRunning()) host_.endPlayer();
             return rollBack();
         }
+        fs::remove(o_.app / files::kJournal, error); // first: a journal outlasting its backup would undo the update
         fs::remove_all(backup_, error);
         fs::remove_all(o_.dataBackup, error);
         fs::remove(o_.data / files::kStarted, error);
@@ -192,6 +227,89 @@ private:
         for (const auto& name : incoming_)
             if (!expected_.contains(name)) throw std::runtime_error("a new file is not in install-manifest.txt");
         if (incoming_.size() != expected_.size()) throw std::runtime_error("a file in install-manifest.txt is missing");
+    }
+
+    // What is about to move and come in, and where the data's copy is, so that an install ended midway can be put
+    // right by the next; "complete" marks it whole, and nothing moves before it is on disk.
+    void writeJournal(const std::set<fs::path>& moving) {
+        journal_ = "data\t" + toUtf8(o_.dataBackup.wstring()) + "\n";
+        for (const auto& name : moving) journal_ += "moved\t" + toUtf8(name.wstring()) + "\n";
+        for (const auto& name : incoming_) journal_ += "new\t" + toUtf8(name.wstring()) + "\n";
+        journal_ += "complete\n";
+        writeThrough(o_.app / files::kJournal, journal_);
+    }
+
+    // An install ended midway, by a sign-out, a shutdown or a power cut, as its journal tells: undone, with the
+    // data, unless the new version had said it started, which is kept. False when something could not be put back;
+    // the journal and the backup then stay for the next try.
+    bool recover() {
+        const auto journal = o_.app / files::kJournal;
+        const auto text = readAll(journal);
+        if (!text) return true;
+        fs::path dataBackup;
+        std::vector<fs::path> moved;
+        std::vector<fs::path> added;
+        bool complete = false;
+        bool starting = false;
+        std::istringstream in(*text);
+        for (std::string line; std::getline(in, line);) {
+            const auto tab = line.find('\t');
+            const auto kind = line.substr(0, tab);
+            const fs::path value = tab == std::string::npos ? fs::path() : fs::path(fromUtf8(line.substr(tab + 1)));
+            if (kind == "data")
+                dataBackup = value;
+            else if (kind == "moved")
+                moved.push_back(value);
+            else if (kind == "new")
+                added.push_back(value);
+            else if (kind == "complete")
+                complete = true;
+            else if (kind == "starting")
+                starting = true;
+        }
+        std::error_code error;
+        if (!complete) return fs::remove(journal, error) || !error; // ended before anything moved
+        if (starting && fs::exists(o_.data / files::kStarted)) {
+            log(L"keeping the update ended after the new version started");
+            fs::remove(journal, error);
+            fs::remove_all(backup_, error);
+            fs::remove_all(dataBackup, error);
+            return true;
+        }
+        log(L"undoing an update that was ended midway");
+        const std::set<fs::path> movedSet(moved.begin(), moved.end());
+        for (const auto& name : added)
+            if (!movedSet.contains(name)) {
+                fs::remove(o_.app / name, error);
+                removeEmptyFolders(o_.app, name);
+            }
+        bool restored = true;
+        for (const auto& name : moved) {
+            if (!fs::exists(backup_ / name, error)) continue; // not moved yet: still the old file
+            fs::remove(o_.app / name, error);
+            fs::create_directories((o_.app / name).parent_path(), error);
+            fs::rename(backup_ / name, o_.app / name, error);
+            if (error) {
+                log(L"could not restore " + name.wstring());
+                restored = false;
+            }
+        }
+        if (starting) restoreData(dataBackup);
+        if (!restored) return false;
+        fs::remove(journal, error);
+        fs::remove_all(backup_, error);
+        fs::remove_all(dataBackup, error);
+        return true;
+    }
+
+    void restoreData(const fs::path& dataBackup) const {
+        std::error_code error;
+        for (const auto* name : files::kDataFiles) {
+            if (fs::exists(dataBackup / name, error))
+                fs::copy_file(dataBackup / name, o_.data / name, fs::copy_options::overwrite_existing, error);
+            else
+                fs::remove(o_.data / name, error);
+        }
     }
 
     void snapshotData() {
@@ -223,21 +341,20 @@ private:
                 fs::remove(o_.app / name, error);
                 removeEmptyFolders(o_.app, name);
             }
+        bool restored = true;
         for (const auto& name : moved_) {
             fs::create_directories((o_.app / name).parent_path(), error);
             fs::rename(backup_ / name, o_.app / name, error);
-            if (error) log(L"could not restore " + name.wstring());
+            if (error) {
+                log(L"could not restore " + name.wstring());
+                restored = false;
+            }
         }
+        if (restored) fs::remove(o_.app / files::kJournal, error);
         for (const auto& name : moved_) removeEmptyFolders(backup_, name);
         if (fs::is_empty(backup_, error)) fs::remove(backup_, error);
-        if (snapshotTaken_)
-            for (const auto* name : files::kDataFiles) {
-                if (fs::exists(o_.dataBackup / name, error))
-                    fs::copy_file(o_.dataBackup / name, o_.data / name, fs::copy_options::overwrite_existing, error);
-                else
-                    fs::remove(o_.data / name, error);
-            }
-        fs::remove_all(o_.dataBackup, error);
+        if (snapshotTaken_) restoreData(o_.dataBackup);
+        if (restored) fs::remove_all(o_.dataBackup, error);
         fs::remove(o_.data / files::kStarted, error);
         writeResult(o_.data, L"failed", o_.version);
         log(L"rolled back to the previous version");
@@ -251,6 +368,7 @@ private:
     std::vector<fs::path> incoming_;           // the new version's files
     std::map<fs::path, std::string> expected_; // their SHA-256, when checked
     std::vector<fs::path> moved_;              // into the backup
+    std::string journal_;
     bool copying_ = false;
     bool snapshotTaken_ = false;
 };

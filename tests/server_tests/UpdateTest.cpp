@@ -314,6 +314,62 @@ TEST(Update, CheckedFilesAreInstalled) {
     EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "new");
 }
 
+// An update ended midway, by a sign-out, a shutdown or a power cut, at any of its steps: the next update puts the
+// program folder back as it was before it starts, so when that one fails too the old version is whole again.
+TEST(Update, AnUpdateEndedAtAnyStepIsPutRightByTheNext) {
+    struct Ended {}; // not an exception the updater catches: the process is gone
+    for (int step = 0;; ++step) {
+        InstallFixture f(L"update-ended");
+        f.seal();
+        int done = 0;
+        f.host.step = [&] {
+            if (done++ == step) throw Ended{};
+        };
+        bool ended = false;
+        try {
+            camel::updater::install(f.options, f.host);
+        } catch (const Ended&) {
+            ended = true;
+        }
+        if (!ended) break; // past the install's last step
+        f.host.step = nullptr;
+        f.goodPlayer = "none"; // the next update fails as well, and rolls back
+        EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack) << "ended at " << step;
+        f.expectOldVersionRestored();
+        if (HasFailure()) {
+            ADD_FAILURE() << "ended at step " << step;
+            break;
+        }
+    }
+}
+
+// Ended while the new version starts: one that never said it started is undone with its data by the next update, one
+// that did is kept.
+TEST(Update, AnUpdateEndedWhileTheNewVersionStartsIsPutRightByTheNext) {
+    struct Ended {};
+    for (const std::string player : {"none", "new"}) {
+        InstallFixture f(L"update-ended-starting");
+        f.seal();
+        f.goodPlayer = player;
+        const auto startPlayer = f.host.startPlayer;
+        f.host.startPlayer = [&](const fs::path& exe) {
+            startPlayer(exe);
+            throw Ended{};
+        };
+        EXPECT_THROW(camel::updater::install(f.options, f.host), Ended);
+        f.host.startPlayer = startPlayer;
+        f.goodPlayer = "none";
+        EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack) << player;
+        if (player == "none") {
+            f.expectOldVersionRestored();
+        } else {
+            EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "new");
+            EXPECT_TRUE(fs::exists(f.app / L"CamelUpdater.exe"));
+            EXPECT_FALSE(fs::exists(f.app / L"old-only.dll"));
+            EXPECT_FALSE(fs::exists(f.app / camel::updatefiles::kBackup));
+        }
+    }
+}
 // An elevated updater installs from a folder any program of the user can write: what changed there after the player
 // checked the download is neither installed nor started.
 TEST(Update, AFileChangedAfterTheCheckIsNotInstalled) {

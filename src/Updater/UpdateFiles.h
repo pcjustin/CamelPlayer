@@ -14,6 +14,8 @@ inline constexpr wchar_t kResult[] = L"update-result";
 inline constexpr wchar_t kStarted[] = L"update-started";
 // In the program folder while an update runs: the previous version's files.
 inline constexpr wchar_t kBackup[] = L"update-backup";
+// In the program folder from before the first file moves until the install is finished or undone.
+inline constexpr wchar_t kJournal[] = L"update-journal.txt";
 // Beside the running updater: settings.json and library.db with its WAL files from before the update.
 inline constexpr wchar_t kDataBackup[] = L"data-backup";
 // In the program folder of a packaged build: "<sha256>  <size>  <path>" for every other file of the package.

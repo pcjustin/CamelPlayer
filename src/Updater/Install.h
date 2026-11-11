@@ -33,6 +33,7 @@ struct Host {
     std::chrono::milliseconds startTimeout{30000};
     std::chrono::milliseconds launchGrace{5000}; // how long a started player may take to appear
     std::function<void(const std::wstring&)> log;
+    std::function<void()> step; // tests: before each file is moved or copied, as where the updater could be ended
 };
 
 enum class Outcome { Installed, RolledBack };
