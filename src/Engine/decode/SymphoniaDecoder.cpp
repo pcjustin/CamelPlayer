@@ -91,7 +91,7 @@ SourceInfo probeAacInfo(const std::filesystem::path& path) {
     const SymphoniaDecoder decoder(path, 24);
     auto info = decoder.info();
     if (const auto trim = mp4EncoderTrim(path, info.sampleRate))
-        info.totalFrames = trim->frames;
+        info.totalFrames = trim->validFrames(info.totalFrames);
     else if (!lossyLengthDeclared(path))
         info.totalFrames = 0;
     return info;

@@ -190,32 +190,36 @@ class TrimDelay final : public IDecoder {
 public:
     TrimDelay(std::unique_ptr<IDecoder> inner, const EncoderTrim& trim)
         : inner_(std::move(inner)), info_(inner_->info()), priming_(trim.priming) {
-        info_.totalFrames = trim.frames;
+        info_.totalFrames = trim.validFrames(info_.totalFrames);
+        lengthKnown_ = info_.totalFrames != 0;
         if (priming_) inner_->seek(priming_);
     }
     const SourceInfo& info() const override { return info_; }
-    size_t read(int32_t* dst, size_t frames) override {
-        const size_t got = inner_->read(dst, size_t(std::min<uint64_t>(frames, info_.totalFrames - position_)));
-        position_ += got;
-        return got;
-    }
+    size_t read(int32_t* dst, size_t frames) override { return counted(inner_->read(dst, wanted(frames)), frames); }
     bool readsFloat() const override { return inner_->readsFloat(); }
-    size_t readFloat(float* dst, size_t frames) override {
-        const size_t got = inner_->readFloat(dst, size_t(std::min<uint64_t>(frames, info_.totalFrames - position_)));
-        position_ += got;
-        return got;
-    }
+    size_t readFloat(float* dst, size_t frames) override { return counted(inner_->readFloat(dst, wanted(frames)), frames); }
     void seek(uint64_t frame) override {
-        if (frame >= info_.totalFrames) throw Error(ErrorCode::SeekFailed, "seek target is past the end");
+        if (lengthKnown_ && frame >= info_.totalFrames) throw Error(ErrorCode::SeekFailed, "seek target is past the end");
         inner_->seek(priming_ + frame);
         position_ = frame;
     }
 
 private:
+    size_t wanted(size_t frames) const {
+        return lengthKnown_ ? size_t(std::min<uint64_t>(frames, info_.totalFrames - position_)) : frames;
+    }
+    // A length neither the file nor the stream declares is the frames read once a read reaches the end.
+    size_t counted(size_t got, size_t asked) {
+        position_ += got;
+        if (!got && asked && !lengthKnown_) info_.totalFrames = position_;
+        return got;
+    }
+
     std::unique_ptr<IDecoder> inner_;
     SourceInfo info_;
     uint64_t priming_;
     uint64_t position_ = 0;
+    bool lengthKnown_ = false;
 };
 
 } // namespace

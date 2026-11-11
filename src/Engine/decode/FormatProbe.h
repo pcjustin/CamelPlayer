@@ -56,7 +56,11 @@ std::optional<uint64_t> aiffSampleFrames(const std::filesystem::path& path);
 // iTunes' iTunSMPB tag. nullopt when the file declares neither (or more than one edit), so nothing can be trimmed.
 struct EncoderTrim {
     uint64_t priming = 0;
-    uint64_t frames = 0;
+    uint64_t frames = 0; // 0 when an edit of length 0 leaves it to the stream, as a fragmented or empty_moov file's does
+    // The valid frames of a stream that counts `streamFrames` with the priming; 0 while neither knows.
+    uint64_t validFrames(uint64_t streamFrames) const {
+        return frames ? frames : streamFrames > priming ? streamFrames - priming : 0;
+    }
 };
 std::optional<EncoderTrim> mp4EncoderTrim(const std::filesystem::path& path, uint32_t sampleRate);
 

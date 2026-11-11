@@ -319,6 +319,38 @@ TEST(LossyDecoderPolicy, PlaysThroughTheEngineUnchanged) {
         }
 }
 
+// An edit of length 0, as a fragmented or empty_moov M4A has, says nothing of where the sound ends: the file plays whole.
+TEST(LossyDecoderPolicy, AnEditOfLengthZeroIsIgnored) {
+    reference();
+    auto bytes = readFile(path(kFixtures[0]));
+    const size_t elst = bytes.find("elst");
+    ASSERT_NE(elst, std::string::npos);
+    ASSERT_EQ(be32At(bytes, elst + 8), 1U) << "the fixture has one edit";
+    const size_t durationBytes = bytes[elst + 4] == 1 ? 8 : 4;
+    bytes.replace(elst + 12, durationBytes, std::string(durationBytes, '\0'));
+    const auto file = writeFile("edit-zero.m4a", bytes);
+    for (const auto kind : decodersFor(AudioFormat::Aac)) {
+        auto decoder = openDecoder(kind, file);
+        const auto got = decodeAll(*decoder);
+        EXPECT_GE(got.size(), reference().size()) << decoderName(kind);
+        EXPECT_EQ(decoder->info().totalFrames, got.size() / kChannels) << decoderName(kind);
+    }
+    EXPECT_GE(probeAacInfo(file).totalFrames, reference().size() / kChannels) << "the length the library shows";
+    const auto out = testutil::tempDir() / "lossy-edit-zero.raw";
+    CaptureOptions options;
+    options.file = out;
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+    {
+        PlaybackEngine engine(Settings{}, [&](const Settings&) { return createCaptureOutput(options); });
+        engine.openAndPlay(file);
+        engine.waitIdle();
+        ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
+        EXPECT_FALSE(engine.snapshot().error) << engine.snapshot().errorDetail;
+    }
+    EXPECT_EQ(std::filesystem::file_size(out) / 4 / kChannels,
+              decodeAll(*openDecoder(DecoderKind::Symphonia, file)).size() / kChannels);
+}
+
 // Two MP3 files that declare their delay and padding follow each other with no gap and no extra frames.
 TEST(LossyDecoderPolicy, TrimmedMp3TracksAreGapless) {
     reference();
