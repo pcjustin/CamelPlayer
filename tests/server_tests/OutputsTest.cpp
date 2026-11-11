@@ -774,3 +774,13 @@ TEST(OutputsFollowTest, OutputsChangedWhileAnOutputsDialogIsOpenReachTheSettings
     EXPECT_EQ(ui::followServerOutputs(shown, nullptr, server), ui::OutputsRefill::Outputs);
     ASSERT_EQ(shown.outputs.size(), 1u);
 }
+
+// The first close to the tray saves that its notice was shown: with an output's settings dialog open, the real
+// settings, not the dialog's copy of another output, which would switch to it.
+TEST(OutputsFollowTest, AChangeMadeWhileAnOutputsDialogIsOpenGoesToTheRealSettings) {
+    SettingsDto dialog, real;
+    dialog.backend = Backend::Wasapi;
+    real.backend = Backend::Asio;
+    EXPECT_EQ(ui::settingsToSave(dialog, &real).backend, Backend::Asio);
+    EXPECT_EQ(ui::settingsToSave(dialog, nullptr).backend, Backend::Wasapi);
+}

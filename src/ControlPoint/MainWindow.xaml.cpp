@@ -569,9 +569,11 @@ void MainWindow::hideToTray() {
     if (!settings_.trayNoticeShown && server_) {
         tray_->notify(std::wstring(tr(L"Tray_NoticeTitle")), std::wstring(tr(L"Tray_NoticeText")));
         settings_.trayNoticeShown = true;
+        auto& saved = ui::settingsToSave(settings_, editingOutput_ ? &editingOutput_->real : nullptr);
+        saved.trayNoticeShown = true;
         Command command;
         command.kind = CommandKind::ApplySettings;
-        command.settings = settings_;
+        command.settings = saved;
         submitCommand(std::move(command));
     }
 }

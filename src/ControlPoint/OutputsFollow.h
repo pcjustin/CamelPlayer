@@ -32,4 +32,10 @@ inline OutputsRefill followServerOutputs(camel::server::SettingsDto& shown, came
     return parameters ? OutputsRefill::Settings : OutputsRefill::Outputs;
 }
 
+// The settings a change made outside an output's settings dialog is saved in: `shown`, unless the dialog is open, when
+// `shown` holds that output's own copy.
+inline camel::server::SettingsDto& settingsToSave(camel::server::SettingsDto& shown, camel::server::SettingsDto* real) {
+    return real ? *real : shown;
+}
+
 } // namespace ui
