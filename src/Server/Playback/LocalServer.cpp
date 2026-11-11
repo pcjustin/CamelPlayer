@@ -1221,6 +1221,7 @@ private:
     void startEntry(const QueuePosition& position, bool play, bool afterEnd = false) {
         if (policy_.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
         restored_.reset();
+        if (!afterEnd) failuresInARow_ = 0;
         engine_->waitIdle();
         const auto before = engine_->snapshot();
         seenTrackEnds_ = before.trackEnds;
@@ -1474,10 +1475,15 @@ private:
             if (!trackLocal(*playback.error)) return;
             policy_.markFailed(state_.queueEntryId);
             queueChanged_ = true;
+            ++failuresInARow_;
+        } else {
+            failuresInARow_ = 0;
         }
+        // Autoplay gives up on tracks that keep failing, as when the output takes none of the library's formats.
+        const bool autoplay = autoplayAllowed() && failuresInARow_ < kAutoplayFailuresInARow;
         if (const auto next = policy_.next(true))
             startEntry(*next, true, true);
-        else if (const auto picked = autoplayAllowed() && appendAutoplay() ? policy_.next(true) : std::nullopt)
+        else if (const auto picked = autoplay && appendAutoplay() ? policy_.next(true) : std::nullopt)
             startEntry(*picked, true, true);
     }
 
@@ -2038,6 +2044,8 @@ private:
     bool queueChanged_ = false;  // queue state changed without a command or playback change
     uint64_t autoplayTried_ = 0; // the entry whose start autoplay already extended the queue for
     static constexpr size_t kAutoplayKept = 100;
+    int failuresInARow_ = 0; // tracks that failed one after another since one played or the user chose one
+    static constexpr int kAutoplayFailuresInARow = 3;
     uint64_t publishedEntry_ = UINT64_MAX; // the current entry state_.queue was built for
     // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
     struct QueueAttempt {

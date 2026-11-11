@@ -988,6 +988,32 @@ TEST_F(LibraryPlaybackTest, AutoplayFollowsTheLastEntryWithAnUnplayedLibraryTrac
     send(command(CommandKind::Stop));
 }
 
+// Autoplay picks one library track after another; when none of them plays, as with conversion off and a device that
+// takes none of the library's formats, it gives up after three failures in a row, with the last one's error shown.
+TEST_F(LibraryPlaybackTest, AutoplayStopsAfterThreeTracksInARowFail) {
+    std::vector<std::filesystem::path> files;
+    files.reserve(8);
+    for (int i = 0; i < 8; ++i)
+        files.push_back(testutil::generatedFile({"autoplay-fails-" + std::to_string(i), 48000, 16, 2, 0.5}));
+    setUp(files);
+    Settings settings;
+    settings.convertWhenUnsupported = false;
+    options.accepts = [](const DeviceFormat&) { return false; };
+    server = std::make_unique<LocalServer>(settings, dir / "db" / "settings.json",
+                                           [&](const Settings&) { return createCaptureOutput(options); });
+    send(queueReplace({track(files[0])}));
+    size_t entries = 0;
+    for (int still = 0; still < 20; std::this_thread::sleep_for(100ms)) {
+        const auto now = server->snapshot().queue.entries.size();
+        still = now == entries ? still + 1 : 0;
+        entries = now;
+    }
+    const auto s = server->snapshot();
+    EXPECT_EQ(s.queue.entries.size(), 3u);
+    EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
+    EXPECT_TRUE(s.playback.error);
+}
+
 TEST_F(LibraryPlaybackTest, AutoplayYieldsToAddedTracksRepeatAndTheSwitch) {
     const auto a = testutil::generatedFile({"yield-a", 48000, 16, 2, 3.0});
     const auto b = testutil::generatedFile({"yield-b", 48000, 16, 2, 3.0});
