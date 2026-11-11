@@ -587,7 +587,8 @@ std::string toJson(const Settings& s) {
     }
     j["followedDefault"] = s.followedDefault;
     if (s.adoptOutputSets) j["adoptOutputSets"] = true;
-    return j.dump(2);
+    // Any text that is not UTF-8 is replaced rather than stopping every later save.
+    return j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 Settings fromJson(const std::string& text) {

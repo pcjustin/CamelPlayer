@@ -24,6 +24,10 @@ std::wstring toWide(std::string_view s) {
     return w;
 }
 
+std::string validUtf8(std::string_view text) {
+    return toUtf8(toWide(text)); // MultiByteToWideChar replaces what is not UTF-8 with U+FFFD
+}
+
 std::wstring longPath(const std::filesystem::path& p) {
     std::wstring s = std::filesystem::absolute(p).lexically_normal().wstring();
     if (s.starts_with(L"\\\\?\\")) return s;

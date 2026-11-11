@@ -784,3 +784,13 @@ TEST(OutputsFollowTest, AChangeMadeWhileAnOutputsDialogIsOpenGoesToTheRealSettin
     EXPECT_EQ(ui::settingsToSave(dialog, &real).backend, Backend::Asio);
     EXPECT_EQ(ui::settingsToSave(dialog, nullptr).backend, Backend::Wasapi);
 }
+
+// One name that is not UTF-8, kept from a device, stopped every later save of the settings.
+TEST(OutputsTest, ANameThatIsNotUtf8DoesNotStopTheSettingsBeingSaved) {
+    Settings s;
+    s.outputs.emplace_back();
+    s.outputs.back().name = "Caf\xE9";
+    std::string text;
+    EXPECT_NO_THROW(text = toJson(s));
+    EXPECT_NE(text.find("Caf"), std::string::npos);
+}

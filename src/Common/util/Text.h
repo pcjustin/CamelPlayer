@@ -12,6 +12,9 @@ namespace camel {
 
 std::string toUtf8(std::wstring_view w);
 std::wstring toWide(std::string_view s);
+// `text` with each byte that is not part of valid UTF-8 replaced by U+FFFD, as text a device sends in another
+// encoding is made before it is kept.
+std::string validUtf8(std::string_view text);
 
 // Path with the \\?\ prefix so long and NAS paths open reliably (docs/Plan.md §15.1).
 std::wstring longPath(const std::filesystem::path& p);

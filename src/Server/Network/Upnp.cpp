@@ -164,7 +164,8 @@ const PlayerService* PlayerDescription::service(std::string_view kind) const {
 }
 
 std::optional<PlayerDescription> parseDescription(std::string_view xml, const std::string& location) {
-    const auto root = parseXml(xml);
+    // A player that names itself in GBK or Latin-1 is read, and its names kept, as valid UTF-8.
+    const auto root = parseXml(validUtf8(xml));
     if (!root || root->name != "root" || !root->child("device")) return std::nullopt;
     const XmlNode* device = findRenderer(*root->child("device"));
     if (!device) return std::nullopt;

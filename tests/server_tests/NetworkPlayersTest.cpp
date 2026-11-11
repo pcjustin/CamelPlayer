@@ -101,6 +101,15 @@ TEST(UpnpMessages, ToldApartByTheServicesAPlayerOffers) {
     EXPECT_EQ(describe(av).service("Playlist"), nullptr);
 }
 
+// A player that names itself in GBK or Latin-1: its name is made valid UTF-8 as it comes in, so it can be shown and saved.
+TEST(UpnpMessages, ANameThatIsNotUtf8IsMadeValidAsItComesIn) {
+    const FakeRenderer latin(RendererKind::UpnpAv, "uuid:latin", "Caf\xE9 Player");
+    const auto name = describe(latin).name;
+    EXPECT_GT(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name.data(), int(name.size()), nullptr, 0), 0) << name;
+    EXPECT_TRUE(name.starts_with("Caf"));
+    EXPECT_TRUE(name.ends_with(" Player"));
+}
+
 TEST(UpnpMessages, ADeviceWithoutPlaybackIsNotAPlayer) {
     EXPECT_FALSE(parseDescription(
         R"(<root><device><UDN>uuid:nas</UDN><serviceList><service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType><controlURL>/c</controlURL></service></serviceList></device></root>)",

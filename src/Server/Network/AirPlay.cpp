@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "Common/util/Log.h"
+#include "Common/util/Text.h"
 
 namespace camel::server::airplay {
 
@@ -221,7 +222,7 @@ std::vector<DnsRecord> parseRecords(std::string_view message) {
 std::optional<std::pair<std::string, std::string>> parseRaopName(std::string_view label) {
     const size_t at = label.find('@');
     if (at == std::string_view::npos || at == 0) return std::nullopt;
-    return std::pair(deviceIdFrom(label.substr(0, at)), std::string(label.substr(at + 1)));
+    return std::pair(deviceIdFrom(label.substr(0, at)), validUtf8(label.substr(at + 1)));
 }
 
 std::string deviceIdFrom(std::string_view text) {
