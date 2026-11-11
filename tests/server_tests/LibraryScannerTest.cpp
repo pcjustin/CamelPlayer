@@ -1327,6 +1327,34 @@ TEST_F(LibraryScannerTest, AFolderThatCannotBeCheckedKeepsItsFiles) {
     EXPECT_EQ(count(store), 1);
 }
 
+// A notified folder whose scan did not complete is scanned again, so what changed in it is not left until the next poll.
+TEST_F(LibraryScannerTest, ANotifiedFolderWhoseScanDidNotCompleteIsScannedAgain) {
+    const auto album = dir / "music" / "album";
+    fs::create_directories(album / "locked");
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "kept.flac");
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "gone.flac");
+    fs::copy_file(testutil::testFile("16-44.1k"), album / "locked" / "inside.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::milliseconds(0);
+    options.offlineInterval = std::chrono::milliseconds(100);
+    options.coalesce = std::chrono::milliseconds(100);
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return count(store) == 3 && store.scanProgress().scans == 0; }));
+    const auto gone = [&] {
+        return count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE '%gone.flac'") == 0;
+    };
+    {
+        const Denied listing(album / "locked", FILE_LIST_DIRECTORY);
+        fs::remove(album / "gone.flac");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500)); // its scan cannot list "locked", so it is not complete
+        ASSERT_FALSE(gone()) << "an incomplete scan marks nothing missing";
+    }
+    EXPECT_TRUE(waitFor(gone));
+}
+
 TEST_F(LibraryScannerTest, ANotifiedFolderIsScannedWithoutTheWholeRoot) {
     audio();
     LibraryStore store(dir / "db");

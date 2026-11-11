@@ -1637,6 +1637,7 @@ private:
         std::map<int64_t, std::unique_ptr<Watch>> watches;
         // Each root scans on its own thread, so a long NAS scan neither delays other roots nor these checks.
         std::map<int64_t, std::future<ScanReport>> scans;
+        std::map<int64_t, std::vector<Path>> scanning; // the folders each running scan took; none for a whole one
         auto check = Clock::time_point{};
         while (!stop.stop_requested()) {
             try {
@@ -1752,7 +1753,8 @@ private:
                         }
                         // A scan the user asked for runs at High, and the work following it until it catches up.
                         if (user) store_.userScanStarted();
-                        scans.emplace(id, std::async(std::launch::async, [this, id, user, folders = watch.take()] {
+                        scanning[id] = watch.take();
+                        scans.emplace(id, std::async(std::launch::async, [this, id, user, folders = scanning[id]] {
                                           SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
                                           auto normal = wil::scope_exit([this, user] {
                                               SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
@@ -1770,12 +1772,23 @@ private:
                     const auto id = it->first;
                     auto job = std::move(it->second);
                     it = scans.erase(it);
+                    const auto folders = std::exchange(scanning[id], {});
+                    const auto watch = watches.find(id);
+                    // The folders of a scan that did not complete are scanned again at the next check, not left to the
+                    // poll; a whole scan is left to it, as a folder that cannot be listed would rescan the whole storage.
+                    const auto again = [&] {
+                        if (watch == watches.end() || folders.empty() || stop.stop_requested()) return;
+                        watch->second->changed.insert(folders.begin(), folders.end());
+                        if (watch->second->due == Clock::time_point{})
+                            watch->second->due = Clock::now() + options_.offlineInterval;
+                    };
                     try {
                         const auto report = job.get();
-                        if (const auto watch = watches.find(id); watch != watches.end())
-                            watch->second->deferred = report.deferred;
+                        if (watch != watches.end()) watch->second->deferred = report.deferred;
+                        if (!report.complete) again();
                         for (const auto& diagnostic : report.diagnostics) log::warn("library: %s", diagnostic.c_str());
                     } catch (const std::exception& e) {
+                        again();
                         log::warn("library scan: %s", e.what());
                     }
                 }
