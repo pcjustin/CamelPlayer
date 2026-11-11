@@ -461,6 +461,32 @@ TEST(PlayerFinderTest, ADescriptionWithAnotherUdnIsNotBelieved) {
     EXPECT_TRUE(finder.players().empty());
 }
 
+// A description that serves two devices, a root MediaRenderer and an embedded OpenHome one, is announced under each
+// UDN: the root's answer, first, does not hide the device the description is for.
+TEST(PlayerFinderTest, AnAnswerUnderAnotherUdnOfTheSameDescriptionDoesNotHideIt) {
+    FakeRenderer renderer(RendererKind::OpenHome, "uuid:embedded");
+    renderer.goQuiet();
+    PlayerFinder finder(optionsFor(renderer, 60s), {});
+    const auto notify = [&](const std::string& udn) {
+        const SOCKET out = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        sockaddr_in target{};
+        target.sin_family = AF_INET;
+        target.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        target.sin_port = htons(finder.notifyPort());
+        const std::string text = "NOTIFY * HTTP/1.1\r\nNT: urn:schemas-upnp-org:device:MediaRenderer:1\r\nNTS: "
+                                 "ssdp:alive\r\nUSN: " +
+                                 udn + "::x\r\nLOCATION: " + renderer.location() + "\r\n\r\n";
+        sendto(out, text.data(), int(text.size()), 0, reinterpret_cast<sockaddr*>(&target), sizeof(target));
+        closesocket(out);
+    };
+    notify("uuid:root");
+    ASSERT_TRUE(waitFor([&] { return !renderer.requests().empty(); }));
+    std::this_thread::sleep_for(100ms);
+    ASSERT_TRUE(finder.players().empty());
+    notify("uuid:embedded");
+    EXPECT_TRUE(waitFor([&] { return finder.players().size() == 1; }));
+}
+
 TEST(PlayerLinkTest, SubscribesAndEndsItsSubscriptionWhenClosed) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     {

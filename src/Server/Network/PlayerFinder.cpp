@@ -56,7 +56,9 @@ struct PlayerFinder::Impl {
     uint16_t boundNotifyPort = 0;
     mutable std::mutex mutex;
     std::vector<Known> known;
-    std::map<std::string, Clock::time_point> refused; // only the finder's thread
+    // Answers whose description did not hold their UDN, by location and UDN, as one description can serve two devices;
+    // only the finder's thread.
+    std::map<std::pair<std::string, std::string>, Clock::time_point> refused;
     std::atomic<bool> stopping = false, searchWanted = true;
     std::thread thread;
 
@@ -146,17 +148,18 @@ struct PlayerFinder::Impl {
                 if (std::ranges::find(found->locations, message.location) != found->locations.end()) return;
             }
         }
-        if (const auto failed = refused.find(message.location);
+        const std::pair answer{message.location, message.udn};
+        if (const auto failed = refused.find(answer);
             failed != refused.end() && Clock::now() - failed->second < kRetryAfterSearches * options.searchInterval)
             return;
         // Outside the lock, as a player that does not answer takes seconds.
         auto description = fetchDescription(message.location, loopback());
         if (!description || description->udn != message.udn) {
             if (refused.size() >= kMaxRefusedAddresses) refused.clear();
-            refused[message.location] = Clock::now();
+            refused[answer] = Clock::now();
             return;
         }
-        refused.erase(message.location);
+        refused.erase(answer);
         {
             std::scoped_lock lock(mutex);
             auto found = std::ranges::find_if(known, [&](const Known& k) { return k.player.description.udn == message.udn; });
