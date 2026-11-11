@@ -1327,6 +1327,27 @@ TEST_F(LibraryScannerTest, AFolderThatCannotBeCheckedKeepsItsFiles) {
     EXPECT_EQ(count(store), 1);
 }
 
+// A library folder's name as it reads on disk is kept for while it is away, so a scan that cannot reach it keeps it too.
+TEST_F(LibraryScannerTest, AScanOfAFolderThatIsAwayKeepsItsName) {
+    const auto music = dir / "My Music";
+    fs::create_directories(music);
+    fs::copy_file(testutil::testFile("16-44.1k"), music / "one.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto shown = [&] {
+        auto row = store.openReader().prepare("SELECT display,location FROM roots");
+        row.step();
+        return std::pair{row.text(0), row.text(1)};
+    };
+    const auto before = shown();
+    ASSERT_TRUE(before.first.ends_with("My Music")) << before.first;
+    fs::rename(music, dir / "away");
+    EXPECT_FALSE(scanner.scan(root).online);
+    EXPECT_EQ(shown(), before);
+}
+
 // A notified folder whose scan did not complete is scanned again, so what changed in it is not left until the next poll.
 TEST_F(LibraryScannerTest, ANotifiedFolderWhoseScanDidNotCompleteIsScannedAgain) {
     const auto album = dir / "music" / "album";

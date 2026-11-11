@@ -970,7 +970,17 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     const auto started = std::chrono::steady_clock::now();
     const auto seconds = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(); };
     if (!partial) log::info("library: scanning %s", key(path).c_str());
-    // How the root reads on disk, for the folder pages and Settings; the scan is reading this storage anyway.
+    if (token.cancelled()) return report;
+    if (!openPath(path, FILE_LIST_DIRECTORY)) {
+        report.rootError = GetLastError();
+        report.online = false;
+        report.diagnostics.push_back("root unavailable (" + std::to_string(report.rootError) + "): " + key(path));
+        store_.write([root](sqlite::Database& db) { db.prepare("UPDATE roots SET online=0 WHERE id=?").bind(1, root).run(); })
+            .get();
+        return report;
+    }
+    // How the root reads on disk, for the folder pages and Settings; the scan is reading this storage anyway. Only once it
+    // is reached: unreached, it would read as its lowercase key, and the name kept for while it is away would be lost.
     const auto display = partial ? std::string{} : libraryDisplayPath(key(path));
     const auto rootName = toUtf8(Path(toWide(display)).filename().wstring());
     if (!partial)
@@ -983,15 +993,6 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                     .run();
             })
             .get();
-    if (token.cancelled()) return report;
-    if (!openPath(path, FILE_LIST_DIRECTORY)) {
-        report.rootError = GetLastError();
-        report.online = false;
-        report.diagnostics.push_back("root unavailable (" + std::to_string(report.rootError) + "): " + key(path));
-        store_.write([root](sqlite::Database& db) { db.prepare("UPDATE roots SET online=0 WHERE id=?").bind(1, root).run(); })
-            .get();
-        return report;
-    }
     std::map<std::string, Version> known;
     auto files = reader.prepare(
         "SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state,content_hash IS NOT NULL "
