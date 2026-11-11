@@ -724,6 +724,27 @@ TEST(AirPlayGroupTest, AReceiverDeletedLeavesTheGroup) {
     EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
 }
 
+// The output menu lists only enabled rows, so a receiver turned off there could never be taken out of the group.
+TEST(AirPlayGroupTest, AReceiverTurnedOffLeavesTheGroup) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    setOutputEnabled(s, Backend::AirPlay, "HP-B", false, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+    EXPECT_FALSE(saved(s, Backend::AirPlay, "HP-B")->enabled);
+}
+
+TEST(AirPlayGroupTest, AReceiverThatBecameUnsupportedLeavesTheGroup) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    setInAirPlayGroup(s, "HP-B", true, withReceivers());
+    auto devices = withReceivers();
+    devices.airplay[1].unsupported = "refused";
+    syncOutputs(s, devices);
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+    EXPECT_FALSE(saved(s, Backend::AirPlay, "HP-B")->enabled);
+}
+
 TEST(AirPlayGroupTest, ChannelsAndTheGroupSurviveInTheSettingsFile) {
     Settings s = fresh();
     selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());

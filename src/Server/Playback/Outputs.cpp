@@ -210,7 +210,10 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
             saved.name = device->name;
             if (!device->speakers.empty()) saved.speakers = device->speakers;
             const bool inUse = saved.backend == s.backend && saved.id == selectedId(s);
-            if (!device->unsupported.empty() && !inUse) saved.enabled = false;
+            if (!device->unsupported.empty() && !inUse) {
+                saved.enabled = false;
+                if (saved.backend == Backend::AirPlay) std::erase(s.airplayGroup, saved.id);
+            }
         }
 }
 
@@ -282,6 +285,8 @@ AirPlayChannels airplayChannels(const Settings& s, const std::string& id) {
 void setOutputEnabled(Settings& s, Backend backend, const std::string& id, bool enabled, const DeviceCatalog& devices) {
     if (s.backend == backend && selectedId(s) == id) return;
     savedOutput(s, backend, id).enabled = enabled;
+    // The output menu lists only enabled receivers, so one turned off there could never be taken out of the group.
+    if (!enabled && backend == Backend::AirPlay) std::erase(s.airplayGroup, id);
     syncOutputs(s, devices);
 }
 
