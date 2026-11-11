@@ -239,6 +239,8 @@ void LibraryTextIndex::run(std::stop_token stop) {
                 .write([&](sqlite::Database& db) {
                     auto state = db.prepare("SELECT value FROM app_state WHERE key='sort_version'");
                     rebuild = !state.step() || state.text(0) != signature;
+                    // Until it finishes the keys are mixed, so a rebuild cut short leaves none of the versions to match.
+                    if (rebuild) db.exec("DELETE FROM app_state WHERE key='sort_version'");
                     db.prepare("INSERT INTO app_state(key,value) VALUES('sort_locale',?) ON CONFLICT(key) DO UPDATE SET "
                                "value=excluded.value")
                         .bind(1, toUtf8(locale))

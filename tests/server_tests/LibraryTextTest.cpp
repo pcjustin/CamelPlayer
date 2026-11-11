@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <gtest/gtest.h>
+#include <chrono>
+#include <span>
 #include <stdexcept>
 #include <future>
 #include "Server/Library/LibraryStore.h"
@@ -156,4 +158,43 @@ TEST(LibraryText, RebuildsOnNlsVersionAndLocaleChangesWhileReadersRemainAvailabl
         ASSERT_TRUE(locale.step());
         EXPECT_EQ(locale.text(0), "zh-TW_pronun");
     }
+}
+
+// A locale switched back before the rebuild for another has finished: every row ends with the keys of the locale chosen.
+TEST(LibraryText, ALocaleSwitchedBackMidRebuildLeavesNoOtherKeys) {
+    const auto directory = testutil::tempDir() / "library-locale-back";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music/album');"
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000) "
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) SELECT "
+                    "x,1,1,'C:/music/'||x||'.flac','audio',1,1 FROM n;"
+                    "INSERT INTO tracks(id,file_id,title) SELECT id,id,'臺灣音樂' FROM files;");
+        })
+        .get();
+    const auto stroke = librarySortKey("臺灣音樂", L"zh-TW"), bopomofo = librarySortKey("臺灣音樂", L"zh-TW_pronun");
+    ASSERT_NE(stroke, bopomofo);
+    const auto count = [&](const std::vector<uint8_t>& key) {
+        auto reader = store.openReader();
+        auto rows = reader.prepare("SELECT count(*) FROM tracks WHERE title_sort=?");
+        rows.bind(1, std::span<const uint8_t>(key));
+        return rows.step() ? rows.integer(0) : 0;
+    };
+    LibraryTextIndex index(store, [](std::wstring_view) { return std::vector<uint8_t>{1}; });
+    index.setLocale(L"zh-TW");
+    index.waitIdle();
+    ASSERT_EQ(count(stroke), 20000);
+    index.setLocale(L"zh-TW_pronun");
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (count(bopomofo) == 0 && std::chrono::steady_clock::now() < until) {
+    }
+    index.setLocale(L"zh-TW");
+    const auto rewritten = count(bopomofo);
+    ASSERT_GT(rewritten, 0);
+    ASSERT_LT(rewritten, 20000) << "the rebuild finished before it was switched back";
+    index.waitIdle();
+    EXPECT_EQ(count(stroke), 20000);
 }
