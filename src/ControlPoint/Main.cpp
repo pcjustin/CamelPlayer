@@ -19,6 +19,7 @@
 #include "TrayIcon.h"
 #include "UiText.h"
 #include "Server/Api/ServerApi.h"
+#include "Server/Support/Updates.h"
 #include "Common/util/CrashDump.h"
 #include "Common/util/FolderWalk.h"
 #include "Common/util/Log.h"
@@ -129,6 +130,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     camel::log::init(logs, L"CamelPlayer");
     camel::log::info("CamelPlayer starting");
     for (const auto& name : notRemoved) camel::log::warn("reset: could not remove %s", camel::toUtf8(name).c_str());
+    camel::server::update::signalStarting(camel::dataDirectory()); // before the Server opens, and may migrate, the data
 
     SetCurrentProcessExplicitAppUserModelID(L"CamelPlayer.CamelPlayer");
     registerAppUserModelId(L"CamelPlayer.CamelPlayer");

@@ -28,10 +28,10 @@ struct Options {
 // What the installation needs from the system; tests replace it.
 struct Host {
     std::function<void(const std::filesystem::path& exe)> startPlayer;
-    std::function<bool()> playerRunning; // a CamelPlayer.exe from the program folder is running
-    std::function<void()> endPlayer;     // ends it and waits until it has exited
-    std::chrono::milliseconds startTimeout{30000};
-    std::chrono::milliseconds launchGrace{5000}; // how long a started player may take to appear
+    std::function<bool()> playerRunning;           // a CamelPlayer.exe from the program folder is running
+    std::function<void()> endPlayer;               // ends it and waits until it has exited
+    std::chrono::milliseconds startTimeout{30000}; // unless the player said it is starting: then while it runs
+    std::chrono::milliseconds launchGrace{5000};   // how long a started player may take to appear
     std::function<void(const std::wstring&)> log;
     std::function<void()> step; // tests: before each file is moved or copied, as where the updater could be ended
 };

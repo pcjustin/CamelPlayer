@@ -485,6 +485,7 @@
   <data name="Update_ConfirmCancel" xml:space="preserve"><value>稍後</value></data>
   <data name="Update_InstalledTitle" xml:space="preserve"><value>已更新到 CamelPlayer {0}</value></data>
   <data name="Update_FailedTitle" xml:space="preserve"><value>更新到 {0} 失敗，已還原</value></data>
+  <data name="Update_UndoneText" xml:space="preserve"><value>已還原先前的版本，設定和媒體庫都保留。之後仍會再提示 {0}。</value></data>
   <data name="Update_FailedText" xml:space="preserve"><value>已還原先前的版本，設定和媒體庫都保留。自動檢查不會再提示 {0}；設定 › 關於 中的「檢查更新」仍會提示。</value></data>
   <data name="Update_CancelledTitle" xml:space="preserve"><value>更新到 {0} 已取消</value></data>
   <data name="Update_CancelledText" xml:space="preserve"><value>CamelPlayer 沒有及時關閉，或未取得系統管理員權限。沒有變更任何檔案。</value></data>

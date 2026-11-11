@@ -485,6 +485,7 @@ Details: {0}</value></data>
   <data name="Update_ConfirmCancel" xml:space="preserve"><value>Not now</value></data>
   <data name="Update_InstalledTitle" xml:space="preserve"><value>Updated to CamelPlayer {0}</value></data>
   <data name="Update_FailedTitle" xml:space="preserve"><value>The update to {0} failed and was undone</value></data>
+  <data name="Update_UndoneText" xml:space="preserve"><value>The previous version was restored with your settings and library. {0} will be offered again.</value></data>
   <data name="Update_FailedText" xml:space="preserve"><value>The previous version was restored with your settings and library. Automatic checks no longer offer {0}; Check for updates in Settings › About still does.</value></data>
   <data name="Update_CancelledTitle" xml:space="preserve"><value>The update to {0} was cancelled</value></data>
   <data name="Update_CancelledText" xml:space="preserve"><value>CamelPlayer did not close in time or administrator rights were not granted. Nothing was changed.</value></data>

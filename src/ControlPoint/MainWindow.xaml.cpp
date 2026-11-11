@@ -5018,20 +5018,22 @@ winrt::fire_and_forget MainWindow::showUpdateResult() {
         co_return;
     }
     update::removeResult(data);
-    const bool failed = result->kind == update::Result::Kind::Failed;
+    const bool undone = result->kind == update::Result::Kind::Undone;
+    const bool failed = undone || result->kind == update::Result::Kind::Failed;
     if (repair) {
         showRepairResult(failed ? L"Repair_FailedTitle" : L"Repair_CancelledTitle",
                          failed ? L"Repair_FailedText" : L"Update_CancelledText", InfoBarSeverity::Warning);
         co_return;
     }
-    if (failed) {
+    if (failed && !undone) { // only a version that did not start is skipped
         settings_.skippedVersion = result->version;
         applySettingsNow();
     }
     auto bar = UpdateBar();
     bar.Severity(InfoBarSeverity::Warning);
     bar.Title(ui::format(failed ? L"Update_FailedTitle" : L"Update_CancelledTitle", {version}));
-    bar.Message(failed ? ui::format(L"Update_FailedText", {version}) : tr(L"Update_CancelledText"));
+    bar.Message(failed ? ui::format(undone ? L"Update_UndoneText" : L"Update_FailedText", {version})
+                       : tr(L"Update_CancelledText"));
     UpdateInstallButton().Visibility(Visibility::Collapsed);
     UpdateNotesButton().Visibility(Visibility::Collapsed);
     UpdateSkipButton().Visibility(Visibility::Collapsed);

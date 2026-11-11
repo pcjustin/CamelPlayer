@@ -182,7 +182,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         if (!data.empty()) {
             openLog(data);
             log(L"the updater could not read its arguments: " + std::wstring(GetCommandLineW()));
-            camel::updater::writeResult(data, L"failed", args[L"version"]);
+            camel::updater::writeResult(data, L"undone", args[L"version"]);
         }
         const fs::path player = args[L"app"].empty() ? playerProgram(args[L"pid"]) : fs::path(args[L"app"]) / files::kPlayer;
         if (!player.empty()) startProcess(player);

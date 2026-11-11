@@ -276,7 +276,7 @@ struct InstallFixture {
         };
     }
 
-    void expectOldVersionRestored() const {
+    void expectOldVersionRestored(update::Result::Kind kind = update::Result::Kind::Failed) const {
         EXPECT_EQ(readText(app / L"CamelPlayer.exe"), "old");
         EXPECT_EQ(readText(app / L"old-only.dll"), "old");
         EXPECT_EQ(readText(app / L"en-us" / L"a.mui"), "old");
@@ -288,7 +288,7 @@ struct InstallFixture {
         EXPECT_FALSE(fs::exists(options.dataBackup));
         const auto result = update::readResult(data);
         ASSERT_TRUE(result);
-        EXPECT_EQ(result->kind, update::Result::Kind::Failed);
+        EXPECT_EQ(result->kind, kind);
         EXPECT_EQ(result->version, "0.1.1");
     }
 
@@ -378,7 +378,7 @@ TEST(Update, AFileChangedAfterTheCheckIsNotInstalled) {
     writeText(f.files / L"CamelPlayer.exe", "bad");
     EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
     EXPECT_EQ(f.started, std::vector<std::string>{"old"});
-    f.expectOldVersionRestored();
+    f.expectOldVersionRestored(update::Result::Kind::Undone);
 }
 
 TEST(Update, AFileAddedAfterTheCheckIsNotInstalled) {
@@ -388,7 +388,7 @@ TEST(Update, AFileAddedAfterTheCheckIsNotInstalled) {
     EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
     EXPECT_EQ(f.started, std::vector<std::string>{"old"});
     EXPECT_FALSE(fs::exists(f.app / L"version.dll"));
-    f.expectOldVersionRestored();
+    f.expectOldVersionRestored(update::Result::Kind::Undone);
 }
 
 TEST(Update, AListChangedAfterTheCheckIsNotInstalled) {
@@ -400,7 +400,7 @@ TEST(Update, AListChangedAfterTheCheckIsNotInstalled) {
     f.options.manifestSha256 = checked;
     EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
     EXPECT_EQ(f.started, std::vector<std::string>{"old"});
-    f.expectOldVersionRestored();
+    f.expectOldVersionRestored(update::Result::Kind::Undone);
 }
 
 TEST(Update, InstallsTheNewVersionAndRemovesTheBackups) {
@@ -459,6 +459,37 @@ TEST(Update, RollsBackWhenTheNewVersionDoesNotStart) {
     f.expectOldVersionRestored();
 }
 
+// A first start that migrates a large library before its window is waited for while the player runs, once it said
+// it is starting.
+TEST(Update, ASlowFirstStartIsWaitedFor) {
+    InstallFixture f(L"update-slow-start");
+    std::jthread migrating;
+    f.host.startPlayer = [&](const fs::path& exe) {
+        f.started.push_back(readText(exe));
+        update::signalStarting(f.data);
+        migrating = std::jthread([&] {
+            std::this_thread::sleep_for(f.host.startTimeout + std::chrono::milliseconds(1000));
+            update::signalStarted(f.data);
+        });
+    };
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    EXPECT_EQ(f.started, std::vector<std::string>{"new"});
+    EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "new");
+    EXPECT_FALSE(fs::exists(f.data / camel::updatefiles::kStarting));
+}
+
+TEST(Update, ReadsAnUndoneUpdate) {
+    const auto data = testutil::tempDir() / L"update-undone";
+    fs::remove_all(data);
+    writeText(data / camel::updatefiles::kResult, "undone 0.1.1\n");
+    const auto result = update::readResult(data);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->kind, update::Result::Kind::Undone);
+    EXPECT_EQ(result->version, "0.1.1");
+    update::signalStarting(data);
+    EXPECT_FALSE(fs::exists(data / camel::updatefiles::kStarting)) << "no installed update waits for it";
+}
+
 TEST(Update, RollsBackWhenTheNewVersionExitsEarly) {
     InstallFixture f(L"update-exits");
     f.goodPlayer = "none";
@@ -484,7 +515,7 @@ TEST(Update, RollsBackWhenCopyingFails) {
     EXPECT_FALSE(fs::exists(f.app / L"zz-locked.dll"));
     EXPECT_EQ(readText(f.data / L"settings.json"), "settings-old");
     EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "old");
-    EXPECT_EQ(update::readResult(f.data)->kind, update::Result::Kind::Failed);
+    EXPECT_EQ(update::readResult(f.data)->kind, update::Result::Kind::Undone) << "offered again: it never started";
 }
 
 // Runs against the real GitHub API; enable with --gtest_also_run_disabled_tests.

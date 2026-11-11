@@ -333,6 +333,7 @@ std::optional<Result> readResult(const std::filesystem::path& dataDirectory) {
     in >> previous;
     if (kind == "installed") return Result{Result::Kind::Installed, version, previous};
     if (kind == "failed") return Result{Result::Kind::Failed, version, {}};
+    if (kind == "undone") return Result{Result::Kind::Undone, version, {}};
     if (kind == "cancelled") return Result{Result::Kind::Cancelled, version, {}};
     return std::nullopt;
 }
@@ -342,8 +343,14 @@ void removeResult(const std::filesystem::path& dataDirectory) {
     std::filesystem::remove(dataDirectory / files::kResult, error);
 }
 
+void signalStarting(const std::filesystem::path& dataDirectory) {
+    const auto result = readResult(dataDirectory);
+    if (result && result->kind == Result::Kind::Installed) std::ofstream(dataDirectory / files::kStarting) << 1;
+}
+
 bool signalStarted(const std::filesystem::path& dataDirectory) {
     std::error_code error;
+    std::filesystem::remove(dataDirectory / files::kStarting, error);
     if (std::filesystem::exists(dataDirectory / files::kStarted, error)) {
         std::filesystem::remove(dataDirectory / files::kStarted, error);
         removeResult(dataDirectory);

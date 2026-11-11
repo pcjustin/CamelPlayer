@@ -151,7 +151,7 @@ public:
         log(L"installing " + o_.version + L" into " + o_.app.wstring());
         if (!recover()) {
             log(L"an earlier update could not be put right; update-backup is left as it is");
-            writeResult(o_.data, L"failed", o_.version);
+            writeResult(o_.data, L"undone", o_.version);
             host_.startPlayer(o_.app / files::kPlayer);
             return Outcome::RolledBack;
         }
@@ -184,28 +184,30 @@ public:
             for (const auto& name : moved_) removeEmptyFolders(o_.app, name);
         } catch (const std::exception& e) {
             log(L"installing failed: " + describe(e));
-            return rollBack();
+            return rollBack(L"undone");
         }
         std::error_code error;
         fs::remove(o_.data / files::kStarted, error);
+        fs::remove(o_.data / files::kStarting, error);
         try {
             journal_ += "starting\n";
             writeThrough(o_.app / files::kJournal, journal_);
         } catch (const std::exception& e) {
             log(L"installing failed: " + describe(e));
-            return rollBack();
+            return rollBack(L"undone");
         }
         writeResult(o_.data, L"installed", o_.version, o_.previous);
         host_.startPlayer(o_.app / files::kPlayer);
         if (!started()) {
             log(L"the new version did not start");
             if (host_.playerRunning()) host_.endPlayer();
-            return rollBack();
+            return rollBack(L"failed");
         }
         fs::remove(o_.app / files::kJournal, error); // first: a journal outlasting its backup would undo the update
         fs::remove_all(backup_, error);
         fs::remove_all(o_.dataBackup, error);
         fs::remove(o_.data / files::kStarted, error);
+        fs::remove(o_.data / files::kStarting, error);
         fs::remove(o_.data / files::kResult, error);
         log(L"installed " + o_.version);
         return Outcome::Installed;
@@ -321,20 +323,24 @@ private:
         snapshotTaken_ = true;
     }
 
+    // A player that said it is starting may open and migrate the data for as long as it needs, while it runs.
     bool started() const {
         using namespace std::chrono;
         const auto start = steady_clock::now();
+        bool starting = false;
         for (;;) {
             if (fs::exists(o_.data / files::kStarted)) return true;
+            starting = starting || fs::exists(o_.data / files::kStarting);
             const auto elapsed = steady_clock::now() - start;
-            if (elapsed >= host_.startTimeout) return false;
+            if (elapsed >= host_.startTimeout && !starting) return false;
             if (elapsed >= host_.launchGrace && !host_.playerRunning()) return false;
             std::this_thread::sleep_for(milliseconds(100));
         }
     }
 
-    // Puts the previous version's files and data back and starts it; it reports the undone update.
-    Outcome rollBack() {
+    // Puts the previous version's files and data back and starts it; it reports the undone update as `kind`: failed
+    // when the new version did not start, undone when it was never started.
+    Outcome rollBack(const wchar_t* kind) {
         std::error_code error;
         if (copying_)
             for (const auto& name : incoming_) {
@@ -356,7 +362,8 @@ private:
         if (snapshotTaken_) restoreData(o_.dataBackup);
         if (restored) fs::remove_all(o_.dataBackup, error);
         fs::remove(o_.data / files::kStarted, error);
-        writeResult(o_.data, L"failed", o_.version);
+        fs::remove(o_.data / files::kStarting, error);
+        writeResult(o_.data, kind, o_.version);
         log(L"rolled back to the previous version");
         host_.startPlayer(o_.app / files::kPlayer);
         return Outcome::RolledBack;

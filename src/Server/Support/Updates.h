@@ -104,7 +104,9 @@ void cleanTemp(const std::filesystem::path& dataDirectory);
 
 // What the updater left in the data folder for the player (docs/Plan.md §8.6).
 struct Result {
-    enum class Kind : uint8_t { Installed, Failed, Cancelled } kind;
+    // Failed: the new version did not start, and is not offered again automatically. Undone: it could not be
+    // installed, and is offered again.
+    enum class Kind : uint8_t { Installed, Failed, Undone, Cancelled } kind;
     std::string version;
     std::string previous; // the replaced version, for Installed
 };
@@ -113,6 +115,9 @@ void removeResult(const std::filesystem::path& dataDirectory);
 // The new player tells the updater it started: its window is shown and the Server has opened the data. False when a
 // signal from an earlier start is still there, so the updater has gone and the result is stale; both are removed then.
 bool signalStarted(const std::filesystem::path& dataDirectory);
+// The new player tells the updater, at the very start, that it is starting, so a first start that migrates the data
+// is waited for; nothing is written when no installed update waits for it.
+void signalStarting(const std::filesystem::path& dataDirectory);
 // The CHANGELOG.md sections `## <v>` with `previous` < v <= `version` (only `version` when `previous` is not a
 // version). A single section comes without its heading; several are each headed by their version.
 std::string changelogSince(const std::string& changelog, std::string_view previous, std::string_view version);

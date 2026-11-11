@@ -12,6 +12,9 @@ namespace camel::updatefiles {
 inline constexpr wchar_t kResult[] = L"update-result";
 // In the data folder: created by the new player once it has started.
 inline constexpr wchar_t kStarted[] = L"update-started";
+// Written by the new player as it starts, before it opens the data, which can take long: the updater then waits for
+// update-started for as long as the player runs.
+inline constexpr wchar_t kStarting[] = L"update-starting";
 // In the program folder while an update runs: the previous version's files.
 inline constexpr wchar_t kBackup[] = L"update-backup";
 // In the program folder from before the first file moves until the install is finished or undone.
