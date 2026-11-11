@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <gtest/gtest.h>
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
 #include <fstream>
 #include <map>
@@ -100,6 +102,23 @@ TEST(Update, OffersOnlyNewerStableReleasesWithBothAssets) {
         R"({"tag_name":"v0.0.1","assets":[{"name":"CamelPlayer-v2-v0.0.1-win-x64.zip","browser_download_url":"https://x/a"}]})",
         "0.0.0"));
     EXPECT_THROW(update::newerRelease("not json", "0.1.0"), std::exception);
+}
+
+// GitHub answers null for a release without notes, and could for any other field.
+TEST(Update, FindsAReleaseWhoseFieldsAreNull) {
+    const std::string base = "https://github.com/x";
+    auto json = nlohmann::json::parse(releaseJson(base, "v0.1.1"));
+    json["body"] = nullptr;
+    json["draft"] = nullptr;
+    json["prerelease"] = nullptr;
+    json["assets"].push_back({{"name", nullptr}, {"browser_download_url", nullptr}});
+    const auto release = update::newerRelease(json.dump(), "0.1.0");
+    ASSERT_TRUE(release);
+    EXPECT_EQ(release->version, "0.1.1");
+    EXPECT_EQ(release->notes, "");
+    EXPECT_EQ(release->zipUrl, base + "/zip");
+    json["tag_name"] = nullptr;
+    EXPECT_FALSE(update::newerRelease(json.dump(), "0.1.0"));
 }
 
 TEST(Update, ReadsChecksumsAndChangelogSections) {

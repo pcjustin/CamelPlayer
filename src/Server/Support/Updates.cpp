@@ -102,15 +102,26 @@ std::optional<Version> parseVersion(std::string_view text) {
 
 namespace {
 
+// GitHub answers null for a field it has nothing for, as the notes of a release without them.
+std::string textOf(const nlohmann::json& j, const char* key) {
+    const auto found = j.find(key);
+    return found != j.end() && found->is_string() ? found->get<std::string>() : std::string();
+}
+
+bool flagOf(const nlohmann::json& j, const char* key) {
+    const auto found = j.find(key);
+    return found != j.end() && found->is_boolean() && found->get<bool>();
+}
+
 // The stable release `json` describes when `wanted` accepts its version and it has the zip and the sums.
 std::optional<Release> releaseFrom(const std::string& json, bool allowHttp, const std::function<bool(const Version&)>& wanted) {
     const auto j = nlohmann::json::parse(json);
-    if (j.value("draft", false) || j.value("prerelease", false)) return std::nullopt;
-    const auto tagged = parseVersion(j.value("tag_name", std::string()));
+    if (flagOf(j, "draft") || flagOf(j, "prerelease")) return std::nullopt;
+    const auto tagged = parseVersion(textOf(j, "tag_name"));
     if (!tagged || !wanted(*tagged)) return std::nullopt;
     Release release;
     release.version = versionText(*tagged);
-    release.notes = j.value("body", std::string());
+    release.notes = textOf(j, "body");
     release.zipName = "CamelPlayer-" + release.version + "-win-x64.zip";
     const std::string sumsName = "CamelPlayer-" + release.version + "-SHA256SUMS.txt";
     const auto usable = [allowHttp](const std::string& url) {
@@ -118,8 +129,8 @@ std::optional<Release> releaseFrom(const std::string& json, bool allowHttp, cons
     };
     if (const auto assets = j.find("assets"); assets != j.end() && assets->is_array())
         for (const auto& asset : *assets) {
-            const auto name = asset.value("name", std::string());
-            const auto url = asset.value("browser_download_url", std::string());
+            const auto name = textOf(asset, "name");
+            const auto url = textOf(asset, "browser_download_url");
             if (!usable(url)) continue;
             if (name == release.zipName) release.zipUrl = url;
             if (name == sumsName) release.sumsUrl = url;
