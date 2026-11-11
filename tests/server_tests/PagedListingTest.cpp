@@ -76,6 +76,30 @@ TEST(PagedListing, APageInFlightWhenTheRevisionChangesIsAskedForAgain) {
     EXPECT_EQ(*listing.at(15), 115);
 }
 
+// A fetch that fails, as a query cancelled while a scan writes, leaves placeholder rows the view will not read again:
+// the page is asked for again by itself, a few times for one revision, so an offline library does not loop.
+TEST(PagedListing, AFailedPageIsAskedForAgainAFewTimes) {
+    PagedListing<int> listing(10);
+    listing.at(0);
+    listing.takeWanted();
+    listing.deliver(0, 1, 30, page(0, 10));
+    listing.at(15);
+    EXPECT_EQ(listing.takeWanted(), (std::vector<int64_t>{1}));
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        listing.failed(1);
+        EXPECT_EQ(listing.takeWanted(), (std::vector<int64_t>{1})) << "attempt " << attempt;
+    }
+    listing.failed(1);
+    EXPECT_TRUE(listing.takeWanted().empty()); // given up for this revision
+    listing.at(0);
+    listing.takeWanted();
+    listing.deliver(0, 2, 30, page(100, 10)); // a new revision tries again
+    listing.at(15);
+    EXPECT_EQ(listing.takeWanted(), (std::vector<int64_t>{1}));
+    listing.failed(1);
+    EXPECT_EQ(listing.takeWanted(), (std::vector<int64_t>{1}));
+}
+
 TEST(PagedListing, MemoryStaysBoundedAndFailedPagesAreRetried) {
     PagedListing<int> listing(10, 3);
     for (int p = 0; p < 5; ++p) {

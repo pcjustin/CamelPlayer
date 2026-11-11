@@ -55,6 +55,7 @@ public:
             order_.clear();
             // What is in flight was asked under the old revision, so the view's reads after this ask for it again.
             inFlight_.clear();
+            attempts_.clear();
             revision_ = revision;
             total_ = total;
         }
@@ -67,8 +68,12 @@ public:
         return reset;
     }
 
-    // A failed fetch may be retried by the next read of its page.
-    void failed(int64_t page) { inFlight_.erase(page); }
+    // A failed fetch is asked for again by itself, as the view does not read placeholder rows twice; a few times for
+    // one revision, so a library that cannot answer does not loop.
+    void failed(int64_t page) {
+        inFlight_.erase(page);
+        if (++attempts_[page] <= kRetries) wanted_.insert(page);
+    }
 
 private:
     void touch(int64_t page) {
@@ -83,6 +88,8 @@ private:
     std::map<int64_t, std::vector<T>> pages_;
     std::list<int64_t> order_; // most recently read first
     std::set<int64_t> wanted_, inFlight_;
+    std::map<int64_t, int> attempts_; // failed fetches of a page under this revision
+    static constexpr int kRetries = 3;
 };
 
 } // namespace camel::server

@@ -167,6 +167,7 @@ private:
         if (refresh) refreshing_ = false;
         if (failed) {
             listing_.failed(page);
+            retryLater();
             return;
         }
         const auto revision = listing_.revision();
@@ -189,6 +190,19 @@ private:
             if (const auto* row = listing_.at(i))
                 winrt::get_self<winrt::CamelPlayer::implementation::BrowseItem>(found->second.as<Item>())->fill(*row);
         }
+    }
+
+    // A failed page is asked for again after a pause, not at once against what made it fail.
+    void retryLater() {
+        if (!retry_) {
+            retry_ = queue_.CreateTimer();
+            retry_.Interval(std::chrono::seconds(1));
+            retry_.IsRepeating(false);
+            retry_.Tick([weak = get_weak()](auto&&, auto&&) {
+                if (auto self = weak.get()) self->schedule();
+            });
+        }
+        retry_.Start();
     }
 
     // A scan or edit produced a newer library state while the view is read. Like Roon, the view stays where it is:
@@ -214,6 +228,7 @@ private:
     }
 
     winrt::Microsoft::UI::Dispatching::DispatcherQueue queue_;
+    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer retry_{nullptr};
     BrowseFetch fetch_;
     std::function<void(int64_t)> reset_;
     camel::server::PagedListing<BrowseRow> listing_{100, 64};
