@@ -198,6 +198,13 @@ TEST(Update, CleansTheTempFolderOnlyWhenNoUpdateIsRunning) {
 
 namespace {
 
+// An install-manifest.txt listing `paths`, as package.ps1 writes it.
+void writeManifest(const fs::path& folder, const std::vector<std::string>& paths) {
+    std::string text;
+    for (const auto& path : paths) text += std::string(64, '0') + "  3  " + path + "\r\n";
+    writeText(folder / camel::updatefiles::kManifest, text);
+}
+
 // An old installation, the new version's files and a data folder; the fake player starts by signalling when the
 // program folder holds `goodPlayer`.
 struct InstallFixture {
@@ -219,6 +226,8 @@ struct InstallFixture {
         writeText(files / L"CamelPlayer.exe", "new");
         writeText(files / L"CamelUpdater.exe", "new");
         writeText(files / L"en-us" / L"a.mui", "new");
+        writeManifest(app, {"CamelPlayer.exe", "old-only.dll", "en-us/a.mui"});
+        writeManifest(files, {"CamelPlayer.exe", "CamelUpdater.exe", "en-us/a.mui"});
         writeText(data / L"settings.json", "settings-old");
         writeText(data / L"library.db", "db-old");
         options = {app, files, data, dir / L"temp" / L"data-backup", L"0.1.1", L"0.1.0"};
@@ -272,6 +281,36 @@ TEST(Update, InstallsTheNewVersionAndRemovesTheBackups) {
     EXPECT_EQ(readText(f.data / L"settings.json"), "settings-new");
     EXPECT_FALSE(update::readResult(f.data));
     EXPECT_FALSE(fs::exists(f.data / camel::updatefiles::kStarted));
+}
+
+// The release zip has no top folder, so it may have been unpacked among other files, which stay as they are.
+TEST(Update, AnUpdateLeavesWhatIsNotThePackagesWhereItIs) {
+    InstallFixture f(L"update-others");
+    writeText(f.app / L"notes.txt", "mine");
+    writeText(f.app / L"Photos" / L"a.jpg", "mine");
+    writeText(f.app / L"en-us" / L"mine.txt", "mine");
+    writeText(f.dir / L"outside.txt", "mine");
+    writeManifest(f.app, {"CamelPlayer.exe", "old-only.dll", "en-us/a.mui", "../outside.txt"});
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "new");
+    EXPECT_EQ(readText(f.app / L"en-us" / L"a.mui"), "new");
+    EXPECT_FALSE(fs::exists(f.app / L"old-only.dll"));
+    EXPECT_FALSE(fs::exists(f.app / camel::updatefiles::kBackup));
+    EXPECT_EQ(readText(f.app / L"notes.txt"), "mine");
+    EXPECT_EQ(readText(f.app / L"Photos" / L"a.jpg"), "mine");
+    EXPECT_EQ(readText(f.app / L"en-us" / L"mine.txt"), "mine");
+    EXPECT_EQ(readText(f.dir / L"outside.txt"), "mine");
+}
+
+TEST(Update, ARollBackLeavesWhatIsNotThePackagesWhereItIs) {
+    InstallFixture f(L"update-others-back");
+    f.goodPlayer = "none";
+    writeText(f.app / L"notes.txt", "mine");
+    writeText(f.app / L"en-us" / L"mine.txt", "mine");
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
+    f.expectOldVersionRestored();
+    EXPECT_EQ(readText(f.app / L"notes.txt"), "mine");
+    EXPECT_EQ(readText(f.app / L"en-us" / L"mine.txt"), "mine");
 }
 
 TEST(Update, RollsBackWhenTheNewVersionDoesNotStart) {

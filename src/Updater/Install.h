@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Replaces the program folder with the new version's files and rolls back when that or the new version's start fails
+// Replaces the installed version's files, as its install-manifest.txt lists them, with the new version's, leaving any
+// other file in the program folder where it is, and rolls back when that or the new version's start fails
 // (docs/Plan.md §8.6). Plain Win32 and the standard library, so CamelUpdater.exe runs from the temp folder on its own.
 #pragma once
 #include <chrono>

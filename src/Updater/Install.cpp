@@ -7,6 +7,8 @@
 #include <windows.h>
 
 #include <fstream>
+#include <optional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -19,10 +21,50 @@ namespace {
 namespace fs = std::filesystem;
 namespace files = camel::updatefiles;
 
-std::vector<fs::path> children(const fs::path& folder) {
-    std::vector<fs::path> names;
-    for (const auto& entry : fs::directory_iterator(folder)) names.push_back(entry.path().filename());
-    return names;
+std::wstring fromUtf8(const std::string& text) {
+    std::wstring wide(text.size(), L'\0');
+    wide.resize(size_t(MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), wide.data(), int(wide.size()))));
+    return wide;
+}
+
+// A path inside the program folder, or nothing.
+std::optional<fs::path> inside(const fs::path& path) {
+    auto normal = path.lexically_normal();
+    if (normal.empty() || normal.has_root_name() || normal.has_root_directory()) return std::nullopt;
+    const auto first = *normal.begin();
+    if (first == L".." || first == L"." || first == files::kBackup) return std::nullopt;
+    return normal;
+}
+
+// What the installed version's install-manifest.txt lists, and the list itself; nothing without one.
+std::set<fs::path> listedFiles(const fs::path& app) {
+    std::set<fs::path> listed;
+    std::ifstream in(app / files::kManifest, std::ios::binary);
+    if (!in) return listed;
+    listed.emplace(files::kManifest);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.ends_with('\r')) line.pop_back();
+        const auto hashEnd = line.find("  ");
+        const auto sizeEnd = hashEnd == std::string::npos ? hashEnd : line.find("  ", hashEnd + 2);
+        if (sizeEnd == std::string::npos) continue;
+        if (const auto path = inside(fromUtf8(line.substr(sizeEnd + 2)))) listed.insert(*path);
+    }
+    return listed;
+}
+
+std::vector<fs::path> filesIn(const fs::path& folder) {
+    std::vector<fs::path> found;
+    for (const auto& entry : fs::recursive_directory_iterator(folder))
+        if (entry.is_regular_file()) found.push_back(entry.path().lexically_relative(folder));
+    return found;
+}
+
+// The folders above `file` in the program folder that are left empty.
+void removeEmptyFolders(const fs::path& app, const fs::path& file) {
+    std::error_code error;
+    for (auto folder = file.parent_path(); !folder.empty(); folder = folder.parent_path())
+        if (!fs::remove(app / folder, error)) return;
 }
 
 std::wstring describe(const std::exception& e) {
@@ -42,13 +84,22 @@ public:
             snapshotData();
             fs::remove_all(backup_);
             fs::create_directory(backup_);
-            for (const auto& name : children(o_.app)) {
-                if (name == files::kBackup) continue;
+            // Only the package's files move: the release zip has no top folder, so other files may lie beside them.
+            incoming_ = filesIn(o_.files);
+            auto owned = listedFiles(o_.app);
+            owned.insert(incoming_.begin(), incoming_.end());
+            for (const auto& name : owned) {
+                if (!fs::is_regular_file(o_.app / name)) continue;
+                fs::create_directories((backup_ / name).parent_path());
                 fs::rename(o_.app / name, backup_ / name);
                 moved_.push_back(name);
             }
             copying_ = true;
-            fs::copy(o_.files, o_.app, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+            for (const auto& name : incoming_) {
+                fs::create_directories((o_.app / name).parent_path());
+                fs::copy_file(o_.files / name, o_.app / name, fs::copy_options::overwrite_existing);
+            }
+            for (const auto& name : moved_) removeEmptyFolders(o_.app, name);
         } catch (const std::exception& e) {
             log(L"installing failed: " + describe(e));
             return rollBack();
@@ -100,12 +151,16 @@ private:
     Outcome rollBack() {
         std::error_code error;
         if (copying_)
-            for (const auto& entry : fs::directory_iterator(o_.files, error))
-                if (entry.path().filename() != files::kBackup) fs::remove_all(o_.app / entry.path().filename(), error);
+            for (const auto& name : incoming_) {
+                fs::remove(o_.app / name, error);
+                removeEmptyFolders(o_.app, name);
+            }
         for (const auto& name : moved_) {
+            fs::create_directories((o_.app / name).parent_path(), error);
             fs::rename(backup_ / name, o_.app / name, error);
             if (error) log(L"could not restore " + name.wstring());
         }
+        for (const auto& name : moved_) removeEmptyFolders(backup_, name);
         if (fs::is_empty(backup_, error)) fs::remove(backup_, error);
         if (snapshotTaken_)
             for (const auto* name : files::kDataFiles) {
@@ -125,7 +180,8 @@ private:
     const Options& o_;
     const Host& host_;
     const fs::path backup_;
-    std::vector<fs::path> moved_;
+    std::vector<fs::path> incoming_; // the new version's files
+    std::vector<fs::path> moved_;    // into the backup
     bool copying_ = false;
     bool snapshotTaken_ = false;
 };
