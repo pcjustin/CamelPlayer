@@ -94,7 +94,7 @@ void PlayerFollower::followTrack(const std::string& track, std::vector<PlayerEve
 std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observation, milliseconds now) {
     std::vector<PlayerEvent> events;
     if (ended_) return events;
-    if (observation.otherSource) {
+    if (observation.otherSource && now >= settledAt_) {
         ended_ = true;
         events.push_back({PlayerEventKind::TakenOver});
         return events;

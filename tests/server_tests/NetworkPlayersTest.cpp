@@ -335,6 +335,16 @@ TEST(PlayerFollowerTest, AfterAdvancingTheOldTrackIsNoLongerNewsAndTheNextStillI
     EXPECT_EQ(follower.observe(seen, 30ms), (std::vector<PlayerEvent>{{PlayerEventKind::TakenOver}}));
 }
 
+// A player just given a track can still report the source it was on, as it can the track it played.
+TEST(PlayerFollowerTest, TheSourceAPlayerWasOnIsNoTakeoverWhileItSettles) {
+    PlayerFollower follower;
+    follower.expectLoaded({"a", "", ""}, 0ms);
+    PlayerObservation seen;
+    seen.otherSource = true;
+    EXPECT_TRUE(follower.observe(seen, 100ms).empty());
+    EXPECT_EQ(follower.observe(seen, 3100ms), (std::vector<PlayerEvent>{{PlayerEventKind::TakenOver}}));
+}
+
 TEST(PlayerFollowerTest, AnotherTrackIsATakeoverAndThenItIsSilent) {
     PlayerFollower follower;
     follower.expect({"a", "b", ""});
