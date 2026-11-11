@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "Engine/PlaybackEngine.h"
+#include "OutputBridge/WasapiOutput.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -57,6 +58,11 @@ std::string adjustments(const EngineSnapshot& s) {
     for (const auto& a : s.outputStatus.adjustments) text += a + "; ";
     return text;
 }
+
+class SilentSource final : public IRenderSource {
+public:
+    size_t render(uint8_t*, size_t) noexcept override { return 0; }
+};
 
 } // namespace
 
@@ -159,4 +165,21 @@ TEST(OutputParamsHardware, DISABLED_ReleaseAfterPauseAndResume) {
     EXPECT_GT(resumed.position, paused.position);
     engine.stop();
     engine.waitIdle();
+}
+
+// A device playing a stream may refuse any other format while it plays: once it is closed, its own answer counts, so a
+// rate change between tracks reaches the format the device has rather than a conversion.
+TEST(OutputParamsHardware, DISABLED_AFormatAskedForWhilePlayingIsAskedAgainOnceClosed) {
+    Settings settings;
+    if (!selectDave(settings, Backend::Wasapi)) GTEST_SKIP() << "Chord DAVE not connected";
+    const DeviceFormat playing{44100, 2, SampleType::Int32}, next{96000, 2, SampleType::Int32};
+    SilentSource silent;
+    auto output = createWasapiOutput(settings.wasapi);
+    ASSERT_TRUE(output->supports(playing));
+    output->open(playing, &silent);
+    output->start();
+    std::this_thread::sleep_for(300ms);
+    const bool whilePlaying = output->supports(next);
+    output->close();
+    EXPECT_TRUE(output->supports(next)) << "while playing: " << whilePlaying;
 }
