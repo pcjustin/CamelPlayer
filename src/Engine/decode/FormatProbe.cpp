@@ -90,8 +90,23 @@ bool adpcmWave(const File& f) {
 bool dtsInWave(const File& f) {
     const auto data = waveChunk(f, "data");
     if (!data) return false;
-    std::string window(size_t(std::min<uint64_t>(32768, f.size() - *data)), '\0');
-    if (!f.readAt(*data, window.data(), window.size())) return false;
+    // A rip's digital silence before the first frame is passed over, up to a minute at the CD rate, at a word's start.
+    constexpr uint64_t kLeadingSilenceBytes = uint64_t{44100} * 4 * 60;
+    uint64_t start = *data;
+    std::string chunk(size_t{64} * 1024, '\0');
+    for (uint64_t pos = *data, end = std::min(f.size(), *data + kLeadingSilenceBytes); pos < end;) {
+        const auto length = size_t(std::min<uint64_t>(chunk.size(), end - pos));
+        if (!f.readAt(pos, chunk.data(), length)) return false;
+        if (const size_t sound = std::string_view(chunk.data(), length).find_first_not_of('\0');
+            sound != std::string_view::npos) {
+            start = pos + sound;
+            break;
+        }
+        pos += length;
+    }
+    start -= (start - *data) % 2;
+    std::string window(size_t(std::min<uint64_t>(32768, f.size() - start)), '\0');
+    if (!f.readAt(start, window.data(), window.size())) return false;
     static constexpr std::string_view kSyncs[] = {
         {"\xFF\x1F\x00\xE8", 4}, {"\x1F\xFF\xE8\x00", 4}, {"\xFE\x7F\x01\x80", 4}, {"\x7F\xFE\x80\x01", 4}};
     const auto nextWord = [&](std::string_view sync, size_t from) {

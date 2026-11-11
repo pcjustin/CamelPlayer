@@ -72,8 +72,9 @@ std::filesystem::path syncsInPcm(const char* name, std::initializer_list<size_t>
     return path;
 }
 
-// The fixture with `silence` word frames of zeros after its bitstream, and with `resumes` the bitstream again after them.
-std::filesystem::path withSilence(const char* name, uint64_t silence, bool resumes) {
+// The fixture with `leading` word frames of zeros before its bitstream and `silence` after it, and with `resumes` the
+// bitstream again after those.
+std::filesystem::path withSilence(const char* name, uint64_t leading, uint64_t silence, bool resumes) {
     std::ifstream in(dtsPath(), std::ios::binary);
     std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const size_t data = bytes.find("data");
@@ -87,6 +88,7 @@ std::filesystem::path withSilence(const char* name, uint64_t silence, bool resum
     if (data == std::string::npos || data + 8 + le32(data + 4) != bytes.size())
         throw std::runtime_error("the fixture's data chunk is not its last");
     const std::string stream = bytes.substr(data + 8);
+    bytes.insert(data + 8, size_t(leading * 4), '\0');
     bytes += std::string(size_t(silence * 4), '\0');
     if (resumes) bytes += stream;
     put32(data + 4, bytes.size() - data - 8);
@@ -111,7 +113,7 @@ TEST(Dts, SilenceWhereTheBitstreamStopsTakesBoundedMemory) {
     const uint64_t silence = uint64_t{44100} * 300;
     for (const bool resumes : {false, true}) {
         SCOPED_TRACE(resumes ? "a gap" : "the end");
-        const auto path = withSilence(resumes ? "dts-gap.wav" : "dts-tail.wav", silence, resumes);
+        const auto path = withSilence(resumes ? "dts-gap.wav" : "dts-tail.wav", 0, silence, resumes);
         const auto d = openDecoder(DecoderKind::Sndfile, path);
         const uint64_t expected = dtsCd().frames * (resumes ? 2 : 1) + silence;
         ASSERT_EQ(d->info().totalFrames, expected);
@@ -139,6 +141,29 @@ TEST(Dts, SilenceWhereTheBitstreamStopsTakesBoundedMemory) {
         if (resumes) EXPECT_GT(after, 0.01f) << "the bitstream plays again after the gap";
         EXPECT_LT(most, int64_t{32} << 20) << "bytes held at most";
     }
+}
+
+// A rip can start with digital silence before its first DTS frame, longer than the start that is looked at for it.
+TEST(Dts, ARipThatStartsWithSilenceIsStillDts) {
+    const auto& file = dtsCd();
+    for (const uint64_t leading : {uint64_t{44100}, uint64_t{44100} * 30}) {
+        SCOPED_TRACE(leading);
+        const auto path = withSilence("dts-leading.wav", leading, 0, false);
+        ASSERT_EQ(probeFormat(path), AudioFormat::Dts);
+        const auto d = openDecoder(DecoderKind::Sndfile, path);
+        ASSERT_EQ(d->info().totalFrames, leading + file.frames);
+        const auto decoded = readAll(*d);
+        ASSERT_EQ(decoded.size(), (leading + file.frames) * 6);
+        EXPECT_EQ(*std::max_element(decoded.begin(), decoded.begin() + ptrdiff_t(leading * 6)), 0.0f);
+        EXPECT_LT(worstDifference(decoded.data() + leading * 6, file.reference.data(), file.reference.size()), kDecoderTolerance);
+    }
+    // PCM after as much silence is still PCM.
+    std::vector<int32_t> words(size_t{44100} * 2 * 2, 0);
+    for (size_t i = size_t{44100} * 2; i < words.size(); i++)
+        words[i] = int32_t(std::lround(8000.0 * std::sin(double(i) * 0.01)));
+    const auto pcm = testutil::tempDir() / "dts-leading-pcm.wav";
+    testaudio::writeWav(pcm, words, 44100, 16, 2);
+    EXPECT_EQ(probeFormat(pcm), AudioFormat::Wav);
 }
 
 TEST(Dts, ProbeFindsDtsInsideWave) {
