@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "DsdFixture.h"
+#include "DtsFixture.h"
 #include "Engine/PlaybackEngine.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "StartedSnapshot.h"
@@ -236,4 +237,53 @@ TEST(FixedDevice, PausesOnLossAndNeverFollowsTheDefault) {
     settings.wasapi.deviceId.clear();
     rig.engine->applySettings(settings);
     ASSERT_TRUE(waitFor(*rig.engine, [&](const EngineSnapshot&) { return rig.watcher.created == 1; }));
+}
+
+// A conversion setting reopens the stream only when it changes the path the stream takes (docs/Plan.md §5.4).
+void expectKeptBy(Rig& rig, Settings settings) {
+    const int opens = rig.device.opens;
+    settings.convertDsdWhenUnsupported = !settings.convertDsdWhenUnsupported; // nothing to a PCM stream
+    rig.engine->applySettings(settings);
+    rig.engine->waitIdle();
+    std::this_thread::sleep_for(200ms);
+    EXPECT_EQ(rig.device.opens, opens);
+    EXPECT_EQ(rig.engine->snapshot().state, PlayState::Playing);
+}
+
+TEST(ConversionSettings, OneThatLeavesThePathKeepsAStreamWithSoftwareVolume) {
+    Settings settings;
+    settings.volume = {VolumeMode::Software, -6.0, false};
+    Rig rig(settings);
+    rig.engine->openAndPlay(testutil::testFile("16-44.1k"));
+    ASSERT_TRUE(waitFor(*rig.engine, playing));
+    expectKeptBy(rig, settings);
+    rig.engine->stop();
+}
+
+TEST(ConversionSettings, OneThatChangesThePathStillReopensTheStream) {
+    Settings settings;
+    settings.volume = {VolumeMode::Software, -6.0, false};
+    Rig rig(settings);
+    rig.device.accepts = [](const DeviceFormat& f) { return f.sampleRate == 48000 && f.type == SampleType::Int32; };
+    rig.engine->openAndPlay(testutil::testFile("16-44.1k"));
+    ASSERT_TRUE(waitFor(*rig.engine, playing));
+    const int opens = rig.device.opens;
+    settings.resampleQuality =
+        settings.resampleQuality == ResampleQuality::High ? ResampleQuality::VeryHigh : ResampleQuality::High;
+    rig.engine->applySettings(settings);
+    ASSERT_TRUE(waitFor(*rig.engine, [&](const EngineSnapshot& s) { return rig.device.opens > opens && playing(s); }));
+    rig.engine->stop();
+}
+
+TEST(ConversionSettings, OneThatLeavesThePathKeepsADtsStream) {
+    const auto file = testutil::tempDir() / "output-policy-dts.wav";
+    testutil::copyDtsCd(file);
+    Settings settings;
+    Rig rig(settings);
+    // A float decode, as a lossy one is, takes a float container where the device has one.
+    rig.device.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32 || f.type == SampleType::Float32; };
+    rig.engine->openAndPlay(file);
+    ASSERT_TRUE(waitFor(*rig.engine, playing));
+    expectKeptBy(rig, settings);
+    rig.engine->stop();
 }

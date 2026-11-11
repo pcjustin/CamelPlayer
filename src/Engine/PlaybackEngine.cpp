@@ -321,7 +321,8 @@ public:
         manualTransition_ = rust_->transitions().count + 1;
         heldUntil_.store(manualTransition_, std::memory_order_release);
         fadeSkip_ = FadeSkip::None;
-        adopt({file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, gainDb});
+        adopt(
+            {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, next->lossy, gainDb});
         publishQueue();
     }
 
@@ -493,7 +494,7 @@ public:
         const auto next = prepareNext(file, requested);
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
         queued_.push_back(
-            {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, gainDb});
+            {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, next->lossy, gainDb});
         {
             const uint32_t in = next->source.sampleRate, out = fmt_.sampleRate;
             std::lock_guard lock(streamMutex_);
@@ -510,6 +511,7 @@ public:
         SourceInfo source;
         uint64_t shown = 0; // shownLength()
         OutputPlan plan;
+        bool lossy = false;   // decoded from a lossy source, or as float
         bool convert = false; // to the open format, which crossfade permits
     };
 
@@ -517,7 +519,7 @@ public:
     // (docs/Plan.md §5.4). Nullopt when it cannot be opened or take that format; a format is remembered for the path.
     std::optional<Prepared> prepareNext(const std::filesystem::path& file, std::optional<DecoderKind> requested) {
         Prepared next;
-        bool lossy = false;
+        bool& lossy = next.lossy;
         try {
             next.format = probeFormat(file);
             next.decoder = chooseDecoder(next.format, requested, settings_);
@@ -1127,6 +1129,7 @@ private:
         const uint64_t shown = shownLength(*dec);
         if (startFrame && shown && startFrame >= shown) startFrame = 0;
         negotiated_ = *plan;
+        negotiatedLossy_ = lossy;
         plan_ = withDsp(negotiated_);
         fmt_ = plan_.format;
         bpf_ = fmt_.bytesPerFrame();
@@ -1388,6 +1391,7 @@ private:
         std::optional<DecoderKind> requested;
         DecoderKind decoder;
         OutputPlan plan;
+        bool lossy = false;
         double gainDb = 0.0;
     };
 
@@ -1418,6 +1422,7 @@ private:
         file_ = next.file;
         gainDb_ = next.gainDb;
         negotiated_ = next.plan;
+        negotiatedLossy_ = next.lossy;
         plan_ = withDsp(negotiated_);
         sourceRate_ = next.source.sampleRate;
         fileDecoder_ = next.requested;
@@ -1551,9 +1556,9 @@ private:
         if (plan_.resample && settings_.resampleQuality != s.resampleQuality) return true;
         const auto source = snapshot().source;
         if (!source) return false;
-        const auto plan =
-            planFor(s, *source, format_ && isLossy(*format_), [&](const DeviceFormat& f) { return output_->supports(f); });
-        return plan != plan_;
+        // As the stream negotiated it, before the DSP chain, ReplayGain, volume and crossfade decorate it.
+        const auto plan = planFor(s, *source, negotiatedLossy_, [&](const DeviceFormat& f) { return output_->supports(f); });
+        return plan != negotiated_;
     }
 
     // The decoder the current file uses, or would use, under settings `s`.
@@ -1593,6 +1598,7 @@ private:
     DeviceFormat fmt_;
     OutputPlan plan_;
     OutputPlan negotiated_;         // plan_ before the DSP chain, which withDsp() applies
+    bool negotiatedLossy_ = false;  // what negotiated_ took the source for
     double gainDb_ = 0.0;           // the current file's ReplayGain
     std::string planAdjustment_;    // a fixed rate the device refused
     uint64_t outputGeneration_ = 0; // counts output devices opened; a new one starts in an unknown format
