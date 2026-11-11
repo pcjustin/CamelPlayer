@@ -881,11 +881,12 @@ void MainWindow::populateOutputs() {
         ToolTipService::SetToolTip(enabled, box_value(tr(L"Output_Enabled")));
         Automation::AutomationProperties::SetName(
             enabled, ui::format(L"Output_ButtonOn", {std::wstring(tr(L"Output_Enabled")), std::wstring(label)}));
-        enabled.Toggled([this, row, enabled](auto&&, auto&&) {
+        enabled.Toggled([this, row](Windows::Foundation::IInspectable const& sender, auto&&) {
+            const bool on = sender.as<ToggleSwitch>().IsOn(); // not the switch itself, which the handler would keep
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
-                camel::server::setOutputEnabled(s, row.backend, row.id, enabled.IsOn(), devices);
+                camel::server::setOutputEnabled(s, row.backend, row.id, on, devices);
             });
-            if (camel::isNetworkPlayer(row.backend) && enabled.IsOn()) askFirewallRule();
+            if (camel::isNetworkPlayer(row.backend) && on) askFirewallRule();
         });
         Grid::SetColumn(enabled, 3);
         line.Children().Append(enabled);

@@ -138,6 +138,12 @@ void EqEditor::removeBand(size_t index) {
     changed(true);
 }
 
+void EqEditor::enableControls(const Row& controls, const EqBand& band) {
+    controls.gain.IsEnabled(hasGain(band.kind));
+    controls.slope.IsEnabled(hasSlope(band.kind));
+    controls.q.IsEnabled(!hasSlope(band.kind) || band.slope == 12);
+}
+
 void EqEditor::rebuildRows() {
     populating_ = true;
     rows_.Children().Clear();
@@ -174,8 +180,8 @@ void EqEditor::rebuildRows() {
         on.MinWidth(0);
         on.Width(56);
         on.Content(box_value(to_hstring(i + 1)));
-        on.Click([this, i, on](auto&&, auto&&) {
-            eq_.bands[i].enabled = on.IsChecked().Value();
+        on.Click([this, i](Windows::Foundation::IInspectable const& sender, auto&&) {
+            eq_.bands[i].enabled = sender.as<CheckBox>().IsChecked().Value();
             redraw();
             changed(true);
         });
@@ -197,12 +203,7 @@ void EqEditor::rebuildRows() {
             if (kSlopes[s] == band.slope) slope = int(s);
         }
         controls.slope = comboBox({L"6 dB", L"12 dB", L"18 dB", L"24 dB", L"36 dB", L"48 dB"}, slope, 96);
-        const auto enable = [controls](const EqBand& b) {
-            controls.gain.IsEnabled(hasGain(b.kind));
-            controls.slope.IsEnabled(hasSlope(b.kind));
-            controls.q.IsEnabled(!hasSlope(b.kind) || b.slope == 12);
-        };
-        enable(band);
+        enableControls(controls, band);
         row.Children().Append(controls.frequency);
         row.Children().Append(controls.gain);
         row.Children().Append(controls.q);
@@ -212,23 +213,26 @@ void EqEditor::rebuildRows() {
         Automation::AutomationProperties::SetName(channels, tr(L"Eq_Column_Channels"));
         Automation::AutomationProperties::SetName(controls.slope, tr(L"Eq_Column_Slope"));
 
-        kind.SelectionChanged([this, i, kind, enable](auto&&, auto&&) {
-            if (populating_ || kind.SelectedIndex() < 0) return;
-            eq_.bands[i].kind = EqKind(kind.SelectedIndex() + 1);
-            enable(eq_.bands[i]);
+        kind.SelectionChanged([this, i](Windows::Foundation::IInspectable const& sender, auto&&) {
+            const auto box = sender.as<ComboBox>();
+            if (populating_ || box.SelectedIndex() < 0) return;
+            eq_.bands[i].kind = EqKind(box.SelectedIndex() + 1);
+            enableControls(rowControls_[i], eq_.bands[i]);
             redraw();
             changed(true);
         });
-        channels.SelectionChanged([this, i, channels](auto&&, auto&&) {
-            if (populating_ || channels.SelectedIndex() < 0) return;
-            eq_.bands[i].channels = EqChannels(channels.SelectedIndex());
+        channels.SelectionChanged([this, i](Windows::Foundation::IInspectable const& sender, auto&&) {
+            const auto box = sender.as<ComboBox>();
+            if (populating_ || box.SelectedIndex() < 0) return;
+            eq_.bands[i].channels = EqChannels(box.SelectedIndex());
             redraw();
             changed(true);
         });
-        controls.slope.SelectionChanged([this, i, slopeBox = controls.slope, enable](auto&&, auto&&) {
-            if (populating_ || slopeBox.SelectedIndex() < 0) return;
-            eq_.bands[i].slope = kSlopes[slopeBox.SelectedIndex()];
-            enable(eq_.bands[i]);
+        controls.slope.SelectionChanged([this, i](Windows::Foundation::IInspectable const& sender, auto&&) {
+            const auto box = sender.as<ComboBox>();
+            if (populating_ || box.SelectedIndex() < 0) return;
+            eq_.bands[i].slope = kSlopes[box.SelectedIndex()];
+            enableControls(rowControls_[i], eq_.bands[i]);
             redraw();
             changed(true);
         });
@@ -347,9 +351,9 @@ void EqEditor::redraw() {
         handle.Children().Append(number);
         Automation::AutomationProperties::SetName(handle, to_hstring(i + 1));
 
-        handle.PointerPressed([this, i, handle](auto&&, Input::PointerRoutedEventArgs const& e) {
+        handle.PointerPressed([this, i](Windows::Foundation::IInspectable const& sender, Input::PointerRoutedEventArgs const& e) {
             dragging_ = int(i);
-            handle.CapturePointer(e.Pointer());
+            sender.as<UIElement>().CapturePointer(e.Pointer());
             e.Handled(true);
         });
         handle.PointerMoved([this, i](auto&&, Input::PointerRoutedEventArgs const& e) {
@@ -366,10 +370,10 @@ void EqEditor::redraw() {
             changed(false);
             e.Handled(true);
         });
-        handle.PointerReleased([this, handle](auto&&, Input::PointerRoutedEventArgs const& e) {
+        handle.PointerReleased([this](Windows::Foundation::IInspectable const& sender, Input::PointerRoutedEventArgs const& e) {
             if (dragging_ < 0) return;
             dragging_ = -1;
-            handle.ReleasePointerCaptures();
+            sender.as<UIElement>().ReleasePointerCaptures();
             redraw();
             changed(true);
             e.Handled(true);

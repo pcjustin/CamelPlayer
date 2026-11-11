@@ -33,6 +33,9 @@ private:
         winrt::Microsoft::UI::Xaml::Controls::ComboBox slope{nullptr};
     };
 
+    // What a band's kind and slope leave to set; handlers reach a row's controls through rowControls_, as one holding
+    // them would keep the row alive.
+    static void enableControls(const Row& controls, const camel::EqBand& band);
     void rebuildRows();
     // Rebuilds the grid, the curves and the points.
     void redraw();
