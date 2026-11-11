@@ -232,8 +232,8 @@ TEST(DiscordPresence, ActivityFollowsThePlayingEntryAndPathState) {
     playback.pathUtf8 = "C:/music/Boat.flac";
     playback.format = audio::AudioFormat::Flac;
     playback.source = audio::SourceInfo{96000, 2, 24, 0, std::nullopt};
-    playback.position = 96000 * 10;
-    playback.total = 96000 * 185;
+    playback.position = uint64_t{96000} * 10;
+    playback.total = uint64_t{96000} * 185;
     playback.plan = audio::OutputPlan{};
     DiscordTexts texts;
     texts.bitPerfect = "Bit-perfect";
@@ -338,6 +338,41 @@ TEST(CoverTunnel, ServesTheCoverWhilePlayingAndStopsWhenIdle) {
     EXPECT_EQ(http::get(local + "/other.jpg", "image/jpeg", {}, 1 << 20).status, 404u);
     tunnel.setPlaying(false);
     EXPECT_TRUE(waitFor([&] { return tunnel.status().state == CoverTunnel::State::Off && tunnel.url().empty(); }));
+}
+
+// A socket the program closes is not held open in cloudflared, which would keep its far end from hearing it closed.
+TEST(CoverTunnel, CloudflaredHoldsNoneOfTheProgramsSockets) {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); // inheritable, as Winsock makes it
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ASSERT_EQ(listen(listener, 4), 0);
+    int size = sizeof(address);
+    getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size);
+
+    const auto cmd = systemFile(L"cmd.exe");
+    CoverTunnel::Options options;
+    options.executable = cmd;
+    options.sha256 = update::sha256File(cmd);
+    options.command = [&](const std::filesystem::path& executable, uint16_t) {
+        return L"\"" + executable.wstring() +
+               L"\" /c \"echo Your quick Tunnel: https://test-tunnel.trycloudflare.com && ping -n 60 127.0.0.1 > nul\"";
+    };
+    CoverTunnel tunnel(options);
+    tunnel.serve({0xFF, 0xD8, 0xFF, 0xD9});
+    tunnel.setEnabled(true);
+    tunnel.setPlaying(true);
+    ASSERT_TRUE(waitFor([&] { return tunnel.status().state == CoverTunnel::State::Ready; }));
+    closesocket(listener);
+
+    const SOCKET probe = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    const bool stillListening = connect(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+    closesocket(probe);
+    EXPECT_FALSE(stillListening) << "cloudflared still holds a listening socket the program closed";
+    WSACleanup();
 }
 
 TEST(CoverTunnel, DownloadsCloudflaredOnlyWhenItsChecksumMatches) {

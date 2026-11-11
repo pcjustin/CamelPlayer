@@ -24,6 +24,8 @@ namespace camel::server {
 
 namespace {
 
+constexpr SOCKET kNoSocket = INVALID_SOCKET;
+
 using Clock = std::chrono::steady_clock;
 
 // A failed download is tried again this much later, or at once when the setting changes.
@@ -70,13 +72,13 @@ CoverTunnel::CoverTunnel(Options options) : options_(std::move(options)) {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (listener != INVALID_SOCKET && bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0 &&
+    if (listener != kNoSocket && bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0 &&
         ::listen(listener, 8) == 0) {
         int length = sizeof(address);
         getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
         port_ = ntohs(address.sin_port);
         listener_ = uint64_t(listener);
-    } else if (listener != INVALID_SOCKET) {
+    } else if (listener != kNoSocket) {
         closesocket(listener);
     }
     server_ = std::jthread([this](const std::stop_token& stop) { serveHttp(stop); });
@@ -231,16 +233,27 @@ bool CoverTunnel::start() {
         return false;
     }
     SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0);
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdOutput = write;
-    startup.hStdError = write;
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdOutput = write;
+    startup.StartupInfo.hStdError = write;
+    // Only the output pipe is passed on: a socket cloudflared inherited would stay open there after CamelPlayer closed it.
+    SIZE_T listSize = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &listSize);
+    std::vector<char> list(listSize);
+    startup.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(list.data());
+    const bool initialized = InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &listSize) != FALSE;
+    const bool listed =
+        initialized && UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                                 static_cast<void*>(&write), sizeof(write), nullptr, nullptr) != FALSE;
     PROCESS_INFORMATION process{};
     std::wstring command = options_.command(options_.executable, port_);
-    const BOOL created = CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED,
-                                        nullptr, nullptr, &startup, &process);
+    const BOOL created = listed && CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE,
+                                                  CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, nullptr,
+                                                  nullptr, &startup.StartupInfo, &process);
     const DWORD error = GetLastError();
+    if (initialized) DeleteProcThreadAttributeList(startup.lpAttributeList);
     CloseHandle(write);
     if (!created) {
         CloseHandle(read);
@@ -325,7 +338,7 @@ void CoverTunnel::serveHttp(const std::stop_token& stop) {
         timeval wait{0, 200000};
         if (select(0, &ready, nullptr, nullptr, &wait) <= 0) continue;
         const SOCKET client = accept(listener, nullptr, nullptr);
-        if (client == INVALID_SOCKET) continue;
+        if (client == kNoSocket) continue;
         const DWORD timeout = 5000;
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
         std::string request;
