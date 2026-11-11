@@ -148,6 +148,17 @@ TEST(NetworkOutputTest, TellsWhatThePlayerCanTake) {
     EXPECT_TRUE(output->gapless());
 }
 
+// A player that could not tell its formats when the output was made, as one waking from standby, is asked again.
+TEST(NetworkOutputTest, APlayerThatCouldNotTellItsFormatsIsAskedAgain) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.refuseSoap(true);
+    auto output = createNetworkOutput(describe(renderer), sampleDetails, {});
+    renderer.refuseSoap(false);
+    EXPECT_TRUE(output->supports(k16));
+    EXPECT_TRUE(output->supports(k24));
+    EXPECT_TRUE(output->gapless());
+}
+
 TEST(NetworkOutputTest, DsdOnlyWhenThePlayerDeclaresIt) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.declare("http-get:*:audio/wav:*,http-get:*:audio/x-dsf:*");

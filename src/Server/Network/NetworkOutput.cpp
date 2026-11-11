@@ -155,6 +155,7 @@ public:
 
     bool supports(const DeviceFormat& f) override {
         if (f.channels != 2) return false;
+        if (!formatsRead_ || !gaplessRead_) readCapabilities();
         if (f.type == SampleType::Dsd8) return formats_.dsf;
         if (f.type == SampleType::Int16) return formats_.wav || formats_.l16;
         if (f.type == SampleType::Int24) return formats_.wav || formats_.l24;
@@ -265,27 +266,43 @@ public:
     }
 
 private:
+    // What the player takes, read again later for what it could not tell yet, as when it was waking from standby.
     void readCapabilities() {
+        if (!formatsRead_) {
+            try {
+                if (const auto* manager = player_.service("ConnectionManager")) {
+                    const auto request = upnp::soapRequest(manager->type, "GetProtocolInfo", {});
+                    const auto reply = http::send("POST", manager->controlUrl,
+                                                  "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + manager->type +
+                                                      "#GetProtocolInfo\"",
+                                                  request, options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
+                    const auto parsed = upnp::parseSoapReply(reply.status, reply.body);
+                    if (const auto sink = parsed.values.find("Sink"); sink != parsed.values.end())
+                        formats_ = upnp::parseProtocolInfo(sink->second);
+                    formatsRead_ = parsed.ok;
+                } else {
+                    formatsRead_ = true;
+                }
+            } catch (const std::exception& e) {
+                log::warn("network player %s: %s", player_.name.c_str(), e.what());
+            }
+            if (player_.protocol == upnp::PlayerProtocol::OpenHome && !formats_.wav && !formats_.l16)
+                formats_.wav = true; // OpenHome players take WAV by URL
+        }
+        if (gaplessRead_) return;
+        const auto* transport = player_.service("AVTransport");
+        if (player_.protocol == upnp::PlayerProtocol::OpenHome || !transport || transport->scpdUrl.empty()) {
+            gapless_ = player_.protocol == upnp::PlayerProtocol::OpenHome;
+            gaplessRead_ = true;
+            return;
+        }
         try {
-            if (const auto* manager = player_.service("ConnectionManager")) {
-                const auto request = upnp::soapRequest(manager->type, "GetProtocolInfo", {});
-                const auto reply = http::send("POST", manager->controlUrl,
-                                              "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + manager->type +
-                                                  "#GetProtocolInfo\"",
-                                              request, options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
-                const auto parsed = upnp::parseSoapReply(reply.status, reply.body);
-                if (const auto sink = parsed.values.find("Sink"); sink != parsed.values.end())
-                    formats_ = upnp::parseProtocolInfo(sink->second);
-            }
-            if (player_.protocol == upnp::PlayerProtocol::OpenHome) {
-                gapless_ = true;
-                if (!formats_.wav && !formats_.l16) formats_.wav = true; // OpenHome players take WAV by URL
-            } else if (const auto* transport = player_.service("AVTransport"); transport && !transport->scpdUrl.empty()) {
-                const auto reply =
-                    http::send("GET", transport->scpdUrl, "", "", options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
-                const auto actions = upnp::parseActions(reply.body);
-                gapless_ = std::ranges::find(actions, "SetNextAVTransportURI") != actions.end();
-            }
+            const auto reply =
+                http::send("GET", transport->scpdUrl, "", "", options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
+            if (reply.status != 200) return;
+            const auto actions = upnp::parseActions(reply.body);
+            gapless_ = std::ranges::find(actions, "SetNextAVTransportURI") != actions.end();
+            gaplessRead_ = true;
         } catch (const std::exception& e) {
             log::warn("network player %s: %s", player_.name.c_str(), e.what());
         }
@@ -860,6 +877,7 @@ private:
     NetworkOutputOptions options_;
     upnp::PlayerFormats formats_;
     bool gapless_ = false;
+    bool formatsRead_ = false, gaplessRead_ = false;
     std::unique_ptr<PlayerLink> link_;
 
     SOCKET listener_ = kNoSocket;
