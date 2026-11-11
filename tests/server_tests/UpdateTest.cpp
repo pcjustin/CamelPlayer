@@ -432,18 +432,19 @@ TEST(Update, FindsTheRunningVersionsReleaseForARepair) {
     EXPECT_FALSE(update::exactRelease(releaseJson("http://example.com", "v0.1.0"), "0.1.0"));
 }
 
-TEST(Update, KeepsUnlistedFilesWhenRepairing) {
-    const auto dir = testutil::tempDir() / L"update-keep";
-    fs::remove_all(dir);
-    const auto app = dir / L"app", files = dir / L"files";
-    writeText(app / L"CamelPlayer.exe", "damaged");
-    writeText(app / L"plugins" / L"mine.dll", "mine");
-    writeText(app / L"notes.txt", "notes");
-    writeText(app / camel::updatefiles::kBackup / L"old.dll", "backup");
-    writeText(files / L"CamelPlayer.exe", "release");
-    update::keepUnlistedFiles(app, files);
-    EXPECT_EQ(readText(files / L"CamelPlayer.exe"), "release");
-    EXPECT_EQ(readText(files / L"plugins" / L"mine.dll"), "mine");
-    EXPECT_EQ(readText(files / L"notes.txt"), "notes");
-    EXPECT_FALSE(fs::exists(files / camel::updatefiles::kBackup));
+// A repair installs the running version again as an update does: what is not the program's stays where it is, even a
+// file another program holds open, and nothing of it is copied.
+TEST(Update, ARepairLeavesFilesBesideTheProgramWhereTheyAre) {
+    InstallFixture f(L"update-repair-others");
+    writeText(f.app / L"Photos" / L"a.jpg", "mine");
+    writeText(f.app / L"open.txt", "mine");
+    const HANDLE open = CreateFileW((f.app / L"open.txt").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(open, INVALID_HANDLE_VALUE);
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    CloseHandle(open);
+    EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "new");
+    EXPECT_EQ(readText(f.app / L"Photos" / L"a.jpg"), "mine");
+    EXPECT_EQ(readText(f.app / L"open.txt"), "mine");
+    EXPECT_FALSE(fs::exists(f.files / L"Photos"));
+    EXPECT_FALSE(fs::exists(f.files / L"open.txt"));
 }

@@ -4900,8 +4900,9 @@ void MainWindow::showRepairResult(wchar_t const* title, wchar_t const* text, Inf
     bar.IsOpen(true);
 }
 
-// Downloads the running version again and installs it over the program folder like an update. When GitHub no longer
-// has it, a newer release is offered instead, which replaces the files as well.
+// Downloads the running version again and installs it over the program folder like an update, which replaces only the
+// program's own files and leaves anything else in the folder where it is. When GitHub no longer has it, a newer release
+// is offered instead, which replaces the files as well.
 winrt::fire_and_forget MainWindow::OnRepairClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
     repairToken_ = {};
@@ -4943,7 +4944,6 @@ winrt::fire_and_forget MainWindow::OnRepairClick(Windows::Foundation::IInspectab
                     });
                 },
                 token);
-            update::keepUnlistedFiles(programDirectory(), files);
         }
     } catch (const std::exception& e) {
         failure = e.what();

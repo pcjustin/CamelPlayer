@@ -422,21 +422,6 @@ std::string describeInstallation(const std::filesystem::path& programDirectory) 
     return text;
 }
 
-void keepUnlistedFiles(const std::filesystem::path& programDirectory, const std::filesystem::path& files) {
-    namespace fs = std::filesystem;
-    for (auto it = fs::recursive_directory_iterator(programDirectory); it != fs::recursive_directory_iterator(); ++it) {
-        const auto relative = it->path().lexically_relative(programDirectory);
-        if (it->is_directory()) {
-            if (relative == files::kBackup) it.disable_recursion_pending();
-            continue;
-        }
-        const auto target = files / relative;
-        if (fs::exists(target)) continue;
-        fs::create_directories(target.parent_path());
-        fs::copy_file(it->path(), target);
-    }
-}
-
 std::string changelogSince(const std::string& changelog, std::string_view previous, std::string_view version) {
     const auto to = parseVersion(version);
     if (!to) return {};

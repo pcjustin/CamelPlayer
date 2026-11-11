@@ -83,8 +83,6 @@ bool verified(const std::filesystem::path& dataDirectory, std::string_view versi
 void markVerified(const std::filesystem::path& dataDirectory, std::string_view version);
 // The check as text for the diagnostic bundle.
 std::string describeInstallation(const std::filesystem::path& programDirectory);
-// Copies the program folder's files that `files` lacks into it, so installing `files` keeps them.
-void keepUnlistedFiles(const std::filesystem::path& programDirectory, const std::filesystem::path& files);
 
 // %TEMP%\CamelPlayer-update: downloads, the extracted files, the data snapshot and the running updater.
 std::filesystem::path tempDirectory();
