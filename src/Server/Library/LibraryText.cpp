@@ -185,7 +185,6 @@ LibraryTextIndex::LibraryTextIndex(LibraryStore& store, std::function<std::vecto
 
 LibraryTextIndex::~LibraryTextIndex() {
     worker_.request_stop();
-    cv_.notify_all();
     worker_.join();
 }
 
@@ -213,7 +212,8 @@ void LibraryTextIndex::run(std::stop_token stop) {
         uint64_t generation;
         {
             std::unique_lock lock(mutex_);
-            cv_.wait(lock, [&] { return pending_ || stop.stop_requested(); });
+            // Given the token, the wait cannot miss a stop that comes between its check and its sleep.
+            cv_.wait(lock, stop, [&] { return pending_; });
             if (stop.stop_requested()) return;
             locale = requested_;
             generation = generation_;

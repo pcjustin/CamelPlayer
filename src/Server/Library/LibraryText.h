@@ -42,7 +42,7 @@ private:
     LibraryStore& store_;
     std::function<std::vector<uint8_t>(std::wstring_view)> version_;
     std::mutex mutex_;
-    std::condition_variable cv_;
+    std::condition_variable_any cv_;
     std::wstring requested_;
     uint64_t generation_ = 1;
     bool pending_ = true, running_ = false;
