@@ -2460,13 +2460,15 @@ void MainWindow::OnSearchQuerySubmitted(AutoSuggestBox const& box, AutoSuggestBo
             submitCommand(std::move(play));
             return;
         }
-        case Suggestion::Kind::Album:
-            selectPage(L"albums");
-            view->showAlbum(suggestion.id, suggestion.title);
+        case Suggestion::Kind::Album: {
+            // Over the page the search was made from, which Back returns to, as the player's album link does.
+            auto leave = openLibraryOverPage();
+            const bool keepHistory = !leave;
+            view->showAlbum(suggestion.id, suggestion.title, std::move(leave), keepHistory);
             return;
+        }
         case Suggestion::Kind::Artist:
-            selectPage(L"albums");
-            view->showArtist(suggestion.title);
+            openArtist(suggestion.title);
             return;
         case Suggestion::Kind::All:
             break;
