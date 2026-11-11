@@ -12,13 +12,20 @@
 
 namespace camel::server {
 
-std::vector<in_addr> localAddresses() {
+std::vector<in_addr> localAddresses(unsigned long firstGuess) {
     std::vector<in_addr> addresses;
-    ULONG size = 16 * 1024;
-    std::vector<char> buffer(size);
-    auto* list = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+    ULONG size = firstGuess;
+    std::vector<char> buffer;
+    IP_ADAPTER_ADDRESSES* list = nullptr;
     const ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
-    if (GetAdaptersAddresses(AF_INET, flags, nullptr, list, &size) != NO_ERROR) return addresses;
+    // Asked again with the size it gives, as adapters can come between two calls.
+    ULONG result = ERROR_BUFFER_OVERFLOW;
+    for (int attempt = 0; attempt < 3 && result == ERROR_BUFFER_OVERFLOW; ++attempt) {
+        buffer.resize(size);
+        list = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+        result = GetAdaptersAddresses(AF_INET, flags, nullptr, list, &size);
+    }
+    if (result != NO_ERROR) return addresses;
     for (auto* adapter = list; adapter; adapter = adapter->Next) {
         if (adapter->OperStatus != IfOperStatusUp || adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
         for (auto* unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next)

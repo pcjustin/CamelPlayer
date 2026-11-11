@@ -14,6 +14,7 @@
 
 #include "FakeRenderer.h"
 #include "Server/Network/Firewall.h"
+#include "Server/Network/LocalAddresses.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerLink.h"
 
@@ -378,6 +379,15 @@ TEST(PlayerFollowerTest, BeforeAnythingIsExpectedNoTrackIsATakeover) {
     PlayerObservation seen;
     seen.track = "what it played before";
     EXPECT_TRUE(follower.observe(seen, 0ms).empty());
+}
+
+// More adapters than the first guess has room for, as Hyper-V switches and VPNs add, still give every address.
+TEST(LocalAddressesTest, AListLongerThanTheFirstGuessIsReadWhole) {
+    const auto addresses = localAddresses();
+    ASSERT_FALSE(addresses.empty()) << "this machine has no adapter up";
+    const auto fromSmall = localAddresses(64);
+    ASSERT_EQ(fromSmall.size(), addresses.size());
+    for (size_t i = 0; i < addresses.size(); ++i) EXPECT_EQ(fromSmall[i].s_addr, addresses[i].s_addr);
 }
 
 TEST(PlayerFinderTest, FindsAPlayerThroughSsdpAndKnowsItsKind) {
