@@ -91,6 +91,7 @@ void PlaylistView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
 }
 
 void PlaylistView::showAll() {
+    if (playlist_ != 0) edits_.clear();
     playlist_ = 0;
     ++generation_;
     HeaderTitle().Text(tr(L"Playlist_PageTitle"));
@@ -107,7 +108,10 @@ void PlaylistView::showAll() {
 
 void PlaylistView::showPlaylist(int64_t playlist) {
     if (playlist <= 0) return showAll();
-    if (playlist != playlist_) sortKey_.reset();
+    if (playlist != playlist_) {
+        sortKey_.reset();
+        edits_.clear();
+    }
     playlist_ = playlist;
     ++generation_;
     HeaderTitle().Text(L"");
@@ -197,7 +201,7 @@ void PlaylistView::load() {
         }
         return std::function<void()>([this, loaded] {
             name_ = loaded->name;
-            revision_ = loaded->revision;
+            edits_.loaded(loaded->revision);
             HeaderTitle().Text(name_);
             const auto total = loaded->rows.size();
             std::wstring detail(ui::format(L"Library_Tracks", {ui::count(int64_t(total))}));
@@ -264,7 +268,13 @@ void PlaylistView::remove(const std::vector<ui::BrowseRow>& rows) {
 }
 
 void PlaylistView::edit(PlaylistEdit change, bool reloadAfter) {
-    change.revision = revision_;
+    edits_.edit({std::move(change), reloadAfter, {}});
+}
+
+void PlaylistView::send(QueuedEdit queued) {
+    auto change = std::move(queued.change);
+    change.revision = queued.revision;
+    const bool reloadAfter = queued.reloadAfter;
     const bool renamedOrDeleted = change.kind == PlaylistEdit::Kind::Rename || change.kind == PlaylistEdit::Kind::Delete;
     auto weak = get_weak();
     auto queue = DispatcherQueue();
@@ -280,11 +290,14 @@ void PlaylistView::edit(PlaylistEdit change, bool reloadAfter) {
             if (!self) return;
             if (!result) {
                 if (self->handlers_.notify) self->handlers_.notify(tr(L"Playlist_EditFailed"), {}, true);
-                if (self->playlist_ == change.playlist) self->load();
+                if (self->playlist_ == change.playlist) {
+                    self->edits_.answered(std::nullopt);
+                    self->load();
+                }
                 return;
             }
             if (self->playlist_ == change.playlist) {
-                self->revision_ = result->revision;
+                self->edits_.answered(result->revision);
                 if (reloadAfter) self->load();
             }
             if (renamedOrDeleted && self->handlers_.changed) self->handlers_.changed();

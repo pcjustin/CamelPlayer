@@ -11,6 +11,7 @@
 #include <fstream>
 
 #include "Common/util/Text.h"
+#include "ControlPoint/EditSequence.h"
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
 #include "TestUtil.h"
@@ -20,10 +21,18 @@ using Kind = PlaylistSource::Kind;
 
 namespace {
 
-PlaylistSource folder(int64_t id) { return {Kind::Folder, id, {}, {}}; }
-PlaylistSource album(int64_t id) { return {Kind::Album, id, {}, {}}; }
-PlaylistSource track(int64_t file) { return {Kind::Track, 0, {file}, {}}; }
-PlaylistSource artist(std::string name) { return {Kind::Artist, 0, {}, std::move(name)}; }
+PlaylistSource folder(int64_t id) {
+    return {Kind::Folder, id, {}, {}};
+}
+PlaylistSource album(int64_t id) {
+    return {Kind::Album, id, {}, {}};
+}
+PlaylistSource track(int64_t file) {
+    return {Kind::Track, 0, {file}, {}};
+}
+PlaylistSource artist(std::string name) {
+    return {Kind::Artist, 0, {}, std::move(name)};
+}
 
 class PlaylistsTest : public ::testing::Test {
 protected:
@@ -64,7 +73,8 @@ INSERT INTO track_values(track_id,field,position,value) VALUES(6,'artist',0,'Pek
 
     std::vector<LibraryTrackKey> tracks(int64_t playlist) {
         std::vector<LibraryTrackKey> out;
-        for (const auto& item : playlistItems(*store, playlist, 0, 500).items) out.push_back(item.track.value_or(LibraryTrackKey{}));
+        for (const auto& item : playlistItems(*store, playlist, 0, 500).items)
+            out.push_back(item.track.value_or(LibraryTrackKey{}));
         return out;
     }
     std::vector<int64_t> ids(int64_t playlist) {
@@ -129,10 +139,10 @@ TEST_F(PlaylistsTest, AddingSkipsTracksAlreadyPresentAndRefusesAStaleRevision) {
 
 TEST_F(PlaylistsTest, SavedEntriesKeepOrderDuplicatesAndEntriesWithoutAnIdentity) {
     const auto saved = savePlaylist(*store, "Queue",
-                                    {{LibraryTrackKey{2}, "c:\\m\\album\\02.flac"},
+                                    {{LibraryTrackKey{2}, R"(c:\m\album\02.flac)"},
                                      {std::nullopt, "d:\\elsewhere\\x.flac"},
-                                     {LibraryTrackKey{2}, "c:\\m\\album\\02.flac"},
-                                     {LibraryTrackKey{5}, "c:\\m\\album\\cd2\\gone.flac"}});
+                                     {LibraryTrackKey{2}, R"(c:\m\album\02.flac)"},
+                                     {LibraryTrackKey{5}, R"(c:\m\album\cd2\gone.flac)"}});
     EXPECT_EQ(saved.added, 4);
     const auto page = playlistItems(*store, saved.playlist, 0, 500);
     ASSERT_EQ(page.items.size(), 4u);
@@ -158,7 +168,7 @@ TEST_F(PlaylistsTest, RemoveMoveSortAndDeleteRenumberPositions) {
     editPlaylist(*store, move);
     EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{3}, {4}, {1}}));
     const auto page = playlistItems(*store, created.playlist, 0, 500);
-    for (int64_t i = 0; i < int64_t(page.items.size()); ++i) EXPECT_EQ(page.items[size_t(i)].position, i);
+    for (size_t i = 0; i < page.items.size(); ++i) EXPECT_EQ(page.items[i].position, int64_t(i));
 
     addToPlaylist(*store, created.playlist, std::nullopt, {track(6)});
     savePlaylist(*store, "unused", {});
@@ -179,9 +189,9 @@ TEST_F(PlaylistsTest, RemoveMoveSortAndDeleteRenumberPositions) {
     editPlaylist(*store, erase);
     EXPECT_EQ(listPlaylists(*store).size(), 1u);
     EXPECT_THROW(playlistItems(*store, created.playlist, 0, 10), std::invalid_argument);
-    EXPECT_EQ(store->openReader().scalar("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=" +
-                                         std::to_string(created.playlist)),
-              0);
+    EXPECT_EQ(
+        store->openReader().scalar("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=" + std::to_string(created.playlist)),
+        0);
 }
 
 TEST_F(PlaylistsTest, QuickUndoRevertsOnlyAnUnchangedPlaylist) {
@@ -218,10 +228,11 @@ TEST_F(PlaylistsTest, AYearAndAvailableFilePathsBecomeTracks) {
     EXPECT_EQ(year.name, "2021");
     EXPECT_EQ(tracks(year.playlist), (std::vector<LibraryTrackKey>{{1}, {2}, {4}, {3}}));
     EXPECT_EQ(year.skippedUnavailable, 1);
-    const auto paths = createPlaylist(*store, "", {{Kind::Path, 0, {}, "c:\\m\\album\\02.flac"},
-                                                    {Kind::Path, 0, {}, "d:\\outside.flac"},
-                                                    {Kind::Path, 0, {}, "c:\\m\\album\\cd2\\gone.flac"},
-                                                    {Kind::Path, 0, {}, "c:\\m\\album\\01.flac"}});
+    const auto paths = createPlaylist(*store, "",
+                                      {{Kind::Path, 0, {}, R"(c:\m\album\02.flac)"},
+                                       {Kind::Path, 0, {}, "d:\\outside.flac"},
+                                       {Kind::Path, 0, {}, R"(c:\m\album\cd2\gone.flac)"},
+                                       {Kind::Path, 0, {}, R"(c:\m\album\01.flac)"}});
     EXPECT_EQ(paths.name, "Bluerose +3");
     EXPECT_EQ(tracks(paths.playlist), (std::vector<LibraryTrackKey>{{2}, {1}}));
     EXPECT_EQ(paths.skippedUnavailable, 2);
@@ -262,10 +273,11 @@ TEST_F(PlaylistsTest, AnM3u8ImportResolvesPathsAndKeepsOrderDuplicatesAndOutside
         })
         .get();
     const auto file = dir / L"Mix 一.m3u8";
-    std::ofstream(file, std::ios::binary) << "\xEF\xBB\xBF#EXTM3U\r\n#EXTINF:60,Suisei - Comet\r\nC:\\M\\ALBUM\\01.flac\r\n"
-                                             "\xE9\x9F\xB3\xE6\xA8\x82/\xE5\xA4\x9C\xE3\x81\xAB\xE9\xA7\x86\xE3\x81\x91\xE3\x82\x8B.flac\n"
-                                             "  c:\\m\\album\\01.flac  \n\nhttp://radio.example/stream\n"
-                                             "c:\\m\\album\\cd2\\gone.flac\nd:\\elsewhere\\x.flac\n";
+    std::ofstream(file, std::ios::binary)
+        << "\xEF\xBB\xBF#EXTM3U\r\n#EXTINF:60,Suisei - Comet\r\nC:\\M\\ALBUM\\01.flac\r\n"
+           "\xE9\x9F\xB3\xE6\xA8\x82/\xE5\xA4\x9C\xE3\x81\xAB\xE9\xA7\x86\xE3\x81\x91\xE3\x82\x8B.flac\n"
+           "  c:\\m\\album\\01.flac  \n\nhttp://radio.example/stream\n"
+           "c:\\m\\album\\cd2\\gone.flac\nd:\\elsewhere\\x.flac\n";
     const auto change = importPlaylistFile(*store, file);
     EXPECT_EQ(change.name, "Mix \xE4\xB8\x80");
     EXPECT_EQ(change.added, 5);
@@ -309,7 +321,7 @@ TEST_F(PlaylistsTest, AnM3u8ExportWritesRelativePathsOnTheSameDriveAndRoundTrips
     const auto saved = savePlaylist(*store, "Out",
                                     {{LibraryTrackKey{7}, camel::toUtf8(inside)},
                                      {LibraryTrackKey{7}, camel::toUtf8(inside)},
-                                     {std::nullopt, "\\\\nas\\share\\x.flac"}});
+                                     {std::nullopt, R"(\\nas\share\x.flac)"}});
     const auto file = dir / "lists" / "out.m3u8";
     std::filesystem::create_directories(file.parent_path());
     exportPlaylistFile(*store, saved.playlist, file);
@@ -345,8 +357,8 @@ INSERT INTO tracks(id,file_id,album_id,sample_rate,total_frames,start_frame) VAL
     ASSERT_EQ(page.items.size(), 2u);
     EXPECT_EQ(page.items[0].track, (LibraryTrackKey{7}));
     EXPECT_EQ(page.items[1].track, (LibraryTrackKey{8}));
-    const auto queued = createPlaylist(*store, "Queue", {{Kind::Path, 0, {}, "\\\\NAS\\Music\\a\\Track 1.flac"},
-                                                         {Kind::Path, 0, {}, "D:\\Local\\B.flac"}});
+    const auto queued = createPlaylist(
+        *store, "Queue", {{Kind::Path, 0, {}, R"(\\NAS\Music\a\Track 1.flac)"}, {Kind::Path, 0, {}, R"(D:\Local\B.flac)"}});
     EXPECT_EQ(tracks(queued.playlist), (std::vector<LibraryTrackKey>{{7}, {8}}));
     EXPECT_EQ(createPlaylist(*store, "", {{Kind::Path, 0, {}, "\\\\NAS\\Music\\a\\Track 1.flac"}}).name, "Track 1");
     EXPECT_EQ(createPlaylist(*store, "", {track(8)}).name, "B");
@@ -381,6 +393,36 @@ TEST_F(PlaylistsTest, AHundredThousandTrackFolderBecomesAPlaylistQuicklyAndWithB
     cancelled.cancel();
     EXPECT_THROW(createPlaylist(*store, "Cancelled", {folder(10)}, cancelled), std::exception);
     EXPECT_EQ(listPlaylists(*store).size(), 1u);
+}
+
+struct QueuedChange {
+    int id = 0;
+    std::optional<int64_t> revision;
+};
+
+// Delete pressed twice quickly: the second edit waits for the first's answer and carries the revision it left.
+TEST(EditSequence, EditsMadeInARowAreSentInTurnWithTheRevisionTheLastOneLeft) {
+    std::vector<QueuedChange> sent;
+    ui::EditSequence<QueuedChange> edits([&](QueuedChange change) { sent.push_back(change); });
+    edits.loaded(1);
+    edits.edit({1, {}});
+    edits.edit({2, {}});
+    ASSERT_EQ(sent.size(), 1u);
+    EXPECT_EQ(sent[0].revision, 1);
+    edits.loaded(1); // a reload the first edit asked for, read before its answer came
+    edits.answered(2);
+    ASSERT_EQ(sent.size(), 2u);
+    EXPECT_EQ(sent[1].id, 2);
+    EXPECT_EQ(sent[1].revision, 2);
+    edits.answered(3);
+    edits.edit({3, {}});
+    edits.edit({4, {}});
+    edits.answered(std::nullopt); // refused: the list is read again, and what waited is dropped
+    EXPECT_EQ(sent.size(), 3u);
+    edits.loaded(7);
+    edits.edit({5, {}});
+    ASSERT_EQ(sent.size(), 4u);
+    EXPECT_EQ(sent[3].revision, 7);
 }
 
 } // namespace

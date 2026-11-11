@@ -5,6 +5,7 @@
 #pragma once
 
 #include "PlaylistView.g.h"
+#include "EditSequence.h"
 #include "PlaylistCollection.h"
 #include "PlaylistMenu.h"
 #include "Server/Api/ServerApi.h"
@@ -66,14 +67,20 @@ private:
     void submitMarks(camel::server::Command command);
     void queue(const std::vector<ui::BrowseRow>& rows, bool playNext);
     void remove(const std::vector<ui::BrowseRow>& rows);
-    // Runs `edit` off the UI thread; a playlist changed elsewhere meanwhile is read again.
+    struct QueuedEdit {
+        camel::server::PlaylistEdit change;
+        bool reloadAfter = false;
+        std::optional<int64_t> revision;
+    };
     void edit(camel::server::PlaylistEdit edit, bool reloadAfter);
+    // Runs the edit off the UI thread; a playlist changed elsewhere meanwhile is read again.
+    void send(QueuedEdit edit);
     winrt::fire_and_forget background(std::function<std::function<void()>()> work);
 
     std::shared_ptr<camel::server::IServer> server_;
     Handlers handlers_;
     int64_t playlist_ = 0; // 0: the Playlists page
-    int64_t revision_ = 0;
+    ui::EditSequence<QueuedEdit> edits_{[this](QueuedEdit queued) { send(std::move(queued)); }};
     hstring name_;
     uint64_t generation_ = 0;
     std::optional<camel::server::PlaylistSortKey> sortKey_;
