@@ -903,6 +903,39 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
     send(command(CommandKind::Stop));
 }
 
+// A save of the queue that fails, as on a full disk, is not taken for saved: the next save writes the entries again.
+TEST_F(LibraryPlaybackTest, AQueueSaveThatFailedIsWrittenAgain) {
+    std::vector<std::filesystem::path> files;
+    files.reserve(5);
+    for (const char* name : {"save-a", "save-b", "save-c", "save-d", "save-e"})
+        files.push_back(testutil::generatedFile({name, 48000, 16, 2, 0.5}));
+    setUp(files);
+    const auto rows = [&] {
+        std::vector<std::string> paths;
+        auto row = store->openReader().prepare("SELECT path FROM queue ORDER BY position");
+        while (row.step()) paths.push_back(std::filesystem::path(toWide(row.text(0))).filename().string());
+        return paths;
+    };
+    send(queueReplace({track(files[0]), track(files[1])}));
+    send(command(CommandKind::Stop));
+    ASSERT_TRUE(waitFor([&] { return rows().size() == 2; }));
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("CREATE TRIGGER fail_queue BEFORE INSERT ON queue BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+        })
+        .get();
+    send(queueReplace({track(files[2]), track(files[3]), track(files[4])}));
+    send(command(CommandKind::Stop));
+    std::this_thread::sleep_for(1s); // the save is made and fails
+    ASSERT_EQ(rows().size(), 2u);
+    store->write([](sqlite::Database& db) { db.exec("DROP TRIGGER fail_queue"); }).get();
+    Command repeat = command(CommandKind::SetRepeat);
+    repeat.repeat = RepeatMode::All;
+    send(repeat);
+    server.reset();
+    EXPECT_EQ(rows(), (std::vector<std::string>{"save-c.flac", "save-d.flac", "save-e.flac"}));
+}
+
 TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
     const auto a = testutil::generatedFile({"restore-gone-a", 48000, 16, 2, 0.5});
     const auto b = testutil::generatedFile({"restore-gone-b", 48000, 16, 2, 0.5});

@@ -707,6 +707,7 @@ private:
                 sessionWrite_.get();
             } catch (const std::exception& e) {
                 log::warn("session: %s", e.what());
+                saved_ = {}; // nothing of it is in the database: the next save writes it all
             }
         }
         const auto playback = engine_->snapshot();
