@@ -41,6 +41,9 @@ public:
     FileView(const FileView&) = delete;
     FileView& operator=(const FileView&) = delete;
 
+    // A read inside the file failed, as when its share went away: what libsndfile then sees as the end is not.
+    bool failed() const { return failed_; }
+
     static SF_VIRTUAL_IO io() {
         SF_VIRTUAL_IO io{};
         io.get_filelen = [](void* self) { return static_cast<FileView*>(self)->size_; };
@@ -64,8 +67,10 @@ private:
             if (offset < start_ || offset >= start_ + filled_) {
                 DWORD got = 0;
                 if (!SetFilePointerEx(h_, LARGE_INTEGER{.QuadPart = offset}, nullptr, FILE_BEGIN) ||
-                    !ReadFile(h_, buffer_.data(), DWORD(buffer_.size()), &got, nullptr) || !got)
+                    !ReadFile(h_, buffer_.data(), DWORD(buffer_.size()), &got, nullptr) || !got) {
+                    if (offset < fileSize_) failed_ = true;
                     break;
+                }
                 start_ = offset;
                 filled_ = got;
             }
@@ -130,6 +135,7 @@ private:
     HANDLE h_;
     std::vector<uint8_t> buffer_, header_;
     sf_count_t fileSize_ = 0, body_ = 0, size_ = 0, position_ = 0, start_ = 0, filled_ = 0;
+    bool failed_ = false;
 };
 
 class SndfileDecoder final : public IDecoder {
@@ -166,6 +172,7 @@ public:
         sf_count_t got = sf_readf_int(sf_, dst, sf_count_t(frames));
         if (sf_error(sf_) != SF_ERR_NO_ERROR)
             throw Error(ErrorCode::DecodeFailed, std::string("libsndfile: ") + sf_strerror(sf_));
+        if (file_.failed()) throw Error(ErrorCode::DecodeFailed, "the file can no longer be read");
         // libsndfile scales integer reads to full 32-bit range; bring them back to the original bits.
         const int shift = 32 - int(info_.bitsPerSample);
         if (shift)

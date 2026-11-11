@@ -231,6 +231,62 @@ TEST(FormatDecoderPolicy, AiffChunkAfterSoundDataIsNotAudio) {
     }
 }
 
+// A file that can no longer be read, as on a share that went away, is a decode error, not the end of the track.
+TEST(FormatDecoderPolicy, AReadFailureIsNotTheEndOfTheTrack) {
+    const testaudio::GenSpec spec{"read-failure", 44100, 16, 2, 2.0};
+    const auto signal = testaudio::makeSignal(spec);
+    for (const auto format : {AudioFormat::Wav, AudioFormat::Aiff}) {
+        SCOPED_TRACE(formatId(format));
+        const auto path = testutil::tempDir() / (std::string("format-read-failure") + extension(format));
+        if (format == AudioFormat::Wav)
+            testaudio::writeWav(path, signal, spec.sampleRate, spec.bits, spec.channels);
+        else
+            testaudio::writeAiff(path, signal, spec.sampleRate, spec.bits, spec.channels);
+        auto decoder = openDecoder(DecoderKind::Sndfile, path);
+        std::vector<int32_t> buffer(size_t{4096} * spec.channels);
+        ASSERT_EQ(decoder->read(buffer.data(), 4096), 4096U);
+        const HANDLE other = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                         nullptr, OPEN_EXISTING, 0, nullptr);
+        ASSERT_NE(other, INVALID_HANDLE_VALUE);
+        OVERLAPPED from{};
+        from.Offset = 128 * 1024;
+        ASSERT_TRUE(LockFileEx(other, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, 0, &from));
+        try {
+            while (decoder->read(buffer.data(), 4096) != 0) {
+            }
+            ADD_FAILURE() << "the read ended as at the end of the track";
+        } catch (const Error& e) {
+            EXPECT_EQ(e.code(), ErrorCode::DecodeFailed) << e.what();
+        }
+        UnlockFileEx(other, 0, MAXDWORD, 0, &from);
+        CloseHandle(other);
+    }
+}
+
+// The Engine then reports the failure rather than a finished track, so the queue does not run on to the next one.
+TEST(FormatDecoderPolicy, AReadFailureWhilePlayingIsReportedNotFinished) {
+    const testaudio::GenSpec spec{"read-failure-playing", 44100, 16, 2, 30.0};
+    const auto path = testutil::tempDir() / "format-read-failure-playing.wav";
+    testaudio::writeWav(path, testaudio::makeSignal(spec), spec.sampleRate, spec.bits, spec.channels);
+    CaptureOptions options;
+    options.file = testutil::tempDir() / "format-read-failure.raw";
+    options.realtime = true;
+    PlaybackEngine engine(Settings{}, [&](const Settings&) { return createCaptureOutput(options); });
+    engine.openAndPlay(path, DecoderKind::Sndfile);
+    ASSERT_TRUE(engine.waitForState(PlayState::Playing, std::chrono::seconds(5)));
+    const HANDLE other = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                     OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(other, INVALID_HANDLE_VALUE);
+    OVERLAPPED from{};
+    from.Offset = 1024 * 1024; // about 6 s in, past what the Engine reads ahead at the start
+    ASSERT_TRUE(LockFileEx(other, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, 0, &from));
+    EXPECT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(20)));
+    const auto snapshot = engine.snapshot();
+    UnlockFileEx(other, 0, MAXDWORD, 0, &from);
+    CloseHandle(other);
+    EXPECT_EQ(snapshot.error, ErrorCode::DecodeFailed) << snapshot.errorDetail;
+}
+
 TEST(FormatDecoderPolicy, DecoderMustSupportTheFileFormat) {
     const auto& spec = kSpecs[0];
     reference(spec);
