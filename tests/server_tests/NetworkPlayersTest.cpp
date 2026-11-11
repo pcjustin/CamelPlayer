@@ -17,6 +17,7 @@
 #include "Server/Network/LocalAddresses.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerLink.h"
+#include "Server/Support/Http.h"
 
 #include <windows.h>
 #include <psapi.h>
@@ -122,6 +123,35 @@ TEST(UpnpMessages, AControlUrlOnAnotherHostIsNotUsed) {
         R"(<root><device><UDN>uuid:x</UDN><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>http://203.0.113.9/ctl</controlURL></service></serviceList></device></root>)",
         "http://192.168.1.2/d.xml");
     EXPECT_FALSE(player);
+}
+
+// Some OpenHome players give https control addresses: a request to one opens with TLS, not with the request in clear.
+TEST(UpnpMessages, AnHttpsControlAddressIsSpokenToOverTls) {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ASSERT_EQ(listen(listener, 1), 0);
+    int size = sizeof(address);
+    getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size);
+    std::thread sender([port = ntohs(address.sin_port)] {
+        try {
+            http::send("POST", "https://127.0.0.1:" + std::to_string(port) + "/ctl", "", "body", 2000, 4096);
+        } catch (const std::exception&) {
+        }
+    });
+    const SOCKET client = accept(listener, nullptr, nullptr);
+    char first = 0;
+    const int read = recv(client, &first, 1, 0);
+    closesocket(client);
+    closesocket(listener);
+    sender.join();
+    WSACleanup();
+    ASSERT_EQ(read, 1);
+    EXPECT_EQ(uint8_t(first), 0x16) << "the request began with '" << first << "', not a TLS handshake";
 }
 
 TEST(UpnpMessages, ReadsSearchAnswersAndAnnouncements) {

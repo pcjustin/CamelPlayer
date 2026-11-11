@@ -123,8 +123,16 @@ Reply send(const std::string& method, const std::string& url, const std::string&
                                        WINHTTP_NO_PROXY_BYPASS, 0));
     WinHttpSetTimeouts(session.get(), timeoutMs, timeoutMs, timeoutMs, timeoutMs);
     const Internet connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
+    const bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
     const Internet request(WinHttpOpenRequest(connection.get(), toWide(method).c_str(), path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                              WINHTTP_DEFAULT_ACCEPT_TYPES, 0));
+                                              WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0));
+    if (secure) {
+        // A player's certificate is its own, signed by no authority Windows knows; the address it answers at has passed
+        // the local-network check (upnp::isLanUrl), which is what the request relies on.
+        DWORD accept = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
+                       SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+        WinHttpSetOption(request.get(), WINHTTP_OPTION_SECURITY_FLAGS, &accept, sizeof(accept));
+    }
     const std::wstring wideHeaders = toWide(headers);
     if (!WinHttpSendRequest(request.get(), wideHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : wideHeaders.c_str(),
                             DWORD(wideHeaders.size()), const_cast<char*>(body.data()), DWORD(body.size()), DWORD(body.size()),

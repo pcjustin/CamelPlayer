@@ -31,7 +31,8 @@ struct Response {
 // The whole body; throws std::runtime_error past `maxBytes`, on network errors and on cancellation.
 Response get(const std::string& url, const char* accept, const CancellationToken& token, size_t maxBytes);
 
-// One request without a proxy, as to a player on the local network. `headers` are CRLF-separated lines without a final
+// One request without a proxy, to a player on the local network only: an https address is spoken to over TLS with
+// the player's own certificate accepted, as no authority signs it. `headers` are CRLF-separated lines without a final
 // CRLF. Throws std::runtime_error on network errors and past `maxBytes`.
 struct Reply {
     unsigned status = 0;
