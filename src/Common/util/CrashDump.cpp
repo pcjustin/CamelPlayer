@@ -24,6 +24,7 @@ namespace camel {
 namespace {
 
 wchar_t g_dir[MAX_PATH];
+DWORD g_fatalDumpLimitMs = 20000;
 std::atomic_flag g_fatalDumped;
 
 struct DumpRequest {
@@ -60,27 +61,37 @@ void dumpFrom(const wchar_t* suffix, EXCEPTION_POINTERS* exception) {
     }
 }
 
-void dumpFatal(const wchar_t* suffix, EXCEPTION_POINTERS* exception) {
-    if (!g_fatalDumped.test_and_set()) dumpFrom(suffix, exception);
+constexpr UINT kAbortCode = 3; // what abort() ends the process with
+
+// The writer may need a lock the crashed thread holds, the heap's or the loader's: then the process ends without its
+// dump, with the crash's own code, rather than staying, and holding the single instance, for ever.
+void dumpFatal(const wchar_t* suffix, EXCEPTION_POINTERS* exception, UINT exitCode) {
+    if (g_fatalDumped.test_and_set()) return;
+    DumpRequest request{suffix, GetCurrentThreadId(), exception};
+    if (HANDLE writer = CreateThread(nullptr, 0, writeDump, &request, 0, nullptr)) {
+        // `request` is on this stack: a writer still running must not outlive it, so the process ends here.
+        if (WaitForSingleObject(writer, g_fatalDumpLimitMs) != WAIT_OBJECT_0) TerminateProcess(GetCurrentProcess(), exitCode);
+        CloseHandle(writer);
+    }
 }
 
 LONG WINAPI onCrash(EXCEPTION_POINTERS* ep) {
-    dumpFatal(L"", ep);
+    dumpFatal(L"", ep, ep->ExceptionRecord->ExceptionCode);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
 // abort(), std::terminate and CRT checks end the process without an unhandled exception reaching onCrash.
 void onAbort(int) {
-    dumpFatal(L"-abort", nullptr);
+    dumpFatal(L"-abort", nullptr, kAbortCode);
 }
 
 void onPureCall() {
-    dumpFatal(L"-purecall", nullptr);
+    dumpFatal(L"-purecall", nullptr, kAbortCode);
     std::abort();
 }
 
 void onInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned, uintptr_t) {
-    dumpFatal(L"-invalid-parameter", nullptr);
+    dumpFatal(L"-invalid-parameter", nullptr, kAbortCode);
     std::abort();
 }
 
@@ -107,7 +118,8 @@ void pruneCrashDumps(const std::filesystem::path& dir, size_t keep) {
     for (size_t i = 0; i + keep < dumps.size(); ++i) std::filesystem::remove(dumps[i], ec);
 }
 
-void installCrashDumps(const std::filesystem::path& dir) {
+void installCrashDumps(const std::filesystem::path& dir, std::chrono::milliseconds fatalDumpLimit) {
+    g_fatalDumpLimitMs = DWORD(fatalDumpLimit.count());
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     pruneCrashDumps(dir, kKeptCrashDumps);

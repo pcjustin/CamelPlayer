@@ -15,8 +15,9 @@ namespace camel {
 constexpr size_t kKeptCrashDumps = 5;
 
 // Keeps the newest `kKeptCrashDumps` dumps already in `dir`; a missing or unwritable directory never blocks startup.
-// Also dumps on abort(), std::terminate, pure virtual calls and invalid CRT parameters.
-void installCrashDumps(const std::filesystem::path& dir);
+// Also dumps on abort(), std::terminate, pure virtual calls and invalid CRT parameters. A dump not written within
+// `fatalDumpLimit`, its writer held by a lock the crashed thread holds, is given up and the process ends.
+void installCrashDumps(const std::filesystem::path& dir, std::chrono::milliseconds fatalDumpLimit = std::chrono::seconds(20));
 
 // Deletes all but the newest `keep` crash-*.dmp files in `dir`; failures are ignored.
 void pruneCrashDumps(const std::filesystem::path& dir, size_t keep);

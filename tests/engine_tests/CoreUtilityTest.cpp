@@ -207,6 +207,46 @@ TEST(CrashDump, AbortInChildCreatesDump) {
     std::filesystem::remove_all(directory);
 }
 
+// A crash inside HeapAlloc leaves the heap's lock held, which the dump's writer needs: the process ends without its
+// dump rather than waiting for it, and holding CamelPlayer's single instance, for ever.
+TEST(CrashDump, ACrashThatHoldsTheHeapEndsWithoutWaitingForItsDump) {
+    constexpr wchar_t marker[] = L"CAMELPLAYER_HEAPDUMP_TEST_CHILD";
+    wchar_t childDirectory[32768];
+    const DWORD length = GetEnvironmentVariableW(marker, childDirectory, DWORD(std::size(childDirectory)));
+    if (length && length < std::size(childDirectory)) {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+        installCrashDumps(childDirectory, std::chrono::seconds(2));
+        HeapLock(GetProcessHeap());
+        std::abort();
+    }
+    const auto directory = testutil::tempDir() / "heapdump-unit-test";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    ASSERT_TRUE(SetEnvironmentVariableW(marker, directory.c_str()));
+    wchar_t executable[32768];
+    ASSERT_NE(GetModuleFileNameW(nullptr, executable, DWORD(std::size(executable))), 0u);
+    std::wstring command =
+        L"\"" + std::wstring(executable) + L"\" --gtest_filter=CrashDump.ACrashThatHoldsTheHeapEndsWithoutWaitingForItsDump";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof startup;
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                                        &startup, &process);
+    SetEnvironmentVariableW(marker, nullptr);
+    ASSERT_TRUE(created);
+    const DWORD waited = WaitForSingleObject(process.hProcess, 15000);
+    if (waited != WAIT_OBJECT_0) TerminateProcess(process.hProcess, 1);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    EXPECT_EQ(waited, WAIT_OBJECT_0) << "the crashed process was still waiting for its dump after 15 s";
+    EXPECT_EQ(exitCode, 3u) << "the code abort() ends with";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+}
+
 TEST(CrashDump, UnansweredPingWritesOneHangDump) {
     const auto directory = testutil::tempDir() / "hangdump-unit-test";
     std::filesystem::remove_all(directory);
