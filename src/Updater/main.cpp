@@ -136,7 +136,7 @@ std::vector<HANDLE> players(const fs::path& exe) {
         if (!process) continue;
         wchar_t path[MAX_PATH * 4];
         auto size = DWORD(std::size(path));
-        if (QueryFullProcessImageNameW(process, 0, path, &size) && _wcsicmp(path, exe.c_str()) == 0)
+        if (QueryFullProcessImageNameW(process, 0, path, &size) && camel::updater::sameFile(path, exe))
             found.push_back(process);
         else
             CloseHandle(process);

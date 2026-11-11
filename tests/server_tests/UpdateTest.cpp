@@ -530,3 +530,25 @@ TEST(Update, ARepairLeavesFilesBesideTheProgramWhereTheyAre) {
     EXPECT_FALSE(fs::exists(f.files / L"Photos"));
     EXPECT_FALSE(fs::exists(f.files / L"open.txt"));
 }
+
+// Started from a SUBST drive, an 8.3 name or a junction, the player's path is spelled otherwise than the updater was
+// given it: the same file is the same player, or the updater takes it for gone and may roll back under it.
+TEST(Update, ThePlayerIsKnownByItsFileWhateverItsPathsSpelling) {
+    const auto dir = testutil::tempDir() / "same-player-file";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "real");
+    std::ofstream(dir / "real" / "CamelPlayer.exe") << "x";
+    std::ofstream(dir / "real" / "Other.exe") << "y";
+    // A drive letter of its own for the folder, as SUBST makes, chosen among the free ones.
+    std::wstring drive;
+    for (wchar_t letter = L'Z'; letter > L'D' && drive.empty(); --letter)
+        if (!(GetLogicalDrives() & (1u << (letter - L'A')))) drive = std::wstring(1, letter) + L":";
+    ASSERT_FALSE(drive.empty());
+    ASSERT_TRUE(DefineDosDeviceW(0, drive.c_str(), (dir / "real").c_str()));
+    const std::filesystem::path substituted = drive + L"\\";
+    EXPECT_TRUE(camel::updater::sameFile(dir / "real" / "CamelPlayer.exe", substituted / "CamelPlayer.exe"));
+    EXPECT_TRUE(camel::updater::sameFile(dir / "real" / "CamelPlayer.exe", dir / "REAL" / "camelplayer.exe"));
+    EXPECT_FALSE(camel::updater::sameFile(dir / "real" / "CamelPlayer.exe", substituted / "Other.exe"));
+    EXPECT_FALSE(camel::updater::sameFile(dir / "real" / "CamelPlayer.exe", dir / "real" / "Gone.exe"));
+    DefineDosDeviceW(DDD_REMOVE_DEFINITION, drive.c_str(), nullptr);
+}

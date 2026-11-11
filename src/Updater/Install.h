@@ -39,6 +39,9 @@ enum class Outcome { Installed, RolledBack };
 // Expects the old player to have exited. Writes the update-result file the started player reads.
 Outcome install(const Options& options, const Host& host);
 
+// Whether two paths name the player's program.
+bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b);
+
 // The data folder's update-result line.
 void writeResult(const std::filesystem::path& data, const wchar_t* kind, const std::wstring& version,
                  const std::wstring& previous = {});

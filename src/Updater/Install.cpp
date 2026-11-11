@@ -269,4 +269,10 @@ void writeResult(const std::filesystem::path& data, const wchar_t* kind, const s
     out << L'\n';
 }
 
+// By the file, not its path's spelling: a SUBST drive, an 8.3 name or a junction names the same file otherwise.
+bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b) {
+    std::error_code error;
+    return std::filesystem::equivalent(a, b, error) && !error;
+}
+
 } // namespace camel::updater
