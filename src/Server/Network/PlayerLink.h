@@ -56,10 +56,12 @@ public:
     std::vector<PlayerEvent> lost();
 
 private:
-    void followTrack(const std::string& track, std::vector<PlayerEvent>& events);
+    void followTrack(const std::string& track, std::chrono::milliseconds now, std::vector<PlayerEvent>& events);
 
     ExpectedTracks expected_;
-    std::string left_; // the track `advance` moved on from
+    std::string left_;     // the track `advance` moved on from
+    std::string justLeft_; // the track a change the player reported left, which it may report a while longer
+    std::chrono::milliseconds leftUntil_{};
     std::optional<TransportState> state_;
     std::optional<uint64_t> position_;
     std::chrono::milliseconds positionAt_{};

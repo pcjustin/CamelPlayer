@@ -50,6 +50,7 @@ std::string find(const Values& values, const char* name) {
 void PlayerFollower::expect(ExpectedTracks tracks) {
     expected_ = std::move(tracks);
     left_.clear();
+    justLeft_.clear();
     ended_ = false;
     position_.reset();
 }
@@ -74,9 +75,12 @@ void PlayerFollower::expectPosition(uint64_t positionMs, milliseconds now) {
     positionAt_ = now;
 }
 
-void PlayerFollower::followTrack(const std::string& track, std::vector<PlayerEvent>& events) {
+void PlayerFollower::followTrack(const std::string& track, milliseconds now, std::vector<PlayerEvent>& events) {
     if (expected_.current.empty() || track == expected_.current || track == left_) return;
+    if (track == justLeft_ && now < leftUntil_) return;
     if (track.empty()) return; // a stopped player has none, which its state reports
+    justLeft_ = expected_.current;
+    leftUntil_ = now + kSettling;
     if (track == expected_.next) {
         expected_ = {expected_.next, {}, expected_.current};
         events.push_back({PlayerEventKind::NextTrack});
@@ -100,7 +104,7 @@ std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observ
         return events;
     }
     if (observation.track && now >= settledAt_) {
-        followTrack(*observation.track, events);
+        followTrack(*observation.track, now, events);
         if (ended_) return events;
     }
     if (observation.state && observation.state != state_) {

@@ -315,8 +315,22 @@ TEST(PlayerFollowerTest, MovesThroughNextAndPrevious) {
     seen.track = "b";
     EXPECT_EQ(follower.observe(seen, 0ms), (std::vector<PlayerEvent>{{PlayerEventKind::NextTrack}}));
     seen.track = "a";
-    EXPECT_EQ(follower.observe(seen, 10ms), (std::vector<PlayerEvent>{{PlayerEventKind::PreviousTrack}}));
-    EXPECT_TRUE(follower.observe(seen, 20ms).empty());
+    EXPECT_EQ(follower.observe(seen, 3100ms), (std::vector<PlayerEvent>{{PlayerEventKind::PreviousTrack}}));
+    EXPECT_TRUE(follower.observe(seen, 3200ms).empty());
+}
+
+// A report of the track just left, queued before the change or from a player's other path, is no Previous.
+TEST(PlayerFollowerTest, TheTrackJustLeftReportedAgainIsNoPrevious) {
+    PlayerFollower follower;
+    follower.expect({"a", "b", ""});
+    PlayerObservation seen;
+    seen.track = "b";
+    EXPECT_EQ(follower.observe(seen, 0ms), (std::vector<PlayerEvent>{{PlayerEventKind::NextTrack}}));
+    seen.track = "a";
+    EXPECT_TRUE(follower.observe(seen, 10ms).empty());
+    EXPECT_TRUE(follower.observe(seen, 2000ms).empty());
+    seen.track = "b";
+    EXPECT_TRUE(follower.observe(seen, 2100ms).empty());
 }
 
 TEST(PlayerFollowerTest, AfterAdvancingTheOldTrackIsNoLongerNewsAndTheNextStillIs) {
@@ -541,6 +555,7 @@ TEST(PlayerLinkTest, FollowsNextAndPreviousFromThePlayersRemote) {
     link.expect({"http://camel/a", "http://camel/b", "http://camel/z"});
     renderer.emitLastChange(R"(<CurrentTrackURI val="http://camel/b"/>)");
     ASSERT_TRUE(events->waitFor(PlayerEventKind::NextTrack));
+    std::this_thread::sleep_for(3100ms); // a report of the track just left means nothing while the change settles
     renderer.emitLastChange(R"(<CurrentTrackURI val="http://camel/a"/>)");
     EXPECT_TRUE(events->waitFor(PlayerEventKind::PreviousTrack));
 }
@@ -620,6 +635,7 @@ TEST(PlayerLinkTest, FollowsAnOpenHomePlayer) {
     ASSERT_TRUE(events->waitFor(PlayerEventKind::Paused));
     renderer.emitVariable("Playlist", "Id", "8");
     ASSERT_TRUE(events->waitFor(PlayerEventKind::NextTrack));
+    std::this_thread::sleep_for(3100ms); // a report of the track just left means nothing while the change settles
     renderer.emitVariable("Playlist", "Id", "7");
     ASSERT_TRUE(events->waitFor(PlayerEventKind::PreviousTrack));
     renderer.emitVariable("Time", "Seconds", "10");
