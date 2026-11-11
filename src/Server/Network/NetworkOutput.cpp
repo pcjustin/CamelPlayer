@@ -129,6 +129,7 @@ struct Body {
     uint64_t retainedFrom = 0; // offset of retained[0]
     uint64_t framesWritten = 0;
     bool complete = false;
+    bool rendered = false; // the source has rendered all of its track, which a told length can end before
     std::vector<uint8_t> dsfLeft, dsfRight;
 
     uint64_t produced() const { return retainedFrom + retained.size(); }
@@ -574,7 +575,7 @@ private:
                 while (!closing_)
                     if (moved_.wait_until(lock, due) == std::cv_status::timeout) break;
                 if (closing_) return;
-                sent = !bodies_.empty() && !producing();
+                sent = !bodies_.empty() && std::ranges::all_of(bodies_, &Body::complete);
             }
             followChangeOfTrack();
             announceNext();
@@ -775,23 +776,31 @@ private:
         if (boundary != IRenderSource::kNoBoundary && boundary <= frames) {
             write(*body, rendered_.data(), boundary);
             finish(*body);
+            body->rendered = true;
             carry_.assign(rendered_.begin() + std::ptrdiff_t(boundary * bytesPerFrame),
                           rendered_.begin() + std::ptrdiff_t(frames * bytesPerFrame));
         } else if (frames) {
             write(*body, rendered_.data(), frames);
         }
-        if (ended && !frames) finish(*body);
+        if (ended && !frames) {
+            finish(*body);
+            body->rendered = true;
+        }
         return frames != 0;
     }
 
+    // The body of the track the source renders: one complete at its told length takes the rest of its track, dropped.
     _Requires_lock_held_(mutex_) Body* producing() {
-        const auto found = std::ranges::find_if(bodies_, [](const Body& b) { return !b.complete; });
+        const auto found = std::ranges::find_if(bodies_, [](const Body& b) { return !b.rendered; });
         return found == bodies_.end() ? nullptr : &*found;
     }
 
     _Requires_lock_held_(mutex_) void write(Body& body, const uint8_t* data, size_t frames) {
-        if (body.lengthKnown && body.framesWritten + frames > body.totalFrames)
-            frames = size_t(body.totalFrames - body.framesWritten);
+        if (body.lengthKnown && body.framesWritten + frames > body.totalFrames) {
+            const auto kept = size_t(body.totalFrames - body.framesWritten);
+            framesFinished_ += frames - kept; // never to be played
+            frames = kept;
+        }
         const size_t bytes = frames * format_.bytesPerFrame();
         if (format_.type == SampleType::Dsd8) {
             for (size_t i = 0; i < frames; ++i) {

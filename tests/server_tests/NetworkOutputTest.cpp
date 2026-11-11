@@ -49,8 +49,9 @@ upnp::PlayerDescription describe(const FakeRenderer& renderer) {
 // Frames counting up, so any lost, repeated or reordered byte shows. A boundary splits them into two tracks.
 class CountingSource final : public audio::IRenderSource {
 public:
-    CountingSource(uint32_t bytesPerFrame, uint64_t first, uint64_t second = 0)
-        : bytesPerFrame_(bytesPerFrame), first_(first), second_(second) {}
+    // `told` is the first track's length as the Engine tells it, when that is not the length it renders.
+    CountingSource(uint32_t bytesPerFrame, uint64_t first, uint64_t second = 0, uint64_t told = 0)
+        : bytesPerFrame_(bytesPerFrame), first_(first), second_(second), told_(told ? told : first) {}
 
     size_t render(uint8_t* destination, size_t frames) noexcept override {
         boundary_ = kNoBoundary;
@@ -65,7 +66,7 @@ public:
     }
     size_t boundaryInLastRender() const noexcept override { return boundary_; }
     bool renderEnded() const noexcept override { return at_.load() == first_ + second_.load(); }
-    audio::StreamTrack streamTrack() const override { return {L"first.flac", first_, 0, 1}; }
+    audio::StreamTrack streamTrack() const override { return {L"first.flac", told_, 0, 1}; }
     std::optional<audio::StreamTrack> nextStreamTrack() const override {
         const uint64_t second = second_.load();
         if (!second || !queued_) return std::nullopt;
@@ -89,6 +90,7 @@ private:
     uint32_t bytesPerFrame_;
     uint64_t first_;
     std::atomic<uint64_t> second_;
+    uint64_t told_;
     std::atomic<uint64_t> at_ = 0;
     size_t boundary_ = kNoBoundary;
     std::atomic<bool> queued_ = false;
@@ -288,6 +290,22 @@ TEST(NetworkOutputTest, OneUrlForEachTrackWithTheBoundaryExactlyWhereItBelongs) 
     EXPECT_EQ(le32(received.at(played[1]), 40), 20000U * 4);
     const auto actions = renderer.actions();
     EXPECT_NE(std::ranges::find(actions, "SetNextAVTransportURI"), actions.end());
+}
+
+// A track told shorter than it renders: the player gets the length it was told, and the next track its own audio.
+TEST(NetworkOutputTest, ATrackToldTooShortLeavesTheNextTrackItsOwnBody) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL); // real time
+    CountingSource source(k16.bytesPerFrame(), 30000, 20000, 25000);
+    source.queueSecond();
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return renderer.played().size() == 2; }));
+    const auto played = renderer.played();
+    const auto received = renderer.received();
+    EXPECT_TRUE(received.at(played[0]).compare(44, std::string::npos, source.expected(0, 25000)) == 0);
+    EXPECT_EQ(le32(received.at(played[1]), 40), 20000U * 4);
+    EXPECT_TRUE(received.at(played[1]).compare(44, std::string::npos, source.expected(30000, 20000)) == 0);
 }
 
 TEST(NetworkOutputTest, AnOpenHomePlayerGetsTheQueueAsItsPlaylist) {
