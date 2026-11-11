@@ -557,6 +557,11 @@ private:
             values = "<NewId>" + id + "</NewId>";
         } else if (name == "SeekId") {
             state_["track"] = between(body, "Value");
+            // Selecting a playlist entry makes the playlist the player's source, as on a real OpenHome player.
+            if (const auto source = state_.find("source"); source != state_.end() && source->second != "0") {
+                source->second = "0";
+                toPlaylistSource_ = true;
+            }
         } else if (name == "DeleteAll") {
             playlist_.clear();
             nextUri_.clear();
@@ -598,6 +603,11 @@ private:
             add("Seconds", "seconds", "0");
         } else if (name == "SourceIndex") {
             add("Value", "source", "0");
+        } else if (name == "SourceXml") {
+            std::string list = "<SourceList>";
+            for (const char* kind : {"Playlist", "Radio", "Receiver", "Spotify"})
+                list += std::string("<Source><Name>") + kind + "</Name><Type>" + kind + "</Type><Visible>true</Visible></Source>";
+            values = "<Value>" + escaped(list + "</SourceList>") + "</Value>";
         }
         return http(200, R"(<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:)" + name +
                              R"(Response xmlns:u=")" + type + R"(">)" + values + "</u:" + name +
@@ -611,6 +621,7 @@ private:
             fetching_ = false;
         }
         if (playRequested_.exchange(false)) startFetch();
+        if (toPlaylistSource_.exchange(false)) emitVariable("Product", "SourceIndex", "0");
     }
 
     void emit(const std::string& service, const std::string& properties) {
@@ -656,7 +667,8 @@ private:
     std::thread httpThread_, udpThread_;
     std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
                       refuseStreams_ = false, standby_ = false;
-    std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false;
+    std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false,
+                      toPlaylistSource_ = false;
     std::atomic<bool> oldTrack_ = false;
     std::atomic<uint64_t> nextTrackFill_ = 0;
     std::atomic<uint64_t> fetchLimit_ = 0;

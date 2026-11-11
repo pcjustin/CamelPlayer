@@ -533,6 +533,29 @@ TEST(NetworkOutputTest, AnOpenHomeTakeoverSendsThePlayerNothingMore) {
     EXPECT_TRUE(controlsSince(renderer, before).empty()) << controlsSince(renderer, before).front();
 }
 
+// A player on another source, its radio here, moves to its playlist when played to: that is no takeover.
+TEST(NetworkOutputTest, AnOpenHomePlayerOnAnotherSourceIsPlayedAtTheFirstTry) {
+    FakeRenderer renderer(RendererKind::OpenHome);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    renderer.set("source", "1");
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    ASSERT_TRUE(waitFor([&] { return renderer.subscribers() == 3; }));
+    renderer.emitVariable("Product", "SourceIndex", "1"); // as the player reports it once subscribed
+    std::this_thread::sleep_for(200ms);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    std::this_thread::sleep_for(1s);
+    EXPECT_EQ(raised, kNoError);
+    EXPECT_EQ(std::ranges::count(output.events(), PlayerEvent{PlayerEventKind::TakenOver}), 0);
+    raised = kNoError;
+    renderer.set("source", "3");
+    renderer.emitVariable("Product", "SourceIndex", "3");
+    EXPECT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceInUse); }));
+}
+
 TEST(NetworkOutputTest, AStopAskedForStillStopsThePlayer) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);

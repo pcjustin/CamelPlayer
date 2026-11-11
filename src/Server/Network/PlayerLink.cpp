@@ -260,6 +260,20 @@ struct PlayerLink::Impl {
         }
     }
 
+    // OpenHome: the index of the player's Playlist source, which the playlist moves it to as it is played.
+    std::optional<std::string> playlistSource() {
+        const auto reply = call("Product", "SourceXml", {});
+        const auto list = reply.ok ? upnp::parseXml(find(reply.values, "Value")) : std::nullopt;
+        if (!list) return std::nullopt;
+        size_t index = 0;
+        for (const auto& source : list->children)
+            if (source.name == "Source") {
+                if (source.childText("Type") == "Playlist") return std::to_string(index);
+                ++index;
+            }
+        return std::nullopt;
+    }
+
     // Throws when the player does not answer.
     void poll() {
         PlayerObservation seen;
@@ -349,9 +363,10 @@ bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
             if (!inserted.ok || id == inserted.values.end() || !link.call("Playlist", "SeekId", {{"Value", id->second}}).ok)
                 return false;
             link.currentId = id->second;
+            const auto playlist = link.playlistSource();
             std::scoped_lock lock(link.mutex);
             link.follower.expectLoaded({id->second, {}, {}}, link.now());
-            link.ownSource = link.seenSource;
+            link.ownSource = playlist ? playlist : link.seenSource;
             return true;
         } catch (const std::exception& e) {
             log::warn("network player Insert: %s", e.what());
