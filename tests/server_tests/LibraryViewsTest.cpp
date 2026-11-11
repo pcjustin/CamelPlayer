@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <random>
 
+#include "ControlPoint/TreeReads.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/LibraryViews.h"
 #include "Server/Library/PlayStatistics.h"
@@ -541,3 +542,15 @@ TEST_F(LibraryViewsTest, DeepPagesOfAHundredThousandTracksStayFast) {
 }
 
 } // namespace
+
+// A folder opened, closed and opened again while the library is busy has two reads on their way: only the last lists
+// its rows, or they would be listed twice.
+TEST(TreeReads, OnlyAFoldersLastReadListsItsRows) {
+    ui::TreeReads reads;
+    const auto first = reads.start(7);
+    const auto second = reads.start(7);
+    const auto other = reads.start(8);
+    EXPECT_FALSE(reads.current(7, first));
+    EXPECT_TRUE(reads.current(7, second));
+    EXPECT_TRUE(reads.current(8, other));
+}

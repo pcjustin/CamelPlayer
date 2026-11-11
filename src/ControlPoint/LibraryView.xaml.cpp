@@ -894,18 +894,20 @@ void LibraryView::expandTree(CamelPlayer::BrowseItem const& parent) {
         node->setExpanded(true);
     }
     ++treeOpening_;
-    background([this, server = server_, items = treeItems_, folder, depth, parent, texts = Texts{}] {
+    const uint64_t read = folder ? treeReads_.start(*folder) : 0;
+    background([this, server = server_, items = treeItems_, folder, depth, parent, read, texts = Texts{}] {
         auto listing = std::make_shared<LibraryFolderListing>();
         try {
             *listing = server->browseFolder(folder);
         } catch (const std::exception& e) {
             camel::log::warn("library view: %s", e.what());
         }
-        return std::function<void()>([this, items, listing, folder, depth, parent, texts] {
+        return std::function<void()>([this, items, listing, folder, depth, parent, read, texts] {
             if (!items || items != treeItems_) return; // a reload counts its own
             uint32_t at = 0;
-            // Closed again while it was read.
-            const bool shown = !parent || (treeItems_.IndexOf(parent, at) && get_self<BrowseItem>(parent)->row().expanded);
+            // Closed again while it was read, or opened again, which reads it again.
+            const bool shown = !parent || (treeItems_.IndexOf(parent, at) && get_self<BrowseItem>(parent)->row().expanded &&
+                                           treeReads_.current(*folder, read));
             if (shown) {
                 if (parent) ++at;
                 std::vector<CamelPlayer::BrowseItem> open;
