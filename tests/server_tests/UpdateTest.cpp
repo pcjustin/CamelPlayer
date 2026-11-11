@@ -152,18 +152,29 @@ TEST(Update, ChecksDownloadsAndVerifiesAgainstAFakeGitHub) {
     const auto release = update::check("0.1.0");
     ASSERT_TRUE(release);
 
-    const std::string zip = makeZip(dir / L"source.zip", {{"CamelPlayer.exe", "new"}, {"CamelUpdater.exe", "updater"}});
+    const std::string zip = makeZip(
+        dir / L"source.zip", {{"CamelPlayer.exe", "new"}, {"CamelUpdater.exe", "updater"}, {"install-manifest.txt", "the list"}});
     fs::create_directories(dir / L"hash");
     writeText(dir / L"hash" / L"z", zip);
     const auto hash = update::sha256File(dir / L"hash" / L"z");
+    writeText(dir / L"hash" / L"list", "the list");
     github.route("/zip", zip);
     github.route("/sums", hash + "  " + release->zipName + "\n");
     uint64_t lastDone = 0, lastTotal = 0;
-    const auto files = update::prepare(*release, [&](uint64_t done, uint64_t total) { lastDone = done, lastTotal = total; }, {});
-    EXPECT_EQ(files, dir / L"temp" / L"CamelPlayer-update" / L"0.1.1" / L"files");
-    EXPECT_EQ(readText(files / L"CamelPlayer.exe"), "new");
+    const auto prepared =
+        update::prepare(*release, [&](uint64_t done, uint64_t total) { lastDone = done, lastTotal = total; }, {});
+    EXPECT_EQ(prepared.files, dir / L"temp" / L"CamelPlayer-update" / L"0.1.1" / L"files");
+    EXPECT_EQ(readText(prepared.files / L"CamelPlayer.exe"), "new");
+    EXPECT_EQ(prepared.manifestSha256, update::sha256File(dir / L"hash" / L"list")) << "what the updater checks the files by";
     EXPECT_EQ(lastDone, zip.size());
     EXPECT_EQ(lastTotal, zip.size());
+
+    const std::string unlisted = makeZip(dir / L"unlisted.zip", {{"CamelPlayer.exe", "new"}});
+    writeText(dir / L"hash" / L"u", unlisted);
+    github.route("/zip", unlisted);
+    github.route("/sums", update::sha256File(dir / L"hash" / L"u") + "  " + release->zipName + "\n");
+    EXPECT_THROW(update::prepare(*release, {}, {}), std::runtime_error) << "a zip without install-manifest.txt";
+    github.route("/zip", zip);
 
     github.route("/sums", std::string(64, '0') + "  " + release->zipName + "\n");
     EXPECT_THROW(update::prepare(*release, {}, {}), std::runtime_error);
@@ -261,9 +272,61 @@ struct InstallFixture {
         EXPECT_EQ(result->kind, update::Result::Kind::Failed);
         EXPECT_EQ(result->version, "0.1.1");
     }
+
+    // Lists the new files with their hashes, as package.ps1 does, and gives the updater the list's own hash.
+    void seal() {
+        std::string text;
+        for (const char* name : {"CamelPlayer.exe", "CamelUpdater.exe", "en-us/a.mui"}) {
+            const auto file = files / fs::path(name);
+            text += update::sha256File(file) + "  " + std::to_string(fs::file_size(file)) + "  " + name + "\r\n";
+        }
+        writeText(files / camel::updatefiles::kManifest, text);
+        options.manifestSha256 = update::sha256File(files / camel::updatefiles::kManifest);
+    }
 };
 
 } // namespace
+
+TEST(Update, CheckedFilesAreInstalled) {
+    InstallFixture f(L"update-checked");
+    f.seal();
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    EXPECT_EQ(f.started, std::vector<std::string>{"new"});
+    EXPECT_EQ(readText(f.app / L"CamelPlayer.exe"), "new");
+}
+
+// An elevated updater installs from a folder any program of the user can write: what changed there after the player
+// checked the download is neither installed nor started.
+TEST(Update, AFileChangedAfterTheCheckIsNotInstalled) {
+    InstallFixture f(L"update-changed");
+    f.seal();
+    writeText(f.files / L"CamelPlayer.exe", "bad");
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
+    EXPECT_EQ(f.started, std::vector<std::string>{"old"});
+    f.expectOldVersionRestored();
+}
+
+TEST(Update, AFileAddedAfterTheCheckIsNotInstalled) {
+    InstallFixture f(L"update-added");
+    f.seal();
+    writeText(f.files / L"version.dll", "bad");
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
+    EXPECT_EQ(f.started, std::vector<std::string>{"old"});
+    EXPECT_FALSE(fs::exists(f.app / L"version.dll"));
+    f.expectOldVersionRestored();
+}
+
+TEST(Update, AListChangedAfterTheCheckIsNotInstalled) {
+    InstallFixture f(L"update-relisted");
+    f.seal();
+    const auto checked = f.options.manifestSha256;
+    writeText(f.files / L"CamelPlayer.exe", "bad");
+    f.seal();
+    f.options.manifestSha256 = checked;
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::RolledBack);
+    EXPECT_EQ(f.started, std::vector<std::string>{"old"});
+    f.expectOldVersionRestored();
+}
 
 TEST(Update, InstallsTheNewVersionAndRemovesTheBackups) {
     InstallFixture f(L"update-install");

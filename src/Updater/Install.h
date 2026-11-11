@@ -20,6 +20,8 @@ struct Options {
     std::filesystem::path dataBackup; // where settings.json and library.db are kept until the new version started
     std::wstring version;             // the new version
     std::wstring previous;            // the version being replaced; empty when not known
+    // SHA-256 of the new version's install-manifest.txt as the player extracted it; empty: the files are not checked.
+    std::string manifestSha256;
 };
 
 // What the installation needs from the system; tests replace it.

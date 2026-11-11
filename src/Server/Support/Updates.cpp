@@ -260,7 +260,7 @@ std::filesystem::path tempDirectory() {
     return std::filesystem::path(temp) / L"CamelPlayer-update";
 }
 
-std::filesystem::path prepare(const Release& release, const Progress& progress, const CancellationToken& token) {
+Prepared prepare(const Release& release, const Progress& progress, const CancellationToken& token) {
     const auto folder = tempDirectory() / toWide(release.version);
     std::filesystem::create_directories(folder);
     const auto zip = folder / toWide(release.zipName);
@@ -281,10 +281,12 @@ std::filesystem::path prepare(const Release& release, const Progress& progress, 
     std::filesystem::remove_all(files, error);
     extractZip(zip, files);
     if (!std::filesystem::exists(files / files::kPlayer, error)) throw std::runtime_error("the zip has no CamelPlayer.exe");
-    return files;
+    if (!std::filesystem::exists(files / files::kManifest, error))
+        throw std::runtime_error("the zip has no install-manifest.txt");
+    return {files, sha256File(files / files::kManifest)};
 }
 
-void startUpdater(const std::filesystem::path& programDirectory, const std::filesystem::path& files,
+void startUpdater(const std::filesystem::path& programDirectory, const Prepared& prepared,
                   const std::filesystem::path& dataDirectory, std::string_view version, std::string_view current) {
     const auto updater = tempDirectory() / files::kUpdater;
     std::filesystem::copy_file(programDirectory / files::kUpdater, updater, std::filesystem::copy_options::overwrite_existing);
@@ -294,8 +296,9 @@ void startUpdater(const std::filesystem::path& programDirectory, const std::file
         return L"\"" + text + L"\"";
     };
     std::wstring command = quoted(updater) + L" --pid " + std::to_wstring(GetCurrentProcessId()) + L" --app " +
-                           quoted(programDirectory) + L" --files " + quoted(files) + L" --data " + quoted(dataDirectory) +
-                           L" --version " + toWide(std::string(version)) + L" --from " + toWide(std::string(current));
+                           quoted(programDirectory) + L" --files " + quoted(prepared.files) + L" --data " +
+                           quoted(dataDirectory) + L" --version " + toWide(std::string(version)) + L" --from " +
+                           toWide(std::string(current)) + L" --manifest " + toWide(prepared.manifestSha256);
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};

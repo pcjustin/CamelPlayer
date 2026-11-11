@@ -426,11 +426,11 @@ private:
     // Automatic updates (docs/Plan.md §8.6): the offered release, its verified files once downloaded, and the download.
     winrt::fire_and_forget checkForUpdates(bool manual);
     void showUpdateOffer();
-    winrt::fire_and_forget restartToUpdate(camel::server::update::Release release, std::filesystem::path files);
+    winrt::fire_and_forget restartToUpdate(camel::server::update::Release release, camel::server::update::Prepared prepared);
     // What the updater left from the previous run: the changelog after an update, or the undone or cancelled update.
     winrt::fire_and_forget showUpdateResult();
     std::optional<camel::server::update::Release> release_;
-    std::filesystem::path updateFiles_;
+    camel::server::update::Prepared updateFiles_;
     camel::server::CancellationToken updateToken_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer updateTimer_{nullptr};
     // The installation check: at each start (a full one for a version not verified yet) and from Settings › About.

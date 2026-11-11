@@ -4654,7 +4654,7 @@ winrt::fire_and_forget MainWindow::checkForUpdates(bool manual) {
         }
         camel::log::info("update: CamelPlayer %s is available", release->version.c_str());
         self->release_ = release;
-        self->updateFiles_.clear();
+        self->updateFiles_ = {};
         self->showUpdateOffer();
     });
 }
@@ -4665,9 +4665,9 @@ void MainWindow::showUpdateOffer() {
     const std::wstring version = toWide(release.version);
     auto bar = UpdateBar();
     bar.Severity(InfoBarSeverity::Informational);
-    bar.Title(ui::format(updateFiles_.empty() ? L"Update_AvailableTitle" : L"Update_ReadyTitle", {version}));
+    bar.Title(ui::format(updateFiles_.files.empty() ? L"Update_AvailableTitle" : L"Update_ReadyTitle", {version}));
     bar.Message(ui::format(L"Update_AvailableText", {L"" CAMEL_VERSION_STRING}));
-    UpdateInstallButton().Content(box_value(tr(updateFiles_.empty() ? L"Update_Install" : L"Update_Restart")));
+    UpdateInstallButton().Content(box_value(tr(updateFiles_.files.empty() ? L"Update_Install" : L"Update_Restart")));
     UpdateInstallButton().Visibility(Visibility::Visible);
     UpdateNotesButton().Visibility(release.notes.empty() ? Visibility::Collapsed : Visibility::Visible);
     UpdateSkipButton().Visibility(Visibility::Visible);
@@ -4680,7 +4680,7 @@ void MainWindow::showUpdateOffer() {
 winrt::fire_and_forget MainWindow::OnUpdateInstallClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
     if (!release_) co_return;
-    if (!updateFiles_.empty()) {
+    if (!updateFiles_.files.empty()) {
         restartToUpdate(*release_, updateFiles_);
         co_return;
     }
@@ -4699,7 +4699,7 @@ winrt::fire_and_forget MainWindow::OnUpdateInstallClick(Windows::Foundation::IIn
     auto weak = get_weak();
     auto queue = DispatcherQueue();
     co_await resume_background();
-    std::filesystem::path files;
+    update::Prepared files;
     std::string failure;
     auto shownPercent = std::make_shared<int>(-1);
     try {
@@ -4764,7 +4764,7 @@ void MainWindow::OnUpdateSkipClick(Windows::Foundation::IInspectable const&, Rou
 
 // Hands the verified files to CamelUpdater.exe and exits the normal way, so the queue and position are saved. The
 // running version's own files repair the installation.
-winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, std::filesystem::path files) {
+winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, update::Prepared prepared) {
     auto strong = get_strong();
     const bool repair = release.version == CAMEL_VERSION_STRING;
     auto bar = repair ? RepairBar() : UpdateBar();
@@ -4783,7 +4783,7 @@ winrt::fire_and_forget MainWindow::restartToUpdate(update::Release release, std:
         }
     }
     try {
-        update::startUpdater(programDirectory(), files, camel::dataDirectory(), release.version, CAMEL_VERSION_STRING);
+        update::startUpdater(programDirectory(), prepared, camel::dataDirectory(), release.version, CAMEL_VERSION_STRING);
     } catch (const std::exception& e) {
         camel::log::warn("update: %s", e.what());
         if (repair) showRepairOffer();
@@ -4920,7 +4920,7 @@ winrt::fire_and_forget MainWindow::OnRepairClick(Windows::Foundation::IInspectab
     auto queue = DispatcherQueue();
     co_await resume_background();
     std::optional<update::Release> release, newer;
-    std::filesystem::path files;
+    update::Prepared files;
     std::string failure;
     auto shownPercent = std::make_shared<int>(-1);
     try {
@@ -4960,7 +4960,7 @@ winrt::fire_and_forget MainWindow::OnRepairClick(Windows::Foundation::IInspectab
             camel::log::info("repair: %s is no longer on GitHub; offering %s", CAMEL_VERSION_STRING, newer->version.c_str());
             self->RepairBar().IsOpen(false);
             self->release_ = newer;
-            self->updateFiles_.clear();
+            self->updateFiles_ = {};
             self->showUpdateOffer();
             self->UpdateBar().Message(tr(L"Repair_UseUpdate"));
             return;

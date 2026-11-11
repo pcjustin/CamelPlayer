@@ -163,6 +163,9 @@ std::map<std::wstring, std::wstring> arguments(bool& elevatedRun) {
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    // It runs from a folder any program of the user can write, so a DLL is never looked for beside it; the linker's
+    // /DEPENDENTLOADFLAG does the same for what it imports.
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     bool elevatedRun = false;
     auto args = arguments(elevatedRun);
     if (args[L"app"].empty() || args[L"files"].empty() || args[L"data"].empty() || args[L"version"].empty()) return 2;
@@ -171,6 +174,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     camel::updater::Options options{args[L"app"],     args[L"files"],
                                     args[L"data"],    fs::path(self).parent_path() / files::kDataBackup,
                                     args[L"version"], args[L"from"]};
+    for (const wchar_t digit : args[L"manifest"]) options.manifestSha256 += char(digit); // hexadecimal
     openLog(options.data);
     const auto player = options.app / files::kPlayer;
 
@@ -229,6 +233,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             CloseHandle(process);
         }
     };
+    if (asAdministrator && options.manifestSha256.empty()) {
+        log(L"no checked install-manifest.txt was given; update cancelled");
+        camel::updater::writeResult(options.data, L"cancelled", options.version);
+        host.startPlayer(player);
+        if (SUCCEEDED(com)) CoUninitialize();
+        return 1;
+    }
     const auto outcome = camel::updater::install(options, host);
     if (SUCCEEDED(com)) CoUninitialize();
     return outcome == camel::updater::Outcome::Installed ? 0 : 1;

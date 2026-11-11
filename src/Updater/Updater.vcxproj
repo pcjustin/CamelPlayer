@@ -42,6 +42,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>shell32.lib;shlwapi.lib;ole32.lib;oleaut32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- LOAD_LIBRARY_SEARCH_SYSTEM32: it runs from a folder any program of the user can write. -->
+      <AdditionalOptions>/DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

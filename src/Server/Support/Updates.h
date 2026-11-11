@@ -86,12 +86,18 @@ std::string describeInstallation(const std::filesystem::path& programDirectory);
 
 // %TEMP%\CamelPlayer-update: downloads, the extracted files, the data snapshot and the running updater.
 std::filesystem::path tempDirectory();
-// Downloads the zip and sums into tempDirectory()\<version>, verifies the zip and extracts it; returns the folder with
-// the new program files. Throws std::runtime_error.
-std::filesystem::path prepare(const Release& release, const Progress& progress, const CancellationToken& token);
+// The new program files, and the SHA-256 of their install-manifest.txt as extracted from the verified zip, which the
+// updater checks them against.
+struct Prepared {
+    std::filesystem::path files;
+    std::string manifestSha256;
+};
+// Downloads the zip and sums into tempDirectory()\<version>, verifies the zip and extracts it. Throws
+// std::runtime_error.
+Prepared prepare(const Release& release, const Progress& progress, const CancellationToken& token);
 // Copies CamelUpdater.exe from `programDirectory` into tempDirectory() and starts it for this process, which runs
 // `current`. The caller then exits the normal way. Throws std::runtime_error.
-void startUpdater(const std::filesystem::path& programDirectory, const std::filesystem::path& files,
+void startUpdater(const std::filesystem::path& programDirectory, const Prepared& prepared,
                   const std::filesystem::path& dataDirectory, std::string_view version, std::string_view current);
 // Removes tempDirectory() when no update is in progress (no update-result file in `dataDirectory`).
 void cleanTemp(const std::filesystem::path& dataDirectory);
