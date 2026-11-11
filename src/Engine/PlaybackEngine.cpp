@@ -318,6 +318,12 @@ public:
         resumeOnDefault_ = false;
         waitingForSource_ = false;
         queued_.clear();
+        {
+            // What was queued goes; a stream output hears of this file at the crossfade's seam instead.
+            std::lock_guard lock(streamMutex_);
+            nextStream_.clear();
+            nextStream_.push_back(streamTrackOf(file, *next));
+        }
         manualTransition_ = rust_->transitions().count + 1;
         heldUntil_.store(manualTransition_, std::memory_order_release);
         fadeSkip_ = FadeSkip::None;
@@ -496,10 +502,8 @@ public:
         queued_.push_back(
             {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, next->lossy, gainDb});
         {
-            const uint32_t in = next->source.sampleRate, out = fmt_.sampleRate;
             std::lock_guard lock(streamMutex_);
-            nextStream_.push_back(
-                {file.wstring(), in == out || !in ? next->shown : (next->shown * out + in / 2) / in, 0, ++streamSequence_});
+            nextStream_.push_back(streamTrackOf(file, *next));
         }
         publishQueue();
         return true;
@@ -547,6 +551,12 @@ public:
         }
         next.plan = *plan;
         return next;
+    }
+
+    // `next` as a stream output is told of it, its length in the stream's frames.
+    _Requires_lock_held_(streamMutex_) StreamTrack streamTrackOf(const std::filesystem::path& file, const Prepared& next) {
+        const uint32_t in = next.source.sampleRate, out = fmt_.sampleRate;
+        return {file.wstring(), in == out || !in ? next.shown : (next.shown * out + in / 2) / in, 0, ++streamSequence_};
     }
 
     // `src` converted to the open stream's format; nullopt for a raw DSD stream, or DSD without permission to become PCM.
@@ -1401,8 +1411,13 @@ private:
         if (audible == handledTransitions_) return;
         while (handledTransitions_ < audible) {
             ++handledTransitions_;
-            // A manual crossfade made its file current when it was asked for.
-            if (handledTransitions_ == manualTransition_ || queued_.empty()) continue;
+            // A manual crossfade made its file current when it was asked for; its seam is now past.
+            if (handledTransitions_ == manualTransition_) {
+                std::lock_guard lock(streamMutex_);
+                if (!nextStream_.empty()) nextStream_.pop_front();
+                continue;
+            }
+            if (queued_.empty()) continue;
             const Queued next = queued_.front();
             queued_.pop_front();
             {
