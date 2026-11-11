@@ -1053,12 +1053,23 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     std::unordered_set<int64_t> present;
     std::deque<Listing> pending;
     if (!partial) pending.push_back(Listing{path});
-    for (const auto& folder : subtrees)
-        if (const DWORD attributes = GetFileAttributesW(folder.c_str());
-            attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
-            pending.push_back(Listing{folder});
-    std::deque<std::future<Listing>> active;
     bool complete = true;
+    for (const auto& folder : subtrees) {
+        const DWORD attributes = GetFileAttributesW(folder.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            pending.push_back(Listing{folder});
+            continue;
+        }
+        // Only a folder that is not there loses its files. One that cannot be checked, as when a share blinks or the
+        // folder is being renamed, keeps them, and is left for the monitor to scan again.
+        if (const DWORD error = GetLastError();
+            attributes == INVALID_FILE_ATTRIBUTES && error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+            complete = false;
+            report.deferred = true;
+            report.diagnostics.push_back(key(folder) + ": " + std::to_string(error));
+        }
+    }
+    std::deque<std::future<Listing>> active;
     std::vector<Entry> batch;
     const auto derivedKey = "library_derived_dirty:" + std::to_string(root);
     auto dirty = reader.prepare("SELECT 1 FROM app_state WHERE key=?");

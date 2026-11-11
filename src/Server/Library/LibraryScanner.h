@@ -23,7 +23,7 @@ std::filesystem::path spelledLibraryPath(const std::filesystem::path& path);
 
 struct ScanReport {
     bool complete = false;
-    bool deferred = false;
+    bool deferred = false; // work left for the monitor to do again: fingerprints while music played, a folder not checked
     bool online = true;
     uint32_t rootError = 0; // Win32 error distinguishes access denial from a missing/offline root
     size_t seen = 0, updated = 0, moved = 0;
@@ -56,7 +56,8 @@ public:
     // declared another; a row that already holds it is not written.
     void recordExactLength(int64_t file, uint32_t sampleRate, uint64_t frames);
     // With `folders` (inside the root), only those subtrees are listed and reconciled: what a change notification named.
-    // A folder that no longer exists just loses its files. The root's last complete scan time is left as it was.
+    // A folder that no longer exists just loses its files; one that cannot be checked leaves them, and the scan incomplete
+    // and deferred. The root's last complete scan time is left as it was.
     ScanReport scan(int64_t root, const CancellationToken& token = {}, const std::vector<std::filesystem::path>& folders = {});
     // Records sampled fingerprints of present files that have none or only a full one.
     FingerprintReport fingerprint(int64_t root, const CancellationToken& token = {});

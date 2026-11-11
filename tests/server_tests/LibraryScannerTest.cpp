@@ -9,6 +9,7 @@
 #include <regex>
 #include <thread>
 #include <wil/resource.h>
+#include <aclapi.h>
 
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
@@ -1257,6 +1258,72 @@ TEST_F(LibraryScannerTest, AFolderScanReconcilesOnlyThatSubtree) {
 
     fs::remove_all(dir / "music" / "album");
     ASSERT_TRUE(scanner.scan(root, {}, {stored / "album"}).complete);
+    EXPECT_EQ(count(store), 1);
+}
+
+namespace {
+
+// Denies the current user `access` to `path` until it goes out of scope.
+class Denied {
+public:
+    Denied(fs::path path, DWORD access) : path_(std::move(path)) {
+        PACL dacl = nullptr;
+        PSECURITY_DESCRIPTOR descriptor = nullptr;
+        if (GetNamedSecurityInfoW(path_.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr,
+                                  &descriptor) != ERROR_SUCCESS)
+            throw std::runtime_error("cannot read the folder's permissions");
+        descriptor_.reset(descriptor);
+        dacl_ = dacl;
+        EXPLICIT_ACCESS_W deny{};
+        deny.grfAccessPermissions = access;
+        deny.grfAccessMode = DENY_ACCESS;
+        deny.grfInheritance = NO_INHERITANCE;
+        BuildTrusteeWithNameW(&deny.Trustee, const_cast<wchar_t*>(L"CURRENT_USER"));
+        PACL denying = nullptr;
+        if (SetEntriesInAclW(1, &deny, dacl, &denying) != ERROR_SUCCESS) throw std::runtime_error("cannot build the deny entry");
+        const wil::unique_hlocal freed(denying);
+        if (SetNamedSecurityInfoW(const_cast<wchar_t*>(path_.c_str()), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                  nullptr, denying, nullptr) != ERROR_SUCCESS)
+            throw std::runtime_error("cannot deny the folder");
+    }
+    ~Denied() {
+        SetNamedSecurityInfoW(const_cast<wchar_t*>(path_.c_str()), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                              dacl_, nullptr);
+    }
+    Denied(const Denied&) = delete;
+    Denied& operator=(const Denied&) = delete;
+
+private:
+    fs::path path_;
+    wil::unique_hlocal_security_descriptor descriptor_;
+    PACL dacl_ = nullptr; // within descriptor_
+};
+
+} // namespace
+
+// A folder that cannot be checked, as when a share blinks or a folder is being renamed, is not a folder that is gone: its
+// files stay as they are, and the scan is left to be done again.
+TEST_F(LibraryScannerTest, AFolderThatCannotBeCheckedKeepsItsFiles) {
+    const auto disc = dir / "music" / "album" / "disc";
+    fs::create_directories(disc);
+    fs::copy_file(testutil::testFile("16-44.1k"), disc / "one.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_EQ(count(store), 1);
+    auto row = store.openReader().prepare("SELECT path FROM roots");
+    ASSERT_TRUE(row.step());
+    const fs::path stored(camel::toWide(row.text(0)));
+    {
+        const Denied listing(dir / "music" / "album", FILE_LIST_DIRECTORY);
+        const Denied attributes(disc, FILE_READ_ATTRIBUTES);
+        ASSERT_EQ(GetFileAttributesW(disc.c_str()), INVALID_FILE_ATTRIBUTES);
+        ASSERT_EQ(GetLastError(), DWORD(ERROR_ACCESS_DENIED));
+        const auto report = scanner.scan(root, {}, {stored / "album" / "disc"});
+        EXPECT_FALSE(report.complete);
+        EXPECT_TRUE(report.deferred) << "the monitor scans it again";
+    }
     EXPECT_EQ(count(store), 1);
 }
 
