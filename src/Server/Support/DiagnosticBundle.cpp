@@ -65,12 +65,20 @@ std::string systemText(const DiagnosticInput& input) {
     return out.str();
 }
 
+// Every text a setting holds is looked through, so a path setting added later is left out too.
+void redactTexts(nlohmann::json& value) {
+    if (value.is_string())
+        value = redactPaths(value.get<std::string>());
+    else if (value.is_structured())
+        for (auto& child : value) redactTexts(child);
+}
+
 std::string settingsText(const DiagnosticInput& input) {
     auto text = readFile(input.dataDirectory / L"settings.json");
     if (input.includePaths || text.empty()) return text;
     try {
         auto json = nlohmann::json::parse(text);
-        json.erase("lastFile");
+        redactTexts(json);
         return json.dump(2);
     } catch (const std::exception&) {
         return "settings.json is not valid JSON\n";

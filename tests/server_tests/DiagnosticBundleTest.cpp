@@ -5,8 +5,12 @@
 #include <zlib.h>
 
 #include <fstream>
+#include <functional>
 #include <map>
 
+#include <nlohmann/json.hpp>
+
+#include "Common/settings/Settings.h"
 #include "Server/Support/DiagnosticBundle.h"
 #include "Server/Support/ZipWriter.h"
 #include "TestUtil.h"
@@ -151,6 +155,33 @@ TEST(DiagnosticBundle, LeavesPathsOutUnlessIncluded) {
     EXPECT_NE(entries.at("logs/CamelPlayer-20261027.log").find("secret.flac"), std::string::npos);
     EXPECT_NE(entries.at("playback.txt").find("secret.flac"), std::string::npos);
     EXPECT_NE(entries.at("library-folders.txt").find("\\\\nas\\music"), std::string::npos);
+}
+
+// Every text a setting holds may be a path, the impulse response's and any added later among them.
+TEST(DiagnosticBundle, LeavesOutThePathOfEverySetting) {
+    auto json = nlohmann::json::parse(toJson(Settings{}));
+    json["convolution"]["file"] = "";
+    size_t texts = 0;
+    const std::function<void(nlohmann::json&)> fill = [&](nlohmann::json& value) {
+        if (value.is_string()) {
+            value = R"(C:\Users\secret\file )" + std::to_string(++texts) + ".wav";
+        } else if (value.is_structured()) {
+            for (auto& child : value) fill(child);
+        }
+    };
+    fill(json);
+    json["later"] = {{"folder", R"(\\nas\secret\share)"}};
+    ASSERT_GT(texts, 5u);
+    const auto data = testutil::tempDir() / L"diagnostic-every-path";
+    std::filesystem::remove_all(data);
+    writeText(data / L"settings.json", json.dump());
+    DiagnosticInput input;
+    input.dataDirectory = data;
+    const auto file = testutil::tempDir() / L"diagnostic-every-path.zip";
+    writeDiagnosticBundle(file, input);
+    const auto settings = readZip(file).at("settings.json");
+    EXPECT_EQ(settings.find("secret"), std::string::npos) << settings;
+    EXPECT_TRUE(nlohmann::json::parse(settings).is_object());
 }
 
 } // namespace
