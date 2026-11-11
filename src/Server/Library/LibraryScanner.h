@@ -86,6 +86,8 @@ public:
         std::function<bool()> coversShown;
         std::function<PlaybackReads()> playback;
         bool watchChanges = true; // off in tests, standing for a share whose change notifications are missed
+        // On in tests, standing for storage that refuses change notifications (some NAS and SMB servers, rclone, WebDAV).
+        bool refuseNotifications = false;
     };
     explicit LibraryMonitor(LibraryStore& store);
     LibraryMonitor(LibraryStore& store, const Options& options);

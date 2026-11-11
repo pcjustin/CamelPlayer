@@ -1559,6 +1559,7 @@ private:
         Clock::time_point due, lastPoll;
         bool pending = false;
         bool deferred = false;
+        bool unwatchable = false; // its storage gives no change notifications, so it is only polled
         std::function<BackgroundPace()> pace;
         Path root;
         // Folders the notifications named since the last scan; a full scan when they cannot say (overflow, failure,
@@ -1618,6 +1619,8 @@ private:
         }
     };
 
+    bool arm(Watch& watch) const { return !options_.refuseNotifications && watch.arm(); }
+
     void run(const std::stop_token& stop) {
         SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
         std::map<int64_t, std::unique_ptr<Watch>> watches;
@@ -1653,14 +1656,15 @@ private:
                                     w.prepare("UPDATE roots SET online=1 WHERE id=?").bind(1, id).run();
                                 })
                                 .get();
-                        if (!watches.contains(id) || (options_.watchChanges && !watches.at(id)->pending)) {
+                        if (!watches.contains(id) ||
+                            (options_.watchChanges && !watches.at(id)->pending && !watches.at(id)->unwatchable)) {
                             watches.erase(id);
                             auto watch = std::make_unique<Watch>();
                             watch->pace = scanner_.pace(path);
                             watch->directory =
                                 openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
                             watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-                            if (watch->directory && watch->event && options_.watchChanges) watch->arm();
+                            if (options_.watchChanges) watch->unwatchable = !(watch->directory && watch->event && arm(*watch));
                             watch->root = path;
                             watch->due = time;
                             watch->lastPoll = time;
@@ -1715,6 +1719,7 @@ private:
                     if (watch.pending && WaitForSingleObject(watch.event.get(), 0) == WAIT_OBJECT_0) {
                         DWORD bytes = 0;
                         const bool ok = bool(GetOverlappedResult(watch.directory.get(), &watch.io, &bytes, FALSE));
+                        const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
                         watch.pending = false;
                         // Empty/overflowed buffers and failed notifications both require a full incremental scan.
                         if (ok && bytes)
@@ -1722,7 +1727,9 @@ private:
                         else
                             watch.full = true;
                         if (watch.due == Clock::time_point{} || (ok && bytes)) watch.due = Clock::now() + options_.coalesce;
-                        watch.arm();
+                        // One that fails other than for too many changes will fail again: the storage is polled from then on.
+                        const bool watching = (ok || error == ERROR_NOTIFY_ENUM_DIR) && arm(watch);
+                        watch.unwatchable = !watching;
                     }
                     if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested() &&
                         !scans.contains(id)) {

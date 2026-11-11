@@ -171,6 +171,33 @@ fs::path storedRoot(LibraryStore& store) {
 
 } // namespace
 
+// Storage that refuses change notifications is scanned at its poll interval, not again at every check that it is there.
+TEST(UnwatchedStorage, IsScannedOnlyAtItsPollInterval) {
+    const auto dir = freshDir("unwatched");
+    fs::create_directories(dir / "music");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "one.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    // Every scan of the whole folder records when it ended; this clears it, so a scan shows as a time again.
+    const auto forget = [&] { store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET last_scan=NULL"); }).get(); };
+    const auto scanned = [&] { return store.openReader().scalar("SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; };
+    auto options = quietMonitor(); // checks the storage every 100 ms
+    options.refuseNotifications = true;
+    {
+        LibraryMonitor monitor(store, options);
+        ASSERT_TRUE(waitFor([&] { return filesIn(store) == 1 && scanned() && store.scanProgress().scans == 0; }));
+        forget();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        EXPECT_FALSE(scanned()) << "scanned again without a poll";
+    }
+    options.pollInterval = std::chrono::milliseconds(500);
+    LibraryMonitor polled(store, options);
+    ASSERT_TRUE(waitFor([&] { return scanned() && store.scanProgress().scans == 0; }));
+    forget();
+    EXPECT_TRUE(waitFor([&] { return scanned(); })) << "the poll still scans it";
+}
+
 // Scan now finds what a share's missed notifications left out: a file added, one changed and one removed.
 TEST(ScanningByHand, ScanNowFindsWhatChangedWithoutNotifications) {
     const auto dir = freshDir("scan-now");
