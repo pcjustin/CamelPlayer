@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "Common/settings/Settings.h"
+#include "Common/util/Text.h"
 #include "Server/Library/LibraryStore.h"
 #include "Server/Library/Loudness.h"
 #include "Server/Playback/ReplayGain.h"
@@ -239,4 +240,86 @@ TEST(Loudness, TheAnalyzerCountsTracksOnlyWhileItsProgressIsRead) {
     while (analyzer.progress().total == 0 && std::chrono::steady_clock::now() < until)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     EXPECT_EQ(analyzer.progress().total, 1);
+}
+
+namespace {
+
+LoudnessAnalyzer::Options trackMode() {
+    return {[] { return ReplayGainSettings{ReplayGainMode::Track}; }, [] { return DecoderByFormat{}; },
+            [] { return std::vector<int64_t>{}; }, [] { return PlaybackReads{}; }};
+}
+
+// Waits for `file` to have an analyzed track value.
+bool analyzed(LibraryStore& store, int64_t file, std::chrono::seconds limit) {
+    const auto until = std::chrono::steady_clock::now() + limit;
+    do {
+        auto db = store.openReader();
+        auto row = db.prepare("SELECT rg_analysis_gain FROM tracks WHERE file_id=?");
+        if (row.bind(1, file).step() && !row.isNull(0)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    } while (std::chrono::steady_clock::now() < until);
+    return false;
+}
+
+} // namespace
+
+// Started while a share sleeps, the first two hundred files all fail: what comes after them is still analyzed.
+TEST(Loudness, FilesThatFailedDoNotHoldUpTheRest) {
+    const auto directory = testutil::tempDir() / "loudness-failed";
+    std::filesystem::remove_all(directory);
+    const auto good = sine("after-failed.wav", 44100, 2, -20.0, 2.0);
+    LibraryStore store(directory);
+    store
+        .write([&](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "INSERT INTO albums(id,folder_id,grouping_key,title,added) VALUES(1,1,'a','Gone',0),(2,1,'b','Here',0);");
+            auto file = db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) "
+                                   "VALUES(?,1,1,?,'audio',1,1,1)");
+            auto track = db.prepare("INSERT INTO tracks(id,file_id,album_id,title,format) VALUES(?1,?1,?2,'T','wav')");
+            for (int64_t id = 1; id <= 201; ++id) {
+                file.reset();
+                track.reset();
+                const auto path = id <= 200 ? "C:/no such folder/" + std::to_string(id) + ".wav" : toUtf8(good.wstring());
+                file.bind(1, id).bind(2, path).run();
+                track.bind(1, id).bind(2, int64_t(id <= 200 ? 1 : 2)).run();
+            }
+        })
+        .get();
+    LoudnessAnalyzer analyzer(store, trackMode());
+    EXPECT_TRUE(analyzed(store, 201, std::chrono::seconds(15)));
+}
+
+// A file that could not be read because its storage was away is tried again once the storage has been away and is back.
+TEST(Loudness, AFileWhoseStorageWasAwayIsTriedAgainOnceItIsBack) {
+    const auto directory = testutil::tempDir() / "loudness-away";
+    std::filesystem::remove_all(directory);
+    const auto music = testutil::tempDir() / "loudness-away-music";
+    std::filesystem::remove_all(music);
+    const auto path = music / "back.wav";
+    LibraryStore store(directory);
+    store
+        .write([&](sqlite::Database& db) {
+            db.prepare("INSERT INTO roots(id,path,added) VALUES(1,?,0)").bind(1, toUtf8(music.wstring())).run();
+            db.exec("INSERT INTO folders(id,root_id,path) VALUES(1,1,'music');");
+            db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(1,1,1,?,'audio',1,1,1)")
+                .bind(1, toUtf8(path.wstring()))
+                .run();
+            db.exec("INSERT INTO tracks(id,file_id,title,format) VALUES(1,1,'T','wav');");
+        })
+        .get();
+    LoudnessAnalyzer analyzer(store, trackMode());
+    std::this_thread::sleep_for(std::chrono::seconds(3)); // tried while away
+    EXPECT_FALSE(analyzed(store, 1, std::chrono::seconds(0)));
+    const auto online = [&](int value) {
+        store.write([value](sqlite::Database& db) { db.prepare("UPDATE roots SET online=?").bind(1, int64_t(value)).run(); })
+            .get();
+    };
+    online(0);
+    std::this_thread::sleep_for(std::chrono::seconds(3)); // the analysis sees the storage away
+    std::filesystem::create_directories(music);
+    std::filesystem::copy_file(sine("away-source.wav", 44100, 2, -20.0, 2.0), path);
+    EXPECT_FALSE(analyzed(store, 1, std::chrono::seconds(3))) << "not tried while its storage is away";
+    online(1);
+    EXPECT_TRUE(analyzed(store, 1, std::chrono::seconds(15)));
 }

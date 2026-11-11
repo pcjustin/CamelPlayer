@@ -145,8 +145,22 @@ std::string notDsd() {
     return std::string("coalesce(t.format,'')<>'") + audio::formatId(audio::AudioFormat::Dsd) + "'";
 }
 
+// Files of a root that is offline are not tried.
+const char* rootOnline() {
+    return "EXISTS(SELECT 1 FROM roots r WHERE r.id=f.root_id AND r.online=1)";
+}
+
+// " AND `column` NOT IN (...)" for the files left out, or nothing; left out before a query's limit, so files that failed
+// never fill it.
+std::string leftOut(const char* column, const std::set<int64_t>& failed, const std::map<int64_t, int64_t>& away) {
+    std::string ids;
+    for (const auto id : failed) ids += (ids.empty() ? "" : ",") + std::to_string(id);
+    for (const auto& [id, root] : away) ids += (ids.empty() ? "" : ",") + std::to_string(id);
+    return ids.empty() ? std::string() : std::string(" AND ") + column + " NOT IN (" + ids + ")";
+}
+
 std::string needsAnalysis() {
-    return "f.available=1 AND " + notDsd() +
+    return "f.available=1 AND " + std::string(rootOnline()) + " AND " + notDsd() +
            " AND (coalesce(t.rg_track_gain,t.rg_analysis_gain) IS NULL OR "
            "(t.album_id IS NOT NULL AND coalesce(t.rg_album_gain,t.rg_analysis_album_gain) IS NULL))";
 }
@@ -272,29 +286,44 @@ std::vector<LoudnessAnalyzer::Track> LoudnessAnalyzer::nextAlbum(bool queuedOnly
     auto needs = db.prepare("SELECT 1 FROM tracks t JOIN files f ON f.id=t.file_id WHERE t.file_id=? AND " + needsAnalysis());
     for (const auto file : options_.queued()) {
         needs.reset();
-        if (!failed_.contains(file) && needs.bind(1, file).step()) {
+        if (!failed_.contains(file) && !away_.contains(file) && needs.bind(1, file).step()) {
             chosen = file;
             break;
         }
     }
     if (!chosen && !queuedOnly) {
         auto any = db.prepare(std::string("SELECT t.file_id FROM tracks t JOIN files f ON f.id=t.file_id WHERE ") +
-                              needsAnalysis() + " ORDER BY t.album_id,t.file_id LIMIT 200");
-        while (any.step())
-            if (!failed_.contains(any.integer(0))) {
-                chosen = any.integer(0);
-                break;
-            }
+                              needsAnalysis() + leftOut("t.file_id", failed_, away_) + " ORDER BY t.album_id,t.file_id LIMIT 1");
+        if (any.step()) chosen = any.integer(0);
     }
     if (!chosen) return {};
     std::vector<Track> tracks;
-    auto members =
-        db.prepare("SELECT f.id,f.path FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.available=1 AND " + notDsd() +
-                   " AND (t.file_id=?1 OR t.album_id=(SELECT album_id FROM tracks "
-                   "WHERE file_id=?1)) ORDER BY f.id");
+    auto members = db.prepare(
+        "SELECT f.id,f.path,f.root_id FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.available=1 AND " + notDsd() +
+        " AND (t.file_id=?1 OR t.album_id=(SELECT album_id FROM tracks "
+        "WHERE file_id=?1)) ORDER BY f.id");
     members.bind(1, *chosen);
-    while (members.step()) tracks.push_back({members.integer(0), std::filesystem::path(toWide(members.text(1)))});
+    while (members.step())
+        tracks.push_back({members.integer(0), std::filesystem::path(toWide(members.text(1))), members.integer(2)});
     return tracks;
+}
+
+// A file that is not there went away with its storage; any other that cannot be read stays failed for the session.
+void LoudnessAnalyzer::fail(std::set<int64_t>& failed, const Track& track) {
+    std::error_code error;
+    if (std::filesystem::exists(track.path, error))
+        failed.insert(track.file);
+    else
+        away_[track.file] = track.root;
+}
+
+// What failed with its storage away is tried again once its root has been seen offline, as it then is when it is back.
+void LoudnessAnalyzer::forgetAway() {
+    if (away_.empty()) return;
+    std::set<int64_t> offline;
+    auto db = store_.openReader();
+    for (auto rows = db.prepare("SELECT id FROM roots WHERE online=0"); rows.step();) offline.insert(rows.integer(0));
+    std::erase_if(away_, [&](const auto& entry) { return offline.contains(entry.second); });
 }
 
 void LoudnessAnalyzer::run(const std::stop_token& stop) {
@@ -310,6 +339,7 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 count();
                 counted = std::chrono::steady_clock::now();
             }
+            forgetAway();
             const bool loudness = options_.settings().mode != ReplayGainMode::Off;
             if (!loudness) store_.caughtUp(BackgroundWork::Loudness);
             const bool scanning = store_.scanProgress().scans > 0;
@@ -369,7 +399,7 @@ bool LoudnessAnalyzer::analyzeAlbum(const std::stop_token& stop, bool queuedOnly
     const bool complete =
         measuring_->run(options_.decoders(), threads, yield, [&](size_t i, const std::optional<Loudness>& track) {
             if (!track) {
-                failed_.insert(ids[i]);
+                fail(failed_, album[i]);
                 return;
             }
             const auto peaks = measuring_->waveform(i);
@@ -448,11 +478,11 @@ bool LoudnessAnalyzer::waveformsInBackground(const std::stop_token& stop) {
     std::vector<Track> tracks;
     {
         auto db = store_.openReader();
-        auto rows = db.prepare("SELECT f.id,f.path FROM tracks t JOIN files f ON f.id=t.file_id LEFT JOIN waveforms w "
-                               "ON w.file_id=f.id WHERE f.available=1 AND w.file_id IS NULL ORDER BY t.album_id,f.id LIMIT 200");
-        while (rows.step())
-            if (!waveformFailed_.contains(rows.integer(0)))
-                tracks.push_back({rows.integer(0), std::filesystem::path(toWide(rows.text(1)))});
+        auto rows = db.prepare(std::string("SELECT f.id,f.path,f.root_id FROM tracks t JOIN files f ON f.id=t.file_id "
+                                           "LEFT JOIN waveforms w ON w.file_id=f.id WHERE f.available=1 AND ") +
+                               rootOnline() + " AND w.file_id IS NULL" + leftOut("f.id", waveformFailed_, away_) +
+                               " ORDER BY t.album_id,f.id LIMIT 200");
+        while (rows.step()) tracks.push_back({rows.integer(0), std::filesystem::path(toWide(rows.text(1))), rows.integer(2)});
     }
     if (tracks.empty()) {
         store_.caughtUp(BackgroundWork::Waveforms);
@@ -481,7 +511,7 @@ bool LoudnessAnalyzer::waveformsInBackground(const std::stop_token& stop) {
             if (stop.stop_requested() || !waveformsOn()) return;
             if (!peaks) {
                 std::lock_guard lock(failedMutex);
-                waveformFailed_.insert(track.file);
+                fail(waveformFailed_, track);
                 continue;
             }
             store_.write([&](sqlite::Database& db) { storeWaveform(db, track.file, *peaks); }).get();

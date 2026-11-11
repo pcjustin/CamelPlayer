@@ -100,6 +100,7 @@ private:
     struct Track {
         int64_t file = 0;
         std::filesystem::path path;
+        int64_t root = 0;
     };
     void run(const std::stop_token& stop);
     std::vector<Track> nextAlbum(bool queuedOnly);
@@ -110,11 +111,16 @@ private:
     bool waveformsOn() const;
     int minuteOfDay() const;
     void count();
+    void fail(std::set<int64_t>& failed, const Track& track);
+    void forgetAway();
 
     LibraryStore& store_;
     Options options_;
     std::set<int64_t> failed_;         // files that could not be read this session
     std::set<int64_t> waveformFailed_; // the same for waveforms
+    // Files that were not there, with their root: their storage was away, and they are tried again once it has been seen
+    // offline and is back.
+    std::map<int64_t, int64_t> away_;
     mutable std::mutex playingMutex_;
     std::map<std::filesystem::path, std::vector<uint8_t>> playingWaveforms_; // playing tracks outside the library
     std::unique_ptr<AlbumMeasure> measuring_;                                // the album cut short last, with its files' ids

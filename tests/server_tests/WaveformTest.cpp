@@ -205,6 +205,24 @@ TEST(Waveform, TheBackgroundAnalysisKeepsToItsWindow) {
     EXPECT_TRUE(waitFor([&] { return waveformsIn(store) == 3; }));
 }
 
+// Two hundred files that cannot be read do not keep the background analysis from the files after them.
+TEST(Waveform, FilesThatFailedDoNotHoldUpTheRest) {
+    const auto dir = freshDir("failed");
+    LibraryStore store(dir);
+    store.setScanSpeed(ScanSpeed::High);
+    std::vector<fs::path> files;
+    for (size_t i = 0; i < 200; ++i) {
+        files.push_back(dir / ("broken" + std::to_string(i) + ".flac"));
+        std::ofstream(files.back(), std::ios::binary) << "not audio";
+    }
+    files.push_back(flacs(dir, 1).front());
+    addTracks(store, files);
+    Analysis analysis;
+    analysis.minute = 2 * 60;
+    LoudnessAnalyzer analyzer(store, analysis.options());
+    EXPECT_TRUE(waitFor([&] { return waveformsIn(store) == 1; }));
+}
+
 TEST(Waveform, NothingIsMadeWhileWaveformsAreOff) {
     const auto dir = freshDir("off");
     LibraryStore store(dir);
