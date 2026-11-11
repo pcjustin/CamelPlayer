@@ -35,6 +35,7 @@
 #include "ArtworkLoader.h"
 #include "Common/settings/EqText.h"
 #include "Common/settings/Settings.h"
+#include "Common/util/FolderWalk.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/StartWithWindows.h"
@@ -2586,14 +2587,7 @@ winrt::fire_and_forget MainWindow::showDataLocation() {
     auto weak = get_weak();
     auto queue = DispatcherQueue();
     co_await winrt::resume_background();
-    std::error_code error;
-    const auto size = [&](const std::filesystem::path& path) -> uintmax_t {
-        if (std::filesystem::is_regular_file(path, error)) return std::filesystem::file_size(path, error);
-        uintmax_t total = 0;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(path, error))
-            if (entry.is_regular_file(error)) total += entry.file_size(error);
-        return total;
-    };
+    const auto size = [](const std::filesystem::path& path) { return camel::sizeOnDisk(path); };
     const uintmax_t library = size(data / L"library.db") + size(data / L"library.db-wal") + size(data / L"library.db-shm");
     const uintmax_t covers = size(data / L"thumbs"), settings = size(camel::settingsPath()), logs = size(data / L"logs");
     queue.TryEnqueue([weak, library, covers, settings, logs] {

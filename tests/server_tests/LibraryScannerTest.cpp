@@ -15,6 +15,7 @@
 #include <taglib/flacpicture.h>
 #include <taglib/tpropertymap.h>
 
+#include "Common/util/FolderWalk.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryViews.h"
 #include "Server/Library/LibraryText.h"
@@ -1300,6 +1301,31 @@ private:
 };
 
 } // namespace
+
+// The data folder walked at start after Reset everything, and for its size in Settings: an entry that cannot be read
+// or removed ends neither walk, which ran before the log and the crash dumps were set up, or off the UI thread.
+TEST(FolderWalk, AnEntryThatCannotBeReadOrRemovedIsPassedOver) {
+    const auto root = testutil::tempDir() / "folder-walk";
+    fs::remove_all(root);
+    fs::create_directories(root / "locked");
+    std::ofstream(root / "a.bin", std::ios::binary) << std::string(100, 'x');
+    std::ofstream(root / "locked" / "b.bin", std::ios::binary) << std::string(50, 'y');
+    {
+        const Denied listing(root / "locked", FILE_LIST_DIRECTORY);
+        uintmax_t size = 0;
+        EXPECT_NO_THROW(size = camel::sizeOnDisk(root));
+        EXPECT_EQ(size, 100u);
+    }
+    EXPECT_EQ(camel::sizeOnDisk(root), 150u);
+    std::ofstream(root / "held.bin", std::ios::binary) << 'z';
+    const wil::unique_hfile held(
+        CreateFileW((root / "held.bin").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr));
+    std::vector<std::wstring> kept;
+    EXPECT_NO_THROW(kept = camel::removeEntries(root));
+    EXPECT_EQ(kept, std::vector<std::wstring>{L"held.bin"});
+    EXPECT_FALSE(fs::exists(root / "a.bin"));
+    EXPECT_FALSE(fs::exists(root / "locked"));
+}
 
 // A folder that cannot be checked, as when a share blinks or a folder is being renamed, is not a folder that is gone: its
 // files stay as they are, and the scan is left to be done again.

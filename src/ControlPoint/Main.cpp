@@ -20,6 +20,7 @@
 #include "UiText.h"
 #include "Server/Api/ServerApi.h"
 #include "Common/util/CrashDump.h"
+#include "Common/util/FolderWalk.h"
 #include "Common/util/Log.h"
 #include "Common/util/Measure.h"
 #include "Common/util/StartWithWindows.h"
@@ -30,14 +31,9 @@ namespace {
 // Settings › Reset everything leaves this marker and restarts; the data, logs included, goes before logging starts
 // and the Server opens it, so the next start is a fresh installation. Returns what could not be removed.
 std::vector<std::wstring> applyPendingReset(const std::filesystem::path& data) {
-    std::vector<std::wstring> kept;
     std::error_code error;
-    if (!std::filesystem::exists(data / L"reset-pending", error)) return kept;
-    for (const auto& entry : std::filesystem::directory_iterator(data, error)) {
-        std::filesystem::remove_all(entry.path(), error);
-        if (error) kept.push_back(entry.path().filename().wstring());
-    }
-    return kept;
+    if (!std::filesystem::exists(data / L"reset-pending", error)) return {};
+    return camel::removeEntries(data);
 }
 
 // Windows names the media flyout, notifications and the taskbar group after the AUMID; an app without a Start menu
