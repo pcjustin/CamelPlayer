@@ -6,12 +6,18 @@
 // it, but only with "convert when unsupported"; played as PCM it would be loud noise.
 #include <gtest/gtest.h>
 
+#include <windows.h>
+// windows.h comes first
+#include <psapi.h>
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <fstream>
 #include <numbers>
+#include <iterator>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -66,7 +72,74 @@ std::filesystem::path syncsInPcm(const char* name, std::initializer_list<size_t>
     return path;
 }
 
+// The fixture with `silence` word frames of zeros after its bitstream, and with `resumes` the bitstream again after them.
+std::filesystem::path withSilence(const char* name, uint64_t silence, bool resumes) {
+    std::ifstream in(dtsPath(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const size_t data = bytes.find("data");
+    const auto le32 = [&](size_t at) {
+        return uint32_t(uint8_t(bytes[at])) | uint32_t(uint8_t(bytes[at + 1])) << 8 | uint32_t(uint8_t(bytes[at + 2])) << 16 |
+               uint32_t(uint8_t(bytes[at + 3])) << 24;
+    };
+    const auto put32 = [&](size_t at, uint64_t value) {
+        for (size_t i = 0; i < 4; i++) bytes[at + i] = char(uint8_t(value >> (8 * i)));
+    };
+    if (data == std::string::npos || data + 8 + le32(data + 4) != bytes.size())
+        throw std::runtime_error("the fixture's data chunk is not its last");
+    const std::string stream = bytes.substr(data + 8);
+    bytes += std::string(size_t(silence * 4), '\0');
+    if (resumes) bytes += stream;
+    put32(data + 4, bytes.size() - data - 8);
+    put32(4, bytes.size() - 8);
+    const auto path = testutil::tempDir() / name;
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+    return path;
+}
+
+int64_t privateBytes() {
+    PROCESS_MEMORY_COUNTERS_EX memory{};
+    memory.cb = sizeof(memory);
+    GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+    return int64_t(memory.PrivateUsage);
+}
+
 } // namespace
+
+// Silence the data chunk holds where the bitstream stops, at its end or before it goes on, is made as it is read: its
+// length is the file's to say, not a measure of what one allocation may take.
+TEST(Dts, SilenceWhereTheBitstreamStopsTakesBoundedMemory) {
+    const uint64_t silence = uint64_t{44100} * 300;
+    for (const bool resumes : {false, true}) {
+        SCOPED_TRACE(resumes ? "a gap" : "the end");
+        const auto path = withSilence(resumes ? "dts-gap.wav" : "dts-tail.wav", silence, resumes);
+        const auto d = openDecoder(DecoderKind::Sndfile, path);
+        const uint64_t expected = dtsCd().frames * (resumes ? 2 : 1) + silence;
+        ASSERT_EQ(d->info().totalFrames, expected);
+        std::vector<float> block(size_t{4096} * 6);
+        const int64_t before = privateBytes();
+        int64_t most = 0;
+        uint64_t frames = 0;
+        const uint64_t silentFrom = dtsCd().frames, silentTo = silentFrom + silence;
+        float inSilence = 0.0f, after = 0.0f;
+        while (const size_t got = d->readFloat(block.data(), 4096)) {
+            for (size_t i = 0; i < got; i++) {
+                const uint64_t at = frames + i;
+                // Well inside the silence, past the last frame's tail, and well inside the resumed bitstream.
+                for (size_t c = 0; c < 6; c++)
+                    if (at >= silentFrom + 4096 && at < silentTo)
+                        inSilence = std::max(inSilence, std::abs(block[i * 6 + c]));
+                    else if (at >= silentTo + 8192)
+                        after = std::max(after, std::abs(block[i * 6 + c]));
+            }
+            frames += got;
+            most = std::max(most, privateBytes() - before);
+        }
+        EXPECT_EQ(frames, expected);
+        EXPECT_EQ(inSilence, 0.0f);
+        if (resumes) EXPECT_GT(after, 0.01f) << "the bitstream plays again after the gap";
+        EXPECT_LT(most, int64_t{32} << 20) << "bytes held at most";
+    }
+}
 
 TEST(Dts, ProbeFindsDtsInsideWave) {
     EXPECT_EQ(probeFormat(dtsPath()), AudioFormat::Dts);

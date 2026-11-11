@@ -60,6 +60,13 @@ public:
         const size_t ch = info_.channels;
         size_t done = 0;
         while (done < frames) {
+            if (silence_) {
+                const auto n = size_t(std::min<uint64_t>(frames - done, silence_));
+                std::fill_n(dst + done * ch, n * ch, 0.0f);
+                silence_ -= n;
+                done += n;
+                continue;
+            }
             if (outPos_ == out_.size()) {
                 out_.clear();
                 outPos_ = 0;
@@ -111,17 +118,18 @@ private:
     void restart(uint64_t frame) {
         startReadingAt(frame > kPreroll ? frame - kPreroll : 0);
         next_ = frame;
+        silence_ = 0;
         out_.clear();
         outPos_ = 0;
         onFrame_ = [this](uint64_t start, const DtsPcm& pcm) { place(start, pcm); };
     }
 
-    // Decodes more into out_; false once the stream has ended and out_ reaches the end of the track.
+    // Decodes more into out_, after the silence owed before it; false once the stream has ended at the end of the track.
     bool refill() {
-        while (out_.empty()) {
+        while (out_.empty() && !silence_) {
             if (decodeNextFrame()) continue;
             if (next_ >= info_.totalFrames) return false;
-            out_.assign(size_t(info_.totalFrames - next_) * info_.channels, 0.0f); // a short last frame
+            silence_ = info_.totalFrames - next_; // a short last frame, or a bitstream that stops early
             next_ = info_.totalFrames;
         }
         return true;
@@ -185,7 +193,7 @@ private:
         const uint64_t end = std::min(start + uint64_t(pcm.frames), info_.totalFrames);
         if (end <= next_ || start >= end) return;
         if (start > next_) {
-            out_.resize(out_.size() + size_t(start - next_) * ch, 0.0f);
+            silence_ += start - next_; // refill() asks only with out_ empty, so the silence comes before it
             next_ = start;
         }
         out_.insert(out_.end(), pcm.samples + size_t(next_ - start) * ch, pcm.samples + size_t(end - start) * ch);
@@ -197,6 +205,7 @@ private:
     bool wordsDone_ = false;
     uint64_t bytesFrom_ = 0; // stream offset of bytes_[0]
     uint64_t next_ = 0;      // track position of the next sample appended to out_
+    uint64_t silence_ = 0;   // frames of silence readFloat() gives before out_, where the bitstream has none
     std::function<void(uint64_t, const DtsPcm&)> onFrame_;
     std::vector<int32_t> words16_;
     std::vector<uint8_t> bytes_;
