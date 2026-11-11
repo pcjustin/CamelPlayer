@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "Common/util/Text.h"
+#include "ControlPoint/OutputsFollow.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Playback/Outputs.h"
@@ -756,4 +757,20 @@ TEST(AirPlayGroupTest, ChannelsAndTheGroupSurviveInTheSettingsFile) {
     EXPECT_EQ(saved(read, Backend::AirPlay, "HP-A")->airplay.channels, AirPlayChannels::Right);
     EXPECT_TRUE(fromJson(toJson(Settings{})).airplayGroup.empty());
     EXPECT_EQ(fromJson(toJson(Settings{})).airplay.channels, AirPlayChannels::Stereo);
+}
+
+// A device scan while an output's settings dialog is open: its outputs reach the settings the dialog writes back, so
+// closing it neither shows the outputs from before nor writes them back over the Server's.
+TEST(OutputsFollowTest, OutputsChangedWhileAnOutputsDialogIsOpenReachTheSettingsItWritesBack) {
+    SettingsDto shown, real, server;
+    server.outputs.emplace_back();
+    server.outputs.back().id = "new-dac";
+    server.followedDefault = "new-dac";
+    EXPECT_EQ(ui::followServerOutputs(shown, &real, server), ui::OutputsRefill::None);
+    ASSERT_EQ(real.outputs.size(), 1u);
+    EXPECT_EQ(real.outputs.front().id, "new-dac");
+    EXPECT_EQ(real.followedDefault, "new-dac");
+    EXPECT_TRUE(shown.outputs.empty()); // the dialog's own copy is left as it is
+    EXPECT_EQ(ui::followServerOutputs(shown, nullptr, server), ui::OutputsRefill::Outputs);
+    ASSERT_EQ(shown.outputs.size(), 1u);
 }

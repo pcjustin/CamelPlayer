@@ -27,6 +27,7 @@
 #include "CreditText.h"
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
+#include "OutputsFollow.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
 #include "TrackColumns.h"
@@ -1297,23 +1298,16 @@ bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
 
 // A device scan can change what the Server keeps: the outputs, and the parameters when the Windows default moved on.
 void MainWindow::showOutputsOf(const SettingsDto& server) {
-    if (editingOutput_) return; // settings_ holds the output in the dialog
-    const bool parameters = server.backend != settings_.backend || server.wasapi != settings_.wasapi ||
-                            server.asio != settings_.asio || server.ks != settings_.ks ||
-                            server.volume.mode != settings_.volume.mode;
-    settings_.outputs = server.outputs;
-    settings_.followedDefault = server.followedDefault;
-    settings_.backend = server.backend;
-    settings_.wasapi = server.wasapi;
-    settings_.asio = server.asio;
-    settings_.ks = server.ks;
-    settings_.volume.mode = server.volume.mode;
-    settings_.airplay = server.airplay;
-    settings_.airplayGroup = server.airplayGroup;
-    if (parameters)
+    switch (ui::followServerOutputs(settings_, editingOutput_ ? &editingOutput_->real : nullptr, server)) {
+    case ui::OutputsRefill::Settings:
         populateSettings();
-    else
+        break;
+    case ui::OutputsRefill::Outputs:
         populateOutputs();
+        break;
+    case ui::OutputsRefill::None:
+        break;
+    }
 }
 
 void MainWindow::applySnapshot(const Snapshot& snapshot) {
