@@ -27,6 +27,7 @@ struct FakeRtp {
     uint32_t rtpTime = 0;
     bool marker = false;
     std::string alac;
+    std::chrono::steady_clock::time_point arrived;
 };
 
 // The frames of an uncompressed ALAC frame, read bit by bit without the sender's code. Empty when it is not one.
@@ -135,6 +136,29 @@ public:
         sendto(control_, request.data(), int(request.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
     }
 
+    // As another machine on the network would, from `address`: the packets that came back to it within `wait`.
+    size_t askResendFrom(const char* address, uint16_t sequence, uint16_t count, std::chrono::milliseconds wait) const {
+        const SOCKET udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        sockaddr_in from{};
+        from.sin_family = AF_INET;
+        inet_pton(AF_INET, address, &from.sin_addr);
+        ::bind(udp, reinterpret_cast<sockaddr*>(&from), sizeof(from));
+        const DWORD timeout = 50;
+        setsockopt(udp, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+        std::string request("\x80\xD5\x00\x01", 4);
+        request += {char(sequence >> 8), char(sequence & 0xFF), char(count >> 8), char(count & 0xFF)};
+        sockaddr_in target = loopback();
+        target.sin_port = htons(portAfter("control_port="));
+        sendto(udp, request.data(), int(request.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
+        size_t answers = 0;
+        char buffer[2048];
+        const auto until = std::chrono::steady_clock::now() + wait;
+        while (std::chrono::steady_clock::now() < until)
+            if (recv(udp, buffer, sizeof(buffer), 0) > 0) ++answers;
+        closesocket(udp);
+        return answers;
+    }
+
     // Another sender takes the receiver, which closes the connection.
     void takeOver() {
         const SOCKET client = client_.exchange(INVALID_SOCKET);
@@ -184,6 +208,7 @@ private:
             packet.sequence = uint16_t(byte(2) << 8 | byte(3));
             packet.rtpTime = byte(4) << 24 | byte(5) << 16 | byte(6) << 8 | byte(7);
             packet.alac.assign(buffer + 12, size_t(got) - 12);
+            packet.arrived = std::chrono::steady_clock::now();
             std::scoped_lock lock(mutex_);
             packets_.push_back(std::move(packet));
         }

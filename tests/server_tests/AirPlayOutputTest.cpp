@@ -281,6 +281,35 @@ TEST_F(AirPlayOutputTest, AMissedPacketIsSentAgainFromHistory) {
     out->close();
 }
 
+TEST_F(AirPlayOutputTest, AResendIsSentOnlyToAReceiverOfTheSession) {
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(10));
+    EXPECT_EQ(rtsp_.askResendFrom("127.0.0.2", rtsp_.packets()[5].sequence, 1, 300ms), 0U);
+    out->close();
+}
+
+// A request for every sequence there is, again and again, does not hold the stream up.
+TEST_F(AirPlayOutputTest, ResendRequestsForEverythingDoNotDelayTheStream) {
+    CountingSource source(30 * kSecond);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(300));
+    const size_t before = rtsp_.packetCount();
+    const auto asked = std::chrono::steady_clock::now();
+    for (int i = 0; i < 20; ++i) rtsp_.askResend(0, 0xFFFF);
+    ASSERT_TRUE(packets(before + 100));
+    const auto arrived = rtsp_.packets();
+    std::chrono::steady_clock::duration longest{};
+    for (size_t i = before; i < arrived.size(); ++i)
+        if (arrived[i].arrived >= asked) longest = std::max(longest, arrived[i].arrived - arrived[i - 1].arrived);
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(longest).count(), 40);
+    out->close();
+}
+
 TEST_F(AirPlayOutputTest, HeldFramesAreWhatTheReceiverHasNotPlayedYet) {
     CountingSource source(kSecond * 10);
     auto out = output();

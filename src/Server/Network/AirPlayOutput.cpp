@@ -536,20 +536,25 @@ private:
         if (got <= 0) return;
         const auto request = parseResend(std::string_view(buffer.data(), size_t(got)));
         if (!request) return;
-        std::scoped_lock lock(mutex_);
-        // The speaker asking, by its control port, else by its address alone.
-        auto asking = std::ranges::find_if(targets_, [&](const Target& t) { return sameAddress(t.destination.control, from); });
-        if (asking == targets_.end())
-            asking = std::ranges::find_if(
-                targets_, [&](const Target& t) { return t.destination.control.sin_addr.s_addr == from.sin_addr.s_addr; });
-        const AirPlayChannels channels = asking == targets_.end() ? AirPlayChannels::Stereo : asking->channels;
-        for (uint16_t i = 0; i < request->count; ++i) {
-            const auto sequence = uint16_t(request->first + i);
-            const auto found = std::ranges::find_if(history_, [&](const Packet& p) { return p.sequence == sequence; });
-            if (found == history_.end()) continue;
-            const auto packet = resendPacket(sequence, rtpPacket(sequence, found->rtpTime, ssrc_, false, found->frame(channels)));
-            sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&from), sizeof(from));
+        std::vector<std::string> answers;
+        {
+            std::scoped_lock lock(mutex_);
+            // Only a speaker of the session, by its control port, else by its address alone.
+            auto asking =
+                std::ranges::find_if(targets_, [&](const Target& t) { return sameAddress(t.destination.control, from); });
+            if (asking == targets_.end())
+                asking = std::ranges::find_if(
+                    targets_, [&](const Target& t) { return t.destination.control.sin_addr.s_addr == from.sin_addr.s_addr; });
+            if (asking == targets_.end()) return;
+            // One pass over what was sent, which is never more than the history holds, however many a request names.
+            const size_t count = std::min<size_t>(request->count, history_.size());
+            for (auto& packet : history_)
+                if (packet.number < nextPacket_ && uint16_t(packet.sequence - request->first) < count)
+                    answers.push_back(resendPacket(packet.sequence, rtpPacket(packet.sequence, packet.rtpTime, ssrc_, false,
+                                                                              packet.frame(asking->channels))));
         }
+        for (const auto& packet : answers)
+            sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&from), sizeof(from));
     }
 
     void serviceLoop() {
