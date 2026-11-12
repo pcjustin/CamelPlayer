@@ -300,8 +300,12 @@ impl Converter {
         } else {
             Mode::Process
         };
+        // A resampled or downmixed integer source is new samples, quantized at the device's depth as the DSP path's are
+        // (24 bits at most, or the source's own when deeper); a lossy source keeps the depth it decodes at.
         let quantize_bits = if float_out {
             0
+        } else if mode == Mode::Process && !in_float {
+            Self::device_bits(out).max(info.valid_bits.min(out.valid_bits))
         } else {
             info.valid_bits.min(out.valid_bits)
         };
@@ -898,6 +902,29 @@ pub(crate) mod tests {
         c.convert(&samples, 64, &mut dsp).unwrap();
         assert!(!dsp.active());
         assert_eq!(dsp.clipped(), 64);
+    }
+
+    // A resampled 16-bit source on a 24-bit device keeps what the resampler computed below 16 bits: it is quantized
+    // at the device's depth, as the DSP path is, not dithered back to 16 bits.
+    #[test]
+    fn a_resampled_16_bit_source_is_quantized_at_the_devices_24_bits() {
+        let mut c = converter(source(44_100, 2, 16, false), SAMPLE_S24_LE, 48_000, true);
+        assert_eq!(c.mode, Mode::Process);
+        let samples: Vec<i32> = (0..44_100)
+            .flat_map(|i| {
+                let v = (f64::from(i) * 0.031).sin() * 12_000.0;
+                [v as i32, -(v as i32)]
+            })
+            .collect();
+        c.convert(&samples, 44_100, &mut flat()).unwrap();
+        let out = ints(c.pending(), 3);
+        assert!(out.len() > 40_000);
+        let below_16_bits = out.iter().filter(|&&s| s & 0xff != 0).count();
+        assert!(
+            below_16_bits > out.len() / 2,
+            "{below_16_bits} of {} samples use the low 8 bits",
+            out.len()
+        );
     }
 
     #[test]
