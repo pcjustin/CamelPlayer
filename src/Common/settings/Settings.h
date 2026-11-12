@@ -425,6 +425,9 @@ public:
 // Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad). Throws NewerSettingsError,
 // and SettingsUnavailableError once a file that cannot be opened has been tried again for a moment.
 Settings loadSettings(const std::filesystem::path& path = settingsPath());
+// The settings as a tool such as camelcli reads them, beside a player that may be running: never written, migrated or
+// renamed; the defaults for a missing or unreadable file. Throws as loadSettings does for a newer or held file.
+Settings readSettingsForTool(const std::filesystem::path& path);
 
 enum class SettingsRecovery : uint8_t { None, RestoredLastGood, Reset };
 // loadSettings at the program's start: a readable file is also copied to settings.json.last-good, and that copy replaces

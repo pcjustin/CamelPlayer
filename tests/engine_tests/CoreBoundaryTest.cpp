@@ -417,6 +417,30 @@ TEST(SettingsBoundary, ALongDataFolderNameIsUsed) {
     std::filesystem::remove_all(L"\\\\?\\" + (testutil::tempDir() / L"long-data").wstring(), ec);
 }
 
+// A tool reads the settings beside a player that may be running: it never rewrites an old schema nor puts a file it
+// cannot read aside, and without a data folder there is no settings file, not one in the working directory.
+TEST(SettingsBoundary, AToolReadsTheSettingsWithoutWritingThem) {
+    const auto dir = testutil::tempDir() / "tool-settings";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const auto old = dir / "old.json";
+    const std::string oldText = R"({"schema":1,"volume":{"db":-6}})";
+    std::ofstream(old, std::ios::binary) << oldText;
+    const auto corrupt = dir / "corrupt.json";
+    std::ofstream(corrupt, std::ios::binary) << "{ not json";
+    EXPECT_EQ(readSettingsForTool(old).volume.db, -6.0);
+    std::ifstream in(old, std::ios::binary);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(in), {}), oldText);
+    readSettingsForTool(corrupt);
+    EXPECT_TRUE(std::filesystem::exists(corrupt));
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(corrupt).concat(L".bad")));
+
+    ASSERT_TRUE(SetEnvironmentVariableW(L"CAMELPLAYER_DATA", L"C:\\camel|player-cannot-be-made"));
+    const auto path = settingsPath();
+    SetEnvironmentVariableW(L"CAMELPLAYER_DATA", nullptr);
+    EXPECT_TRUE(path.empty()) << path.string();
+}
+
 TEST(SettingsBoundary, TheEqIsOffWithFiveFlatBandsAndKeepsItsPresetsThroughAPlaybackReset) {
     const Settings defaults;
     EXPECT_FALSE(defaults.eq.enabled);

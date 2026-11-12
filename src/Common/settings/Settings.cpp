@@ -828,7 +828,8 @@ bool inAnalysisWindow(const WaveformSettings& settings, int minute) {
 }
 
 std::filesystem::path settingsPath() {
-    return dataDirectory() / L"settings.json";
+    const auto directory = dataDirectory();
+    return directory.empty() ? std::filesystem::path{} : directory / L"settings.json";
 }
 
 namespace {
@@ -837,7 +838,7 @@ constexpr int kOpenAttempts = 10; // 200 ms apart: a backup or antivirus program
 
 // Nothing for a missing file; throws NewerSettingsError, SettingsUnavailableError for a file that exists and still
 // cannot be opened after a moment, or another exception for a corrupt file.
-std::optional<Settings> readSettings(const std::filesystem::path& path) {
+std::optional<Settings> readSettings(const std::filesystem::path& path, bool migrate = true) {
     std::ifstream in;
     for (int attempt = 0;; ++attempt) {
         in.open(path, std::ios::binary);
@@ -860,7 +861,7 @@ std::optional<Settings> readSettings(const std::filesystem::path& path) {
                                  ", newer than this program (" + std::to_string(Settings::kSchemaVersion) + ")");
     Settings settings = fromJson(contents);
     const int schema = parsed.value("schema", 0);
-    if (schema < Settings::kSchemaVersion) {
+    if (migrate && schema < Settings::kSchemaVersion) {
         try {
             saveSettings(settings, path);
         } catch (const std::exception& e) {
@@ -887,6 +888,20 @@ Settings loadSettings(const std::filesystem::path& path) {
         throw;
     } catch (const std::exception& e) {
         keepAsBad(path, e);
+        return {};
+    }
+}
+
+Settings readSettingsForTool(const std::filesystem::path& path) {
+    if (path.empty()) return {};
+    try {
+        return readSettings(path, false).value_or(Settings{});
+    } catch (const NewerSettingsError&) {
+        throw;
+    } catch (const SettingsUnavailableError&) {
+        throw;
+    } catch (const std::exception& e) {
+        log::warn("settings: %s cannot be read, defaults used (%s)", toUtf8(path.filename().wstring()).c_str(), e.what());
         return {};
     }
 }
@@ -925,6 +940,7 @@ Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recov
 }
 
 void saveSettings(const Settings& s, const std::filesystem::path& path) {
+    if (path.empty()) throw std::runtime_error("no data folder to save the settings in");
     auto tmp = std::filesystem::path(path).concat(L".tmp");
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);

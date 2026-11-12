@@ -42,7 +42,7 @@ const char* decoderLabel(const Settings& s, const std::filesystem::path& file) {
 
 // Applies --backend/--decoder/--device/--ks-mode/--format/--buffer options on top of the saved settings.
 Settings settingsFromArgs(const Args& args) {
-    Settings s = loadSettings();
+    Settings s = readSettingsForTool(settingsPath());
     if (auto v = option(args, L"--backend")) {
         if (!backendFromId(toUtf8(*v), s.backend)) throw std::runtime_error("unknown backend");
     }
