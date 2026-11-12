@@ -30,6 +30,7 @@
 #include "UiText.h"
 #include "TrimmedText.h"
 #include "ArtworkLoader.h"
+#include "RowArtwork.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -1853,10 +1854,12 @@ void LibraryView::bindArtwork(Image const& image) {
     const auto value = image.DataContext().try_as<CamelPlayer::BrowseItem>();
     if (!value) return;
     auto& slot = artworkSlots_[get_abi(image)];
-    slot.changed = value.PropertyChanged(auto_revoke, [weak = get_weak(), target = make_weak(image)](auto&&, auto&&) {
-        if (auto self = weak.get())
-            if (auto image = target.get()) self->loadRowArtwork(image);
-    });
+    slot.changed = value.PropertyChanged(
+        auto_revoke, [weak = get_weak(), target = make_weak(image)](auto&&, Data::PropertyChangedEventArgs const& args) {
+            if (!ui::changesRowArtwork(args.PropertyName())) return;
+            if (auto self = weak.get())
+                if (auto image = target.get()) self->loadRowArtwork(image);
+        });
     loadRowArtwork(image);
 }
 
