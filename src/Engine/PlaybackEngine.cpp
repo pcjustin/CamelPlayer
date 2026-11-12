@@ -621,15 +621,11 @@ public:
         startSession(position, playing);
     }
 
+    // A panel that cannot open is no playback failure: its error goes to the caller.
     bool showControlPanel() {
         if (settings_.backend != Backend::Asio) return false;
-        try {
-            ensureOutput();
-            return output_->showControlPanel();
-        } catch (const Error& e) {
-            fail(e, PlayState::Stopped);
-            return false;
-        }
+        ensureOutput();
+        return output_->showControlPanel();
     }
 
     EngineSnapshot snapshot() const {

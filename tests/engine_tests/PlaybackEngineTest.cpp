@@ -252,6 +252,23 @@ TEST(EngineNetworkPlayer, TheTrackBeingLeftShowsItsOwnPositionOnAResampledStream
     engine.waitIdle();
 }
 
+// The ASIO panel of a driver that cannot load says why, and is not a playback failure: the play state, the count of
+// track ends and the playback error stay as they were.
+TEST(EngineAsioPanel, APanelThatCannotOpenLeavesPlaybackAsItWas) {
+    Settings settings;
+    settings.backend = Backend::Asio;
+    PlaybackEngine engine(settings, [](const Settings&) -> std::unique_ptr<IOutput> {
+        throw Error(ErrorCode::DeviceNotFound, "the ASIO driver cannot be loaded");
+    });
+    const auto before = engine.snapshot();
+    EXPECT_THROW(engine.showControlPanel(), Error);
+    engine.waitIdle();
+    const auto after = engine.snapshot();
+    EXPECT_EQ(after.state, before.state);
+    EXPECT_EQ(after.trackEnds, before.trackEnds);
+    EXPECT_FALSE(after.error);
+}
+
 std::optional<Md5State> awaitMd5(PlaybackEngine& engine, Md5State expected) {
     for (int i = 0; i < 200 && engine.snapshot().md5 != expected; ++i) std::this_thread::sleep_for(5ms);
     return engine.snapshot().md5;

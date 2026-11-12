@@ -958,7 +958,12 @@ private:
                 refreshDevices();
                 break;
             case CommandKind::ShowControlPanel:
-                state_.controlPanelOpened = engine_->showControlPanel();
+                try {
+                    state_.controlPanelOpened = engine_->showControlPanel();
+                } catch (const audio::Error& e) {
+                    state_.controlPanelOpened = false;
+                    state_.commandError = Failure{e.code(), e.what()};
+                }
                 break;
             default:
                 break;

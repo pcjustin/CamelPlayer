@@ -81,7 +81,8 @@ public:
     void seek(uint64_t frame);
     // Applies immediately: an open stream restarts from the current position (docs/Plan.md §2).
     void applySettings(const Settings& settings);
-    // ASIO only: opens the driver's control panel. Blocks until the driver returns.
+    // ASIO only: opens the driver's control panel. Blocks until the driver returns. Throws Error when the driver cannot
+    // load, leaving playback as it was.
     bool showControlPanel();
     // Gapless: queues the file that follows the current one. True when it will play without reopening the device,
     // which needs the Rust Engine and the same negotiated output format; with crossfade on, another format is converted
