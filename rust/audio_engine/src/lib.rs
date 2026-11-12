@@ -1929,6 +1929,8 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                         engine.next_occupied.store(false, Ordering::Release);
                         engine.pending_boundary.store(true, Ordering::Release);
                         stage.stream_ended = false;
+                        // Its own end plays the chain's whole tail again.
+                        stage.tail_left = None;
                         // A track queued after the previous end was reached keeps the stream going.
                         engine
                             .render_source_state
@@ -4413,6 +4415,44 @@ mod tests {
         assert_eq!(result.units_rendered, 8);
         assert_eq!(transitions(engine), (1, 4, 0));
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    // A track queued after the stream's end continues the stream, and its own end plays the chain's whole tail again.
+    #[test]
+    fn each_end_of_the_stream_plays_its_own_whole_tail() {
+        let ir = impulse(&[0.5, 0.0, 0.0, 0.25], 1, 48_000);
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
+        cfg.format.rate_hz = 48_000;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], None, ir)) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source_with_gain(engine, 0.0), ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        prefill_until_end(engine);
+        assert_eq!(queue_mock_next(engine, 3), ENGINE_OK);
+        prefill_until_end(engine);
+        let mut output = vec![0u8; 64 * 8];
+        let request = render_request(64, &mut output);
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_END
+        );
+        assert_eq!(
+            result.units_rendered, 14,
+            "each track's 4 frames, each followed by the 3-frame tail"
+        );
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        assert_eq!(unsafe { camel_impulse_destroy_v1(ir) }, ENGINE_OK);
     }
 
     #[test]
