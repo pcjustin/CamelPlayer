@@ -116,7 +116,12 @@ int cmdGenLibrary(const Args& args) {
         return 2;
     }
     const uint32_t tracks = option(args, L"--tracks") ? uint32_t(std::stoul(*option(args, L"--tracks"))) : 100000;
-    const uint32_t perAlbum = option(args, L"--per-album") ? uint32_t(std::stoul(*option(args, L"--per-album"))) : 12;
+    const long perAlbumAsked = option(args, L"--per-album") ? std::stol(*option(args, L"--per-album")) : 12;
+    if (perAlbumAsked <= 0) {
+        std::puts("gen-library: --per-album must be 1 or more");
+        return 2;
+    }
+    const auto perAlbum = uint32_t(perAlbumAsked);
     const std::filesystem::path music = std::filesystem::path(pos[0]) / L"music";
     std::filesystem::create_directories(music);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
