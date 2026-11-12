@@ -115,6 +115,7 @@ void DiscordPresence::configure(const DiscordSettings& settings) {
     if (tunnel_) tunnel_->setEnabled(covers);
     // The next snapshot picks the track up again, and its cover with it.
     track_.clear();
+    coverFor_.clear();
     servedFor_.clear();
 }
 
@@ -144,6 +145,7 @@ void DiscordPresence::observe(const Snapshot& snapshot) {
             coverCancel_.cancel();
             coverCancel_ = {};
             coverFor_ = path;
+            ++coverAsked_;
             coverWanted_.notify_all();
         }
     }
@@ -182,10 +184,11 @@ DiscordStatus DiscordPresence::status() const {
 
 void DiscordPresence::loadCovers(const std::stop_token& stop) {
     std::unique_lock lock(mutex_);
-    std::string loaded;
+    uint64_t loaded = 0;
     while (!stop.stop_requested()) {
-        coverWanted_.wait(lock, stop, [&] { return coverFor_ != loaded; });
+        coverWanted_.wait(lock, stop, [&] { return coverAsked_ != loaded; });
         if (stop.stop_requested()) break;
+        const uint64_t asked = coverAsked_;
         const std::string path = coverFor_;
         const auto token = coverCancel_;
         lock.unlock();
@@ -195,8 +198,8 @@ void DiscordPresence::loadCovers(const std::stop_token& stop) {
         } catch (const std::exception&) {
         }
         lock.lock();
-        loaded = path;
-        if (token.cancelled() || coverFor_ != path || !tunnel_) continue;
+        loaded = asked;
+        if (token.cancelled() || coverAsked_ != asked || !tunnel_) continue;
         servedCover_ = !jpeg.empty();
         tunnel_->serve(std::move(jpeg));
         servedFor_ = path;

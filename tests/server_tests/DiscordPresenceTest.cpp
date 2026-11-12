@@ -301,6 +301,59 @@ TEST(DiscordPresence, ClientWaitsForDiscordToStart) {
     EXPECT_TRUE(waitFor([&] { return client.state() == DiscordClient::State::Off; }));
 }
 
+// Covers turned off and on again while the same track plays: its cover is loaded again and shown, rather than the
+// text waiting out the cover's time and going without it.
+TEST(DiscordPresence, TheCoverComesBackWhenCoversAreTurnedOffAndOn) {
+    FakeDiscord discord(pipePrefix("cover-again"));
+    const auto cmd = systemFile(L"cmd.exe");
+    CoverTunnel::Options tunnel;
+    tunnel.sha256 = update::sha256File(cmd);
+    tunnel.command = [](const std::filesystem::path& executable, uint16_t) {
+        return L"\"" + executable.wstring() +
+               L"\" /c \"echo Your quick Tunnel: https://test-tunnel.trycloudflare.com && ping -n 60 127.0.0.1 > nul\"";
+    };
+    std::atomic<int> loads = 0;
+    DiscordPresence presence(
+        cmd,
+        [&](const std::string&, const CancellationToken&) {
+            ++loads;
+            return std::vector<uint8_t>{0xFF, 0xD8, 0xFF, 0xD9};
+        },
+        fastOptions("cover-again"), tunnel);
+    Snapshot snapshot;
+    snapshot.queueEntryId = 1;
+    snapshot.playback.state = PlaybackState::Playing;
+    snapshot.playback.pathUtf8 = "C:/music/Boat.flac";
+    const auto coveredSince = [&](size_t from) {
+        const auto activities = discord.activities();
+        for (size_t i = from; i < activities.size(); ++i)
+            if (activities[i].is_object() && activities[i].contains("assets") &&
+                activities[i]["assets"].value("large_image", "").starts_with("https://"))
+                return true;
+        return false;
+    };
+    presence.configure({true, true});
+    ASSERT_TRUE(waitFor([&] {
+        presence.observe(snapshot);
+        return coveredSince(0);
+    }));
+    presence.configure({true, false});
+    ASSERT_TRUE(waitFor([&] {
+        presence.observe(snapshot);
+        const auto activities = discord.activities();
+        return activities.back().is_object() && activities.back()["assets"].value("large_image", "") == "camelplayer";
+    }));
+    const auto shown = discord.activities().size();
+    presence.configure({true, true});
+    EXPECT_TRUE(waitFor(
+        [&] {
+            presence.observe(snapshot);
+            return coveredSince(shown);
+        },
+        std::chrono::seconds(8)));
+    EXPECT_EQ(loads, 2);
+}
+
 TEST(CoverTunnel, FindsTheQuickTunnelInCloudflaredsOutput) {
     EXPECT_EQ(quickTunnelUrl("2026-11-01T05:00:00Z INF |  https://calm-lake-bird.trycloudflare.com  |"),
               "https://calm-lake-bird.trycloudflare.com");

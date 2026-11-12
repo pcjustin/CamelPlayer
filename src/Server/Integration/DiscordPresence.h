@@ -52,9 +52,10 @@ private:
     DiscordSettings settings_;
     DiscordTexts texts_;
     std::string track_; // the queue entry and file shown, to notice a track change
-    std::chrono::steady_clock::time_point trackSince_{};
-    std::string coverFor_;  // the file whose cover is wanted
-    std::string servedFor_; // the file whose cover the tunnel serves (or found none)
+    std::chrono::steady_clock::time_point trackSince_;
+    std::string coverFor_;    // the file whose cover is wanted
+    uint64_t coverAsked_ = 0; // counts the times a cover was wanted, the same file's again among them
+    std::string servedFor_;   // the file whose cover the tunnel serves (or found none)
     bool servedCover_ = false;
     CancellationToken coverCancel_;
     std::unique_ptr<CoverTunnel> tunnel_; // made the first time covers are on
