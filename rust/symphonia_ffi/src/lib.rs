@@ -27,7 +27,7 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::units::Timestamp;
+use symphonia::core::units::{TimeBase, Timestamp};
 
 pub const SYM_OK: i32 = 0;
 pub const SYM_END: i32 = 1;
@@ -64,7 +64,40 @@ pub struct SymDecoder {
     pending_pos: usize,
     /// Frames still to drop after a seek so the next read starts exactly at the requested frame.
     skip_frames: u64,
+    ticks: Ticks,
     last_error: String,
+}
+
+/// The container's time against frames at the rate reported: `per` ticks are `frames` frames. An MP4's timescale need
+/// not be its sample rate, and an AAC track plays at its AudioSpecificConfig's rate whatever the container counts in.
+#[derive(Clone, Copy)]
+struct Ticks {
+    per: u64,
+    frames: u64,
+}
+
+impl Ticks {
+    fn new(time_base: Option<TimeBase>, sample_rate: u32) -> Self {
+        match time_base {
+            Some(tb) if sample_rate > 0 => Self {
+                per: u64::from(tb.denom.get()),
+                frames: u64::from(tb.numer.get()) * u64::from(sample_rate),
+            },
+            _ => Self { per: 1, frames: 1 },
+        }
+    }
+
+    fn same(self) -> bool {
+        self.per == self.frames
+    }
+
+    fn to_frames(self, ticks: u64) -> u64 {
+        (u128::from(ticks) * u128::from(self.frames) / u128::from(self.per)) as u64
+    }
+
+    fn to_ticks(self, frames: u64) -> u64 {
+        (u128::from(frames) * u128::from(self.per) / u128::from(self.frames)) as u64
+    }
 }
 
 fn map_err(e: &Error) -> i32 {
@@ -150,7 +183,10 @@ impl SymDecoder {
                     } else {
                         0
                     };
-                    let frames = packet.dur.get().saturating_sub(trimmed) as usize;
+                    let frames = self
+                        .ticks
+                        .to_frames(packet.dur.get())
+                        .saturating_sub(trimmed) as usize;
                     self.set_pending(vec![0; frames * self.channels]);
                     return Ok(true);
                 }
@@ -235,6 +271,8 @@ unsafe fn open_decoder(
     let mut params = params.clone();
     let track_id = track.id;
     let num_frames = track.num_frames;
+    let time_base = track.time_base;
+    let duration = track.duration;
     // Delay and padding are trimmed only where the file declares them: without, the length is Symphonia's estimate
     // from the bitrate, and trimming to it would drop the last frames.
     let gapless = track.delay.is_some() || track.padding.is_some();
@@ -288,6 +326,14 @@ unsafe fn open_decoder(
     if channels == 0 || bits == 0 || bits > 32 {
         return SYM_E_UNSUPPORTED;
     }
+    let ticks = Ticks::new(time_base, sample_rate);
+    // The reader counts frames only where its timescale is the sample entry's rate; otherwise the length is the
+    // track's duration, counted in the container's ticks.
+    let total_frames = if ticks.same() {
+        num_frames.unwrap_or(0)
+    } else {
+        duration.map_or(0, |d| ticks.to_frames(d.get()))
+    };
     let (has_md5, md5) = match params.verification_check {
         Some(VerificationCheck::Md5(m)) => (1, m),
         _ => (0, [0u8; 16]),
@@ -296,7 +342,7 @@ unsafe fn open_decoder(
         sample_rate,
         channels: channels as u32,
         bits_per_sample: bits,
-        total_frames: num_frames.unwrap_or(0),
+        total_frames,
         has_md5,
         md5,
         is_float: u32::from(lossy),
@@ -312,6 +358,7 @@ unsafe fn open_decoder(
         pending: Vec::new(),
         pending_pos: 0,
         skip_frames: 0,
+        ticks,
         last_error: String::new(),
     });
     *out = Box::into_raw(dec);
@@ -383,7 +430,7 @@ fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
     let seeked = match d.format.seek(
         SeekMode::Accurate,
         SeekTo::Timestamp {
-            ts: Timestamp::from(i64::try_from(frame).unwrap_or(i64::MAX)),
+            ts: Timestamp::from(i64::try_from(d.ticks.to_ticks(frame)).unwrap_or(i64::MAX)),
             track_id: d.track_id,
         },
     ) {
@@ -396,7 +443,10 @@ fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
     d.decoder.reset();
     d.pending.clear();
     d.pending_pos = 0;
-    d.skip_frames = u64::try_from(seeked.required_ts.get() - seeked.actual_ts.get()).unwrap_or(0);
+    let landed = d
+        .ticks
+        .to_frames(u64::try_from(seeked.actual_ts.get()).unwrap_or(0));
+    d.skip_frames = frame.saturating_sub(landed);
     SYM_OK
 }
 

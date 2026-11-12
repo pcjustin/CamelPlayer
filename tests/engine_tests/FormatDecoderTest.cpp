@@ -135,6 +135,106 @@ INSTANTIATE_TEST_SUITE_P(Lossless, FormatDecoder, ::testing::ValuesIn(cases()), 
 
 namespace {
 
+std::string readFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// `m4a` with its media timescale, and every time counted in it, doubled: the same audio, its time counted at twice the
+// sample rate, as a muxer may write it.
+std::string doubledTimescale(std::string m4a) {
+    const auto get = [&](size_t at, int bytes) {
+        uint64_t value = 0;
+        for (int i = 0; i < bytes; i++) value = value << 8 | uint8_t(m4a[at + size_t(i)]);
+        return value;
+    };
+    const auto put = [&](size_t at, int bytes, uint64_t value) {
+        for (int i = bytes - 1; i >= 0; i--, value >>= 8) m4a[at + size_t(i)] = char(value & 0xFF);
+    };
+    const auto box = [&](const char* type) {
+        const size_t at = m4a.find(type);
+        EXPECT_NE(at, std::string::npos) << type;
+        return at - 4;
+    };
+    const size_t mdhd = box("mdhd");
+    const bool mdhdLong = m4a[mdhd + 8] == 1;
+    const size_t timescale = mdhd + (mdhdLong ? 28 : 20);
+    put(timescale, 4, get(timescale, 4) * 2);
+    put(timescale + 4, mdhdLong ? 8 : 4, get(timescale + 4, mdhdLong ? 8 : 4) * 2);
+    const size_t stts = box("stts");
+    for (uint64_t i = 0, n = get(stts + 12, 4); i < n; i++) {
+        const size_t delta = stts + 16 + size_t(i) * 8 + 4;
+        put(delta, 4, get(delta, 4) * 2);
+    }
+    if (const size_t found = m4a.find("elst"); found != std::string::npos) {
+        const size_t elst = found - 4;
+        const bool elstLong = m4a[elst + 8] == 1;
+        const int width = elstLong ? 8 : 4;
+        for (uint64_t i = 0, n = get(elst + 12, 4); i < n; i++) {
+            const size_t mediaTime = elst + 16 + size_t(i) * (elstLong ? 20 : 12) + size_t(width);
+            const uint64_t value = get(mediaTime, width);
+            if (value != (width == 8 ? ~uint64_t{0} : 0xFFFFFFFFu)) put(mediaTime, width, value * 2); // -1: an empty edit
+        }
+    }
+    return m4a;
+}
+
+} // namespace
+
+// An MP4 whose media timescale is not its sample rate: its length, its decode and every seek are counted in frames at
+// the rate the track reports, not in the container's ticks.
+TEST(FormatDecoderTimescale, AnMp4CountedAtAnotherRateKeepsItsLengthAndSeeks) {
+    const auto& spec = kSpecs[0];
+    const auto& expected = reference(spec);
+    const uint64_t frames = expected.size() / spec.channels;
+    const auto alac = testutil::tempDir() / "format-alac-timescale-x2.m4a";
+    std::ofstream(alac, std::ios::binary) << doubledTimescale(readFile(fixture(AudioFormat::Alac, spec)));
+    std::vector<int32_t> buffer(size_t(4096) * spec.channels);
+    for (const auto kind : decodersFor(AudioFormat::Alac)) {
+        auto decoder = openDecoder(kind, alac);
+        EXPECT_EQ(decoder->info().sampleRate, spec.sampleRate) << decoderName(kind);
+        EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind);
+        EXPECT_TRUE(readAll(*decoder) == expected) << decoderName(kind);
+        decoder = openDecoder(kind, alac); // the MP4 reader cannot seek once it has read to the end
+        for (const uint64_t target : {frames / 2 + 4097, frames / 3, uint64_t(1)}) {
+            decoder->seek(target);
+            const size_t want = size_t(std::min<uint64_t>(4096, frames - target));
+            size_t got = 0;
+            while (got < want) {
+                const size_t n = decoder->read(buffer.data() + got * spec.channels, want - got);
+                ASSERT_GT(n, 0u) << decoderName(kind) << ": short read after seek to " << target;
+                got += n;
+            }
+            EXPECT_TRUE(std::equal(buffer.begin(), buffer.begin() + std::ptrdiff_t(want * spec.channels),
+                                   expected.begin() + std::ptrdiff_t(target * spec.channels)))
+                << decoderName(kind) << ": seek to " << target;
+        }
+    }
+
+    // AAC, against the same file counted at its own rate.
+    const auto plain = testutil::tempDir() / "format-aac-timescale-x1.m4a";
+    const auto doubled = testutil::tempDir() / "format-aac-timescale-x2.m4a";
+    testutil::copyFixture("aac.m4a", plain);
+    std::ofstream(doubled, std::ios::binary) << doubledTimescale(readFile(plain));
+    for (const auto kind : decodersFor(AudioFormat::Aac)) {
+        auto counted = openDecoder(kind, plain);
+        auto decoder = openDecoder(kind, doubled);
+        EXPECT_EQ(decoder->info().sampleRate, counted->info().sampleRate) << decoderName(kind);
+        EXPECT_EQ(decoder->info().totalFrames, counted->info().totalFrames) << decoderName(kind);
+        EXPECT_TRUE(readAll(*decoder) == readAll(*counted)) << decoderName(kind);
+        counted = openDecoder(kind, plain);
+        decoder = openDecoder(kind, doubled);
+        const uint64_t target = counted->info().totalFrames / 2;
+        counted->seek(target);
+        decoder->seek(target);
+        std::vector<int32_t> want(size_t(1024) * counted->info().channels), got(want.size());
+        EXPECT_EQ(decoder->read(got.data(), 1024), counted->read(want.data(), 1024)) << decoderName(kind);
+        EXPECT_TRUE(got == want) << decoderName(kind) << ": seek to " << target;
+    }
+}
+
+namespace {
+
 // 64-bit float PCM, which testaudio does not write.
 void writeFloat64Wav(const std::filesystem::path& path, const std::vector<int32_t>& samples24) {
     std::string data;
