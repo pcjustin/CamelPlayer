@@ -56,14 +56,15 @@ struct Message {
     json body;
 };
 
-// The next frame within `timeout`; nullopt when none came, the pipe closed or the frame was broken.
-std::optional<Message> readFrame(HANDLE pipe, std::chrono::milliseconds timeout) {
+// The next frame within `timeout`; nullopt when none came, the pipe closed, the frame was broken or the client is
+// stopping.
+std::optional<Message> readFrame(HANDLE pipe, std::chrono::milliseconds timeout, const std::stop_token& stop) {
     const auto deadline = Clock::now() + timeout;
     for (;;) {
         const auto bytes = available(pipe);
         if (!bytes) return std::nullopt;
         if (*bytes >= 8) break;
-        if (Clock::now() >= deadline) return std::nullopt;
+        if (Clock::now() >= deadline || stop.stop_requested()) return std::nullopt;
         Sleep(10);
     }
     uint32_t header[2]{};
@@ -151,6 +152,7 @@ DiscordClient::State DiscordClient::state() const {
 }
 
 void DiscordClient::run(const std::stop_token& stop) {
+    stop_ = stop;
     std::unique_lock lock(mutex_);
     while (!stop.stop_requested()) {
         const auto seen = version_;
@@ -222,13 +224,13 @@ void DiscordClient::run(const std::stop_token& stop) {
 }
 
 bool DiscordClient::connect() {
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10 && !stop_.stop_requested(); ++i) {
         const auto name = options_.pipePrefix + std::to_wstring(i);
         HANDLE pipe = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
         if (pipe == INVALID_HANDLE_VALUE) continue;
         const json handshake = {{"v", 1}, {"client_id", options_.clientId}};
         if (writeFrame(pipe, kHandshake, handshake.dump()))
-            if (const auto ready = readFrame(pipe, options_.timeout);
+            if (const auto ready = readFrame(pipe, options_.timeout, stop_);
                 ready && ready->op == kFrame && field(ready->body, "evt") == "READY") {
                 pipe_ = pipe;
                 log::info("Discord: connected on pipe %d", i);
@@ -252,7 +254,8 @@ bool DiscordClient::send(const std::optional<DiscordActivity>& activity) {
     // The reply carries the nonce; a ping may come first. Without a reply in time the update stands.
     const auto deadline = Clock::now() + options_.timeout;
     while (Clock::now() < deadline) {
-        const auto reply = readFrame(pipe_, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()));
+        const auto reply =
+            readFrame(pipe_, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()), stop_);
         if (!reply) {
             if (available(pipe_)) return true;
             close();
@@ -283,7 +286,7 @@ bool DiscordClient::drain() {
         const auto bytes = available(pipe_);
         if (!bytes) return false;
         if (*bytes < 8) return true;
-        const auto message = readFrame(pipe_, options_.timeout);
+        const auto message = readFrame(pipe_, options_.timeout, stop_);
         if (!message) return available(pipe_).has_value();
         if (message->op == kPing) writeFrame(pipe_, kPong, message->body.dump());
         if (message->op == kClose) return false;

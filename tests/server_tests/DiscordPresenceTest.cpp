@@ -354,6 +354,61 @@ TEST(DiscordPresence, TheCoverComesBackWhenCoversAreTurnedOffAndOn) {
     EXPECT_EQ(loads, 2);
 }
 
+// A Discord that takes the handshake and never answers it does not hold up closing for the handshake's wait.
+TEST(DiscordPresence, ClosingDoesNotWaitForADiscordThatNeverAnswers) {
+    const auto name = pipePrefix("silent") + L"0";
+    const HANDLE pipe = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1,
+                                         65536, 65536, 0, nullptr);
+    ASSERT_NE(pipe, INVALID_HANDLE_VALUE);
+    std::atomic<bool> connected = false;
+    std::thread silent([&] {
+        if (!ConnectNamedPipe(pipe, nullptr) && GetLastError() != ERROR_PIPE_CONNECTED) return;
+        connected = true;
+        char buffer[256];
+        DWORD read = 0;
+        while (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) && read) {
+        }
+    });
+    auto options = fastOptions("silent");
+    options.timeout = std::chrono::seconds(5);
+    auto client = std::make_unique<DiscordClient>(options);
+    client->setEnabled(true);
+    ASSERT_TRUE(waitFor([&] { return connected.load(); }));
+    const auto start = std::chrono::steady_clock::now();
+    client.reset();
+    const auto closing = std::chrono::steady_clock::now() - start;
+    silent.join();
+    CloseHandle(pipe);
+    EXPECT_LT(closing, std::chrono::seconds(1));
+}
+
+// A download stuck waiting for its server ends as soon as it is cancelled, not when WinHTTP gives up on it.
+TEST(CoverTunnel, ADownloadStuckWaitingEndsWhenCancelled) {
+    WSADATA wsa;
+    ASSERT_EQ(WSAStartup(MAKEWORD(2, 2), &wsa), 0);
+    const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); // takes connections and never answers
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ASSERT_EQ(listen(listener, 4), 0);
+    int size = sizeof(address);
+    getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size);
+    const auto url = "http://127.0.0.1:" + std::to_string(ntohs(address.sin_port)) + "/cloudflared.exe";
+    CancellationToken cancel;
+    std::thread canceller([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        cancel.cancel();
+    });
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_THROW(http::get(url, "application/octet-stream", cancel, 1 << 20), std::runtime_error);
+    const auto took = std::chrono::steady_clock::now() - start;
+    canceller.join();
+    closesocket(listener);
+    WSACleanup();
+    EXPECT_LT(took, std::chrono::seconds(2));
+}
+
 TEST(CoverTunnel, FindsTheQuickTunnelInCloudflaredsOutput) {
     EXPECT_EQ(quickTunnelUrl("2026-11-01T05:00:00Z INF |  https://calm-lake-bird.trycloudflare.com  |"),
               "https://calm-lake-bird.trycloudflare.com");

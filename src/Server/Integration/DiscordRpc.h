@@ -76,6 +76,7 @@ private:
     void* pipe_ = nullptr;
     uint64_t nonce_ = 0;
     bool statusDisplay_ = true; // dropped for the run once Discord refuses it
+    std::stop_token stop_;      // the worker's, so that a wait on Discord ends when the client closes
     std::jthread worker_;
 };
 

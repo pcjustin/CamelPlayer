@@ -7,7 +7,11 @@
 #include <windows.h>
 #include <winhttp.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "Common/Version.h"
@@ -34,6 +38,39 @@ private:
 void fail(const char* what) {
     throw std::runtime_error(std::string(what) + " failed (" + std::to_string(GetLastError()) + ")");
 }
+
+// A request closed as soon as its token is cancelled, which ends a resolve, connect, send or read WinHTTP is waiting in.
+class CancellableRequest {
+public:
+    CancellableRequest(HINTERNET request, const CancellationToken& token) : request_(request) {
+        if (!request) fail("HTTP request");
+        // The token cannot wake anyone, so it is looked at every 20 ms; the request's end wakes the watch at once.
+        watch_ = std::jthread([this, token](const std::stop_token& stop) {
+            std::mutex mutex;
+            std::condition_variable_any idle;
+            std::unique_lock lock(mutex);
+            while (!idle.wait_for(lock, stop, std::chrono::milliseconds(20), [&] { return token.cancelled(); }))
+                if (stop.stop_requested()) return;
+            close();
+        });
+    }
+    ~CancellableRequest() {
+        watch_ = {};
+        close();
+    }
+    CancellableRequest(const CancellableRequest&) = delete;
+    CancellableRequest& operator=(const CancellableRequest&) = delete;
+    HINTERNET get() const { return request_; }
+
+private:
+    void close() {
+        if (const HINTERNET open = open_.exchange(nullptr)) WinHttpCloseHandle(open);
+    }
+
+    HINTERNET request_;
+    std::atomic<HINTERNET> open_{request_};
+    std::jthread watch_;
+};
 
 } // namespace
 
@@ -70,13 +107,16 @@ unsigned get(const std::string& url, const char* accept, const CancellationToken
                                        WINHTTP_NO_PROXY_BYPASS, 0));
     WinHttpSetTimeouts(session.get(), 10000, 10000, 15000, 30000);
     const Internet connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
-    const Internet request(WinHttpOpenRequest(connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                              WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                              parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0));
+    const CancellableRequest request(WinHttpOpenRequest(connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                                        WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                        parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0),
+                                     token);
     const std::wstring headers = L"Accept: " + toWide(accept);
     if (!WinHttpSendRequest(request.get(), headers.c_str(), DWORD(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-        !WinHttpReceiveResponse(request.get(), nullptr))
+        !WinHttpReceiveResponse(request.get(), nullptr)) {
+        if (token.cancelled()) throw std::runtime_error("cancelled");
         fail("HTTP request");
+    }
     DWORD status = 0, size = sizeof(status);
     WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                         &status, &size, WINHTTP_NO_HEADER_INDEX);
@@ -91,7 +131,10 @@ unsigned get(const std::string& url, const char* accept, const CancellationToken
     for (;;) {
         if (token.cancelled()) throw std::runtime_error("cancelled");
         DWORD read = 0;
-        if (!WinHttpReadData(request.get(), buffer.data(), DWORD(buffer.size()), &read)) fail("HTTP read");
+        if (!WinHttpReadData(request.get(), buffer.data(), DWORD(buffer.size()), &read)) {
+            if (token.cancelled()) throw std::runtime_error("cancelled");
+            fail("HTTP read");
+        }
         if (read == 0) break;
         sink(buffer.data(), read);
     }
