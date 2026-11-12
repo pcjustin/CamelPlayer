@@ -1035,9 +1035,13 @@ impl CamelEngine {
                     continue;
                 }
                 if *stream_ended && last {
-                    // After the last track the chain's tail plays out, such as a convolution's reverberation.
-                    let left =
-                        *tail_left.get_or_insert(if dsp.active() { dsp.tail_frames() } else { 0 });
+                    // After the last track the chain's tail plays out, such as a convolution's reverberation. A chain
+                    // turned off meanwhile has no tail left to play.
+                    let left = if dsp.active() {
+                        *tail_left.get_or_insert(dsp.tail_frames())
+                    } else {
+                        0
+                    };
                     if left > 0 {
                         if space == 0 {
                             break Ok(());
@@ -3626,6 +3630,62 @@ mod tests {
         );
         assert_eq!(unsafe { camel_impulse_destroy_v1(other) }, ENGINE_OK);
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    // Convolution switched off while its tail plays after the last track, on an integer device the track would reach
+    // untouched: the tail ends there and the stream ends as played, rather than failing the engine.
+    #[test]
+    fn turning_the_chain_off_during_the_tail_ends_the_stream_cleanly() {
+        let mut response = vec![0.0; 40_000];
+        response[0] = 0.5;
+        response[39_999] = 0.25;
+        let ir = impulse(&response, 1, 48_000);
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
+        cfg.format.rate_hz = 48_000;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], None, ir)) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source_with_gain(engine, 0.0), ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        // The track and the start of its 40 000-frame tail, more than the 12 000-frame device ring holds.
+        let mut frames = 0;
+        for _ in 0..8 {
+            let status = unsafe { camel_engine_prefill_v1(engine, 4, &mut frames) };
+            assert!(status == ENGINE_OK || status == ENGINE_END, "{status}");
+        }
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], None, ptr::null())) },
+            ENGINE_OK
+        );
+        let mut rendered = 0;
+        let mut status = ENGINE_OK;
+        let mut output = vec![0u8; 4096 * 8];
+        for _ in 0..100 {
+            let prefilled = unsafe { camel_engine_prefill_v1(engine, 4, &mut frames) };
+            if prefilled != ENGINE_OK && prefilled != ENGINE_END {
+                status = prefilled;
+                break;
+            }
+            let request = render_request(4096, &mut output);
+            let mut result = render_result();
+            status = unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+            rendered += result.units_rendered;
+            if status != ENGINE_OK {
+                break;
+            }
+        }
+        assert_eq!(status, ENGINE_END, "after {rendered} frames");
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        assert_eq!(unsafe { camel_impulse_destroy_v1(ir) }, ENGINE_OK);
     }
 
     #[test]
