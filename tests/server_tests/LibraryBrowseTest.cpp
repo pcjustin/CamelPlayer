@@ -206,7 +206,7 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
             timings.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
         }
         std::sort(timings.begin(), timings.end());
-        return timings[size_t(timings.size() * 0.95)];
+        return timings[timings.size() * 95 / 100];
     };
     const double oneCharacterP95 = fallbackP95("a");
     const double twoCharacterP95 = fallbackP95("ab");
@@ -226,10 +226,10 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
         broadTimings.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
     }
     std::sort(broadTimings.begin(), broadTimings.end());
-    const double broadSuggestionP95 = broadTimings[size_t(broadTimings.size() * 0.95)];
+    const double broadSuggestionP95 = broadTimings[broadTimings.size() * 95 / 100];
     GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernelEnd, &userEnd);
     std::sort(samples.begin(), samples.end());
-    const double p95 = samples[size_t(samples.size() * 0.95)];
+    const double p95 = samples[samples.size() * 95 / 100];
     auto db = store.openReader();
     auto databaseBytes = std::filesystem::file_size(store.path());
     for (const auto* suffix : {L"-wal", L"-shm"}) {
