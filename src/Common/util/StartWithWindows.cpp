@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <string>
 #include <vector>
 
 namespace camel::startup {
@@ -64,13 +65,20 @@ void follow(const std::wstring& program, const Keys& keys) {
     if (s.registered && s.command != commandFor(program)) enable(program, keys);
 }
 
+// The arguments as Windows splits them, a quoted one whole, so the word inside a file's path is not taken for one.
 bool isBackgroundStart(std::wstring_view commandLine) {
-    for (size_t at = commandLine.find(kBackgroundArgument); at != std::wstring_view::npos;
-         at = commandLine.find(kBackgroundArgument, at + 1)) {
-        const size_t end = at + std::wstring_view(kBackgroundArgument).size();
-        const bool startsWord = at == 0 || commandLine[at - 1] == L' ' || commandLine[at - 1] == L'"';
-        const bool endsWord = end == commandLine.size() || commandLine[end] == L' ' || commandLine[end] == L'"';
-        if (startsWord && endsWord) return true;
+    size_t at = 0;
+    while (at < commandLine.size()) {
+        while (at < commandLine.size() && (commandLine[at] == L' ' || commandLine[at] == L'\t')) ++at;
+        std::wstring argument;
+        bool quoted = false;
+        for (; at < commandLine.size() && (quoted || (commandLine[at] != L' ' && commandLine[at] != L'\t')); ++at) {
+            if (commandLine[at] == L'"')
+                quoted = !quoted;
+            else
+                argument += commandLine[at];
+        }
+        if (argument == kBackgroundArgument) return true;
     }
     return false;
 }

@@ -81,6 +81,14 @@ TEST(StartWithWindowsLaunchTest, TheBackgroundArgumentStartsHidden) {
     EXPECT_EQ(launchFor(false, false), Launch::Start);
 }
 
+// The argument is a whole argument: a file or folder whose path holds the word is opened, not a background start.
+TEST(StartWithWindowsLaunchTest, APathHoldingTheArgumentIsNoBackgroundStart) {
+    EXPECT_FALSE(isBackgroundStart(LR"("C:\Apps\CamelPlayer.exe" "C:\Music\live --background mix.flac")"));
+    EXPECT_FALSE(isBackgroundStart(LR"("C:\Apps --background\CamelPlayer.exe" "C:\Music\a.flac")"));
+    EXPECT_TRUE(isBackgroundStart(LR"("C:\Apps\CamelPlayer.exe" "--background")"));
+    EXPECT_TRUE(isBackgroundStart(L"CamelPlayer.exe\t--background"));
+}
+
 TEST(StartWithWindowsLaunchTest, ABackgroundStartLeavesARunningInstanceAlone) {
     EXPECT_EQ(launchFor(true, true), Launch::Nothing);
     EXPECT_EQ(launchFor(false, true), Launch::ShowRunning);
