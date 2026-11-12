@@ -434,6 +434,21 @@ TEST(SettingsBoundary, UnreadableEqBandsAreDroppedAndAMissingListKeepsTheDefault
     EXPECT_EQ(fromJson(R"({"eq":{"enabled":true}})").eq.bands, defaultEqBands());
 }
 
+// A shared endpoint mixes at its own rate, which can be below the 44.1 and 48 kHz families: with conversion the stream
+// is resampled to it; without, only the source rate is tried, as before.
+TEST(FormatRuleBoundary, ConversionReachesAnEndpointThatMixesBelow44100) {
+    for (const uint32_t mix : {32000u, 16000u, 22050u, 8000u}) {
+        const auto supports = [mix](const DeviceFormat& f) {
+            return f.sampleRate == mix && f.channels == 2 && f.type == SampleType::Float32;
+        };
+        const auto plan = negotiateOutput(SourceInfo{44100, 2, 16}, false, SampleType::Float32, true, supports);
+        ASSERT_TRUE(plan) << mix;
+        EXPECT_EQ(plan->format.sampleRate, mix);
+        EXPECT_TRUE(plan->resample);
+        EXPECT_FALSE(negotiateOutput(SourceInfo{44100, 2, 16}, false, SampleType::Float32, false, supports)) << mix;
+    }
+}
+
 TEST(EqText, ReadsAutoEqAndEqualizerApoFilters) {
     const auto bands = parseEqualizerApo("Preamp: -6.2 dB\r\n"
                                          "Filter 1: ON LSC Fc 105 Hz Gain 6.0 dB Q 0.70\r\n"

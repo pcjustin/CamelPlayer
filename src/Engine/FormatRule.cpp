@@ -15,6 +15,8 @@ namespace {
 
 constexpr uint32_t kFamily44[] = {44100, 88200, 176400, 352800, 705600};
 constexpr uint32_t kFamily48[] = {48000, 96000, 192000, 384000, 768000};
+// Rates a shared endpoint can mix at below both families, tried last.
+constexpr uint32_t kLowRates[] = {32000, 24000, 22050, 16000, 12000, 11025, 8000};
 
 std::vector<uint32_t> candidateRates(uint32_t source, bool convert) {
     std::vector<uint32_t> rates{source};
@@ -31,6 +33,7 @@ std::vector<uint32_t> candidateRates(uint32_t source, bool convert) {
     all.insert(all.end(), std::begin(kFamily48), std::end(kFamily48));
     std::sort(all.rbegin(), all.rend()); // the highest the device takes
     rates.insert(rates.end(), all.begin(), all.end());
+    rates.insert(rates.end(), std::begin(kLowRates), std::end(kLowRates));
     return rates;
 }
 
