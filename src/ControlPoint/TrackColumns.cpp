@@ -10,6 +10,7 @@
 #endif
 #if __has_include("ColumnDivider.g.cpp")
 #include "ColumnDivider.g.cpp"
+#include "ThemeBrush.h"
 #endif
 
 #include <algorithm>
@@ -64,7 +65,12 @@ ColumnDivider::ColumnDivider() {
     line.Width(1);
     line.Margin(ThicknessHelper::FromLengths(0, 4, 0, 4));
     line.HorizontalAlignment(HorizontalAlignment::Center);
-    line.Fill(Application::Current().Resources().Lookup(box_value(L"DividerStrokeColorDefaultBrush")).as<Media::Brush>());
+    // In the theme the window shows, which a change in Settings gives the content alone, not the Application.
+    line.Fill(ui::themeBrush(L"DividerStrokeColorDefaultBrush"));
+    ActualThemeChanged([line](FrameworkElement const& divider, auto&&) {
+        ui::setTheme(divider.ActualTheme());
+        line.Fill(ui::themeBrush(L"DividerStrokeColorDefaultBrush"));
+    });
     Children().Append(line);
 
     PointerPressed([this](auto&&, Input::PointerRoutedEventArgs const& e) {
