@@ -449,6 +449,21 @@ TEST(NetworkOutputTest, TheStandInClockStopsWhileThePlayerIsPaused) {
         << "the pause was counted as played: " << heldWhenPaused << " held when paused, " << heldWhenResumed << " after";
 }
 
+// The 32-bit sizes of a WAV header cannot hold a stream past 4 GB: both say 0xFFFFFFFF, which players take for a size
+// unknown, rather than a size near 4 GB at which a player trusting the header would stop.
+TEST(NetworkOutputTest, AWavStreamPastFourGigabytesSaysItsSizeIsUnknown) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 1'100'000'000ULL); // 4.4 GB of 16-bit stereo
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.currentUri().empty() && source.rendered() > 0; }));
+    const auto head = http::send("GET", renderer.currentUri(), "Range: bytes=0-43", "", 2000, 1 << 20);
+    ASSERT_EQ(head.body.size(), 44U);
+    EXPECT_EQ(le32(head.body, 4), 0xFFFFFFFFU) << "RIFF size";
+    EXPECT_EQ(le32(head.body, 40), 0xFFFFFFFFU) << "data size";
+}
+
 TEST(NetworkOutputTest, APlayerThatReconnectsGetsTheStartAgain) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     CountingSource source(k16.bytesPerFrame(), 20000);

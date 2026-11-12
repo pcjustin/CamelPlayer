@@ -52,11 +52,14 @@ void putLe(std::string& out, uint64_t value, int bytes) {
     for (int i = 0; i < bytes; ++i) out.push_back(char((value >> (8 * i)) & 0xFF));
 }
 
+// A stream past what the 32-bit sizes hold says 0xFFFFFFFF for both, which players take for a size unknown, rather than
+// a size it does not have.
 std::string wavHeader(const DeviceFormat& format, uint64_t dataBytes) {
-    const uint32_t data = uint32_t(std::min<uint64_t>(dataBytes, 0xFFFFFFFFULL - 36));
+    const bool fits = dataBytes <= 0xFFFFFFFFULL - 36;
+    const uint64_t data = fits ? dataBytes : 0xFFFFFFFFULL;
     const uint32_t blockAlign = format.bytesPerFrame();
     std::string header = "RIFF";
-    putLe(header, 36ULL + data, 4);
+    putLe(header, fits ? 36ULL + data : 0xFFFFFFFFULL, 4);
     header += "WAVEfmt ";
     putLe(header, 16, 4);
     putLe(header, 1, 2); // PCM
