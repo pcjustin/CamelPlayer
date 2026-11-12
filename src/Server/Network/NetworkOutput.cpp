@@ -183,6 +183,8 @@ public:
             playing_ = false;
             released_ = false;
             playingSince_ = {};
+            pausedAt_ = {};
+            pausedFor_ = {};
             askedToPlay_ = {};
             nextId_ = 0;
             queuedNext_ = 0;
@@ -216,6 +218,10 @@ public:
         if (!link_->play()) throw Error(ErrorCode::DriverError, "the player did not start");
         std::scoped_lock lock(mutex_);
         if (playingSince_ == Clock::time_point{}) playingSince_ = Clock::now();
+        if (pausedAt_ != Clock::time_point{}) {
+            pausedFor_ += Clock::now() - pausedAt_;
+            pausedAt_ = {};
+        }
         moved_.notify_all();
     }
 
@@ -225,6 +231,7 @@ public:
             std::scoped_lock lock(mutex_);
             playing_ = false;
             released = released_;
+            if (playingSince_ != Clock::time_point{} && pausedAt_ == Clock::time_point{}) pausedAt_ = Clock::now();
         }
         if (link_ && !released) link_->pause();
     }
@@ -420,7 +427,9 @@ private:
         // A player that never reports a position is taken to play in real time from a start it may take seconds to reach (the
         // DMP-A6 does); 0 is also a track's start.
         if (!reportsPosition_ && playingSince_ != Clock::time_point{}) {
-            const auto elapsed = std::chrono::duration_cast<milliseconds>(Clock::now() - playingSince_).count();
+            // Time paused is not played.
+            const auto until = pausedAt_ != Clock::time_point{} ? pausedAt_ : Clock::now();
+            const auto elapsed = std::chrono::duration_cast<milliseconds>(until - playingSince_ - pausedFor_).count();
             if (elapsed > kSlowStartMs) reported = uint64_t(elapsed - kSlowStartMs) * format_.sampleRate / 1000;
         }
         return reported;
@@ -902,6 +911,8 @@ private:
     _Guarded_by_(mutex_) bool closing_ = false;
     _Guarded_by_(mutex_) bool released_ = false;
     _Guarded_by_(mutex_) Clock::time_point playingSince_;
+    _Guarded_by_(mutex_) Clock::time_point pausedAt_; // while paused, since when
+    _Guarded_by_(mutex_) Clock::duration pausedFor_ {};
     _Guarded_by_(mutex_) Clock::time_point askedToPlay_;
     _Guarded_by_(mutex_) mutable uint64_t highestMs_ = 0; // of the track playing
     _Guarded_by_(mutex_) mutable bool reportsPosition_ = false;

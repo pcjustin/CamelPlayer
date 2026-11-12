@@ -429,6 +429,26 @@ TEST(NetworkOutputTest, APlayerThatNeverReportsAPositionIsTakenToPlayInRealTime)
     EXPECT_TRUE(waitFor([&] { return source.rendered() > 44100ULL * 8; }, 7s)); // rendering goes on as time passes
 }
 
+// The clock that stands in for such a player's position stops while it is paused: after a pause of three seconds it
+// does not count them as played.
+TEST(NetworkOutputTest, TheStandInClockStopsWhileThePlayerIsPaused) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.reportNoPosition();
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    // Past the slow start the clock allows, once it counts a second played.
+    ASSERT_TRUE(waitFor([&] { return output->status().heldFrames + 44100ULL < source.rendered(); }, 10s));
+    output->pause();
+    const auto heldWhenPaused = output->status().heldFrames;
+    std::this_thread::sleep_for(3s);
+    output->start();
+    const auto heldWhenResumed = output->status().heldFrames;
+    EXPECT_GE(double(heldWhenResumed), double(heldWhenPaused) - 44100.0 * 0.5)
+        << "the pause was counted as played: " << heldWhenPaused << " held when paused, " << heldWhenResumed << " after";
+}
+
 TEST(NetworkOutputTest, APlayerThatReconnectsGetsTheStartAgain) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     CountingSource source(k16.bytesPerFrame(), 20000);
