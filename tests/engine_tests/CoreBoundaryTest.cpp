@@ -442,6 +442,21 @@ TEST(SettingsBoundary, UnreadableEqBandsAreDroppedAndAMissingListKeepsTheDefault
     EXPECT_EQ(fromJson(R"({"eq":{"enabled":true}})").eq.bands, defaultEqBands());
 }
 
+// A band whose type or channels are not text is dropped or read as all channels, as an unreadable band is; the rest of
+// the settings file stays good.
+TEST(SettingsBoundary, AnEqBandOfTheWrongTypeIsDroppedNotTheSettings) {
+    const auto read = fromJson(R"({"volume":{"db":-12.5},"eq":{"enabled":true,"bands":[
+        {"type":3,"frequency":250},
+        {"type":"peaking","frequency":500,"gain":2,"channels":null},
+        {"type":"peaking","frequency":1000,"gain":-3,"channels":7}]}})");
+    EXPECT_EQ(read.volume.db, -12.5);
+    EXPECT_TRUE(read.eq.enabled);
+    ASSERT_EQ(read.eq.bands.size(), 2u);
+    EXPECT_EQ(read.eq.bands[0].frequencyHz, 500.0);
+    EXPECT_EQ(read.eq.bands[0].channels, EqChannels::All);
+    EXPECT_EQ(read.eq.bands[1].channels, EqChannels::All);
+}
+
 // A shared endpoint mixes at its own rate, which can be below the 44.1 and 48 kHz families: with conversion the stream
 // is resampled to it; without, only the source rate is tried, as before.
 TEST(FormatRuleBoundary, ConversionReachesAnEndpointThatMixesBelow44100) {

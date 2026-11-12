@@ -222,11 +222,14 @@ static std::vector<EqBand> eqBandsFrom(const json& list, const std::vector<EqBan
     for (const auto& item : list) {
         if (!item.is_object()) continue;
         EqBand band;
-        const auto type = item.value("type", std::string());
-        const auto kind = std::ranges::find(kEqKindIds, type);
+        // value() throws for a key of another type; a band that cannot be read is dropped instead.
+        const auto text = [&](const char* key, const char* fallbackText) -> std::string {
+            return item.contains(key) && item[key].is_string() ? item[key].get<std::string>() : fallbackText;
+        };
+        const auto kind = std::ranges::find(kEqKindIds, text("type", ""));
         if (kind == std::end(kEqKindIds)) continue;
         band.kind = EqKind(kind - std::begin(kEqKindIds) + 1);
-        const auto channels = std::ranges::find(kEqChannelIds, item.value("channels", std::string("all")));
+        const auto channels = std::ranges::find(kEqChannelIds, text("channels", "all"));
         band.channels = channels == std::end(kEqChannelIds) ? EqChannels::All : EqChannels(channels - std::begin(kEqChannelIds));
         const auto number = [&](const char* key, double fallbackValue, double minimum, double maximum) {
             if (!item.contains(key) || !item[key].is_number()) return fallbackValue;
