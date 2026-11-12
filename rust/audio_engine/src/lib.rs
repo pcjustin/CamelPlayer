@@ -2494,7 +2494,11 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
         drop(stage);
         *engine.next_source.lock().unwrap() = None;
         engine.next_occupied.store(false, Ordering::Release);
-        *engine.finished_view.lock().unwrap() = current_source.as_ref().map(SourceView::of);
+        // While a boundary is still to be rendered, the track heard is already the finished one; the source decoding,
+        // which this change drops, was never heard.
+        if !engine.boundary_pending() {
+            *engine.finished_view.lock().unwrap() = current_source.as_ref().map(SourceView::of);
+        }
         engine.pending_boundary.store(true, Ordering::Release);
         engine
             .render_source_state
@@ -4028,6 +4032,72 @@ mod tests {
         }
         assert!(left[start + 4_800..].iter().all(|&v| v == -4000));
         assert_eq!(left.len(), start + 48_000);
+    }
+
+    // A manual change while decoding has already moved to the queued track, before it is heard: the track being heard
+    // stays the one whose length the engine reports until the fade, not the queued one the change drops.
+    #[test]
+    fn a_manual_change_before_a_queued_track_is_heard_reports_the_heard_tracks_length() {
+        let mut queued = false;
+        let mut changed = false;
+        let mut total = None;
+        play_tones("8000:24000:48000", |engine, rendered| {
+            if !queued {
+                queued = true;
+                assert_eq!(queue_tone(engine, 3, "1000:96000:48000", 0, 0), ENGINE_OK);
+            }
+            if rendered >= 4_800 && !changed {
+                changed = true;
+                assert!(engine_ref(engine).boundary_pending());
+                let host = tone_host();
+                let source = tone_source("-4000:48000:48000", 100, 0);
+                assert_eq!(
+                    unsafe {
+                        camel_engine_crossfade_to_v1(
+                            engine,
+                            &command_stamp(4),
+                            &source,
+                            decoder_host::DECODER_SYMPHONIA,
+                            &host,
+                        )
+                    },
+                    ENGINE_OK
+                );
+                total = Some(state_total(engine));
+            }
+        });
+        assert_eq!(total, Some(24_000));
+    }
+
+    fn engine_ref<'a>(engine: *mut CamelEngine) -> &'a CamelEngine {
+        unsafe { &*engine }
+    }
+
+    fn state_total(engine: *mut CamelEngine) -> u64 {
+        let mut state = CamelEngineStateV1 {
+            struct_size: std::mem::size_of::<CamelEngineStateV1>() as u32,
+            abi_version: ABI_VERSION,
+            playback_state: 0,
+            last_error_code: 0,
+            command: CamelCommandStampV1 {
+                struct_size: std::mem::size_of::<CamelCommandStampV1>() as u32,
+                abi_version: ABI_VERSION,
+                command_id: 0,
+                generation: 0,
+                queue_revision: 0,
+            },
+            position_frames: 0,
+            total_frames: 0,
+            has_source: 0,
+            reserved: 0,
+            source_format: empty_format(),
+            output_format: empty_format(),
+        };
+        assert_eq!(
+            unsafe { camel_engine_get_state_v1(engine, &mut state) },
+            ENGINE_OK
+        );
+        state.total_frames
     }
 
     #[test]
