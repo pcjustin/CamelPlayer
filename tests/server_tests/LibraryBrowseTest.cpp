@@ -105,7 +105,8 @@ TEST(LibraryBrowse, SearchRanksWholeNamesAndTheirStartsFirst) {
 }
 
 // A word over 2,000 titles hold walks the tracks; the artists still come from every visible track whose artist holds
-// it, ranked, with each name a shared credit lists, and follow later changes.
+// it, ranked, and follow later changes. Of a shared credit, only the names that hold the word are listed and counted:
+// "Aimer with Tokyo Orchestra" gives Tokyo Orchestra for "orchestra" and Aimer for "ai", not both.
 TEST(LibraryBrowse, ArtistsOfABroadSearchComeFromTheArtistIndex) {
     const auto directory = testutil::tempDir() / "library-browse-broad-artists";
     std::filesystem::remove_all(directory);
@@ -133,8 +134,11 @@ TEST(LibraryBrowse, ArtistsOfABroadSearchComeFromTheArtistIndex) {
         .get();
     const auto results = searchLibrary(store, "Orchestra", 0, 10);
     EXPECT_EQ(results.tracks.total, 2104);
-    EXPECT_EQ(results.artists, (std::vector<std::string>{"Orchestra", "Orchestra of Lyon", "Tokyo Orchestra", "Aimer"}));
-    EXPECT_EQ(results.totalArtists, 4);
+    EXPECT_EQ(results.artists, (std::vector<std::string>{"Orchestra", "Orchestra of Lyon", "Tokyo Orchestra"}));
+    EXPECT_EQ(results.totalArtists, 3);
+    const auto two = searchLibrary(store, "ai", 0, 10);
+    EXPECT_EQ(two.artists, (std::vector<std::string>{"Aimer"}));
+    EXPECT_EQ(two.totalArtists, 1);
     store
         .write([](sqlite::Database& db) {
             db.exec("UPDATE tracks SET artist='Lyon Strings',artist_norm='lyon strings' WHERE id=2102;"
@@ -142,8 +146,8 @@ TEST(LibraryBrowse, ArtistsOfABroadSearchComeFromTheArtistIndex) {
         })
         .get();
     const auto changed = searchLibrary(store, "Orchestra", 0, 10);
-    EXPECT_EQ(changed.artists, (std::vector<std::string>{"Tokyo Orchestra", "Aimer"}));
-    EXPECT_EQ(changed.totalArtists, 2);
+    EXPECT_EQ(changed.artists, (std::vector<std::string>{"Tokyo Orchestra"}));
+    EXPECT_EQ(changed.totalArtists, 1);
 }
 
 TEST(LocalServer, ExposesVersionedBrowseAndGroupedSearch) {

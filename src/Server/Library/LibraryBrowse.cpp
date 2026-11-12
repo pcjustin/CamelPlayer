@@ -242,7 +242,7 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
         }
     }
 
-    // Artists whose name matches; each multi-artist track lists every artist it carries.
+    // Artists whose name matches: a multi-artist track lists each of its artists whose own name holds the query.
     {
         const std::string artist = "coalesce(nullif(v.value,''),t.artist,'')";
         Search named = search;
@@ -261,6 +261,8 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
             artistTracks = kArtistFtsTracks;
             artistFilter = " AND track_artists_fts MATCH ?1 ";
         }
+        // The track's credit matched; of its names, those that hold the query.
+        artistFilter += " AND instr(coalesce(v.value_norm,t.artist_norm,''),?4)>0 ";
         const std::string artistFrom =
             std::string(artistTracks) + "LEFT JOIN track_values v ON v.track_id=t.id AND v.field='artist' ";
         // Every matching artist is grouped anyway, so artists always rank.
@@ -274,7 +276,7 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
         if (totals) {
             auto total = db.prepare("SELECT COUNT(DISTINCT " + artist + ")" + artistFrom + "WHERE" + kVisible + artistFilter);
             named.bind(total);
-            if (search.plan == Search::Plan::Hits) total.bind(4, search.text);
+            total.bind(4, search.text);
             if (total.step()) result.totalArtists = total.integer(0);
         }
     }
