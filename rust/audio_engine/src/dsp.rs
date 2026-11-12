@@ -452,9 +452,15 @@ impl Dsp {
             .map_or(0, |c| c.impulse_response().tail_frames())
     }
 
-    /// Samples the chain sent above full scale, which the final quantization clips.
+    /// Samples sent above full scale, which the final quantization clips: the chain's, or while no chain acts, those
+    /// of the conversion before it.
     pub(crate) fn clipped(&self) -> u64 {
         self.clipped
+    }
+
+    /// Counts the samples above full scale of a conversion that passes no chain.
+    pub(crate) fn count_clipped(&mut self, samples: &[f64]) {
+        self.clipped += samples.iter().filter(|s| s.abs() > 1.0).count() as u64;
     }
 
     /// Processes interleaved frames in place.

@@ -652,6 +652,9 @@ impl Converter {
     fn quantize(&mut self, floats: &mut [f64], dsp: &mut Dsp, processed: bool) -> Result<(), i32> {
         if dsp.active() {
             dsp.process(floats);
+        } else {
+            // A downmix, a resampler's overshoot or a gain can pass full scale too.
+            dsp.count_clipped(floats);
         }
         if self.out.sample_format == SAMPLE_F32_LE {
             // As in the integer path, what is not a number is silence.
@@ -879,6 +882,22 @@ pub(crate) mod tests {
         let before = c.pending().to_vec();
         assert_eq!(c.drain(1024, &mut dsp), Ok(()));
         assert_eq!(c.pending(), before.as_slice());
+    }
+
+    // A downmix that sums past full scale clips in the final quantization, and the clip is counted, as the DSP chain's
+    // are, though no chain acts.
+    #[test]
+    fn a_downmix_that_clips_is_counted() {
+        let mut c = converter(source(48_000, 6, 24, false), SAMPLE_S24_LE, 48_000, true);
+        assert_eq!(c.mode, Mode::Process);
+        let full = (1 << 23) - 1;
+        // L, R, C, LFE, Ls, Rs: full-scale L, C and Ls sum to about 2.41 on the left.
+        let frame = [full, 0, full, 0, full, 0];
+        let samples: Vec<i32> = frame.iter().copied().cycle().take(6 * 64).collect();
+        let mut dsp = flat();
+        c.convert(&samples, 64, &mut dsp).unwrap();
+        assert!(!dsp.active());
+        assert_eq!(dsp.clipped(), 64);
     }
 
     #[test]
