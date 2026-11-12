@@ -116,9 +116,22 @@ impl Resampler {
         (input_frames as f64 * self.ratio).ceil() as usize + 1024
     }
 
-    /// Resamples `input` (interleaved frames) and appends the output to `output`. An empty `input` ends the stream
-    /// and flushes the remaining output.
+    /// Resamples `input` (interleaved frames) and appends the output to `output`. An empty `input` gives nothing and
+    /// leaves the stream as it was; `flush` ends it.
     pub(crate) fn process(&mut self, input: &[f64], output: &mut Vec<f64>) -> Result<(), ()> {
+        if input.is_empty() {
+            return Ok(());
+        }
+        self.run(input, output)
+    }
+
+    /// Ends the stream and appends the remaining output to `output`.
+    pub(crate) fn flush(&mut self, output: &mut Vec<f64>) -> Result<(), ()> {
+        self.run(&[], output)
+    }
+
+    // soxr reads a null input as the end of the stream, after which it only flushes.
+    fn run(&mut self, input: &[f64], output: &mut Vec<f64>) -> Result<(), ()> {
         let end = input.is_empty();
         let mut offset = 0;
         loop {
@@ -158,5 +171,49 @@ impl Resampler {
 impl Drop for Resampler {
     fn drop(&mut self) {
         unsafe { soxr_delete(self.handle) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Resampler, QUALITY_HIGH};
+
+    fn tone(frames: usize, start: usize) -> Vec<f64> {
+        (start..start + frames)
+            .flat_map(|i| {
+                let value = (i as f64 * 0.05).sin() * 0.5;
+                [value, -value]
+            })
+            .collect()
+    }
+
+    // The DSD-to-PCM path passes an empty block when the decimator has no frame for a short one: the stream goes on as
+    // it was, and only the real end flushes it.
+    #[test]
+    fn an_empty_block_mid_stream_leaves_the_stream_as_it_was() {
+        let mut whole = Resampler::new(176_400, 88_200, 2, QUALITY_HIGH).unwrap();
+        let mut gapped = Resampler::new(176_400, 88_200, 2, QUALITY_HIGH).unwrap();
+        let (mut expected, mut got) = (Vec::new(), Vec::new());
+        for block in 0..8 {
+            let input = tone(1000, block * 1000);
+            whole.process(&input, &mut expected).unwrap();
+            let before = got.len();
+            gapped.process(&input, &mut got).unwrap();
+            if block == 3 {
+                let at = got.len();
+                gapped.process(&[], &mut got).unwrap();
+                assert_eq!(got.len(), at, "an empty block gives no output");
+                assert!(got.len() > before);
+            }
+        }
+        whole.flush(&mut expected).unwrap();
+        gapped.flush(&mut got).unwrap();
+        assert_eq!(got.len(), expected.len());
+        let worst = got
+            .iter()
+            .zip(&expected)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+        assert!(worst < 1e-12, "differs by {worst}");
     }
 }

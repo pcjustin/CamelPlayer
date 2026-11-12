@@ -438,7 +438,7 @@ impl Converter {
         let start = out.len();
         if let Some(resampler) = self.resampler.as_mut() {
             resampler
-                .process(&[], out)
+                .flush(out)
                 .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)?;
         }
         self.apply_gain(&mut out[start..]);
@@ -478,7 +478,7 @@ impl Converter {
         let mut tail = std::mem::take(&mut self.scratch.output);
         tail.clear();
         let result = resampler
-            .process(&[], &mut tail)
+            .flush(&mut tail)
             .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)
             .and_then(|()| self.emit(&mut tail, dsp));
         self.scratch.output = tail;
