@@ -134,6 +134,13 @@ TEST(ApiJson, SnapshotAndEventSurviveTheRoundTrip) {
     EXPECT_EQ(throughText(CommandStamp{1, 2, 3}, commandStampFromJson), (CommandStamp{1, 2, 3}));
 }
 
+// A stereo pair's speakers come back with its device: the JSON form loses nothing.
+TEST(ApiJson, ADevicesSpeakersSurviveTheRoundTrip) {
+    Snapshot s = fullSnapshot();
+    s.devices.airplay = {{"PAIR", "HomePod pair", "", {"A1B2C3", "D4E5F6"}}};
+    EXPECT_EQ(throughText(s, snapshotFromJson).devices.airplay, s.devices.airplay);
+}
+
 TEST(ApiJson, LiveLocalServerSnapshotSurvivesTheRoundTrip) {
     LocalServer server(Settings{}, std::filesystem::path{});
     server.waitIdle();
