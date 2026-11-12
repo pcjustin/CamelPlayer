@@ -16,6 +16,7 @@
 #include "Common/util/CrashDump.h"
 #include "Common/util/Zip.h"
 #include "Server/Support/ZipWriter.h"
+#include "Tools/camelcli/ScanBenchData.h"
 #include "TestUtil.h"
 // after windows.h, which TestUtil.h includes
 #include <psapi.h>
@@ -324,6 +325,33 @@ TEST(Zip, AnEntryDeclaringMoreThanItsDataCanHoldIsRefusedBeforeItIsAllocated) {
     EXPECT_EQ(exitCode, 0u) << "1: read without an error, 2: an error other than std::runtime_error, 3: more than "
                                "256 MB of memory committed on the way, 4: still reading after a minute";
     std::filesystem::remove(file);
+}
+
+// scan-bench builds a library in its --data folder: it empties only a folder that is missing, empty or one it made,
+// and never one that is, or holds, the player's own data.
+TEST(ScanBench, EmptiesOnlyAFolderItMade) {
+    namespace fs = std::filesystem;
+    const auto root = testutil::tempDir() / "scan-bench-data";
+    fs::remove_all(root);
+    const auto write = [](const fs::path& file) {
+        fs::create_directories(file.parent_path());
+        std::ofstream(file) << "x";
+    };
+    const auto notes = root / "notes";
+    write(notes / "keep.txt");
+    EXPECT_TRUE(camelcli::clearBenchData(notes, {}));
+    EXPECT_TRUE(fs::exists(notes / "keep.txt")) << "a folder of the user's is not emptied";
+    const auto player = root / "Local" / "CamelPlayer";
+    write(player / "settings.json");
+    EXPECT_TRUE(camelcli::clearBenchData(player, {player}));
+    EXPECT_TRUE(camelcli::clearBenchData(root / "Local", {player}));
+    EXPECT_TRUE(fs::exists(player / "settings.json")) << "the player's data is never emptied";
+    const auto bench = root / "bench";
+    EXPECT_FALSE(camelcli::clearBenchData(bench, {player})) << "a missing folder is made";
+    write(bench / "library.db");
+    EXPECT_FALSE(camelcli::clearBenchData(bench, {player})) << "one scan-bench made is emptied again";
+    EXPECT_FALSE(fs::exists(bench / "library.db"));
+    fs::remove_all(root);
 }
 
 TEST(CrashDump, UnansweredPingWritesOneHangDump) {

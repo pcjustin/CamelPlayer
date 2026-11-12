@@ -5,6 +5,8 @@
 // scan-bench: times building a library from one folder, such as a NAS folder, as the player builds it, without touching
 // the player's own library.
 #include <windows.h>
+// windows.h comes first
+#include <shlobj.h>
 
 #include <chrono>
 #include <cstdio>
@@ -12,6 +14,7 @@
 #include <string>
 
 #include "Commands.h"
+#include "ScanBenchData.h"
 #include "Common/util/Text.h"
 #include "Server/Artwork/ArtworkCache.h"
 #include "Server/Library/LibraryScanner.h"
@@ -20,9 +23,27 @@
 
 namespace camelcli {
 
+namespace {
+
+// %LOCALAPPDATA%\CamelPlayer and the folder CAMELPLAYER_DATA names, without making either.
+std::vector<std::filesystem::path> playerData() {
+    std::vector<std::filesystem::path> folders;
+    PWSTR base = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)))
+        folders.push_back(std::filesystem::path(base) / L"CamelPlayer");
+    CoTaskMemFree(base);
+    std::wstring measured(32768, L'\0');
+    measured.resize(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", measured.data(), DWORD(measured.size())));
+    if (!measured.empty() && measured.size() < 32768) folders.emplace_back(measured);
+    return folders;
+}
+
+} // namespace
+
 // scan-bench <folder> [--data <dir>]: builds a fresh library of <folder> in <dir> (default %TEMP%\camelcli-scan-bench)
 // the way the player does: scan, fingerprints, cover thumbnails and search text; then scans it again unchanged, as
-// every start of the player does.
+// every start of the player does. <dir> must be missing, empty or one scan-bench made; the player's own data is never
+// used.
 int cmdScanBench(const Args& args) {
     const auto rest = positional(args);
     if (rest.empty()) {
@@ -32,8 +53,10 @@ int cmdScanBench(const Args& args) {
     namespace fs = std::filesystem;
     const fs::path folder = rest[0];
     const fs::path data = option(args, L"--data").value_or((fs::temp_directory_path() / L"camelcli-scan-bench").wstring());
-    std::error_code ec;
-    fs::remove_all(data, ec);
+    if (const auto refused = clearBenchData(data, playerData())) {
+        std::fprintf(stderr, "scan-bench: %s is left as it is: %s\n", camel::toUtf8(data.wstring()).c_str(), refused->c_str());
+        return 2;
+    }
     const auto started = std::chrono::steady_clock::now();
     camel::server::LibraryStore store(data);
     camel::server::LibraryTextIndex text(store);
