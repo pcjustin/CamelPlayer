@@ -66,6 +66,11 @@ pub unsafe extern "C" fn camel_dsd_to_pcm_process_v1(
     if capacity < frames {
         return ENGINE_E_BUFFER_TOO_SMALL;
     }
+    // The buffers may be null with no frames, and a slice is never made of a null pointer.
+    if frames == 0 {
+        *produced = 0;
+        return ENGINE_OK;
+    }
     let converter = &mut *converter;
     let channels = converter.channels;
     let bytes = std::slice::from_raw_parts(input, frames * channels);
@@ -102,6 +107,27 @@ pub unsafe extern "C" fn camel_dsd_to_pcm_destroy_v1(converter: *mut CamelDsdToP
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // No frames may come with no buffers: nothing is converted, and no slice is made of a null pointer.
+    #[test]
+    fn no_frames_with_null_buffers_converts_nothing() {
+        let converter = camel_dsd_to_pcm_create_v1(2_822_400, 2);
+        assert!(!converter.is_null());
+        let mut produced = usize::MAX;
+        let result = unsafe {
+            camel_dsd_to_pcm_process_v1(
+                converter,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut produced,
+            )
+        };
+        assert_eq!(result, ENGINE_OK);
+        assert_eq!(produced, 0);
+        unsafe { camel_dsd_to_pcm_destroy_v1(converter) };
+    }
 
     #[test]
     fn silence_stays_near_zero_and_a_full_scale_pattern_does_not() {
