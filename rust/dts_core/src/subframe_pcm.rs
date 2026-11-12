@@ -1155,23 +1155,9 @@ impl SubframePcmDecoder {
         // ChannelSideInfoParams.
         let params: Vec<_> = coding.channel_params.clone();
 
-        // §5.7.2.2: when a Rev2AUX chunk carries broadcast DRC values,
-        // they "should be used instead of any dynamic range control
-        // coefficients found in the legacy core stream (indicated by
-        // flag DYNF)". Look the chunk up front so the per-subframe
-        // legacy RANGE gain can be suppressed; gate on the verified
-        // Annex B CRC so a false DWORD-aligned sync alias inside the
-        // audio payload cannot hijack the gain path.
-        let frame_end = bytes.len().min(usize::from(header.frame_size_bytes));
-        let rev2_drc: Option<Vec<f64>> = crate::parse_rev2_aux(&bytes[..frame_end], header)
-            .ok()
-            .flatten()
-            .filter(|chunk| chunk.crc_valid)
-            .and_then(|chunk| chunk.drc)
-            .filter(|drc| {
-                drc.version == crate::REV2_DRC_VERSION_SINGLE_BAND && !drc.codes.is_empty()
-            })
-            .map(|drc| drc.multipliers());
+        // The encoder's dynamic-range control, the per-subframe RANGE gain (DYNF) and a Rev2AUX chunk's broadcast DRC
+        // values (§5.7.2), is read for framing but not applied: the frame decodes to the uncompressed mix, as the
+        // reference decoder does, on every channel and the LFE alike.
 
         // §5.3.1 HFLAG (Predictor History Flag Switch): "When
         // generating ADPCM predictions for current frame, the decoder
@@ -1223,7 +1209,7 @@ impl SubframePcmDecoder {
                     },
                 ));
             }
-            let (mut block, audio_bits) = self.decode_subframe_partial(
+            let (block, audio_bits) = self.decode_subframe_partial(
                 bytes,
                 bit,
                 header,
@@ -1236,96 +1222,14 @@ impl SubframePcmDecoder {
             )?;
             frame_lfe.append(&mut self.last_lfe_pcm);
 
-            // §5.4.1: when DYNF != 0, multiply every reconstructed PCM
-            // sample of this subframe by the linear DRC gain, applied
-            // after QMF synthesis. The 8-bit RANGE code is signed Q2
-            // (dB = (int8)code · 0.25; see dts_dynrng_to_db and
-            // docs/audio/dts/dts-drc-dynrng.md) — NOT a raw index into
-            // the offset-binary §D.4 presentation table. Suppressed
-            // (the field is still consumed for framing) when a
-            // CRC-verified Rev2AUX DRC payload overrides it (§5.7.2.2).
-            if let Some(code) = tail.range_index
-                && rev2_drc.is_none()
-            {
-                apply_range(&mut block, crate::dts_dynrng_to_linear(code));
-            }
-
             for (ch, samples) in block.into_iter().enumerate() {
                 pcm[ch].extend(samples);
             }
             bit += audio_bits;
         }
 
-        // §5.7.2 Table 5-34: one Rev2AUX DRC value per 256-sample
-        // subsubframe of the frame, each applied to its own window of
-        // the reconstructed PCM (replacing the per-subframe legacy
-        // gain suppressed above).
-        if let Some(multipliers) = &rev2_drc {
-            apply_rev2_drc(&mut pcm, multipliers);
-        }
-
         self.last_lfe_pcm = frame_lfe;
         Ok((pcm, bit))
-    }
-}
-
-/// Apply the §5.7.2 Rev2AUX per-subsubframe DRC multipliers to the
-/// frame's reconstructed planar PCM, in place: plane `ch` is split
-/// into `multipliers.len()` equal consecutive windows (Table 5-34: one
-/// 8-bit DRC value per 256-sample subsubframe) and window `k` is
-/// scaled by `multipliers[k]` with the same round-to-nearest /
-/// `i32`-saturating convention as the legacy `RANGE` gain.
-///
-/// A plane whose length is not an exact multiple of the value count
-/// (only possible on a malformed stream whose `NBLKS` disagrees with
-/// the decoded subframe structure) is left untouched rather than
-/// scaled with a guessed window split.
-fn apply_rev2_drc(pcm: &mut SubframePcm, multipliers: &[f64]) {
-    for channel in pcm.iter_mut() {
-        if multipliers.is_empty() || channel.len() % multipliers.len() != 0 {
-            continue;
-        }
-        let window = channel.len() / multipliers.len();
-        if window == 0 {
-            continue;
-        }
-        for (chunk, &m) in channel.chunks_mut(window).zip(multipliers) {
-            if m == 1.0 {
-                continue;
-            }
-            for sample in chunk.iter_mut() {
-                let scaled = (*sample as f64 * m).round();
-                *sample = if scaled >= i32::MAX as f64 {
-                    i32::MAX
-                } else if scaled <= i32::MIN as f64 {
-                    i32::MIN
-                } else {
-                    scaled as i32
-                };
-            }
-        }
-    }
-}
-
-/// Apply the §5.4.1 `RANGE` dynamic-range multiplier (the signed-Q2
-/// [`crate::dts_dynrng_to_linear`] gain) to every reconstructed PCM
-/// sample of one subframe, in place, after QMF synthesis. Results are
-/// rounded to the nearest integer and saturated to the `i32` range.
-fn apply_range(block: &mut SubframePcm, range: f64) {
-    if range == 1.0 {
-        return;
-    }
-    for channel in block.iter_mut() {
-        for sample in channel.iter_mut() {
-            let scaled = (*sample as f64 * range).round();
-            *sample = if scaled >= i32::MAX as f64 {
-                i32::MAX
-            } else if scaled <= i32::MIN as f64 {
-                i32::MIN
-            } else {
-                scaled as i32
-            };
-        }
     }
 }
 
@@ -2003,6 +1907,125 @@ mod tests {
         assert_eq!(lfe.len(), pcm[0].len());
     }
 
+    /// The first frame of the 5.1 fixture, decoded on a fresh stream decoder: its primary channels and LFE.
+    fn surround_frame_pcm(frame: &[u8]) -> (SubframePcm, Vec<i32>) {
+        let header = crate::parse_frame_header(frame).unwrap();
+        let (coding, _) = crate::decode_audio_coding_header_at(
+            frame,
+            header.header_bit_length() as usize,
+            header.crc_present,
+        )
+        .unwrap();
+        let mut stream = CoreStreamDecoder::new(coding.n_pchs);
+        let pcm = stream.decode_frame(frame, &header).unwrap();
+        (pcm, stream.take_last_lfe_pcm())
+    }
+
+    fn bits_of(bytes: &[u8]) -> Vec<u8> {
+        bytes
+            .iter()
+            .flat_map(|b| (0..8).rev().map(move |i| (b >> i) & 1))
+            .collect()
+    }
+
+    fn bytes_of(bits: &[u8]) -> Vec<u8> {
+        bits.chunks(8)
+            .map(|c| {
+                c.iter()
+                    .enumerate()
+                    .fold(0u8, |b, (i, &bit)| b | (bit << (7 - i)))
+            })
+            .collect()
+    }
+
+    fn put_bits(bits: &mut [u8], at: usize, width: usize, value: u32) {
+        for i in 0..width {
+            bits[at + i] = ((value >> (width - 1 - i)) & 1) as u8;
+        }
+    }
+
+    const SURROUND: &[u8] = include_bytes!("../tests/fixtures/dts_51_lfe.bin");
+    // 14-bit FSIZE (frame bytes - 1) at bit 46 and the DYNF flag at bit 76 of the core frame header.
+    const FSIZE_BIT: usize = 46;
+    const DYNF_BIT: usize = 76;
+
+    /// The encoder's per-subframe RANGE gain (DYNF) is left out, as the reference decoder leaves it: the frame decodes
+    /// to the uncompressed mix, the same samples as without it.
+    #[test]
+    fn the_legacy_dynamic_range_gain_is_not_applied() {
+        let frame = &SURROUND[..1024];
+        let header = crate::parse_frame_header(frame).unwrap();
+        assert!(!header.dynamic_range && !header.crc_present);
+        let header_bits = header.header_bit_length() as usize;
+        let (coding, ach_bits) =
+            crate::decode_audio_coding_header_at(frame, header_bits, false).unwrap();
+        assert_eq!(coding.n_subframes, 1);
+        assert!(coding.joinx.iter().all(|&j| j == 0));
+        let at = header_bits + ach_bits;
+        let (_, side_bits) =
+            crate::decode_primary_side_info_at(frame, at, &coding.channel_params).unwrap();
+
+        // The 8-bit RANGE code goes where the side-info tail starts: -20 dB.
+        let mut bits = bits_of(frame);
+        bits.splice(at + side_bits..at + side_bits, bits_of(&[0xB0]));
+        bits[DYNF_BIT] = 1;
+        put_bits(&mut bits, FSIZE_BIT, 14, 1024);
+        let compressed = bytes_of(&bits);
+        assert!(
+            crate::parse_frame_header(&compressed)
+                .unwrap()
+                .dynamic_range
+        );
+
+        assert!(
+            surround_frame_pcm(&compressed) == surround_frame_pcm(frame),
+            "the gain was applied"
+        );
+    }
+
+    /// Nor are the broadcast DRC values of a Rev2AUX chunk.
+    #[test]
+    fn the_rev2aux_dynamic_range_gain_is_not_applied() {
+        let frame = &SURROUND[..1024];
+        // Sync, 7-bit size - 1, the ES, broadcast, DRC and dialnorm flags, the DRC version, then one code per
+        // subsubframe (two: -20 dB each), zero-padded to the CRC.
+        let size = 8usize;
+        let mut chunk = crate::REV2_AUX_SYNC_WORD.to_be_bytes().to_vec();
+        let mut fields = vec![0u8; 7 + 4 + 4];
+        let size_code = size as u32 - 1;
+        put_bits(&mut fields, 0, 7, size_code);
+        put_bits(&mut fields, 7, 4, 0b0110);
+        put_bits(
+            &mut fields,
+            11,
+            4,
+            u32::from(crate::REV2_DRC_VERSION_SINGLE_BAND),
+        );
+        fields.resize(16, 0); // nByteAlign0
+        fields.extend(bits_of(&[0xB0, 0xB0]));
+        fields.resize((size - 2) * 8, 0);
+        chunk.extend(bytes_of(&fields));
+        let crc = crate::dts_crc16(&chunk[4..]);
+        chunk.extend(crc.to_be_bytes());
+
+        let mut bits = bits_of(frame);
+        put_bits(&mut bits, FSIZE_BIT, 14, (1024 + chunk.len() - 1) as u32);
+        let mut compressed = bytes_of(&bits);
+        compressed.extend(&chunk);
+        let found = crate::parse_rev2_aux(
+            &compressed,
+            &crate::parse_frame_header(&compressed).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(found.crc_valid && found.drc.is_some());
+
+        assert!(
+            surround_frame_pcm(&compressed) == surround_frame_pcm(frame),
+            "the gain was applied"
+        );
+    }
+
     /// A frame whose header sets `CPF` (a 16-bit `SICRC` side-info tail)
     /// now decodes end to end: the `SICRC` word is consumed for framing
     /// (its CRC test is not applied per §5.4.1) and the §5.5 region lands
@@ -2032,8 +2055,8 @@ mod tests {
     /// and (for a non-unity code) the signed-Q2 linear gain scales the
     /// PCM. With an all-zero (NoBits) subframe the PCM is zero
     /// regardless of `RANGE`, which proves only the framing/cursor is
-    /// correct — the `apply_range` value is covered by
-    /// `range_unity_is_noop` / `range_scales_pcm`.
+    /// correct; the gain itself is not applied
+    /// (`the_legacy_dynamic_range_gain_is_not_applied`).
     #[test]
     fn decode_core_frame_consumes_range_tail() {
         let mut bytes = encode_clean_header(true, false); // DYNF=1, CPF=0
@@ -2116,35 +2139,11 @@ mod tests {
         assert!(pcm[0].iter().all(|&s| s == 0));
     }
 
-    /// `apply_range` with the unity code (signed-Q2 `0` = 0 dB) leaves
-    /// the PCM untouched.
-    #[test]
-    fn range_unity_is_noop() {
-        let mut block: SubframePcm = vec![vec![100, -200, 0, i32::MAX, i32::MIN]];
-        apply_range(&mut block, crate::dts_dynrng_to_linear(0)); // 1.0
-        assert_eq!(block[0], vec![100, -200, 0, i32::MAX, i32::MIN]);
-    }
-
-    /// `apply_range` scales every sample by the signed-Q2 linear gain
-    /// with round-to-nearest and `i32` saturation.
-    #[test]
-    fn range_scales_pcm() {
-        // Signed-Q2 code -80 -> -20 dB -> 0.1; code +80 -> +20 dB -> 10.0.
-        let minus_20_db = 0u8.wrapping_sub(80);
-        let mut down: SubframePcm = vec![vec![1000, -1000, 5]];
-        apply_range(&mut down, crate::dts_dynrng_to_linear(minus_20_db)); // 0.1
-        assert_eq!(down[0], vec![100, -100, 1]); // 5*0.1=0.5 -> round 1
-
-        let mut up: SubframePcm = vec![vec![10, -10, i32::MAX]];
-        apply_range(&mut up, crate::dts_dynrng_to_linear(80)); // 10.0
-        assert_eq!(up[0], vec![100, -100, i32::MAX]); // saturates
-    }
-
     /// Build a complete one-channel all-`ABITS==0` (NoBits) raw-BE Core
     /// frame — the same proven layout `decode_core_frame_no_bits_round_trips`
-    /// uses — with a signed-Q2 `RANGE` code optionally injected so
-    /// the `apply_range` path is exercised even though the §5.5 audio
-    /// data is silent. When `dynf` is `false` no `RANGE` field is
+    /// uses — with a signed-Q2 `RANGE` code optionally injected, read
+    /// for framing though not applied, over silent §5.5 audio
+    /// data. When `dynf` is `false` no `RANGE` field is
     /// present and the frame decodes to all-zero PCM.
     fn build_nobits_frame(dynf: bool, range_index: u8) -> Vec<u8> {
         let mut header = crate::parse_frame_header(&[
