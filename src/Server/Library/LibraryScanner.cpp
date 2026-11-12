@@ -1604,7 +1604,7 @@ private:
                 if (gone) changed.insert(item);
                 if (folder != root)
                     changed.insert(folder);
-                else if (!gone || !kind(item).empty())
+                else if (!kind(item).empty()) // a file the library reads, there or gone; others start no scan
                     full = true;
                 if (!info->NextEntryOffset) break;
                 offset += info->NextEntryOffset;
@@ -1749,7 +1749,9 @@ private:
                             watch.collect(bytes);
                         else
                             watch.full = true;
-                        if (watch.due == Clock::time_point{} || (ok && bytes)) watch.due = Clock::now() + options_.coalesce;
+                        // A change to nothing the library reads leaves the watch with no folder to scan, and so no scan.
+                        if ((watch.full || !watch.changed.empty()) && (watch.due == Clock::time_point{} || (ok && bytes)))
+                            watch.due = Clock::now() + options_.coalesce;
                         // One that fails other than for too many changes will fail again: the storage is polled from then on.
                         const bool watching = (ok || error == ERROR_NOTIFY_ENUM_DIR) && arm(watch);
                         watch.unwatchable = !watching;

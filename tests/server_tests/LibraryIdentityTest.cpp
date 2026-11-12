@@ -844,6 +844,34 @@ TEST_F(LibraryIdentityTest, LegacySchemaUpgradePreservesVerifiedCurrentPathIdent
     EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
 }
 
+// A file the library does not read changing in the root folder, as Explorer's desktop.ini or a sync tool's files do,
+// starts no scan; an audio file there still does.
+TEST_F(LibraryIdentityTest, MonitorPassesOverAChangeToAFileTheLibraryDoesNotRead) {
+    const auto ini = music / "desktop.ini";
+    std::ofstream(ini) << "[.ShellClassInfo]\n";
+    fs::copy_file(testutil::testFile("16-44.1k"), music / "loose.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(music);
+    LibraryMonitor monitor(store, {});
+    const auto waitFor = [&](const std::function<bool()>& check, std::chrono::seconds limit) {
+        const auto end = std::chrono::steady_clock::now() + limit;
+        while (std::chrono::steady_clock::now() < end) {
+            if (check()) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return false;
+    };
+    const auto lastScan = [&] { return scalar(store, "SELECT coalesce(last_scan,0) FROM roots"); };
+    ASSERT_TRUE(waitFor([&] { return lastScan() != 0; }, std::chrono::seconds(10)));
+    const auto first = lastScan();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100)); // a later scan records a later second
+    std::ofstream(ini, std::ios::app) << "IconResource=x\n";
+    EXPECT_FALSE(waitFor([&] { return lastScan() != first; }, std::chrono::seconds(4))) << "desktop.ini started a scan";
+    std::ofstream(music / "loose.flac", std::ios::app | std::ios::binary) << '\0';
+    EXPECT_TRUE(waitFor([&] { return lastScan() != first; }, std::chrono::seconds(10))) << "an audio file started none";
+}
+
 TEST_F(LibraryIdentityTest, MonitorScansOnlyWhilePlaybackIsAheadAndFingerprintsAfter) {
     file("old.lrc");
     LibraryStore store(dir / "db");
