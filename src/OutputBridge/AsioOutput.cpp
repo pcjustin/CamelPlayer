@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include "OutputBridge/AsioDriverChoice.h"
 #include "OutputBridge/AsioOutput.h"
 
 #include <windows.h>
@@ -303,17 +304,7 @@ private:
     void load() {
         if (drv_) return;
         CLSID clsid{};
-        std::string id = cfg_.driverClsid;
-        const auto drivers = listAsioDrivers();
-        if (id.empty()) {
-            if (drivers.empty()) throw Error(ErrorCode::DeviceNotFound, "no ASIO driver installed");
-            id = drivers.front().id;
-        } else if (std::none_of(drivers.begin(), drivers.end(), [&](const DeviceEntry& d) {
-                       return d.id == id && d.name.find("(unavailable)") == std::string::npos;
-                   })) {
-            // A saved driver is never replaced by another one.
-            throw Error(ErrorCode::DeviceNotFound, "ASIO driver not connected (not installed)");
-        }
+        const std::string id = asioDriverToLoad(listAsioDrivers(), cfg_.driverClsid);
         if (FAILED(CLSIDFromString(toWide(id).c_str(), &clsid))) throw Error(ErrorCode::DeviceNotFound, "bad ASIO driver id");
         asio::Driver* d = nullptr;
         HRESULT hr = CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER, clsid, reinterpret_cast<void**>(&d));
