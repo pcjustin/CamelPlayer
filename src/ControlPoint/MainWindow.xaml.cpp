@@ -592,11 +592,12 @@ void MainWindow::showStartWithWindows() {
 void MainWindow::OnStartWithWindowsToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (populating_) return;
     wchar_t program[MAX_PATH];
-    if (StartWithWindowsSwitch().IsOn() && GetModuleFileNameW(nullptr, program, MAX_PATH))
-        camel::startup::enable(program);
-    else
-        camel::startup::disable();
+    const bool written = StartWithWindowsSwitch().IsOn() && GetModuleFileNameW(nullptr, program, MAX_PATH)
+                             ? camel::startup::enable(program)
+                             : camel::startup::disable();
     showStartWithWindows();
+    // The switch springs back to what the Run key holds; this says why.
+    StartWithWindowsError().Visibility(written ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void MainWindow::startInTray() {

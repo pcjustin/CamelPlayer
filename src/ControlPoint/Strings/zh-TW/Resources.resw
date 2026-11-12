@@ -747,6 +747,7 @@
   <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>隨 Windows 啟動</value></data>
   <data name="Settings_StartWithWindows.OnContent" xml:space="preserve"><value>登入時在通知區域啟動 CamelPlayer</value></data>
   <data name="Settings_StartWithWindows.OffContent" xml:space="preserve"><value>登入時在通知區域啟動 CamelPlayer</value></data>
+  <data name="Settings_StartWithWindowsFailed.Text" xml:space="preserve"><value>Windows 不允許 CamelPlayer 變更它的啟動項目，可能被原則或防護程式鎖住。</value></data>
   <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>已在 Windows 的啟動設定中關閉（設定 › 應用程式 › 啟動，或工作管理員）。請在那裡開啟，CamelPlayer 才會隨 Windows 啟動。</value></data>
   <data name="Lyrics_Show" xml:space="preserve"><value>顯示歌詞</value></data>
   <data name="Lyrics_Hide" xml:space="preserve"><value>隱藏歌詞</value></data>

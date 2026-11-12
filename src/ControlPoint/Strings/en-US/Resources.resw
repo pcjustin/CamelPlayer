@@ -747,6 +747,7 @@ Details: {0}</value></data>
   <data name="Settings_StartWithWindows.Header" xml:space="preserve"><value>Start with Windows</value></data>
   <data name="Settings_StartWithWindows.OnContent" xml:space="preserve"><value>Start CamelPlayer at sign-in, in the notification area</value></data>
   <data name="Settings_StartWithWindows.OffContent" xml:space="preserve"><value>Start CamelPlayer at sign-in, in the notification area</value></data>
+  <data name="Settings_StartWithWindowsFailed.Text" xml:space="preserve"><value>Windows did not let CamelPlayer change its startup entry; a policy or a protection program may hold it.</value></data>
   <data name="Settings_StartWithWindowsDisabled.Text" xml:space="preserve"><value>Turned off in Windows' startup settings (Settings › Apps › Startup, or Task Manager). Turn it on there to start CamelPlayer with Windows.</value></data>
   <data name="Lyrics_Show" xml:space="preserve"><value>Show the lyrics</value></data>
   <data name="Lyrics_Hide" xml:space="preserve"><value>Hide the lyrics</value></data>

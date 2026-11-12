@@ -548,6 +548,8 @@
                                     <ToggleSwitch x:Name="StartWithWindowsSwitch" x:Uid="Settings_StartWithWindows" Toggled="OnStartWithWindowsToggled" />
                                     <TextBlock x:Name="StartWithWindowsNote" x:Uid="Settings_StartWithWindowsDisabled" TextWrapping="Wrap"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                                    <TextBlock x:Name="StartWithWindowsError" x:Uid="Settings_StartWithWindowsFailed" TextWrapping="Wrap"
+                                               Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="Collapsed" />
                                 </StackPanel>
                                 <ToggleSwitch x:Name="AutoUpdateSwitch" x:Uid="Settings_AutoUpdate" Toggled="OnUpdateSwitchToggled" />
                                 <ToggleSwitch x:Name="ArtistPicturesSwitch" x:Uid="Settings_ArtistPictures" Toggled="OnArtistPicturesToggled" />

@@ -7,9 +7,14 @@
 
 #include <windows.h>
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
+#include "Common/util/Log.h"
 #include "Common/util/StartWithWindows.h"
+#include "TestUtil.h"
 
 using namespace camel::startup;
 
@@ -69,6 +74,26 @@ TEST_F(StartWithWindowsTest, WindowsTurningTheEntryOffIsReadAndKept) {
     EXPECT_TRUE(state(keys_).disabledInWindows);
     approve(2);
     EXPECT_TRUE(state(keys_).on());
+}
+
+// A Run key that cannot be written, as one locked by a policy, is said so in the log rather than passed over.
+TEST_F(StartWithWindowsTest, AnEntryThatCannotBeWrittenIsLogged) {
+    const auto directory = testutil::tempDir() / "startup-log";
+    std::filesystem::remove_all(directory);
+    camel::log::init(directory, L"startup");
+    Keys locked = keys_;
+    locked.run += L"\\" + std::wstring(300, L'x'); // a key name past the registry's 255 characters cannot be made
+    enable(L"C:\\Apps\\CamelPlayer.exe", locked);
+    disable(locked);
+    camel::log::init(testutil::tempDir() / "log-after-tests", L"test");
+    std::string text;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        std::ifstream input(entry.path());
+        text += std::string(std::istreambuf_iterator<char>(input), {});
+    }
+    EXPECT_NE(text.find("start with Windows: cannot add"), std::string::npos) << text;
+    EXPECT_NE(text.find("start with Windows: cannot remove"), std::string::npos) << text;
+    EXPECT_FALSE(state(locked).registered);
 }
 
 TEST(StartWithWindowsLaunchTest, TheBackgroundArgumentStartsHidden) {

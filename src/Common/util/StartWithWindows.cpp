@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "Common/util/Log.h"
+
 namespace camel::startup {
 
 namespace {
@@ -50,14 +52,20 @@ State state(const Keys& keys) {
     return s;
 }
 
-void enable(const std::wstring& program, const Keys& keys) {
+bool enable(const std::wstring& program, const Keys& keys) {
     const std::wstring command = commandFor(program);
-    RegSetKeyValueW(HKEY_CURRENT_USER, keys.run.c_str(), keys.name.c_str(), REG_SZ, command.c_str(),
-                    DWORD((command.size() + 1) * sizeof(wchar_t)));
+    const LSTATUS status = RegSetKeyValueW(HKEY_CURRENT_USER, keys.run.c_str(), keys.name.c_str(), REG_SZ, command.c_str(),
+                                           DWORD((command.size() + 1) * sizeof(wchar_t)));
+    if (status == ERROR_SUCCESS) return true;
+    log::warn("start with Windows: cannot add the Run entry (%ld)", static_cast<long>(status));
+    return false;
 }
 
-void disable(const Keys& keys) {
-    RegDeleteKeyValueW(HKEY_CURRENT_USER, keys.run.c_str(), keys.name.c_str());
+bool disable(const Keys& keys) {
+    const LSTATUS status = RegDeleteKeyValueW(HKEY_CURRENT_USER, keys.run.c_str(), keys.name.c_str());
+    if (status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND) return true;
+    log::warn("start with Windows: cannot remove the Run entry (%ld)", static_cast<long>(status));
+    return false;
 }
 
 void follow(const std::wstring& program, const Keys& keys) {

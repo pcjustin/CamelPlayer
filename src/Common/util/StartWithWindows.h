@@ -30,8 +30,9 @@ struct State {
 
 std::wstring commandFor(const std::wstring& program); // the program quoted, with the background argument
 State state(const Keys& keys = {});
-void enable(const std::wstring& program, const Keys& keys = {});
-void disable(const Keys& keys = {});
+// False, and logged, when the Run key cannot be written, as one locked by a policy or a protection program.
+bool enable(const std::wstring& program, const Keys& keys = {});
+bool disable(const Keys& keys = {});
 // An entry that starts another program, as after the folder moved, is pointed at this one; none is left alone.
 void follow(const std::wstring& program, const Keys& keys = {});
 
