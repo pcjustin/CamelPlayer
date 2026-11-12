@@ -3050,7 +3050,7 @@ mod tests {
             sample_encoding: 0,
             total_frames: metadata.total_frames,
             has_md5: metadata.has_md5,
-            reserved2: 0,
+            channel_mask: 0,
             md5: metadata.md5,
         };
         0
@@ -3763,7 +3763,7 @@ mod tests {
             sample_encoding: if dsd { SAMPLE_ENCODING_DSD } else { 0 },
             total_frames: decoder.frames,
             has_md5: 0,
-            reserved2: 0,
+            channel_mask: 0,
             md5: [0; 16],
         };
         *out_decoder = Box::into_raw(decoder).cast();
@@ -5573,7 +5573,7 @@ mod tests {
             sample_encoding: SAMPLE_ENCODING_DSD,
             total_frames: (mock.bytes.len() / mock.channels as usize) as u64,
             has_md5: 0,
-            reserved2: 0,
+            channel_mask: 0,
             md5: [0; 16],
         };
         0

@@ -86,8 +86,12 @@ const RESAMPLER_FLUSH_FRAMES: usize = 8192;
 const MAX_DSD_CHANNELS: usize = 8;
 
 /// Stereo downmix coefficients per source channel count, in WAVE/FLAC default order (ITU-R BS.775: centre and
-/// surrounds at -3 dB, LFE dropped). 7: L R C LFE Cs Ls Rs; 8: L R C LFE Lb Rb Ls Rs.
-fn downmix_matrix(channels: usize) -> Option<[Vec<f64>; 2]> {
+/// surrounds at -3 dB, LFE dropped). 7: L R C LFE Cs Ls Rs; 8: L R C LFE Lb Rb Ls Rs. With a `mask`, by the speaker
+/// each channel names instead.
+fn downmix_matrix(channels: usize, mask: u32) -> Option<[Vec<f64>; 2]> {
+    if mask != 0 {
+        return downmix_by_speaker(channels, mask);
+    }
     let a = std::f64::consts::FRAC_1_SQRT_2;
     Some(match channels {
         1 => [vec![1.0], vec![1.0]],
@@ -109,6 +113,33 @@ fn downmix_matrix(channels: usize) -> Option<[Vec<f64>; 2]> {
         ],
         _ => return None,
     })
+}
+
+/// The downmix of channels on the WAVE speaker positions of `mask`, one bit per channel in their order: a centre at
+/// -3 dB, or whole on both sides when there is no front pair, surrounds at -3 dB, a back centre at -6 dB, LFE dropped.
+fn downmix_by_speaker(channels: usize, mask: u32) -> Option<[Vec<f64>; 2]> {
+    const FRONT: u32 = 0x1 | 0x2;
+    let a = std::f64::consts::FRAC_1_SQRT_2;
+    if mask.count_ones() as usize != channels {
+        return None;
+    }
+    let mut out = [Vec::with_capacity(channels), Vec::with_capacity(channels)];
+    for bit in (0..32).map(|i| 1u32 << i).filter(|bit| mask & bit != 0) {
+        let (left, right) = match bit {
+            0x1 => (1.0, 0.0),
+            0x2 => (0.0, 1.0),
+            0x4 if mask & FRONT == 0 => (1.0, 1.0),
+            0x4 => (a, a),
+            0x8 => (0.0, 0.0),
+            0x10 | 0x200 => (a, 0.0),
+            0x20 | 0x400 => (0.0, a),
+            0x100 => (0.5, 0.5),
+            _ => return None,
+        };
+        out[0].push(left);
+        out[1].push(right);
+    }
+    Some(out)
 }
 
 /// Triangular dither of +-1 LSB from two uniform values. Deterministic, so conversions are reproducible.
@@ -182,7 +213,10 @@ impl Converter {
                 },
                 gain: 1.0,
                 dsp_bits: Self::device_bits(out),
-                matrix: Some(downmix_matrix(in_channels).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?),
+                matrix: Some(
+                    downmix_matrix(in_channels, info.channel_mask)
+                        .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+                ),
                 resampler,
                 dither: Tpdf(0x9E37_79B9_7F4A_7C15),
                 pending: Vec::new(),
@@ -281,7 +315,10 @@ impl Converter {
             }
         }
         let matrix = if mode == Mode::Process {
-            Some(downmix_matrix(in_channels).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?)
+            Some(
+                downmix_matrix(in_channels, info.channel_mask)
+                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+            )
         } else {
             None
         };
@@ -744,7 +781,7 @@ pub(crate) mod tests {
             },
             total_frames: 0,
             has_md5: 0,
-            reserved2: 0,
+            channel_mask: 0,
             md5: [0; 16],
         }
     }
@@ -837,6 +874,57 @@ pub(crate) mod tests {
             .map(|&f| (f64::from(f) * 8_388_608.0) as i32)
             .collect();
         assert_eq!(back, samples);
+    }
+
+    // A float source on `mask`'s speakers, one frame of `frame`, downmixed to a float stereo device: its L and R.
+    fn downmixed(mask: u32, frame: &[f32]) -> [f32; 2] {
+        let mut info = source(48_000, frame.len() as u32, 32, true);
+        info.channel_mask = mask;
+        let mut c = converter(info, SAMPLE_F32_LE, 48_000, true);
+        let words: Vec<i32> = frame.iter().map(|v| v.to_bits() as i32).collect();
+        c.convert(&words, 1, &mut flat()).unwrap();
+        let out = floats(c.pending());
+        [out[0], out[1]]
+    }
+
+    // Each channel goes to the stereo device by the speaker it is for, not by its place in a default layout: an
+    // LFE is never mixed in, a centre goes to both sides at -3 dB and a back centre at -6 dB.
+    #[test]
+    fn a_downmix_follows_each_channels_speaker() {
+        let a = std::f32::consts::FRAC_1_SQRT_2;
+        let close = |got: [f32; 2], want: [f32; 2]| {
+            assert!(
+                (got[0] - want[0]).abs() < 1e-6 && (got[1] - want[1]).abs() < 1e-6,
+                "{got:?} for {want:?}"
+            );
+        };
+        const FL: u32 = 0x1;
+        const FR: u32 = 0x2;
+        const FC: u32 = 0x4;
+        const LFE: u32 = 0x8;
+        const BL: u32 = 0x10;
+        const BR: u32 = 0x20;
+        const BC: u32 = 0x100;
+        // Stereo and LFE.
+        close(downmixed(FL | FR | LFE, &[0.5, 0.25, 0.8]), [0.5, 0.25]);
+        // Mono and LFE: the programme on both sides.
+        close(downmixed(FC | LFE, &[0.5, 0.8]), [0.5, 0.5]);
+        // 3.1.
+        close(
+            downmixed(FL | FR | FC | LFE, &[0.5, 0.25, 0.2, 0.8]),
+            [0.5 + a * 0.2, 0.25 + a * 0.2],
+        );
+        // L R S and C L R S, in the order L R C S.
+        close(downmixed(FL | FR | BC, &[0.5, 0.25, 0.1]), [0.55, 0.3]);
+        close(
+            downmixed(FL | FR | FC | BC, &[0.5, 0.25, 0.2, 0.1]),
+            [0.5 + a * 0.2 + 0.05, 0.25 + a * 0.2 + 0.05],
+        );
+        // 4.1: L R LFE Ls Rs.
+        close(
+            downmixed(FL | FR | LFE | BL | BR, &[0.5, 0.25, 0.8, 0.1, 0.05]),
+            [0.5 + a * 0.1, 0.25 + a * 0.05],
+        );
     }
 
     // What is not a number never reaches a float device, as the integer path already turns it into silence.

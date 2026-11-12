@@ -76,6 +76,7 @@ int32_t openDecoderHost(void*, uint32_t kind, const uint8_t* path, uint64_t path
                                                                  : CAMEL_SAMPLE_ENCODING_INTEGER;
         result.total_frames = source.totalFrames;
         result.has_md5 = source.md5.has_value() ? 1u : 0u;
+        result.channel_mask = source.channelMask;
         if (source.md5) std::copy(source.md5->begin(), source.md5->end(), result.md5);
         *info = result;
         *outDecoder = handle.release();

@@ -184,6 +184,7 @@ TEST(Dts, EveryWaveDecoderReadsTheSameDecode) {
         EXPECT_TRUE(d->readsFloat());
         EXPECT_EQ(d->info().sampleRate, 44100u);
         EXPECT_EQ(d->info().channels, 6u);
+        EXPECT_EQ(d->info().channelMask, 0x3Fu) << "L R C LFE and the surrounds";
         EXPECT_EQ(d->info().bitsPerSample, 24u);
         EXPECT_EQ(d->info().totalFrames, file.frames);
         const auto decoded = readAll(*d);

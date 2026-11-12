@@ -58,7 +58,7 @@ pub struct FrameInfo {
 pub struct Decoded {
     /// Interleaved, in the order of `speakers`.
     pub pcm: Vec<f32>,
-    /// In the order L R C LFE Ls Rs, of those present.
+    /// In the order L R C LFE Ls Rs Cs (the back centre), of those present.
     pub speakers: Vec<Speaker>,
     /// Samples per channel.
     pub samples: usize,

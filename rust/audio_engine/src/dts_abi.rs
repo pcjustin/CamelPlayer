@@ -8,7 +8,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
 
-use dts_core::{find_sync, frame_info, DecodeError, Decoder};
+use dts_core::{find_sync, frame_info, DecodeError, Decoder, Speaker};
 
 const DTS_OK: i32 = 0;
 const DTS_E_NO_SYNC: i32 = -1;
@@ -30,10 +30,14 @@ pub struct DtsFrameInfo {
 
 #[repr(C)]
 pub struct DtsPcm {
+    /// Set by the caller to the size it allocated.
+    struct_size: u32,
     samples: *const f32,
     channels: u32,
     frames: u32,
     sample_rate: u32,
+    /// WAVE speaker positions (SPEAKER_* bits) of the channels, in their order.
+    channel_mask: u32,
 }
 
 fn code_of(error: &DecodeError) -> i32 {
@@ -44,6 +48,20 @@ fn code_of(error: &DecodeError) -> i32 {
         DecodeError::Header(_) | DecodeError::Frame(_) | DecodeError::UnequalChannels => {
             DTS_E_DECODE
         }
+    }
+}
+
+// The WAVE speaker position of a channel; the surrounds are the back pair, as in the WAVE 5.1 layout, so the bits
+// rise in the order the channels come in.
+fn speaker_bit(speaker: Speaker) -> u32 {
+    match speaker {
+        Speaker::Left => 0x1,
+        Speaker::Right => 0x2,
+        Speaker::Center => 0x4,
+        Speaker::Lfe => 0x8,
+        Speaker::LeftSurround => 0x10,
+        Speaker::RightSurround => 0x20,
+        Speaker::BackCenter => 0x100,
     }
 }
 
@@ -130,7 +148,7 @@ pub unsafe extern "C" fn dts_decode(
     let Some(d) = decoder.as_mut() else {
         return DTS_E_ARG;
     };
-    if pcm.is_null() {
+    if pcm.is_null() || (*pcm).struct_size < std::mem::size_of::<DtsPcm>() as u32 {
         return DTS_E_ARG;
     }
     let input = bytes_of(bytes, len);
@@ -138,10 +156,12 @@ pub unsafe extern "C" fn dts_decode(
         Ok(Ok(decoded)) => {
             d.pcm = decoded.pcm;
             *pcm = DtsPcm {
+                struct_size: std::mem::size_of::<DtsPcm>() as u32,
                 samples: d.pcm.as_ptr(),
                 channels: decoded.speakers.len() as u32,
                 frames: decoded.samples as u32,
                 sample_rate: decoded.sample_rate,
+                channel_mask: decoded.speakers.iter().map(|&s| speaker_bit(s)).sum(),
             };
             DTS_OK
         }
@@ -157,16 +177,45 @@ pub unsafe extern "C" fn dts_decode(
 mod tests {
     use super::*;
 
+    fn empty_pcm() -> DtsPcm {
+        DtsPcm {
+            struct_size: std::mem::size_of::<DtsPcm>() as u32,
+            samples: ptr::null(),
+            channels: 0,
+            frames: 0,
+            sample_rate: 0,
+            channel_mask: 0,
+        }
+    }
+
+    // The roles cross the ABI with the channels: a 5.1 frame is front left, right and centre, LFE and the two
+    // surrounds, the WAVE 5.1 layout.
+    #[test]
+    fn a_frame_names_the_speaker_of_each_channel() {
+        let frame = &include_bytes!("../../dts_core/tests/fixtures/dts_51_lfe.bin")[..1024];
+        unsafe {
+            let decoder = dts_new();
+            let mut pcm = empty_pcm();
+            assert_eq!(
+                dts_decode(decoder, frame.as_ptr(), frame.len(), &mut pcm),
+                DTS_OK
+            );
+            assert_eq!(pcm.channels, 6);
+            assert_eq!(pcm.channel_mask, 0x3F);
+            pcm.struct_size = 4;
+            assert_eq!(
+                dts_decode(decoder, frame.as_ptr(), frame.len(), &mut pcm),
+                DTS_E_ARG
+            );
+            dts_free(decoder);
+        }
+    }
+
     #[test]
     fn nonsense_gets_an_error_and_no_decoder_needs_bytes() {
         unsafe {
             let decoder = dts_new();
-            let mut pcm = DtsPcm {
-                samples: ptr::null(),
-                channels: 0,
-                frames: 0,
-                sample_rate: 0,
-            };
+            let mut pcm = empty_pcm();
             assert_eq!(dts_decode(decoder, ptr::null(), 0, &mut pcm), DTS_E_NO_SYNC);
             assert_eq!(
                 dts_decode(ptr::null_mut(), ptr::null(), 0, &mut pcm),

@@ -103,6 +103,7 @@ private:
             if (frames.empty()) {
                 info_.sampleRate = pcm.sample_rate;
                 info_.channels = pcm.channels;
+                info_.channelMask = pcm.channel_mask;
             }
             frames.emplace_back(start, pcm.frames);
         };
@@ -175,6 +176,7 @@ private:
                 return false;
             }
             DtsPcm pcm{};
+            pcm.struct_size = sizeof(pcm);
             if (dts_decode(decoder_.get(), bytes_.data(), bytes_.size(), &pcm) != DTS_OK) {
                 dropBytes(kWordBytes);
                 continue;
@@ -187,7 +189,7 @@ private:
 
     // Appends a decoded frame at its position: silence fills a gap before it, and what precedes next_ is dropped.
     void place(uint64_t start, const DtsPcm& pcm) {
-        if (pcm.channels != info_.channels)
+        if (pcm.channels != info_.channels || pcm.channel_mask != info_.channelMask)
             throw Error(ErrorCode::DecodeFailed, "the DTS channel layout changed within the track");
         const size_t ch = info_.channels;
         const uint64_t end = std::min(start + uint64_t(pcm.frames), info_.totalFrames);

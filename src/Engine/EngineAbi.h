@@ -152,7 +152,7 @@ typedef struct CamelSourceInfoV1 {
     uint32_t sample_encoding;
     uint64_t total_frames;
     uint32_t has_md5;
-    uint32_t reserved2;
+    uint32_t channel_mask; // WAVE SPEAKER_* positions of the channels, in their order; 0: the default of the count
     uint8_t md5[16];
 } CamelSourceInfoV1;
 

@@ -48,7 +48,8 @@ pub struct CamelSourceInfoV1 {
     pub sample_encoding: u32,
     pub total_frames: u64,
     pub has_md5: u32,
-    pub reserved2: u32,
+    /// WAVE speaker positions (SPEAKER_* bits) of the channels, in their order; 0 for the default of the count.
+    pub channel_mask: u32,
     pub md5: [u8; 16],
 }
 
@@ -185,7 +186,7 @@ impl DecoderSource {
             sample_encoding: SAMPLE_ENCODING_INTEGER,
             total_frames: 0,
             has_md5: 0,
-            reserved2: 0,
+            channel_mask: 0,
             md5: [0; 16],
         };
         let mut decoder = std::ptr::null_mut();
@@ -207,7 +208,7 @@ impl DecoderSource {
             || info.channel_count == 0
             || info.channel_count > 32
             || info.sample_encoding > SAMPLE_ENCODING_DSD
-            || info.reserved2 != 0
+            || (info.channel_mask != 0 && info.channel_mask.count_ones() != info.channel_count)
         {
             if !decoder.is_null() {
                 (host.close)(host.context(), decoder);

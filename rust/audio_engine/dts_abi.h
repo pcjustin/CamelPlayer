@@ -19,10 +19,13 @@ typedef struct DtsFrameInfo {
     uint32_t sample_rate;
 } DtsFrameInfo;
 typedef struct DtsPcm {
-    const float* samples; // interleaved L R C LFE Ls Rs, of those present; valid until the decoder's next call
+    uint32_t struct_size; // set by the caller: sizeof(DtsPcm)
+    const float*
+        samples; // interleaved L R C LFE Ls Rs Cs (the back centre), of those present; valid until the decoder's next call
     uint32_t channels;
     uint32_t frames;
     uint32_t sample_rate;
+    uint32_t channel_mask; // WAVE SPEAKER_* positions of the channels, in their order
 } DtsPcm;
 
 DtsDecoder* dts_new(void);

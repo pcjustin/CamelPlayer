@@ -67,6 +67,7 @@ struct SourceInfo {
     uint32_t bitsPerSample = 0;                 // original bit depth; decoded samples are right-aligned to it
     uint64_t totalFrames = 0;                   // 0 if unknown
     std::optional<std::array<uint8_t, 16>> md5; // FLAC STREAMINFO MD5 when present (all zero means absent)
+    uint32_t channelMask = 0; // WAVE SPEAKER_* positions of the channels, in their order; 0: the default of the count
     bool operator==(const SourceInfo&) const = default;
 };
 
