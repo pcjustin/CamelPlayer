@@ -523,11 +523,14 @@ PlaylistChange importPlaylistFile(LibraryStore& store, const std::filesystem::pa
 void exportPlaylistFile(const LibraryStore& store, int64_t playlist, const std::filesystem::path& file) {
     const auto target = std::filesystem::absolute(file);
     std::string out = "#EXTM3U\r\n";
+    auto db = store.openReader();
     for (int64_t offset = 0;;) {
         const auto page = playlistItems(store, playlist, offset, 500);
         for (const auto& item : page.items) {
-            auto path = usualPath(toWide(item.path));
-            if (!item.name.empty()) path.replace_filename(toWide(item.name)); // the stored path is case-folded
+            // The stored path is case-folded; a library file is spelled as it is on disk, its folders included.
+            const auto onDisk = item.track ? libraryStoredPath(db, item.track->file) : std::nullopt;
+            auto path = usualPath(toWide(onDisk.value_or(item.path)));
+            if (!onDisk && !item.name.empty()) path.replace_filename(toWide(item.name));
             auto title = item.title.empty() ? toUtf8(path.stem().wstring()) : item.title;
             if (!item.artist.empty()) title.insert(0, item.artist + " - ");
             std::replace_if(title.begin(), title.end(), [](char c) { return c == '\r' || c == '\n'; }, ' ');

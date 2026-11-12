@@ -337,6 +337,24 @@ TEST_F(PlaylistsTest, AnM3u8ExportWritesRelativePathsOnTheSameDriveAndRoundTrips
     EXPECT_EQ(again.items[2].path, "\\\\nas\\share\\x.flac");
 }
 
+// The library keeps paths case-folded; an exported playlist spells each folder, as well as the file, as it is on disk,
+// which a player on a case-sensitive system needs.
+TEST_F(PlaylistsTest, AnExportSpellsTheFoldersAsTheyAreOnDisk) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec(R"(UPDATE roots SET display='C:\M' WHERE id=1;
+UPDATE folders SET name='Album' WHERE id=2;
+UPDATE files SET name='01.flac' WHERE id=1;)");
+        })
+        .get();
+    const auto saved = savePlaylist(*store, "Case", {{LibraryTrackKey{1}, ""}});
+    const auto file = dir / "case.m3u8";
+    exportPlaylistFile(*store, saved.playlist, file);
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("M\\Album\\01.flac"), std::string::npos) << text;
+}
+
 TEST_F(PlaylistsTest, PlaylistFilesUseTheUsualPathFormAndTheOnDiskNameOfExtendedLibraryPaths) {
     store
         ->write([](sqlite::Database& db) {
