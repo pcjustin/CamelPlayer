@@ -581,6 +581,20 @@ TEST(PlayerLinkTest, FollowsThePlayersOwnPauseAndPlayThroughEvents) {
     EXPECT_TRUE(events->waitFor(PlayerEventKind::Paused));
 }
 
+// An event sent with chunked transfer encoding is read whole, not cut at what came with its headers.
+TEST(PlayerLinkTest, FollowsAnEventSentInChunks) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.set("track", "http://camel/a");
+    renderer.set("state", "PLAYING");
+    renderer.chunkEvents(true);
+    auto events = std::make_shared<Events>();
+    PlayerLink link(describe(renderer), into(events), {60s, 2, 1800, 500});
+    link.expect({"http://camel/a", "http://camel/b", ""});
+    ASSERT_TRUE(events->waitFor(PlayerEventKind::Playing));
+    renderer.emitLastChange(R"(<TransportState val="PAUSED_PLAYBACK"/>)");
+    EXPECT_TRUE(events->waitFor(PlayerEventKind::Paused));
+}
+
 TEST(PlayerLinkTest, FollowsASeekFromThePlayersRemoteThroughThePoll) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.set("track", "http://camel/a");

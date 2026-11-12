@@ -190,6 +190,8 @@ public:
         state_[name] = value;
     }
     void refuseSoap(bool refuse) { refuseSoap_ = refuse; }
+    // Sends its events with chunked transfer encoding, in two chunks that arrive apart.
+    void chunkEvents(bool chunk) { chunkEvents_ = chunk; }
     // Answers a subscription to this service with an error, as a player at its limit of subscribers does.
     void refuseSubscriptions(std::string service) {
         std::scoped_lock lock(mutex_);
@@ -668,12 +670,28 @@ private:
         if (connect(out, reinterpret_cast<sockaddr*>(&target), sizeof(target)) == 0) {
             const std::string body = R"(<?xml version="1.0"?><e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">)" +
                                      properties + "</e:propertyset>";
-            const std::string text = "NOTIFY " + callback.substr(slash) +
-                                     " HTTP/1.1\r\nHOST: " + callback.substr(hostStart, slash - hostStart) +
-                                     "\r\nCONTENT-TYPE: text/xml\r\nCONTENT-LENGTH: " + std::to_string(body.size()) +
-                                     "\r\nNT: upnp:event\r\nNTS: upnp:propchange\r\nSID: " + sid +
-                                     "\r\nSEQ: " + std::to_string(sequence) + "\r\n\r\n" + body;
-            ::send(out, text.data(), int(text.size()), 0);
+            const bool chunked = chunkEvents_;
+            const std::string length = chunked ? "TRANSFER-ENCODING: chunked" : "CONTENT-LENGTH: " + std::to_string(body.size());
+            const std::string head =
+                "NOTIFY " + callback.substr(slash) + " HTTP/1.1\r\nHOST: " + callback.substr(hostStart, slash - hostStart) +
+                "\r\nCONTENT-TYPE: text/xml\r\n" + length + "\r\nNT: upnp:event\r\nNTS: upnp:propchange\r\nSID: " + sid +
+                "\r\nSEQ: " + std::to_string(sequence) + "\r\n\r\n";
+            if (chunked) {
+                const auto chunk = [](std::string_view part) {
+                    char size[16];
+                    snprintf(size, sizeof(size), "%zx\r\n", part.size());
+                    return size + std::string(part) + "\r\n";
+                };
+                const std::string_view whole = body;
+                const std::string first = head + chunk(whole.substr(0, whole.size() / 2));
+                const std::string second = chunk(whole.substr(whole.size() / 2)) + "0\r\n\r\n";
+                ::send(out, first.data(), int(first.size()), 0);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                ::send(out, second.data(), int(second.size()), 0);
+            } else {
+                const std::string text = head + body;
+                ::send(out, text.data(), int(text.size()), 0);
+            }
             char reply[256];
             recv(out, reply, sizeof(reply), 0);
         }
@@ -692,6 +710,7 @@ private:
     std::thread httpThread_, udpThread_;
     std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
                       refuseStreams_ = false, standby_ = false;
+    std::atomic<bool> chunkEvents_ = false;
     std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false,
                       toPlaylistSource_ = false;
     std::atomic<bool> oldTrack_ = false;

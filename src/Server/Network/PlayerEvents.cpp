@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <charconv>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -49,6 +50,24 @@ std::string headerValue(const std::string& head, const char* name) {
         start = end + 2;
     }
     return {};
+}
+
+// The body of a chunked message once its last chunk has come; nothing before, or when it is not chunked as it says.
+std::optional<std::string> dechunked(std::string_view data) {
+    std::string body;
+    size_t at = 0;
+    for (;;) {
+        const auto lineEnd = data.find("\r\n", at);
+        if (lineEnd == std::string_view::npos) return std::nullopt;
+        uint64_t size = 0;
+        const auto [end, error] = std::from_chars(data.data() + at, data.data() + lineEnd, size, 16);
+        if (error != std::errc() || end == data.data() + at) return std::nullopt;
+        at = lineEnd + 2;
+        if (size == 0) return body;
+        if (data.size() - at < size + 2) return std::nullopt;
+        body.append(data.substr(at, size_t(size)));
+        at += size_t(size) + 2;
+    }
 }
 
 } // namespace
@@ -187,22 +206,32 @@ struct PlayerEvents::Impl {
             char buffer[4096];
             size_t headEnd = std::string::npos;
             size_t total = 0;
+            bool chunked = false;
+            std::optional<std::string> body;
             while (request.size() < upnp::kMaxMessageBytes) {
                 const int read = recv(client, buffer, sizeof(buffer), 0);
                 if (read <= 0) break;
                 request.append(buffer, size_t(read));
                 if (headEnd == std::string::npos) {
                     headEnd = request.find("\r\n\r\n");
-                    if (headEnd != std::string::npos)
-                        total = headEnd + 4 + size_t(number(headerValue(request.substr(0, headEnd), "CONTENT-LENGTH")));
+                    if (headEnd == std::string::npos) continue;
+                    const auto head = request.substr(0, headEnd);
+                    chunked = _stricmp(headerValue(head, "TRANSFER-ENCODING").c_str(), "chunked") == 0;
+                    total = headEnd + 4 + size_t(number(headerValue(head, "CONTENT-LENGTH")));
                 }
-                if (headEnd != std::string::npos && request.size() >= total) break;
+                if (chunked) {
+                    body = dechunked(std::string_view(request).substr(headEnd + 4));
+                    if (body) break;
+                } else if (request.size() >= total) {
+                    break;
+                }
             }
+            if (headEnd != std::string::npos && !chunked) body = request.substr(headEnd + 4);
             bool accepted = false;
-            if (headEnd != std::string::npos && request.starts_with("NOTIFY ")) {
+            if (body && request.starts_with("NOTIFY ")) {
                 const auto head = request.substr(0, headEnd);
                 std::scoped_lock lock(mutex);
-                received.push_back({headerValue(head, "SID"), request.substr(headEnd + 4)});
+                received.push_back({headerValue(head, "SID"), std::move(*body)});
                 accepted = true;
             }
             const std::string reply = accepted
