@@ -45,6 +45,14 @@ std::vector<uint8_t> streamInfo() {
     return bytes;
 }
 
+// DSD is named by its multiple of 44.1 kHz or of 48 kHz, whichever family its rate is in: 3.072 MHz is DSD64 too.
+TEST(AudioTypes, DsdIsNamedByTheMultipleOfItsOwnFamily) {
+    EXPECT_EQ(describe({352800, 2, SampleType::Dsd8}), "DSD64 / DSD native");
+    EXPECT_EQ(describe({1411200, 2, SampleType::Dsd8}), "DSD256 / DSD native");
+    EXPECT_EQ(describe({384000, 2, SampleType::Dsd8}), "DSD64 / DSD native");
+    EXPECT_EQ(describe({768000, 2, SampleType::Dsd8}), "DSD128 / DSD native");
+}
+
 TEST(AudioTypes, DescriptionsPreserveRateAndContainer) {
     EXPECT_EQ(describe({96000, 2, SampleType::Int24In32}), "96 kHz / 24-in-32");
     EXPECT_EQ(describe({44100, 2, SampleType::Int16}), "44.1 kHz / 16");

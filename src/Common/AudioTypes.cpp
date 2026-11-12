@@ -28,8 +28,11 @@ const char* sampleTypeName(SampleType t) {
 
 std::string describe(const DeviceFormat& f) {
     char buf[64];
+    // DSD in byte frames of eight samples, named by its multiple of 44.1 kHz or, in the other family, of 48 kHz.
+    const uint32_t dsdBase = (uint64_t(f.sampleRate) * 8) % 44100 == 0 ? 44100 : 48000;
     const int length =
-        f.type == SampleType::Dsd8 ? snprintf(buf, sizeof buf, "DSD%u / %s", f.sampleRate * 8 / 44100, sampleTypeName(f.type))
+        f.type == SampleType::Dsd8
+            ? snprintf(buf, sizeof buf, "DSD%u / %s", uint32_t(uint64_t(f.sampleRate) * 8 / dsdBase), sampleTypeName(f.type))
         : f.sampleRate % 1000 == 0 ? snprintf(buf, sizeof buf, "%u kHz / %s", f.sampleRate / 1000, sampleTypeName(f.type))
                                    : snprintf(buf, sizeof buf, "%.1f kHz / %s", f.sampleRate / 1000.0, sampleTypeName(f.type));
     if (length < 0 || size_t(length) >= sizeof buf) throw std::runtime_error("failed to format device description");
