@@ -2189,7 +2189,8 @@ void MainWindow::OnWindowKeyDown(Windows::Foundation::IInspectable const&, Input
         if (!s.source || !s.source->sampleRate) return;
         const int64_t step = int64_t(s.source->sampleRate) * 10;
         int64_t target = int64_t(s.position) + (key == VirtualKey::Right ? step : -step);
-        target = std::clamp<int64_t>(target, 0, s.total ? int64_t(s.total) : target);
+        target = std::max<int64_t>(target, 0);
+        if (s.total) target = std::min<int64_t>(target, int64_t(s.total));
         Command command;
         command.kind = CommandKind::Seek;
         command.frame = uint64_t(target);
