@@ -4,6 +4,7 @@
 
 #include "Server/Api/ApiJson.h"
 
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -23,13 +24,22 @@ const json& field(const json& j, const char* key) {
     return j[key];
 }
 
+// An unsigned integer that T holds; one it does not is refused rather than cut to fit.
+template <class T> T unsignedFrom(const json& v, const std::string& what) {
+    if (!v.is_number_unsigned() && (!v.is_number_integer() || v.get<int64_t>() < 0))
+        invalid(what + " is not an unsigned integer");
+    if (v.get<uint64_t>() > uint64_t(std::numeric_limits<T>::max())) invalid(what + " is out of range");
+    return T(v.get<uint64_t>());
+}
+
 template <class T> T value(const json& j, const char* key) {
     const json& v = field(j, key);
     if constexpr (std::is_same_v<T, bool>) {
         if (!v.is_boolean()) invalid(std::string(key) + " is not a boolean");
     } else if constexpr (std::is_integral_v<T>) {
-        if (!v.is_number_unsigned() && (!v.is_number_integer() || v.get<int64_t>() < 0))
-            invalid(std::string(key) + " is not an unsigned integer");
+        return unsignedFrom<T>(v, key);
+    } else if constexpr (std::is_floating_point_v<T>) {
+        if (!v.is_number()) invalid(std::string(key) + " is not a number");
     } else if constexpr (std::is_same_v<T, std::string>) {
         if (!v.is_string()) invalid(std::string(key) + " is not a string");
     }
@@ -343,14 +353,10 @@ PlaybackSnapshot playbackFrom(const json& j) {
     }
     p.bufferFrames = value<uint32_t>(j, "bufferFrames");
     p.underruns = value<uint64_t>(j, "underruns");
-    p.bufferingSeconds = optional<uint32_t>(j, "bufferingSeconds", [](const json& v) {
-        if (!v.is_number_unsigned()) invalid("bufferingSeconds is not a number");
-        return v.get<uint32_t>();
-    });
-    p.playerVolume = optional<uint32_t>(j, "playerVolume", [](const json& v) {
-        if (!v.is_number_unsigned()) invalid("playerVolume is not a number");
-        return v.get<uint32_t>();
-    });
+    p.bufferingSeconds =
+        optional<uint32_t>(j, "bufferingSeconds", [](const json& v) { return unsignedFrom<uint32_t>(v, "bufferingSeconds"); });
+    p.playerVolume =
+        optional<uint32_t>(j, "playerVolume", [](const json& v) { return unsignedFrom<uint32_t>(v, "playerVolume"); });
     p.playerMuted = value<bool>(j, "playerMuted");
     if (j.contains("receivers"))
         for (const auto& r : array(j, "receivers"))
@@ -514,10 +520,8 @@ Command commandFromJson(const json& j) {
     if (j.contains("artists") || c.kind == CommandKind::SetArtistFavorite)
         for (const auto& a : array(j, "artists"))
             c.artists.push_back({enumFrom(field(a, "field"), kArtistFields, "artist field"), value<std::string>(a, "name")});
-    c.playerVolume = optional<uint32_t>(j, "playerVolume", [](const json& v) {
-        if (!v.is_number_unsigned()) invalid("playerVolume is not a number");
-        return v.get<uint32_t>();
-    });
+    c.playerVolume =
+        optional<uint32_t>(j, "playerVolume", [](const json& v) { return unsignedFrom<uint32_t>(v, "playerVolume"); });
     c.playerMute = optional<bool>(j, "playerMute", [](const json& v) {
         if (!v.is_boolean()) invalid("playerMute is not a boolean");
         return v.get<bool>();

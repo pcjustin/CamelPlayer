@@ -230,6 +230,23 @@ TEST(ApiJson, AddingALibraryRootRoundTripsItsPath) {
     EXPECT_THROW(commandFromJson(j), std::invalid_argument);
 }
 
+// A wrong type or a number too large for its field is refused with std::invalid_argument, as every malformed value is,
+// not let through cut to fit or thrown as nlohmann's own error.
+TEST(ApiJson, AWrongTypeOrRangeIsRefusedAsMalformed) {
+    json snapshot = toJson(fullSnapshot());
+    snapshot["playback"]["plan"]["gainDb"] = "x";
+    EXPECT_THROW(snapshotFromJson(snapshot), std::invalid_argument);
+    snapshot = toJson(fullSnapshot());
+    snapshot["playback"]["playerVolume"] = 4294967396ULL;
+    EXPECT_THROW(snapshotFromJson(snapshot), std::invalid_argument);
+    snapshot = toJson(fullSnapshot());
+    snapshot["playback"]["source"]["sampleRate"] = 4294967296ULL + 44100;
+    EXPECT_THROW(snapshotFromJson(snapshot), std::invalid_argument);
+    json command = toJson(fullCommand());
+    command["playerVolume"] = 4294967396ULL;
+    EXPECT_THROW(commandFromJson(command), std::invalid_argument);
+}
+
 TEST(ApiJson, MalformedInputIsRefused) {
     json j = toJson(fullCommand());
     for (const char* key : {"kind", "frame", "sources", "repeat"}) {
