@@ -30,6 +30,7 @@
 #include "UiText.h"
 #include "TrimmedText.h"
 #include "ArtworkLoader.h"
+#include "ConsentWait.h"
 #include "RowArtwork.h"
 
 using namespace winrt;
@@ -1456,9 +1457,8 @@ void LibraryView::loadArtistPicture(const std::string& name, bool allowed) {
     pictureToken_ = {};
     if (!allowed) PictureConsent().IsOpen(server_->snapshot().settings.artistPictures == camel::OnlineLookup::Ask);
     background([server = server_, name, token = pictureToken_, allowed, this] {
-        // The window applies the answer through the Server's command queue, a moment after the click.
-        for (int i = 0; allowed && i < 100 && server->snapshot().settings.artistPictures != camel::OnlineLookup::Allowed; ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        if (allowed)
+            ui::consentApplied([&] { return server->snapshot().settings.artistPictures == camel::OnlineLookup::Allowed; }, token);
         auto picture = std::make_shared<ArtistPicture>(server->artistPicture(name, true, token));
         return std::function<void()>([this, picture] { showArtistPicture(*picture); });
     });
