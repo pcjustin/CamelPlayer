@@ -22,6 +22,8 @@ std::string upper(std::string_view text) {
 }
 
 std::optional<double> number(std::string_view text) {
+    // from_chars takes no leading "+", which presets write for a boost.
+    if (text.size() > 1 && text.front() == '+' && text[1] != '-' && text[1] != '+') text.remove_prefix(1);
     double value = 0;
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || end != text.data() + text.size()) return std::nullopt;

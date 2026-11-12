@@ -476,6 +476,14 @@ TEST(EqText, ReadsAutoEqAndEqualizerApoFilters) {
     EXPECT_TRUE(parseEqualizerApo("nothing to see\n").empty());
 }
 
+// A value written with a plus sign, as many presets write a boost, is read as the number it is, not passed over.
+TEST(EqText, AValueWithAPlusSignIsRead) {
+    const auto bands = parseEqualizerApo("Preamp: +1.5 dB\n"
+                                         "Filter 1: ON PK Fc +1000 Hz Gain +3.0 dB Q +1.41\n");
+    ASSERT_EQ(bands.size(), 1u);
+    EXPECT_EQ(bands[0], (EqBand{EqKind::Peaking, EqChannels::All, 12, 1000.0, 3.0, 1.41, true}));
+}
+
 // What a file brings is held to the ranges the settings keep, so a preset sounds the same after a restart, and what
 // is not a finite number never reaches the Engine.
 TEST(EqText, AnImportIsHeldToTheSettingsRanges) {
