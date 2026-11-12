@@ -138,12 +138,18 @@ struct PlayerEvents::Impl {
         subscription.renewAt = renewalTime(reply.headers);
     }
 
-    // Halfway through what the player granted, which may be less than what was asked.
+    // Halfway through what the player granted, which may be less than what was asked. A grant without end, as
+    // Second-infinite, is taken for what was asked.
     Clock::time_point renewalTime(const std::string& head) const {
         const auto timeout = headerValue(head, "TIMEOUT");
         int seconds = options.subscribeSeconds;
-        if (timeout.starts_with("Second-"))
-            seconds = std::clamp(int(number(std::string_view(timeout).substr(7))), 2, options.subscribeSeconds);
+        if (timeout.starts_with("Second-")) {
+            const auto digits = std::string_view(timeout).substr(7);
+            uint64_t granted = 0;
+            const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), granted);
+            if (error == std::errc() && end != digits.data())
+                seconds = int(std::clamp<uint64_t>(granted, 2, uint64_t(options.subscribeSeconds)));
+        }
         return Clock::now() + std::chrono::seconds(seconds) / 2;
     }
 

@@ -645,6 +645,20 @@ TEST(PlayerLinkTest, RenewsSubscriptionsBeforeTheyRunOut) {
     EXPECT_TRUE(waitFor([&] { return subscribes() >= 2; }, 4s));
 }
 
+// A subscription granted without end (UPnP 1.0 allows it), or for longer than an int holds, is renewed as one granted
+// for what was asked, not every second.
+TEST(PlayerLinkTest, ASubscriptionGrantedWithoutEndIsNotRenewedEverySecond) {
+    for (const std::string granted : {"Second-infinite", "Second-2147483648"}) {
+        FakeRenderer renderer(RendererKind::UpnpAv);
+        renderer.grantTimeout(granted);
+        auto events = std::make_shared<Events>();
+        PlayerLink link(describe(renderer), into(events), kQuick);
+        std::this_thread::sleep_for(3s);
+        const auto requests = renderer.requests();
+        EXPECT_EQ(std::ranges::count(requests, std::string("SUBSCRIBE /evt/AVTransport")), 1) << granted;
+    }
+}
+
 TEST(PlayerLinkTest, SubscribesAgainWhenThePlayerForgotAfterARestart) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.grantTimeout("Second-2");
