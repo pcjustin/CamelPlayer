@@ -179,6 +179,10 @@ ScrollViewer scrollViewerOf(DependencyObject const& root) {
 
 } // namespace
 
+ui::BrowsePage LibraryView::albumRows(const LibraryAlbumPage& page) {
+    return albumPage(page, Texts{});
+}
+
 void LibraryView::InitializeComponent() {
     LibraryViewT::InitializeComponent();
     ToolTipService::SetToolTip(DescendingToggle(), box_value(tr(L"Library_Descending")));

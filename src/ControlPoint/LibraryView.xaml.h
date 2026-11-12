@@ -42,6 +42,8 @@ struct LibraryView : LibraryViewT<LibraryView> {
     void showSearch(hstring const& query, std::function<void()> leave);
     // Home's "View all": an album wall, artist list or track list read through `fetch`; Back runs `leave`.
     void showAlbumList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
+    // Albums as the library's walls show them, cards the playing album is marked on.
+    static ui::BrowsePage albumRows(const camel::server::LibraryAlbumPage& page);
     void showArtistList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void showTrackList(hstring const& title, ui::BrowseFetch fetch, std::function<void()> leave);
     void hide();

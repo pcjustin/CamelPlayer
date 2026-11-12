@@ -678,9 +678,11 @@ ui::BrowseFetch HomeView::periodFetch(std::wstring_view list) {
             std::vector<ui::BrowseRow> rows;
             if (list == L"topAlbums") {
                 for (const auto& a : stats.albums)
-                    if (counted(byTime, a.plays, a.listenedMs))
+                    if (counted(byTime, a.plays, a.listenedMs)) {
                         rows.push_back(
                             {a.album, {}, ui::utf8(a.name), ui::utf8(a.artist), {}, measured(byTime, a.plays, a.listenedMs)});
+                        rows.back().album = true;
+                    }
             } else if (list == L"topArtists") {
                 for (const auto& a : stats.artists)
                     if (counted(byTime, a.plays, a.listenedMs))

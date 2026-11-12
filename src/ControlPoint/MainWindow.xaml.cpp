@@ -1813,19 +1813,11 @@ void MainWindow::selectPage(hstring const& tag) {
 void MainWindow::viewAll(hstring const& list, hstring const& title, ui::BrowseFetch fetch) {
     auto server = server_;
     const auto back = [this, tag = shownTag_] { returnToPage(tag); };
-    const hstring unknown = tr(L"Library_Unknown");
     Nav().SelectedItem(nullptr);
     Home().Visibility(Visibility::Collapsed);
     Library().Visibility(Visibility::Visible);
     auto view = get_self<LibraryView>(Library());
-    const auto albums = [unknown](const LibraryAlbumPage& page) {
-        ui::BrowsePage out{page.revision, page.total, {}};
-        for (const auto& a : page.albums) {
-            out.rows.push_back({a.id, {}, a.title.empty() ? unknown : ui::utf8(a.title), ui::utf8(a.artist), {}, {}});
-            out.rows.back().favorite = a.favorite;
-        }
-        return out;
-    };
+    const auto albums = [](const LibraryAlbumPage& page) { return LibraryView::albumRows(page); };
     if (list == L"added") {
         view->showAlbumList(
             tr(L"Home_RecentlyAdded/Text"),
