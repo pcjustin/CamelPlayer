@@ -522,8 +522,12 @@ impl Converter {
         result
     }
 
-    /// Emits `frames` frames of the DSP chain's tail after the stream's end: silence through the chain.
+    /// Emits `frames` frames of the DSP chain's tail after the stream's end: silence through the chain. DSD sent as it
+    /// is passes no chain, so it has no tail.
     pub(crate) fn drain(&mut self, frames: usize, dsp: &mut Dsp) -> Result<(), i32> {
+        if matches!(self.mode, Mode::Dsd | Mode::Dop) {
+            return Ok(());
+        }
         let mut silence = std::mem::take(&mut self.scratch.output);
         silence.clear();
         silence.resize(frames * self.out_channels, 0.0);
@@ -843,6 +847,38 @@ pub(crate) mod tests {
         assert_eq!(out.len(), 4);
         assert!(out.iter().all(|s| s & 0xff == 0), "{out:?}");
         assert_ne!(out, samples.map(|s| s << 8));
+    }
+
+    // A DSP chain set on an engine that sends DSD as it is has nothing to act on: the chain's tail after the stream's
+    // end adds nothing to the DSD, nor quantizes at the 0 bits a DSD converter has.
+    #[test]
+    fn a_dsp_tail_on_raw_dsd_adds_nothing() {
+        let mut info = source(352_800, 2, 1, false);
+        info.sample_encoding = crate::SAMPLE_ENCODING_DSD;
+        let out = AudioFormat {
+            stream_kind: crate::AUDIO_DSD,
+            sample_format: crate::SAMPLE_DSD_U8,
+            channel_count: 2,
+            valid_bits: 1,
+            container_bits: 8,
+        };
+        let mut c = Converter::new(&info, &out, 2_822_400, false, false, QUALITY_HIGH).unwrap();
+        assert_eq!(c.mode, Mode::Dsd);
+        let mut dsp = Dsp::new(352_800, 2);
+        dsp.set(crate::dsp::Settings {
+            order: crate::dsp::DEFAULT_ORDER,
+            crossfeed: Some(crate::crossfeed::Params {
+                cutoff_hz: 700,
+                feed_db: 4.5,
+            }),
+            ..crate::dsp::Settings::default()
+        });
+        assert!(dsp.active());
+        c.convert(&[0x69, 0x69, 0x96, 0x96], 2, &mut dsp).unwrap();
+        c.finish(&mut dsp).unwrap();
+        let before = c.pending().to_vec();
+        assert_eq!(c.drain(1024, &mut dsp), Ok(()));
+        assert_eq!(c.pending(), before.as_slice());
     }
 
     #[test]
