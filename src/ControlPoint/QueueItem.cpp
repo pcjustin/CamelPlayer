@@ -13,9 +13,9 @@
 
 namespace winrt::CamelPlayer::implementation {
 
+// Read each time: a change of language opens a new window in the same process.
 hstring QueueItem::RemoveLabel() const {
-    static const hstring label = ui::tr(L"Queue_RemoveEntry");
-    return label;
+    return ui::tr(L"Queue_RemoveEntry");
 }
 
 void QueueItem::fill(const ui::QueueRow& row, bool current) {
