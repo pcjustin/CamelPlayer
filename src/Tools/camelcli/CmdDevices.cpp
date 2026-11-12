@@ -53,13 +53,15 @@ Settings settingsFromArgs(const Args& args) {
             if (supports(format, decoder)) s.decoderByFormat[format] = decoder;
     }
     if (auto v = option(args, L"--device")) {
+        if (s.backend != Backend::Wasapi && s.backend != Backend::Asio && s.backend != Backend::Ks)
+            throw std::runtime_error("--device works with --backend wasapi, asio or ks");
         // index into the backend's device list, or a raw id
         std::vector<DeviceEntry> list = s.backend == Backend::Wasapi ? listWasapiDevices()
                                         : s.backend == Backend::Asio ? listAsioDrivers()
                                                                      : listKsPins();
         std::string id = *v == L"default" ? "" : toUtf8(*v); // "default": follow the Windows default (WASAPI)
-        if (!id.empty() && std::all_of(id.begin(), id.end(), ::isdigit) && std::stoul(id) < list.size())
-            id = list[std::stoul(id)].id;
+        const auto digit = [](unsigned char c) { return std::isdigit(c) != 0; };
+        if (!id.empty() && std::all_of(id.begin(), id.end(), digit) && std::stoul(id) < list.size()) id = list[std::stoul(id)].id;
         if (s.backend == Backend::Wasapi)
             s.wasapi.deviceId = id;
         else if (s.backend == Backend::Asio)
