@@ -100,68 +100,119 @@ impl Node for Option<Convolver> {
     }
 }
 
-// A node and, while a change fades in, the one it replaced.
+// The most nodes a change fades from; a further change drops the faintest.
+const MAX_BLENDED: usize = 4;
+
+// A node and, while a change fades in, what was heard before it: the nodes it replaced, each at the share it had then.
 struct Faded<N> {
     current: N,
-    previous: Option<(N, usize)>,
+    previous: Vec<(N, f64)>,
+    left: usize,
     fade: usize,
+    // Nodes whose fade has ended, freed at the next change rather than while audio is processed.
+    done: Vec<N>,
     scratch: Vec<f64>,
+    blend: Vec<f64>,
 }
 
 impl<N: Node> Faded<N> {
     fn new(node: N, fade: usize, channels: usize) -> Self {
         Faded {
             current: node,
-            previous: None,
+            previous: Vec::with_capacity(MAX_BLENDED),
+            left: 0,
             fade,
+            done: Vec::with_capacity(MAX_BLENDED),
             scratch: vec![0.0; BLOCK_FRAMES * channels],
+            blend: vec![0.0; BLOCK_FRAMES * channels],
         }
     }
 
     fn active(&self) -> bool {
-        !self.current.is_identity() || self.previous.is_some()
+        !self.current.is_identity() || !self.previous.is_empty()
     }
 
-    // Replaces the node, fading once audio has passed; returns the node no longer needed, if any.
+    // Replaces the node, fading once audio has passed; returns a node no longer needed, if any. A change within a
+    // fade fades from what is heard at that moment, the earlier nodes in their proportions then.
     fn set(&mut self, node: N, started: bool) -> Option<N> {
+        self.done.clear();
         let old = std::mem::replace(&mut self.current, node);
-        if started && !(old.is_identity() && self.current.is_identity()) {
-            self.previous.replace((old, self.fade)).map(|(n, _)| n)
-        } else {
-            Some(old)
+        if !started || (self.previous.is_empty() && old.is_identity() && self.current.is_identity())
+        {
+            return Some(old);
         }
-    }
-
-    fn reset(&mut self) -> Option<N> {
-        self.current.reset();
-        self.previous.take().map(|(n, _)| n)
-    }
-
-    // At most BLOCK_FRAMES frames; returns the replaced node once its fade has ended.
-    fn process(&mut self, samples: &mut [f64], channels: usize) -> Option<N> {
-        let Some((old, left)) = self.previous.as_mut() else {
-            self.current.process(samples, channels);
-            return None;
+        let mut share = if self.previous.is_empty() {
+            1.0
+        } else {
+            1.0 - self.left as f64 / self.fade as f64
         };
-        let dry = &mut self.scratch[..samples.len()];
-        dry.copy_from_slice(samples);
-        old.process(dry, channels);
-        self.current.process(samples, channels);
-        let total = self.fade as f64;
-        for (frame, faded) in samples
+        for (_, weight) in &mut self.previous {
+            *weight *= 1.0 - share;
+        }
+        let mut dropped = None;
+        if self.previous.len() == MAX_BLENDED {
+            let faintest = (0..MAX_BLENDED)
+                .min_by(|&a, &b| self.previous[a].1.total_cmp(&self.previous[b].1))
+                .expect("MAX_BLENDED is not 0");
+            let (node, weight) = self.previous.swap_remove(faintest);
+            let kept = 1.0 - weight;
+            for (_, w) in &mut self.previous {
+                *w /= kept;
+            }
+            share /= kept;
+            dropped = Some(node);
+        }
+        self.previous.push((old, share));
+        self.left = self.fade;
+        dropped
+    }
+
+    fn reset(&mut self) {
+        self.current.reset();
+        self.done.extend(self.previous.drain(..).map(|(n, _)| n));
+        self.left = 0;
+    }
+
+    // At most BLOCK_FRAMES frames.
+    fn process(&mut self, samples: &mut [f64], channels: usize) {
+        let Self {
+            current,
+            previous,
+            left,
+            fade,
+            done,
+            scratch,
+            blend,
+        } = self;
+        if previous.is_empty() {
+            current.process(samples, channels);
+            return;
+        }
+        let blend = &mut blend[..samples.len()];
+        blend.fill(0.0);
+        for (node, weight) in previous.iter_mut() {
+            let dry = &mut scratch[..samples.len()];
+            dry.copy_from_slice(samples);
+            node.process(dry, channels);
+            for (to, &from) in blend.iter_mut().zip(dry.iter()) {
+                *to += *weight * from;
+            }
+        }
+        current.process(samples, channels);
+        let total = *fade as f64;
+        for (frame, heard) in samples
             .chunks_exact_mut(channels)
-            .zip(dry.chunks_exact(channels))
+            .zip(blend.chunks_exact(channels))
         {
             let t = 1.0 - *left as f64 / total;
-            for (wet, &was) in frame.iter_mut().zip(faded) {
+            for (wet, &was) in frame.iter_mut().zip(heard) {
                 *wet = was + (*wet - was) * t;
             }
             *left = left.saturating_sub(1);
         }
         if *left == 0 {
-            return self.previous.take().map(|(n, _)| n);
+            done.extend(previous.drain(..).map(|(n, _)| n));
         }
-        None
     }
 }
 
@@ -278,9 +329,8 @@ pub(crate) struct Dsp {
     ramp_left: usize,
     started: bool,
     clipped: u64,
-    // Replaced convolvers and EQs, freed on the next change rather than in the DSP stage.
+    // Replaced convolvers, freed on the next change rather than in the DSP stage.
     retired: Vec<Convolver>,
-    retired_eq: Vec<EqNode>,
 }
 
 impl Dsp {
@@ -304,7 +354,6 @@ impl Dsp {
             started: false,
             clipped: 0,
             retired: Vec::with_capacity(4),
-            retired_eq: Vec::with_capacity(4),
         }
     }
 
@@ -321,7 +370,6 @@ impl Dsp {
     /// Applies `settings`, which must be valid for this rate. Once audio has passed, the change fades in.
     pub(crate) fn set(&mut self, settings: Settings) {
         self.retired.clear();
-        self.retired_eq.clear();
         let rate = f64::from(self.rate);
         let started = self.started;
         if settings.bands != self.settings.bands {
@@ -347,7 +395,13 @@ impl Dsp {
         if settings.order != pending {
             if started && self.active() {
                 let half = (self.fade_frames() / 2).max(1);
-                self.reorder = Some((settings.order, half, half));
+                // From the level heard now: a fade out under way goes on, and one fading back in turns down from there.
+                let out = match self.reorder {
+                    Some((_, out, _)) if out > 0 => out,
+                    Some((_, _, into)) => half - into.min(half),
+                    None => half,
+                };
+                self.reorder = Some((settings.order, out, half));
             } else {
                 self.order = settings.order;
                 self.reorder = None;
@@ -382,8 +436,7 @@ impl Dsp {
     pub(crate) fn reset(&mut self) {
         self.eq.reset();
         self.crossfeed.reset();
-        let old = self.convolution.reset();
-        self.retire(old);
+        self.convolution.reset();
         if let Some((order, _, _)) = self.reorder.take() {
             self.order = order;
         }
@@ -440,18 +493,9 @@ impl Dsp {
         }
         for node in self.order {
             match node {
-                NODE_EQ => {
-                    if let Some(old) = self.eq.process(block, channels) {
-                        self.retired_eq.push(old);
-                    }
-                }
-                NODE_CROSSFEED => {
-                    self.crossfeed.process(block, channels);
-                }
-                _ => {
-                    let old = self.convolution.process(block, channels);
-                    self.retire(old);
-                }
+                NODE_EQ => self.eq.process(block, channels),
+                NODE_CROSSFEED => self.crossfeed.process(block, channels),
+                _ => self.convolution.process(block, channels),
             }
         }
         let half = (self.fade_frames() / 2).max(1) as f64;
@@ -602,6 +646,63 @@ mod tests {
         let mut rest = sine(1000.0, rate, 0.5, 9600..14400);
         dsp.process(&mut rest);
         assert!(!dsp.active());
+    }
+
+    fn largest_step(parts: &[&[f64]]) -> f64 {
+        let left: Vec<f64> = parts
+            .iter()
+            .flat_map(|p| p.iter().step_by(2))
+            .copied()
+            .collect();
+        left.windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f64::max)
+    }
+
+    // A second change within the fade, an EQ band dragged or a node toggled twice, goes on from what is heard then.
+    #[test]
+    fn a_change_within_a_fade_goes_on_from_what_is_heard() {
+        let rate = 48_000.0;
+        let mut dsp = Dsp::new(48_000, 2);
+        dsp.set(eq(&[band(KIND_PEAKING, 1000.0, -12.0, 1.0)]));
+        let mut first = sine(1000.0, rate, 0.5, 0..4800);
+        dsp.process(&mut first);
+        dsp.set(eq(&[band(KIND_PEAKING, 1000.0, 12.0, 1.0)]));
+        let mut second = sine(1000.0, rate, 0.5, 4800..5052);
+        dsp.process(&mut second);
+        dsp.set(eq(&[band(KIND_PEAKING, 1000.0, -6.0, 1.0)]));
+        let mut third = sine(1000.0, rate, 0.5, 5052..9600);
+        dsp.process(&mut third);
+        let step = largest_step(&[&first, &second, &third]);
+        assert!(step < 0.2, "{step}");
+
+        let mut left_cut = band(KIND_PEAKING, 300.0, -12.0, 1.0);
+        left_cut.channels = CHANNELS_LEFT;
+        let ordered = |order| Settings {
+            order,
+            bands: vec![left_cut],
+            crossfeed: Some(crossfeed::Params {
+                cutoff_hz: 700,
+                feed_db: 4.5,
+            }),
+            impulse: None,
+            volume_db: 0.0,
+        };
+        let mut dsp = Dsp::new(48_000, 2);
+        dsp.set(ordered(DEFAULT_ORDER));
+        let mut first = sine(500.0, rate, 0.5, 0..4800);
+        dsp.process(&mut first);
+        dsp.set(ordered([NODE_CROSSFEED, NODE_EQ, NODE_CONVOLUTION]));
+        // Past the fade out and into the fade in, then the order changes back.
+        let mut second = sine(500.0, rate, 0.5, 4800..5340);
+        dsp.process(&mut second);
+        dsp.set(ordered(DEFAULT_ORDER));
+        let mut third = sine(500.0, rate, 0.5, 5340..9600);
+        dsp.process(&mut third);
+        let step = largest_step(&[&first, &second, &third]);
+        assert!(step < 0.1, "{step}");
+        assert!(dsp.reorder.is_none());
+        assert_eq!(dsp.order, DEFAULT_ORDER);
     }
 
     #[test]
