@@ -213,6 +213,10 @@ int cmdBenchDecoders(const Args& args) {
         return 2;
     }
     const int runs = option(args, L"--runs") ? std::stoi(*option(args, L"--runs")) : 3;
+    if (runs < 1) {
+        std::puts("bench-decoders: --runs must be 1 or more");
+        return 2;
+    }
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
     json all = json::array();
@@ -255,14 +259,19 @@ int cmdBenchDecoders(const Args& args) {
                 }
                 results.push_back(j);
             }
-            // keep the run with the median decode time
+            // Keep the run with the median decode time, or the first crash: a crash sorts first, with no decode time,
+            // and the median would hide it.
+            const auto crashes = std::ranges::count_if(results, [](const json& j) { return j.contains("crash"); });
             std::sort(results.begin(), results.end(),
                       [](const json& a, const json& b) { return a.value("decodeMs", 0.0) < b.value("decodeMs", 0.0); });
-            json best = results[results.size() / 2];
+            const auto crashed = std::ranges::find_if(results, [](const json& j) { return j.contains("crash"); });
+            json best = crashed != results.end() ? *crashed : results[results.size() / 2];
             best["runs"] = runs;
+            best["crashes"] = crashes;
             std::printf("%-26s %-10s ", toUtf8(f.filename().wstring()).c_str(), decoderName(k));
             if (best.contains("crash"))
-                std::printf("CRASH (exit 0x%08lX)\n", (unsigned long)best.value("exitCode", 0u));
+                std::printf("CRASH (exit 0x%08lX) in %lld of %d runs\n", (unsigned long)best.value("exitCode", 0u),
+                            static_cast<long long>(crashes), runs);
             else if (best.contains("openError"))
                 std::printf("open: %s\n", best["openError"].get<std::string>().c_str());
             else {
