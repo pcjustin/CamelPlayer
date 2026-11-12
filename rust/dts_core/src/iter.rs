@@ -197,7 +197,7 @@ pub struct FrameView<'a> {
     /// the input passed to [`iter_frames`].
     pub offset: usize,
     /// Byte length of the frame (from
-    /// [`DtsFrameHeader::frame_size_bytes`]). Always 95..=16384.
+    /// [`DtsFrameHeader::frame_size_bytes`]). Always 96..=16384.
     pub len: usize,
     /// Borrowed frame bytes (`bytes[offset..offset + len]`).
     pub data: &'a [u8],
@@ -217,8 +217,8 @@ impl<'a> FrameView<'a> {
     /// the header boundary.
     ///
     /// Always non-empty for well-formed frames: the smallest documented
-    /// frame size is 95 B and the largest header window is 15 B
-    /// (`crc_present == true`), so at least 80 B of SUBFRAMES region
+    /// frame size is 96 B and the largest header window is 15 B
+    /// (`crc_present == true`), so at least 81 B of SUBFRAMES region
     /// is guaranteed.
     pub fn payload(&self) -> &'a [u8] {
         &self.data[self.header.header_byte_length()..]
@@ -360,7 +360,7 @@ pub fn iter_frames(bytes: &[u8]) -> FrameIterator<'_> {
 pub enum ResyncCause {
     /// The header bits that follow the sync failed one of the
     /// structural bounds the spec mandates (NBLKS &lt; 5 → [`Error::BlockCountOutOfRange`],
-    /// frame size &lt; 95 → [`Error::FrameSizeOutOfRange`]) — strong
+    /// frame size &lt; 96 → [`Error::FrameSizeOutOfRange`]) — strong
     /// evidence the sync was a coincidental byte sequence inside a
     /// previous frame's payload rather than the start of a real
     /// frame.
@@ -410,7 +410,7 @@ pub struct ResyncEvent {
 /// Error-tolerant counterpart to [`FrameIterator`].
 ///
 /// The fail-fast [`FrameIterator`] surfaces a structural-bound
-/// failure at a candidate sync (NBLKS &lt; 5, FSIZE &lt; 95) or a
+/// failure at a candidate sync (NBLKS &lt; 5, frame size &lt; 96) or a
 /// header-truncation by yielding the parser's [`Error`] and
 /// terminating — appropriate for callers walking a known-good raw
 /// `.dts` stream where any malformed sync is a hard fault.
@@ -966,16 +966,16 @@ mod tests {
     // Round 138 — FrameView::payload()
     // ---------------------------------------------------------------
 
-    /// Hand-build a 95-byte raw-BE termination frame (NBLKS=5,
+    /// Hand-build a 96-byte raw-BE termination frame (NBLKS=5,
     /// FSIZE=95, crc_present=0) padded with zeros for the SUBFRAMES
     /// region; then confirm `FrameView::payload()` returns exactly
-    /// `frame.len - header_byte_length()` bytes (= 95 - 13 = 82).
+    /// `frame.len - header_byte_length()` bytes (= 96 - 13 = 82).
     #[test]
     fn frame_view_payload_slice_length_matches_header_boundary_no_crc() {
         // The base 13-byte header window is followed by 82 bytes of
         // SUBFRAMES region we fill with a distinctive 0xCD pattern
         // so the slice content can be checked too.
-        let mut buf = vec![0u8; 95];
+        let mut buf = vec![0u8; 96];
         // Sync.
         buf[0..4].copy_from_slice(&[0x7F, 0xFE, 0x80, 0x01]);
         // FTYPE=0 (termination, MSB), SHORT=0, CRC_PRESENT=0,
@@ -1005,7 +1005,7 @@ mod tests {
         push(&mut bv, 0, 5); // sample_count_m1
         push(&mut bv, 0, 1); // crc_present
         push(&mut bv, 5, 7); // nblks
-        push(&mut bv, 94, 14); // fsize-1 = 94 -> frame_size = 95
+        push(&mut bv, 95, 14); // fsize-1 = 95 -> frame_size = 96
         push(&mut bv, 0, 6); // amode
         push(&mut bv, 0, 4); // sfreq
         push(&mut bv, 0, 5); // rate
@@ -1024,7 +1024,7 @@ mod tests {
             }
             buf[i] = b;
         }
-        // Fill the SUBFRAMES region (bytes 13..95) with a pattern so
+        // Fill the SUBFRAMES region (bytes 13..96) with a pattern so
         // the payload-slice contents can be verified.
         for byte in buf.iter_mut().skip(13) {
             *byte = 0xCD;
@@ -1033,13 +1033,13 @@ mod tests {
         let mut it = iter_frames(&buf);
         let view = it.next().expect("frame must yield").expect("must parse");
         assert_eq!(view.offset, 0);
-        assert_eq!(view.len, 95);
-        assert_eq!(view.header.frame_size_bytes, 95);
+        assert_eq!(view.len, 96);
+        assert_eq!(view.header.frame_size_bytes, 96);
         assert!(!view.header.crc_present);
         assert_eq!(view.header.header_byte_length(), 13);
 
         let payload = view.payload();
-        assert_eq!(payload.len(), 95 - 13);
+        assert_eq!(payload.len(), 96 - 13);
         assert!(payload.iter().all(|&b| b == 0xCD));
         // No more frames in the buffer.
         assert!(it.next().is_none());
@@ -1050,8 +1050,8 @@ mod tests {
     /// extends the header window from 104 to 120 bits.
     #[test]
     fn frame_view_payload_offset_shifts_when_crc_present() {
-        // Build a 95-byte crc-present termination frame.
-        let mut buf = vec![0u8; 95];
+        // Build a 96-byte crc-present termination frame.
+        let mut buf = vec![0u8; 96];
         fn push(bv: &mut Vec<bool>, value: u32, width: u32) {
             for i in (0..width).rev() {
                 bv.push(((value >> i) & 1) == 1);
@@ -1063,7 +1063,7 @@ mod tests {
         push(&mut bv, 0, 5);
         push(&mut bv, 1, 1); // crc_present = true
         push(&mut bv, 5, 7);
-        push(&mut bv, 94, 14);
+        push(&mut bv, 95, 14);
         push(&mut bv, 0, 6);
         push(&mut bv, 0, 4);
         push(&mut bv, 0, 5);
@@ -1082,7 +1082,7 @@ mod tests {
             }
             buf[i] = b;
         }
-        // Fill bytes 15..95 with a distinct pattern.
+        // Fill bytes 15..96 with a distinct pattern.
         for byte in buf.iter_mut().skip(15) {
             *byte = 0xEF;
         }
@@ -1091,7 +1091,7 @@ mod tests {
         assert!(view.header.crc_present);
         assert_eq!(view.header.header_byte_length(), 15);
         let payload = view.payload();
-        assert_eq!(payload.len(), 95 - 15);
+        assert_eq!(payload.len(), 96 - 15);
         assert!(payload.iter().all(|&b| b == 0xEF));
     }
 
@@ -1377,7 +1377,7 @@ mod tests {
         out
     }
 
-    /// Build a minimum-size (95-byte) termination raw-BE frame whose
+    /// Build a minimum-size (96-byte) termination raw-BE frame whose
     /// SUBFRAMES region is filled with `fill`. Header fields chosen so
     /// the parser accepts the frame.
     fn build_min_frame_be(fill: u8) -> Vec<u8> {
@@ -1387,7 +1387,7 @@ mod tests {
         push_bits(&mut bv, 0, 5); // sample_count_m1
         push_bits(&mut bv, 0, 1); // crc_present
         push_bits(&mut bv, 5, 7); // nblks = 5
-        push_bits(&mut bv, 94, 14); // fsize-1 = 94 → frame_size = 95
+        push_bits(&mut bv, 95, 14); // fsize-1 = 95 → frame_size = 96
         push_bits(&mut bv, 0, 6); // amode
         push_bits(&mut bv, 0, 4); // sfreq
         push_bits(&mut bv, 0, 5); // rate
@@ -1397,7 +1397,7 @@ mod tests {
             bv.push(false);
         }
         let mut buf = bits_to_bytes(&bv);
-        buf.resize(95, fill);
+        buf.resize(96, fill);
         for byte in buf.iter_mut().skip(13) {
             *byte = fill;
         }
@@ -1410,12 +1410,12 @@ mod tests {
     #[test]
     fn resync_walks_clean_stream_identically_to_fail_fast() {
         // Build a 3-frame raw-BE stream by concatenating three
-        // build_min_frame_be calls. Each frame is 95 B → 3 × 95 = 285 B.
-        let mut stream = Vec::with_capacity(3 * 95);
+        // build_min_frame_be calls. Each frame is 96 B → 3 × 96 = 288 B.
+        let mut stream = Vec::with_capacity(3 * 96);
         for fill in [0x11u8, 0x22, 0x33] {
             stream.extend_from_slice(&build_min_frame_be(fill));
         }
-        assert_eq!(stream.len(), 285);
+        assert_eq!(stream.len(), 288);
 
         let strict: Vec<FrameView<'_>> = iter_frames(&stream)
             .collect::<core::result::Result<Vec<_>, _>>()
@@ -1445,7 +1445,7 @@ mod tests {
     #[test]
     fn resync_skips_false_positive_sync_in_garbage_and_recovers_real_frame() {
         // Layout: [garbage with embedded false sync 0..32] +
-        // [real frame at offset 32, 95 B].
+        // [real frame at offset 32, 96 B].
         let real = build_min_frame_be(0xCC);
         let mut buf = vec![0xAAu8; 32];
         // Plant the canonical raw-BE sync at offset 8, followed by all
@@ -1480,12 +1480,12 @@ mod tests {
         let second = it.next().expect("must yield real frame");
         let view = second.expect("real frame must parse");
         assert_eq!(view.offset, 32);
-        assert_eq!(view.len, 95);
+        assert_eq!(view.len, 96);
         assert_eq!(
             view.header.sync_word_encoding,
             SyncWordEncoding::RawBigEndian
         );
-        assert_eq!(view.header.frame_size_bytes, 95);
+        assert_eq!(view.header.frame_size_bytes, 96);
         assert!(it.next().is_none());
     }
 
@@ -1496,24 +1496,24 @@ mod tests {
     /// next real frame (or ends naturally if none).
     #[test]
     fn resync_overrun_event_lets_iterator_continue() {
-        // Build a buffer: real frame at offset 0 (95 B); then plant a
-        // raw-BE sync at offset 96 with a header declaring a huge
+        // Build a buffer: real frame at offset 0 (96 B); then plant a
+        // raw-BE sync at offset 97 with a header declaring a huge
         // frame_size (overruns end-of-buffer); then the genuine next
-        // frame at offset 96 + 5 = 101.
+        // frame at offset 97 + 5 = 102.
         //
         // To engineer the "header parses OK but length overruns" case
-        // we use a real 95-byte termination frame but place it inside
-        // a buffer that is exactly 96+95 = 191 B starting at offset 96
-        // — but if we plant the well-formed frame at offset 96, the
+        // we use a real 96-byte termination frame but place it inside
+        // a buffer that is exactly 97+96 = 193 B starting at offset 97
+        // — but if we plant the well-formed frame at offset 97, the
         // resync iterator would correctly walk it. So instead we plant
-        // a HAND-CRAFTED header at offset 96 with FSIZE that exceeds
+        // a HAND-CRAFTED header at offset 97 with FSIZE that exceeds
         // remaining buffer space.
 
         let real = build_min_frame_be(0x11);
-        let mut buf = real.clone(); // frame at offset 0..95.
+        let mut buf = real.clone(); // frame at offset 0..96.
         // 1 byte of garbage so the false sync is well-separated.
         buf.push(0xAA);
-        let false_sync_off = buf.len(); // == 96
+        let false_sync_off = buf.len(); // == 97
         // Craft a header with FSIZE that overruns the remaining buffer.
         let total_after_false_sync = 50; // we'll make remaining = 50.
         // Declared frame_size = 200 > 50.
@@ -1545,20 +1545,20 @@ mod tests {
         // Walk with the resync iterator.
         let events: Vec<_> = iter_frames_resync(&buf).collect();
         // Expect: Ok(real frame at 0), Err(FrameLengthOverrunsBuffer at
-        // 96, declared_len=200), then end (find_next_sync from 97
-        // finds nothing — the canonical sync was only planted at 96).
+        // 97, declared_len=200), then end (find_next_sync from 98
+        // finds nothing — the canonical sync was only planted at 97).
         assert_eq!(events.len(), 2);
         let frame = events[0].as_ref().unwrap();
         assert_eq!(frame.offset, 0);
-        assert_eq!(frame.len, 95);
+        assert_eq!(frame.len, 96);
 
         match events[1] {
             Err(ResyncEvent {
-                offset: 96,
+                offset: 97,
                 encoding: SyncWordEncoding::RawBigEndian,
                 cause: ResyncCause::FrameLengthOverrunsBuffer { declared_len: 200 },
             }) => {}
-            ref other => panic!("expected overrun event at 96 with len 200, got {other:?}"),
+            ref other => panic!("expected overrun event at 97 with len 200, got {other:?}"),
         }
     }
 
@@ -1618,7 +1618,7 @@ mod tests {
         assert_eq!(it.cursor(), 1);
         // Step 2: real frame at 20; cursor advances by frame_size_bytes.
         let _ = it.next();
-        assert_eq!(it.cursor(), real_off + 95);
+        assert_eq!(it.cursor(), real_off + 96);
         // Step 3: no more syncs.
         assert!(it.next().is_none());
     }
@@ -1669,7 +1669,7 @@ mod tests {
     #[test]
     fn resync_truncated_tail_surfaces_overrun_event_then_ends() {
         // Build a valid-header buffer whose declared frame_size_bytes
-        // is 95 but the buffer holds only 50 bytes total.
+        // is 96 but the buffer holds only 50 bytes total.
         let real = build_min_frame_be(0xEE);
         let truncated = &real[..50];
         let events: Vec<_> = iter_frames_resync(truncated).collect();
@@ -1678,7 +1678,7 @@ mod tests {
             Err(ResyncEvent {
                 offset: 0,
                 encoding: SyncWordEncoding::RawBigEndian,
-                cause: ResyncCause::FrameLengthOverrunsBuffer { declared_len: 95 },
+                cause: ResyncCause::FrameLengthOverrunsBuffer { declared_len: 96 },
             }) => {}
             ref other => panic!("expected overrun event, got {other:?}"),
         }
@@ -2161,19 +2161,19 @@ mod tests {
     // ---------------------------------------------------------------
     // Round 192 — iter_frames_14bit (14-bit container-stream walker)
     //
-    // Each test builds a raw-BE frame (95 bytes, the minimum FSIZE+1
+    // Each test builds a raw-BE frame (96 bytes, the minimum FSIZE+1
     // the spec allows), packs it through `pack_16bit_to_14bit` into a
     // 14-bit-packed container buffer, and exercises the iterator
     // against the resulting bytes. The container-byte advance is
     // verified to equal `frame_size_container_bytes(encoding)`
-    // (= 110 bytes for FSIZE+1 = 95: ceil(95 * 8 / 14) * 2 = 110).
+    // (= 110 bytes for FSIZE+1 = 96: ceil(96 * 8 / 14) * 2 = 110).
     // ---------------------------------------------------------------
 
     use crate::{FourteenBitByteOrder, pack_16bit_to_14bit};
 
-    /// Build a 95-byte raw-BE single-frame buffer: FTYPE=0
-    /// (termination), SHORT=0, CRC_PRESENT=0, NBLKS=5, FSIZE-1=94 (=>
-    /// frame_size_bytes = 95), all other fields zero. Mirrors the
+    /// Build a 96-byte raw-BE single-frame buffer: FTYPE=0
+    /// (termination), SHORT=0, CRC_PRESENT=0, NBLKS=5, FSIZE-1=95 (=>
+    /// frame_size_bytes = 96), all other fields zero. Mirrors the
     /// hand-built buffers used by the round-138 payload tests above.
     fn build_minimum_raw_be_frame() -> Vec<u8> {
         fn push(bv: &mut Vec<bool>, value: u32, width: u32) {
@@ -2187,7 +2187,7 @@ mod tests {
         push(&mut bv, 0, 5);
         push(&mut bv, 0, 1); // crc_present
         push(&mut bv, 5, 7); // nblks
-        push(&mut bv, 94, 14); // fsize-1 = 94 -> frame_size = 95
+        push(&mut bv, 95, 14); // fsize-1 = 95 -> frame_size = 96
         push(&mut bv, 0, 6); // amode
         push(&mut bv, 0, 4); // sfreq
         push(&mut bv, 0, 5); // rate
@@ -2196,7 +2196,7 @@ mod tests {
         while !bv.len().is_multiple_of(8) {
             bv.push(false);
         }
-        let mut buf = vec![0u8; 95];
+        let mut buf = vec![0u8; 96];
         for (i, chunk) in bv.chunks(8).enumerate() {
             let mut b: u8 = 0;
             for (k, bit) in chunk.iter().enumerate() {
@@ -2233,7 +2233,7 @@ mod tests {
             view.header.sync_word_encoding,
             SyncWordEncoding::FourteenBitBigEndian
         );
-        assert_eq!(view.header.frame_size_bytes, 95);
+        assert_eq!(view.header.frame_size_bytes, 96);
         assert_eq!(view.header.blocks_per_frame, 5);
         assert_eq!(view.header.frame_type, FrameType::Termination);
         // No further frames.
@@ -2256,7 +2256,7 @@ mod tests {
             view.header.sync_word_encoding,
             SyncWordEncoding::FourteenBitLittleEndian
         );
-        assert_eq!(view.header.frame_size_bytes, 95);
+        assert_eq!(view.header.frame_size_bytes, 96);
     }
 
     /// Two back-to-back 14-bit-BE frames: the iterator must advance

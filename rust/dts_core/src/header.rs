@@ -28,7 +28,7 @@
 //! | 5    | SHORT (sample count)  | raw value; samples-in-block = +1   |
 //! | 1    | CRC_PRESENT           |                                    |
 //! | 7    | NBLKS (block count)   | raw 5..=127                        |
-//! | 14   | FSIZE-1               | frame size in bytes = +1, 95..=16384 |
+//! | 14   | FSIZE-1               | frame size in bytes = +1, 96..=16384 |
 //! | 6    | AMODE (channel cfg)   | 0..=15 standard, 16..=63 user      |
 //! | 4    | SFREQ                 | sample-freq index (tables missing) |
 //! | 5    | RATE                  | bitrate index (tables missing)     |
@@ -700,7 +700,7 @@ pub struct DtsFrameHeader {
     pub crc_present: bool,
     /// Number of sub-blocks in the frame (raw NBLKS, 5..=127).
     pub blocks_per_frame: u8,
-    /// Frame size in bytes (`FSIZE-1 + 1`, 95..=16384).
+    /// Frame size in bytes (`FSIZE-1 + 1`, 96..=16384: FSIZE is valid from 95).
     pub frame_size_bytes: u16,
     /// Channel-configuration code (AMODE, 0..=63). 0..=15 are
     /// standard layouts (per ETSI §5.3.1 Table 5-4 — resolved by
@@ -1329,7 +1329,7 @@ pub fn encode_frame_header_le(header: &DtsFrameHeader) -> Result<Vec<u8>> {
 /// Returns:
 /// - [`Error::BlockCountOutOfRange`] if `header.blocks_per_frame < 5`
 ///   or > 127 (NBLKS is a 7-bit field).
-/// - [`Error::FrameSizeOutOfRange`] if `header.frame_size_bytes < 95`
+/// - [`Error::FrameSizeOutOfRange`] if `header.frame_size_bytes < 96`
 ///   or > 16384 (FSIZE-1 is a 14-bit field).
 /// - [`Error::FieldOutOfRange`] if any other field is too large for
 ///   its documented bit width (AMODE > 63, SFREQ > 15, RATE > 31,
@@ -1351,7 +1351,7 @@ pub fn encode_frame_header_be(header: &DtsFrameHeader) -> Result<Vec<u8>> {
             blocks: header.blocks_per_frame,
         });
     }
-    if !(95..=16384).contains(&header.frame_size_bytes) {
+    if !(96..=16384).contains(&header.frame_size_bytes) {
         return Err(Error::FrameSizeOutOfRange {
             frame_size: header.frame_size_bytes,
         });
@@ -1711,7 +1711,7 @@ pub fn parse_frame_header(bytes: &[u8]) -> Result<DtsFrameHeader> {
     }
     let fsize_minus_one = br.read_bits(14)? as u16;
     let frame_size_bytes = fsize_minus_one + 1;
-    if frame_size_bytes < 95 {
+    if frame_size_bytes < 96 {
         return Err(Error::FrameSizeOutOfRange {
             frame_size: frame_size_bytes,
         });
@@ -2098,13 +2098,13 @@ mod tests {
 
     #[test]
     fn parse_termination_frame_be() {
-        let bytes = build_be_header(0, 0, 0, 5, 94, 0, 0, 0, 0, None, 0);
+        let bytes = build_be_header(0, 0, 0, 5, 95, 0, 0, 0, 0, None, 0);
         let hdr = parse_frame_header(&bytes).unwrap();
         assert_eq!(hdr.frame_type, FrameType::Termination);
         assert_eq!(hdr.sample_count_per_block, 1);
         assert!(!hdr.crc_present);
         assert_eq!(hdr.blocks_per_frame, 5);
-        assert_eq!(hdr.frame_size_bytes, 95);
+        assert_eq!(hdr.frame_size_bytes, 96);
         // All trailing flags zero by construction.
         assert!(!hdr.downmix);
         assert!(!hdr.dynamic_range);
@@ -2144,6 +2144,18 @@ mod tests {
             parse_frame_header(&bytes).unwrap_err(),
             Error::FrameSizeOutOfRange { frame_size: 94 }
         );
+    }
+
+    // FSIZE (the frame's bytes less one) is valid from 95, so the smallest frame is 96 bytes: FSIZE 94 is a false sync.
+    #[test]
+    fn parse_rejects_a_95_byte_frame() {
+        let bytes = build_be_header(1, 31, 1, 16, 94, 0, 0, 0, 0, Some(0), 0);
+        assert_eq!(
+            parse_frame_header(&bytes).unwrap_err(),
+            Error::FrameSizeOutOfRange { frame_size: 95 }
+        );
+        let smallest = build_be_header(1, 31, 1, 16, 95, 0, 0, 0, 0, Some(0), 0);
+        assert_eq!(parse_frame_header(&smallest).unwrap().frame_size_bytes, 96);
     }
 
     #[test]
@@ -2428,14 +2440,14 @@ mod tests {
 
     #[test]
     fn parse_frame_header_14bit_le_matches_raw_be() {
-        let raw = build_be_header(0, 0, 0, 5, 94, 0, 0, 0, 0, None, 0);
+        let raw = build_be_header(0, 0, 0, 5, 95, 0, 0, 0, 0, None, 0);
         let packed = build_14bit_packed_header(
             FourteenBitByteOrder::LittleEndian,
             0,
             0,
             0,
             5,
-            94,
+            95,
             0,
             0,
             0,
@@ -3080,14 +3092,14 @@ mod tests {
         let post_crc = 1 + 4 + 2 + 3 + 1 + 1 + 4; // 16
         let crc_slot = 16; // optional
 
-        let absent = build_be_header(1, 31, 0, 5, 94, 0, 0, 0, 0, None, 0);
+        let absent = build_be_header(1, 31, 0, 5, 95, 0, 0, 0, 0, None, 0);
         let hdr_absent = parse_frame_header(&absent).unwrap();
         assert_eq!(
             hdr_absent.header_bit_length(),
             sync + base + trailing + post_crc,
         );
 
-        let present = build_be_header(1, 31, 1, 5, 94, 0, 0, 0, 0, Some(0), 0);
+        let present = build_be_header(1, 31, 1, 5, 95, 0, 0, 0, 0, Some(0), 0);
         let hdr_present = parse_frame_header(&present).unwrap();
         assert_eq!(
             hdr_present.header_bit_length(),
@@ -3103,7 +3115,7 @@ mod tests {
     fn header_byte_length_is_always_byte_aligned() {
         for crc in [0, 1] {
             for nblks in [5u32, 16, 127] {
-                for fsize_m1 in [94u32, 1023, 16383] {
+                for fsize_m1 in [95u32, 1023, 16383] {
                     let crc_payload = if crc == 1 { Some(0) } else { None };
                     let bytes =
                         build_be_header(1, 31, crc, nblks, fsize_m1, 0, 0, 0, 0, crc_payload, 0);
@@ -3205,20 +3217,20 @@ mod tests {
         );
     }
 
-    /// Minimum-frame (FSIZE+1 = 95) and maximum-frame (FSIZE+1 =
+    /// Minimum-frame (FSIZE+1 = 96) and maximum-frame (FSIZE+1 =
     /// 16384) advances exercise the formula's bottom and top.
-    /// `ceil(95 * 8 / 14)` = `ceil(760 / 14)` = 55 words = 110
+    /// `ceil(96 * 8 / 14)` = `ceil(768 / 14)` = 55 words = 110
     /// container bytes; `ceil(16384 * 8 / 14)` = `ceil(131072 / 14)`
     /// = 9363 words = 18726 container bytes (the last container word
-    /// carries 760 mod 14 = 4 leftover bits in the minimum case
+    /// carries 768 mod 14 = 12 leftover bits in the minimum case
     /// and 131072 mod 14 = 10 leftover bits in the maximum case;
     /// each leftover bit-count is non-zero so the closed-form
     /// ceiling rounds up to a full container word).
     #[test]
     fn frame_size_container_bytes_14bit_min_and_max() {
-        let bytes_min = build_be_header(1, 31, 0, 5, 94, 0, 0, 0, 0, None, 0);
+        let bytes_min = build_be_header(1, 31, 0, 5, 95, 0, 0, 0, 0, None, 0);
         let hdr_min = parse_frame_header(&bytes_min).unwrap();
-        assert_eq!(hdr_min.frame_size_bytes, 95);
+        assert_eq!(hdr_min.frame_size_bytes, 96);
         assert_eq!(
             hdr_min.frame_size_container_bytes(SyncWordEncoding::FourteenBitBigEndian),
             110,
@@ -3242,7 +3254,7 @@ mod tests {
     /// rounding-up word.
     #[test]
     fn frame_size_container_bytes_14bit_is_strictly_greater_than_raw() {
-        for fsize_m1 in [94u32, 511, 1023, 2047, 4095, 8191, 16383] {
+        for fsize_m1 in [95u32, 511, 1023, 2047, 4095, 8191, 16383] {
             let bytes = build_be_header(1, 31, 0, 16, fsize_m1, 0, 0, 0, 0, None, 0);
             let hdr = parse_frame_header(&bytes).unwrap();
             let raw = hdr.frame_size_container_bytes(SyncWordEncoding::RawBigEndian);
@@ -3276,7 +3288,7 @@ mod tests {
     /// of raw-BE).
     #[test]
     fn frame_size_container_bytes_be_le_equivalence() {
-        for fsize_m1 in [94u32, 1023, 16383] {
+        for fsize_m1 in [95u32, 1023, 16383] {
             let bytes = build_be_header(1, 31, 0, 16, fsize_m1, 0, 0, 0, 0, None, 0);
             let hdr = parse_frame_header(&bytes).unwrap();
             assert_eq!(
@@ -3298,7 +3310,7 @@ mod tests {
     /// step lands on an even byte count.
     #[test]
     fn frame_size_container_bytes_14bit_is_even() {
-        for fsize_m1 in [94u32, 100, 511, 1023, 1535, 16383] {
+        for fsize_m1 in [95u32, 100, 511, 1023, 1535, 16383] {
             let bytes = build_be_header(1, 31, 0, 16, fsize_m1, 0, 0, 0, 0, None, 0);
             let hdr = parse_frame_header(&bytes).unwrap();
             let n = hdr.frame_size_container_bytes(SyncWordEncoding::FourteenBitBigEndian);
@@ -3318,7 +3330,7 @@ mod tests {
     /// container-word count times two container bytes per word).
     #[test]
     fn frame_size_container_bytes_14bit_matches_closed_form() {
-        for fsize_m1 in [94u32, 200, 400, 1023, 8192, 16383] {
+        for fsize_m1 in [95u32, 200, 400, 1023, 8192, 16383] {
             let bytes = build_be_header(1, 31, 0, 16, fsize_m1, 0, 0, 0, 0, None, 0);
             let hdr = parse_frame_header(&bytes).unwrap();
             let logical_bits = (hdr.frame_size_bytes as u32) * 8;
@@ -3393,7 +3405,7 @@ mod tests {
     /// immediately after the 13-byte header anyway).
     #[test]
     fn encode_round_trip_termination_no_crc_minimal() {
-        let bytes_in = build_be_header(0, 0, 0, 5, 94, 0, 0, 0, 0, None, 0);
+        let bytes_in = build_be_header(0, 0, 0, 5, 95, 0, 0, 0, 0, None, 0);
         let hdr = parse_frame_header(&bytes_in).unwrap();
 
         let encoded = encode_frame_header_be(&hdr).unwrap();
@@ -3411,7 +3423,7 @@ mod tests {
         assert_eq!(hdr_round.sample_count_per_block, 1);
         assert!(!hdr_round.crc_present);
         assert_eq!(hdr_round.blocks_per_frame, 5);
-        assert_eq!(hdr_round.frame_size_bytes, 95);
+        assert_eq!(hdr_round.frame_size_bytes, 96);
         // Sync_word_encoding is the only differing field by design.
         let mut hdr_norm = hdr_round;
         hdr_norm.sync_word_encoding = hdr.sync_word_encoding;
@@ -3571,7 +3583,7 @@ mod tests {
     fn encode_round_trip_grid_lfe_crc_states() {
         for crc_state in [false, true] {
             for lfe_code in 0u8..=3 {
-                for &(nblks, fsize) in &[(5u8, 95u16), (16u8, 1024u16), (127u8, 16384u16)] {
+                for &(nblks, fsize) in &[(5u8, 96u16), (16u8, 1024u16), (127u8, 16384u16)] {
                     let crc_arg = if crc_state { Some(0xBEEF) } else { None };
                     let bytes = build_be_header(
                         1,
@@ -3782,7 +3794,7 @@ mod tests {
     fn encode_le_round_trip_grid_lfe_crc_states() {
         for crc_state in [false, true] {
             for lfe_code in 0u8..=3 {
-                for &(nblks, fsize) in &[(5u8, 95u16), (16u8, 1024u16), (127u8, 16384u16)] {
+                for &(nblks, fsize) in &[(5u8, 96u16), (16u8, 1024u16), (127u8, 16384u16)] {
                     let crc_arg = if crc_state { Some(0xBEEF) } else { None };
                     let bytes = build_be_header(
                         1,
@@ -4052,7 +4064,7 @@ mod tests {
     fn encode_14bit_round_trip_grid_lfe_crc_states() {
         for crc_state in [false, true] {
             for lfe_code in 0u8..=3 {
-                for &(nblks, fsize) in &[(5u8, 95u16), (16u8, 1024u16), (127u8, 16384u16)] {
+                for &(nblks, fsize) in &[(5u8, 96u16), (16u8, 1024u16), (127u8, 16384u16)] {
                     let crc_arg = if crc_state { Some(0xBEEF) } else { None };
                     let bytes = build_be_header(
                         1,
