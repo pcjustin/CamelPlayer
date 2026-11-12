@@ -190,6 +190,11 @@ public:
         state_[name] = value;
     }
     void refuseSoap(bool refuse) { refuseSoap_ = refuse; }
+    // Answers a subscription to this service with an error, as a player at its limit of subscribers does.
+    void refuseSubscriptions(std::string service) {
+        std::scoped_lock lock(mutex_);
+        refusedSubscriptions_ = std::move(service);
+    }
     // Forgets its subscriptions, as a restart does; a renewal then gets 412.
     void forgetSubscriptions() {
         std::scoped_lock lock(mutex_);
@@ -377,6 +382,7 @@ private:
 
     std::string subscribe(const std::string& service, const std::string& head) {
         std::scoped_lock lock(mutex_);
+        if (service == refusedSubscriptions_) return http(500, "");
         const auto sid = header(head, "sid");
         if (!sid.empty()) {
             const auto found = subscribers_.find(service);
@@ -704,7 +710,7 @@ private:
     std::map<std::string, std::string> state_;
     std::map<std::string, Subscriber> subscribers_;
     std::vector<std::string> actions_, requests_;
-    std::string extraLocation_, grantedTimeout_ = "Second-1800";
+    std::string extraLocation_, grantedTimeout_ = "Second-1800", refusedSubscriptions_;
     int nextSid_ = 0;
 };
 

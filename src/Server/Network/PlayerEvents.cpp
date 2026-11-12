@@ -74,7 +74,12 @@ struct PlayerEvents::Impl {
         : options(linkOptions) {
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
-        openListener(player);
+        try {
+            openListener(player);
+        } catch (...) {
+            WSACleanup();
+            throw;
+        }
         listening = std::thread([this] { listen(); });
         try {
             for (const auto& kind : kinds) {
@@ -85,23 +90,29 @@ struct PlayerEvents::Impl {
             }
             if (subscriptions.empty()) throw std::runtime_error("the player offers no events");
         } catch (...) {
+            unsubscribe();
             stopListening();
             throw;
         }
     }
 
     ~Impl() {
+        unsubscribe();
+        stopListening();
+    }
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+
+    void unsubscribe() const {
         for (const auto& subscription : subscriptions) {
+            if (subscription.sid.empty()) continue;
             try {
                 http::send("UNSUBSCRIBE", subscription.eventUrl, "SID: " + subscription.sid, "", kUnsubscribeTimeoutMs, 4096);
             } catch (const std::exception&) {
                 log::info("network player: left a subscription to expire");
             }
         }
-        stopListening();
     }
-    Impl(const Impl&) = delete;
-    Impl& operator=(const Impl&) = delete;
 
     void stopListening() {
         closesocket(listener);

@@ -659,6 +659,16 @@ TEST(PlayerLinkTest, ASubscriptionGrantedWithoutEndIsNotRenewedEverySecond) {
     }
 }
 
+// A link that cannot subscribe to every service it needs ends the subscriptions it already made, rather than leave
+// them on the player, sending to a closed port, for each try until the player's limit of subscribers.
+TEST(PlayerLinkTest, ASubscriptionRefusedEndsThoseAlreadyMade) {
+    FakeRenderer renderer(RendererKind::OpenHome);
+    renderer.refuseSubscriptions("Time");
+    auto events = std::make_shared<Events>();
+    EXPECT_ANY_THROW({ const PlayerLink link(describe(renderer), into(events), kQuick); });
+    EXPECT_EQ(renderer.subscribers(), 0U);
+}
+
 TEST(PlayerLinkTest, SubscribesAgainWhenThePlayerForgotAfterARestart) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.grantTimeout("Second-2");
