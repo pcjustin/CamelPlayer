@@ -180,12 +180,16 @@ bool AlbumMeasure::run(const DecoderByFormat& decoders, unsigned threads, const 
         for (size_t at; (at = next++) < left.size();) {
             const size_t file = left[at];
             std::optional<Measured> result;
+            // What stopped the reading, not what `cancelled` says afterwards: a file left for a moment is measured
+            // again, and only one that failed is recorded without a value.
+            bool interrupted = false;
+            const std::function<bool()> stop = [&] { return interrupted = cancelled && cancelled(); };
             try {
-                result = measure(files_[file], decoders, cancelled, waveforms_);
+                result = measure(files_[file], decoders, stop, waveforms_);
             } catch (const std::exception& e) {
                 log::warn("loudness: %s: %s", toUtf8(files_[file].wstring()).c_str(), e.what());
             }
-            if (cancelled && cancelled()) return;
+            if (interrupted) return;
             std::optional<Loudness> track;
             {
                 std::lock_guard lock(mutex_);

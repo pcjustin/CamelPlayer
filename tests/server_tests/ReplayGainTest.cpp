@@ -193,6 +193,24 @@ TEST(Loudness, AnAlbumCutShortGoesOnWhereItStopped) {
     EXPECT_DOUBLE_EQ(result.album->peak, expected.album->peak);
 }
 
+// The measure gives way to playback for a moment and the moment has passed when it looks again: the file it left is
+// measured again, not taken for one that failed.
+TEST(Loudness, AFileInterruptedForAMomentIsMeasuredAgainNotFailed) {
+    const std::vector<std::filesystem::path> files{sine("moment-1.wav", 48000, 2, -20.0, 2.0)};
+    AlbumMeasure measure(files);
+    std::vector<std::optional<Loudness>> told;
+    const auto record = [&](size_t, const std::optional<Loudness>& track) { told.push_back(track); };
+    int asked = 0;
+    measure.run({}, 1, [&] { return ++asked == 2; }, record); // the second look sees playback, the third no more
+    EXPECT_TRUE(told.empty() || told.front()) << "an interrupted file was told as failed";
+    if (told.empty()) {
+        EXPECT_TRUE(measure.run({}, 1, {}, record));
+        ASSERT_EQ(told.size(), 1u);
+        EXPECT_TRUE(told.front());
+    }
+    EXPECT_TRUE(measure.result().tracks[0]);
+}
+
 // Counting reads every track of the library, so it waits until someone reads the progress (the Settings page).
 // DSD is not analyzed, so it is not counted either: with it the analysis would never reach its total.
 TEST(Loudness, DsdTracksAreLeftOutOfTheAnalysis) {
