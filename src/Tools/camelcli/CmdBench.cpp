@@ -94,21 +94,15 @@ int cmdBenchOne(const Args& args) {
     r["channels"] = in.channels;
     r["totalFrames"] = in.totalFrames;
 
-    // 1. Pure sequential decode: speed, CPU, memory. The samples are kept as the seek reference for formats without a
-    //    libFLAC reference, when they fit.
+    // 1. Pure sequential decode: speed, CPU, memory, for every format alike.
     constexpr size_t kMaxReferenceSamples = size_t(64) << 20;
     const AudioFormat format = probeFormat(file);
-    const bool keep = format != AudioFormat::Flac && in.totalFrames * in.channels <= kMaxReferenceSamples;
-    std::vector<int32_t> linear;
     std::vector<int32_t> buf(4096 * size_t(in.channels));
     uint64_t frames = 0;
     double c0 = cpuMs();
     t0 = nowMs();
     try {
-        while (size_t n = dec->read(buf.data(), 4096)) {
-            if (keep) linear.insert(linear.end(), buf.begin(), buf.begin() + ptrdiff_t(n * in.channels));
-            frames += n;
-        }
+        while (size_t n = dec->read(buf.data(), 4096)) frames += n;
     } catch (const Error& e) {
         r["decodeError"] = std::string(errorCodeName(e.code())) + ": " + e.what();
     }
@@ -117,6 +111,17 @@ int cmdBenchOne(const Args& args) {
     r["cpuMs"] = cpuMs() - c0;
     r["framesDecoded"] = frames;
     r["peakMB"] = peakMB() - baseMB;
+
+    // The seek reference for formats without a libFLAC one: a second, untimed decode of what the first decoded, when
+    // it fits.
+    const bool keep = format != AudioFormat::Flac && !r.contains("decodeError") && frames * in.channels <= kMaxReferenceSamples;
+    std::vector<int32_t> linear;
+    if (keep) {
+        auto again = openDecoder(kind, file);
+        linear.reserve(size_t(frames * in.channels));
+        while (size_t n = again->read(buf.data(), 4096))
+            linear.insert(linear.end(), buf.begin(), buf.begin() + ptrdiff_t(n * in.channels));
+    }
 
     // 2. A separate decode with STREAMINFO MD5 for FLAC, so the pure decode time above excludes hashing.
     r["md5Status"] = "n/a";
