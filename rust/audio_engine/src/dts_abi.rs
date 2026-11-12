@@ -41,7 +41,9 @@ fn code_of(error: &DecodeError) -> i32 {
         DecodeError::NoSync => DTS_E_NO_SYNC,
         DecodeError::Truncated => DTS_E_TRUNCATED,
         DecodeError::UnsupportedChannels | DecodeError::UnsupportedSampleRate => DTS_E_UNSUPPORTED,
-        DecodeError::Header(_) | DecodeError::Frame(_) => DTS_E_DECODE,
+        DecodeError::Header(_) | DecodeError::Frame(_) | DecodeError::UnequalChannels => {
+            DTS_E_DECODE
+        }
     }
 }
 

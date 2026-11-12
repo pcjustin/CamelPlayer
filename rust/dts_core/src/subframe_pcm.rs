@@ -1187,6 +1187,8 @@ impl SubframePcmDecoder {
 
         let n_subs = coding.n_subs();
         let mut bit = header_bits + ach_bits;
+        // Each subframe leaves only its own LFE PCM; take_last_lfe_pcm() gives the frame's.
+        let mut frame_lfe: Vec<i32> = Vec::new();
         for subframe_index in 0..coding.n_subframes {
             // §5.4.1 side info (Table 5-28) through the end of the
             // SCALES block.
@@ -1232,6 +1234,7 @@ impl SubframePcmDecoder {
                 header.aspf,
                 &tail.join_scales,
             )?;
+            frame_lfe.append(&mut self.last_lfe_pcm);
 
             // §5.4.1: when DYNF != 0, multiply every reconstructed PCM
             // sample of this subframe by the linear DRC gain, applied
@@ -1261,6 +1264,7 @@ impl SubframePcmDecoder {
             apply_rev2_drc(&mut pcm, multipliers);
         }
 
+        self.last_lfe_pcm = frame_lfe;
         Ok((pcm, bit))
     }
 }
@@ -1961,6 +1965,42 @@ mod tests {
             (0, 5), // ABITS[0][0] = 0
             (0, 5), // ABITS[0][1] = 0
         ]
+    }
+
+    /// A frame of two subframes with an LFE: the stream decoder gives the LFE of the whole frame, as long as the
+    /// primary channel, not the last subframe's alone.
+    #[test]
+    fn core_stream_gathers_the_lfe_of_every_subframe() {
+        let hdr_bytes: [u8; 16] = [
+            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
+            0xef, 0x7f,
+        ];
+        let mut header = crate::parse_frame_header(&hdr_bytes).unwrap();
+        header.dynamic_range = false;
+        header.crc_present = false;
+        header.header_crc = None;
+        header.aspf = false;
+        header.lfe = crate::LfeMode::Mode1; // LFF == 1 -> 128x
+        let mut bytes = crate::encode_frame_header_be(&header).unwrap();
+        let mut body = nobits_ach_body(false);
+        body[0] = (1, 4); // SUBFS = 1 -> two subframes
+        for _ in 0..2 {
+            body.extend(nobits_side_info());
+            // §5.5 for nSSC = 1, LFF = 1: two LFE sample bytes and the scale index, then the DSYNC.
+            body.extend([(20, 8), (236, 8), (10, 8), (0xffff, 16)]);
+        }
+        bytes.extend_from_slice(&pack_fields(&body));
+        bytes.extend_from_slice(&[0u8; 4]);
+        let header = crate::parse_frame_header(&bytes).unwrap();
+
+        let mut stream = CoreStreamDecoder::new(1);
+        let pcm = stream.decode_frame(&bytes, &header).unwrap();
+        let lfe = stream.take_last_lfe_pcm();
+        assert_eq!(
+            pcm[0].len(),
+            2 * SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW
+        );
+        assert_eq!(lfe.len(), pcm[0].len());
     }
 
     /// A frame whose header sets `CPF` (a 16-bit `SICRC` side-info tail)

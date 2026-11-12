@@ -79,6 +79,8 @@ pub enum DecodeError {
     UnsupportedChannels,
     /// The header names no sample rate.
     UnsupportedSampleRate,
+    /// The channels of the frame decoded to different lengths.
+    UnequalChannels,
     /// The audio cannot be read.
     Frame(CoreFrameDecodeError),
 }
@@ -91,6 +93,7 @@ impl std::fmt::Display for DecodeError {
             Self::Header(e) => write!(f, "DTS frame header: {e}"),
             Self::UnsupportedChannels => write!(f, "a DTS channel arrangement beyond 5.1"),
             Self::UnsupportedSampleRate => write!(f, "a DTS frame without a sample rate"),
+            Self::UnequalChannels => write!(f, "a DTS frame whose channels differ in length"),
             Self::Frame(e) => write!(f, "DTS frame: {e}"),
         }
     }
@@ -200,12 +203,12 @@ fn transmission_order(arrangement: AmodeArrangement) -> Option<&'static [Speaker
     })
 }
 
-fn interleaved(planes: &[(Speaker, Vec<i32>)]) -> (Vec<f32>, usize) {
-    let samples = planes
-        .iter()
-        .map(|(_, plane)| plane.len())
-        .min()
-        .unwrap_or(0);
+// Every channel of a frame gives its whole length; one that does not is an error, not a shorter frame.
+fn interleaved(planes: &[(Speaker, Vec<i32>)]) -> Result<(Vec<f32>, usize), DecodeError> {
+    let samples = planes.first().map_or(0, |(_, plane)| plane.len());
+    if planes.iter().any(|(_, plane)| plane.len() != samples) {
+        return Err(DecodeError::UnequalChannels);
+    }
     let mut pcm = Vec::with_capacity(samples * planes.len());
     for at in 0..samples {
         pcm.extend(
@@ -214,7 +217,7 @@ fn interleaved(planes: &[(Speaker, Vec<i32>)]) -> (Vec<f32>, usize) {
                 .map(|(_, plane)| plane[at] as f32 / FULL_SCALE),
         );
     }
-    (pcm, samples)
+    Ok((pcm, samples))
 }
 
 /// One stream's decoding state. Frames of a stream go through one decoder in order, as each carries on the filter of the
@@ -270,12 +273,25 @@ impl Decoder {
             planes.push((Speaker::Lfe, lfe));
         }
         planes.sort_by_key(|(speaker, _)| *speaker);
-        let (pcm, samples) = interleaved(&planes);
+        let (pcm, samples) = interleaved(&planes)?;
         Ok(Decoded {
             pcm,
             speakers: planes.into_iter().map(|(speaker, _)| speaker).collect(),
             samples,
             sample_rate,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channels_of_unequal_length_are_an_error() {
+        let planes = [(Speaker::Left, vec![1, 2]), (Speaker::Right, vec![3, 4])];
+        assert_eq!(interleaved(&planes).map(|(_, n)| n), Ok(2));
+        let short = [(Speaker::Left, vec![1, 2]), (Speaker::Lfe, vec![3])];
+        assert_eq!(interleaved(&short), Err(DecodeError::UnequalChannels));
     }
 }
