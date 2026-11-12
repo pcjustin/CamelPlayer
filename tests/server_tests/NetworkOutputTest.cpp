@@ -303,6 +303,28 @@ TEST(NetworkOutputTest, OneUrlForEachTrackWithTheBoundaryExactlyWhereItBelongs) 
     EXPECT_NE(std::ranges::find(actions, "SetNextAVTransportURI"), actions.end());
 }
 
+// A DSD track that ends short of its told length is filled to it with DSD silence, not zeros, which are a full-scale
+// step in DSD and a thump at the track's end.
+TEST(NetworkOutputTest, ADsdTrackEndingShortIsFilledWithDsdSilence) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.declare("http-get:*:audio/x-dsf:*");
+    const DeviceFormat dsd{352800, 2, SampleType::Dsd8};
+    constexpr uint64_t rendered = 5000, told = 10000;
+    constexpr size_t block = 4096, dataAt = 92;
+    CountingSource source(2, rendered, 0, told);
+    OutputRun output(renderer, source, dsd);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.received().empty(); }));
+    const std::string body = renderer.received().begin()->second;
+    ASSERT_EQ(body.size(), dataAt + 3 * block * 2);
+    constexpr auto kSilence = uint8_t(0x96); // 0x69, the DSD idle pattern, least significant bit first as DSF has it
+    size_t notSilent = 0;
+    for (uint64_t frame = rendered; frame < told; ++frame)
+        for (size_t channel = 0; channel < 2; ++channel)
+            if (uint8_t(body[dataAt + ((frame / block) * 2 + channel) * block + frame % block]) != kSilence) ++notSilent;
+    EXPECT_EQ(notSilent, 0U) << "of " << (told - rendered) * 2 << " bytes filled in";
+}
+
 // A track told shorter than it renders: the player gets the length it was told, and the next track its own audio.
 // A connection reset before it is served, as a port probe's, leaves the next track served.
 TEST(NetworkOutputTest, AConnectionResetBeforeItIsServedLeavesTheStreamServed) {

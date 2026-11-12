@@ -41,6 +41,7 @@ constexpr size_t kRetainBytes = size_t{16} << 20; // what a player that reconnec
 constexpr uint64_t kUnknownLength = uint64_t{1} << 31;
 constexpr size_t kDsfBlock = 4096;
 constexpr size_t kDsfHeader = 92;
+constexpr uint8_t kDsfSilence = 0x96; // the DSD idle pattern 0x69, least significant bit first
 constexpr size_t kWavHeader = 44;
 constexpr auto kPatience = milliseconds(1500);
 constexpr uint64_t kNearStartMs = 2000, kNearEndMs = 3000, kClockSlackMs = 2000;
@@ -862,9 +863,19 @@ private:
         body.dsfRight.clear();
     }
 
-    // What is missing of a length that was only estimated is silence, as the player was told the length.
+    // What is missing of a length that was only estimated is silence, as the player was told the length. Zeros are not
+    // silence in DSD.
     void finish(Body& body) {
         if (body.complete) return;
+        if (body.lengthKnown && format_.type == SampleType::Dsd8 && body.framesWritten < body.totalFrames) {
+            log::info("network player: %s ended %llu frames short of its length", toUtf8(body.track.file).c_str(),
+                      static_cast<unsigned long long>(body.totalFrames - body.framesWritten));
+            for (uint64_t frame = body.framesWritten; frame < body.totalFrames; ++frame) {
+                body.dsfLeft.push_back(kDsfSilence);
+                body.dsfRight.push_back(kDsfSilence);
+                if (body.dsfLeft.size() == kDsfBlock) flushDsf(body);
+            }
+        }
         flushDsf(body);
         if (body.lengthKnown && body.produced() < body.totalBytes) {
             log::info("network player: %s ended %llu bytes short of its length", toUtf8(body.track.file).c_str(),
