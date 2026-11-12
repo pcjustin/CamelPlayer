@@ -16,6 +16,7 @@
 
 #include "Common/DecoderKind.h"
 #include "Common/util/Text.h"
+#include "Server/Library/LibraryStore.h"
 #include "Server/Support/Updates.h"
 #include "Server/Support/ZipWriter.h"
 
@@ -89,7 +90,7 @@ std::string rootsText(const DiagnosticInput& input) {
     std::ostringstream out;
     for (const auto& root : input.roots) {
         out << "Root " << root.id << ": " << (root.online ? "online" : "offline") << ", "
-            << (root.path.starts_with("\\\\") ? "network" : "local") << ", last scan " << root.lastScan;
+            << (isNetworkPath(toWide(root.path)) ? "network" : "local") << ", last scan " << root.lastScan;
         if (input.includePaths) out << ", " << root.path;
         out << "\n";
     }

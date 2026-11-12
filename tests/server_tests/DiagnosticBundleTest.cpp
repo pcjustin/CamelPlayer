@@ -157,6 +157,22 @@ TEST(DiagnosticBundle, LeavesPathsOutUnlessIncluded) {
     EXPECT_NE(entries.at("library-folders.txt").find("\\\\nas\\music"), std::string::npos);
 }
 
+// The library keeps its folders in the \\?\ form, which a local folder and a share both start with: only the share
+// is a network folder.
+TEST(DiagnosticBundle, TellsALocalFolderFromANetworkOneInTheFormTheLibraryKeeps) {
+    const auto data = testutil::tempDir() / L"diagnostic-roots";
+    std::filesystem::remove_all(data);
+    std::filesystem::create_directories(data);
+    DiagnosticInput input;
+    input.dataDirectory = data;
+    input.roots = {{1, R"(\\?\c:\music)", "music", "c:", true, 0}, {2, R"(\\?\UNC\nas\music)", "music", "nas", true, 0}};
+    const auto file = testutil::tempDir() / L"diagnostic-roots.zip";
+    writeDiagnosticBundle(file, input);
+    const auto folders = readZip(file).at("library-folders.txt");
+    EXPECT_NE(folders.find("Root 1: online, local"), std::string::npos) << folders;
+    EXPECT_NE(folders.find("Root 2: online, network"), std::string::npos) << folders;
+}
+
 // Every text a setting holds may be a path, the impulse response's and any added later among them.
 TEST(DiagnosticBundle, LeavesOutThePathOfEverySetting) {
     auto json = nlohmann::json::parse(toJson(Settings{}));
