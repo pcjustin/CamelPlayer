@@ -44,7 +44,9 @@ Statement& Statement::bind(int index, double value) {
 }
 
 Statement& Statement::bind(int index, std::string_view text) {
-    check(db_, sqlite3_bind_text64(stmt_, index, text.data(), text.size(), SQLITE_TRANSIENT, SQLITE_UTF8), "bind");
+    // SQLite reads a null pointer as NULL; an empty view is still the empty string.
+    const char* data = text.data() ? text.data() : "";
+    check(db_, sqlite3_bind_text64(stmt_, index, data, text.size(), SQLITE_TRANSIENT, SQLITE_UTF8), "bind");
     return *this;
 }
 
