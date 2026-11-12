@@ -200,7 +200,7 @@ void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Com
     // The format badges are colored from code, so they follow a change of theme.
     ActualThemeChanged([this](auto&&, auto&&) {
         ui::setTheme(ActualTheme());
-        showAlbumFormats(albumFormats_);
+        showAlbumFormats(albumBadges_.formats());
     });
     // A dragged divider changes the columns but not the rows, so the rows' own size changes do not refit their credits.
     columnsChanged_ = Application::Current()
@@ -462,6 +462,7 @@ void LibraryView::open(View view, bool push) {
     DetailCover().Source(nullptr);
     DetailCoverFrame().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
     AlbumActions().Visibility(view.mode == Mode::AlbumDetail ? Visibility::Visible : Visibility::Collapsed);
+    albumBadges_.open();
     AlbumFormats().Children().Clear();
     AlbumFormats().Visibility(Visibility::Collapsed);
     ListActions().Visibility(view.smartList() ? Visibility::Visible : Visibility::Collapsed);
@@ -1595,7 +1596,7 @@ void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, Rout
 }
 
 void LibraryView::showAlbumFormats(const std::vector<LibraryAlbumFormat>& formats) {
-    if (&formats != &albumFormats_) albumFormats_ = formats;
+    if (&formats != &albumBadges_.formats()) albumBadges_.set(formats);
     AlbumFormats().Children().Clear();
     for (const auto& f : formats) {
         const auto label = formatLabel(f);

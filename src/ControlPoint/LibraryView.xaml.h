@@ -12,6 +12,7 @@
 #include <set>
 #include <unordered_map>
 #include "Server/Api/ServerApi.h"
+#include "AlbumBadges.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -229,7 +230,7 @@ private:
     void showAlbumFavorite(bool favorite);
     void showArtistFavorite(bool favorite);
     void showAlbumFormats(const std::vector<camel::server::LibraryAlbumFormat>& formats);
-    std::vector<camel::server::LibraryAlbumFormat> albumFormats_; // the album shown, for a change of theme
+    ui::AlbumBadges albumBadges_;
     // The artist page's picture: what the library keeps, after a lookup when one is due. `allowed` waits until the
     // Server has the answer the page just gave.
     void loadArtistPicture(const std::string& name, bool allowed);
