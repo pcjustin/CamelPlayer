@@ -254,8 +254,9 @@ public:
             // A queued file became audible inside this request; positions now count from its start.
             renderTransitions_.store(transitions.count, std::memory_order_release);
             if (transitions.trackPosition <= n) boundary_.store(size_t(n - transitions.trackPosition), std::memory_order_relaxed);
-            leaving_.store(base_.load(std::memory_order_relaxed) + consumed_.load(std::memory_order_relaxed) + n -
-                               transitions.trackPosition,
+            // Where the track being left ends, in its own frames: base_ counts source frames, consumed_ output frames.
+            leaving_.store(base_.load(std::memory_order_relaxed) +
+                               toSource(consumed_.load(std::memory_order_relaxed) + n - transitions.trackPosition),
                            std::memory_order_relaxed);
             trackStartFrame_.store(renderedFrames - transitions.trackPosition, std::memory_order_relaxed);
             base_.store(0, std::memory_order_relaxed);
@@ -841,12 +842,15 @@ private:
             if (transitionPending_.load(std::memory_order_acquire)) {
                 const uint64_t left = trackStart - std::min(measured, trackStart); // of the track being left, still heard
                 const uint64_t end = leaving_.load(std::memory_order_relaxed);
-                return end - std::min(left, end);
+                return end - std::min(toSource(left), end);
             }
             heard = measured - std::min(measured, trackStart);
         }
+        return base_ + toSource(heard);
+    }
+    uint64_t toSource(uint64_t outputFrames) const noexcept {
         const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
-        return base_ + (in == out || !out ? heard : (heard * in + out / 2) / out);
+        return in == out || !out ? outputFrames : (outputFrames * in + out / 2) / out;
     }
     uint64_t toOutput(uint64_t sourceFrames) const {
         const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);

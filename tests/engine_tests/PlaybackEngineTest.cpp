@@ -32,12 +32,16 @@ struct OutputProbe {
     std::optional<ErrorCode> openError, startError, pauseError;
     bool unexpectedStartError = false;
     std::atomic<bool> statusFails = false;
+    std::optional<uint32_t> onlyRate;    // the one rate the device takes, when set
+    std::atomic<uint64_t> heldFrames{0}; // rendered frames not played yet, as a network player holds them
 };
 
 class ManualOutput final : public IOutput {
 public:
     explicit ManualOutput(OutputProbe& probe) : probe_(probe) { ++probe_.creations; }
-    bool supports(const DeviceFormat&) override { return probe_.accepts; }
+    bool supports(const DeviceFormat& f) override {
+        return probe_.accepts && (!probe_.onlyRate || f.sampleRate == *probe_.onlyRate);
+    }
     void open(const DeviceFormat& format, IRenderSource* source) override {
         ++probe_.opens;
         if (probe_.openError) throw Error(*probe_.openError, "injected open failure");
@@ -60,7 +64,9 @@ public:
     }
     OutputStatus status() const override {
         if (probe_.statusFails) throw std::runtime_error("injected status failure");
-        return {"Manual test output", 256, "No hardware"};
+        OutputStatus status{"Manual test output", 256, "No hardware"};
+        status.heldFrames = probe_.heldFrames;
+        return status;
     }
     void fail(ErrorCode code) { raiseError(Error(code, "injected asynchronous failure")); }
     void restart() { raiseRestart(); }
@@ -201,6 +207,49 @@ TEST_F(EngineStateTest, QueuedFileFollowsWithoutReopeningTheDevice) {
     EXPECT_FALSE(s.error) << s.errorDetail;
     EXPECT_EQ(frames, 192000u + 48000u);
     EXPECT_EQ(probe.opens, 1);
+}
+
+// A network player still plays the track being left after the next one has been sent to it: that track shows where it
+// is heard, counted in its own frames on a stream resampled from 96 to 48 kHz.
+TEST(EngineNetworkPlayer, TheTrackBeingLeftShowsItsOwnPositionOnAResampledStream) {
+    OutputProbe probe;
+    probe.onlyRate = 48000;
+    Settings settings;
+    settings.backend = Backend::Network;
+    PlaybackEngine engine(settings, [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
+    const auto next = testutil::generatedFile({"leaving-next-24-96k", 96000, 24, 2, 0.5});
+    engine.openAndPlay(testutil::testFile("24-96k")); // 192000 frames: 96000 at 48 kHz
+    engine.waitIdle();
+    ASSERT_EQ(probe.format.sampleRate, 48000u);
+    ASSERT_TRUE(engine.queueNext(next));
+    for (int i = 0; i < 200 && !engine.snapshot().nextSlotFree; ++i) std::this_thread::sleep_for(5ms);
+    // The whole first track and 1000 frames of the next go to the player, which has played all but the last 24000 of
+    // the first: half a second of it, 48000 of its own frames, is still to be heard.
+    probe.heldFrames = 1'000'000'000; // the player holds everything until it is told what it has played
+    size_t pulled = 0;
+    {
+        std::lock_guard lock(probe.renderMutex);
+        std::vector<uint8_t> buffer(size_t(4096) * probe.format.bytesPerFrame());
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (pulled < 97000 && std::chrono::steady_clock::now() < deadline) {
+            const size_t got = probe.source->render(buffer.data(), std::min<size_t>(4096, 97000 - pulled));
+            if (!got) std::this_thread::sleep_for(1ms);
+            pulled += got;
+        }
+    }
+    ASSERT_EQ(pulled, 97000u);
+    probe.heldFrames = 97000 - 72000;
+    uint64_t position = 0;
+    for (int i = 0; i < 100; ++i) {
+        engine.waitIdle();
+        position = engine.snapshot().position;
+        if (position > 0 && position < 192000) break;
+        std::this_thread::sleep_for(10ms);
+    }
+    EXPECT_NEAR(double(position), 144000.0, 4.0);
+    EXPECT_EQ(engine.snapshot().file, testutil::testFile("24-96k").wstring()) << "the track being left is still shown";
+    engine.stop();
+    engine.waitIdle();
 }
 
 std::optional<Md5State> awaitMd5(PlaybackEngine& engine, Md5State expected) {
