@@ -19,6 +19,7 @@
 #include "FileDetailsWindow.h"
 #include "WaveformBar.h"
 #include "Engine/ImpulseResponse.h"
+#include "RepeatedPlay.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -287,15 +288,7 @@ private:
     uint32_t impulseRate_ = 0;
     uint64_t impulseLoads_ = 0;
     // The last play request and when it came, so the second click of a double click does not play it again.
-    struct PlayRequest {
-        camel::server::CommandKind kind{};
-        uint64_t index = 0;
-        size_t count = 0;
-        std::string path;
-        bool operator==(const PlayRequest&) const = default;
-    };
-    std::optional<PlayRequest> lastPlay_;
-    std::chrono::steady_clock::time_point lastPlayAt_;
+    ui::RepeatedPlay repeatedPlay_;
     std::vector<PathStep> shownPath_;
     // The theme brushes the playback state shows now, painted again when the theme changes.
     const wchar_t* stateColor_ = L"TextFillColorSecondaryBrush";

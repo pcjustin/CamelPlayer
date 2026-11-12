@@ -1275,18 +1275,16 @@ void MainWindow::showScanProgress() {
 
 void MainWindow::submitCommand(Command command) {
     if (!server_) return;
-    // Lists play on a single click, so a double click sends the same play twice; the second would only restart the
-    // track it has just started, cutting its crossfade.
     if (command.kind == CommandKind::QueueReplace || command.kind == CommandKind::OpenAndPlay) {
         const TrackSource* chosen = command.source                           ? &*command.source
                                     : command.index < command.sources.size() ? &command.sources[command.index]
                                                                              : nullptr;
-        PlayRequest play{command.kind, command.index, command.sources.size(), chosen ? chosen->pathUtf8() : std::string{}};
-        const auto now = std::chrono::steady_clock::now();
-        const bool repeated = play == lastPlay_ && now - lastPlayAt_ < std::chrono::milliseconds(GetDoubleClickTime());
-        lastPlay_ = std::move(play);
-        lastPlayAt_ = now;
-        if (repeated) return;
+        if (repeatedPlay_.repeated(
+                {command.kind, command.index, command.sources.size(), chosen ? chosen->pathUtf8() : std::string{}},
+                std::chrono::steady_clock::now(), std::chrono::milliseconds(GetDoubleClickTime())))
+            return;
+    } else {
+        repeatedPlay_.other();
     }
     cursor_.expect(server_->submit(std::move(command)));
 }
