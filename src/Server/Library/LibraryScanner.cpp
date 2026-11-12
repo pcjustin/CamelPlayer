@@ -1235,9 +1235,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         report.deferred = report.deferred || listing.deferred;
         if (!listing.error.empty()) report.diagnostics.push_back(listing.error);
         if (!listing.fileWork) {
-            submit([root, folder = key(listing.path),
+            submit([&token, root, folder = key(listing.path),
                     parent = listing.path == path ? std::string{} : key(listing.path.parent_path()),
                     name = listing.path == path ? rootName : toUtf8(listing.path.filename().wstring())](sqlite::Database& db) {
+                if (token.cancelled()) return;
                 db.prepare("INSERT INTO folders(root_id,path,parent_id,name) VALUES(?,?,(SELECT id FROM folders WHERE path=?),?) "
                            "ON CONFLICT(path) DO UPDATE SET root_id=excluded.root_id,parent_id=excluded.parent_id,"
                            "name=excluded.name WHERE root_id IS NOT excluded.root_id OR parent_id IS NOT "

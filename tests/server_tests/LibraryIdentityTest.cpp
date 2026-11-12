@@ -11,6 +11,7 @@
 #include <optional>
 #include <thread>
 
+#include "Common/util/Text.h"
 #include "Server/Library/LibraryIdentity.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryViews.h"
@@ -392,6 +393,37 @@ TEST_F(LibraryIdentityTest, ARemovedFolderWhoseDeleteFailsSaysSo) {
         .get();
     EXPECT_ANY_THROW(scanner.removeRoot(root).get());
     EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 1) << "the delete rolled back";
+}
+
+// A scan's writes wait in the store's queue; one cancelled before they run, as removeRoot cancels it, writes nothing,
+// the folders it listed included.
+TEST_F(LibraryIdentityTest, AScanCancelledBeforeItsWritesRunWritesNoFolder) {
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    auto row = store.openReader().prepare("SELECT path FROM roots");
+    ASSERT_TRUE(row.step());
+    const fs::path stored(camel::toWide(row.text(0)));
+    fs::create_directories(music / "a" / "b" / "c");
+    fs::copy_file(testutil::testFile("16-44.1k"), music / "a" / "b" / "c" / "one.flac");
+    const auto before = scalar(store, "SELECT COUNT(*) FROM folders");
+    std::promise<void> release;
+    std::promise<void> holding;
+    auto held = release.get_future().share();
+    auto blocker = store.write([held, &holding](sqlite::Database&) {
+        holding.set_value();
+        held.wait();
+    });
+    holding.get_future().wait();
+    CancellationToken token;
+    auto scan = std::async(std::launch::async, [&] { return scanner.scan(root, token, {stored / "a"}); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // the listing is done and its writes queued
+    token.cancel();
+    release.set_value();
+    blocker.get();
+    scan.get();
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM folders"), before);
 }
 
 TEST_F(LibraryIdentityTest, ARemovedRootLeavesNoRowsAndComesBackAsNew) {
