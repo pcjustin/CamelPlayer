@@ -120,8 +120,9 @@ std::optional<SavedSession> loadSession(sqlite::Database& db) {
             session.track.source = audio::SourceInfo{s.at(0).get<uint32_t>(), s.at(1).get<uint32_t>(), s.at(2).get<uint32_t>(),
                                                      s.at(3).get<uint64_t>()};
         }
-        if (j.contains("format") && j["format"].get<int>() <= int(audio::AudioFormat::Dsd))
-            session.track.format = audio::AudioFormat(j["format"].get<int>());
+        if (j.contains("format"))
+            for (const auto format : audio::kAllFormats)
+                if (int(format) == j["format"].get<int>()) session.track.format = format;
         return session;
     } catch (const std::exception& e) {
         log::warn("session: saved queue cannot be read: %s", e.what());
