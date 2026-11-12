@@ -37,15 +37,20 @@ pub(crate) struct Band {
     pub q: f64,
 }
 
+// The ranges the settings keep, so a preset from a file cannot overflow the filters.
+const MAX_GAIN_DB: f64 = 60.0;
+const MIN_Q: f64 = 0.01;
+const MAX_Q: f64 = 100.0;
+const MIN_FREQUENCY_HZ: f64 = 1.0;
+
 impl Band {
     fn valid(&self) -> bool {
         (KIND_PEAKING..=KIND_ALL_PASS).contains(&self.kind)
             && matches!(self.channels, CHANNELS_ALL | CHANNELS_LEFT | CHANNELS_RIGHT)
             && self.frequency.is_finite()
-            && self.frequency > 0.0
-            && self.gain_db.is_finite()
-            && self.q.is_finite()
-            && self.q > 0.0
+            && self.frequency >= MIN_FREQUENCY_HZ
+            && self.gain_db.abs() <= MAX_GAIN_DB
+            && (MIN_Q..=MAX_Q).contains(&self.q)
             && (!self.is_pass() || (self.slope.is_multiple_of(6) && (6..=48).contains(&self.slope)))
     }
 
@@ -284,6 +289,23 @@ mod tests {
             frequency,
             gain_db,
             q,
+        }
+    }
+
+    // The settings' ranges: gain within 60 dB either way, Q from 0.01 to 100, frequency from 1 Hz. A band of about
+    // 1e4 dB, as an imported preset could bring, gives infinite coefficients and NaN samples.
+    #[test]
+    fn a_band_outside_the_settings_ranges_is_not_valid() {
+        assert!(band(KIND_PEAKING, 1000.0, 60.0, 0.01).valid());
+        assert!(band(KIND_PEAKING, 1.0, -60.0, 100.0).valid());
+        for wrong in [
+            band(KIND_PEAKING, 1000.0, 1e4, 1.0),
+            band(KIND_PEAKING, 1000.0, -60.5, 1.0),
+            band(KIND_PEAKING, 1000.0, 6.0, 0.005),
+            band(KIND_PEAKING, 1000.0, 6.0, 150.0),
+            band(KIND_PEAKING, 0.5, 6.0, 1.0),
+        ] {
+            assert!(!wrong.valid(), "{wrong:?}");
         }
     }
 

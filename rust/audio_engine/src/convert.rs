@@ -613,9 +613,10 @@ impl Converter {
             dsp.process(floats);
         }
         if self.out.sample_format == SAMPLE_F32_LE {
+            // As in the integer path, what is not a number is silence.
             for &v in floats.iter() {
-                self.pending
-                    .extend_from_slice(&(v.clamp(-1.0, 1.0) as f32).to_le_bytes());
+                let v = if v.is_nan() { 0.0 } else { v.clamp(-1.0, 1.0) };
+                self.pending.extend_from_slice(&(v as f32).to_le_bytes());
             }
             self.pending_frames += (floats.len() / self.out_channels) as u64;
             return Ok(());
@@ -836,6 +837,24 @@ pub(crate) mod tests {
             .map(|&f| (f64::from(f) * 8_388_608.0) as i32)
             .collect();
         assert_eq!(back, samples);
+    }
+
+    // What is not a number never reaches a float device, as the integer path already turns it into silence.
+    #[test]
+    fn a_float_device_gets_no_nan_or_infinity() {
+        let mut c = converter(source(48_000, 2, 32, true), SAMPLE_F32_LE, 48_000, true);
+        let samples = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.5].map(|v| v.to_bits() as i32);
+        let mut dsp = Dsp::new(48_000, 2);
+        dsp.set(crate::dsp::Settings {
+            order: crate::dsp::DEFAULT_ORDER,
+            volume_db: -6.0,
+            ..Default::default()
+        });
+        c.convert(&samples, 2, &mut dsp).unwrap();
+        let out = floats(c.pending());
+        assert_eq!(out.len(), 4);
+        assert!(out.iter().all(|v| v.is_finite()), "{out:?}");
+        assert_eq!(out[0], 0.0);
     }
 
     #[test]
