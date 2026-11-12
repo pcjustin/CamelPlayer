@@ -147,6 +147,13 @@ bool isPathStart(std::string_view text, size_t at) {
     return at == 0 || !std::isalnum(uint8_t(text[at - 1]));
 }
 
+// A separator after the words that end a path means they were in a name; the slash of "44.1 kHz / 16" is none.
+bool holdsSeparator(std::string_view text) {
+    for (size_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\\' || (text[i] == '/' && i > 0 && text[i - 1] != ' ')) return true;
+    return false;
+}
+
 } // namespace
 
 std::string redactPaths(std::string_view text) {
@@ -158,8 +165,14 @@ std::string redactPaths(std::string_view text) {
         while (start < text.size() && !isPathStart(text, start)) ++start;
         out.append(text.substr(at, start - at));
         if (start == text.size()) break;
-        size_t end = std::min(text.find_first_of("\r\n", start), text.size());
-        for (const std::string_view after : {" via ", " is reported ", ": "}) end = std::min(end, text.find(after, start));
+        const size_t lineEnd = std::min(text.find_first_of("\r\n", start), text.size());
+        size_t end = lineEnd;
+        for (const std::string_view after : {" via ", " is reported ", ": "})
+            for (size_t found = text.find(after, start); found < lineEnd; found = text.find(after, found + 1))
+                if (!holdsSeparator(text.substr(found + after.size(), lineEnd - found - after.size()))) {
+                    end = std::min(end, found);
+                    break;
+                }
         out += "<path>";
         at = end;
     }

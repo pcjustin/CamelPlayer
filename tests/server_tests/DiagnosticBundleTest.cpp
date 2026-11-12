@@ -104,6 +104,15 @@ TEST(DiagnosticBundle, RedactsPathsUpToWhatFollowsThem) {
     EXPECT_EQ(redactPaths("44.1 kHz, ratio 1:2, AB:\\ not a drive"), "44.1 kHz, ratio 1:2, AB:\\ not a drive");
 }
 
+// The words that end a path can be in a folder's or a file's name: the path goes on past them while a separator follows.
+TEST(DiagnosticBundle, RedactsAPathWhoseNamesHoldTheWordsThatEndIt) {
+    EXPECT_EQ(redactPaths("engine: D:\\Music\\Live via Satellite\\01 Intro.flac via libsndfile, 44.1 kHz / 16"),
+              "engine: <path> via libsndfile, 44.1 kHz / 16");
+    EXPECT_EQ(redactPaths("engine: E:\\What is reported here\\a.dsf is reported when playback starts (x)"),
+              "engine: <path> is reported when playback starts (x)");
+    EXPECT_EQ(redactPaths("engine: D:/Music/Live via Satellite/01.flac via dr_flac"), "engine: <path> via dr_flac");
+}
+
 TEST(DiagnosticBundle, ProbesEveryRateAndNativeDsdForAsio) {
     FormatsOutput output;
     Settings settings;
