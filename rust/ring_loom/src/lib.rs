@@ -9,6 +9,9 @@
 #[path = "../../audio_engine/src/ring.rs"]
 mod ring;
 
+#[path = "../../audio_engine/src/boundary.rs"]
+mod boundary;
+
 use loom::sync::Arc;
 use loom::thread;
 use ring::SpscByteRing;
@@ -102,5 +105,55 @@ fn the_reader_clearing_keeps_what_follows_in_order() {
         let left = ring.readable();
         let received = receive(&ring, left);
         assert!(received.as_slice() == [1, 2] || received.as_slice() == [2] || received.is_empty());
+    });
+}
+
+// The decoding thread publishes the next boundary as soon as render has taken the last: render still reports the
+// start of the track whose boundary it reached.
+#[test]
+fn a_boundary_reached_gives_its_own_tracks_start() {
+    use boundary::NO_BOUNDARY;
+    use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    model(|| {
+        let at = Arc::new(AtomicU64::new(10));
+        let start = Arc::new(AtomicU64::new(100));
+        let pending = Arc::new(AtomicBool::new(true));
+        let decoder = {
+            let (at, start) = (Arc::clone(&at), Arc::clone(&start));
+            thread::spawn(move || {
+                while at.load(Ordering::Acquire) != NO_BOUNDARY {
+                    thread::yield_now();
+                }
+                start.store(200, Ordering::Release);
+                at.store(20, Ordering::Release);
+            })
+        };
+        assert_eq!(boundary::reach(&at, &start, &pending, 15), Some((10, 100)));
+        decoder.join().unwrap();
+    });
+}
+
+// A crossfade marks its new boundary pending once render has reached the last: render's taking of that one does not
+// clear the new mark.
+#[test]
+fn a_boundary_marked_after_one_is_reached_stays_pending() {
+    use boundary::NO_BOUNDARY;
+    use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    model(|| {
+        let at = Arc::new(AtomicU64::new(10));
+        let start = Arc::new(AtomicU64::new(100));
+        let pending = Arc::new(AtomicBool::new(true));
+        let crossfade = {
+            let (at, pending) = (Arc::clone(&at), Arc::clone(&pending));
+            thread::spawn(move || {
+                while at.load(Ordering::Acquire) != NO_BOUNDARY {
+                    thread::yield_now();
+                }
+                pending.store(true, Ordering::Release);
+            })
+        };
+        assert!(boundary::reach(&at, &start, &pending, 15).is_some());
+        crossfade.join().unwrap();
+        assert!(pending.load(Ordering::Acquire));
     });
 }

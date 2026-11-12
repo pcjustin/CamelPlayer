@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+mod boundary;
 mod convert;
 mod convolver;
 mod crossfeed;
@@ -583,7 +584,7 @@ pub struct CamelEngine {
     dop_phase: AtomicUsize,
 }
 
-const NO_BOUNDARY: u64 = u64::MAX;
+use boundary::NO_BOUNDARY;
 
 // The source frames of one track in `source_ring` and the converter that takes them to the device format.
 struct Segment {
@@ -2691,12 +2692,13 @@ pub unsafe extern "C" fn camel_engine_render_v1(
             .read_frames
             .fetch_add(rendered_frames as u64, Ordering::AcqRel);
         let after = before + rendered_frames as u64;
-        let boundary = engine.boundary_at.load(Ordering::Acquire);
-        if boundary != NO_BOUNDARY && boundary <= after {
+        if let Some((boundary, start)) = boundary::reach(
+            &engine.boundary_at,
+            &engine.boundary_start_frame,
+            &engine.pending_boundary,
+            after,
+        ) {
             // The queued track is now audible: its position restarts at the boundary.
-            engine.boundary_at.store(NO_BOUNDARY, Ordering::Release);
-            engine.pending_boundary.store(false, Ordering::Release);
-            let start = engine.boundary_start_frame.load(Ordering::Acquire);
             engine
                 .submitted_position
                 .store(start + (after - boundary), Ordering::Release);
