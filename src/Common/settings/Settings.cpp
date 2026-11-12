@@ -767,9 +767,10 @@ std::filesystem::path dataDirectory() {
     PWSTR base = nullptr;
     std::filesystem::path dir;
     // Measurements (docs/Plan.md §12.1) run against a separate data folder so the user's library stays untouched.
-    std::wstring measured(MAX_PATH, L'\0');
-    measured.resize(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", measured.data(), DWORD(measured.size())));
-    if (!measured.empty() && measured.size() < MAX_PATH)
+    // Asked for its size first, so a name of any length is read whole.
+    std::wstring measured(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", nullptr, 0), L'\0');
+    if (!measured.empty()) measured.resize(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", measured.data(), DWORD(measured.size())));
+    if (!measured.empty())
         dir = measured;
     else if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base)))
         dir = std::filesystem::path(base) / L"CamelPlayer";

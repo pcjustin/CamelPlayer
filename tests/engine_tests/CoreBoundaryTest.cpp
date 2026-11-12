@@ -404,6 +404,19 @@ TEST(SettingsBoundary, TrackColumnsAreThreeTwoTwoUntilDraggedAndRefuseNonsense) 
         EXPECT_EQ(fromJson(text).trackColumns, TrackColumns{}) << text;
 }
 
+// A data folder named by CAMELPLAYER_DATA is used however long its name; past 260 characters it was passed over for the
+// user's own folder, and a measurement then ran on the user's library.
+TEST(SettingsBoundary, ALongDataFolderNameIsUsed) {
+    std::wstring folder = L"\\\\?\\" + (testutil::tempDir() / L"long-data").wstring();
+    while (folder.size() < 300) folder += L"\\a-folder-name-long-enough";
+    ASSERT_TRUE(SetEnvironmentVariableW(L"CAMELPLAYER_DATA", folder.c_str()));
+    const auto used = dataDirectory();
+    SetEnvironmentVariableW(L"CAMELPLAYER_DATA", nullptr);
+    EXPECT_EQ(used.wstring(), folder);
+    std::error_code ec;
+    std::filesystem::remove_all(L"\\\\?\\" + (testutil::tempDir() / L"long-data").wstring(), ec);
+}
+
 TEST(SettingsBoundary, TheEqIsOffWithFiveFlatBandsAndKeepsItsPresetsThroughAPlaybackReset) {
     const Settings defaults;
     EXPECT_FALSE(defaults.eq.enabled);
