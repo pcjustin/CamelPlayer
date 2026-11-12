@@ -16,6 +16,7 @@
 #include "Common/util/Log.h"
 #include "Server/Network/LocalAddresses.h"
 #include "Server/Support/Http.h"
+#include "Server/Network/SocketWait.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -232,8 +233,7 @@ struct PlayerFinder::Impl {
             FD_ZERO(&readable);
             FD_SET(searcher, &readable);
             FD_SET(listener, &readable);
-            const timeval wait{0, long(std::chrono::microseconds(kPollSockets).count())};
-            if (select(0, &readable, nullptr, nullptr, &wait) <= 0) continue;
+            if (!waitReadable(readable, kPollSockets)) continue;
             if (FD_ISSET(searcher, &readable)) receive(searcher);
             if (FD_ISSET(listener, &readable)) receive(listener);
         }

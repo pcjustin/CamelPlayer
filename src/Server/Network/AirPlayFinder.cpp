@@ -20,6 +20,7 @@
 #include "Common/util/Log.h"
 #include "Server/Network/LocalAddresses.h"
 #include "Server/Network/Rtsp.h"
+#include "Server/Network/SocketWait.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -273,8 +274,7 @@ struct AirPlayFinder::Impl {
             fd_set readable;
             FD_ZERO(&readable);
             FD_SET(udp, &readable);
-            const timeval wait{0, long(std::chrono::microseconds(kPollSockets).count())};
-            if (select(0, &readable, nullptr, nullptr, &wait) <= 0) continue;
+            if (!waitReadable(readable, kPollSockets)) continue;
             char buffer[9000];
             const int length = recv(udp, buffer, sizeof(buffer), 0);
             if (length <= 0) continue;

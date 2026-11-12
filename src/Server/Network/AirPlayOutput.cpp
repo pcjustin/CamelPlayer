@@ -24,6 +24,7 @@
 
 #include "Common/util/Log.h"
 #include "Server/Network/Rtsp.h"
+#include "Server/Network/SocketWait.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -572,8 +573,7 @@ private:
             FD_ZERO(&readable);
             FD_SET(control_, &readable);
             FD_SET(timing_, &readable);
-            const timeval wait{0, long(std::chrono::microseconds(kPollSockets).count())};
-            if (select(0, &readable, nullptr, nullptr, &wait) > 0) {
+            if (waitReadable(readable, kPollSockets)) {
                 if (FD_ISSET(timing_, &readable)) answerTiming();
                 if (FD_ISSET(control_, &readable)) answerResend();
             }
