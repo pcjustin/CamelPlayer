@@ -904,7 +904,7 @@ std::future<void> LibraryScanner::deleteRemovedRoots() {
         return none.get_future();
     }
     // The cancelled scans of these roots write nothing more, as each write checks its token first.
-    store_.write([](sqlite::Database& db) {
+    auto deleted = store_.write([](sqlite::Database& db) {
         std::vector<int64_t> roots;
         auto removed = db.prepare("SELECT id FROM roots WHERE removed IS NOT NULL");
         while (removed.step()) roots.push_back(removed.integer(0));
@@ -926,7 +926,16 @@ std::future<void> LibraryScanner::deleteRemovedRoots() {
         deriveLibraryNames(db, loadLibraryNames(db));
         log::info("library: %zu removed folders deleted with %lld files", roots.size(), static_cast<long long>(files));
     });
-    return store_.compact();
+    store_.compact();
+    // Queued after the delete, so its result is known by then: a failed delete reaches the caller.
+    return store_.write([deleted = std::make_shared<std::future<void>>(std::move(deleted))](sqlite::Database&) {
+        try {
+            deleted->get();
+        } catch (const std::exception& e) {
+            log::warn("library: removed folders were not deleted: %s", e.what());
+            throw;
+        }
+    });
 }
 
 ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, const std::vector<Path>& folders) {

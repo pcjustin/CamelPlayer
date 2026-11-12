@@ -377,6 +377,23 @@ TEST_F(LibraryIdentityTest, AFingerprintPassWithNothingLeftIsCompleteWhenPlaybac
     EXPECT_TRUE(scanner.fingerprint(root).complete);
 }
 
+// A removed folder whose delete fails, here refused by a trigger, says so to removeRoot's caller instead of looking done
+// while its files stay in library.db.
+TEST_F(LibraryIdentityTest, ARemovedFolderWhoseDeleteFailsSaysSo) {
+    fs::copy_file(testutil::testFile("16-44.1k"), music / "kept.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("CREATE TEMP TRIGGER refuse BEFORE DELETE ON roots BEGIN SELECT RAISE(ABORT,'held'); END;");
+        })
+        .get();
+    EXPECT_ANY_THROW(scanner.removeRoot(root).get());
+    EXPECT_EQ(scalar(store, "SELECT COUNT(*) FROM files"), 1) << "the delete rolled back";
+}
+
 TEST_F(LibraryIdentityTest, ARemovedRootLeavesNoRowsAndComesBackAsNew) {
     fs::copy_file(testutil::testFile("16-44.1k"), music / "gone.flac");
     file("gone.lrc");
