@@ -266,6 +266,7 @@ private:
     void startSession() {
         std::scoped_lock lock(rtspMutex_);
         closeAt_ = Clock::time_point::max();
+        playing_.reset();
         if (!members_.empty()) return;
         std::vector<std::pair<std::string, Error>> refused;
         for (const auto& wanted : options_.members()) {
@@ -463,6 +464,13 @@ private:
                 changed = true;
             } catch (const Error& e) {
                 tellLeft(w.id, e);
+                continue;
+            }
+            // One that joins mid-track is told the track playing.
+            try {
+                if (playing_) tellTrack(members_.back(), playing_->first, playing_->second);
+            } catch (const std::exception& e) {
+                log::info("AirPlay receiver %s: %s", members_.back().name.c_str(), e.what());
             }
         }
         if (changed) publishTargets();
@@ -471,6 +479,7 @@ private:
     // A connection the receiver closes means another sender took it; one that stops answering means it has gone.
     void tendSession(const std::optional<TrackNotice>& notice, const TrackDetails& details) {
         std::scoped_lock lock(rtspMutex_);
+        if (notice) playing_.emplace(*notice, details);
         if (members_.empty()) return;
         const auto wanted = options_.members();
         followMembers(wanted);
@@ -700,6 +709,7 @@ private:
     std::mutex rtspMutex_; // taken before `mutex_`
     _Guarded_by_(rtspMutex_) std::vector<Member> members_;
     _Guarded_by_(rtspMutex_) Clock::time_point nextHeartbeat_;
+    _Guarded_by_(rtspMutex_) std::optional<std::pair<TrackNotice, TrackDetails>> playing_; // the last track told
     std::atomic<Clock::time_point> closeAt_ = Clock::time_point::max();
 
     mutable std::mutex mutex_;

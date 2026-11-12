@@ -840,6 +840,21 @@ TEST_F(AirPlayGroupOutputTest, AReceiverAddedWhilePlayingJoinsTheSameStream) {
     out->close();
 }
 
+// A receiver that joins while a track plays is told that track, not left without a title until the next one.
+TEST_F(AirPlayGroupOutputTest, AReceiverAddedWhilePlayingIsToldTheTrack) {
+    want({member(a_, "A")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(told(a_, "application/x-dmap-tagged"));
+    want({member(a_, "A"), member(b_, "B")});
+    ASSERT_TRUE(waitFor([&] { return b_.packetCount() >= 40; }));
+    EXPECT_TRUE(told(b_, "application/x-dmap-tagged"));
+    EXPECT_TRUE(told(b_, "image/jpeg"));
+    out->close();
+}
+
 TEST_F(AirPlayGroupOutputTest, EveryReceiverIsSentTheSameClock) {
     want({member(a_, "A"), member(b_, "B")});
     CountingSource source(kSecond * 10);
