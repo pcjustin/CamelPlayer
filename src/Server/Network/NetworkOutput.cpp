@@ -261,6 +261,7 @@ public:
         {
             std::scoped_lock lock(mutex_);
             source_ = nullptr;
+            served_.clear();
             if (link_ && started_ && !released_) link_->stop();
             started_ = false;
             ended = std::move(link_);
@@ -540,12 +541,21 @@ private:
         for (;;) {
             const SOCKET client = accept(listener_, nullptr, nullptr);
             if (client == kNoSocket) return;
-            std::scoped_lock lock(mutex_);
-            if (closing_) {
-                closesocket(client);
-                return;
+            std::vector<std::thread::id> served;
+            {
+                std::scoped_lock lock(mutex_);
+                if (closing_) {
+                    closesocket(client);
+                    return;
+                }
+                clients_.push_back(client);
+                served.swap(served_);
             }
-            clients_.push_back(client);
+            std::erase_if(connections_, [&](std::thread& connection) {
+                if (std::ranges::find(served, connection.get_id()) == served.end()) return false;
+                connection.join();
+                return true;
+            });
             connections_.emplace_back([this, client] { serve(client); });
         }
     }
@@ -636,6 +646,7 @@ private:
     void forget(SOCKET client) {
         std::scoped_lock lock(mutex_);
         if (std::erase(clients_, client)) closesocket(client);
+        served_.push_back(std::this_thread::get_id());
     }
 
     static bool sendAll(SOCKET client, const char* data, size_t size) {
@@ -922,6 +933,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable moved_;
     _Guarded_by_(mutex_) std::vector<SOCKET> clients_;
+    _Guarded_by_(mutex_) std::vector<std::thread::id> served_; // connections done, for acceptLoop to join
     _Guarded_by_(mutex_) DeviceFormat format_ {};
     _Guarded_by_(mutex_) IRenderSource* source_ = nullptr;
     _Guarded_by_(mutex_) std::deque<Body> bodies_;

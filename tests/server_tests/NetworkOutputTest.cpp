@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -551,6 +551,24 @@ TEST(NetworkOutputTest, ARangeRequestGetsThatPartOfTheStream) {
     const auto headOnly = http::send("HEAD", url, "", "", 2000, 1 << 20);
     EXPECT_EQ(headOnly.status, 200U);
     EXPECT_TRUE(headOnly.body.empty());
+}
+
+TEST(NetworkOutputTest, ShortRequestsDoNotPileUpThreadsDuringTheSession) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    CountingSource source(k16.bytesPerFrame(), 20000);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.currentUri().empty(); }));
+    const auto probe = [&](int times) {
+        for (int i = 0; i < times; ++i) FakeRenderer::resetConnectionTo(renderer.currentUri());
+        std::this_thread::sleep_for(200ms);
+    };
+    probe(20);
+    DWORD before = 0, after = 0;
+    GetProcessHandleCount(GetCurrentProcess(), &before);
+    probe(300);
+    GetProcessHandleCount(GetCurrentProcess(), &after);
+    EXPECT_LT(after, before + 50) << before << " handles before, " << after << " after";
 }
 
 TEST(NetworkOutputTest, ARangePastTheStreamIsThePlayersOwnSeek) {
