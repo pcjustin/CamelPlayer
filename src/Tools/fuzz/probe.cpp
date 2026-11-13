@@ -8,12 +8,17 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <string>
+
+#include <process.h>
 
 #include "Engine/decode/FormatProbe.h"
 #include "OutputBridge/IOutput.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    static const auto path = std::filesystem::temp_directory_path() / "camelplayer-probe-fuzz.bin";
+    // One file a process: -jobs, -workers and -fork run several, which would write over each other's input.
+    static const auto path =
+        std::filesystem::temp_directory_path() / ("camelplayer-probe-fuzz-" + std::to_string(_getpid()) + ".bin");
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file.write(reinterpret_cast<const char*>(data), std::streamsize(size));
