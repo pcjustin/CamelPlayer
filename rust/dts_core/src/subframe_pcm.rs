@@ -698,12 +698,12 @@ impl SubframePcmDecoder {
         let apply_front =
             header.front_sum || matches!(arrangement, AmodeArrangement::SumDifference);
         if apply_front && let Some((l, r)) = arrangement.front_lr_channels() {
-            apply_sum_difference(&mut matrices, l, r, &eff_n_subs)?;
+            apply_sum_difference(&mut matrices, l, r, &mut eff_n_subs)?;
         }
         if header.surround_sum
             && let Some((l, r)) = arrangement.surround_lr_channels()
         {
-            apply_sum_difference(&mut matrices, l, r, &eff_n_subs)?;
+            apply_sum_difference(&mut matrices, l, r, &mut eff_n_subs)?;
         }
 
         // (2) §C.2.5 per-channel 32-band synthesis -> planar PCM.
@@ -1341,9 +1341,11 @@ fn apply_joint_subband(
 /// channel and `r` the **right** — is matrixed as
 /// `(L', R') = (L + R, L - R)`, reading the pre-update value of the left
 /// sample for both outputs (the §C.2.4 pseudocode's read-old/write-new
-/// ordering). The active sub-band bound is the smaller of the two
-/// channels' `nSUBS` (they are equal in a well-formed stream) clamped to
-/// the 32-band matrix width.
+/// ordering). The active sub-band bound is the larger of the two
+/// channels' `nSUBS` clamped to the 32-band matrix width, each channel's
+/// sub-bands above its own count being zero, so the result is the
+/// PCM-domain butterfly; both channels' counts in `n_subs` are raised to
+/// it, so the QMF synthesizes the bands the other channel brought.
 ///
 /// Structural inconsistencies (channel index out of range, `l == r`, or
 /// the two channels' matrices carrying a different sample-row count)
@@ -1354,18 +1356,15 @@ fn apply_sum_difference(
     matrices: &mut [SubbandSampleMatrix],
     l: usize,
     r: usize,
-    n_subs: &[usize],
+    n_subs: &mut [usize],
 ) -> Result<(), SubframePcmError> {
     let channels = matrices.len();
-    if l >= channels || r >= channels || l == r {
+    if l >= channels || r >= channels || l == r || l >= n_subs.len() || r >= n_subs.len() {
         return Err(SubframePcmError::JointSubbandShape { ch: l.min(r) });
     }
-    let n_active = n_subs
-        .get(l)
-        .copied()
-        .unwrap_or(0)
-        .min(n_subs.get(r).copied().unwrap_or(0))
-        .min(NUM_SUBBAND);
+    let n_active = n_subs[l].max(n_subs[r]).min(NUM_SUBBAND);
+    n_subs[l] = n_active;
+    n_subs[r] = n_active;
     if n_active == 0 {
         return Ok(());
     }
@@ -2327,7 +2326,7 @@ mod tests {
             matrices[0][row][20] = 7.0;
             matrices[1][row][20] = 9.0;
         }
-        apply_sum_difference(&mut matrices, 0, 1, &[2, 2]).unwrap();
+        apply_sum_difference(&mut matrices, 0, 1, &mut [2, 2]).unwrap();
         for row in 0..3 {
             for n in 0..2 {
                 assert_eq!(
@@ -2345,6 +2344,25 @@ mod tests {
             assert_eq!(matrices[0][row][20], 7.0);
             assert_eq!(matrices[1][row][20], 9.0);
         }
+    }
+
+    /// A pair with unequal `nSUBS` matrixes up to the larger, as the PCM-domain butterfly would, and both channels
+    /// are then synthesized that far.
+    #[test]
+    fn apply_sum_difference_reaches_the_larger_subband_count() {
+        let mut sum = [0.0; NUM_SUBBAND];
+        sum[0] = 3.0;
+        sum[27] = 5.0;
+        let mut difference = [0.0; NUM_SUBBAND];
+        difference[0] = 1.0;
+        let mut matrices: Vec<SubbandSampleMatrix> = vec![vec![sum; 2], vec![difference; 2]];
+        let mut n_subs = [28, 20];
+        apply_sum_difference(&mut matrices, 0, 1, &mut n_subs).unwrap();
+        for (left, right) in matrices[0].iter().zip(&matrices[1]) {
+            assert_eq!((left[0], right[0]), (4.0, 2.0));
+            assert_eq!((left[27], right[27]), (5.0, 5.0));
+        }
+        assert_eq!(n_subs, [28, 28]);
     }
 
     /// End-to-end: forcing the `SUMF` flag on a real fixture frame routes
