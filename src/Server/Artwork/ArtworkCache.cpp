@@ -250,7 +250,6 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
         }
     }
     std::lock_guard lock(mutex_);
-    BackgroundPriority priority;
     auto use = [&](const std::optional<ArtworkCandidate>& candidate) -> std::optional<ArtworkReference> {
         if (!candidate || token.cancelled()) return {};
         try {
@@ -353,7 +352,6 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
         std::filesystem::last_write_time(target, std::filesystem::file_time_type::clock::now(), ec);
         return ArtworkReference{key, target};
     }
-    BackgroundPriority priority;
     if (token.cancelled()) return std::nullopt;
     // The source is read before taking the lock, so the covers of several albums are read from a NAS at once.
     ArtworkCandidate image;
@@ -429,6 +427,8 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 return !reading.cancelled();
             };
+            // Only the warmer works at background priority: a cover being shown is made at the caller's.
+            const BackgroundPriority priority;
             auto db = store.openReader();
             for (size_t at; turn() && (at = next++) < albums.size();) {
                 const auto cover = albumCover(db, albums[at]);
