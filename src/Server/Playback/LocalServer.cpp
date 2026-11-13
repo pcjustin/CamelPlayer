@@ -1373,7 +1373,7 @@ private:
             copy.select(chain_[i]);
         }
         if (!playback.nextSlotFree || chain_.size() >= 2) return;
-        const auto upcoming = copy.upcoming();
+        const auto upcoming = copy.next(true); // the copy is the prediction's own, so upcoming() would copy it again
         if (!upcoming) return;
         const QueueAttempt attempt{state_.queueEntryId, upcoming->entryId, policy_.revision(), chain_.size()};
         if (attempt == attempted_) return;
