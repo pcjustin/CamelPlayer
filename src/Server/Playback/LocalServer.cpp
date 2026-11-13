@@ -1569,7 +1569,12 @@ private:
     }
 
     void publish(bool completed) {
-        shareLoudnessInputs();
+        // Settings share them when applied; here only a change to the queue or its current entry does.
+        const std::pair shared{policy_.revision(), state_.queueEntryId};
+        if (queueChanged_ || shared != loudnessShared_) {
+            loudnessShared_ = shared;
+            shareLoudnessInputs();
+        }
         auto p = playback(engine_->snapshot());
         if (settings_.backend == Backend::AirPlay) {
             std::scoped_lock lock(groupMutex_);
@@ -2053,7 +2058,8 @@ private:
     static constexpr size_t kAutoplayKept = 100;
     int failuresInARow_ = 0; // tracks that failed one after another since one played or the user chose one
     static constexpr int kAutoplayFailuresInARow = 3;
-    uint64_t publishedEntry_ = UINT64_MAX; // the current entry state_.queue was built for
+    uint64_t publishedEntry_ = UINT64_MAX;                                 // the current entry state_.queue was built for
+    std::pair<uint64_t, uint64_t> loudnessShared_{UINT64_MAX, UINT64_MAX}; // queue revision and entry last shared
     // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
     struct QueueAttempt {
         uint64_t current = 0, upcoming = 0, revision = 0;
