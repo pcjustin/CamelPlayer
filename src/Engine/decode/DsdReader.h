@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Raw DSD from DSF and DSDIFF files through DSD Nexus libdsf/libdsdiff, with DST decompressed by libdst
-// (docs/Plan.md §5.8). Not yet a playback decoder: DSD output arrives with DoP/native packing (M2-R06).
+// (docs/Plan.md §5.8). The dsdnexus decoder plays it, as native DSD, DoP or converted to PCM.
 #pragma once
 #include <cstddef>
 #include <cstdint>

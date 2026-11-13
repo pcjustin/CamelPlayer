@@ -8,6 +8,7 @@
 
 namespace camel::audio {
 
+// The local outputs. Network players and AirPlay receivers are played through the Server's output factory.
 std::unique_ptr<IOutput> createOutput(const Settings& s) {
     switch (s.backend) {
     case Backend::Wasapi:
@@ -17,9 +18,9 @@ std::unique_ptr<IOutput> createOutput(const Settings& s) {
     case Backend::Ks:
         return createKsOutput(s.ks);
     case Backend::Network:
-        throw Error(ErrorCode::DeviceNotFound, "playing to a network player is not available yet");
+        throw Error(ErrorCode::DeviceNotFound, "a network player is played through the Server");
     case Backend::AirPlay:
-        throw Error(ErrorCode::DeviceNotFound, "playing to an AirPlay receiver is not available yet");
+        throw Error(ErrorCode::DeviceNotFound, "an AirPlay receiver is played through the Server");
     }
     return createWasapiOutput(s.wasapi);
 }

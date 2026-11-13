@@ -19,6 +19,7 @@ extern "C" {
 }
 
 #include "Common/AudioTypes.h"
+#include "Common/DsdBits.h"
 #include "Common/util/Text.h"
 #include "Engine/decode/DecoderImpl.h"
 
@@ -26,12 +27,6 @@ namespace camel::audio {
 namespace {
 
 constexpr size_t kDsfBlockBytes = DSF_BLOCK_SIZE_PER_CHANNEL;
-
-uint8_t reverseBits(uint8_t b) {
-    b = uint8_t((b & 0xF0) >> 4 | (b & 0x0F) << 4);
-    b = uint8_t((b & 0xCC) >> 2 | (b & 0x33) << 2);
-    return uint8_t((b & 0xAA) >> 1 | (b & 0x55) << 1);
-}
 
 void requireRate(uint32_t channels, uint32_t rate) {
     if (!channels || !rate || rate % (44100 * 64))
@@ -81,7 +76,7 @@ public:
         if (got != want)
             throw Error(ErrorCode::DecodeFailed, "DSF: audio data ends at frame " + std::to_string(pos_ + got / info_.channels));
         if (msbFirst_)
-            for (size_t i = 0; i < want; i++) dst[i] = reverseBits(dst[i]);
+            for (size_t i = 0; i < want; i++) dst[i] = reverseDsdBits(dst[i]);
         pos_ += frames;
         return frames;
     }

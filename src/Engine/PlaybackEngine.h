@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Minimal playback engine of the MVP (docs/Plan.md §5.1, §16.2): decoder -> SPSC ring -> output.
-// All commands run in order on one control thread; the UI only posts commands and reads snapshots.
+// The playback engine (docs/Plan.md §5.1, §16.2): a track's decoder, read by the Rust Engine through RustSession, which
+// predecodes, converts and applies the DSP chain, to the output. All commands run in order on one control thread; the
+// UI only posts commands and reads snapshots.
 #pragma once
 #include <chrono>
 #include <filesystem>

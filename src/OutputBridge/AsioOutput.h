@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// ASIO (PCM) with a dedicated STA control thread (docs/Plan.md §5.6, §15.3). Native DSD arrives in M2.
+// ASIO with a dedicated STA control thread (docs/Plan.md §5.6, §15.3): PCM, and native DSD where the driver takes it.
 #pragma once
 #include "OutputBridge/IOutput.h"
 #include "Common/settings/Settings.h"

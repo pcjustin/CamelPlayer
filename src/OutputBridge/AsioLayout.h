@@ -8,14 +8,9 @@
 #include <cstdint>
 #include <cstring>
 
-namespace camel::audio {
+#include "Common/DsdBits.h"
 
-// ASIOSTDSDInt8LSB1 wants the oldest sample in the least significant bit; the Engine delivers it in the MSB.
-constexpr uint8_t reverseDsdBits(uint8_t b) {
-    b = uint8_t((b & 0xF0) >> 4 | (b & 0x0F) << 4);
-    b = uint8_t((b & 0xCC) >> 2 | (b & 0x33) << 2);
-    return uint8_t((b & 0xAA) >> 1 | (b & 0x55) << 1);
-}
+namespace camel::audio {
 
 // Splits `frames` stereo frames of `bytesPerSample` bytes per channel into `left` and `right`. Native DSD has one byte
 // per channel per frame; `lsbFirst` reverses its bit order.
