@@ -150,6 +150,8 @@ HangWatch::HangWatch(std::function<bool(std::function<void()>)> post, std::chron
                   log::error("hang: UI thread has not answered for %lld s; %.0f MB private memory; writing a dump",
                              static_cast<long long>(unanswered), privateMegabytes());
                   dumpFrom(L"-hang", nullptr);
+                  // A session whose UI stalls again and again keeps the limit a start keeps.
+                  pruneCrashDumps(g_dir, kKeptCrashDumps);
               }
               if (const double megabytes = privateMegabytes(); megabytes >= nextMemoryReport) {
                   log::warn("memory: %.0f MB private memory", megabytes);

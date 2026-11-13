@@ -377,6 +377,32 @@ TEST(CrashDump, UnansweredPingWritesOneHangDump) {
     std::filesystem::remove_all(directory);
 }
 
+// A long session whose UI stops answering again and again keeps no more dumps than a start leaves.
+TEST(CrashDump, AHangDumpKeepsTheLimitDuringASession) {
+    const auto directory = testutil::tempDir() / "hangdump-limit";
+    std::filesystem::remove_all(directory);
+    installCrashDumps(directory);
+    for (size_t i = 0; i < kKeptCrashDumps; ++i)
+        std::ofstream(directory / ("crash-20200101-00000" + std::to_string(i) + "-hang.dmp")) << std::string(64, 'd');
+    std::vector<std::function<void()>> pings;
+    std::mutex mutex;
+    {
+        HangWatch watch(
+            [&](std::function<void()> ping) {
+                std::lock_guard lock(mutex);
+                pings.push_back(std::move(ping));
+                return true;
+            },
+            std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    }
+    auto names = dumpNames(directory);
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names.size(), kKeptCrashDumps);
+    EXPECT_FALSE(names.empty() || names.back().starts_with(L"crash-2020")) << "the new dump is kept";
+    std::filesystem::remove_all(directory);
+}
+
 TEST(CrashDump, AnsweredPingsWriteNoDump) {
     const auto directory = testutil::tempDir() / "hangdump-answered";
     std::filesystem::remove_all(directory);
