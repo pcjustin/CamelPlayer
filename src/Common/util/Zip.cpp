@@ -53,9 +53,8 @@ std::string inflateEntry(const char* data, uint32_t compressed, uint32_t size, c
     return out;
 }
 
-} // namespace
-
-std::vector<ZipEntry> readZip(const std::string& data) {
+// Each entry in the central directory's order, checked as far as its data is not read, handed to `each`.
+template <class Each> void walk(const std::string& data, Each&& each) {
     if (data.size() < 22) throw std::runtime_error("zip: not a zip file");
     size_t end = data.size() - 22;
     const size_t lowest = data.size() > 22 + 65535 ? data.size() - 22 - 65535 : 0;
@@ -65,41 +64,63 @@ std::vector<ZipEntry> readZip(const std::string& data) {
     }
     const uint32_t count = read16(data, end + 10);
     size_t at = read32(data, end + 16);
-    std::vector<ZipEntry> entries;
     for (uint32_t i = 0; i < count; ++i) {
         if (read32(data, at) != 0x02014b50) throw std::runtime_error("zip: damaged central directory");
-        const uint32_t flags = read16(data, at + 8), method = read16(data, at + 10), crc = read32(data, at + 16);
-        const uint32_t compressed = read32(data, at + 20), size = read32(data, at + 24);
+        const uint32_t flags = read16(data, at + 8);
+        ZipItem item;
+        item.method = read16(data, at + 10);
+        item.crc = read32(data, at + 16);
+        item.compressed = read32(data, at + 20);
+        item.size = read32(data, at + 24);
         const uint32_t nameLength = read16(data, at + 28), offset = read32(data, at + 42);
-        if (compressed == 0xffffffff || size == 0xffffffff || offset == 0xffffffff)
+        if (item.compressed == 0xffffffff || item.size == 0xffffffff || offset == 0xffffffff)
             throw std::runtime_error("zip: zip64 entries are not supported");
         if (at + 46 + nameLength > data.size()) throw std::runtime_error("zip: truncated");
-        ZipEntry entry;
-        entry.name = data.substr(at + 46, nameLength);
-        entry.utf8 = (flags & (1 << 11)) != 0;
+        item.name = data.substr(at + 46, nameLength);
+        item.utf8 = (flags & (1 << 11)) != 0;
         at += 46 + nameLength + read16(data, at + 30) + read16(data, at + 32);
-        if (entry.name.ends_with('/') || entry.name.ends_with('\\')) {
-            entry.directory = true;
-            entries.push_back(std::move(entry));
+        if (item.name.ends_with('/') || item.name.ends_with('\\')) {
+            item.directory = true;
+            each(std::move(item));
             continue;
         }
-        if (read32(data, offset) != 0x04034b50) throw std::runtime_error("zip: damaged entry " + entry.name);
-        const size_t start = offset + 30 + read16(data, offset + 26) + read16(data, offset + 28);
-        if (start + compressed > data.size()) throw std::runtime_error("zip: truncated entry " + entry.name);
-        if (size > kMaxEntryBytes || (method == 8 && size > compressed * kMaxDeflateRatio))
-            throw std::runtime_error("zip: " + entry.name + " says it holds more than it can");
-        if (method == 0) {
-            entry.data = data.substr(start, compressed);
-        } else if (method == 8) {
-            entry.data = inflateEntry(data.data() + start, compressed, size, entry.name);
-        } else {
-            throw std::runtime_error("zip: unsupported compression in " + entry.name);
-        }
-        if (entry.data.size() != size ||
-            crc32(0, reinterpret_cast<const Bytef*>(entry.data.data()), uInt(entry.data.size())) != crc)
-            throw std::runtime_error("zip: checksum mismatch in " + entry.name);
-        entries.push_back(std::move(entry));
+        if (read32(data, offset) != 0x04034b50) throw std::runtime_error("zip: damaged entry " + item.name);
+        item.start = offset + 30 + read16(data, offset + 26) + read16(data, offset + 28);
+        if (item.start + item.compressed > data.size()) throw std::runtime_error("zip: truncated entry " + item.name);
+        if (item.size > kMaxEntryBytes || (item.method == 8 && item.size > item.compressed * kMaxDeflateRatio))
+            throw std::runtime_error("zip: " + item.name + " says it holds more than it can");
+        if (item.method != 0 && item.method != 8) throw std::runtime_error("zip: unsupported compression in " + item.name);
+        each(std::move(item));
     }
+}
+
+} // namespace
+
+std::vector<ZipItem> listZip(const std::string& data) {
+    std::vector<ZipItem> items;
+    walk(data, [&](ZipItem&& item) { items.push_back(std::move(item)); });
+    return items;
+}
+
+std::string zipData(const std::string& data, const ZipItem& item) {
+    if (item.directory) return {};
+    std::string out = item.method == 0 ? data.substr(item.start, item.compressed)
+                                       : inflateEntry(data.data() + item.start, item.compressed, item.size, item.name);
+    if (out.size() != item.size || crc32(0, reinterpret_cast<const Bytef*>(out.data()), uInt(out.size())) != item.crc)
+        throw std::runtime_error("zip: checksum mismatch in " + item.name);
+    return out;
+}
+
+std::vector<ZipEntry> readZip(const std::string& data) {
+    std::vector<ZipEntry> entries;
+    walk(data, [&](ZipItem&& item) {
+        ZipEntry entry;
+        entry.data = zipData(data, item);
+        entry.name = std::move(item.name);
+        entry.utf8 = item.utf8;
+        entry.directory = item.directory;
+        entries.push_back(std::move(entry));
+    });
     return entries;
 }
 

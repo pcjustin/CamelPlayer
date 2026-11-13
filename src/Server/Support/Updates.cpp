@@ -194,17 +194,26 @@ void extractZip(const std::filesystem::path& zip, const std::filesystem::path& d
     std::ifstream in(zip, std::ios::binary);
     if (!in) throw std::runtime_error("zip: cannot open the file");
     const std::string data{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    for (const auto& entry : readZip(data)) {
-        const auto target = directory / entryPath(entry.name, entry.utf8);
-        if (entry.directory) {
-            std::filesystem::create_directories(target);
-            continue;
+    // One entry inflated at a time: all of them at once held the release twice over in memory, unpacked and zipped. A
+    // damaged entry still leaves no folder behind.
+    try {
+        for (const auto& item : listZip(data)) {
+            const auto target = directory / entryPath(item.name, item.utf8);
+            if (item.directory) {
+                std::filesystem::create_directories(target);
+                continue;
+            }
+            const std::string bytes = zipData(data, item);
+            std::filesystem::create_directories(target.parent_path());
+            std::ofstream file(target, std::ios::binary | std::ios::trunc);
+            file.write(bytes.data(), std::streamsize(bytes.size()));
+            file.close();
+            if (!file) throw std::runtime_error("zip: cannot write " + item.name);
         }
-        std::filesystem::create_directories(target.parent_path());
-        std::ofstream file(target, std::ios::binary | std::ios::trunc);
-        file.write(entry.data.data(), std::streamsize(entry.data.size()));
-        file.close();
-        if (!file) throw std::runtime_error("zip: cannot write " + entry.name);
+    } catch (...) {
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+        throw;
     }
 }
 
