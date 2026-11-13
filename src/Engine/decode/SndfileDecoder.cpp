@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "Common/util/Text.h"
+#include "Engine/decode/Id3Tags.h"
 
 namespace camel::audio {
 namespace {
@@ -82,14 +83,10 @@ private:
         return done;
     }
 
-    // Keeps the file as it is unless it is a native FLAC (after an optional ID3v2 tag) with blocks to leave out.
+    // Keeps the file as it is unless it is a native FLAC (after optional ID3v2 tags) with blocks to leave out.
     void dropPictures() {
-        uint8_t head[10];
-        if (copy(0, head, sizeof head) != sizeof head) return;
-        sf_count_t at = 0;
-        if (std::memcmp(head, "ID3", 3) == 0)
-            at = 10 + (sf_count_t(head[6] & 0x7f) << 21 | sf_count_t(head[7] & 0x7f) << 14 | sf_count_t(head[8] & 0x7f) << 7 |
-                       (head[9] & 0x7f));
+        auto at = sf_count_t(
+            afterId3Tags([&](uint64_t offset, uint8_t* header) { return copy(sf_count_t(offset), header, 10) == 10; }));
         uint8_t marker[4];
         if (copy(at, marker, 4) != 4 || std::memcmp(marker, "fLaC", 4) != 0) return;
         std::vector<uint8_t> kept{'f', 'L', 'a', 'C'};

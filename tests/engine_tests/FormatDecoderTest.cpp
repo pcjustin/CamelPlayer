@@ -7,13 +7,16 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <tuple>
+#include <vector>
 
+#include "Engine/decode/FlacStreamInfo.h"
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/IDecoder.h"
 #include "Engine/PlaybackEngine.h"
@@ -481,5 +484,64 @@ TEST(FormatDecoderPolicy, LibsndfileAndSymphoniaOpenAFlacWithoutReadingItsCover)
         ASSERT_EQ(decoder->read(buffer.data(), 1000), 1000u) << decoderName(kind);
         EXPECT_TRUE(std::equal(buffer.begin(), buffer.end(), expected.begin() + std::ptrdiff_t(target * spec.channels)))
             << decoderName(kind);
+    }
+}
+
+namespace {
+
+// An ID3v2.4 tag of `size` bytes after its header, with its 10-byte footer when `footer` is set.
+std::vector<uint8_t> id3Tag(uint32_t size, bool footer) {
+    const uint8_t flags = footer ? 0x10 : 0;
+    const std::array<uint8_t, 4> synchsafe{uint8_t((size >> 21) & 0x7f), uint8_t((size >> 14) & 0x7f),
+                                           uint8_t((size >> 7) & 0x7f), uint8_t(size & 0x7f)};
+    std::vector<uint8_t> tag{'I', 'D', '3', 4, 0, flags};
+    tag.insert(tag.end(), synchsafe.begin(), synchsafe.end());
+    tag.resize(tag.size() + size, 0);
+    if (footer) {
+        tag.insert(tag.end(), {'3', 'D', 'I', 4, 0, flags});
+        tag.insert(tag.end(), synchsafe.begin(), synchsafe.end());
+    }
+    return tag;
+}
+
+} // namespace
+
+// Behind two ID3v2 tags, or one with a footer, a FLAC keeps its MD5 check and libsndfile still reads past its cover.
+TEST(FormatDecoderPolicy, AFlacBehindId3TagsKeepsItsMd5AndLeavesItsCoverUnread) {
+    const testaudio::GenSpec spec{"tagged", 44100, 16, 2, 1.0};
+    const auto plain = testutil::tempDir() / "tagged-plain.flac";
+    testaudio::writeFlac(plain, spec);
+    const std::string read = readFile(plain);
+    std::vector<uint8_t> flac(read.begin(), read.end());
+    ASSERT_EQ(flac[4] & 0x7f, 0);
+    const uint32_t length = 3 << 20;
+    std::vector<uint8_t> picture{6, uint8_t((length >> 16) & 0xff), uint8_t((length >> 8) & 0xff), uint8_t(length & 0xff)};
+    picture.resize(4 + length, 'p');
+    if (flac[4] & 0x80) {
+        flac[4] &= 0x7f;
+        picture[0] |= 0x80;
+    }
+    flac.insert(flac.begin() + 8 + 34, picture.begin(), picture.end());
+    const auto expected = testaudio::makeSignal(spec);
+    const auto twoTags = [] {
+        auto tags = id3Tag(300, false);
+        const auto second = id3Tag(120, false);
+        tags.insert(tags.end(), second.begin(), second.end());
+        return tags;
+    }();
+    for (const auto& [name, tags] : {std::pair{"two tags", twoTags}, std::pair{"a footer", id3Tag(300, true)}}) {
+        auto bytes = tags;
+        bytes.insert(bytes.end(), flac.begin(), flac.end());
+        const auto file = testutil::tempDir() / (std::string("tagged-") + (name[0] == 't' ? "two" : "footer") + ".flac");
+        std::ofstream(file, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+        SourceInfo parsed;
+        EXPECT_TRUE(readFlacStreamInfo(file, parsed) && parsed.md5) << name;
+        IO_COUNTERS before{}, after{};
+        GetProcessIoCounters(GetCurrentProcess(), &before);
+        auto decoder = openDecoder(DecoderKind::Sndfile, file);
+        GetProcessIoCounters(GetCurrentProcess(), &after);
+        EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, 512u * 1024) << name;
+        EXPECT_TRUE(decoder->info().md5) << name;
+        EXPECT_TRUE(readAll(*decoder) == expected) << name;
     }
 }

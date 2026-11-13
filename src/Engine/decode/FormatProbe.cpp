@@ -17,6 +17,7 @@
 #include "Common/AudioTypes.h"
 #include "Common/DecoderRegistry.h"
 #include "Common/util/Text.h"
+#include "Engine/decode/Id3Tags.h"
 
 namespace camel::audio {
 namespace {
@@ -129,15 +130,8 @@ bool dtsInWave(const File& f) {
     throw Error(ErrorCode::UnsupportedStream, detail);
 }
 
-// Where the data after the ID3v2 tags at the start of the file begins; some taggers leave two tags in a row.
-uint64_t afterId3Tags(const File& f) {
-    uint64_t pos = 0;
-    for (uint8_t h[10]; f.readAt(pos, h, sizeof h) && h[0] == 'I' && h[1] == 'D' && h[2] == '3';)
-        pos += 10 +
-               ((uint64_t(h[6] & 0x7f) << 21) | (uint64_t(h[7] & 0x7f) << 14) | (uint64_t(h[8] & 0x7f) << 7) |
-                uint64_t(h[9] & 0x7f)) +
-               ((h[5] & 0x10) ? 10 : 0); // synchsafe size, optional footer
-    return pos;
+uint64_t afterTags(const File& f) {
+    return afterId3Tags([&](uint64_t at, uint8_t* header) { return f.readAt(at, header, 10); });
 }
 
 bool frameSync(const uint8_t* h) {
@@ -184,7 +178,7 @@ std::optional<uint64_t> confirmedMpegFrame(const File& f, uint64_t pos) {
 }
 
 uint64_t mpegStart(const File& f) {
-    const uint64_t pos = afterId3Tags(f);
+    const uint64_t pos = afterTags(f);
     uint8_t h[4];
     if (!pos || (f.readAt(pos, h, sizeof h) && frameSync(h))) return pos;
     return confirmedMpegFrame(f, pos).value_or(pos);
@@ -321,7 +315,7 @@ std::optional<AudioFormat> builtinFormat(const std::filesystem::path& path) {
     }
     if (tagIs(h, "DSD ") || tagIs(h, "FRM8")) return AudioFormat::Dsd;
 
-    const uint64_t pos = afterId3Tags(f);
+    const uint64_t pos = afterTags(f);
     if (pos && !f.readAt(pos, h, 4)) unsupported("file has an ID3 tag but no audio");
     if (tagIs(h, "fLaC")) return AudioFormat::Flac;
     if (pos && !frameSync(h))

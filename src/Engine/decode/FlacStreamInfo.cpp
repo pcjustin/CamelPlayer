@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "Common/util/Text.h"
+#include "Engine/decode/Id3Tags.h"
 
 namespace camel::audio {
 
@@ -23,12 +24,9 @@ bool readFlacStreamInfo(const std::filesystem::path& path, SourceInfo& out) {
         return SetFilePointerEx(h, li, nullptr, FILE_BEGIN) && ReadFile(h, buf, n, &got, nullptr) && got == n;
     };
     uint8_t hdr[10];
-    uint64_t pos = 0;
     bool ok = false;
     if (readAt(0, hdr, 10)) {
-        if (hdr[0] == 'I' && hdr[1] == 'D' && hdr[2] == '3') // ID3v2: synchsafe size
-            pos = 10 + ((uint64_t(hdr[6] & 0x7f) << 21) | (uint64_t(hdr[7] & 0x7f) << 14) | (uint64_t(hdr[8] & 0x7f) << 7) |
-                        uint64_t(hdr[9] & 0x7f));
+        const uint64_t pos = afterId3Tags([&](uint64_t at, uint8_t* header) { return readAt(at, header, 10); });
         uint8_t b[4 + 4 + 34]; // "fLaC", block header, STREAMINFO body
         if (readAt(pos, b, sizeof b) && b[0] == 'f' && b[1] == 'L' && b[2] == 'a' && b[3] == 'C' && (b[4] & 0x7f) == 0 &&
             b[5] == 0 && b[6] == 0 && b[7] == 34) {
