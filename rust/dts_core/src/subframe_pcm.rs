@@ -157,6 +157,8 @@ pub enum SubframePcmError {
         /// The raw §5.3.1 Table 5-17 `PCMR` index.
         pcmr: u8,
     },
+    /// The frame header's `LFF` is the invalid code 3, which names no LFE decimation (ETSI TS 102 114 §5.3.1).
+    InvalidLfe,
     /// The caller-supplied per-channel side-info / loop-bound slices did
     /// not all agree on the channel count. Carries the channel count the
     /// driver expected (the [`SubframePcmDecoder`]'s configured count)
@@ -205,6 +207,7 @@ impl core::fmt::Display for SubframePcmError {
                 "frame header PCMR index {pcmr} is reserved; the output rScale \
                  is undefined"
             ),
+            SubframePcmError::InvalidLfe => write!(f, "frame header LFF code 3 is invalid"),
             SubframePcmError::ChannelCountMismatch { expected, got } => write!(
                 f,
                 "channel-count mismatch: driver expects {expected}, slice carries {got}"
@@ -377,6 +380,7 @@ impl SubframePcmDecoder {
     ///   carries `JOINX[ch] > 0`;
     /// * [`SubframePcmError::ReservedPcmResolution`] if the header's
     ///   `PCMR` code is reserved;
+    /// * [`SubframePcmError::InvalidLfe`] if the header's `LFF` is 3;
     /// * [`SubframePcmError::AudioData`] for any §5.5 walk failure
     ///   (including the §D.10 VQ blockers);
     /// * [`SubframePcmError::Synthesis`] for any §C.2.5 driver failure.
@@ -497,6 +501,9 @@ impl SubframePcmDecoder {
             return Err(SubframePcmError::ReservedPcmResolution {
                 pcmr: header.source_pcm_resolution_index,
             });
+        }
+        if header.lfe == crate::LfeMode::Mode3 {
+            return Err(SubframePcmError::InvalidLfe);
         }
         // PCMR tells what the source was, not how the core's samples
         // are scaled: every resolution decodes at the 16-bit one's

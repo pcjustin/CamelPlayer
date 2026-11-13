@@ -236,6 +236,18 @@ fn every_source_resolution_decodes_at_the_same_level() {
 }
 
 #[test]
+fn the_invalid_lfe_code_is_an_error() {
+    // LFF is the header's bits 85 and 86, before the optional CRC.
+    let frames = big_endian(SURROUND);
+    assert_eq!(frames[0][10] >> 1 & 0b11, 2);
+    for frame in &frames {
+        let mut invalid = frame.clone();
+        invalid[10] |= 0b110;
+        assert!(Decoder::new().decode(&invalid).is_err());
+    }
+}
+
+#[test]
 fn output_stays_within_full_scale() {
     for frame in pcm_of(&decode_all(&big_endian(SURROUND))) {
         assert!((-1.0..=1.0).contains(&frame));
