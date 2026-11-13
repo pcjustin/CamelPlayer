@@ -333,8 +333,13 @@ void LoudnessAnalyzer::forgetAway() {
 void LoudnessAnalyzer::run(const std::stop_token& stop) {
     using namespace std::chrono_literals;
     auto counted = std::chrono::steady_clock::time_point{};
+    // A second's rest after a pass that found nothing to do, gave way or failed; none after one that did its work.
+    bool rest = true;
     while (!stop.stop_requested()) {
-        for (int i = 0; i < 10 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(100ms);
+        if (rest)
+            for (int i = 0; i < 10 && !stop.stop_requested(); ++i) std::this_thread::sleep_for(100ms);
+        rest = true;
+        gaveWay_ = false;
         try {
             // Counting reads every track, so it runs only while someone reads the progress.
             const auto now = std::chrono::steady_clock::now();
@@ -351,16 +356,25 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
             if (!waveforms) store_.caughtUp(BackgroundWork::Waveforms);
             // Queued tracks' loudness first, as playing volume depends on it; then the playing track's waveform; then
             // the rest of the library's loudness; then the background waveforms, after the scan and in their window.
-            if (loudness && !scanning && analyzeAlbum(stop, true, waveforms)) continue;
-            if (waveforms && waveformsNow(stop)) continue;
+            if (loudness && !scanning && analyzeAlbum(stop, true, waveforms)) {
+                rest = gaveWay_;
+                continue;
+            }
+            if (waveforms && waveformsNow(stop)) {
+                rest = false;
+                continue;
+            }
             if (loudness && !scanning && analyzeAlbum(stop, false, waveforms)) {
                 count();
                 counted = std::chrono::steady_clock::now();
+                rest = gaveWay_;
                 continue;
             }
             if (loudness && !scanning) store_.caughtUp(BackgroundWork::Loudness);
-            if (waveforms && !scanning && inAnalysisWindow(options_.waveform(), minuteOfDay()) && waveformsInBackground(stop))
+            if (waveforms && !scanning && inAnalysisWindow(options_.waveform(), minuteOfDay()) && waveformsInBackground(stop)) {
+                rest = false;
                 continue;
+            }
             running_ = false;
         } catch (const std::exception& e) {
             log::warn("audio analysis: %s", e.what());
@@ -388,6 +402,7 @@ bool LoudnessAnalyzer::analyzeAlbum(const std::stop_token& stop, bool queuedOnly
         return threads > allowed();
     };
     running_ = !yield();
+    gaveWay_ = !running_;
     if (!running_) return true;
     std::vector<int64_t> ids;
     std::vector<std::filesystem::path> files;
@@ -418,6 +433,7 @@ bool LoudnessAnalyzer::analyzeAlbum(const std::stop_token& stop, bool queuedOnly
                 })
                 .get();
         });
+    gaveWay_ = !complete;
     if (!complete) return true;
     const auto result = measuring_->result();
     measuring_.reset();
