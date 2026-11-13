@@ -392,9 +392,10 @@ struct Settings {
 };
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
-// decoders, autoplay, playing on from a folder and the DSP chain, whose saved EQ presets stay. Interface: language, close action,
-// the tray notice, the first-run guide, the hotkeys, the automatic update check, the online artist pictures, the folder tree, the
-// track list columns and Discord. Each keeps the other group.
+// decoders, autoplay, playing on from a folder, the library scan's speed and the DSP chain, whose saved EQ presets stay.
+// Interface: language, close action, the tray notice, the first-run guide, the hotkeys, the automatic update check, the
+// online artist pictures, the folder tree, the waveform and the hours of its analysis, the track list columns and Discord.
+// Each keeps the other group, and both keep the release a user skipped and the last file opened.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
 

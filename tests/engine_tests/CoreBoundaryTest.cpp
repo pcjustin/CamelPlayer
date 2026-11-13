@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <set>
+#include <vector>
 #include <fstream>
 #include <limits>
 #include <numeric>
@@ -20,6 +22,7 @@
 #include "Common/settings/Settings.h"
 #include "Common/util/Md5.h"
 #include "Common/util/Text.h"
+#include <nlohmann/json.hpp>
 #include "TestUtil.h"
 
 using namespace camel;
@@ -439,6 +442,63 @@ TEST(SettingsBoundary, AToolReadsTheSettingsWithoutWritingThem) {
     const auto path = settingsPath();
     SetEnvironmentVariableW(L"CAMELPLAYER_DATA", nullptr);
     EXPECT_TRUE(path.empty()) << path.string();
+}
+
+// Every setting belongs to a reset group or is kept on purpose: the waveform's hours go with Reset interface, the scan
+// speed with Reset playback, and the update a user skipped stays through both (the owner's choice, 2026-11-11).
+TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
+    const std::set<std::string> interfaceGroup{"language",     "closeAction", "theme",        "trayNoticeShown",
+                                               "firstRunDone", "hotkeys",     "checkUpdates", "artistPictures",
+                                               "folderTree",   "waveform",    "trackColumns", "discord"};
+    const std::set<std::string> playbackGroup{"backend",
+                                              "wasapi",
+                                              "asio",
+                                              "ks",
+                                              "network",
+                                              "airplay",
+                                              "airplayGroup",
+                                              "airplayLevels",
+                                              "outputs",
+                                              "parameters",
+                                              "decoderByFormat",
+                                              "convertUnsupported",
+                                              "convertDsdWhenUnsupported",
+                                              "resampleQuality",
+                                              "autoplay",
+                                              "folderPlaysOn",
+                                              "eq",
+                                              "convolution",
+                                              "crossfeed",
+                                              "dspOrder",
+                                              "volume",
+                                              "replayGain",
+                                              "crossfade",
+                                              "scanSpeed",
+                                              "followedDefault",
+                                              "adoptOutputSets"};
+    const std::set<std::string> kept{"schema", "skippedVersion", "lastFile"};
+    std::vector<std::string> unlisted;
+    const auto file = nlohmann::json::parse(toJson(Settings{}));
+    for (const auto& item : file.items())
+        if (const auto& key = item.key(); !interfaceGroup.contains(key) && !playbackGroup.contains(key) && !kept.contains(key))
+            unlisted.push_back(key);
+    EXPECT_TRUE(unlisted.empty()) << "in no group: " << nlohmann::json(unlisted).dump();
+
+    const Settings defaults;
+    Settings changed;
+    changed.waveform.anyTime = !defaults.waveform.anyTime;
+    changed.waveform.fromMinute = defaults.waveform.fromMinute + 30;
+    changed.waveform.toMinute = defaults.waveform.toMinute + 30;
+    changed.scanSpeed = ScanSpeed::High;
+    changed.skippedVersion = "0.9.9";
+    const auto afterInterface = resetInterface(changed);
+    EXPECT_EQ(afterInterface.waveform, defaults.waveform);
+    EXPECT_EQ(afterInterface.scanSpeed, changed.scanSpeed);
+    EXPECT_EQ(afterInterface.skippedVersion, "0.9.9");
+    const auto afterPlayback = resetPlayback(changed);
+    EXPECT_EQ(afterPlayback.scanSpeed, defaults.scanSpeed);
+    EXPECT_EQ(afterPlayback.waveform, changed.waveform);
+    EXPECT_EQ(afterPlayback.skippedVersion, "0.9.9");
 }
 
 TEST(SettingsBoundary, TheEqIsOffWithFiveFlatBandsAndKeepsItsPresetsThroughAPlaybackReset) {

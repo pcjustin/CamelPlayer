@@ -302,10 +302,10 @@
   <data name="Reset_ClearButton.Content" xml:space="preserve"><value>清除</value></data>
   <data name="Reset_AllButton.Content" xml:space="preserve"><value>全部重置</value></data>
   <data name="Reset_PlaybackTitle.Text" xml:space="preserve"><value>播放與輸出</value></data>
-  <data name="Reset_PlaybackText.Text" xml:space="preserve"><value>後端、裝置、各後端參數、轉換與解碼器回到預設值（WASAPI 跟隨 Windows 預設裝置）。</value></data>
+  <data name="Reset_PlaybackText.Text" xml:space="preserve"><value>後端、裝置、各後端參數、轉換、解碼器與媒體庫掃描速度回到預設值（WASAPI 跟隨 Windows 預設裝置）。</value></data>
   <data name="Reset_PlaybackConfirm" xml:space="preserve"><value>輸出會回到 WASAPI 跟隨 Windows 預設裝置，各後端參數、轉換與解碼器也回到預設值。媒體庫、統計與介面設定不受影響。</value></data>
   <data name="Reset_InterfaceTitle.Text" xml:space="preserve"><value>介面</value></data>
-  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>語言、主題、關閉視窗時的行為、佇列面板、系統列提示、入門引導、快捷鍵與曲目清單的欄寬回到預設值。</value></data>
+  <data name="Reset_InterfaceText.Text" xml:space="preserve"><value>語言、主題、關閉視窗時的行為、佇列面板、系統列提示、入門引導、快捷鍵、波形與其分析時段，以及曲目清單的欄寬回到預設值。</value></data>
   <data name="Reset_InterfaceConfirm" xml:space="preserve"><value>重新啟動後語言改回跟隨 Windows；關閉視窗會縮到系統列；佇列面板會關閉；系統列提示與入門引導視為尚未顯示；曲目清單的欄位回到 3:2:2。</value></data>
   <data name="Reset_LibraryTitle.Text" xml:space="preserve"><value>重建媒體庫</value></data>
   <data name="Reset_LibraryText.Text" xml:space="preserve"><value>重新讀取每個檔案的標籤與封面並重建專輯；播放統計與播放清單會保留。</value></data>

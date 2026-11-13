@@ -68,7 +68,7 @@ TEST(ScanSpeed, IsLowByDefaultAndRoundTrips) {
         Settings settings;
         settings.scanSpeed = speed;
         EXPECT_EQ(fromJson(toJson(settings)).scanSpeed, speed);
-        EXPECT_EQ(resetPlayback(settings).scanSpeed, speed);
+        EXPECT_EQ(resetPlayback(settings).scanSpeed, ScanSpeed::Low); // Reset playback takes it back to the default
         EXPECT_EQ(resetInterface(settings).scanSpeed, speed);
     }
     // ReplayGain analysis had a speed of its own, which the scan speed replaced.

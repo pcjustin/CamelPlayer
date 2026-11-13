@@ -792,7 +792,6 @@ Settings resetPlayback(const Settings& s) {
     reset.checkUpdates = s.checkUpdates;
     reset.artistPictures = s.artistPictures;
     reset.folderTree = s.folderTree;
-    reset.scanSpeed = s.scanSpeed;
     reset.waveform = s.waveform;
     reset.trackColumns = s.trackColumns;
     reset.discord = s.discord;
@@ -814,7 +813,7 @@ Settings resetInterface(const Settings& s) {
     reset.checkUpdates = defaults.checkUpdates;
     reset.artistPictures = defaults.artistPictures;
     reset.folderTree = defaults.folderTree;
-    reset.waveform.enabled = defaults.waveform.enabled;
+    reset.waveform = defaults.waveform;
     reset.trackColumns = defaults.trackColumns;
     reset.discord = defaults.discord;
     return reset;
