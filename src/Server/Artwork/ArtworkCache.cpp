@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "Server/Artwork/ArtworkCache.h"
@@ -569,8 +569,11 @@ void ArtworkCache::trim() {
         bytes += entry.file_size();
     }
     std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) { return a.last_write_time() < b.last_write_time(); });
+    // Down to 90 %, so the thumbnails after this one fit without listing the folder again; that margin never takes the
+    // newest, the one just made.
+    const uintmax_t keep = bytes > maxBytes_ ? maxBytes_ / 10 * 9 : maxBytes_;
     for (const auto& entry : files) {
-        if (bytes <= maxBytes_) break;
+        if (bytes <= keep || (bytes <= maxBytes_ && &entry == &files.back())) break;
         const auto size = entry.file_size();
         std::error_code ec;
         if (std::filesystem::remove(entry.path(), ec)) {

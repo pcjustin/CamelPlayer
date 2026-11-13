@@ -128,6 +128,17 @@ TEST_F(ArtworkCacheTest, DiskCacheEvictsOldThumbnailsToItsByteLimit) {
     for (const auto& entry : std::filesystem::directory_iterator(dir / "thumbs")) total += entry.file_size();
     EXPECT_LE(total, limit);
 }
+TEST_F(ArtworkCacheTest, AFullDiskCacheMakesRoomForMoreThanOneThumbnail) {
+    const auto thumbs = dir / "thumbs";
+    std::filesystem::create_directories(thumbs);
+    for (int i = 0; i < 100; ++i)
+        std::ofstream(thumbs / ("old" + std::to_string(i) + ".jpg"), std::ios::binary) << std::string(1000, 'x');
+    ArtworkCache cache(thumbs, 100'000);
+    ASSERT_TRUE(cache.thumbnail(bitmap()));
+    uintmax_t total = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(thumbs)) total += entry.file_size();
+    EXPECT_LE(total, 90'000U);
+}
 TEST_F(ArtworkCacheTest, WebpWorksWithoutTheWindowsCodec) {
     ArtworkCache cache(dir / "thumbs");
     std::vector<uint8_t> rgba(size_t{32} * 16 * 4, 120);
