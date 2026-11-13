@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "Server/Library/Playlists.h"
@@ -48,12 +48,11 @@ struct Expansion {
 };
 
 std::wstring folded(std::wstring text);
-std::wstring libraryKey(const std::filesystem::path& path);
 
 // A path source (a queue entry) uses the usual path form and case; the library stores the extended, case-folded form.
 void bindPathKeys(sqlite::Statement& statement, const std::string& path) {
     const auto wide = toWide(path);
-    statement.bind(1, toUtf8(libraryKey(wide))).bind(2, toUtf8(folded(wide)));
+    statement.bind(1, toUtf8(spelledLibraryPath(wide).wstring())).bind(2, toUtf8(folded(wide)));
 }
 
 // A track without a title tag is named after its file.
@@ -252,8 +251,11 @@ std::string defaultName(const Expansion& expansion, size_t sources) {
     return expansion.firstName + " +" + std::to_string(sources - 1);
 }
 
+// Cases folded as the scanner folds the library's keys.
 std::wstring folded(std::wstring text) {
-    if (!text.empty()) CharLowerBuffW(text.data(), DWORD(text.size()));
+    if (!text.empty())
+        LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, text.data(), int(text.size()), text.data(), int(text.size()),
+                      nullptr, nullptr, 0);
     return text;
 }
 
@@ -277,13 +279,6 @@ std::filesystem::path usualPath(std::wstring path) {
     if (folded(path.substr(0, 8)) == L"\\\\?\\unc\\") return L"\\\\" + path.substr(8);
     if (path.starts_with(L"\\\\?\\")) return path.substr(4);
     return path;
-}
-
-std::wstring libraryKey(const std::filesystem::path& path) {
-    const auto text = path.wstring();
-    if (text.starts_with(L"\\\\?\\")) return folded(text);
-    if (text.starts_with(L"\\\\")) return folded(L"\\\\?\\unc\\" + text.substr(2));
-    return folded(L"\\\\?\\" + text);
 }
 
 // `path` relative to `folder` when both are on one drive or share; Windows compares the parts without case.
@@ -504,7 +499,7 @@ PlaylistChange importPlaylistFile(LibraryStore& store, const std::filesystem::pa
         std::filesystem::path path(line);
         if (path.is_relative()) path = folder / path;
         path = path.make_preferred().lexically_normal();
-        auto found = files.find(libraryKey(path));
+        auto found = files.find(spelledLibraryPath(path).wstring());
         if (found == files.end()) found = files.find(folded(path.wstring()));
         if (std::error_code error; found == files.end() && std::filesystem::exists(path, error)) {
             try {
