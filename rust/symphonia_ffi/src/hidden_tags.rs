@@ -75,6 +75,13 @@ fn boxes<R: Read + Seek>(r: &mut R, start: u64, end: u64) -> io::Result<Vec<Mp4B
 
 /// The types of the boxes Symphonia reads tags from: a top-level meta and the movie's udta. None outside MP4 files.
 fn tag_boxes<R: Read + Seek>(r: &mut R, len: u64) -> io::Result<Vec<u64>> {
+    // The first type first: a FLAC or WAV header read as a box size passes for a large file, and walking on from it
+    // would read far into the file, on a NAS too, before the result was dropped.
+    let mut first = [0u8; 8];
+    r.seek(SeekFrom::Start(0))?;
+    if len < 8 || r.read_exact(&mut first).is_err() || &first[4..] != b"ftyp" {
+        return Ok(Vec::new());
+    }
     let top = boxes(r, 0, len)?;
     if top.first().map(|b| &b.kind) != Some(b"ftyp") {
         return Ok(Vec::new());
@@ -184,6 +191,58 @@ mod tests {
         source.read_exact(&mut header).unwrap();
         assert_eq!(&header[4..], b"free");
         assert_eq!(source.byte_len(), Some(file.len() as u64));
+    }
+
+    /// A file of `len` bytes that begins with `head`, zeros after it, noting how far any read reached.
+    struct Large {
+        head: Vec<u8>,
+        len: u64,
+        pos: u64,
+        furthest: u64,
+    }
+
+    impl Read for Large {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = buf.len().min((self.len - self.pos.min(self.len)) as usize);
+            for (i, byte) in buf[..n].iter_mut().enumerate() {
+                let at = self.pos as usize + i;
+                *byte = self.head.get(at).copied().unwrap_or(0);
+            }
+            self.pos += n as u64;
+            if n > 0 {
+                self.furthest = self.furthest.max(self.pos);
+            }
+            Ok(n)
+        }
+    }
+
+    impl Seek for Large {
+        fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+            self.pos = match to {
+                SeekFrom::Start(at) => at,
+                SeekFrom::End(back) => (self.len as i64 + back) as u64,
+                SeekFrom::Current(by) => (self.pos as i64 + by) as u64,
+            };
+            Ok(self.pos)
+        }
+    }
+
+    #[test]
+    fn a_large_file_that_is_not_mp4_is_read_only_at_its_start() {
+        // "RIFF" and "fLaC" read as box sizes of about 1.38 and 1.72 GB, which such files exceed.
+        for head in [
+            &b"RIFF\x24\0\0\0WAVEfmt "[..],
+            &b"fLaC\0\0\0\x22\x10\0\x10\0"[..],
+        ] {
+            let mut file = Large {
+                head: head.to_vec(),
+                len: 2_000_000_000,
+                pos: 0,
+                furthest: 0,
+            };
+            assert!(tag_boxes(&mut file, 2_000_000_000).unwrap().is_empty());
+            assert!(file.furthest <= 16, "read up to byte {}", file.furthest);
+        }
     }
 
     #[test]
