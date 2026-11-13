@@ -1102,14 +1102,15 @@ private:
     }
 
     void removeQueue(const std::vector<uint64_t>& ids) {
-        discardPreloads([&](uint64_t id) { return std::ranges::find(ids, id) != ids.end(); });
+        const std::unordered_set<uint64_t> leaving(ids.begin(), ids.end());
+        discardPreloads([&](uint64_t id) { return leaving.contains(id); });
         policy_.remove(ids);
-        if (restored_ && std::find(ids.begin(), ids.end(), state_.queueEntryId) != ids.end()) {
+        if (restored_ && leaving.contains(state_.queueEntryId)) {
             restored_.reset();
             state_.queueEntryId = 0;
             state_.track.reset();
         }
-        std::erase_if(entries_, [&](const QueueEntry& e) { return std::find(ids.begin(), ids.end(), e.id) != ids.end(); });
+        std::erase_if(entries_, [&](const QueueEntry& e) { return leaving.contains(e.id); });
         for (const auto id : ids) libraryEntries_.erase(id);
     }
 

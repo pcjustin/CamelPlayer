@@ -231,3 +231,20 @@ TEST(QueuePolicyTest, AWholeQueueOfUnavailableEntriesIsPassedOverWithoutQuadrati
     const auto took = std::chrono::steady_clock::now() - started;
     EXPECT_LT(took, std::chrono::seconds(1));
 }
+TEST(QueuePolicyTest, RemovingAndAddingManyEntriesInALargeQueueIsNotQuadratic) {
+    std::vector<uint64_t> ids(100'000);
+    for (size_t i = 0; i < ids.size(); ++i) ids[i] = i + 1;
+    QueuePolicy queue(1);
+    queue.replace(ids);
+    queue.select(ids[5]);
+    std::vector<uint64_t> removed, added;
+    for (size_t i = 0; i < ids.size(); i += 5) removed.push_back(ids[i]);
+    for (uint64_t i = 0; i < 20'000; ++i) added.push_back(200'001 + i);
+    const auto started = std::chrono::steady_clock::now();
+    queue.remove(removed);
+    queue.append(added, false);
+    const auto took = std::chrono::steady_clock::now() - started;
+    EXPECT_EQ(queue.state().entries.size(), 100'000U);
+    EXPECT_EQ(queue.state().order.size(), 100'001U); // the current entry stays in the order
+    EXPECT_LT(took, std::chrono::seconds(1)) << std::chrono::duration_cast<std::chrono::milliseconds>(took).count() << " ms";
+}

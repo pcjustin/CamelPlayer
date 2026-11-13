@@ -49,8 +49,8 @@ public:
     }
 
     uint64_t append(const std::vector<uint64_t>& entryIds, bool playNext) {
-        validateUnique(entryIds);
-        if (std::any_of(entryIds.begin(), entryIds.end(), [&](uint64_t id) { return contains(id); }))
+        const auto adding = validateUnique(entryIds);
+        if (std::any_of(entries_.begin(), entries_.end(), [&](uint64_t id) { return adding.contains(id); }))
             throw std::invalid_argument("appended queue entry IDs must be new");
         const auto after = [&](const std::vector<uint64_t>& list) {
             const auto at = playNext && current_ ? std::find(list.begin(), list.end(), *current_) : list.end();
@@ -63,19 +63,12 @@ public:
     }
 
     uint64_t remove(const std::vector<uint64_t>& entryIds) {
-        validateUnique(entryIds);
-        if (std::any_of(entryIds.begin(), entryIds.end(), [&](uint64_t id) { return !contains(id); }))
+        const auto leaving = validateUnique(entryIds);
+        if (size_t(std::count_if(entries_.begin(), entries_.end(), [&](uint64_t id) { return leaving.contains(id); })) !=
+            leaving.size())
             throw std::invalid_argument("cannot remove an unknown queue entry");
-        entries_.erase(
-            std::remove_if(entries_.begin(), entries_.end(),
-                           [&](uint64_t id) { return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end(); }),
-            entries_.end());
-        order_.erase(std::remove_if(order_.begin(), order_.end(),
-                                    [&](uint64_t id) {
-                                        return std::find(entryIds.begin(), entryIds.end(), id) != entryIds.end() &&
-                                               current_ != id;
-                                    }),
-                     order_.end());
+        std::erase_if(entries_, [&](uint64_t id) { return leaving.contains(id); });
+        std::erase_if(order_, [&](uint64_t id) { return leaving.contains(id) && current_ != id; });
         for (const auto id : entryIds) {
             if (current_ != id) {
                 failed_.erase(id);
@@ -208,10 +201,11 @@ public:
     }
 
 private:
-    static void validateUnique(const std::vector<uint64_t>& ids) {
+    static std::unordered_set<uint64_t> validateUnique(const std::vector<uint64_t>& ids) {
         std::unordered_set<uint64_t> unique(ids.begin(), ids.end());
         if (unique.size() != ids.size() || unique.contains(0))
             throw std::invalid_argument("queue entry IDs must be unique and nonzero");
+        return unique;
     }
 
     bool contains(uint64_t id) const { return std::find(entries_.begin(), entries_.end(), id) != entries_.end(); }
