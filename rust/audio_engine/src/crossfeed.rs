@@ -63,8 +63,18 @@ impl Coefficients {
 }
 
 /// The response from a channel to its own ear and to the other ear at `frequency`.
+#[cfg(test)]
 pub(crate) fn response(params: Params, rate: f64, frequency: f64) -> (Complex, Complex) {
+    responses(params, rate)(frequency)
+}
+
+/// [`response`] at any frequency, its coefficients worked out once.
+pub(crate) fn responses(params: Params, rate: f64) -> impl Fn(f64) -> (Complex, Complex) {
     let c = Coefficients::new(params, rate);
+    move |frequency| response_of(&c, rate, frequency)
+}
+
+fn response_of(c: &Coefficients, rate: f64, frequency: f64) -> (Complex, Complex) {
     let z1 = Complex::unit(-2.0 * PI * frequency / rate);
     let one = Complex::new(1.0, 0.0);
     let direct = (Complex::new(c.a0_hi, 0.0) + z1.scale(c.a1_hi)).div(one - z1.scale(c.b1_hi));

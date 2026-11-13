@@ -186,16 +186,26 @@ pub(crate) fn acts(bands: &[Band], rate: f64) -> bool {
     bands.iter().any(|b| b.valid() && b.acts(rate))
 }
 
-/// The complex response `bands` give `channel` at `frequency`.
-pub(crate) fn response(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> Complex {
-    let w = 2.0 * PI * frequency / rate;
+/// The sections `bands` apply to `channel` at `rate`, worked out once for a response over many frequencies.
+pub(crate) fn channel_sections(bands: &[Band], rate: f64, channel: usize) -> Vec<[f64; 5]> {
     bands
         .iter()
         .filter(|b| b.valid() && b.acts(rate) && b.applies_to(channel))
         .flat_map(|b| b.sections(rate))
-        .fold(Complex::new(1.0, 0.0), |product, s| {
-            product * section_response(&s, w)
-        })
+        .collect()
+}
+
+/// The complex response of `sections` at `frequency`.
+pub(crate) fn sections_response(sections: &[[f64; 5]], rate: f64, frequency: f64) -> Complex {
+    let w = 2.0 * PI * frequency / rate;
+    sections.iter().fold(Complex::new(1.0, 0.0), |product, s| {
+        product * section_response(s, w)
+    })
+}
+
+/// The complex response `bands` give `channel` at `frequency`.
+pub(crate) fn response(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> Complex {
+    sections_response(&channel_sections(bands, rate, channel), rate, frequency)
 }
 
 /// The level in dB that `bands` give `channel` at `frequency`.

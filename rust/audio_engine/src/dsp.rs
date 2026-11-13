@@ -266,6 +266,13 @@ pub(crate) fn analyze(settings: &Settings, rate: u32, channels: usize) -> Analys
             points
         }
     };
+    // The filters are worked out once, not at every frequency: it ran under the stage lock.
+    let eq_sections: [Vec<[f64; 5]>; 3] = if eq_on {
+        std::array::from_fn(|channel| eq::channel_sections(&settings.bands, rate_f, channel))
+    } else {
+        Default::default()
+    };
+    let crossfeed_at = crossfeed.map(|p| crossfeed::responses(p, rate_f));
     let one = Complex::new(1.0, 0.0);
     let identity = [[one, Complex::ZERO], [Complex::ZERO, one]];
     let mut peak: f64 = 0.0;
@@ -275,12 +282,18 @@ pub(crate) fn analyze(settings: &Settings, rate: u32, channels: usize) -> Analys
             let stage: Option<Matrix> = match node {
                 NODE_EQ => eq_on.then(|| {
                     [
-                        [eq::response(&settings.bands, rate_f, 0, f), Complex::ZERO],
-                        [Complex::ZERO, eq::response(&settings.bands, rate_f, 1, f)],
+                        [
+                            eq::sections_response(&eq_sections[0], rate_f, f),
+                            Complex::ZERO,
+                        ],
+                        [
+                            Complex::ZERO,
+                            eq::sections_response(&eq_sections[1], rate_f, f),
+                        ],
                     ]
                 }),
-                NODE_CROSSFEED => crossfeed.map(|p| {
-                    let (direct, cross) = crossfeed::response(p, rate_f, f);
+                NODE_CROSSFEED => crossfeed_at.as_ref().map(|at| {
+                    let (direct, cross) = at(f);
                     [[direct, cross], [cross, direct]]
                 }),
                 NODE_CONVOLUTION => impulse.map(|ir| {
@@ -301,7 +314,7 @@ pub(crate) fn analyze(settings: &Settings, rate: u32, channels: usize) -> Analys
         }
         if channels > 2 && eq_on {
             // Further channels get only the bands for every channel.
-            peak = peak.max(eq::response(&settings.bands, rate_f, 2, f).norm());
+            peak = peak.max(eq::sections_response(&eq_sections[2], rate_f, f).norm());
         }
     }
     Analysis {
