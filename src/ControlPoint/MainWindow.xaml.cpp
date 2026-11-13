@@ -895,7 +895,33 @@ void MainWindow::populateOutputs() {
     }
     const bool players = std::ranges::any_of(
         rows, [](const camel::server::OutputRow& r) { return camel::isNetworkPlayer(r.backend) && r.enabled; });
-    FirewallNotice().IsOpen(players && !camel::server::firewallRuleExists());
+    if (players && !firewallRule_) readFirewallRule(); // the notice opens once it is known
+    FirewallNotice().IsOpen(players && firewallRule_ == false);
+}
+
+namespace {
+bool firewallRuleFound() {
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool found = camel::server::firewallRuleExists();
+    if (SUCCEEDED(com)) CoUninitialize();
+    return found;
+}
+} // namespace
+
+winrt::fire_and_forget MainWindow::readFirewallRule() {
+    if (std::exchange(firewallReading_, true)) co_return;
+    auto weak = get_weak();
+    auto queue = DispatcherQueue();
+    co_await winrt::resume_background();
+    const bool found = firewallRuleFound();
+    queue.TryEnqueue([weak, found] {
+        const auto self = weak.get();
+        if (!self) return;
+        self->firewallReading_ = false;
+        self->firewallRule_ = found;
+        self->populateOutputs();
+        if (std::exchange(self->firewallAsk_, false)) self->askFirewallRule();
+    });
 }
 
 winrt::fire_and_forget MainWindow::addFirewallRule() {
@@ -903,15 +929,24 @@ winrt::fire_and_forget MainWindow::addFirewallRule() {
     auto queue = DispatcherQueue();
     co_await winrt::resume_background();
     camel::server::addFirewallRule();
-    queue.TryEnqueue([weak] {
-        if (auto self = weak.get()) self->populateOutputs();
+    const bool found = firewallRuleFound();
+    queue.TryEnqueue([weak, found] {
+        const auto self = weak.get();
+        if (!self) return;
+        self->firewallRule_ = found;
+        self->populateOutputs();
     });
 }
 
 // The first player enabled says why before Windows asks for an administrator; declining leaves the notice with its fix.
 winrt::fire_and_forget MainWindow::askFirewallRule() {
     auto strong = get_strong();
-    if (camel::server::firewallRuleExists()) co_return;
+    if (!firewallRule_) {
+        firewallAsk_ = true; // asked again once the rule is known
+        readFirewallRule();
+        co_return;
+    }
+    if (*firewallRule_) co_return;
     ContentDialog dialog;
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(tr(L"Firewall_Title")));

@@ -213,6 +213,7 @@ private:
     winrt::fire_and_forget askDeleteOutput(camel::Backend backend, std::string id, hstring label);
     winrt::fire_and_forget askFirewallRule();
     winrt::fire_and_forget addFirewallRule();
+    winrt::fire_and_forget readFirewallRule();
     void readSettingsFromUi(); // controls -> settings_
     // One decoder selector per format with more than one integrated decoder.
     std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 3> decoderCombos();
@@ -346,6 +347,10 @@ private:
         camel::server::SettingsDto real; // settings_ holds this output's parameters while the dialog is open
     };
     std::optional<OutputEdit> editingOutput_;
+    // Whether the network players' firewall rule exists, read in the background: listing the rules takes 15-25 ms.
+    std::optional<bool> firewallRule_;
+    bool firewallReading_ = false;
+    bool firewallAsk_ = false; // a player was enabled before the rule was known
     std::vector<std::pair<Microsoft::UI::Xaml::FrameworkElement, Microsoft::UI::Xaml::Controls::HyperlinkButton>> settingsLinks_;
     // Goes back in the library pages, or from Listening to Home, when the title bar offers Back.
     bool goBack();
