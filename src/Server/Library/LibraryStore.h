@@ -114,6 +114,8 @@ public:
     // Counts the committed writes to files and roots, so background work over files can wait for them to change rather
     // than for any commit, such as the queue session saved every few seconds while playing.
     uint64_t fileChanges() const { return fileChanges_.load(); }
+    // The same for the tracks table.
+    uint64_t trackChanges() const { return trackChanges_.load(); }
 
     // library.db.daily-YYYYMMDD.bak: a copy taken while idle, or at exit, once the last is a day old; kept only when it
     // passes quick_check. A damaged database is replaced by it before the migration backups. True when one was made.
@@ -136,11 +138,14 @@ private:
     friend class LibraryScanner;
     std::atomic<unsigned> activeScans_{0};
     std::atomic<int64_t> scanning_{0}, scanFound_{0}, scanChecked_{0}, scanFinishing_{0};
-    std::atomic<uint64_t> fileChanges_{0};
+    std::atomic<uint64_t> fileChanges_{0}, trackChanges_{0};
     std::atomic<ScanSpeed> scanSpeed_{ScanSpeed::Low};
     std::atomic<int> userScans_{0};
     std::atomic<uint8_t> followingUserScan_{0}; // a bit per BackgroundWork still at High after a user's scan
-    bool fileRowsWritten_ = false;              // by the transaction on the writer thread
+    struct RowsWritten {
+        bool files = false; // files or roots
+        bool tracks = false;
+    } rowsWritten_; // by the transaction on the writer thread
     // Different roots scan at the same time; scanMutex_ serializes what crosses roots (finishing a scan,
     // absorbing roots), and each root's lock (under jobsMutex_) keeps one scan per root.
     std::mutex scanMutex_;

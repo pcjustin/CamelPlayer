@@ -232,9 +232,11 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
     sqlite3_update_hook(
         db_->handle(),
         [](void* changes, int, const char*, const char* table, sqlite3_int64) {
-            if (std::strcmp(table, "files") == 0 || std::strcmp(table, "roots") == 0) *static_cast<bool*>(changes) = true;
+            auto& written = *static_cast<RowsWritten*>(changes);
+            if (std::strcmp(table, "files") == 0 || std::strcmp(table, "roots") == 0) written.files = true;
+            if (std::strcmp(table, "tracks") == 0) written.tracks = true;
         },
-        &fileRowsWritten_);
+        &rowsWritten_);
     writer_ = std::thread([this] { writerMain(); });
 }
 
@@ -266,11 +268,12 @@ void LibraryStore::close() {
 std::future<void> LibraryStore::write(std::function<void(sqlite::Database&)> work) {
     return enqueue(std::packaged_task<void()>([this, work = std::move(work)] {
         sqlite::Transaction t(*db_);
-        fileRowsWritten_ = false;
+        rowsWritten_ = {};
         work(*db_);
         t.commit();
         // Only once committed, so a reader that sees the new count also sees the rows.
-        if (fileRowsWritten_) fileChanges_.fetch_add(1);
+        if (rowsWritten_.files) fileChanges_.fetch_add(1);
+        if (rowsWritten_.tracks) trackChanges_.fetch_add(1);
     }));
 }
 

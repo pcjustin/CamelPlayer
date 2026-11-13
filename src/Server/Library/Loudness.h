@@ -126,6 +126,15 @@ private:
     std::unique_ptr<AlbumMeasure> measuring_;                                // the album cut short last, with its files' ids
     std::vector<int64_t> measuringFiles_;
     bool gaveWay_ = false; // the last album's analysis waited for playback or a setting, not finished
+    // What a pass reads besides the library's rows, with the counts of their changes.
+    struct IdleInputs {
+        uint64_t files = 0, tracks = 0;
+        std::vector<int64_t> queued;
+        std::vector<std::filesystem::path> playing;
+        bool loudness = false, scanning = false, waveforms = false, window = false;
+        bool operator==(const IdleInputs&) const = default;
+    };
+    std::optional<IdleInputs> idle_; // those of the last pass that found nothing to do
     std::atomic<int64_t> analyzed_ = 0, total_ = 0;
     mutable std::atomic<int64_t> progressAsked_ = 0; // steady_clock ticks of the last progress() call
     std::atomic<bool> running_ = false;

@@ -348,11 +348,24 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 count();
                 counted = std::chrono::steady_clock::now();
             }
-            forgetAway();
             const bool loudness = options_.settings().mode != ReplayGainMode::Off;
-            if (!loudness) store_.caughtUp(BackgroundWork::Loudness);
             const bool scanning = store_.scanProgress().scans > 0;
             const bool waveforms = waveformsOn();
+            // A pass that found nothing to do finds nothing again until what it read changes.
+            IdleInputs inputs{store_.fileChanges(),
+                              store_.trackChanges(),
+                              options_.queued(),
+                              {},
+                              loudness,
+                              scanning,
+                              waveforms,
+                              waveforms && inAnalysisWindow(options_.waveform(), minuteOfDay())};
+            if (waveforms && options_.playing)
+                for (const auto& track : options_.playing()) inputs.playing.push_back(track.path);
+            if (idle_ == inputs) continue;
+            idle_.reset();
+            forgetAway();
+            if (!loudness) store_.caughtUp(BackgroundWork::Loudness);
             if (!waveforms) store_.caughtUp(BackgroundWork::Waveforms);
             // Queued tracks' loudness first, as playing volume depends on it; then the playing track's waveform; then
             // the rest of the library's loudness; then the background waveforms, after the scan and in their window.
@@ -371,11 +384,12 @@ void LoudnessAnalyzer::run(const std::stop_token& stop) {
                 continue;
             }
             if (loudness && !scanning) store_.caughtUp(BackgroundWork::Loudness);
-            if (waveforms && !scanning && inAnalysisWindow(options_.waveform(), minuteOfDay()) && waveformsInBackground(stop)) {
+            if (waveforms && !scanning && inputs.window && waveformsInBackground(stop)) {
                 rest = false;
                 continue;
             }
             running_ = false;
+            idle_ = std::move(inputs);
         } catch (const std::exception& e) {
             log::warn("audio analysis: %s", e.what());
         }
