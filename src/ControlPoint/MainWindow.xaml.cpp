@@ -1447,15 +1447,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             count.replace(at, 3, ui::count(int64_t(ui::QueueCollection::kShown)));
         QueueCountText().Text(count);
         QueueEmptyText().Visibility(snapshot.queue.entries.empty() ? Visibility::Visible : Visibility::Collapsed);
-        std::vector<ui::QueueRow> rows;
-        rows.reserve(snapshot.queue.entries.size());
-        for (const auto& entry : snapshot.queue.entries)
-            rows.push_back({entry.id,
-                            entry.title.empty() ? hstring(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
-                                                : ui::utf8(entry.title),
-                            ui::utf8(entry.artist), ui::utf8(entry.source.pathUtf8()), entry.automatic, entry.file,
-                            entry.favorite});
-        queueItems_->update(std::move(rows), snapshot.queueEntryId);
+        queueItems_->update(snapshot.queue.entries, snapshot.queueEntryId);
     } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
         shownQueueEntryId_ = snapshot.queueEntryId;
         queueItems_->setCurrent(snapshot.queueEntryId);

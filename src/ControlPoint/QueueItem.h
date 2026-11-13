@@ -6,6 +6,10 @@
 
 #include "QueueItem.g.h"
 
+namespace camel::server {
+struct QueueEntry;
+}
+
 namespace ui {
 
 struct QueueRow {
@@ -39,10 +43,13 @@ struct QueueItem : QueueItemT<QueueItem> {
     void PropertyChanged(event_token const& token) noexcept { changed_.remove(token); }
 
     const ui::QueueRow& row() const { return row_; }
-    void fill(const ui::QueueRow& row, bool current);
+    // The snapshot's entry the row was made from, for the collection to keep when the row is moved.
+    const camel::server::QueueEntry* entry() const { return entry_; }
+    void fill(const ui::QueueRow& row, bool current, const camel::server::QueueEntry* entry);
 
 private:
     ui::QueueRow row_;
+    const camel::server::QueueEntry* entry_ = nullptr;
     bool current_ = false;
     event<Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> changed_;
 };

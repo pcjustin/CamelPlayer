@@ -18,7 +18,8 @@ hstring QueueItem::RemoveLabel() const {
     return ui::tr(L"Queue_RemoveEntry");
 }
 
-void QueueItem::fill(const ui::QueueRow& row, bool current) {
+void QueueItem::fill(const ui::QueueRow& row, bool current, const camel::server::QueueEntry* entry) {
+    entry_ = entry;
     if (row_ == row && current_ == current) return;
     row_ = row;
     current_ = current;

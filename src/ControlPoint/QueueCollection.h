@@ -2,16 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// The queue panel's ItemsSource. A queue can hold a whole 100k-track library, so items are made only for the rows the
-// list realizes, and a new snapshot with the same entries refreshes those rows in place instead of resetting the view.
-// Drag reordering moves rows through RemoveAt and InsertAt.
+// The queue panel's ItemsSource. A queue can hold a whole 100k-track library, so items, and the text of their rows, are
+// made only for the rows the list realizes (converting every entry took 100-280 ms on the UI thread at each change),
+// and a new snapshot with the same entries refreshes those rows in place instead of resetting the view. Drag
+// reordering moves rows through RemoveAt and InsertAt.
 #pragma once
 
 #include <algorithm>
+#include <filesystem>
 #include <unordered_map>
 #include <vector>
 
+#include "Common/util/Text.h"
 #include "QueueItem.h"
+#include "Server/Api/ServerApi.h"
+#include "UiText.h"
 
 namespace ui {
 
@@ -29,20 +34,24 @@ public:
     // past the list's bottom edge at 125 % scaling, and higher scaling lowers that limit.
     static constexpr size_t kShown = 25000;
 
-    void update(std::vector<QueueRow> rows, uint64_t current) {
+    void update(camel::server::QueueEntries entries, uint64_t current) {
+        std::vector<Slot> rows;
+        rows.reserve(entries.size());
+        for (const auto& entry : entries) rows.push_back({entry.id, &entry});
         size_t first = 0;
         if (rows.size() > kShown) {
-            const auto at = std::find_if(rows.begin(), rows.end(), [&](const QueueRow& row) { return row.id == current; });
+            const auto at = std::find_if(rows.begin(), rows.end(), [&](const Slot& row) { return row.id == current; });
             const size_t index = at == rows.end() ? 0 : size_t(at - rows.begin());
             first = std::min(index > kShown / 2 ? index - kShown / 2 : 0, rows.size() - kShown);
         }
         const bool same = first == first_ && std::equal(rows.begin(), rows.end(), rows_.begin(), rows_.end(),
-                                                        [](const QueueRow& a, const QueueRow& b) { return a.id == b.id; });
+                                                        [](const Slot& a, const Slot& b) { return a.id == b.id; });
         rows_ = std::move(rows);
+        entries_ = std::move(entries); // what the slots point into
         first_ = first;
         current_ = current;
         if (same) {
-            for (auto& [index, item] : items_) self(item)->fill(row(index), row(index).id == current_);
+            for (auto& [index, item] : items_) fill(item, index);
             return;
         }
         items_.clear();
@@ -51,7 +60,7 @@ public:
 
     void setCurrent(uint64_t current) {
         current_ = current;
-        for (auto& [index, item] : items_) self(item)->fill(row(index), row(index).id == current_);
+        for (auto& [index, item] : items_) fill(item, index);
     }
 
     size_t total() const { return rows_.size(); }
@@ -73,7 +82,7 @@ public:
         auto& item = items_[index];
         if (!item) {
             item = winrt::make<winrt::CamelPlayer::implementation::QueueItem>();
-            self(item)->fill(row(index), row(index).id == current_);
+            fill(item, index);
         }
         if (items_.size() > 4000)
             std::erase_if(items_, [index](const auto& pair) { return pair.first + 2000 < index || pair.first > index + 2000; });
@@ -114,7 +123,7 @@ public:
         using winrt::Windows::Foundation::Collections::CollectionChange;
         if (index > Size()) throw winrt::hresult_out_of_bounds();
         const auto before = Size();
-        rows_.insert(rows_.begin() + ptrdiff_t(first_ + index), self(value)->row());
+        rows_.insert(rows_.begin() + ptrdiff_t(first_ + index), Slot{self(value)->row().id, self(value)->entry()});
         shift(index, 1);
         items_[index] = value;
         changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemInserted, index));
@@ -164,7 +173,30 @@ private:
         return winrt::get_self<winrt::CamelPlayer::implementation::QueueItem>(item.as<Item>());
     }
 
-    const QueueRow& row(uint32_t index) const { return rows_[first_ + index]; }
+    // A listed row: its entry's id and the entry in the snapshot entries_ holds.
+    struct Slot {
+        uint64_t id = 0;
+        const camel::server::QueueEntry* entry = nullptr;
+    };
+
+    const Slot& row(uint32_t index) const { return rows_[first_ + index]; }
+
+    static QueueRow rowOf(const camel::server::QueueEntry& entry) {
+        const auto& path = entry.source.pathUtf8();
+        return {entry.id,
+                entry.title.empty() ? winrt::hstring(std::filesystem::path(camel::toWide(path)).stem().wstring())
+                                    : utf8(entry.title),
+                utf8(entry.artist),
+                utf8(path),
+                entry.automatic,
+                entry.file,
+                entry.favorite};
+    }
+
+    void fill(IInspectable const& item, uint32_t index) const {
+        const auto& slot = row(index);
+        self(item)->fill(rowOf(*slot.entry), slot.id == current_, slot.entry);
+    }
 
     // Realized items keep following their rows when rows before them are removed or inserted.
     void shift(uint32_t from, int delta) {
@@ -178,7 +210,8 @@ private:
         items_ = std::move(moved);
     }
 
-    std::vector<QueueRow> rows_;
+    std::vector<Slot> rows_;
+    camel::server::QueueEntries entries_;
     size_t first_ = 0; // the first listed row
     uint64_t current_ = 0;
     std::unordered_map<uint32_t, IInspectable> items_;
