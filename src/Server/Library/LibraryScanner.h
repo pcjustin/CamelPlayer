@@ -11,10 +11,27 @@
 #include <string>
 #include <vector>
 
+#include "Common/AudioFormat.h"
+#include "Common/AudioTypes.h"
 #include "Server/Artwork/ArtworkProvider.h"
 #include "Server/Library/LibraryStore.h"
 
+namespace TagLib {
+class PropertyMap;
+}
+
 namespace camel::server {
+
+// A file's stream as the library reads it, for the scan and the file details alike: its format, what its decoder
+// tells (DSD at its 1-bit rate) and whether the length is an estimate. A FLAC file's scan reads its STREAMINFO instead.
+struct LibraryStream {
+    audio::AudioFormat format{};
+    audio::SourceInfo info;
+    bool lengthEstimated = false;
+};
+LibraryStream readLibraryStream(const std::filesystem::path& path);
+// A ReplayGain tag's value as the library reads it.
+std::optional<double> libraryGain(const TagLib::PropertyMap& tags, const char* name);
 
 std::filesystem::path canonicalLibraryPath(const std::filesystem::path& path);
 // The library's key for `path` from its spelling alone: canonicalLibraryPath's result for a path the library gave out,

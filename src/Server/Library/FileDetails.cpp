@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -45,8 +45,6 @@
 
 #include "Common/AudioFormat.h"
 #include "Common/util/Text.h"
-#include "Engine/decode/FormatProbe.h"
-#include "Engine/decode/IDecoder.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryViews.h"
 
@@ -225,36 +223,17 @@ std::vector<FileTagSection> sectionsOf(TagLib::File* file) {
     return out;
 }
 
-// As the scanner reads the stream (LibraryScanner.cpp), DSD at its 1-bit rate.
+// As the scanner reads the stream, by the same code.
 void readStream(FileDetails& details, const std::filesystem::path& path) {
-    const auto format = audio::probeFormat(path);
-    bool estimated = false;
-    audio::SourceInfo info;
-    if (format == audio::AudioFormat::Mp3)
-        info = audio::probeMp3Info(path, estimated);
-    else if (format == audio::AudioFormat::Aac)
-        info = audio::probeAacInfo(path);
-    else
-        info = audio::openDecoder(audio::defaultDecoder(format), path)->info();
-    if (format == audio::AudioFormat::Dsd) {
-        info.sampleRate *= 8;
-        info.totalFrames *= 8;
-    }
+    const auto stream = readLibraryStream(path);
+    const auto format = stream.format;
+    const auto& info = stream.info;
     details.format = audio::formatName(format);
     details.sampleRate = info.sampleRate;
     details.bitsPerSample = audio::isLossy(format) ? 0 : info.bitsPerSample; // a lossy stream has no source depth
     details.channels = info.channels;
     details.frames = info.totalFrames;
     details.lengthMs = info.sampleRate ? info.totalFrames * 1000 / info.sampleRate : 0;
-}
-
-std::optional<double> gainOf(const TagLib::PropertyMap& tags, const char* name) {
-    const auto values = tags.value(name);
-    if (values.isEmpty()) return std::nullopt;
-    const auto text = utf8(values.front());
-    char* end = nullptr;
-    const double value = std::strtod(text.c_str(), &end);
-    return end != text.c_str() && std::isfinite(value) ? std::optional(value) : std::nullopt;
 }
 
 std::string systemMessage(DWORD code) {
@@ -452,10 +431,10 @@ FileDetails readFileDetails(const std::string& pathUtf8, sqlite::Database* db) {
             if (!ref.isNull()) {
                 details.sections = sectionsOf(ref.file());
                 const auto tags = ref.file()->properties();
-                details.trackGain = gainOf(tags, "REPLAYGAIN_TRACK_GAIN");
-                details.trackPeak = gainOf(tags, "REPLAYGAIN_TRACK_PEAK");
-                details.albumGain = gainOf(tags, "REPLAYGAIN_ALBUM_GAIN");
-                details.albumPeak = gainOf(tags, "REPLAYGAIN_ALBUM_PEAK");
+                details.trackGain = libraryGain(tags, "REPLAYGAIN_TRACK_GAIN");
+                details.trackPeak = libraryGain(tags, "REPLAYGAIN_TRACK_PEAK");
+                details.albumGain = libraryGain(tags, "REPLAYGAIN_ALBUM_GAIN");
+                details.albumPeak = libraryGain(tags, "REPLAYGAIN_ALBUM_PEAK");
                 if (const auto* audio = ref.audioProperties()) details.bitrateKbps = uint32_t(std::max(0, audio->bitrate()));
             }
             if (!details.bitrateKbps && details.lengthMs) details.bitrateKbps = uint32_t(*details.size * 8 / details.lengthMs);

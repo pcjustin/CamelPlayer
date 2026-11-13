@@ -221,20 +221,9 @@ Metadata metadata(const Path& path, int64_t fileSize) {
         out.cover = cover;
         return out;
     }
-    const auto format = audio::probeFormat(path);
-    audio::SourceInfo info;
-    bool estimated = false;
-    if (format == audio::AudioFormat::Mp3)
-        info = audio::probeMp3Info(path, estimated);
-    else if (format == audio::AudioFormat::Aac)
-        info = audio::probeAacInfo(path);
-    else
-        info = audio::openDecoder(audio::defaultDecoder(format), path)->info();
-    Metadata out{audio::formatId(format), info, {}, false, estimated};
-    if (format == audio::AudioFormat::Dsd) {
-        out.info.sampleRate *= 8;
-        out.info.totalFrames *= 8;
-    }
+    const auto read = readLibraryStream(path);
+    const auto format = read.format;
+    Metadata out{audio::formatId(format), read.info, {}, false, read.lengthEstimated};
     char header[8]{};
     std::ifstream(path, std::ios::binary).read(header, sizeof(header));
     TagLib::FileStream stream(path.c_str(), true);
@@ -353,11 +342,8 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
     for (const auto* field : {"TITLESORT", "ALBUMSORT", "ARTISTSORT"}) s.bind(i++, tag(m, field));
     for (const auto* field :
          {"REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK", "REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_PEAK"}) {
-        const auto value = tag(m, field);
-        char* end = nullptr;
-        const double parsed = std::strtod(value.c_str(), &end);
-        if (end != value.c_str() && std::isfinite(parsed))
-            s.bind(i++, parsed);
+        if (const auto gain = libraryGain(m.tags, field))
+            s.bind(i++, *gain);
         else
             s.bindNull(i++);
     }
@@ -791,6 +777,31 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
 }
 
 } // namespace
+
+LibraryStream readLibraryStream(const Path& path) {
+    LibraryStream stream;
+    stream.format = audio::probeFormat(path);
+    if (stream.format == audio::AudioFormat::Mp3)
+        stream.info = audio::probeMp3Info(path, stream.lengthEstimated);
+    else if (stream.format == audio::AudioFormat::Aac)
+        stream.info = audio::probeAacInfo(path);
+    else
+        stream.info = audio::openDecoder(audio::defaultDecoder(stream.format), path)->info();
+    if (stream.format == audio::AudioFormat::Dsd) {
+        stream.info.sampleRate *= 8;
+        stream.info.totalFrames *= 8;
+    }
+    return stream;
+}
+
+std::optional<double> libraryGain(const TagLib::PropertyMap& tags, const char* name) {
+    const auto values = tags.value(name);
+    if (values.isEmpty()) return std::nullopt;
+    const auto value = trimmedTag(values.front().to8Bit(true));
+    char* end = nullptr;
+    const double parsed = std::strtod(value.c_str(), &end);
+    return end != value.c_str() && std::isfinite(parsed) ? std::optional(parsed) : std::nullopt;
+}
 
 Path canonicalLibraryPath(const Path& path) {
     return canonicalRoot(path);
