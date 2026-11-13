@@ -4,13 +4,25 @@
 
 #pragma once
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <string_view>
 
 #include "Engine/EngineAbi.h"
+#include "Engine/decode/IDecoder.h"
 
 namespace camel::audio {
 
-CamelDecoderHostV1 makeDecoderHostV1();
+// A decoder already open on `path`, which the host's first open of `path` with decoder number `kind` takes rather than
+// opening the file again.
+struct OpenedDecoder {
+    std::unique_ptr<IDecoder> decoder;
+    std::filesystem::path path;
+    uint32_t kind = 0;
+};
+
+// `opened`, when given, outlives the host.
+CamelDecoderHostV1 makeDecoderHostV1(OpenedDecoder* opened = nullptr);
 
 // The C ABI decoder number for a decoder in decoderRegistry(): built-ins keep CAMEL_DECODER_SYMPHONIA..DSD_NEXUS, others
 // are CAMEL_DECODER_REGISTERED_BASE + their registration index. 0 for an unknown ID.

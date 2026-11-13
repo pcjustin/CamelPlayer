@@ -8,12 +8,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
 #include "Common/settings/Settings.h"
 #include "Engine/EngineAbi.h"
 #include "Engine/FormatRule.h"
+#include "Engine/decode/DecoderHost.h"
 
 namespace camel::audio {
 
@@ -37,9 +39,11 @@ public:
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`. `dsd` makes the stream native DSD or
     // DoP. The Engine predecodes up to `predecodeSeconds` (within its memory limit). `gainDb` is the track's ReplayGain.
+    // `opened`, a decoder `decoder` has opened on `path` and not read, is used rather than opening the file again.
     // Throws Error on failure.
     RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                Conversion conversion, DsdPath dsd = DsdPath::None, uint32_t predecodeSeconds = 10, double gainDb = 0.0);
+                Conversion conversion, DsdPath dsd = DsdPath::None, uint32_t predecodeSeconds = 10, double gainDb = 0.0,
+                std::unique_ptr<IDecoder> opened = nullptr);
     ~RustSession();
     RustSession(const RustSession&) = delete;
     RustSession& operator=(const RustSession&) = delete;
@@ -103,6 +107,7 @@ private:
     CamelCommandStampV1 nextCommand();
 
     CamelEngine* engine_ = nullptr;
+    OpenedDecoder opened_;
     CamelDecoderHostV1 host_{};
     CamelCommandStampV1 command_{};
     bool raw_ = false;           // DoP or native DSD

@@ -54,14 +54,18 @@ std::string decoderFor(uint32_t number) {
     throw Error(ErrorCode::UnsupportedStream, "unknown decoder selection");
 }
 
-int32_t openDecoderHost(void*, uint32_t kind, const uint8_t* path, uint64_t pathLength, void** outDecoder,
+int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint64_t pathLength, void** outDecoder,
                         CamelSourceInfoV1* info) noexcept {
     if (!path || !pathLength || pathLength > std::numeric_limits<size_t>::max() || !outDecoder || !info)
         return CAMEL_DECODER_HOST_E_FORMAT;
     *outDecoder = nullptr;
     try {
         const std::string_view utf8(reinterpret_cast<const char*>(path), static_cast<size_t>(pathLength));
-        auto decoder = openDecoder(decoderFor(kind), std::filesystem::path(toWide(utf8)));
+        const std::filesystem::path file(toWide(utf8));
+        auto* opened = static_cast<OpenedDecoder*>(context);
+        auto decoder = opened && opened->decoder && opened->kind == kind && opened->path == file
+                           ? std::move(opened->decoder)
+                           : openDecoder(decoderFor(kind), file);
         const auto& source = decoder->info();
         auto handle = std::make_unique<DecoderHandle>();
         handle->decoder = std::move(decoder);
@@ -135,8 +139,8 @@ int32_t lengthDecoderHost(void*, void* opaque, uint64_t* totalFrames) noexcept {
 
 } // namespace
 
-CamelDecoderHostV1 makeDecoderHostV1() {
-    return {sizeof(CamelDecoderHostV1), CAMEL_ENGINE_ABI_VERSION, nullptr, openDecoderHost, readDecoderHost, seekDecoderHost,
+CamelDecoderHostV1 makeDecoderHostV1(OpenedDecoder* opened) {
+    return {sizeof(CamelDecoderHostV1), CAMEL_ENGINE_ABI_VERSION, opened, openDecoderHost, readDecoderHost, seekDecoderHost,
             closeDecoderHost,           lengthDecoderHost};
 }
 

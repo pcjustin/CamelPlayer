@@ -102,9 +102,10 @@ void destroy(CamelEngine* engine) noexcept {
 } // namespace
 
 RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder, const DeviceFormat& format, uint64_t startFrame,
-                         Conversion conversion, DsdPath dsd, uint32_t predecodeSeconds, double gainDb)
-    : host_(makeDecoderHostV1()), raw_(dsd == DsdPath::Native || dsd == DsdPath::Dop),
-      unitsPerFrame_(dsd == DsdPath::Native ? 8 : 1) {
+                         Conversion conversion, DsdPath dsd, uint32_t predecodeSeconds, double gainDb,
+                         std::unique_ptr<IDecoder> opened)
+    : opened_{std::move(opened), path, abiDecoder(decoderId(decoder))}, host_(makeDecoderHostV1(&opened_)),
+      raw_(dsd == DsdPath::Native || dsd == DsdPath::Dop), unitsPerFrame_(dsd == DsdPath::Native ? 8 : 1) {
     command_.struct_size = sizeof(command_);
     command_.abi_version = CAMEL_ENGINE_ABI_VERSION;
     command_.generation = 1;

@@ -1071,7 +1071,7 @@ private:
             format_ = probeFormat(file_);
             stages_[0] = measure::now();
             decoder = chooseDecoder(*format_, fileDecoder_, settings_);
-            dec = openDecoder(decoder, file_);
+            dec = openDecoder(decoder, file_, *format_);
             stages_[1] = measure::now();
         } catch (const Error& e) {
             {
@@ -1151,11 +1151,11 @@ private:
             buffering_ = true;
             bufferingShown_ = 0;
         }
-        dec.reset(); // the Rust Engine opens its own decoder through the host ABI
         stages_[3] = measure::now();
         try {
-            rust_ =
-                std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, conversion(), plan_.dsd, predecode, plan_.gainDb);
+            // The Rust Engine reads, through the host ABI, the decoder opened here.
+            rust_ = std::make_unique<RustSession>(file_, decoder, fmt_, startFrame, conversion(), plan_.dsd, predecode,
+                                                  plan_.gainDb, std::move(dec));
             rust_->setDsp(chainFor(plan_));
         } catch (const Error& e) {
             position_ = waitingForSource_ ? startFrame : 0;

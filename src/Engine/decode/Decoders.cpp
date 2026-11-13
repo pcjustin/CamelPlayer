@@ -289,11 +289,12 @@ void registerBuiltinOpeners() {
 
 } // namespace
 
-std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path) {
+namespace {
+
+std::unique_ptr<IDecoder> openProbed(std::string_view decoder, const std::filesystem::path& path, AudioFormat format) {
     // A lossy stream has no source depth; it decodes to 24-bit PCM (docs/Plan.md §3.1).
     constexpr uint32_t kLossyBits = 24;
     registerBuiltinOpeners();
-    const AudioFormat format = probeFormat(path);
     const std::string_view id = formatId(format);
     const auto entry = decoderRegistry().find(decoder);
     if (!entry || !entry->open || std::find(entry->formats.begin(), entry->formats.end(), id) == entry->formats.end())
@@ -310,8 +311,18 @@ std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::files
     return d;
 }
 
+} // namespace
+
+std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path) {
+    return openProbed(decoder, path, probeFormat(path));
+}
+
 std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path) {
     return openDecoder(decoderId(kind), path);
+}
+
+std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, AudioFormat format) {
+    return openProbed(decoderId(kind), path, format);
 }
 
 } // namespace camel::audio

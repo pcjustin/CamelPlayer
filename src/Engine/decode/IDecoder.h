@@ -11,6 +11,7 @@
 #include <span>
 #include <string_view>
 
+#include "Common/AudioFormat.h"
 #include "Common/AudioTypes.h"
 #include "Common/DecoderKind.h"
 
@@ -42,6 +43,8 @@ public:
 // Opens `path` with the chosen decoder. Lossy formats decode to 24-bit PCM.
 // Throws Error (FileOpen / UnsupportedStream / DecodeFailed).
 std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path);
+// The same for a file whose format probeFormat() has just given, which is not probed again.
+std::unique_ptr<IDecoder> openDecoder(DecoderKind kind, const std::filesystem::path& path, AudioFormat format);
 // The same for any decoder in decoderRegistry() by its ID (docs/Extension-points.md #1).
 std::unique_ptr<IDecoder> openDecoder(std::string_view decoder, const std::filesystem::path& path);
 
