@@ -1003,16 +1003,30 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             })
             .get();
     std::map<std::string, Version> known;
-    auto files = reader.prepare(
-        "SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state,content_hash IS NOT NULL "
-        "FROM files WHERE root_id=? AND available=1");
-    files.bind(1, root);
     std::set<std::string> pendingIdentity;
     std::set<std::string> knownHashes;
-    while (files.step()) {
-        known.emplace(files.text(0), library::storedVersion(files, 1));
-        if (files.integer(7)) pendingIdentity.insert(files.text(0));
-        if (files.integer(8)) knownHashes.insert(files.text(0));
+    // A folder scan lists only its subtrees, so it needs only their rows: a path range over the files.path index.
+    const std::string fileRows =
+        "SELECT path,size,mtime,volume_serial,file_index,created,volume_key,identity_state,content_hash IS NOT NULL "
+        "FROM files WHERE root_id=? AND available=1";
+    const auto load = [&](sqlite::Statement& files) {
+        while (files.step()) {
+            known.emplace(files.text(0), library::storedVersion(files, 1));
+            if (files.integer(7)) pendingIdentity.insert(files.text(0));
+            if (files.integer(8)) knownHashes.insert(files.text(0));
+        }
+    };
+    if (partial) {
+        for (const auto& folder : subtrees) {
+            const auto below = key(folder);
+            auto files = reader.prepare(fileRows + " AND path>?||'\\' AND path<?||']'");
+            files.bind(1, root).bind(2, below).bind(3, below);
+            load(files);
+        }
+    } else {
+        auto files = reader.prepare(fileRows);
+        files.bind(1, root);
+        load(files);
     }
     // A newer CamelPlayer may read audio files an earlier one refused, such as ADPCM WAV files, and estimate the length
     // of an MP3 without a header better, so a complete scan reads them again once per version. An earlier one also
