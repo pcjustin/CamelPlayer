@@ -5,6 +5,8 @@
 // Capture comparison (docs/Plan.md §12.1, §16.7 item 2): the bytes the engine hands to the "device"
 // must unpack to exactly the libFLAC reference decode, for every decoder and container choice.
 #include <gtest/gtest.h>
+#include <vector>
+#include <iterator>
 
 #include <fstream>
 #include <tuple>
@@ -144,4 +146,30 @@ TEST(Capture, UnsupportedFormatIsReportedNotPlayed) {
     EXPECT_EQ(snap.state, PlayState::Stopped);
     ASSERT_TRUE(snap.error.has_value());
     EXPECT_EQ(*snap.error, ErrorCode::FormatNotSupported);
+}
+
+// A STREAMINFO declaring far more samples than memory holds, as a damaged file can: the reference decode reports it,
+// rather than letting the allocation's exception cross libFLAC's C frames.
+TEST(ReferenceDecode, AnImpossibleLengthIsAnErrorNotACrash) {
+    const auto path = testutil::tempDir() / "reference-impossible-length.flac";
+    std::vector<int32_t> samples(2000);
+    for (size_t i = 0; i < samples.size(); ++i) samples[i] = int32_t(i % 200) - 100;
+    camel::audio::testaudio::writeFlacSamples(path, samples, 44100, 16, 2);
+    std::string bytes;
+    {
+        std::ifstream in(path, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(in), {});
+    }
+    ASSERT_GT(bytes.size(), 26u);
+    ASSERT_EQ(bytes.substr(0, 4), "fLaC");
+    // STREAMINFO's 36-bit total sample count ends at byte 25: every bit set, 68.7 billion frames.
+    bytes[21] = char(uint8_t(bytes[21]) | 0x0F);
+    for (size_t at = 22; at <= 25; ++at) bytes[at] = '\xFF';
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    }
+    const auto ref = camel::audio::testaudio::referenceDecode(path);
+    EXPECT_FALSE(ref.error.empty());
+    std::filesystem::remove(path);
 }

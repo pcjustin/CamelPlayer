@@ -256,7 +256,14 @@ FLAC__StreamDecoderWriteStatus onWrite(const FLAC__StreamDecoder*, const FLAC__F
     const unsigned ch = frame->header.channels, n = frame->header.blocksize;
     auto& v = st->out->samples;
     size_t at = v.size();
-    v.resize(at + size_t(n) * ch);
+    // No exception may cross libFLAC's C frames: a failure ends the decode through libFLAC's own status.
+    try {
+        v.resize(at + size_t(n) * ch);
+    } catch (const std::exception& e) {
+        if (!st->errorSeen) st->out->error = std::string("reference decode: ") + e.what();
+        st->errorSeen = true;
+        return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+    }
     for (unsigned i = 0; i < n; i++)
         for (unsigned c = 0; c < ch; c++) v[at + size_t(i) * ch + c] = buffer[c][i];
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
@@ -272,7 +279,16 @@ void onMetadata(const FLAC__StreamDecoder*, const FLAC__StreamMetadata* m, void*
     std::array<uint8_t, 16> md5;
     std::copy(m->data.stream_info.md5sum, m->data.stream_info.md5sum + 16, md5.begin());
     if (std::any_of(md5.begin(), md5.end(), [](uint8_t x) { return x; })) in.md5 = md5;
-    static_cast<RefState*>(user)->out->samples.reserve(size_t(in.totalFrames * in.channels));
+    // STREAMINFO's count is not checked: reserve only what a real decode could hold, and never throw into libFLAC.
+    constexpr uint64_t kMaxReservedSamples = uint64_t(1) << 28;
+    const uint64_t declared = in.totalFrames * in.channels;
+    if (declared <= kMaxReservedSamples) {
+        try {
+            static_cast<RefState*>(user)->out->samples.reserve(size_t(declared));
+        } catch (const std::exception&) {
+            // the decode grows the vector as it goes
+        }
+    }
 }
 
 void onError(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus s, void* user) {
