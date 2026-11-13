@@ -71,7 +71,7 @@ TEST(OutputBoundary, MalformedKsIdsAreRejected) {
 
 TEST(OutputBoundary, RepeatedKsConstructionDoesNotLeakHandles) {
     KsSettings settings;
-    settings.deviceId = "\\\\?\\camelplayer-nonexistent-filter|0";
+    settings.deviceId = R"(\\?\camelplayer-nonexistent-filter|0)";
     {
         auto warmup = createKsOutput(settings);
     }
@@ -86,7 +86,7 @@ TEST(OutputBoundary, RepeatedKsConstructionDoesNotLeakHandles) {
 
 TEST(OutputBoundary, MissingKsFilterReportsTypedFailure) {
     KsSettings settings;
-    settings.deviceId = "\\\\?\\camelplayer-nonexistent-filter|0";
+    settings.deviceId = R"(\\?\camelplayer-nonexistent-filter|0)";
     auto output = createKsOutput(settings);
     SilentSource source;
     EXPECT_THROW(output->supports({48000, 2, SampleType::Int16}), Error);
@@ -113,7 +113,7 @@ TEST(OutputBoundary, EnginePreservesMissingDeviceErrorFromCapabilityProbe) {
         Settings settings;
         settings.backend = backend;
         settings.wasapi.deviceId = "camelplayer-test-nonexistent-endpoint";
-        settings.ks.deviceId = "\\\\?\\camelplayer-nonexistent-filter|0";
+        settings.ks.deviceId = R"(\\?\camelplayer-nonexistent-filter|0)";
         PlaybackEngine engine(settings);
         engine.openAndPlay(testutil::testFile("24-96k"));
         engine.waitIdle();
@@ -171,6 +171,7 @@ TEST(Log, ConcurrentWritesAndRetention) {
     std::filesystem::last_write_time(unrelated, old);
     log::init(directory, L"unit");
     std::vector<std::thread> writers;
+    writers.reserve(4);
     for (int thread = 0; thread < 4; ++thread)
         writers.emplace_back([thread] {
             for (int line = 0; line < 20; ++line) log::info("writer=%d line=%d", thread, line);
@@ -199,3 +200,33 @@ TEST(Log, ConcurrentWritesAndRetention) {
 }
 
 } // namespace
+
+namespace {
+log::LocalTime g_testTime;
+log::LocalTime testClock() {
+    return g_testTime;
+}
+} // namespace
+
+// A program left running past midnight writes each day's lines into that day's file, not into the first day's.
+TEST(LoggerTest, EachDayGoesIntoItsOwnFile) {
+    const auto directory = testutil::tempDir() / "log-days";
+    std::filesystem::remove_all(directory);
+    g_testTime = {2026, 11, 12, 23, 59, 59, 900};
+    log::setClockForTest(testClock);
+    log::init(directory, L"days");
+    log::info("before-midnight");
+    g_testTime = {2026, 11, 13, 0, 0, 0, 100};
+    log::info("after-midnight");
+    log::setClockForTest(nullptr);
+    log::init(testutil::tempDir() / "log-after-tests", L"test");
+    const auto read = [&](const wchar_t* name) {
+        std::ifstream input(directory / name);
+        return std::string(std::istreambuf_iterator<char>(input), {});
+    };
+    const auto first = read(L"days-20261112.log");
+    const auto second = read(L"days-20261113.log");
+    EXPECT_NE(first.find("before-midnight"), std::string::npos);
+    EXPECT_EQ(first.find("after-midnight"), std::string::npos);
+    EXPECT_NE(second.find("after-midnight"), std::string::npos);
+}

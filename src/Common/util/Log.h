@@ -16,4 +16,10 @@ void info(const char* fmt, ...);
 void warn(const char* fmt, ...);
 void error(const char* fmt, ...);
 
+// The local time the log reads, which a test sets to cross midnight; nullptr restores the clock.
+struct LocalTime {
+    unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, millisecond = 0;
+};
+void setClockForTest(LocalTime (*clock)());
+
 } // namespace camel::log
