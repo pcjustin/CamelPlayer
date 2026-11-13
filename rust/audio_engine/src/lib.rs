@@ -123,6 +123,9 @@ const MIN_DEVICE_RING_FRAMES: u64 = 8_192;
 const MAX_SOURCE_FRAME_BYTES: u64 = 8 * 4;
 // The longest crossfade a track may ask for (docs/Plan.md §5.4).
 const MAX_CROSSFADE_MS: u32 = 10_000;
+// The most a crossfade holds of the outgoing track's last source frames outside the decoded ring: the longest crossfade
+// of the widest source, eight channels of 32-bit words at 768 kHz, and a prefill fit.
+const MAX_HOLD_BYTES: u64 = 256 << 20;
 // A manual change keeps this much more of the playing track than its fade takes, so it plays on while the chosen one
 // starts decoding.
 const CUT_MARGIN_MS: u32 = 1_000;
@@ -607,6 +610,10 @@ struct Segment {
     cut: bool,
     // Room for the outgoing track's tail when this track fades in, reserved off the DSP stage.
     held: Vec<u8>,
+    // This track's last source frames, from `tail_read` on, taken out of `source_ring` for a crossfade out of it so
+    // decoding goes on whatever the source; they come before what the ring holds of it.
+    tail: Vec<u8>,
+    tail_read: usize,
 }
 
 impl Segment {
@@ -629,7 +636,13 @@ impl Segment {
             fade_in,
             cut: false,
             held: Vec::new(),
+            tail: Vec::new(),
+            tail_read: 0,
         }
+    }
+
+    fn tail_frames(&self) -> u64 {
+        ((self.tail.len() - self.tail_read) / self.frame_bytes()) as u64
     }
 
     // The track's length in source frames as far as it is known: decoded so far, or more if it is expected to be.
@@ -724,15 +737,17 @@ fn retire(retired: &mut Vec<Segment>, segment: Option<Segment>) {
     }
 }
 
-// A crossfade (docs/Plan.md §5.4). When it begins, the outgoing track's last source frames leave the source ring for
-// `held`, so the incoming track's frames behind them can be read; both are converted to float at the device rate, mixed
-// with equal-power gains, and go through the DSP chain and the final quantization once, in the incoming track's
-// converter. A change during a crossfade renders what that one would still play into `outgoing`, which then fades out as
-// one track.
+// A crossfade (docs/Plan.md §5.4). When it begins, the outgoing track's last source frames are its `tail` and what is
+// left of them in the source ring, which goes to `held`, so the incoming track's frames behind them can be read; both
+// tracks are converted to float at the device rate, mixed with equal-power gains, and go through the DSP chain and the
+// final quantization once, in the incoming track's converter. A change during a crossfade renders what that one would
+// still play into `outgoing`, which then fades out as one track.
 struct Fade {
     // Output frames.
     length: u64,
     done: u64,
+    tail: Vec<u8>,
+    tail_read: usize,
     held: Vec<u8>,
     held_read: usize,
     outgoing: Vec<f64>,
@@ -834,6 +849,15 @@ impl CamelEngine {
     // Caller holds `source`; render must be drained. The source's converter starts a new segment at the next prefill.
     fn reset_stream(&self) {
         let mut stage = self.stage.lock().unwrap();
+        // The room reserved for the playing track's tail goes back to the queued track, for the segment that follows.
+        if let Some(playing) = stage.segments.front_mut() {
+            if let Some(next) = self.next_source.lock().unwrap().as_mut() {
+                if playing.tail.capacity() > next.held.capacity() {
+                    playing.tail.clear();
+                    std::mem::swap(&mut playing.tail, &mut next.held);
+                }
+            }
+        }
         stage.segments.clear();
         stage.stream_ended = false;
         stage.dsp.reset();
@@ -896,8 +920,12 @@ impl CamelEngine {
                     Ok(FadeStep::Mixed) => {}
                     Ok(FadeStep::Wait) => break Ok(()),
                     Ok(FadeStep::Done) => {
-                        let ended = fade.take().expect("a fade plays");
-                        let outgoing = segments.pop_front();
+                        let mut ended = fade.take().expect("a fade plays");
+                        let mut outgoing = segments.pop_front();
+                        if let Some(outgoing) = outgoing.as_mut() {
+                            // Its tail's room leaves with it, to be freed off the stage.
+                            outgoing.tail = std::mem::take(&mut ended.tail);
+                        }
                         buffers.give_back(ended, &mut segments[0]);
                         retire(retired, outgoing);
                     }
@@ -906,6 +934,9 @@ impl CamelEngine {
                 continue;
             }
             let fade_frames = self.fade_after_first(segments);
+            if fade_frames > 0 {
+                self.reserve_tail(segments);
+            }
             let next_ready = segments.get(1).map(|next| next.frames > next.read);
             let last = segments.len() == 1;
             let Some(segment) = segments.front_mut() else {
@@ -940,7 +971,8 @@ impl CamelEngine {
                 );
             }
             let available = segment.frames - segment.read;
-            // Before a crossfade the track's last frames wait in the source ring until the fade takes them.
+            let tail_frames = segment.tail_frames();
+            // Before a crossfade the track's last frames wait in its tail, or the source ring, until the fade takes them.
             let hold = if fade_frames > 0 {
                 segment
                     .converter
@@ -949,11 +981,11 @@ impl CamelEngine {
             } else {
                 0
             };
-            let convertible = available.min(
+            let convertible = (available + tail_frames).min(
                 segment
                     .length()
                     .saturating_sub(hold)
-                    .saturating_sub(segment.read),
+                    .saturating_sub(segment.read - tail_frames),
             );
             if hold > 0
                 && segment.ended
@@ -963,17 +995,27 @@ impl CamelEngine {
                 if next_ready.is_none() || self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
                     break Ok(());
                 }
-                let length = fade_frames.min(self.output_frames(available, segment.rate));
+                let length =
+                    fade_frames.min(self.output_frames(available + tail_frames, segment.rate));
                 if length == 0 {
                     segments[1].fade_in = 0;
                     continue;
                 }
-                let held_bytes = available as usize * segment.frame_bytes();
+                let ring_bytes = available as usize * segment.frame_bytes();
                 segment.read = segment.frames;
+                let mut tail = std::mem::take(&mut segment.tail);
+                let tail_read = std::mem::replace(&mut segment.tail_read, 0);
                 let mut held = std::mem::take(&mut segments[1].held);
                 held.clear();
-                held.resize(held_bytes, 0);
-                if self.source_ring.read(&mut held) != held.len() {
+                // What the ring still has of the track joins its tail where there is room, as it usually is.
+                let rest = if tail.capacity() - tail.len() >= ring_bytes {
+                    &mut tail
+                } else {
+                    &mut held
+                };
+                let at = rest.len();
+                rest.resize(at + ring_bytes, 0);
+                if self.source_ring.read(&mut rest[at..]) != ring_bytes {
                     break Err(ENGINE_E_INVALID_STATE);
                 }
                 if let Some(start) = segments[1].boundary_start.take() {
@@ -987,6 +1029,8 @@ impl CamelEngine {
                 *fade = Some(Fade {
                     length,
                     done: 0,
+                    tail,
+                    tail_read,
                     held,
                     held_read: 0,
                     outgoing,
@@ -1001,17 +1045,32 @@ impl CamelEngine {
                 if space == 0 {
                     break Ok(());
                 }
-                let frames = segment
+                let mut frames = segment
                     .converter
                     .input_frames_for(space)
                     .min(convertible)
                     .min(MAX_PREFILL_FRAMES);
                 buffers.bytes.clear();
-                buffers
-                    .bytes
-                    .resize(frames as usize * segment.frame_bytes(), 0);
-                if self.source_ring.read(&mut buffers.bytes) != buffers.bytes.len() {
-                    break Err(ENGINE_E_INVALID_STATE);
+                if tail_frames > 0 {
+                    // A shorter fade, or none, than the tail was held for: it plays first.
+                    frames = frames.min(tail_frames);
+                    let end = segment.tail_read + frames as usize * segment.frame_bytes();
+                    buffers
+                        .bytes
+                        .extend_from_slice(&segment.tail[segment.tail_read..end]);
+                    segment.tail_read = end;
+                    if end == segment.tail.len() {
+                        segment.tail.clear();
+                        segment.tail_read = 0;
+                    }
+                } else {
+                    buffers
+                        .bytes
+                        .resize(frames as usize * segment.frame_bytes(), 0);
+                    if self.source_ring.read(&mut buffers.bytes) != buffers.bytes.len() {
+                        break Err(ENGINE_E_INVALID_STATE);
+                    }
+                    segment.read += frames;
                 }
                 sample_words(&buffers.bytes, segment.sample_bytes, &mut buffers.words);
                 if let Err(status) = segment
@@ -1020,12 +1079,28 @@ impl CamelEngine {
                 {
                     break Err(status);
                 }
-                segment.read += frames;
                 continue;
             }
             if available > 0 {
-                // Held for the crossfade until decoding reaches the track's end.
-                break Ok(());
+                // Held for the crossfade until decoding reaches the track's end: in the tail while it has room, so the
+                // source ring has room to decode on.
+                if segment.tail_read > 0 {
+                    segment.tail.drain(..segment.tail_read);
+                    segment.tail_read = 0;
+                }
+                let spare = (segment.tail.capacity() - segment.tail.len()) / segment.frame_bytes();
+                let frames = available.min(spare as u64).min(MAX_PREFILL_FRAMES);
+                if frames == 0 {
+                    break Ok(());
+                }
+                let at = segment.tail.len();
+                let bytes = frames as usize * segment.frame_bytes();
+                segment.tail.resize(at + bytes, 0);
+                if self.source_ring.read(&mut segment.tail[at..]) != bytes {
+                    break Err(ENGINE_E_INVALID_STATE);
+                }
+                segment.read += frames;
+                continue;
             }
             if segment.ended {
                 if !segment.converter.finished() {
@@ -1114,10 +1189,40 @@ impl CamelEngine {
         u64::from(self.output_format.rate_hz) * u64::from(milliseconds) / 1000
     }
 
-    // The most source frames of `segment` a crossfade may hold back: decoding must keep room for a prefill.
+    // The most source frames of `segment` a crossfade may hold back: what its tail has room for, or without one what
+    // leaves decoding room for a prefill in the source ring.
     fn max_hold(&self, segment: &Segment) -> u64 {
+        if segment.tail.capacity() > 0 {
+            return (segment.tail.capacity() / segment.frame_bytes()) as u64;
+        }
         ((self.source_ring.capacity() / segment.frame_bytes()) as u64)
             .saturating_sub(MAX_PREFILL_FRAMES)
+    }
+
+    // Gives the first segment, which is to fade out, the room reserved for its tail when the next track was queued,
+    // where it has less. The smaller room goes where the larger was, to be freed off the stage.
+    fn reserve_tail(&self, segments: &mut std::collections::VecDeque<Segment>) {
+        let Some((first, rest)) = segments.make_contiguous().split_first_mut() else {
+            return;
+        };
+        let mut queued = None;
+        let reserved = match rest.first_mut() {
+            Some(next) => &mut next.held,
+            None => match queued.insert(self.next_source.lock().unwrap()).as_mut() {
+                Some(next) => &mut next.held,
+                None => return,
+            },
+        };
+        if reserved.capacity() <= first.tail.capacity() {
+            return;
+        }
+        let mut larger = std::mem::take(reserved);
+        larger.clear();
+        larger.extend_from_slice(&first.tail[first.tail_read..]);
+        let mut smaller = std::mem::replace(&mut first.tail, larger);
+        first.tail_read = 0;
+        smaller.clear();
+        *reserved = smaller;
     }
 
     // One step of the crossfade from the first segment into the second: writes either track's pending output to the ring,
@@ -1230,28 +1335,41 @@ impl CamelEngine {
         buffers: &mut StageBuffers,
     ) -> Result<(), i32> {
         let channels = self.format.channel_count as usize;
-        while fade.outgoing.len() < frames * channels && !fade.outgoing_done {
-            if fade.held_read < fade.held.len() {
+        let Fade {
+            tail,
+            tail_read,
+            held,
+            held_read,
+            outgoing: floats,
+            outgoing_done,
+            ..
+        } = fade;
+        while floats.len() < frames * channels && !*outgoing_done {
+            // The tail comes first, then what the source ring still had.
+            let (bytes, read) = if *tail_read < tail.len() {
+                (&*tail, &mut *tail_read)
+            } else {
+                (&*held, &mut *held_read)
+            };
+            if *read < bytes.len() {
                 let frame_bytes = outgoing.frame_bytes();
-                let left = ((fade.held.len() - fade.held_read) / frame_bytes) as u64;
+                let left = ((bytes.len() - *read) / frame_bytes) as u64;
                 let count = outgoing
                     .converter
                     .input_frames_for(frames as u64)
                     .min(left)
                     .min(MAX_PREFILL_FRAMES) as usize;
-                let end = fade.held_read + count * frame_bytes;
+                let end = *read + count * frame_bytes;
                 sample_words(
-                    &fade.held[fade.held_read..end],
+                    &bytes[*read..end],
                     outgoing.sample_bytes,
                     &mut buffers.words,
                 );
-                fade.held_read = end;
-                outgoing
-                    .converter
-                    .floats(&buffers.words, count, &mut fade.outgoing)?;
+                *read = end;
+                outgoing.converter.floats(&buffers.words, count, floats)?;
             } else {
-                outgoing.converter.finish_floats(&mut fade.outgoing)?;
-                fade.outgoing_done = true;
+                outgoing.converter.finish_floats(floats)?;
+                *outgoing_done = true;
             }
         }
         Ok(())
@@ -2285,7 +2403,7 @@ pub unsafe extern "C" fn camel_engine_queue_next_flac_v1(
                 let bytes = frames
                     * u64::from(view.info.channel_count)
                     * Segment::sample_bytes(&view.info) as u64;
-                next.held = Vec::with_capacity((bytes as usize).min(engine.source_ring.capacity()));
+                next.held = Vec::with_capacity(bytes.min(MAX_HOLD_BYTES) as usize);
             }
         }
         // The queued track plays into the same device format; a converter takes it there or it is refused.
@@ -2412,7 +2530,6 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             buffers,
             ..
         } = &mut *stage;
-        let mut held_bytes = 0;
         if let Some(mut playing) = fade.take() {
             let [outgoing, incoming, ..] = segments.make_contiguous() else {
                 return ENGINE_E_INVALID_STATE;
@@ -2451,6 +2568,8 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             *fade = Some(Fade {
                 length,
                 done: 0,
+                tail: Vec::new(),
+                tail_read: 0,
                 held: Vec::new(),
                 held_read: 0,
                 outgoing: mix,
@@ -2466,32 +2585,33 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             if !playing.converter.mixes() {
                 return ENGINE_E_INVALID_STATE;
             }
+            let tail_frames = playing.tail_frames();
             let keep = playing
                 .converter
                 .input_frames_for(keep_frames)
-                .min(playing.frames - playing.read);
-            let mut kept = vec![0u8; keep as usize * playing.frame_bytes()];
-            if engine.source_ring.read(&mut kept) != kept.len() {
+                .min(playing.frames - playing.read + tail_frames);
+            // What is kept becomes the track's tail, out of the source ring the new track decodes into.
+            let frame_bytes = playing.frame_bytes();
+            let from_tail = keep.min(tail_frames) as usize * frame_bytes;
+            let mut kept = Vec::with_capacity(keep as usize * frame_bytes);
+            kept.extend_from_slice(&playing.tail[playing.tail_read..playing.tail_read + from_tail]);
+            kept.resize(keep as usize * frame_bytes, 0);
+            if engine.source_ring.read(&mut kept[from_tail..]) != kept.len() - from_tail {
                 return ENGINE_E_INVALID_STATE;
             }
             engine.source_ring.clear();
-            if engine.source_ring.write(&kept) != kept.len() {
-                drop(stage);
-                engine.fail_render(ENGINE_E_INVALID_STATE);
-                return ENGINE_E_INVALID_STATE;
-            }
-            playing.frames = playing.read + keep;
+            playing.read += ((kept.len() - from_tail) / frame_bytes) as u64;
+            playing.frames = playing.read;
+            playing.tail = kept;
+            playing.tail_read = 0;
             playing.ended = true;
             playing.cut = true;
             segments.truncate(1);
-            held_bytes = kept.len();
         }
         *stream_ended = false;
         *tail_left = None;
         let start = engine.output_frames(next.start_frame(), next.info.sample_rate);
-        let mut segment = Segment::new(converter, &next, Some(start), fade_in);
-        segment.held = Vec::with_capacity(held_bytes);
-        segments.push_back(segment);
+        segments.push_back(Segment::new(converter, &next, Some(start), fade_in));
         drop(stage);
         *engine.next_source.lock().unwrap() = None;
         engine.next_occupied.store(false, Ordering::Release);
@@ -3831,15 +3951,26 @@ mod tests {
 
     // Plays the tone `first` on a 16-bit 48 kHz device 480 frames at a time until the stream ends. `step` runs before
     // each render with the frames rendered so far, and may queue or change tracks. Returns the left channel.
-    fn play_tones(first: &str, mut step: impl FnMut(*mut CamelEngine, usize)) -> Vec<i16> {
-        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+    fn play_tones(first: &str, step: impl FnMut(*mut CamelEngine, usize)) -> Vec<i16> {
+        play_tones_buffered(0, first, 0, step)
+    }
+
+    // As play_tones, with `prebuffer_ms` of decoded audio and the first track queued with `flags`.
+    fn play_tones_buffered(
+        prebuffer_ms: u32,
+        first: &str,
+        flags: u32,
+        mut step: impl FnMut(*mut CamelEngine, usize),
+    ) -> Vec<i16> {
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        cfg.prebuffer_ms = prebuffer_ms;
         let mut engine = ptr::null_mut();
         assert_eq!(
             unsafe { camel_engine_create_v1(&cfg, &mut engine) },
             ENGINE_OK
         );
         let host = tone_host();
-        let source = tone_source(first, 0, 0);
+        let source = tone_source(first, 0, flags);
         assert_eq!(
             unsafe {
                 camel_engine_load_flac_v1(
@@ -3944,6 +4075,113 @@ mod tests {
         );
         // The second track became current when its fade began.
         assert_eq!(transitions_at_end.0, 1);
+    }
+
+    #[test]
+    fn a_crossfade_keeps_its_length_out_of_a_source_wider_than_the_decoded_ring_was_sized_for() {
+        // One second of decoded audio at the device's 48 kHz is half a second at 96 kHz; ten seconds hold the fade.
+        let play = |prebuffer_ms| {
+            play_tones_buffered(
+                prebuffer_ms,
+                "8000:192000:96000",
+                TRACK_CONVERT,
+                |engine, rendered| {
+                    if rendered == 0 {
+                        assert_eq!(
+                            queue_tone(engine, 3, "-4000:96000:48000", 1_000, 0),
+                            ENGINE_OK
+                        );
+                    }
+                },
+            )
+        };
+        let roomy = play(10_000);
+        // Two seconds, then the second track's two less the one second of fade, less what the resampler delays.
+        assert!(
+            roomy.len().abs_diff(96_000 + 96_000 - 48_000) < 1_000,
+            "{}",
+            roomy.len()
+        );
+        assert_eq!(play(1_000), roomy);
+    }
+
+    fn held_tail(engine: *mut CamelEngine) -> u64 {
+        let stage = engine_ref(engine).stage.lock().unwrap();
+        stage.segments.front().map_or(0, Segment::tail_frames)
+    }
+
+    #[test]
+    fn a_tail_held_for_a_fade_that_is_called_off_plays_at_its_level() {
+        // Five seconds of fade are held past the one second the decoded ring has.
+        let mut cleared = false;
+        let left = play_tones_buffered(1_000, "8000:480000:48000", 0, |engine, rendered| {
+            if rendered == 0 {
+                assert_eq!(
+                    queue_tone(engine, 3, "-4000:480000:48000", 5_000, 0),
+                    ENGINE_OK
+                );
+            }
+            if !cleared && held_tail(engine) > 0 {
+                cleared = true;
+                assert_eq!(
+                    unsafe { camel_engine_clear_next_v1(engine, &command_stamp(4)) },
+                    ENGINE_OK
+                );
+            }
+        });
+        assert!(cleared);
+        assert_eq!(left.len(), 480_000);
+        assert!(left.iter().all(|&v| v == 8000));
+    }
+
+    #[test]
+    fn a_manual_change_keeps_what_is_held_for_a_fade() {
+        let mut changed = None;
+        let mut boundary = None;
+        let left = play_tones_buffered(1_000, "8000:480000:48000", 0, |engine, rendered| {
+            if rendered == 0 {
+                assert_eq!(
+                    queue_tone(engine, 3, "1000:480000:48000", 5_000, 0),
+                    ENGINE_OK
+                );
+            }
+            let (count, position, _) = transitions(engine);
+            if count == 1 && boundary.is_none() {
+                boundary = Some(rendered - position as usize);
+            }
+            if changed.is_none() && held_tail(engine) > 0 {
+                changed = Some(rendered);
+                let host = tone_host();
+                let source = tone_source("-4000:48000:48000", 100, 0);
+                assert_eq!(
+                    unsafe {
+                        camel_engine_crossfade_to_v1(
+                            engine,
+                            &command_stamp(4),
+                            &source,
+                            decoder_host::DECODER_SYMPHONIA,
+                            &host,
+                        )
+                    },
+                    ENGINE_OK
+                );
+            }
+        });
+        let (changed, start) = (changed.unwrap(), boundary.unwrap());
+        assert!(
+            start > changed && start <= changed + 12_480,
+            "{changed} {start}"
+        );
+        assert!(left[..start].iter().all(|&v| v == 8000));
+        for (i, &v) in left[start..start + 4_800].iter().enumerate() {
+            let expected = faded(8000.0, -4000.0, i, 4_800);
+            assert!(
+                (f64::from(v) - expected).abs() <= 2.0,
+                "{i}: {v} vs {expected}"
+            );
+        }
+        assert!(left[start + 4_800..].iter().all(|&v| v == -4000));
+        assert_eq!(left.len(), start + 48_000);
     }
 
     #[test]
@@ -4314,6 +4552,22 @@ mod tests {
                         );
                     }
                 },
+            ),
+        ));
+        let mut short_ring = pcm24;
+        short_ring.prebuffer_ms = 1_000;
+        heap.push((
+            "a crossfade held past the decoded ring",
+            stage_heap_playing(
+                short_ring,
+                &tone("8000:480000:96000", 0.0),
+                |engine| {
+                    assert_eq!(
+                        queue_tone(engine, 3, "-4000:480000:48000", 5_000, 0),
+                        ENGINE_OK
+                    )
+                },
+                |_, _| {},
             ),
         ));
         let mut changes = 0;
