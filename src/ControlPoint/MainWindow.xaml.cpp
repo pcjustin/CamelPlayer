@@ -28,6 +28,7 @@
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
 #include "OutputsFollow.h"
+#include "SnapshotForward.h"
 #include "ThemeBrush.h"
 #include "UiText.h"
 #include "TrackColumns.h"
@@ -354,8 +355,10 @@ void MainWindow::InitializeComponent() {
                               winrt::to_string(tr(L"Lamp_Processed")), winrt::to_string(tr(L"Lamp_Lossy"))});
     auto dq = DispatcherQueue();
     // The Server reports the position with every engine poll, 20 times a second; the 250 ms refresh shows it, so an event
-    // that moves only the position is left to it, and to nothing while the window is minimized or hidden.
-    server_->setListener([dq, weak = get_weak()](const Event& event) {
+    // that moves only the position is left to it, and to nothing while the window is minimized or hidden. It is not even
+    // sent to the UI thread; one the window then finds moving only the position (against what it shows) is dropped.
+    server_->setListener([dq, weak = get_weak(), forward = std::make_shared<ui::SnapshotForward>()](const Event& event) {
+        if (!forward->forward(event)) return;
         dq.TryEnqueue([weak, kind = event.kind, snapshot = event.snapshot] {
             if (auto self = weak.get(); self && (kind == EventKind::CommandCompleted || !self->movesOnlyThePosition(snapshot)))
                 self->applySnapshot(snapshot);
@@ -1326,12 +1329,7 @@ void MainWindow::submitCommand(Command command) {
 }
 
 bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
-    const auto &now = snapshot.playback, &before = shown_.playback;
-    return snapshot.queueEntryId == shown_.queueEntryId && snapshot.queue.revision == shown_.queue.revision &&
-           snapshot.queue.marks == shown_.queue.marks && snapshot.queue.upcomingEntryId == shown_.queue.upcomingEntryId &&
-           snapshot.devices.revision == shown_.devices.revision && snapshot.commandError == shown_.commandError &&
-           now.revision == before.revision && now.state == before.state && now.pathUtf8 == before.pathUtf8 &&
-           now.total == before.total && now.underruns == before.underruns;
+    return ui::movesOnlyThePosition(snapshot, shown_);
 }
 
 // A device scan can change what the Server keeps: the outputs, and the parameters when the Windows default moved on.
