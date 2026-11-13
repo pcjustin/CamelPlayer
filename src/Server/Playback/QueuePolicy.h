@@ -215,7 +215,8 @@ private:
     }
 
     bool contains(uint64_t id) const { return std::find(entries_.begin(), entries_.end(), id) != entries_.end(); }
-    bool eligible(uint64_t id) const { return contains(id) && !failed_.contains(id) && !unavailable_.contains(id); }
+    // The sets first: passing over a whole queue of unavailable entries then never searches it.
+    bool eligible(uint64_t id) const { return !failed_.contains(id) && !unavailable_.contains(id) && contains(id); }
 
     QueuePosition position(uint64_t id) const {
         const auto it = std::find(entries_.begin(), entries_.end(), id);

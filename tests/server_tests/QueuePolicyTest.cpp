@@ -215,3 +215,19 @@ TEST(QueuePolicyTest, AWholeLibraryQueueReordersRestoresAndAdvancesWithoutQuadra
     // Each step is linear; the quadratic versions took minutes for this size.
     EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(2));
 }
+
+TEST(QueuePolicyTest, AWholeQueueOfUnavailableEntriesIsPassedOverWithoutQuadraticWork) {
+    std::vector<uint64_t> ids(100'000);
+    for (size_t i = 0; i < ids.size(); ++i) ids[i] = i + 1;
+    QueuePolicy queue(1);
+    queue.replace(ids);
+    queue.setRepeat(RepeatMode::All);
+    for (const auto entry : ids) queue.setUnavailable(entry, true);
+    queue.setUnavailable(ids.back(), false);
+    const auto started = std::chrono::steady_clock::now();
+    EXPECT_EQ(id(queue.upcoming()), ids.back());
+    queue.setUnavailable(ids.back(), true);
+    EXPECT_FALSE(queue.upcoming());
+    const auto took = std::chrono::steady_clock::now() - started;
+    EXPECT_LT(took, std::chrono::seconds(1));
+}
