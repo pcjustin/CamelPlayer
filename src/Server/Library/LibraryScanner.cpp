@@ -995,7 +995,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     if (!partial)
         store_
             .write([&](sqlite::Database& db) {
-                db.prepare("UPDATE roots SET display=?,location=? WHERE id=?")
+                db.prepare("UPDATE roots SET display=?1,location=?2 WHERE id=?3 AND (display IS NOT ?1 OR location IS NOT ?2)")
                     .bind(1, display)
                     .bind(2, libraryLocation(key(path)))
                     .bind(3, root)
@@ -1319,7 +1319,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                     derivedChanged = derivedChanged || !missing.empty();
                 };
                 if (!partial) {
+                    // When the root was scanned is no change to its files, for the work that waits for one.
+                    const bool filesWritten = store_.rowsWritten_.files;
                     db.prepare("UPDATE roots SET last_scan=? WHERE id=?").bind(1, now()).bind(2, root).run();
+                    store_.rowsWritten_.files = filesWritten;
                     db.prepare("DELETE FROM app_state WHERE key=?").bind(1, rereadKey).run();
                     db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
                         .bind(1, refusedKey)

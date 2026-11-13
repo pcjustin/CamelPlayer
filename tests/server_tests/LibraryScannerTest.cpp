@@ -85,6 +85,20 @@ TEST_F(LibraryScannerTest, NormalizesAliasesAndOverlappingRootsInBothOrders) {
     EXPECT_THROW(scanner.addRoot(dir / "music" / "album" / "one.flac"), std::invalid_argument);
 }
 
+// The work that waits for the library's files to change, such as fingerprinting, is not woken by a scan that found
+// nothing new.
+TEST_F(LibraryScannerTest, AScanThatChangedNothingLeavesTheFilesUnchanged) {
+    audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto settled = store.fileChanges();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(store.fileChanges(), settled);
+}
+
 // A queued library file is found by its spelling, without opening it on a share.
 TEST_F(LibraryScannerTest, ASpelledPathMatchesTheStoredKey) {
     const auto file = audio();
