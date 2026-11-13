@@ -11,6 +11,7 @@
 #include <fstream>
 #include <limits>
 #include <cmath>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <thread>
@@ -764,21 +765,34 @@ Settings fromJson(const std::string& text) {
 }
 
 std::filesystem::path dataDirectory() {
-    PWSTR base = nullptr;
-    std::filesystem::path dir;
     // Measurements (docs/Plan.md §12.1) run against a separate data folder so the user's library stays untouched.
     // Asked for its size first, so a name of any length is read whole.
     std::wstring measured(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", nullptr, 0), L'\0');
     if (!measured.empty()) measured.resize(GetEnvironmentVariableW(L"CAMELPLAYER_DATA", measured.data(), DWORD(measured.size())));
+    // The answer is kept, for as long as the variable is the same and the folder is there: finding and creating it
+    // again took most of a millisecond a call.
+    static std::mutex mutex;
+    static std::wstring keptFor;
+    static std::filesystem::path kept;
+    std::error_code ec;
+    {
+        std::scoped_lock lock(mutex);
+        if (!kept.empty() && keptFor == measured && std::filesystem::is_directory(kept, ec)) return kept;
+    }
+    PWSTR base = nullptr;
+    std::filesystem::path dir;
     if (!measured.empty())
         dir = measured;
     else if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base)))
         dir = std::filesystem::path(base) / L"CamelPlayer";
     CoTaskMemFree(base);
-    std::error_code ec;
     if (dir.empty()) return {}; // never fall back to the working directory, which may be the program folder
     std::filesystem::create_directories(dir, ec);
-    return std::filesystem::is_directory(dir, ec) ? dir : std::filesystem::path{};
+    if (!std::filesystem::is_directory(dir, ec)) return {};
+    std::scoped_lock lock(mutex);
+    keptFor = measured;
+    kept = dir;
+    return dir;
 }
 
 Settings resetPlayback(const Settings& s) {
