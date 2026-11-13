@@ -159,6 +159,12 @@ pub enum SubframePcmError {
     },
     /// The frame header's `LFF` is the invalid code 3, which names no LFE decimation (ETSI TS 102 114 §5.3.1).
     InvalidLfe,
+    /// The subframes' subsubframes hold more sample blocks than the header's `NBLKS` gives the frame. Carries the
+    /// 0-based subframe index that goes past it.
+    MoreBlocksThanHeader {
+        /// 0-based subframe index.
+        subframe: usize,
+    },
     /// The caller-supplied per-channel side-info / loop-bound slices did
     /// not all agree on the channel count. Carries the channel count the
     /// driver expected (the [`SubframePcmDecoder`]'s configured count)
@@ -208,6 +214,10 @@ impl core::fmt::Display for SubframePcmError {
                  is undefined"
             ),
             SubframePcmError::InvalidLfe => write!(f, "frame header LFF code 3 is invalid"),
+            SubframePcmError::MoreBlocksThanHeader { subframe } => write!(
+                f,
+                "subframe {subframe} goes past the frame header's NBLKS sample blocks"
+            ),
             SubframePcmError::ChannelCountMismatch { expected, got } => write!(
                 f,
                 "channel-count mismatch: driver expects {expected}, slice carries {got}"
@@ -1182,6 +1192,9 @@ impl SubframePcmDecoder {
         let mut bit = header_bits + ach_bits;
         // Each subframe leaves only its own LFE PCM; take_last_lfe_pcm() gives the frame's.
         let mut frame_lfe: Vec<i32> = Vec::new();
+        // As the reference decoder does, more blocks than NBLKS+1 fail the frame; fewer leave a gap the caller fills.
+        let header_blocks = usize::from(header.blocks_per_frame) + 1;
+        let mut blocks = 0;
         for subframe_index in 0..coding.n_subframes {
             // §5.4.1 side info (Table 5-28) through the end of the
             // SCALES block.
@@ -1213,6 +1226,14 @@ impl SubframePcmDecoder {
                     SubframePcmError::PartialSubsubframeInNormalFrame {
                         subframe: subframe_index,
                         psc,
+                    },
+                ));
+            }
+            blocks += n_ssc * crate::SAMPLES_PER_SUBSUBFRAME;
+            if blocks > header_blocks {
+                return Err(CoreFrameDecodeError::Decode(
+                    SubframePcmError::MoreBlocksThanHeader {
+                        subframe: subframe_index,
                     },
                 ));
             }

@@ -247,6 +247,28 @@ fn the_invalid_lfe_code_is_an_error() {
     }
 }
 
+/// The frame with its block count (NBLKS, the header's bits 39 to 45) set to `blocks`.
+fn with_blocks(frame: &[u8], blocks: u8) -> Vec<u8> {
+    let mut out = frame.to_vec();
+    out[4] = out[4] & !1 | blocks >> 6;
+    out[5] = out[5] & 0b11 | (blocks & 0x3F) << 2;
+    out
+}
+
+#[test]
+fn a_frame_with_more_samples_than_its_header_says_is_an_error() {
+    let frames = big_endian(SURROUND);
+    let header = dts_core::parse_frame_header(&frames[0]).expect("parses");
+    assert_eq!(header.blocks_per_frame, 15);
+    assert_eq!(
+        Decoder::new().decode(&with_blocks(&frames[0], 15)),
+        Decoder::new().decode(&frames[0])
+    );
+    for frame in &frames {
+        assert!(Decoder::new().decode(&with_blocks(frame, 7)).is_err());
+    }
+}
+
 #[test]
 fn output_stays_within_full_scale() {
     for frame in pcm_of(&decode_all(&big_endian(SURROUND))) {
