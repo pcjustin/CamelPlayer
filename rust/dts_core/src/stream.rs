@@ -178,10 +178,22 @@ fn big_endian_frame(
     packing: SyncWordEncoding,
     length: usize,
 ) -> Result<Cow<'_, [u8]>, DecodeError> {
-    let frame = bytes.get(..length & !1).ok_or(DecodeError::Truncated)?;
+    // A raw little-endian frame of odd length ends in the first byte of a word: its last byte is the word's other one.
+    let words = match packing {
+        SyncWordEncoding::RawBigEndian => length,
+        SyncWordEncoding::RawLittleEndian => length.next_multiple_of(2),
+        SyncWordEncoding::FourteenBitBigEndian | SyncWordEncoding::FourteenBitLittleEndian => {
+            length & !1
+        }
+    };
+    let frame = bytes.get(..words).ok_or(DecodeError::Truncated)?;
     Ok(match (packing, order_of(packing)) {
         (_, Some(order)) => Cow::Owned(unpack_14bit_to_16bit(frame, order)?),
-        (SyncWordEncoding::RawLittleEndian, None) => Cow::Owned(swapped(frame)),
+        (SyncWordEncoding::RawLittleEndian, None) => {
+            let mut swapped = swapped(frame);
+            swapped.truncate(length);
+            Cow::Owned(swapped)
+        }
         _ => Cow::Borrowed(frame),
     })
 }
@@ -293,5 +305,19 @@ mod tests {
         assert_eq!(interleaved(&planes).map(|(_, n)| n), Ok(2));
         let short = [(Speaker::Left, vec![1, 2]), (Speaker::Lfe, vec![3])];
         assert_eq!(interleaved(&short), Err(DecodeError::UnequalChannels));
+    }
+
+    #[test]
+    fn a_raw_frame_of_odd_length_keeps_its_last_byte() {
+        let be: Vec<u8> = (0..1024u32).map(|at| (at * 7 + 1) as u8).collect();
+        let frame = big_endian_frame(&be, SyncWordEncoding::RawBigEndian, 1023).unwrap();
+        assert_eq!(&*frame, &be[..1023]);
+        let le = swapped(&be);
+        let frame = big_endian_frame(&le, SyncWordEncoding::RawLittleEndian, 1023).unwrap();
+        assert_eq!(&*frame, &be[..1023]);
+        assert_eq!(
+            big_endian_frame(&le[..1023], SyncWordEncoding::RawLittleEndian, 1023),
+            Err(DecodeError::Truncated)
+        );
     }
 }
