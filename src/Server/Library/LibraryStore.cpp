@@ -235,6 +235,7 @@ LibraryStore::LibraryStore(const std::filesystem::path& directory, const std::ve
             auto& written = *static_cast<RowsWritten*>(changes);
             if (std::strcmp(table, "files") == 0 || std::strcmp(table, "roots") == 0) written.files = true;
             if (std::strcmp(table, "tracks") == 0) written.tracks = true;
+            if (std::strcmp(table, "albums") == 0 || std::strcmp(table, "covers") == 0) written.albums = true;
         },
         &rowsWritten_);
     writer_ = std::thread([this] { writerMain(); });
@@ -274,6 +275,7 @@ std::future<void> LibraryStore::write(std::function<void(sqlite::Database&)> wor
         // Only once committed, so a reader that sees the new count also sees the rows.
         if (rowsWritten_.files) fileChanges_.fetch_add(1);
         if (rowsWritten_.tracks) trackChanges_.fetch_add(1);
+        if (rowsWritten_.albums) albumChanges_.fetch_add(1);
     }));
 }
 

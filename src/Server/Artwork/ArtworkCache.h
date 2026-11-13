@@ -5,6 +5,7 @@
 #include <functional>
 #include <mutex>
 #include <map>
+#include <set>
 #include "Server/Library/LibraryStore.h"
 
 namespace camel::server {
@@ -53,6 +54,12 @@ private:
     uintmax_t maxBytes_;
     std::optional<uintmax_t> diskBytes_;
     std::map<std::string, std::optional<ArtworkReference>> embedded_;
+    // The library's file and album change counts when prepare() last went through every album; it does nothing while
+    // they stay the same. Reset by whatever removes thumbnails.
+    std::optional<std::pair<uint64_t, uint64_t>> prepared_;
     std::mutex mutex_;
+    // Covers prepare() could not make, by their key, which follows the file's version: not read again until it changes.
+    std::set<std::string> failed_;
+    std::mutex failedMutex_;
 };
 } // namespace camel::server

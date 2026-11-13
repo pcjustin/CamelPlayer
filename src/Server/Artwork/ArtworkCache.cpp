@@ -402,6 +402,11 @@ std::optional<ArtworkReference> ArtworkCache::artist(const LibraryStore& store, 
 }
 
 size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token) {
+    const std::pair changes{store.fileChanges(), store.albumChanges()};
+    {
+        std::lock_guard lock(mutex_);
+        if (prepared_ == changes) return 0;
+    }
     std::vector<int64_t> albums;
     {
         auto db = store.openReader();
@@ -424,21 +429,43 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 return !reading.cancelled();
             };
+            auto db = store.openReader();
             for (size_t at; turn() && (at = next++) < albums.size();) {
-                auto db = store.openReader();
                 const auto cover = albumCover(db, albums[at]);
                 std::error_code ec;
                 if (!cover || std::filesystem::exists(directory_ / (cover->key + "-" + std::to_string(kPixels) + ".jpg"), ec))
                     continue;
+                {
+                    std::lock_guard lock(failedMutex_);
+                    if (failed_.contains(cover->key)) continue;
+                }
+                bool done = false;
                 try {
-                    if (stored(store, {ArtworkKind::Album, albums[at], {}}, reading)) ++made;
+                    done = stored(store, {ArtworkKind::Album, albums[at], {}}, reading).has_value();
                 } catch (const std::exception&) {
+                }
+                if (done) {
+                    ++made;
+                } else if (!reading.cancelled()) {
+                    std::lock_guard lock(failedMutex_);
+                    failed_.insert(cover->key);
                 }
             }
         }));
-    for (auto& worker : workers)
+    bool complete = true;
+    for (auto& worker : workers) {
         while (worker.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready)
             if (yield && yield()) reading.cancel();
+        try {
+            worker.get();
+        } catch (const std::exception&) {
+            complete = false;
+        }
+    }
+    if (complete && !reading.cancelled()) {
+        std::lock_guard lock(mutex_);
+        prepared_ = changes;
+    }
     return made;
 }
 
@@ -527,6 +554,9 @@ void ArtworkCache::clear() {
         std::filesystem::remove_all(entry.path(), error); // a thumbnail being read stays until its reader closes it
     embedded_.clear();
     diskBytes_.reset();
+    prepared_.reset();
+    std::lock_guard failedLock(failedMutex_);
+    failed_.clear();
 }
 
 void ArtworkCache::trim() {
@@ -543,7 +573,10 @@ void ArtworkCache::trim() {
         if (bytes <= maxBytes_) break;
         const auto size = entry.file_size();
         std::error_code ec;
-        if (std::filesystem::remove(entry.path(), ec)) bytes -= size;
+        if (std::filesystem::remove(entry.path(), ec)) {
+            bytes -= size;
+            prepared_.reset();
+        }
     }
     diskBytes_ = bytes;
 }

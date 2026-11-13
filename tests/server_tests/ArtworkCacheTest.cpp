@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <gtest/gtest.h>
@@ -130,7 +130,7 @@ TEST_F(ArtworkCacheTest, DiskCacheEvictsOldThumbnailsToItsByteLimit) {
 }
 TEST_F(ArtworkCacheTest, WebpWorksWithoutTheWindowsCodec) {
     ArtworkCache cache(dir / "thumbs");
-    std::vector<uint8_t> rgba(32 * 16 * 4, 120);
+    std::vector<uint8_t> rgba(size_t{32} * 16 * 4, 120);
     uint8_t* output = nullptr;
     const auto size = WebPEncodeLosslessRGBA(rgba.data(), 32, 16, 32 * 4, &output);
     ASSERT_GT(size, 0u);
@@ -244,7 +244,8 @@ TEST_F(ArtworkCacheTest, ScannedCoversAreServedWithoutReadingTheirSourceAgain) {
     ASSERT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM albums WHERE cover_id IS NOT NULL").value(), 2);
 
     std::vector<int64_t> albums;
-    for (auto rows = store.openReader().prepare("SELECT id FROM albums ORDER BY id"); rows.step();) albums.push_back(rows.integer(0));
+    for (auto rows = store.openReader().prepare("SELECT id FROM albums ORDER BY id"); rows.step();)
+        albums.push_back(rows.integer(0));
     ArtworkCache cache(dir / "thumbs");
     EXPECT_EQ(cache.prepare(store, {}), 2u);
     EXPECT_EQ(cache.prepare(store, {}), 0u);
@@ -263,4 +264,36 @@ TEST_F(ArtworkCacheTest, ScannedCoversAreServedWithoutReadingTheirSourceAgain) {
         EXPECT_EQ(again->key, covers[i].key);
     }
     EXPECT_EQ(cache.prepare(store, [] { return true; }), 0u);
+}
+TEST(ArtworkCachePrepare, ACoverThatCouldNotBeMadeIsNotReadAgainUntilItsFileChanges) {
+    const Path dir = testutil::tempDir() / "artwork-cache-failed";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    const auto folder = dir / "music" / "Album";
+    std::filesystem::create_directories(folder);
+    {
+        std::ofstream broken(folder / "cover.jpg", std::ios::binary);
+        broken << std::string(5000, 'x');
+    }
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), folder / "song.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM albums WHERE cover_id IS NOT NULL").value(), 1);
+    ArtworkCache cache(dir / "thumbs");
+    EXPECT_EQ(cache.prepare(store, {}), 0u);
+    // The file now reads as a picture, but the library still records the version that failed: the next pass, after
+    // another change to the library, leaves it alone.
+    const auto version = std::filesystem::last_write_time(folder / "cover.jpg");
+    save(folder / "cover.jpg", bitmap(80, 40));
+    std::filesystem::last_write_time(folder / "cover.jpg", version);
+    store.write([](camel::server::sqlite::Database& db) { db.exec("UPDATE roots SET display='Music'"); }).get();
+    EXPECT_EQ(cache.prepare(store, {}), 0u);
+    // A scan records the new version, which is read.
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(cache.prepare(store, {}), 1u);
+    EXPECT_EQ(cache.prepare(store, {}), 0u);
+    cache.clear();
+    EXPECT_EQ(cache.prepare(store, {}), 1u);
 }
