@@ -74,7 +74,7 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_TRUE(store.report().created);
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 21);
+    EXPECT_EQ(db.userVersion(), 22);
     EXPECT_EQ(
         tables(db),
         (std::set<std::string>{
@@ -207,7 +207,7 @@ TEST(LibraryStore, UpgradesV1WithoutInventingFingerprintsOrChangingHistory) {
     EXPECT_EQ(store.report().migratedFrom, 1);
     EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 21);
+    EXPECT_EQ(db.userVersion(), 22);
     EXPECT_EQ(db.scalar("SELECT rating FROM stats JOIN files ON files.id=stats.file_id WHERE files.path='C:/music/old.flac'"), 5);
     EXPECT_EQ(db.scalar("SELECT play_count FROM stats"), 17);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL AND created=0 AND volume_key IS NULL"), 1);
@@ -247,7 +247,7 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
     LibraryStore store(dir);
     EXPECT_EQ(store.report().migratedFrom, 11);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 21);
+    EXPECT_EQ(db.userVersion(), 22);
     for (const char* table : {"tracks", "stats", "play_events", "playlist_items", "queue"})
         EXPECT_EQ(db.scalar(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name LIKE 'cue%'"), 0)
             << table;
@@ -363,10 +363,10 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-        EXPECT_EQ(store.report().migratedFrom, 21);
+        EXPECT_EQ(store.report().migratedFrom, 22);
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 22);
-        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v21.bak"));
+        EXPECT_EQ(db.userVersion(), 23);
+        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v22.bak"));
     }
     const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
                                        db.exec("CREATE TABLE half (x INTEGER)");
@@ -376,7 +376,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 22);
+        EXPECT_EQ(db.userVersion(), 23);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
@@ -466,7 +466,7 @@ TEST(LibraryStore, KeepsTheNewestThreeBackups) {
         LibraryStore store(dir, withExtra(extra));
     }
     EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
-    for (int v : {23, 24, 25}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+    for (int v : {24, 25, 26}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
 }
 
 TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
@@ -487,7 +487,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
         auto db = store.openReader();
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
-        EXPECT_EQ(db.userVersion(), 22); // the backup was migrated again
+        EXPECT_EQ(db.userVersion(), 23); // the backup was migrated again
     }
     for (const auto& e : std::filesystem::directory_iterator(dir))
         if (e.path().extension() == ".bak") std::filesystem::remove(e.path());

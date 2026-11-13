@@ -482,6 +482,12 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
                     "WHEN old.size IS NOT new.size OR old.mtime IS NOT new.mtime "
                     "BEGIN DELETE FROM waveforms WHERE file_id=new.id; END;");
         },
+        // The album rebuild after every scan batch finds a file's cover and drops the covers no album uses; without these
+        // each batch read both tables whole for every album.
+        [](sqlite::Database& db) {
+            db.exec("CREATE INDEX albums_cover ON albums(cover_id);"
+                    "CREATE INDEX covers_file ON covers(file_id);");
+        },
     };
     return migrations;
 }
