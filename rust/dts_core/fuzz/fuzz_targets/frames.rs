@@ -8,16 +8,24 @@ use dts_core::{Decoder, find_sync, frame_info};
 use libfuzzer_sys::fuzz_target;
 use sancov_bounds as _;
 
-// As the Engine reads a file: every sync, a frame's header, its decode, and the state a bad frame leaves.
+// As DtsStage reads a file: from each sync a frame's header, then its decode, past it on success and two bytes on
+// failure. A frame that fails part-way leaves its filter state to the next, as the Engine resets only after a panic.
 fuzz_target!(|data: &[u8]| {
     let mut decoder = Decoder::new();
     let mut start = 0;
     while let Some(sync) = find_sync(data, start) {
         let frame = &data[sync.offset..];
-        let _ = frame_info(frame);
-        if decoder.decode(frame).is_err() {
-            decoder.reset();
+        let Ok(info) = frame_info(frame) else {
+            start = sync.offset + 2;
+            continue;
+        };
+        if frame.len() < info.container_bytes {
+            break;
         }
-        start = sync.offset + 1;
+        start = sync.offset
+            + match decoder.decode(frame) {
+                Ok(_) => info.container_bytes,
+                Err(_) => 2,
+            };
     }
 });

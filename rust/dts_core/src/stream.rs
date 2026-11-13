@@ -255,7 +255,8 @@ impl Decoder {
     ///
     /// # Errors
     ///
-    /// A [`DecodeError`] when the frame gives no audio; [`Decoder::reset`] clears what it may have left in the filters.
+    /// A [`DecodeError`] when the frame gives no audio. What it may have left in the filters carries on to the next
+    /// frame, as a good frame's does, unless [`Decoder::reset`] clears it.
     pub fn decode(&mut self, bytes: &[u8]) -> Result<Decoded, DecodeError> {
         let packing = packing_at_start(bytes)?;
         let length = header_of(bytes, packing)?.frame_size_container_bytes(packing) as usize;
