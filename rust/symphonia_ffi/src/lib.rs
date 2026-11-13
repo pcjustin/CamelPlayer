@@ -66,6 +66,9 @@ pub struct SymDecoder {
     skip_frames: u64,
     ticks: Ticks,
     last_error: String,
+    path: String,
+    /// The reader has given its last packet.
+    ended: bool,
 }
 
 /// The container's time against frames at the rate reported: `per` ticks are `frames` frames. An MP4's timescale need
@@ -157,9 +160,13 @@ impl SymDecoder {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(Some(p)) => p,
-                Ok(None) => return Ok(false),
+                Ok(None) => {
+                    self.ended = true;
+                    return Ok(false);
+                }
                 Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    return Ok(false)
+                    self.ended = true;
+                    return Ok(false);
                 }
                 Err(e) => {
                     self.last_error = e.to_string();
@@ -231,6 +238,28 @@ pub unsafe extern "C" fn sym_open(
     guarded(|| open_decoder(path, lossy_bits, out, info))
 }
 
+fn open_format(path: &str) -> Result<Box<dyn FormatReader>, i32> {
+    let source = std::fs::File::open(path)
+        .and_then(FlacView::new)
+        .and_then(HiddenTags::new)
+        .map_err(|_| SYM_E_IO)?;
+    let mss = MediaSourceStream::new(Box::new(source), Default::default());
+    symphonia::default::get_probe()
+        .probe(
+            &Hint::new(),
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|e| {
+            if matches!(e, Error::Unsupported(_)) {
+                SYM_E_UNSUPPORTED
+            } else {
+                SYM_E_FORMAT
+            }
+        })
+}
+
 unsafe fn open_decoder(
     path: *const c_char,
     lossy_bits: u32,
@@ -238,28 +267,9 @@ unsafe fn open_decoder(
     info: *mut SymInfo,
 ) -> i32 {
     let path = CStr::from_ptr(path).to_string_lossy().into_owned();
-    let source = match std::fs::File::open(&path)
-        .and_then(FlacView::new)
-        .and_then(HiddenTags::new)
-    {
-        Ok(s) => s,
-        Err(_) => return SYM_E_IO,
-    };
-    let mss = MediaSourceStream::new(Box::new(source), Default::default());
-    let format = match symphonia::default::get_probe().probe(
-        &Hint::new(),
-        mss,
-        FormatOptions::default(),
-        MetadataOptions::default(),
-    ) {
+    let format = match open_format(&path) {
         Ok(f) => f,
-        Err(e) => {
-            return if matches!(e, Error::Unsupported(_)) {
-                SYM_E_UNSUPPORTED
-            } else {
-                SYM_E_FORMAT
-            }
-        }
+        Err(code) => return code,
     };
     // A music video's first track is its picture; its sound is the first audio track with a codec.
     let Some((track, params)) = format.tracks().iter().find_map(|t| match &t.codec_params {
@@ -360,6 +370,8 @@ unsafe fn open_decoder(
         skip_frames: 0,
         ticks,
         last_error: String::new(),
+        path,
+        ended: false,
     });
     *out = Box::into_raw(dec);
     SYM_OK
@@ -427,6 +439,17 @@ pub unsafe extern "C" fn sym_seek(dec: *mut SymDecoder, frame: u64) -> i32 {
 }
 
 fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
+    // Once the MP4 reader has given its last packet its seek succeeds but it reads no more; one opened anew reads.
+    if d.ended {
+        match open_format(&d.path) {
+            Ok(format) => d.format = format,
+            Err(code) => {
+                d.last_error = "the file cannot be opened again".into();
+                return code;
+            }
+        }
+        d.ended = false;
+    }
     let seeked = match d.format.seek(
         SeekMode::Accurate,
         SeekTo::Timestamp {

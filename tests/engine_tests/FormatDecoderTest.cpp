@@ -121,6 +121,31 @@ TEST_P(FormatDecoder, SeeksToTheExactFrame) {
     }
 }
 
+// A track decoded to its end before it is heard to the end is sought on the same decoder.
+TEST_P(FormatDecoder, SeeksOnceReadToTheEnd) {
+    const auto [format, kind, index] = GetParam();
+    const auto& spec = kSpecs[index];
+    const auto& expected = reference(spec);
+    const uint64_t frames = expected.size() / spec.channels;
+    auto decoder = openDecoder(kind, fixture(format, spec));
+    readAll(*decoder);
+    std::vector<int32_t> buffer(size_t(4096) * spec.channels);
+    for (const uint64_t target : {frames / 3, uint64_t(0), frames - 1}) {
+        decoder->seek(target);
+        const size_t want = size_t(std::min<uint64_t>(4096, frames - target));
+        size_t got = 0;
+        while (got < want) {
+            const size_t n = decoder->read(buffer.data() + got * spec.channels, want - got);
+            ASSERT_GT(n, 0u) << "short read after seek to " << target;
+            got += n;
+        }
+        EXPECT_TRUE(std::equal(buffer.begin(), buffer.begin() + std::ptrdiff_t(want * spec.channels),
+                               expected.begin() + std::ptrdiff_t(target * spec.channels)))
+            << "seek to " << target;
+        readAll(*decoder);
+    }
+}
+
 namespace {
 std::string caseName(const ::testing::TestParamInfo<Case>& info) {
     const auto [format, decoder, index] = info.param;
@@ -195,7 +220,6 @@ TEST(FormatDecoderTimescale, AnMp4CountedAtAnotherRateKeepsItsLengthAndSeeks) {
         EXPECT_EQ(decoder->info().sampleRate, spec.sampleRate) << decoderName(kind);
         EXPECT_EQ(decoder->info().totalFrames, frames) << decoderName(kind);
         EXPECT_TRUE(readAll(*decoder) == expected) << decoderName(kind);
-        decoder = openDecoder(kind, alac); // the MP4 reader cannot seek once it has read to the end
         for (const uint64_t target : {frames / 2 + 4097, frames / 3, uint64_t(1)}) {
             decoder->seek(target);
             const size_t want = size_t(std::min<uint64_t>(4096, frames - target));
