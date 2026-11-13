@@ -947,6 +947,13 @@ void saveSettings(const Settings& s, const std::filesystem::path& path) {
         out.close();
         if (!out) throw std::runtime_error("cannot write settings");
     }
+    // The bytes reach the disk before the rename can: MOVEFILE_WRITE_THROUGH waits for the rename alone, and a power cut
+    // after it could otherwise leave an empty or cut settings.json.
+    const HANDLE written = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (written == INVALID_HANDLE_VALUE) throw std::runtime_error("cannot flush settings");
+    const bool flushed = FlushFileBuffers(written) != FALSE;
+    CloseHandle(written);
+    if (!flushed) throw std::runtime_error("cannot flush settings");
     if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         throw std::runtime_error("cannot replace settings file");
 }
