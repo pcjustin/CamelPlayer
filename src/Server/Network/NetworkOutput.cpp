@@ -172,6 +172,8 @@ public:
         close();
         ensureLink();
         openListener();
+        const StreamTrack first = source->streamTrack();
+        const TrackDetails details = detailsOf(first.file);
         {
             std::scoped_lock lock(mutex_);
             format_ = f;
@@ -194,7 +196,7 @@ public:
             queuedNext_ = 0;
             announcedBody_ = 0;
             closing_ = false;
-            bodies_.push_back(makeBody(source->streamTrack()));
+            bodies_.push_back(makeBody(first, details));
         }
         acceptor_ = std::thread([this] { acceptLoop(); });
         announcer_ = std::thread([this] { announceLoop(); });
@@ -473,7 +475,10 @@ private:
         moved_.notify_all();
     }
 
-    _Requires_lock_held_(mutex_) Body makeBody(const StreamTrack& track) {
+    // The cover's read and scaling take up to seconds from a NAS, so this is called without the lock.
+    TrackDetails detailsOf(const std::wstring& file) const { return details_ ? details_(file) : TrackDetails{}; }
+
+    _Requires_lock_held_(mutex_) Body makeBody(const StreamTrack& track, const TrackDetails& details) {
         Body body;
         body.id = nextId_++;
         body.track = track;
@@ -502,7 +507,6 @@ private:
         body.protocolInfo = "http-get:*:" + body.contentType + ":*";
         body.retained.assign(header.begin(), header.end());
         body.uri = base_ + "/s/" + std::to_string(generation_) + "/" + std::to_string(body.id) + "." + body.extension;
-        const TrackDetails details = details_ ? details_(track.file) : TrackDetails{};
         body.coverJpeg = details.coverJpeg;
         const std::string cover = details.coverJpeg.empty()
                                       ? std::string()
@@ -560,8 +564,16 @@ private:
             queuedNext_ = 0;
         }
         if (next && next->sequence != queuedNext_) {
-            queuedNext_ = next->sequence;
-            bodies_.push_back(makeBody(*next));
+            const StreamTrack& track = *next;
+            lock.unlock();
+            const TrackDetails details = detailsOf(track.file);
+            lock.lock();
+            if (closing_ || released_ || !source_) return;
+            // Taken back or replaced meanwhile: the next pass sees what is queued now.
+            const auto still = source_->nextStreamTrack();
+            if (!still || still->sequence != track.sequence) return;
+            queuedNext_ = track.sequence;
+            bodies_.push_back(makeBody(track, details));
         }
         if (bodies_.size() < 2 || !bodies_.front().complete || bodies_[1].id == announcedBody_ || !mayRender()) return;
         announcedBody_ = bodies_[1].id;

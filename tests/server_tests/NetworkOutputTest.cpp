@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -397,6 +399,41 @@ TEST(NetworkOutputTest, ThePlayerHearsOfTheNextTrackOnlyOnceThatTrackHasData) {
     EXPECT_EQ(told(), 0);
     EXPECT_TRUE(waitFor([&] { return told() == 1; }, 5s));
     EXPECT_GE(source.rendered(), first);
+}
+
+TEST(NetworkOutputTest, TheNextTracksCoverIsReadWithoutHoldingUpTheStream) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 4, 44100ULL * 4);
+    std::mutex gate;
+    std::condition_variable changed;
+    bool asked = false, answer = false;
+    const auto details = [&](const std::wstring& file) {
+        if (file == L"second.flac") {
+            std::unique_lock lock(gate);
+            asked = true;
+            changed.notify_all();
+            changed.wait(lock, [&] { return answer; });
+        }
+        return sampleDetails(file);
+    };
+    auto output = createNetworkOutput(describe(renderer), details, {});
+    output->open(k16, &source);
+    output->start();
+    source.queueSecond();
+    {
+        std::unique_lock lock(gate);
+        ASSERT_TRUE(changed.wait_for(lock, 10s, [&] { return asked; }));
+    }
+    auto status = std::async(std::launch::async, [&] { return output->status(); });
+    const bool answered = status.wait_for(1s) == std::future_status::ready;
+    {
+        std::scoped_lock lock(gate);
+        answer = true;
+    }
+    changed.notify_all();
+    status.wait();
+    output->close();
+    EXPECT_TRUE(answered);
 }
 
 TEST(NetworkOutputTest, ANextTrackTakenBackIsNeitherFilledNorAnnounced) {
