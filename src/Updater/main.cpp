@@ -199,14 +199,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     if (!elevatedRun) {
         log(L"updating to " + options.version);
+        // The player can take long to end, stopping network players or waiting for a scan on a NAS: the update waits for
+        // it however long, as giving up would leave no player running.
         if (const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, DWORD(_wtoi(args[L"pid"].c_str())))) {
-            const DWORD waited = WaitForSingleObject(process, 30000);
-            CloseHandle(process);
-            if (waited == WAIT_TIMEOUT) {
-                log(L"CamelPlayer did not exit within 30 s; update cancelled");
-                camel::updater::writeResult(options.data, L"cancelled", options.version);
-                return 1;
+            if (WaitForSingleObject(process, 30000) == WAIT_TIMEOUT) {
+                log(L"CamelPlayer has not exited after 30 s; waiting for it");
+                WaitForSingleObject(process, INFINITE);
             }
+            CloseHandle(process);
         }
         if (!writable(options.app)) {
             log(L"the program folder is not writable; asking for administrator rights");
