@@ -42,14 +42,26 @@ KsCreatePinFn ksCreatePinFn() {
     return fn;
 }
 
+// One event a thread, reset for each request: the render thread may ask for the position every few milliseconds.
+struct ThreadEvent {
+    HANDLE handle = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    ThreadEvent() = default;
+    ThreadEvent(const ThreadEvent&) = delete;
+    ThreadEvent& operator=(const ThreadEvent&) = delete;
+    ~ThreadEvent() {
+        if (handle) CloseHandle(handle);
+    }
+};
+
 bool ksIoctl(HANDLE h, DWORD code, void* in, DWORD inSize, void* out, DWORD outSize, DWORD* ret = nullptr) {
+    thread_local const ThreadEvent event;
     OVERLAPPED ov{};
-    ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    ov.hEvent = event.handle;
+    if (ov.hEvent) ResetEvent(ov.hEvent);
     DWORD got = 0;
     BOOL ok = DeviceIoControl(h, code, in, inSize, out, outSize, &got, &ov);
     if (!ok && GetLastError() == ERROR_IO_PENDING) ok = GetOverlappedResult(h, &ov, &got, TRUE);
     DWORD e = ok ? 0 : GetLastError();
-    CloseHandle(ov.hEvent);
     if (ret) *ret = got;
     SetLastError(e);
     return ok != FALSE;
