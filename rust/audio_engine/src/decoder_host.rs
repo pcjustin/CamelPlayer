@@ -252,10 +252,7 @@ impl DecoderSource {
             }
         }
 
-        let has_reference_md5 = info.has_md5 != 0 && info.md5.iter().any(|byte| *byte != 0);
-        let full_coverage_possible = source.start_frame == 0
-            && (end_frame.is_none()
-                || info.total_frames != 0 && end_frame == Some(info.total_frames));
+        let full_coverage_possible = covers_whole(source.start_frame, end_frame, info.total_frames);
 
         Ok(Self {
             decoder: decoder as usize,
@@ -264,11 +261,7 @@ impl DecoderSource {
             position: source.start_frame,
             start_frame: source.start_frame,
             end_frame,
-            integrity_status: if has_reference_md5 {
-                FLAC_INTEGRITY_INCOMPLETE
-            } else {
-                FLAC_INTEGRITY_UNAVAILABLE
-            },
+            integrity_status: unchecked_status(&info),
             full_coverage_possible,
             converter: None,
             gain: 10f64.powf(source.gain_db / 20.0),
@@ -393,19 +386,12 @@ impl DecoderSource {
             return Err(map_host_status(status));
         }
         self.position = frame;
-        self.full_coverage_possible = frame == 0
-            && (self.end_frame.is_none()
-                || self.info.total_frames != 0 && self.end_frame == Some(self.info.total_frames));
+        self.full_coverage_possible = covers_whole(frame, self.end_frame, self.info.total_frames);
         if !matches!(
             self.integrity_status,
             FLAC_INTEGRITY_VERIFIED | FLAC_INTEGRITY_FAILED
         ) {
-            self.integrity_status =
-                if self.info.has_md5 != 0 && self.info.md5.iter().any(|byte| *byte != 0) {
-                    FLAC_INTEGRITY_INCOMPLETE
-                } else {
-                    FLAC_INTEGRITY_UNAVAILABLE
-                };
+            self.integrity_status = unchecked_status(&self.info);
         }
         Ok(())
     }
@@ -431,8 +417,27 @@ impl DecoderSource {
     }
 
     pub(crate) fn has_reference_md5(&self) -> bool {
-        self.info.has_md5 != 0 && self.info.md5.iter().any(|byte| *byte != 0)
+        has_reference_md5(&self.info)
     }
+}
+
+// The source declares an MD5 of its whole decoded audio, and it is not all zeros.
+fn has_reference_md5(info: &CamelSourceInfoV1) -> bool {
+    info.has_md5 != 0 && info.md5.iter().any(|byte| *byte != 0)
+}
+
+// A source not yet checked: its MD5 waits for a whole decode, or there is none to check.
+fn unchecked_status(info: &CamelSourceInfoV1) -> u32 {
+    if has_reference_md5(info) {
+        FLAC_INTEGRITY_INCOMPLETE
+    } else {
+        FLAC_INTEGRITY_UNAVAILABLE
+    }
+}
+
+// Decoding from `from` reaches every frame of the file: from its start to its end, or to an end it is known to have.
+fn covers_whole(from: u64, end_frame: Option<u64>, total_frames: u64) -> bool {
+    from == 0 && (end_frame.is_none() || total_frames != 0 && end_frame == Some(total_frames))
 }
 
 impl Drop for DecoderSource {
