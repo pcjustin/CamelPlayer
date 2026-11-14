@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -13,7 +13,6 @@
 #include <utility>
 
 #include "Common/util/Log.h"
-#include "Server/Support/Http.h"
 
 namespace camel::server {
 
@@ -73,11 +72,7 @@ struct PlayerVolume::Impl {
         if (!service) throw std::runtime_error("the player has no RenderingControl");
         std::vector<std::pair<std::string, std::string>> arguments{{"InstanceID", "0"}, {"Channel", "Master"}};
         arguments.insert(arguments.end(), extra.begin(), extra.end());
-        const auto reply =
-            http::send("POST", service->controlUrl,
-                       "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + service->type + "#" + action + "\"",
-                       upnp::soapRequest(service->type, action, arguments), options.requestTimeoutMs, upnp::kMaxMessageBytes);
-        return upnp::parseSoapReply(reply.status, reply.body);
+        return upnp::call(*service, action, arguments, options.requestTimeoutMs);
     }
 
     bool read() {

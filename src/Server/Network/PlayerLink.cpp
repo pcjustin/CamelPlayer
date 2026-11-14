@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -13,7 +13,6 @@
 #include <thread>
 
 #include "Common/util/Log.h"
-#include "Server/Support/Http.h"
 
 namespace camel::server {
 
@@ -247,12 +246,7 @@ struct PlayerLink::Impl {
                          const std::vector<std::pair<std::string, std::string>>& arguments) {
         const auto* service = player.service(kind);
         if (!service) return {};
-        const auto body = upnp::soapRequest(service->type, action, arguments);
-        const auto reply =
-            http::send("POST", service->controlUrl,
-                       "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + service->type + "#" + action + "\"", body,
-                       options.requestTimeoutMs, upnp::kMaxMessageBytes);
-        return upnp::parseSoapReply(reply.status, reply.body);
+        return upnp::call(*service, action, arguments, options.requestTimeoutMs);
     }
 
     bool attempt(const char* kind, const char* action, const std::vector<std::pair<std::string, std::string>>& arguments) {

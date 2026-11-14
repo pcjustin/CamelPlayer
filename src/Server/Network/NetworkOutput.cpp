@@ -285,12 +285,7 @@ private:
         if (!formatsRead_) {
             try {
                 if (const auto* manager = player_.service("ConnectionManager")) {
-                    const auto request = upnp::soapRequest(manager->type, "GetProtocolInfo", {});
-                    const auto reply = http::send("POST", manager->controlUrl,
-                                                  "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + manager->type +
-                                                      "#GetProtocolInfo\"",
-                                                  request, options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
-                    const auto parsed = upnp::parseSoapReply(reply.status, reply.body);
+                    const auto parsed = upnp::call(*manager, "GetProtocolInfo", {}, options_.link.requestTimeoutMs);
                     if (const auto sink = parsed.values.find("Sink"); sink != parsed.values.end())
                         formats_ = upnp::parseProtocolInfo(sink->second);
                     formatsRead_ = parsed.ok;

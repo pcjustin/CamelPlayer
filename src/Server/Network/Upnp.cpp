@@ -285,6 +285,15 @@ SoapReply parseSoapReply(unsigned status, std::string_view body) {
     return reply;
 }
 
+SoapReply call(const PlayerService& service, std::string_view action,
+               const std::vector<std::pair<std::string, std::string>>& arguments, int timeoutMs) {
+    const auto reply = http::send("POST", service.controlUrl,
+                                  "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"" + service.type + "#" +
+                                      std::string(action) + "\"",
+                                  soapRequest(service.type, action, arguments), timeoutMs, kMaxMessageBytes);
+    return parseSoapReply(reply.status, reply.body);
+}
+
 std::map<std::string, std::string> parsePropertySet(std::string_view xml) {
     std::map<std::string, std::string> values;
     if (const auto root = parseXml(xml))

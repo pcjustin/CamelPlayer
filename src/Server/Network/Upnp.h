@@ -74,6 +74,9 @@ struct SoapReply {
     int errorCode = 0; // the UPnP error of a fault
 };
 SoapReply parseSoapReply(unsigned status, std::string_view body);
+// `action` on `service`, posted with its SOAP headers and its reply parsed. Throws when the player does not answer.
+SoapReply call(const PlayerService& service, std::string_view action,
+               const std::vector<std::pair<std::string, std::string>>& arguments, int timeoutMs);
 
 // The variables of a GENA event, and those inside a LastChange value.
 std::map<std::string, std::string> parsePropertySet(std::string_view xml);
