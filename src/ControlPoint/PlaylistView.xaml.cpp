@@ -24,6 +24,7 @@
 #include "FileDetailsWindow.h"
 #include "Substitute.h"
 #include "FilePicker.h"
+#include "MenuSelection.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 
@@ -211,17 +212,11 @@ void PlaylistView::play(size_t index) {
 
 std::vector<ui::BrowseRow> PlaylistView::selectedRows(Windows::Foundation::IInspectable const& clicked) {
     const auto& rows = entries_->rows();
+    if (clicked && !ui::actsOnSelection(EntryList(), *entries_, clicked)) return {ui::PlaylistCollection::rowOf(clicked)};
     std::vector<ui::BrowseRow> out;
-    bool clickedSelected = !clicked;
-    uint32_t clickedIndex = 0;
-    if (clicked && entries_->IndexOf(clicked, clickedIndex)) {
-        for (const auto& range : EntryList().SelectedRanges())
-            if (std::cmp_greater_equal(clickedIndex, range.FirstIndex()) && std::cmp_less_equal(clickedIndex, range.LastIndex()))
-                clickedSelected = true;
-    }
-    if (!clickedSelected) return {ui::PlaylistCollection::rowOf(clicked)};
-    for (const auto& range : EntryList().SelectedRanges())
-        for (auto i = range.FirstIndex(); i <= range.LastIndex() && size_t(i) < rows.size(); ++i) out.push_back(rows[size_t(i)]);
+    ui::forEachSelected(EntryList(), [&](uint32_t i) {
+        if (i < rows.size()) out.push_back(rows[i]);
+    });
     return out;
 }
 

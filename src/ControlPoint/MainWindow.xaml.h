@@ -249,6 +249,8 @@ private:
     winrt::hstring shownTag_ = L"albums";
     winrt::hstring shownArtist_; // the player bar's artist credit
     void removeSelectedQueueEntries();
+    // The selected queue entries in queue order, or the right-clicked one when it is not selected.
+    std::vector<Windows::Foundation::IInspectable> queueMenuItems();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
     winrt::fire_and_forget refreshRoots();
     void showRoots(Microsoft::UI::Xaml::Controls::ListView const& list);

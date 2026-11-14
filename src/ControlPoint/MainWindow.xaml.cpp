@@ -32,6 +32,7 @@
 #include "ThemeBrush.h"
 #include "CaptionButtons.h"
 #include "FilePicker.h"
+#include "MenuSelection.h"
 #include "UiText.h"
 #include "TrackColumns.h"
 #include "TrimmedText.h"
@@ -2967,6 +2968,13 @@ void MainWindow::OnPlaybackFavoriteClick(Windows::Foundation::IInspectable const
     submitCommand(ui::favoriteCommand({{playbackFile_}}, playbackFavorite_));
 }
 
+std::vector<Windows::Foundation::IInspectable> MainWindow::queueMenuItems() {
+    if (!ui::actsOnSelection(QueueList(), *queueItems_, queueMenuItem_)) return {queueMenuItem_};
+    std::vector<Windows::Foundation::IInspectable> items;
+    ui::forEachSelected(QueueList(), [&](uint32_t i) { items.push_back(queueItems_->GetAt(i)); });
+    return items;
+}
+
 void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::ContextRequestedEventArgs const& e) {
     const auto element = sender.as<FrameworkElement>();
     queueMenuItem_ = element.DataContext();
@@ -2974,44 +2982,19 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
     if (!queueMenu_) {
         queueMenu_ = MenuFlyout();
         extendPlaylistMenu(queueMenu_, [this]() -> ui::SourceFetch {
-            // The selected entries in queue order, or the right-clicked one when it is not selected.
             std::vector<PlaylistSource> sources;
-            const auto add = [&](Windows::Foundation::IInspectable const& item) {
+            for (const auto& item : queueMenuItems()) {
                 const auto path = item.as<CamelPlayer::QueueItem>().Path();
                 sources.push_back({PlaylistSource::Kind::Path, 0, {}, toUtf8(std::wstring_view(path.c_str(), path.size()))});
-            };
-            uint32_t clicked = 0;
-            bool selected = false;
-            if (queueItems_->IndexOf(queueMenuItem_, clicked))
-                for (const auto& range : QueueList().SelectedRanges())
-                    selected = selected || (std::cmp_greater_equal(clicked, range.FirstIndex()) &&
-                                            std::cmp_less_equal(clicked, range.LastIndex()));
-            if (!selected) {
-                add(queueMenuItem_);
-            } else {
-                for (const auto& range : QueueList().SelectedRanges())
-                    for (auto i = range.FirstIndex(); i <= range.LastIndex(); ++i) add(queueItems_->GetAt(uint32_t(i)));
             }
             return [sources] { return sources; };
         });
         queueMenu_.Items().RemoveAt(0); // the separator before the playlist entries
         ui::appendFavoriteMenu(queueMenu_, [this](bool favorite) {
             std::vector<LibraryTrackKey> tracks;
-            const auto add = [&](Windows::Foundation::IInspectable const& item) {
+            for (const auto& item : queueMenuItems()) {
                 const auto file = get_self<QueueItem>(item.as<CamelPlayer::QueueItem>())->row().file;
                 if (file && std::ranges::find(tracks, LibraryTrackKey{file}) == tracks.end()) tracks.push_back({file});
-            };
-            uint32_t clicked = 0;
-            bool selected = false;
-            if (queueItems_->IndexOf(queueMenuItem_, clicked))
-                for (const auto& range : QueueList().SelectedRanges())
-                    selected = selected || (std::cmp_greater_equal(clicked, range.FirstIndex()) &&
-                                            std::cmp_less_equal(clicked, range.LastIndex()));
-            if (!selected) {
-                add(queueMenuItem_);
-            } else {
-                for (const auto& range : QueueList().SelectedRanges())
-                    for (auto i = range.FirstIndex(); i <= range.LastIndex(); ++i) add(queueItems_->GetAt(uint32_t(i)));
             }
             if (!tracks.empty()) submitCommand(ui::favoriteCommand(tracks, favorite));
         });

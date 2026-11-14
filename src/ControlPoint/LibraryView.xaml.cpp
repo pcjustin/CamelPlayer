@@ -29,6 +29,7 @@
 #include "ThemeBrush.h"
 #include "Substitute.h"
 #include "FilePicker.h"
+#include "MenuSelection.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 #include "ArtworkLoader.h"
@@ -1219,17 +1220,10 @@ std::optional<PlaylistSource> LibraryView::sourceOf(Target target, Mode mode, Li
 
 std::function<std::vector<ui::BrowseRow>()>
 LibraryView::selectionRows(ListViewBase const& list, Windows::Foundation::IInspectable const& clicked, bool paged) const {
+    if (!ui::actsOnSelection(list, list.Items(), clicked))
+        return [row = ui::LibraryCollection::rowOf(clicked)] { return std::vector<ui::BrowseRow>{row}; };
     std::vector<std::pair<int64_t, int64_t>> ranges; // first index, count
-    bool clickedSelected = false;
-    uint32_t clickedIndex = 0;
-    const bool found = list.Items().IndexOf(clicked, clickedIndex);
-    for (const auto& range : list.SelectedRanges()) {
-        ranges.emplace_back(range.FirstIndex(), int64_t(range.Length()));
-        if (found && std::cmp_greater_equal(clickedIndex, range.FirstIndex()) &&
-            std::cmp_less_equal(clickedIndex, range.LastIndex()))
-            clickedSelected = true;
-    }
-    if (!clickedSelected) return [row = ui::LibraryCollection::rowOf(clicked)] { return std::vector<ui::BrowseRow>{row}; };
+    for (const auto& range : list.SelectedRanges()) ranges.emplace_back(range.FirstIndex(), int64_t(range.Length()));
     if (paged && fetch_) {
         // The rows at those indexes in the library state the list shows; a library changed since refuses the action.
         return [ranges, fetch = fetch_, revision = collection_ ? collection_->revision() : std::nullopt] {
