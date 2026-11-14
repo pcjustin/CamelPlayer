@@ -223,27 +223,31 @@ public:
             options.coversShown = [this] { return coversInFlight_.load() > 0; };
             options.playback = [this] { return playbackReads(); };
             libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
-            // Album-wall thumbnails are made ahead of display, only while nothing plays, scans or shows covers.
+            // Album-wall thumbnails are made ahead of display while nothing plays or shows covers: every 30 s, and
+            // soon after albums are written, so a scan's albums have theirs made during it, one at a time.
             coverWarmer_ = std::jthread([this](std::stop_token stop) {
                 int64_t swept = -1;
+                auto albumsSeen = library_->albumChanges();
                 const auto busy = [this, &stop] {
-                    return stop.stop_requested() || library_->scanProgress().scans > 0 ||
-                           engine_->snapshot().state == audio::PlayState::Playing || coversInFlight_.load() > 0;
+                    return stop.stop_requested() || engine_->snapshot().state == audio::PlayState::Playing ||
+                           coversInFlight_.load() > 0;
                 };
                 while (!stop.stop_requested()) {
-                    for (int i = 0; i < 300 && !stop.stop_requested(); ++i)
+                    for (int i = 0; i < 300 && !stop.stop_requested() && library_->albumChanges() == albumsSeen; ++i)
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    albumsSeen = library_->albumChanges();
                     if (busy()) continue;
-                    library_->backupIfDue();
+                    const bool scanning = library_->scanProgress().scans > 0;
+                    if (!scanning) library_->backupIfDue();
                     try {
                         // The thumbnails of covers whose files left the library go with them.
                         auto reader = library_->openReader();
-                        if (const auto deletions = libraryDeletions(reader); deletions != swept) {
+                        if (const auto deletions = libraryDeletions(reader); !scanning && deletions != swept) {
                             swept = deletions;
                             if (const auto forgotten = artwork_->forgetDeleted(*library_))
                                 log::info("artwork: %zu thumbnails of deleted covers removed", forgotten);
                         }
-                        if (const auto made = artwork_->prepare(*library_, busy))
+                        if (const auto made = artwork_->prepare(*library_, busy, {}, scanning ? 1 : 4))
                             log::info("artwork: prepared %zu album covers", made);
                         if (!busy()) library_->caughtUp(BackgroundWork::Covers);
                     } catch (const std::exception& e) {

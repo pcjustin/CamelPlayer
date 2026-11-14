@@ -9,8 +9,10 @@
 #include <taglib/tpropertymap.h>
 #include <webp/encode.h>
 #include <fstream>
+#include <future>
 #include "Server/Artwork/ArtworkCache.h"
 #include "Server/Library/LibraryScanner.h"
+#include "Server/Playback/LocalServer.h"
 #include "Common/util/Text.h"
 #include "TestUtil.h"
 
@@ -307,4 +309,79 @@ TEST(ArtworkCachePrepare, ACoverThatCouldNotBeMadeIsNotReadAgainUntilItsFileChan
     EXPECT_EQ(cache.prepare(store, {}), 0u);
     cache.clear();
     EXPECT_EQ(cache.prepare(store, {}), 1u);
+}
+// The albums a scan writes have their thumbnails made during it, so the wall finds them made once it ends.
+TEST(ArtworkCacheWarmer, AScanLeavesItsAlbumsThumbnailsMade) {
+    using namespace std::chrono_literals;
+    const Path dir = testutil::tempDir() / "artwork-scan-thumbnails";
+    std::error_code removed;
+    std::filesystem::remove_all(dir, removed);
+    for (const char* name : {"One", "Two", "Three"}) {
+        const auto folder = dir / "music" / name;
+        std::filesystem::create_directories(folder);
+        save(folder / "cover.jpg", bitmap(80, 40, uint8_t(name[1])));
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), folder / "song.flac");
+        TagLib::FLAC::File tags((folder / "song.flac").c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList(name));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    std::filesystem::create_directories(dir / "data");
+    LocalServer server(camel::Settings{}, dir / "data" / "settings.json");
+    Command add;
+    add.kind = CommandKind::AddLibraryRoot;
+    add.path = camel::toUtf8((dir / "music").wstring());
+    server.submit(add);
+    const auto waitFor = [](const std::function<bool()>& done, std::chrono::milliseconds limit) {
+        const auto end = std::chrono::steady_clock::now() + limit;
+        while (!done() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(20ms);
+        return done();
+    };
+    ASSERT_TRUE(
+        waitFor([&] { return server.browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).total == 3; }, 20s));
+    ASSERT_TRUE(waitFor([&] { return server.libraryScanProgress().scans == 0; }, 20s));
+    const auto thumbnails = [&] {
+        size_t count = 0;
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(dir / "data" / "thumbs", ec))
+            count += entry.path().extension() == L".jpg";
+        return count;
+    };
+    EXPECT_TRUE(waitFor([&] { return thumbnails() == 3; }, 3s)) << thumbnails() << " thumbnails";
+    server.shutdown();
+}
+// A cover asked for while the warmer makes thumbnails is not held behind them: the warmer stops at its next read.
+TEST(ArtworkCacheWarmer, TheWarmerStopsForACoverBeingAskedFor) {
+    using namespace std::chrono_literals;
+    const Path dir = testutil::tempDir() / "artwork-warmer-yields";
+    std::error_code removed;
+    std::filesystem::remove_all(dir, removed);
+    constexpr int kAlbums = 24;
+    for (int i = 0; i < kAlbums; ++i) {
+        const auto folder = dir / "music" / ("Album " + std::to_string(i));
+        std::filesystem::create_directories(folder);
+        save(folder / "cover.jpg", bitmap(800, 400, uint8_t(10 * i)));
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), folder / "song.flac");
+        TagLib::FLAC::File tags((folder / "song.flac").c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList(("Album " + std::to_string(i)).c_str()));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    const auto last = store.openReader().scalar("SELECT MAX(id) FROM albums").value();
+    ArtworkCache cache(dir / "thumbs");
+    std::atomic<bool> asked = false;
+    auto warming = std::async(std::launch::async, [&] { return cache.prepare(store, [&] { return asked.load(); }, {}, 1); });
+    const auto end = std::chrono::steady_clock::now() + 20s;
+    std::error_code ec;
+    while (std::filesystem::is_empty(dir / "thumbs", ec) && std::chrono::steady_clock::now() < end)
+        std::this_thread::sleep_for(5ms);
+    asked = true;
+    ASSERT_EQ(warming.wait_for(2s), std::future_status::ready);
+    EXPECT_LT(warming.get(), size_t(kAlbums));
+    EXPECT_TRUE(cache.get(&store, {ArtworkKind::Album, last}));
 }

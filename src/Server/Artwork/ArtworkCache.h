@@ -35,8 +35,10 @@ public:
     std::optional<ArtworkReference> thumbnail(const ArtworkCandidate& image, const CancellationToken& token = {});
     // Settings › Clear cover cache: deletes every generated thumbnail; later requests generate them again.
     void clear();
-    // Makes the album thumbnails the library lacks, until `yield` asks for the storage; returns how many it made.
-    size_t prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token = {});
+    // Makes the album thumbnails the library lacks, with up to `workers` at once, until `yield` asks for the storage;
+    // returns how many it made.
+    size_t prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token = {},
+                   unsigned workers = 4);
     // Deletes the thumbnails of library covers whose files the library no longer holds; returns how many.
     size_t forgetDeleted(const LibraryStore& store);
 
