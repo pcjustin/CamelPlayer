@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <winhttp.h>
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -72,6 +73,60 @@ private:
     std::jthread watch_;
 };
 
+// What get() and send() share: the URL taken apart, the session, the connection and the request opened, which each wraps
+// as it closes it. They differ in the proxy and the timeouts.
+class Opener {
+public:
+    Opener(const std::string& url, DWORD access, const std::array<int, 4>& timeouts)
+        : target_(targetOf(url)), session_(sessionWith(access, timeouts)),
+          connection_(WinHttpConnect(session_.get(), target_.host.c_str(), target_.port, 0)) {}
+
+    HINTERNET open(const std::string& method) const {
+        return WinHttpOpenRequest(connection_.get(), toWide(method).c_str(), target_.path.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                  WINHTTP_DEFAULT_ACCEPT_TYPES, target_.secure ? WINHTTP_FLAG_SECURE : 0);
+    }
+    bool secure() const { return target_.secure; }
+
+private:
+    struct Target {
+        std::wstring host, path;
+        INTERNET_PORT port = 0;
+        bool secure = false;
+    };
+
+    static Target targetOf(const std::string& url) {
+        const std::wstring wide = toWide(url);
+        URL_COMPONENTS parts{};
+        parts.dwStructSize = sizeof(parts);
+        parts.dwHostNameLength = DWORD(-1);
+        parts.dwUrlPathLength = DWORD(-1);
+        parts.dwExtraInfoLength = DWORD(-1);
+        if (!WinHttpCrackUrl(wide.c_str(), DWORD(wide.size()), 0, &parts)) throw std::runtime_error("invalid URL: " + url);
+        return {std::wstring(parts.lpszHostName, parts.dwHostNameLength),
+                std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
+                    std::wstring(parts.lpszExtraInfo ? parts.lpszExtraInfo : L"", parts.dwExtraInfoLength),
+                parts.nPort, parts.nScheme == INTERNET_SCHEME_HTTPS};
+    }
+
+    static HINTERNET sessionWith(DWORD access, const std::array<int, 4>& timeouts) {
+        const HINTERNET session =
+            WinHttpOpen(toWide(userAgent()).c_str(), access, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (session) WinHttpSetTimeouts(session, timeouts[0], timeouts[1], timeouts[2], timeouts[3]);
+        return session;
+    }
+
+    Target target_;
+    Internet session_;
+    Internet connection_;
+};
+
+unsigned statusOf(HINTERNET request) {
+    DWORD status = 0, size = sizeof(status);
+    WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status,
+                        &size, WINHTTP_NO_HEADER_INDEX);
+    return status;
+}
+
 } // namespace
 
 std::string userAgent() {
@@ -93,40 +148,22 @@ std::optional<UrlParts> crackUrl(const std::string& url) {
 unsigned get(const std::string& url, const char* accept, const CancellationToken& token,
              const std::function<void(unsigned status, uint64_t length)>& onStart,
              const std::function<void(const char*, size_t)>& sink) {
-    const std::wstring wide = toWide(url);
-    URL_COMPONENTS parts{};
-    parts.dwStructSize = sizeof(parts);
-    parts.dwHostNameLength = DWORD(-1);
-    parts.dwUrlPathLength = DWORD(-1);
-    parts.dwExtraInfoLength = DWORD(-1);
-    if (!WinHttpCrackUrl(wide.c_str(), DWORD(wide.size()), 0, &parts)) throw std::runtime_error("invalid URL: " + url);
-    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-    const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
-                              std::wstring(parts.lpszExtraInfo ? parts.lpszExtraInfo : L"", parts.dwExtraInfoLength);
-    const Internet session(WinHttpOpen(toWide(userAgent()).c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
-                                       WINHTTP_NO_PROXY_BYPASS, 0));
-    WinHttpSetTimeouts(session.get(), 10000, 10000, 15000, 30000);
-    const Internet connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
-    const CancellableRequest request(WinHttpOpenRequest(connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                                        WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                                        parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0),
-                                     token);
+    const Opener opener(url, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, {10000, 10000, 15000, 30000});
+    const CancellableRequest request(opener.open("GET"), token);
     const std::wstring headers = L"Accept: " + toWide(accept);
     if (!WinHttpSendRequest(request.get(), headers.c_str(), DWORD(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr)) {
         if (token.cancelled()) throw std::runtime_error("cancelled");
         fail("HTTP request");
     }
-    DWORD status = 0, size = sizeof(status);
-    WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                        &status, &size, WINHTTP_NO_HEADER_INDEX);
+    const unsigned status = statusOf(request.get());
     wchar_t length[32] = {};
-    size = sizeof(length);
+    DWORD size = sizeof(length);
     uint64_t total = 0;
     if (WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX, length, &size,
                             WINHTTP_NO_HEADER_INDEX))
         total = _wcstoui64(length, nullptr, 10);
-    if (onStart) onStart(unsigned(status), total);
+    if (onStart) onStart(status, total);
     std::vector<char> buffer(size_t{64} * 1024);
     for (;;) {
         if (token.cancelled()) throw std::runtime_error("cancelled");
@@ -138,7 +175,7 @@ unsigned get(const std::string& url, const char* accept, const CancellationToken
         if (read == 0) break;
         sink(buffer.data(), read);
     }
-    return unsigned(status);
+    return status;
 }
 
 Response get(const std::string& url, const char* accept, const CancellationToken& token, size_t maxBytes) {
@@ -152,24 +189,9 @@ Response get(const std::string& url, const char* accept, const CancellationToken
 
 Reply send(const std::string& method, const std::string& url, const std::string& headers, const std::string& body, int timeoutMs,
            size_t maxBytes) {
-    const std::wstring wide = toWide(url);
-    URL_COMPONENTS parts{};
-    parts.dwStructSize = sizeof(parts);
-    parts.dwHostNameLength = DWORD(-1);
-    parts.dwUrlPathLength = DWORD(-1);
-    parts.dwExtraInfoLength = DWORD(-1);
-    if (!WinHttpCrackUrl(wide.c_str(), DWORD(wide.size()), 0, &parts)) throw std::runtime_error("invalid URL: " + url);
-    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-    const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
-                              std::wstring(parts.lpszExtraInfo ? parts.lpszExtraInfo : L"", parts.dwExtraInfoLength);
-    const Internet session(WinHttpOpen(toWide(userAgent()).c_str(), WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME,
-                                       WINHTTP_NO_PROXY_BYPASS, 0));
-    WinHttpSetTimeouts(session.get(), timeoutMs, timeoutMs, timeoutMs, timeoutMs);
-    const Internet connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
-    const bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
-    const Internet request(WinHttpOpenRequest(connection.get(), toWide(method).c_str(), path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                              WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0));
-    if (secure) {
+    const Opener opener(url, WINHTTP_ACCESS_TYPE_NO_PROXY, {timeoutMs, timeoutMs, timeoutMs, timeoutMs});
+    const Internet request(opener.open(method));
+    if (opener.secure()) {
         // A player's certificate is its own, signed by no authority Windows knows; the address it answers at has passed
         // the local-network check (upnp::isLanUrl), which is what the request relies on.
         DWORD accept = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
@@ -183,11 +205,8 @@ Reply send(const std::string& method, const std::string& url, const std::string&
         !WinHttpReceiveResponse(request.get(), nullptr))
         fail("HTTP request");
     Reply reply;
-    DWORD status = 0, size = sizeof(status);
-    WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                        &status, &size, WINHTTP_NO_HEADER_INDEX);
-    reply.status = status;
-    size = 0;
+    reply.status = statusOf(request.get());
+    DWORD size = 0;
     WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER,
                         &size, WINHTTP_NO_HEADER_INDEX);
     std::wstring head(size / sizeof(wchar_t), L'\0');
