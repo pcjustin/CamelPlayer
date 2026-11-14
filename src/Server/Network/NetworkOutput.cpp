@@ -514,22 +514,15 @@ private:
     }
 
     void openListener() {
-        const auto* first = player_.services.empty() ? nullptr : &player_.services.front();
-        const std::string host = first ? upnp::hostOf(first->controlUrl) : std::string();
-        const std::string local = upnp::localAddressFor(host);
-        if (local.empty()) throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: no route to it");
-        const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        inet_pton(AF_INET, local.c_str(), &address.sin_addr);
-        if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(listener, 8) != 0) {
-            closesocket(listener);
+        try {
+            const auto listening = upnp::listenFor(player_);
+            listener_ = SOCKET(listening.socket);
+            base_ = listening.base;
+        } catch (const upnp::NoRoute&) {
+            throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: no route to it");
+        } catch (const std::runtime_error&) {
             throw Error(ErrorCode::DeviceNotFound, "cannot serve the stream");
         }
-        int length = sizeof(address);
-        getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
-        listener_ = listener;
-        base_ = "http://" + local + ":" + std::to_string(ntohs(address.sin_port));
     }
 
     void acceptLoop() {

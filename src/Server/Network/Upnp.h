@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -98,6 +99,17 @@ std::string didlLite(const DidlTrack& track);
 
 // The address of this computer that `host` can reach.
 std::string localAddressFor(const std::string& host);
+
+// A TCP socket listening on the address of this computer that `player` reaches, and its "http://address:port". Throws
+// NoRoute when no address reaches the player, std::runtime_error when the socket cannot be made, bound or listened on.
+struct NoRoute : std::runtime_error {
+    NoRoute() : std::runtime_error("no route to the player") {}
+};
+struct Listener {
+    uintptr_t socket = 0; // a SOCKET
+    std::string base;
+};
+Listener listenFor(const PlayerDescription& player);
 
 std::optional<uint64_t> parseDuration(std::string_view text); // h:mm:ss[.fff] in milliseconds
 std::string formatDuration(uint64_t milliseconds);

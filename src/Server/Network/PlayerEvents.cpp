@@ -140,21 +140,16 @@ struct PlayerEvents::Impl {
     }
 
     void openListener(const upnp::PlayerDescription& player) {
-        const auto* first = player.services.empty() ? nullptr : &player.services.front();
-        const std::string host = first ? upnp::hostOf(first->controlUrl) : std::string();
-        const std::string local = upnp::localAddressFor(host);
-        if (local.empty()) throw std::runtime_error("no route to the player");
-        listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        inet_pton(AF_INET, local.c_str(), &address.sin_addr);
-        if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(listener, 8) != 0) {
-            closesocket(listener);
+        upnp::Listener bound;
+        try {
+            bound = upnp::listenFor(player);
+        } catch (const upnp::NoRoute&) {
+            throw;
+        } catch (const std::runtime_error&) {
             throw std::runtime_error("cannot listen for the player's events");
         }
-        int length = sizeof(address);
-        getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
-        callback = "http://" + local + ":" + std::to_string(ntohs(address.sin_port)) + "/event";
+        listener = SOCKET(bound.socket);
+        callback = bound.base + "/event";
     }
 
     void subscribe(Subscription& subscription) const {

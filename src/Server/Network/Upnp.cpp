@@ -385,6 +385,25 @@ std::string localAddressFor(const std::string& host) {
     return local;
 }
 
+Listener listenFor(const PlayerDescription& player) {
+    const auto* first = player.services.empty() ? nullptr : &player.services.front();
+    const std::string local = localAddressFor(first ? hostOf(first->controlUrl) : std::string());
+    if (local.empty()) throw NoRoute();
+    constexpr auto kNoSocket = INVALID_SOCKET;
+    const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listener == kNoSocket) throw std::runtime_error("cannot make a socket");
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    inet_pton(AF_INET, local.c_str(), &address.sin_addr);
+    int length = sizeof(address);
+    if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(listener, 8) != 0 ||
+        getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+        closesocket(listener);
+        throw std::runtime_error("cannot listen");
+    }
+    return {listener, "http://" + local + ":" + std::to_string(ntohs(address.sin_port))};
+}
+
 std::optional<uint64_t> parseDuration(std::string_view text) {
     unsigned hours = 0, minutes = 0, seconds = 0, fraction = 0;
     int consumed = 0;
