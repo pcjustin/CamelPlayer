@@ -58,7 +58,6 @@ using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace camel;
 using namespace camel::audio;
-using ui::themeBrush;
 using ui::tr;
 using namespace camel::server;
 
@@ -306,7 +305,6 @@ void MainWindow::InitializeComponent() {
     ExtendsContentIntoTitleBar(true);
     SetTitleBar(AppTitleBar());
     AppWindow().TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
-    ui::setTheme(Content().as<FrameworkElement>().ActualTheme());
     colorCaptionButtons();
     Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) {
         colorCaptionButtons();
@@ -2264,9 +2262,12 @@ void MainWindow::applyTheme() {
     if (content.RequestedTheme() != theme) content.RequestedTheme(theme);
 }
 
+Media::Brush MainWindow::themeBrush(const wchar_t* key) const {
+    return ui::themeBrush(Content().as<FrameworkElement>(), key);
+}
+
 // Colors set from code take the theme's brushes again once the window shows another theme.
 void MainWindow::repaintTheme() {
-    ui::setTheme(Content().as<FrameworkElement>().ActualTheme());
     if (waveformBar_) waveformBar_->repaint();
     StateIcon().Foreground(themeBrush(stateColor_));
     Lamp().Fill(themeBrush(lampColor_));

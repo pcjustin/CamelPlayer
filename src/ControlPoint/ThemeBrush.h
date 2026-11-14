@@ -8,9 +8,10 @@
 
 namespace ui {
 
-// The theme the window shows, Light or Dark, kept whenever it changes.
-void setTheme(winrt::Microsoft::UI::Xaml::ElementTheme theme);
-// The brush `key` in that theme, or in high contrast while Windows uses it.
-winrt::Microsoft::UI::Xaml::Media::Brush themeBrush(const wchar_t* key);
+// The brush `key` in `theme` (Default: the Application's), or in high contrast while Windows uses it.
+winrt::Microsoft::UI::Xaml::Media::Brush themeBrush(winrt::Microsoft::UI::Xaml::ElementTheme theme, const wchar_t* key);
+// The brush `key` in the theme `element` shows.
+winrt::Microsoft::UI::Xaml::Media::Brush themeBrush(winrt::Microsoft::UI::Xaml::FrameworkElement const& element,
+                                                    const wchar_t* key);
 
 } // namespace ui

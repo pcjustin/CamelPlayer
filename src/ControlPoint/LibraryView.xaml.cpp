@@ -201,10 +201,7 @@ void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Com
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
     // The format badges are colored from code, so they follow a change of theme.
-    ActualThemeChanged([this](auto&&, auto&&) {
-        ui::setTheme(ActualTheme());
-        showAlbumFormats(albumBadges_.formats());
-    });
+    ActualThemeChanged([this](auto&&, auto&&) { showAlbumFormats(albumBadges_.formats()); });
     // A dragged divider changes the columns but not the rows, so the rows' own size changes do not refit their credits.
     columnsChanged_ = Application::Current()
                           .Resources()
@@ -1593,8 +1590,8 @@ void LibraryView::showAlbumFormats(const std::vector<LibraryAlbumFormat>& format
         badge.CornerRadius({10, 10, 10, 10});
         badge.BorderThickness({1, 1, 1, 1});
         const auto resources = Application::Current().Resources();
-        badge.Background(ui::themeBrush(L"ControlFillColorSecondaryBrush"));
-        badge.BorderBrush(ui::themeBrush(L"ControlStrokeColorDefaultBrush"));
+        badge.Background(ui::themeBrush(ActualTheme(), L"ControlFillColorSecondaryBrush"));
+        badge.BorderBrush(ui::themeBrush(ActualTheme(), L"ControlStrokeColorDefaultBrush"));
         TextBlock text;
         text.Text(label);
         text.Style(resources.Lookup(box_value(L"CaptionTextBlockStyle")).as<Microsoft::UI::Xaml::Style>());

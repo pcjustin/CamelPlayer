@@ -172,6 +172,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnRepairCancelClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
 private:
+    // The brush `key` in the theme the window's content shows.
+    Microsoft::UI::Xaml::Media::Brush themeBrush(const wchar_t* key) const;
     void fitPlayerArtist();
     void populateSettings(); // fills every control from settings_
     // The EQ (docs/Plan.md §5.9): the DSP card from settings_.eq, and its changes applied. A dragged point applies at

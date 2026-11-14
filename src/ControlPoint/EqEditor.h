@@ -37,6 +37,8 @@ private:
     // them would keep the row alive.
     static void enableControls(const Row& controls, const camel::EqBand& band);
     void rebuildRows();
+    // The brush `key` in the theme the curve shows.
+    winrt::Microsoft::UI::Xaml::Media::Brush brush(const wchar_t* key) const;
     // Rebuilds the grid, the curves and the points.
     void redraw();
     // Moves the curves and the points only, so a point being dragged keeps its pointer.

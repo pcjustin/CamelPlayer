@@ -176,10 +176,11 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
     root_.Children().Append(scroller);
     window_.Content(root_);
     window_.SetTitleBar(bar);
-    if (Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported())
+    const bool mica = Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported();
+    if (mica)
         window_.SystemBackdrop(Media::MicaBackdrop());
     else
-        root_.Background(themeBrush(L"SolidBackgroundFillColorBaseBrush"));
+        root_.Background(themeBrush(theme, L"SolidBackgroundFillColorBaseBrush"));
 
     const auto app = window_.AppWindow();
     app.TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
@@ -207,7 +208,8 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
     app.MoveAndResize({x, y, width, height});
 
     colorCaptionButtons();
-    root_.ActualThemeChanged([this](auto&&, auto&&) {
+    root_.ActualThemeChanged([this, mica](auto&&, auto&&) {
+        if (!mica) root_.Background(themeBrush(root_, L"SolidBackgroundFillColorBaseBrush"));
         colorCaptionButtons();
         render();
     });
@@ -239,8 +241,8 @@ UIElement FileDetailsWindow::sectionView(const Section& section) {
     heading.Style(Application::Current().Resources().Lookup(box_value(L"BodyStrongTextBlockStyle")).as<Style>());
     panel.Children().Append(heading);
     Border card;
-    card.Background(themeBrush(L"CardBackgroundFillColorDefaultBrush"));
-    card.BorderBrush(themeBrush(L"CardStrokeColorDefaultBrush"));
+    card.Background(themeBrush(root_.RequestedTheme(), L"CardBackgroundFillColorDefaultBrush"));
+    card.BorderBrush(themeBrush(root_.RequestedTheme(), L"CardStrokeColorDefaultBrush"));
     card.BorderThickness({1, 1, 1, 1});
     card.CornerRadius({8, 8, 8, 8});
     card.Padding({16, 12, 16, 12});
@@ -257,7 +259,7 @@ UIElement FileDetailsWindow::sectionView(const Section& section) {
         grid.RowDefinitions().Append(RowDefinition());
         grid.RowDefinitions().GetAt(uint32_t(index)).Height(GridLengthHelper::Auto());
         auto name = text(row.name);
-        name.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+        name.Foreground(themeBrush(root_.RequestedTheme(), L"TextFillColorSecondaryBrush"));
         Grid::SetRow(name, index);
         grid.Children().Append(name);
         StackPanel cell;
@@ -274,10 +276,10 @@ UIElement FileDetailsWindow::sectionView(const Section& section) {
             icon.FontSize(12);
             icon.VerticalAlignment(VerticalAlignment::Top);
             icon.Margin({0, 4, 0, 0});
-            icon.Foreground(themeBrush(L"SystemFillColorCautionBrush"));
+            icon.Foreground(themeBrush(root_.RequestedTheme(), L"SystemFillColorCautionBrush"));
             mark.Children().Append(icon);
             auto library = text(format(L"FileDetails_InLibrary", {std::wstring(*row.library)}));
-            library.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+            library.Foreground(themeBrush(root_.RequestedTheme(), L"TextFillColorSecondaryBrush"));
             Grid::SetColumn(library, 1);
             mark.Children().Append(library);
             cell.Children().Append(mark);

@@ -198,7 +198,6 @@ void HomeView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     handlers_ = std::move(handlers);
     // Colors set from code follow a change of theme.
     ActualThemeChanged([this](auto&&, auto&&) {
-        ui::setTheme(ActualTheme());
         showTiles();
         drawChart();
     });
@@ -451,7 +450,7 @@ winrt::fire_and_forget HomeView::loadPeriod() {
 
 // The chosen card is outlined in the accent color; padding makes up for its wider border so its text stays put.
 void HomeView::showTiles() {
-    const auto accent = ui::themeBrush(L"AccentFillColorDefaultBrush");
+    const auto accent = ui::themeBrush(ActualTheme(), L"AccentFillColorDefaultBrush");
     for (const auto& child : Tiles().Children()) {
         const auto tile = child.as<Border>();
         const bool chosen = unbox_value_or<hstring>(tile.Tag(), L"") == period_;
@@ -491,9 +490,9 @@ void HomeView::drawChart() {
     for (const auto& b : chart_.buckets) most = std::max(most, b.listenedMs);
     const double width = Chart().ActualWidth(), height = Chart().ActualHeight();
     if (width <= 0 || height <= 0) return;
-    const auto accent = ui::themeBrush(L"AccentFillColorDefaultBrush");
-    const auto secondary = ui::themeBrush(L"TextFillColorSecondaryBrush");
-    const auto divider = ui::themeBrush(L"DividerStrokeColorDefaultBrush");
+    const auto accent = ui::themeBrush(ActualTheme(), L"AccentFillColorDefaultBrush");
+    const auto secondary = ui::themeBrush(ActualTheme(), L"TextFillColorSecondaryBrush");
+    const auto divider = ui::themeBrush(ActualTheme(), L"DividerStrokeColorDefaultBrush");
     const auto text = [&](std::wstring_view value) {
         TextBlock block;
         // The caption size, with a fixed line height: a block not yet shown measures its width but not its height.

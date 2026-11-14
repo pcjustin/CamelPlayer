@@ -96,8 +96,8 @@ void WaveformBar::draw() {
         }
         path.Data(group);
     }
-    rest_.Fill(themeBrush(L"ControlStrongFillColorDisabledBrush"));
-    played_.Fill(themeBrush(L"AccentFillColorDefaultBrush"));
+    rest_.Fill(themeBrush(layer_, L"ControlStrongFillColorDisabledBrush"));
+    played_.Fill(themeBrush(layer_, L"AccentFillColorDefaultBrush"));
     setPlayed(playedFraction_);
 }
 

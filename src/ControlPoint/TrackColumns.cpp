@@ -65,12 +65,13 @@ ColumnDivider::ColumnDivider() {
     line.Width(1);
     line.Margin(ThicknessHelper::FromLengths(0, 4, 0, 4));
     line.HorizontalAlignment(HorizontalAlignment::Center);
-    // In the theme the window shows, which a change in Settings gives the content alone, not the Application.
-    line.Fill(ui::themeBrush(L"DividerStrokeColorDefaultBrush"));
-    ActualThemeChanged([line](FrameworkElement const& divider, auto&&) {
-        ui::setTheme(divider.ActualTheme());
-        line.Fill(ui::themeBrush(L"DividerStrokeColorDefaultBrush"));
-    });
+    // In the theme the window shows, which a change in Settings gives the content alone, not the Application: known once
+    // the divider is in the window.
+    const auto paint = [line](Windows::Foundation::IInspectable const& divider, auto&&) {
+        line.Fill(ui::themeBrush(divider.as<FrameworkElement>(), L"DividerStrokeColorDefaultBrush"));
+    };
+    Loaded(paint);
+    ActualThemeChanged(paint);
     Children().Append(line);
 
     PointerPressed([this](auto&&, Input::PointerRoutedEventArgs const& e) {

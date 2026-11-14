@@ -33,10 +33,6 @@ constexpr const wchar_t* kKindKeys[] = {L"Eq_Kind_Peaking",  L"Eq_Kind_LowShelf"
 constexpr const wchar_t* kChannelKeys[] = {L"Eq_Channels_All", L"Eq_Channels_Left", L"Eq_Channels_Right"};
 constexpr uint32_t kSlopes[] = {6, 12, 18, 24, 36, 48};
 
-Media::Brush brush(const wchar_t* key) {
-    return ui::themeBrush(key);
-}
-
 bool hasGain(EqKind kind) {
     return kind == EqKind::Peaking || kind == EqKind::LowShelf || kind == EqKind::HighShelf;
 }
@@ -148,7 +144,7 @@ void EqEditor::rebuildRows() {
     populating_ = true;
     rows_.Children().Clear();
     rowControls_.clear();
-    const auto header = [](const wchar_t* key, double width) {
+    const auto header = [this](const wchar_t* key, double width) {
         TextBlock text;
         text.Text(key ? tr(key) : hstring{});
         text.Width(width);
@@ -272,6 +268,10 @@ double EqEditor::pointDb(size_t band, const std::vector<double>& leftDb) const {
     // A point without a gain of its own sits on the curve.
     const double at = std::log(std::clamp(b.frequencyHz, kLowHz, kHighHz) / kLowHz) / std::log(kHighHz / kLowHz);
     return leftDb[size_t(std::lround(at * (kCurvePoints - 1)))];
+}
+
+Media::Brush EqEditor::brush(const wchar_t* key) const {
+    return ui::themeBrush(curve_, key);
 }
 
 void EqEditor::repaint() {
