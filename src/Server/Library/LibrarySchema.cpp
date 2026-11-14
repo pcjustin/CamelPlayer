@@ -1,9 +1,8 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Server/Library/LibrarySchema.h"
-#include "Server/Library/LibraryNames.h"
 
 #include <stdexcept>
 #include <string>
@@ -410,7 +409,8 @@ ALTER TABLE queue DROP COLUMN cue_index;
                     "ALTER TABLE stats ADD COLUMN album_favorite_at INTEGER;");
         },
         // Artist and composer tags move to track_tags as written; track_values keeps the names they credit, split by
-        // LibraryNameSplitter and derived again whenever the library learns names ("Aimer with chelly" credits both).
+        // LibraryNameSplitter and derived again whenever the library learns names ("Aimer with chelly" credits both). The
+        // names are derived after opening (updateLibraryNameRules), by the rules of the code that runs, not here.
         [](sqlite::Database& db) {
             db.exec(R"sql(
 CREATE TABLE track_tags (
@@ -424,7 +424,6 @@ CREATE TABLE track_tags (
 INSERT INTO track_tags(track_id,field,position,value,sort_source)
     SELECT track_id,field,position,value,sort_source FROM track_values WHERE field IN ('artist','composer');
 )sql");
-            updateLibraryNameRules(db);
         },
         // Favorite artists and composers are kept by name, so they outlast rescans, moves and rebuilds, and come back
         // with a name that left the library and returned.

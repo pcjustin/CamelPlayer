@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "Server/Library/LibraryNames.h"
 #include "Server/Library/LibraryStore.h"
 #include "TestUtil.h"
 
@@ -432,6 +433,9 @@ TEST(LibraryStore, UpgradesV14ByKeepingTagsAndSplittingTheNamesTheyCredit) {
             .get();
     }
     LibraryStore store(dir);
+    // The migration leaves the names as they were; the rules are applied after opening, as the Server does.
+    EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM app_state WHERE key='name_rules'"), 0);
+    store.write([](Database& db) { updateLibraryNameRules(db); }).get();
     auto db = store.openReader();
     const auto names = [&](int64_t track, const char* field) {
         std::vector<std::string> out;
