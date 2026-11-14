@@ -6,7 +6,11 @@
 #include <windows.h>
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <mutex>
+#include <random>
+#include <vector>
 
 #include "Common/AudioFormat.h"
 #include "Engine/decode/IDecoder.h"
@@ -46,6 +50,12 @@ inline std::filesystem::path testFile(const char* name) {
             camel::audio::testaudio::writeFlac(dir / (s.name + ".flac"), s);
         camel::audio::testaudio::writeCorrupted(dir / "24-96k.flac", dir / "damaged.flac");
         camel::audio::testaudio::writeTruncated(dir / "24-96k.flac", dir / "truncated.flac");
+        // Random bytes after the last frame, with no tag, as some rips carry.
+        std::ifstream in(dir / "24-96k.flac", std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(in)), {});
+        std::mt19937 random(5);
+        for (int i = 0; i < 20152; ++i) bytes.push_back(char(random() & 0xff));
+        std::ofstream(dir / "trailing.flac", std::ios::binary).write(bytes.data(), std::streamsize(bytes.size()));
     });
     return tempDir() / (std::string(name) + ".flac");
 }

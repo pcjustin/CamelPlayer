@@ -450,6 +450,20 @@ TEST(FormatDecoderPolicy, RealSamplesAgreeAcrossDecoders) {
     }
 }
 
+TEST(FormatDecoderPolicy, EveryFlacDecoderEndsAtStreamInfosCountBeforeBytesAfterTheLastFrame) {
+    const auto expected = readAll(*openDecoder(DecoderKind::DrFlac, testutil::testFile("24-96k")));
+    for (const auto kind : {DecoderKind::Symphonia, DecoderKind::DrFlac, DecoderKind::Sndfile}) {
+        auto decoder = openDecoder(kind, testutil::testFile("trailing"));
+        EXPECT_TRUE(decoder->info().md5) << decoderName(kind);
+        std::vector<int32_t> got;
+        EXPECT_NO_THROW(got = readAll(*decoder)) << decoderName(kind);
+        EXPECT_TRUE(got == expected) << decoderName(kind);
+    }
+    const auto reference = testaudio::referenceDecode(testutil::testFile("trailing"));
+    EXPECT_TRUE(reference.md5Ok) << reference.error;
+    EXPECT_TRUE(reference.samples == expected);
+}
+
 TEST(FormatDecoderPolicy, LibsndfileAndSymphoniaOpenAFlacWithoutReadingItsCover) {
     const testaudio::GenSpec spec{"cover", 96000, 24, 2, 1.0};
     const auto plain = testutil::tempDir() / "cover-plain.flac", covered = testutil::tempDir() / "cover-3mb.flac";

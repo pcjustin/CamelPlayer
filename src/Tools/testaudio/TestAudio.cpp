@@ -293,6 +293,9 @@ void onMetadata(const FLAC__StreamDecoder*, const FLAC__StreamMetadata* m, void*
 
 void onError(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus s, void* user) {
     auto* st = static_cast<RefState*>(user);
+    // Bytes after the last frame, once STREAMINFO's count is decoded, are not audio.
+    const auto& in = st->out->info;
+    if (in.totalFrames && in.channels && st->out->samples.size() / in.channels >= in.totalFrames) return;
     if (!st->errorSeen) st->out->error = FLAC__StreamDecoderErrorStatusString[s];
     st->errorSeen = true;
 }

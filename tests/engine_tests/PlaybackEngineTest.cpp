@@ -846,6 +846,20 @@ TEST_F(EngineStateTest, DestructionClosesActiveSession) {
     EXPECT_GT(probe.closes, 0);
 }
 
+TEST_F(EngineStateTest, BytesAfterTheLastFlacFramePlayTheTrackToItsEndWithoutAnError) {
+    engine->openAndPlay(testutil::testFile("trailing"));
+    engine->waitIdle();
+    size_t frames = 0;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (engine->snapshot().state != PlayState::Stopped && std::chrono::steady_clock::now() < deadline) {
+        frames += pull(4096);
+        engine->waitIdle();
+    }
+    EXPECT_EQ(frames, 192000u);
+    ASSERT_TRUE(engine->waitForState(PlayState::Stopped, 2s));
+    EXPECT_FALSE(engine->snapshot().error);
+}
+
 TEST_F(EngineStateTest, TruncatedAudioPublishesDecodeFailureAndNextFileRecovers) {
     engine->openAndPlay(testutil::testFile("truncated"));
     engine->waitIdle();

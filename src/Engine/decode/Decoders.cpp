@@ -19,7 +19,8 @@ namespace camel::audio {
 namespace {
 
 // Gives every decoder the same STREAMINFO MD5 (from our own parser), so the engine and reports
-// do not depend on which decoder happens to expose it.
+// do not depend on which decoder happens to expose it. The stream ends at STREAMINFO's count: bytes after the last frame
+// are not read, which Symphonia and libsndfile take for a damaged frame.
 class WithStreamInfo final : public IDecoder {
 public:
     WithStreamInfo(std::unique_ptr<IDecoder> inner, const SourceInfo& parsed) : inner_(std::move(inner)), info_(inner_->info()) {
@@ -30,9 +31,10 @@ public:
     const SourceInfo& info() const override { return info_; }
     size_t read(int32_t* dst, size_t frames) override {
         if (!frames || ended_) return 0;
-        const size_t got = inner_->read(dst, frames);
+        if (info_.totalFrames) frames = size_t(std::min<uint64_t>(frames, info_.totalFrames - position_));
+        const size_t got = frames ? inner_->read(dst, frames) : 0;
         position_ += got;
-        if (info_.totalFrames && (position_ > info_.totalFrames || (!got && position_ != info_.totalFrames)))
+        if (info_.totalFrames && !got && position_ != info_.totalFrames)
             throw Error(ErrorCode::DecodeFailed, "FLAC frame count does not match STREAMINFO");
         if (got) {
             if (md5_) md5_->update(dst, got * info_.channels);

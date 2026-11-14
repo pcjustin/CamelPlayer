@@ -404,6 +404,29 @@ TEST(RustEngineHost, CorruptAndTruncatedFlacFailIntegrityForEveryDecoder) {
     }
 }
 
+// Bytes after the last frame are not audio: every decoder ends the track at STREAMINFO's count, with its MD5 checked.
+TEST(RustEngineHost, BytesAfterTheLastFlacFrameEndTheTrackWholeForEveryDecoder) {
+    const auto path = testutil::testFile("trailing");
+    camel::audio::SourceInfo parsed;
+    ASSERT_TRUE(camel::audio::readFlacStreamInfo(path, parsed));
+    for (const auto decoderKind : {CAMEL_DECODER_SYMPHONIA, CAMEL_DECODER_DR_FLAC, CAMEL_DECODER_SNDFILE}) {
+        auto* engine = createEngine();
+        ASSERT_NE(engine, nullptr);
+        ASSERT_EQ(loadSource(engine, path, decoderKind), CAMEL_ENGINE_OK) << decoderKind;
+        std::array<int32_t, size_t{4096} * 2> chunk{};
+        uint64_t framesRead = 0, total = 0;
+        int32_t status = CAMEL_ENGINE_OK;
+        while (status == CAMEL_ENGINE_OK) {
+            status = camel_engine_read_decoded_v1(engine, chunk.data(), 4096, &framesRead);
+            total += framesRead;
+        }
+        EXPECT_EQ(status, CAMEL_ENGINE_END) << decoderKind;
+        EXPECT_EQ(total, parsed.totalFrames) << decoderKind;
+        EXPECT_EQ(flacIntegrity(engine).status, CAMEL_FLAC_INTEGRITY_VERIFIED) << decoderKind;
+        destroyEngine(engine);
+    }
+}
+
 TEST(RustEngineHost, SourceRangeIsEnforced) {
     auto* engine = createEngine();
     ASSERT_NE(engine, nullptr);

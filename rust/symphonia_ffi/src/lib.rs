@@ -5,6 +5,7 @@
 //! C ABI over Symphonia's FLAC, ALAC, WAV, AIFF and AAC decoding for CamelPlayer (docs/Plan.md §16.3).
 //! Samples are returned interleaved as i32, right-aligned to the stream's original bit depth.
 
+mod flac_tail;
 mod flac_view;
 mod hidden_tags;
 
@@ -17,7 +18,7 @@ use hidden_tags::HiddenTags;
 use symphonia::core::audio::conv::ConvertibleSample;
 use symphonia::core::audio::sample::i24;
 use symphonia::core::audio::GenericAudioBufferRef;
-use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_ALAC};
+use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_ALAC, CODEC_ID_FLAC};
 use symphonia::core::codecs::audio::{
     AudioCodecParameters, AudioDecoder, AudioDecoderOptions, VerificationCheck, CODEC_ID_NULL_AUDIO,
 };
@@ -27,7 +28,8 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::units::{TimeBase, Timestamp};
+use symphonia::core::packet::Packet;
+use symphonia::core::units::{Duration, TimeBase, Timestamp};
 
 pub const SYM_OK: i32 = 0;
 pub const SYM_END: i32 = 1;
@@ -69,6 +71,15 @@ pub struct SymDecoder {
     path: String,
     /// The reader has given its last packet.
     ended: bool,
+    flac: Option<FlacEnd>,
+}
+
+/// A FLAC's length and largest block from its STREAMINFO, and the frame its reader reaches next.
+struct FlacEnd {
+    total: u64,
+    max_block: u64,
+    next_frame: u64,
+    last_frame_read: bool,
 }
 
 /// The container's time against frames at the rate reported: `per` ticks are `frames` frames. An MP4's timescale need
@@ -155,6 +166,44 @@ impl SymDecoder {
         self.pending_pos = drop * ch;
     }
 
+    /// The FLAC frame the reader dropped at the end of the file, decoded into `pending` (flac_tail.rs).
+    fn last_flac_frame(&mut self) -> bool {
+        let Some(flac) = self.flac.as_mut() else {
+            return false;
+        };
+        if flac.last_frame_read || flac.next_frame >= flac.total {
+            return false;
+        }
+        flac.last_frame_read = true;
+        let (first, block, max_block) = (
+            flac.next_frame,
+            flac.total - flac.next_frame,
+            flac.max_block,
+        );
+        let Ok(tail) = flac_tail::read_tail(&self.path) else {
+            return false;
+        };
+        for (start, end) in flac_tail::frame_candidates(&tail, first, block, max_block) {
+            let packet = Packet::new(
+                self.track_id,
+                Timestamp::from(i64::try_from(first).unwrap_or(i64::MAX)),
+                Duration::from(block),
+                &tail[start..end],
+            );
+            let Ok(buf) = self.decoder.decode(&packet) else {
+                continue;
+            };
+            match interleave(buf, self.bits) {
+                Ok(out) if out.len() as u64 == block * self.channels as u64 => {
+                    self.set_pending(out);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// Decodes the next packet of our track into `pending`. Ok(false) at end of stream.
     fn next_packet(&mut self) -> Result<bool, i32> {
         loop {
@@ -162,11 +211,11 @@ impl SymDecoder {
                 Ok(Some(p)) => p,
                 Ok(None) => {
                     self.ended = true;
-                    return Ok(false);
+                    return Ok(self.last_flac_frame());
                 }
                 Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     self.ended = true;
-                    return Ok(false);
+                    return Ok(self.last_flac_frame());
                 }
                 Err(e) => {
                     self.last_error = e.to_string();
@@ -175,6 +224,9 @@ impl SymDecoder {
             };
             if packet.track_id != self.track_id {
                 continue;
+            }
+            if let Some(flac) = self.flac.as_mut() {
+                flac.next_frame = u64::try_from(packet.pts.get()).unwrap_or(0) + packet.dur.get();
             }
             match self.decoder.decode(&packet) {
                 Ok(buf) => {
@@ -344,6 +396,17 @@ unsafe fn open_decoder(
     } else {
         duration.map_or(0, |d| ticks.to_frames(d.get()))
     };
+    let flac = match params.extra_data.as_deref() {
+        Some(info) if params.codec == CODEC_ID_FLAC && info.len() >= 34 && total_frames > 0 => {
+            Some(FlacEnd {
+                total: total_frames,
+                max_block: u64::from(u16::from_be_bytes([info[2], info[3]])),
+                next_frame: 0,
+                last_frame_read: false,
+            })
+        }
+        _ => None,
+    };
     let (has_md5, md5) = match params.verification_check {
         Some(VerificationCheck::Md5(m)) => (1, m),
         _ => (0, [0u8; 16]),
@@ -372,6 +435,7 @@ unsafe fn open_decoder(
         last_error: String::new(),
         path,
         ended: false,
+        flac,
     });
     *out = Box::into_raw(dec);
     SYM_OK
@@ -470,6 +534,10 @@ fn seek_frame(d: &mut SymDecoder, frame: u64) -> i32 {
         .ticks
         .to_frames(u64::try_from(seeked.actual_ts.get()).unwrap_or(0));
     d.skip_frames = frame.saturating_sub(landed);
+    if let Some(flac) = d.flac.as_mut() {
+        flac.next_frame = landed;
+        flac.last_frame_read = false;
+    }
     SYM_OK
 }
 
