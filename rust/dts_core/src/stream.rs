@@ -122,14 +122,6 @@ pub fn find_sync(bytes: &[u8], start: usize) -> Option<Sync> {
     })
 }
 
-fn order_of(packing: SyncWordEncoding) -> Option<FourteenBitByteOrder> {
-    match packing {
-        SyncWordEncoding::FourteenBitBigEndian => Some(FourteenBitByteOrder::BigEndian),
-        SyncWordEncoding::FourteenBitLittleEndian => Some(FourteenBitByteOrder::LittleEndian),
-        SyncWordEncoding::RawBigEndian | SyncWordEncoding::RawLittleEndian => None,
-    }
-}
-
 fn packing_at_start(bytes: &[u8]) -> Result<SyncWordEncoding, DecodeError> {
     match find_sync(bytes, 0) {
         Some(found) if found.offset == 0 => Ok(found.packing),
@@ -187,14 +179,18 @@ fn big_endian_frame(
         }
     };
     let frame = bytes.get(..words).ok_or(DecodeError::Truncated)?;
-    Ok(match (packing, order_of(packing)) {
-        (_, Some(order)) => Cow::Owned(unpack_14bit_to_16bit(frame, order)?),
-        (SyncWordEncoding::RawLittleEndian, None) => {
+    Ok(match packing {
+        SyncWordEncoding::RawBigEndian => Cow::Borrowed(frame),
+        SyncWordEncoding::RawLittleEndian => {
             let mut swapped = swapped(frame);
             swapped.truncate(length);
             Cow::Owned(swapped)
         }
-        _ => Cow::Borrowed(frame),
+        SyncWordEncoding::FourteenBitBigEndian | SyncWordEncoding::FourteenBitLittleEndian => {
+            let order = FourteenBitByteOrder::from_sync(packing)
+                .expect("a 14-bit packing has a byte order");
+            Cow::Owned(unpack_14bit_to_16bit(frame, order)?)
+        }
     })
 }
 
