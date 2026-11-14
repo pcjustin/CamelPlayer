@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -16,6 +16,7 @@
 #include <thread>
 
 #include "ThemeBrush.h"
+#include "CaptionButtons.h"
 #include "UiText.h"
 
 using namespace winrt;
@@ -220,18 +221,7 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
 }
 
 void FileDetailsWindow::colorCaptionButtons() {
-    const bool dark = root_.ActualTheme() == ElementTheme::Dark;
-    const auto bar = window_.AppWindow().TitleBar();
-    const Windows::UI::Color foreground = dark ? Windows::UI::Color{255, 255, 255, 255} : Windows::UI::Color{255, 0, 0, 0};
-    const Windows::UI::Color transparent{0, 0, 0, 0};
-    bar.ButtonBackgroundColor(transparent);
-    bar.ButtonInactiveBackgroundColor(transparent);
-    bar.ButtonForegroundColor(foreground);
-    bar.ButtonHoverForegroundColor(foreground);
-    bar.ButtonPressedForegroundColor(foreground);
-    bar.ButtonInactiveForegroundColor(dark ? Windows::UI::Color{255, 140, 140, 140} : Windows::UI::Color{255, 120, 120, 120});
-    bar.ButtonHoverBackgroundColor(dark ? Windows::UI::Color{24, 255, 255, 255} : Windows::UI::Color{24, 0, 0, 0});
-    bar.ButtonPressedBackgroundColor(dark ? Windows::UI::Color{16, 255, 255, 255} : Windows::UI::Color{16, 0, 0, 0});
+    ui::colorCaptionButtons(window_.AppWindow(), root_.ActualTheme() == ElementTheme::Dark);
 }
 
 TextBlock FileDetailsWindow::text(hstring const& value) {

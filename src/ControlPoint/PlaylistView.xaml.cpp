@@ -23,6 +23,7 @@
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
 #include "Substitute.h"
+#include "FilePicker.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 
@@ -38,36 +39,16 @@ namespace {
 constexpr COMDLG_FILTERSPEC kPlaylistFiles[] = {{L"M3U8", L"*.m3u8;*.m3u"}};
 
 std::optional<std::filesystem::path> pickPlaylistFile(HWND owner) {
-    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
-    dialog->SetFileTypes(1, kPlaylistFiles);
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(owner)) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        return std::nullopt;
-    std::filesystem::path result(path);
-    CoTaskMemFree(path);
-    return result;
+    return ui::pickFile(owner, kPlaylistFiles);
 }
 
 std::optional<std::filesystem::path> pickExportFile(HWND owner, const hstring& name) {
-    auto dialog = winrt::create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);
     constexpr COMDLG_FILTERSPEC types[] = {{L"M3U8", L"*.m3u8"}};
-    dialog->SetFileTypes(1, types);
-    dialog->SetDefaultExtension(L"m3u8");
     std::wstring file(name);
     std::replace_if(
         file.begin(), file.end(), [](wchar_t c) { return std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos; },
         L'_');
-    dialog->SetFileName(file.c_str());
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(owner)) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        return std::nullopt;
-    std::filesystem::path result(path);
-    CoTaskMemFree(path);
-    return result;
+    return ui::pickFile(owner, types, true, L"m3u8", file);
 }
 
 ContentDialog dialog(XamlRoot const& root, hstring const& title, hstring const& primary) {

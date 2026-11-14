@@ -28,6 +28,7 @@
 #include "FileDetailsWindow.h"
 #include "ThemeBrush.h"
 #include "Substitute.h"
+#include "FilePicker.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 #include "ArtworkLoader.h"
@@ -1539,16 +1540,10 @@ void LibraryView::changeArtistPicture(std::function<ArtistPicture(IServer&)> cha
 
 void LibraryView::OnChoosePictureClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (!current_.filter || !window_) return;
-    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
     constexpr COMDLG_FILTERSPEC kPictures[] = {{L"JPEG, PNG, WebP", L"*.jpg;*.jpeg;*.png;*.webp"}};
-    dialog->SetFileTypes(1, kPictures);
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(window_())) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        return;
-    const std::filesystem::path file(path);
-    CoTaskMemFree(path);
+    const auto chosen = ui::pickFile(window_(), kPictures);
+    if (!chosen) return;
+    const std::filesystem::path file = *chosen;
     changeArtistPicture(
         [name = current_.filter->value, file](IServer& server) {
             std::error_code ec;

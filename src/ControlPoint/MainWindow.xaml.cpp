@@ -30,6 +30,8 @@
 #include "OutputsFollow.h"
 #include "SnapshotForward.h"
 #include "ThemeBrush.h"
+#include "CaptionButtons.h"
+#include "FilePicker.h"
 #include "UiText.h"
 #include "TrackColumns.h"
 #include "TrimmedText.h"
@@ -2279,18 +2281,7 @@ void MainWindow::repaintTheme() {
 
 // The minimize, maximize and close buttons sit on our title bar, so they follow the app's light or dark theme.
 void MainWindow::colorCaptionButtons() {
-    const bool dark = Content().as<FrameworkElement>().ActualTheme() == ElementTheme::Dark;
-    const auto bar = AppWindow().TitleBar();
-    const Windows::UI::Color foreground = dark ? Windows::UI::Color{255, 255, 255, 255} : Windows::UI::Color{255, 0, 0, 0};
-    const Windows::UI::Color transparent{0, 0, 0, 0};
-    bar.ButtonBackgroundColor(transparent);
-    bar.ButtonInactiveBackgroundColor(transparent);
-    bar.ButtonForegroundColor(foreground);
-    bar.ButtonHoverForegroundColor(foreground);
-    bar.ButtonPressedForegroundColor(foreground);
-    bar.ButtonInactiveForegroundColor(dark ? Windows::UI::Color{255, 140, 140, 140} : Windows::UI::Color{255, 120, 120, 120});
-    bar.ButtonHoverBackgroundColor(dark ? Windows::UI::Color{24, 255, 255, 255} : Windows::UI::Color{24, 0, 0, 0});
-    bar.ButtonPressedBackgroundColor(dark ? Windows::UI::Color{16, 255, 255, 255} : Windows::UI::Color{16, 0, 0, 0});
+    ui::colorCaptionButtons(AppWindow(), Content().as<FrameworkElement>().ActualTheme() == ElementTheme::Dark);
 }
 
 void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IInspectable const&) {
@@ -2622,23 +2613,15 @@ void MainWindow::OnOpenDataFolderClick(Windows::Foundation::IInspectable const&,
 winrt::fire_and_forget MainWindow::OnDiagnosticBundleClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
     if (!server_) co_return;
-    auto dialog = winrt::create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);
     constexpr COMDLG_FILTERSPEC types[] = {{L"Zip", L"*.zip"}};
-    dialog->SetFileTypes(1, types);
-    dialog->SetDefaultExtension(L"zip");
     SYSTEMTIME t;
     GetLocalTime(&t);
     std::array<wchar_t, 64> name{};
     swprintf(name.data(), name.size(), L"CamelPlayer-diagnostics-%04u%02u%02u-%02u%02u%02u.zip", t.wYear, t.wMonth, t.wDay,
              t.wHour, t.wMinute, t.wSecond);
-    dialog->SetFileName(name.data());
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        co_return;
-    const std::filesystem::path file(path);
-    CoTaskMemFree(path);
+    const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), types, true, L"zip", name.data());
+    if (!chosen) co_return;
+    const std::filesystem::path file = *chosen;
     const auto checked = DiagnosticPathsCheck().IsChecked();
     const bool includePaths = checked && checked.Value();
     DiagnosticButton().IsEnabled(false);
@@ -3877,16 +3860,10 @@ void MainWindow::OnEqResetClick(Windows::Foundation::IInspectable const&, Routed
 
 // Equalizer APO and AutoEq ParametricEQ.txt: the filters become a preset named after the file, and the EQ turns on.
 void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
     constexpr COMDLG_FILTERSPEC types[] = {{L"Equalizer APO / AutoEq", L"*.txt"}};
-    dialog->SetFileTypes(1, types);
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        return;
-    const std::filesystem::path file(path);
-    CoTaskMemFree(path);
+    const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), types);
+    if (!chosen) return;
+    const std::filesystem::path file = *chosen;
     std::ifstream in(file, std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(in)), {});
     camel::EqImportNotes notes;
@@ -3920,19 +3897,11 @@ void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, Route
 }
 
 void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    auto dialog = winrt::create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);
     constexpr COMDLG_FILTERSPEC types[] = {{L"Equalizer APO", L"*.txt"}};
-    dialog->SetFileTypes(1, types);
-    dialog->SetDefaultExtension(L"txt");
     const auto name = settings_.eq.preset.empty() ? std::wstring(L"CamelPlayer EQ") : camel::toWide(settings_.eq.preset);
-    dialog->SetFileName((name + L".txt").c_str());
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        return;
-    const std::filesystem::path file(path);
-    CoTaskMemFree(path);
+    const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), types, true, L"txt", name + L".txt");
+    if (!chosen) return;
+    const std::filesystem::path file = *chosen;
     auto shown = settings_.eq;
     shown.enabled = true;
     const auto text = camel::formatEqualizerApo(settings_.eq.bands, analyzeDsp(eqChain(shown), eqRate()).preampDb);
@@ -4518,17 +4487,11 @@ void MainWindow::OnConvolutionToggled(Windows::Foundation::IInspectable const&, 
 }
 
 void MainWindow::OnConvolutionChooseClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
     const hstring types = tr(L"Convolution_FileTypes");
     const COMDLG_FILTERSPEC filter[] = {{types.c_str(), L"*.wav;*.zip"}};
-    dialog->SetFileTypes(1, filter);
-    winrt::com_ptr<IShellItem> item;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->Show(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()))) || FAILED(dialog->GetResult(item.put())) ||
-        FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        return;
-    settings_.convolution.file = camel::toUtf8(path);
-    CoTaskMemFree(path);
+    const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), filter);
+    if (!chosen) return;
+    settings_.convolution.file = camel::toUtf8(chosen->wstring());
     settings_.convolution.enabled = true;
     showDsp();
     settingsChanged();
