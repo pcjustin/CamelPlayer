@@ -105,23 +105,6 @@ uint8_t reverseBits(uint8_t value) {
     return uint8_t((value & 0xAA) >> 1 | (value & 0x55) << 1);
 }
 
-std::string xmlText(std::string_view text) {
-    std::string out;
-    for (const char c : text) {
-        if (c == '&')
-            out += "&amp;";
-        else if (c == '<')
-            out += "&lt;";
-        else if (c == '>')
-            out += "&gt;";
-        else if (c == '"')
-            out += "&quot;";
-        else
-            out += c;
-    }
-    return out;
-}
-
 // One track of the stream: bytes the player has asked for or may ask for again.
 struct Body {
     uint32_t id = 0;
