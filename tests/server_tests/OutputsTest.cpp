@@ -759,30 +759,19 @@ TEST(AirPlayGroupTest, ChannelsAndTheGroupSurviveInTheSettingsFile) {
     EXPECT_EQ(fromJson(toJson(Settings{})).airplay.channels, AirPlayChannels::Stereo);
 }
 
-// A device scan while an output's settings dialog is open: its outputs reach the settings the dialog writes back, so
-// closing it neither shows the outputs from before nor writes them back over the Server's.
-TEST(OutputsFollowTest, OutputsChangedWhileAnOutputsDialogIsOpenReachTheSettingsItWritesBack) {
-    SettingsDto shown, real, server;
+// A device scan while an output's settings dialog is open: its outputs reach the settings the window keeps at once,
+// so closing it neither shows the outputs from before nor writes them back over the Server's; the page is filled once
+// the dialog closes.
+TEST(OutputsFollowTest, OutputsChangedWhileAnOutputsDialogIsOpenReachTheSettings) {
+    SettingsDto settings, server;
     server.outputs.emplace_back();
     server.outputs.back().id = "new-dac";
     server.followedDefault = "new-dac";
-    EXPECT_EQ(ui::followServerOutputs(shown, &real, server), ui::OutputsRefill::None);
-    ASSERT_EQ(real.outputs.size(), 1u);
-    EXPECT_EQ(real.outputs.front().id, "new-dac");
-    EXPECT_EQ(real.followedDefault, "new-dac");
-    EXPECT_TRUE(shown.outputs.empty()); // the dialog's own copy is left as it is
-    EXPECT_EQ(ui::followServerOutputs(shown, nullptr, server), ui::OutputsRefill::Outputs);
-    ASSERT_EQ(shown.outputs.size(), 1u);
-}
-
-// The first close to the tray saves that its notice was shown: with an output's settings dialog open, the real
-// settings, not the dialog's copy of another output, which would switch to it.
-TEST(OutputsFollowTest, AChangeMadeWhileAnOutputsDialogIsOpenGoesToTheRealSettings) {
-    SettingsDto dialog, real;
-    dialog.backend = Backend::Wasapi;
-    real.backend = Backend::Asio;
-    EXPECT_EQ(ui::settingsToSave(dialog, &real).backend, Backend::Asio);
-    EXPECT_EQ(ui::settingsToSave(dialog, nullptr).backend, Backend::Wasapi);
+    EXPECT_EQ(ui::followServerOutputs(settings, server, true), ui::OutputsRefill::None);
+    ASSERT_EQ(settings.outputs.size(), 1u);
+    EXPECT_EQ(settings.outputs.front().id, "new-dac");
+    EXPECT_EQ(settings.followedDefault, "new-dac");
+    EXPECT_EQ(ui::followServerOutputs(settings, server, false), ui::OutputsRefill::Outputs);
 }
 
 // One name that is not UTF-8, kept from a device, stopped every later save of the settings.

@@ -574,11 +574,9 @@ void MainWindow::hideToTray() {
     if (!settings_.trayNoticeShown && server_) {
         tray_->notify(std::wstring(tr(L"Tray_NoticeTitle")), std::wstring(tr(L"Tray_NoticeText")));
         settings_.trayNoticeShown = true;
-        auto& saved = ui::settingsToSave(settings_, editingOutput_ ? &editingOutput_->real : nullptr);
-        saved.trayNoticeShown = true;
         Command command;
         command.kind = CommandKind::ApplySettings;
-        command.settings = saved;
+        command.settings = settings_;
         submitCommand(std::move(command));
     }
 }
@@ -633,6 +631,72 @@ void MainWindow::setRefreshing(bool refreshing) {
     refreshFromServer();
 }
 
+// The groups of OutputSettingsPanel, from `p`.
+void MainWindow::showOutputParameters(const SettingsDto& p) {
+    fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, p.wasapi.shared ? 1 : 0);
+    fill(WasapiSharedQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
+         int(p.wasapi.sharedResampleQuality));
+    fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, p.wasapi.eventDriven ? 0 : 1);
+    fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(p.wasapi.period));
+    WasapiPeriodBox().Value(p.wasapi.customPeriodMs);
+    const std::vector<hstring> formats = {tr(L"Format_Auto"), L"16", L"24", L"24-in-32", L"32"};
+    fill(WasapiFormatCombo(), formats, formatIndex(p.wasapi.sampleType));
+    const auto rates = rateItems();
+    const std::vector<hstring> tasks = {L"Pro Audio", L"Playback", tr(L"Mmcss_Disabled")};
+    const std::vector<hstring> priorities = {tr(L"Priority_Normal"), tr(L"Priority_High"), tr(L"Priority_Critical")};
+    fill(WasapiRateCombo(), rates, rateIndex(p.wasapi.fixedRate));
+    // WASAPI and KS have no native DSD; a stored Native plays as DoP.
+    const std::vector<hstring> dopOrPcm = {tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")};
+    const auto dsdRates = dsdRateItems();
+    fill(WasapiDsdCombo(), dopOrPcm, p.wasapi.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(WasapiDsdRateCombo(), dsdRates, dsdRateIndex(p.wasapi.dsdPcmRate));
+    auto deviceLimits = rates;
+    deviceLimits.front() = tr(L"Limit_FollowDevice");
+    const auto deviceDsdLimits = maxDsdItems(tr(L"Limit_FollowDevice"));
+    fill(WasapiMaxRateCombo(), deviceLimits, rateIndex(p.wasapi.maxSampleRate));
+    fill(WasapiMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(p.wasapi.maxDsdRate));
+    WasapiPollBufferBox().Value(p.wasapi.pollBufferMs);
+    fill(WasapiMmcssTaskCombo(), tasks, int(p.wasapi.mmcssTask));
+    fill(WasapiMmcssPriorityCombo(), priorities, int(p.wasapi.mmcssPriority));
+    showTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), p.wasapi.timing);
+
+    AsioBufferBox().Value(double(p.asio.bufferSize));
+    AsioLeftBox().Value(p.asio.outLeft + 1);
+    AsioRightBox().Value(p.asio.outRight + 1);
+    fill(AsioRateCombo(), rates, rateIndex(p.asio.fixedRate));
+    fill(AsioDsdCombo(), {tr(L"Dsd_Native"), tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")}, int(p.asio.dsdOutput));
+    fill(AsioDsdRateCombo(), dsdRates, dsdRateIndex(p.asio.dsdPcmRate));
+    fill(AsioMaxRateCombo(), deviceLimits, rateIndex(p.asio.maxSampleRate));
+    fill(AsioMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(p.asio.maxDsdRate));
+    showTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), p.asio.timing);
+
+    fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")},
+         int(p.ks.mode));
+    KsBufferBox().Value(p.ks.bufferMs);
+    KsPacketCountBox().Value(p.ks.packetCount);
+    KsPacketMsBox().Value(p.ks.packetMs);
+    fill(KsFormatCombo(), formats, formatIndex(p.ks.sampleType));
+    fill(KsRateCombo(), rates, rateIndex(p.ks.fixedRate));
+    fill(KsDsdCombo(), dopOrPcm, p.ks.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(KsDsdRateCombo(), dsdRates, dsdRateIndex(p.ks.dsdPcmRate));
+    fill(KsMaxRateCombo(), deviceLimits, rateIndex(p.ks.maxSampleRate));
+    fill(KsMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(p.ks.maxDsdRate));
+    fill(KsMmcssTaskCombo(), tasks, int(p.ks.mmcssTask));
+    fill(KsMmcssPriorityCombo(), priorities, int(p.ks.mmcssPriority));
+    showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), p.ks.timing);
+
+    auto limits = rates;
+    limits.front() = tr(L"Limit_FollowPlayer");
+    fill(NetworkRateCombo(), limits, rateIndex(p.network.maxSampleRate));
+    fill(NetworkBitsCombo(), {tr(L"Limit_FollowPlayer"), L"16"}, p.network.maxBits ? 1 : 0);
+    fill(NetworkDsdCombo(), {tr(L"Dsd_Dsf"), tr(L"Dsd_Pcm")}, p.network.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(NetworkDsdRateCombo(), dsdRates, dsdRateIndex(p.network.dsdPcmRate));
+    fill(NetworkMaxDsdCombo(), maxDsdItems(tr(L"Limit_FollowPlayer")), maxDsdIndex(p.network.maxDsdRate));
+    NetworkGaplessSwitch().IsOn(p.network.gapless);
+    showTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), p.network.timing);
+    fill(AirPlayChannelsCombo(), {tr(L"Channels_Stereo"), tr(L"Channels_Left"), tr(L"Channels_Right")}, int(p.airplay.channels));
+}
+
 void MainWindow::populateSettings() {
     populating_ = true;
     for (const auto& [combo, format] : decoderCombos()) {
@@ -672,69 +736,7 @@ void MainWindow::populateSettings() {
     showCrossfade();
     applyHotkeys();
 
-    fill(WasapiShareCombo(), {tr(L"Share_Exclusive"), tr(L"Share_Shared")}, settings_.wasapi.shared ? 1 : 0);
-    fill(WasapiSharedQualityCombo(), {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")},
-         int(settings_.wasapi.sharedResampleQuality));
-    fill(WasapiModeCombo(), {tr(L"Mode_Event"), tr(L"Mode_Polling")}, settings_.wasapi.eventDriven ? 0 : 1);
-    fill(WasapiPeriodCombo(), {tr(L"Period_Default"), tr(L"Period_Minimum"), tr(L"Period_Custom")}, int(settings_.wasapi.period));
-    WasapiPeriodBox().Value(settings_.wasapi.customPeriodMs);
-    const std::vector<hstring> formats = {tr(L"Format_Auto"), L"16", L"24", L"24-in-32", L"32"};
-    fill(WasapiFormatCombo(), formats, formatIndex(settings_.wasapi.sampleType));
-    const auto rates = rateItems();
-    const std::vector<hstring> tasks = {L"Pro Audio", L"Playback", tr(L"Mmcss_Disabled")};
-    const std::vector<hstring> priorities = {tr(L"Priority_Normal"), tr(L"Priority_High"), tr(L"Priority_Critical")};
-    fill(WasapiRateCombo(), rates, rateIndex(settings_.wasapi.fixedRate));
-    // WASAPI and KS have no native DSD; a stored Native plays as DoP.
-    const std::vector<hstring> dopOrPcm = {tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")};
-    const auto dsdRates = dsdRateItems();
-    fill(WasapiDsdCombo(), dopOrPcm, settings_.wasapi.dsdOutput == DsdOutput::Pcm ? 1 : 0);
-    fill(WasapiDsdRateCombo(), dsdRates, dsdRateIndex(settings_.wasapi.dsdPcmRate));
-    auto deviceLimits = rates;
-    deviceLimits.front() = tr(L"Limit_FollowDevice");
-    const auto deviceDsdLimits = maxDsdItems(tr(L"Limit_FollowDevice"));
-    fill(WasapiMaxRateCombo(), deviceLimits, rateIndex(settings_.wasapi.maxSampleRate));
-    fill(WasapiMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(settings_.wasapi.maxDsdRate));
-    WasapiPollBufferBox().Value(settings_.wasapi.pollBufferMs);
-    fill(WasapiMmcssTaskCombo(), tasks, int(settings_.wasapi.mmcssTask));
-    fill(WasapiMmcssPriorityCombo(), priorities, int(settings_.wasapi.mmcssPriority));
-    showTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), settings_.wasapi.timing);
-
-    AsioBufferBox().Value(double(settings_.asio.bufferSize));
-    AsioLeftBox().Value(settings_.asio.outLeft + 1);
-    AsioRightBox().Value(settings_.asio.outRight + 1);
-    fill(AsioRateCombo(), rates, rateIndex(settings_.asio.fixedRate));
-    fill(AsioDsdCombo(), {tr(L"Dsd_Native"), tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")}, int(settings_.asio.dsdOutput));
-    fill(AsioDsdRateCombo(), dsdRates, dsdRateIndex(settings_.asio.dsdPcmRate));
-    fill(AsioMaxRateCombo(), deviceLimits, rateIndex(settings_.asio.maxSampleRate));
-    fill(AsioMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(settings_.asio.maxDsdRate));
-    showTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
-
-    fill(KsModeCombo(), {tr(L"KsMode_Auto"), tr(L"KsMode_RtEvent"), tr(L"KsMode_RtPoll"), tr(L"KsMode_Standard")},
-         int(settings_.ks.mode));
-    KsBufferBox().Value(settings_.ks.bufferMs);
-    KsPacketCountBox().Value(settings_.ks.packetCount);
-    KsPacketMsBox().Value(settings_.ks.packetMs);
-    fill(KsFormatCombo(), formats, formatIndex(settings_.ks.sampleType));
-    fill(KsRateCombo(), rates, rateIndex(settings_.ks.fixedRate));
-    fill(KsDsdCombo(), dopOrPcm, settings_.ks.dsdOutput == DsdOutput::Pcm ? 1 : 0);
-    fill(KsDsdRateCombo(), dsdRates, dsdRateIndex(settings_.ks.dsdPcmRate));
-    fill(KsMaxRateCombo(), deviceLimits, rateIndex(settings_.ks.maxSampleRate));
-    fill(KsMaxDsdCombo(), deviceDsdLimits, maxDsdIndex(settings_.ks.maxDsdRate));
-    fill(KsMmcssTaskCombo(), tasks, int(settings_.ks.mmcssTask));
-    fill(KsMmcssPriorityCombo(), priorities, int(settings_.ks.mmcssPriority));
-    showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
-
-    auto limits = rates;
-    limits.front() = tr(L"Limit_FollowPlayer");
-    fill(NetworkRateCombo(), limits, rateIndex(settings_.network.maxSampleRate));
-    fill(NetworkBitsCombo(), {tr(L"Limit_FollowPlayer"), L"16"}, settings_.network.maxBits ? 1 : 0);
-    fill(NetworkDsdCombo(), {tr(L"Dsd_Dsf"), tr(L"Dsd_Pcm")}, settings_.network.dsdOutput == DsdOutput::Pcm ? 1 : 0);
-    fill(NetworkDsdRateCombo(), dsdRates, dsdRateIndex(settings_.network.dsdPcmRate));
-    fill(NetworkMaxDsdCombo(), maxDsdItems(tr(L"Limit_FollowPlayer")), maxDsdIndex(settings_.network.maxDsdRate));
-    NetworkGaplessSwitch().IsOn(settings_.network.gapless);
-    showTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
-    fill(AirPlayChannelsCombo(), {tr(L"Channels_Stereo"), tr(L"Channels_Left"), tr(L"Channels_Right")},
-         int(settings_.airplay.channels));
+    showOutputParameters(outputParameters());
 
     const int lang = settings_.language == "zh-TW" ? 1 : settings_.language == "en-US" ? 2 : 0;
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
@@ -988,9 +990,11 @@ winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::stri
     const auto rows = camel::server::outputRows(real, server_->snapshot().devices);
     const bool inUse = std::ranges::any_of(
         rows, [&](const camel::server::OutputRow& r) { return r.selected && r.backend == backend && r.id == id; });
-    editingOutput_ = OutputEdit{backend, id, settings_};
-    settings_ = settingsDto(camel::server::withOutputParameters(real, backend, id, server_->snapshot().devices));
-    populateSettings();
+    editingOutput_ =
+        OutputEdit{backend, id, settingsDto(camel::server::withOutputParameters(real, backend, id, server_->snapshot().devices))};
+    populating_ = true;
+    showOutputParameters(editingOutput_->parameters);
+    populating_ = false;
     updateBackendGroups();
     AsioPanelButton().IsEnabled(inUse); // the driver's panel opens for the driver in use
     const auto panel = OutputSettingsPanel();
@@ -1003,10 +1007,13 @@ winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::stri
     dialog.Title(box_value(label));
     dialog.Content(scroller);
     dialog.CloseButtonText(tr(L"Output_SettingsClose"));
-    co_await ui::showDialog(dialog);
+    try {
+        co_await ui::showDialog(dialog);
+    } catch (const hresult_error& e) { // the page shows the settings' own parameters again all the same
+        camel::log::warn("output settings dialog: %ls", e.message().c_str());
+    }
     scroller.Content(nullptr);
     OutputSettingsHost().Child(panel);
-    settings_ = editingOutput_->real;
     editingOutput_.reset();
     AsioPanelButton().IsEnabled(true);
     populateSettings();
@@ -1120,6 +1127,59 @@ std::array<std::pair<ComboBox, AudioFormat>, 3> MainWindow::decoderCombos() {
         {{DecoderCombo(), AudioFormat::Flac}, {WavDecoderCombo(), AudioFormat::Wav}, {AiffDecoderCombo(), AudioFormat::Aiff}}};
 }
 
+// The groups of OutputSettingsPanel, into `p`.
+void MainWindow::readOutputParameters(SettingsDto& p) {
+    auto idx = [](ComboBox const& c) { return std::max(0, c.SelectedIndex()); };
+    p.wasapi.shared = idx(WasapiShareCombo()) == 1;
+    p.wasapi.sharedResampleQuality = ResampleQuality(std::min(idx(WasapiSharedQualityCombo()), 2));
+    p.wasapi.eventDriven = idx(WasapiModeCombo()) == 0;
+    p.wasapi.period = WasapiPeriod(std::min(idx(WasapiPeriodCombo()), 2));
+    p.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), p.wasapi.customPeriodMs);
+    p.wasapi.sampleType = kFormatChoices[std::min(idx(WasapiFormatCombo()), 4)];
+    p.wasapi.fixedRate = rateAt(idx(WasapiRateCombo()));
+    p.wasapi.dsdOutput = idx(WasapiDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
+    p.wasapi.dsdPcmRate = dsdRateAt(idx(WasapiDsdRateCombo()));
+    p.wasapi.maxSampleRate = rateAt(idx(WasapiMaxRateCombo()));
+    p.wasapi.maxDsdRate = maxDsdAt(idx(WasapiMaxDsdCombo()));
+    p.wasapi.pollBufferMs = std::clamp(numberOr(WasapiPollBufferBox(), p.wasapi.pollBufferMs), 20.0, 2000.0);
+    p.wasapi.mmcssTask = MmcssTask(std::min(idx(WasapiMmcssTaskCombo()), 2));
+    p.wasapi.mmcssPriority = MmcssPriority(std::min(idx(WasapiMmcssPriorityCombo()), 2));
+    readTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), p.wasapi.timing);
+
+    p.asio.bufferSize = long(numberOr(AsioBufferBox(), double(p.asio.bufferSize)));
+    p.asio.outLeft = int(numberOr(AsioLeftBox(), p.asio.outLeft + 1)) - 1;
+    p.asio.outRight = int(numberOr(AsioRightBox(), p.asio.outRight + 1)) - 1;
+    p.asio.fixedRate = rateAt(idx(AsioRateCombo()));
+    p.asio.dsdOutput = DsdOutput(std::min(idx(AsioDsdCombo()), 2));
+    p.asio.dsdPcmRate = dsdRateAt(idx(AsioDsdRateCombo()));
+    p.asio.maxSampleRate = rateAt(idx(AsioMaxRateCombo()));
+    p.asio.maxDsdRate = maxDsdAt(idx(AsioMaxDsdCombo()));
+    readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), p.asio.timing);
+
+    p.ks.mode = KsMode(std::min(idx(KsModeCombo()), 3));
+    p.ks.bufferMs = numberOr(KsBufferBox(), p.ks.bufferMs);
+    p.ks.packetCount = int(numberOr(KsPacketCountBox(), p.ks.packetCount));
+    p.ks.packetMs = numberOr(KsPacketMsBox(), p.ks.packetMs);
+    p.ks.sampleType = kFormatChoices[std::min(idx(KsFormatCombo()), 4)];
+    p.ks.fixedRate = rateAt(idx(KsRateCombo()));
+    p.ks.dsdOutput = idx(KsDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
+    p.ks.dsdPcmRate = dsdRateAt(idx(KsDsdRateCombo()));
+    p.ks.maxSampleRate = rateAt(idx(KsMaxRateCombo()));
+    p.ks.maxDsdRate = maxDsdAt(idx(KsMaxDsdCombo()));
+    p.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
+    p.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
+    readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), p.ks.timing);
+
+    p.network.maxSampleRate = rateAt(idx(NetworkRateCombo()));
+    p.network.maxBits = idx(NetworkBitsCombo()) == 1 ? 16 : 0;
+    p.network.dsdOutput = idx(NetworkDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
+    p.network.dsdPcmRate = dsdRateAt(idx(NetworkDsdRateCombo()));
+    p.network.maxDsdRate = maxDsdAt(idx(NetworkMaxDsdCombo()));
+    p.network.gapless = NetworkGaplessSwitch().IsOn();
+    readTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), p.network.timing);
+    p.airplay.channels = AirPlayChannels(std::clamp(idx(AirPlayChannelsCombo()), 0, 2));
+}
+
 void MainWindow::readSettingsFromUi() {
     auto idx = [](ComboBox const& c) { return std::max(0, c.SelectedIndex()); };
     for (const auto& [combo, format] : decoderCombos()) {
@@ -1174,54 +1234,7 @@ void MainWindow::readSettingsFromUi() {
         settings_.crossfade.seconds =
             std::clamp(std::round(seconds * 2) / 2, camel::CrossfadeSettings::kMinSeconds, camel::CrossfadeSettings::kMaxSeconds);
 
-    settings_.wasapi.shared = idx(WasapiShareCombo()) == 1;
-    settings_.wasapi.sharedResampleQuality = ResampleQuality(std::min(idx(WasapiSharedQualityCombo()), 2));
-    settings_.wasapi.eventDriven = idx(WasapiModeCombo()) == 0;
-    settings_.wasapi.period = WasapiPeriod(std::min(idx(WasapiPeriodCombo()), 2));
-    settings_.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), settings_.wasapi.customPeriodMs);
-    settings_.wasapi.sampleType = kFormatChoices[std::min(idx(WasapiFormatCombo()), 4)];
-    settings_.wasapi.fixedRate = rateAt(idx(WasapiRateCombo()));
-    settings_.wasapi.dsdOutput = idx(WasapiDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
-    settings_.wasapi.dsdPcmRate = dsdRateAt(idx(WasapiDsdRateCombo()));
-    settings_.wasapi.maxSampleRate = rateAt(idx(WasapiMaxRateCombo()));
-    settings_.wasapi.maxDsdRate = maxDsdAt(idx(WasapiMaxDsdCombo()));
-    settings_.wasapi.pollBufferMs = std::clamp(numberOr(WasapiPollBufferBox(), settings_.wasapi.pollBufferMs), 20.0, 2000.0);
-    settings_.wasapi.mmcssTask = MmcssTask(std::min(idx(WasapiMmcssTaskCombo()), 2));
-    settings_.wasapi.mmcssPriority = MmcssPriority(std::min(idx(WasapiMmcssPriorityCombo()), 2));
-    readTiming(WasapiPredecodeBox(), WasapiSilenceBox(), WasapiReleaseBox(), settings_.wasapi.timing);
-
-    settings_.asio.bufferSize = long(numberOr(AsioBufferBox(), double(settings_.asio.bufferSize)));
-    settings_.asio.outLeft = int(numberOr(AsioLeftBox(), settings_.asio.outLeft + 1)) - 1;
-    settings_.asio.outRight = int(numberOr(AsioRightBox(), settings_.asio.outRight + 1)) - 1;
-    settings_.asio.fixedRate = rateAt(idx(AsioRateCombo()));
-    settings_.asio.dsdOutput = DsdOutput(std::min(idx(AsioDsdCombo()), 2));
-    settings_.asio.dsdPcmRate = dsdRateAt(idx(AsioDsdRateCombo()));
-    settings_.asio.maxSampleRate = rateAt(idx(AsioMaxRateCombo()));
-    settings_.asio.maxDsdRate = maxDsdAt(idx(AsioMaxDsdCombo()));
-    readTiming(AsioPredecodeBox(), AsioSilenceBox(), AsioReleaseBox(), settings_.asio.timing);
-
-    settings_.ks.mode = KsMode(std::min(idx(KsModeCombo()), 3));
-    settings_.ks.bufferMs = numberOr(KsBufferBox(), settings_.ks.bufferMs);
-    settings_.ks.packetCount = int(numberOr(KsPacketCountBox(), settings_.ks.packetCount));
-    settings_.ks.packetMs = numberOr(KsPacketMsBox(), settings_.ks.packetMs);
-    settings_.ks.sampleType = kFormatChoices[std::min(idx(KsFormatCombo()), 4)];
-    settings_.ks.fixedRate = rateAt(idx(KsRateCombo()));
-    settings_.ks.dsdOutput = idx(KsDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
-    settings_.ks.dsdPcmRate = dsdRateAt(idx(KsDsdRateCombo()));
-    settings_.ks.maxSampleRate = rateAt(idx(KsMaxRateCombo()));
-    settings_.ks.maxDsdRate = maxDsdAt(idx(KsMaxDsdCombo()));
-    settings_.ks.mmcssTask = MmcssTask(std::min(idx(KsMmcssTaskCombo()), 2));
-    settings_.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
-    readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), settings_.ks.timing);
-
-    settings_.network.maxSampleRate = rateAt(idx(NetworkRateCombo()));
-    settings_.network.maxBits = idx(NetworkBitsCombo()) == 1 ? 16 : 0;
-    settings_.network.dsdOutput = idx(NetworkDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
-    settings_.network.dsdPcmRate = dsdRateAt(idx(NetworkDsdRateCombo()));
-    settings_.network.maxDsdRate = maxDsdAt(idx(NetworkMaxDsdCombo()));
-    settings_.network.gapless = NetworkGaplessSwitch().IsOn();
-    readTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), settings_.network.timing);
-    settings_.airplay.channels = AirPlayChannels(std::clamp(idx(AirPlayChannelsCombo()), 0, 2));
+    readOutputParameters(settings_);
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
     settings_.theme = Theme(std::clamp(idx(ThemeCombo()), 0, 2));
 }
@@ -1246,19 +1259,20 @@ void MainWindow::OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, 
 
 void MainWindow::settingsChanged() {
     if (populating_ || !server_) return;
-    readSettingsFromUi();
     if (editingOutput_) {
-        auto real = nativeSettings(editingOutput_->real);
-        camel::server::keepOutputParameters(real, nativeSettings(settings_), editingOutput_->backend, editingOutput_->id,
-                                            server_->snapshot().devices);
-        editingOutput_->real = settingsDto(real);
+        readOutputParameters(editingOutput_->parameters);
+        auto real = nativeSettings(settings_);
+        camel::server::keepOutputParameters(real, nativeSettings(editingOutput_->parameters), editingOutput_->backend,
+                                            editingOutput_->id, server_->snapshot().devices);
+        settings_ = settingsDto(real);
         Command command;
         command.kind = CommandKind::ApplySettings;
-        command.settings = editingOutput_->real;
+        command.settings = settings_;
         submitCommand(std::move(command));
         updateBackendGroups();
         return;
     }
+    readSettingsFromUi();
     applyTheme();
     get_self<LibraryView>(Library())->setFolderTree(settings_.folderTree);
     get_self<LibraryView>(Library())->setFolderPlaysOn(settings_.folderPlaysOn);
@@ -1270,16 +1284,17 @@ void MainWindow::settingsChanged() {
 }
 
 void MainWindow::updateBackendGroups() {
-    WasapiGroup().Visibility(settings_.backend == Backend::Wasapi ? Visibility::Visible : Visibility::Collapsed);
-    AsioGroup().Visibility(settings_.backend == Backend::Asio ? Visibility::Visible : Visibility::Collapsed);
-    KsGroup().Visibility(settings_.backend == Backend::Ks ? Visibility::Visible : Visibility::Collapsed);
-    NetworkGroup().Visibility(settings_.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
-    AirPlayGroup().Visibility(settings_.backend == Backend::AirPlay ? Visibility::Visible : Visibility::Collapsed);
-    WasapiPeriodBox().IsEnabled(settings_.wasapi.period == WasapiPeriod::Custom);
-    WasapiRateCombo().IsEnabled(!settings_.wasapi.shared); // the mixer sets the rate in shared mode
-    WasapiMaxRateCombo().IsEnabled(!settings_.wasapi.shared);
-    WasapiMaxDsdCombo().IsEnabled(!settings_.wasapi.shared);
-    WasapiPollBufferBox().IsEnabled(!settings_.wasapi.eventDriven);
+    const auto& p = outputParameters();
+    WasapiGroup().Visibility(p.backend == Backend::Wasapi ? Visibility::Visible : Visibility::Collapsed);
+    AsioGroup().Visibility(p.backend == Backend::Asio ? Visibility::Visible : Visibility::Collapsed);
+    KsGroup().Visibility(p.backend == Backend::Ks ? Visibility::Visible : Visibility::Collapsed);
+    NetworkGroup().Visibility(p.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
+    AirPlayGroup().Visibility(p.backend == Backend::AirPlay ? Visibility::Visible : Visibility::Collapsed);
+    WasapiPeriodBox().IsEnabled(p.wasapi.period == WasapiPeriod::Custom);
+    WasapiRateCombo().IsEnabled(!p.wasapi.shared); // the mixer sets the rate in shared mode
+    WasapiMaxRateCombo().IsEnabled(!p.wasapi.shared);
+    WasapiMaxDsdCombo().IsEnabled(!p.wasapi.shared);
+    WasapiPollBufferBox().IsEnabled(!p.wasapi.eventDriven);
 }
 
 void MainWindow::refreshFromServer() {
@@ -1333,7 +1348,7 @@ bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
 
 // A device scan can change what the Server keeps: the outputs, and the parameters when the Windows default moved on.
 void MainWindow::showOutputsOf(const SettingsDto& server) {
-    switch (ui::followServerOutputs(settings_, editingOutput_ ? &editingOutput_->real : nullptr, server)) {
+    switch (ui::followServerOutputs(settings_, server, editingOutput_.has_value())) {
     case ui::OutputsRefill::Settings:
         populateSettings();
         break;

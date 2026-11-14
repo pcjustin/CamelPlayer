@@ -217,6 +217,9 @@ private:
     winrt::fire_and_forget addFirewallRule();
     winrt::fire_and_forget readFirewallRule();
     void readSettingsFromUi(); // controls -> settings_
+    // The output parameters' controls (OutputSettingsPanel's groups), filled from and read into the object given.
+    void showOutputParameters(const camel::server::SettingsDto& p);
+    void readOutputParameters(camel::server::SettingsDto& p);
     // One decoder selector per format with more than one integrated decoder.
     std::array<std::pair<Microsoft::UI::Xaml::Controls::ComboBox, camel::audio::AudioFormat>, 3> decoderCombos();
     void settingsChanged();
@@ -348,9 +351,11 @@ private:
     struct OutputEdit {
         camel::Backend backend = camel::Backend::Wasapi;
         std::string id;
-        camel::server::SettingsDto real; // settings_ holds this output's parameters while the dialog is open
+        camel::server::SettingsDto parameters; // this output's own, which the dialog's controls show and change
     };
     std::optional<OutputEdit> editingOutput_;
+    // The parameters the output groups show: the dialog's while it is open, else the output in use's.
+    const camel::server::SettingsDto& outputParameters() const { return editingOutput_ ? editingOutput_->parameters : settings_; }
     // Whether the network players' firewall rule exists, read in the background: listing the rules takes 15-25 ms.
     std::optional<bool> firewallRule_;
     bool firewallReading_ = false;
