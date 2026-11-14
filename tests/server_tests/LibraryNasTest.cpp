@@ -7,6 +7,9 @@
 #include <winnetwk.h>
 
 #include <fstream>
+#include <future>
+#include <map>
+#include <mutex>
 #include <algorithm>
 #include <iostream>
 #include <optional>
@@ -981,4 +984,70 @@ TEST(LibraryNas, DISABLED_PlaybackDuringARebuildAnswersAsWhenIdle) {
     server.submit(command(CommandKind::Stop));
     server.waitIdle();
     std::ofstream(local / "report.json") << report.dump(2);
+}
+
+// A first scan of the NAS with the album wall open (Task-breakdown.md CV-R01): every 250 ms the newest 40 albums are
+// listed, as the wall shows them while albums arrive, and each album's cover is asked for once it is listed, as the
+// wall asks for the covers it shows. Reports how long the covers took from their album's first listing, with an empty
+// thumbnail folder, and how far the scan got meanwhile. CAMEL_NAS_ROOT names the share.
+TEST(LibraryNas, DISABLED_CoversDuringAFirstScan) {
+    using namespace std::chrono_literals;
+    const auto root = nasRoot();
+    const auto local = localRun("covers-first-scan");
+    std::cout << "covers results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
+    LocalServer server(camel::Settings{}, local / "settings.json");
+    Command add;
+    add.kind = CommandKind::AddLibraryRoot;
+    add.path = camel::toUtf8(root.wstring());
+    server.submit(add);
+    struct Cover {
+        Clock::time_point listed;
+        std::optional<double> seconds;
+        bool found = false;
+    };
+    std::map<int64_t, Cover> covers;
+    std::mutex mutex;
+    std::vector<std::future<void>> requests;
+    const auto start = Clock::now();
+    while (Clock::now() - start < 240s) {
+        try {
+            const auto page = server.browseAlbums(AlbumSort::Added, std::nullopt, 0, 40, std::nullopt);
+            for (const auto& album : page.albums) {
+                std::lock_guard lock(mutex);
+                if (covers.contains(album.id)) continue;
+                covers[album.id].listed = Clock::now();
+                requests.push_back(std::async(std::launch::async, [&, id = album.id] {
+                    ArtworkRequest request;
+                    request.id = id;
+                    const auto found = server.artwork(request, {}).has_value();
+                    std::lock_guard done(mutex);
+                    auto& cover = covers[id];
+                    cover.found = found;
+                    cover.seconds = std::chrono::duration<double>(Clock::now() - cover.listed).count();
+                }));
+            }
+        } catch (const std::exception&) {
+        }
+        std::this_thread::sleep_for(250ms);
+    }
+    for (auto& request : requests) request.wait_for(60s);
+    std::vector<double> times;
+    size_t found = 0;
+    {
+        std::lock_guard lock(mutex);
+        for (const auto& [id, cover] : covers)
+            if (cover.seconds) {
+                times.push_back(*cover.seconds);
+                found += cover.found;
+            }
+    }
+    std::ranges::sort(times);
+    const auto at = [&](double share) { return times.empty() ? 0.0 : times[size_t(share * double(times.size() - 1))]; };
+    const auto progress = server.libraryScanProgress();
+    Json report{{"albums_listed", covers.size()},    {"covers_answered", times.size()}, {"covers_found", found},
+                {"median_seconds", at(0.5)},         {"p90_seconds", at(0.9)},          {"max_seconds", at(1.0)},
+                {"files_checked", progress.checked}, {"files_found", progress.found},   {"scan_seconds", 240}};
+    std::cout << "covers: " << report.dump() << '\n' << std::flush;
+    std::ofstream(local / "covers-report.json") << report.dump(2);
+    server.shutdown();
 }

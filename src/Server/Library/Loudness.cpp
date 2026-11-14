@@ -272,14 +272,19 @@ bool LoudnessAnalyzer::waveformsOn() const {
     return options_.waveform && options_.waveform().enabled;
 }
 
-// A decoding's check between chunks: it waits while playback needs the file's storage (docs/Plan.md §7.7), and stops
-// for good when the analysis ends or waveforms are turned off.
+// A decoding's check between chunks: it waits while playback needs the file's storage (docs/Plan.md §7.7) or covers are
+// read, and stops for good when the analysis ends or waveforms are turned off.
 std::function<bool()> LoudnessAnalyzer::givingWay(const std::stop_token& stop, const std::filesystem::path& path) const {
     return [this, stop, path] {
-        while (!stop.stop_requested() && backgroundPace(options_.playback(), path) == BackgroundPace::Wait)
+        while (!stop.stop_requested() && pace(path) == BackgroundPace::Wait)
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         return stop.stop_requested() || !waveformsOn();
     };
+}
+
+BackgroundPace LoudnessAnalyzer::pace(const std::filesystem::path& path) const {
+    if (options_.coversShown && options_.coversShown()) return BackgroundPace::Wait;
+    return backgroundPace(options_.playback(), path);
 }
 
 // The album of the first queued track that needs analysis, else (unless `queuedOnly`) of any such track; a track
@@ -405,9 +410,9 @@ bool LoudnessAnalyzer::analyzeAlbum(const std::stop_token& stop, bool queuedOnly
     // begun with more threads than either allows starts again with fewer.
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     const auto allowed = [&] {
-        const auto pace = backgroundPace(options_.playback(), album.front().path);
-        return pace == BackgroundPace::Wait  ? 0u
-               : pace == BackgroundPace::One ? 1u
+        const auto turn = pace(album.front().path);
+        return turn == BackgroundPace::Wait  ? 0u
+               : turn == BackgroundPace::One ? 1u
                                              : store_.backgroundWorkers(BackgroundWork::Loudness, cores);
     };
     const unsigned threads = std::max(1u, allowed());

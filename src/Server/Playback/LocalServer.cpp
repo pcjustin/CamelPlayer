@@ -219,11 +219,8 @@ public:
             LibraryScanner(*library_).deleteRemovedRoots();
             libraryText_ = std::make_unique<LibraryTextIndex>(*library_);
             LibraryMonitor::Options options;
-            // Covers being shown take the storage first: scans and fingerprints drop to one worker meanwhile.
-            options.coversShown = [this] {
-                return std::chrono::steady_clock::now().time_since_epoch().count() <
-                       artworkUntil_.load(std::memory_order_relaxed);
-            };
+            // Covers being shown take the storage first: scans and fingerprints wait while one is read.
+            options.coversShown = [this] { return coversInFlight_.load() > 0; };
             options.playback = [this] { return playbackReads(); };
             libraryMonitor_ = std::make_unique<LibraryMonitor>(*library_, std::move(options));
             // Album-wall thumbnails are made ahead of display, only while nothing plays, scans or shows covers.
@@ -231,9 +228,7 @@ public:
                 int64_t swept = -1;
                 const auto busy = [this, &stop] {
                     return stop.stop_requested() || library_->scanProgress().scans > 0 ||
-                           engine_->snapshot().state == audio::PlayState::Playing ||
-                           std::chrono::steady_clock::now().time_since_epoch().count() <
-                               artworkUntil_.load(std::memory_order_relaxed);
+                           engine_->snapshot().state == audio::PlayState::Playing || coversInFlight_.load() > 0;
                 };
                 while (!stop.stop_requested()) {
                     for (int i = 0; i < 300 && !stop.stop_requested(); ++i)
@@ -271,6 +266,7 @@ public:
                 return queuedFiles_;
             };
             loudness.playback = [this] { return playbackReads(); };
+            loudness.coversShown = [this] { return coversInFlight_.load() > 0; };
             loudness.waveform = [this] {
                 std::lock_guard lock(loudnessMutex_);
                 return waveformSettings_;
@@ -521,8 +517,8 @@ public:
     void setAirPlayFinderOptions(const AirPlayFinderOptions& options) { airplayFinderOptions_ = options; }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
-        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
-        artworkUntil_.store(until.time_since_epoch().count(), std::memory_order_relaxed);
+        coversInFlight_.fetch_add(1);
+        const auto done = wil::scope_exit([this] { coversInFlight_.fetch_sub(1); });
         return artwork_ ? artwork_->get(library_.get(), request, token) : std::nullopt;
     }
 
@@ -2004,7 +2000,7 @@ private:
     std::filesystem::path settingsFile_;
     audio::OutputFactory factory_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
-    mutable std::atomic<int64_t> artworkUntil_{0}; // steady_clock ticks; read by scan workers, so declared before them
+    mutable std::atomic<int> coversInFlight_{0}; // covers being read for the window; read by scan workers, so declared first
     std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
     mutable std::mutex creditMutex_;

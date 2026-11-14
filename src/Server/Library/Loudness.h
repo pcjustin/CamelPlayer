@@ -82,6 +82,7 @@ public:
         std::function<DecoderByFormat()> decoders;
         std::function<std::vector<int64_t>()> queued; // file ids of the current and upcoming queue entries
         std::function<PlaybackReads()> playback;
+        std::function<bool()> coversShown;                  // the window reads covers, which take the storage first
         std::function<WaveformSettings()> waveform;         // none: no waveforms
         std::function<std::vector<PlayingTrack>()> playing; // the playing track and the next
         std::function<int()> minuteOfDay;                   // the local time's; tests set it
@@ -108,6 +109,8 @@ private:
     bool waveformsNow(const std::stop_token& stop);
     bool waveformsInBackground(const std::stop_token& stop);
     std::function<bool()> givingWay(const std::stop_token& stop, const std::filesystem::path& path) const;
+    // How analysis of `path` goes now: covers being read and playback come first.
+    BackgroundPace pace(const std::filesystem::path& path) const;
     bool waveformsOn() const;
     int minuteOfDay() const;
     void count();

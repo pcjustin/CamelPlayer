@@ -99,6 +99,22 @@ TEST_F(LibraryScannerTest, AScanThatChangedNothingLeavesTheFilesUnchanged) {
     EXPECT_EQ(store.fileChanges(), settled);
 }
 
+// While a cover the window asked for is read, the scan starts no new work; once the request ends it goes on.
+TEST_F(LibraryScannerTest, AScanWaitsWhileACoverIsRead) {
+    audio("one.flac");
+    audio("two.flac");
+    LibraryStore store(dir / "db");
+    std::atomic<bool> coverRead = true;
+    LibraryScanner scanner(store, [&] { return coverRead.load(); });
+    const auto root = scanner.addRoot(dir / "music");
+    auto scan = std::async(std::launch::async, [&] { return scanner.scan(root); });
+    EXPECT_EQ(scan.wait_for(std::chrono::milliseconds(800)), std::future_status::timeout);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 0);
+    coverRead = false;
+    EXPECT_TRUE(scan.get().complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 2);
+}
+
 // A queued library file is found by its spelling, without opening it on a share.
 TEST_F(LibraryScannerTest, ASpelledPathMatchesTheStoredKey) {
     const auto file = audio();
@@ -970,7 +986,9 @@ TEST_F(LibraryScannerTest, UnchangedPendingFilesReuseTheirRecordedFingerprint) {
     std::ofstream(dir / "music" / "album" / "words.lrc") << "lyrics";
     bool playing = false;
     LibraryStore store(dir / "db");
-    LibraryScanner scanner(store, [&] { return playing; });
+    // Playback ahead on the same storage: one worker, no fingerprints.
+    LibraryScanner scanner(store, {},
+                           [&] { return playing ? PlaybackReads{{dir / "music" / "playing.flac"}, true} : PlaybackReads{}; });
     const auto root = scanner.addRoot(dir / "music");
     ASSERT_TRUE(scanner.scan(root).complete);
     ASSERT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL"), 1);
@@ -1181,7 +1199,9 @@ TEST_F(LibraryScannerTest, PlaybackReducesDirectoryWorkersAndPauseRestoresConcur
     bool playing = true;
     LibraryStore store(dir / "db");
     store.setScanSpeed(camel::ScanSpeed::High); // the paused passes take more than the one worker of Low
-    LibraryScanner scanner(store, [&] { return playing; });
+    // Playback ahead on the same storage: one worker, no fingerprints.
+    LibraryScanner scanner(store, {},
+                           [&] { return playing ? PlaybackReads{{dir / "music" / "playing.flac"}, true} : PlaybackReads{}; });
     const auto root = scanner.addRoot(dir / "music");
     for (int pass = 0; pass < 2; ++pass) {
         for (int album = 0; album < 4; ++album) {

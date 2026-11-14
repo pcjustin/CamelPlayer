@@ -206,8 +206,9 @@ TEST_F(LibraryIdentityTest, AFileRewrittenInPlaceKeepsItsHistory) {
 TEST_F(LibraryIdentityTest, UniqueRecordedHashRecoversUntrustedOrCrossVolumeIdentity) {
     const auto source = file("old.lrc");
     LibraryStore store(dir / "db");
+    // Playback ahead on the same storage leaves the scan one worker and no fingerprints; covers being read would stop it.
     bool playing = false;
-    LibraryScanner scanner(store, [&] { return playing; });
+    LibraryScanner scanner(store, {}, [&] { return playing ? PlaybackReads{{music / "playing.flac"}, true} : PlaybackReads{}; });
     const auto root = scanner.addRoot(music);
     ASSERT_TRUE(scanner.scan(root).complete);
     const auto original = id(store, "old.lrc");
@@ -912,14 +913,15 @@ TEST_F(LibraryIdentityTest, MonitorRetriesDeferredMoveMatchingAfterPlaybackWitho
     distrustIds(store);
     fs::rename(source, music / "new.lrc");
     std::atomic<bool> playing = true;
-    LibraryScanner gated(store, [&] { return playing.load(); });
+    const auto ahead = [&] { return playing ? PlaybackReads{{music / "playing.flac"}, true} : PlaybackReads{}; };
+    LibraryScanner gated(store, {}, ahead);
     const auto deferred = gated.scan(root);
     ASSERT_TRUE(deferred.deferred);
     ASSERT_FALSE(deferred.complete);
     EXPECT_EQ(id(store, "old.lrc"), original);
     LibraryMonitor::Options options;
     options.pollInterval = std::chrono::milliseconds(0);
-    options.coversShown = [&] { return playing.load(); };
+    options.playback = ahead;
     store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET online=0"); }).get();
     LibraryMonitor monitor(store, options);
     const auto scanned = std::chrono::steady_clock::now() + std::chrono::seconds(5);

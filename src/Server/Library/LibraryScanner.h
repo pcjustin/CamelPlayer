@@ -58,7 +58,7 @@ struct FingerprintReport {
 class LibraryScanner {
 public:
     // The callbacks must be thread-safe; monitor scan workers and fingerprinting may call them concurrently.
-    // `coversShown`: the window reads covers, so work drops to one worker; `playback`: what playback reads now.
+    // `coversShown`: the window reads covers, so work waits; `playback`: what playback reads now.
     explicit LibraryScanner(LibraryStore& store, std::function<bool()> coversShown = {},
                             std::function<PlaybackReads()> playback = {})
         : store_(store), coversShown_(std::move(coversShown)), playback_(std::move(playback)) {}

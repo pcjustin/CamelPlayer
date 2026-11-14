@@ -885,8 +885,8 @@ std::mutex& LibraryScanner::rootLock(int64_t root) {
 
 std::function<BackgroundPace()> LibraryScanner::pace(const Path& root) const {
     return [this, root] {
-        const auto pace = backgroundPace(playback_ ? playback_() : PlaybackReads{}, root);
-        return pace == BackgroundPace::Full && coversShown_ && coversShown_() ? BackgroundPace::One : pace;
+        if (coversShown_ && coversShown_()) return BackgroundPace::Wait;
+        return backgroundPace(playback_ ? playback_() : PlaybackReads{}, root);
     };
 }
 
