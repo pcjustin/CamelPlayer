@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -27,6 +27,7 @@
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
 #include "ThemeBrush.h"
+#include "Substitute.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 #include "ArtworkLoader.h"
@@ -49,10 +50,9 @@ struct Texts {
             composer = tr(L"Library_RoleComposer");
 };
 
+// ormat is read on the UI thread and passed to work done elsewhere, so it comes already translated.
 hstring counted(const hstring& format, int64_t n) {
-    std::wstring text(format);
-    if (const auto at = text.find(L"{0}"); at != std::wstring::npos) text.replace(at, 3, ui::count(n));
-    return hstring(text);
+    return hstring(ui::substitute(std::wstring(format), {ui::count(n)}));
 }
 
 // Tags written with surrounding spaces, tabs or ideographic spaces show without them; a blank one is unknown.
@@ -345,9 +345,7 @@ void LibraryView::showSearch(hstring const& query, std::function<void()> leave) 
     View view;
     view.mode = Mode::Search;
     view.query = camel::toUtf8(std::wstring_view(query.c_str(), query.size()));
-    std::wstring title(tr(L"Search_Title"));
-    if (const auto at = title.find(L"{0}"); at != std::wstring::npos) title.replace(at, 3, query.c_str());
-    view.title = hstring(title);
+    view.title = ui::format(L"Search_Title", {query.c_str()});
     const bool keepHistory = !leave && (collection_ || current_.mode == Mode::AlbumDetail || current_.mode == Mode::Artist ||
                                         current_.mode == Mode::Folders);
     if (!keepHistory) back_.clear();

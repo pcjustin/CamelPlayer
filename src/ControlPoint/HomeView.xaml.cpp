@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -40,25 +40,15 @@ constexpr double kCoverRowExtra = 90; // a row's height beyond its covers
 constexpr int64_t kRowItems = 30;
 constexpr int64_t kListRows = 10;
 
-hstring formatted(const wchar_t* key, std::initializer_list<int64_t> values) {
-    std::wstring text(tr(key));
-    int index = 0;
-    for (const auto value : values) {
-        const std::wstring marker = L"{" + std::to_wstring(index++) + L"}";
-        if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, marker.size(), ui::count(value));
-    }
-    return hstring(text);
-}
-
 // Minutes under an hour, then hours and minutes, never days.
 hstring listeningTime(int64_t ms) {
     const int64_t minutes = ms / 60'000;
-    if (minutes < 60) return formatted(L"Home_Minutes", {minutes});
-    return formatted(L"Home_HoursMinutes", {minutes / 60, minutes % 60});
+    if (minutes < 60) return ui::format(L"Home_Minutes", {ui::count(minutes)});
+    return ui::format(L"Home_HoursMinutes", {ui::count(minutes / 60), ui::count(minutes % 60)});
 }
 
 hstring plays(int64_t n) {
-    return formatted(L"Home_Plays", {n});
+    return ui::format(L"Home_Plays", {ui::count(n)});
 }
 
 Windows::Foundation::IInspectable item(const ui::BrowseRow& row) {
@@ -341,9 +331,9 @@ winrt::fire_and_forget HomeView::refresh() {
         for (const auto& row : {self->PlayedRow(), self->AddedRow()}) self->fill(row);
         self->PlayedEmpty().Visibility(data->played.albums.empty() ? Visibility::Visible : Visibility::Collapsed);
 
-        hstring counts = formatted(L"Library_Albums", {data->added.total}) + L" · " +
-                         formatted(L"Library_Tracks", {data->tracks}) + L" · " +
-                         formatted(L"Search_ArtistCount", {data->artists});
+        hstring counts = ui::format(L"Library_Albums", {ui::count(data->added.total)}) + L" · " +
+                         ui::format(L"Library_Tracks", {ui::count(data->tracks)}) + L" · " +
+                         ui::format(L"Search_ArtistCount", {ui::count(data->artists)});
         self->LibraryCounts().Text(data->tracks ? counts : tr(L"Library_Empty/Text"));
         if (camel::measure::measuring())
             camel::log::info("measure: home shown %.0f ms after process start", camel::measure::sinceProcessStart());

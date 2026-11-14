@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -1302,9 +1302,7 @@ void MainWindow::showScanProgress() {
     if (progress.scans && progress.finishing == progress.scans) {
         text = tr(L"Library_Finishing");
     } else if (progress.scans) {
-        text = tr(L"Library_Scanning");
-        for (const auto& [marker, n] : {std::pair{L"{0}", progress.checked}, std::pair{L"{1}", progress.found}})
-            if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, 3, ui::count(int64_t(n)));
+        text = ui::format(L"Library_Scanning", {ui::count(int64_t(progress.checked)), ui::count(int64_t(progress.found))});
     }
     if (text == shownScan_) return;
     shownScan_ = hstring(text);
@@ -1438,12 +1436,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownQueueMarks_ = snapshot.queue.marks;
         shownQueueEntryId_ = snapshot.queueEntryId;
         const bool windowed = snapshot.queue.entries.size() > ui::QueueCollection::kShown;
-        std::wstring count(tr(windowed ? L"Queue_CountWindowed" : L"Library_Tracks"));
-        if (const auto at = count.find(L"{0}"); at != std::wstring::npos)
-            count.replace(at, 3, ui::count(int64_t(snapshot.queue.entries.size())));
-        if (const auto at = count.find(L"{1}"); at != std::wstring::npos)
-            count.replace(at, 3, ui::count(int64_t(ui::QueueCollection::kShown)));
-        QueueCountText().Text(count);
+        QueueCountText().Text(
+            ui::format(windowed ? L"Queue_CountWindowed" : L"Library_Tracks",
+                       {ui::count(int64_t(snapshot.queue.entries.size())), ui::count(int64_t(ui::QueueCollection::kShown))}));
         QueueEmptyText().Visibility(snapshot.queue.entries.empty() ? Visibility::Visible : Visibility::Collapsed);
         queueItems_->update(snapshot.queue.entries, snapshot.queueEntryId);
     } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
@@ -1740,13 +1735,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (s.output) {
         StatusOutputText().Text(ui::utf8(describe(*s.output)));
         StatusModeText().Text(ui::utf8(s.outputMode));
-        std::wstring buffer(tr(L"Status_BufferValue"));
         wchar_t ms[32];
         swprintf(ms, 32, L"%.1f", s.output->sampleRate ? 1000.0 * s.bufferFrames / s.output->sampleRate : 0.0);
-        for (const auto& [marker, value] : {std::pair<const wchar_t*, std::wstring>{L"{0}", std::to_wstring(s.bufferFrames)},
-                                            std::pair<const wchar_t*, std::wstring>{L"{1}", ms}})
-            if (const auto at = buffer.find(marker); at != std::wstring::npos) buffer.replace(at, 3, value);
-        StatusBufferText().Text(buffer);
+        StatusBufferText().Text(ui::format(L"Status_BufferValue", {std::to_wstring(s.bufferFrames), ms}));
         StatusUnderrunText().Text(to_hstring(s.underruns));
         StatusDetailText().Text(clauseLines(s.outputDetail));
     }
@@ -2458,9 +2449,7 @@ void MainWindow::showSuggestions(const LibrarySearchResults& results, hstring co
     for (const auto& a : results.albums)
         add({Suggestion::Kind::Album, a.id, {}, ui::utf8(a.title)}, ui::utf8(a.artist), albumsLabel);
     for (const auto& name : results.artists) add({Suggestion::Kind::Artist, 0, name, ui::utf8(name)}, {}, artistsLabel);
-    std::wstring all(tr(L"Search_All"));
-    if (const auto at = all.find(L"{0}"); at != std::wstring::npos) all.replace(at, 3, text.c_str());
-    add({Suggestion::Kind::All, 0, {}, hstring(all)}, {}, {});
+    add({Suggestion::Kind::All, 0, {}, ui::format(L"Search_All", {text.c_str()})}, {}, {});
     suggestionItems_ = items;
     SearchBox().ItemsSource(items);
 }
@@ -2621,13 +2610,7 @@ winrt::fire_and_forget MainWindow::showDataLocation() {
                 swprintf(text, 32, L"%.1f KB", double(n) / 1024.0);
             return std::wstring(text);
         };
-        std::wstring text(tr(L"Reset_Sizes"));
-        const std::array<std::wstring, 4> values{bytes(library), bytes(covers), bytes(settings), bytes(logs)};
-        for (size_t i = 0; i < values.size(); ++i) {
-            const std::wstring marker = L"{" + std::to_wstring(i) + L"}";
-            if (const auto at = text.find(marker); at != std::wstring::npos) text.replace(at, marker.size(), values[i]);
-        }
-        self->DataSizesText().Text(hstring(text));
+        self->DataSizesText().Text(ui::format(L"Reset_Sizes", {bytes(library), bytes(covers), bytes(settings), bytes(logs)}));
     });
 }
 

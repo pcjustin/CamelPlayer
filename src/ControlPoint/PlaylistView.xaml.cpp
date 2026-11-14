@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -22,6 +22,7 @@
 #include "TrackMarks.h"
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
+#include "Substitute.h"
 #include "UiText.h"
 #include "TrimmedText.h"
 
@@ -152,9 +153,7 @@ void PlaylistView::load() {
                 auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
                 for (const auto& p : playlists_) {
                     ui::BrowseRow row{p.id, {}, ui::utf8(p.name)};
-                    std::wstring count(tracks);
-                    if (const auto at = count.find(L"{0}"); at != std::wstring::npos) count.replace(at, 3, ui::count(p.tracks));
-                    row.trailing = hstring(count);
+                    row.trailing = hstring(ui::substitute(std::wstring(tracks), {ui::count(p.tracks)}));
                     auto item = make<BrowseItem>();
                     get_self<BrowseItem>(item)->fill(row);
                     items.Append(item);
