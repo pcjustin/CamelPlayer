@@ -943,20 +943,15 @@ impl CamelEngine {
                 break Ok(());
             };
             let space = (self.ring.writable() / bytes_per_frame) as u64;
-            let pending = segment.converter.pending_frames();
-            if pending > 0 {
-                let frames = pending.min(space);
-                if frames == 0 {
-                    break Ok(());
+            if segment.converter.pending_frames() > 0 {
+                match self.flush_pending(&mut segment.converter, space, bytes_per_frame) {
+                    Ok(0) => break Ok(()),
+                    Ok(frames) => {
+                        written += frames;
+                        continue;
+                    }
+                    Err(status) => break Err(status),
                 }
-                let bytes = frames as usize * bytes_per_frame;
-                if self.ring.write(&segment.converter.pending()[..bytes]) != bytes {
-                    break Err(ENGINE_E_INVALID_STATE);
-                }
-                segment.converter.consume(frames);
-                self.written_frames.fetch_add(frames, Ordering::AcqRel);
-                written += frames;
-                continue;
             }
             if let Some(start) = segment.boundary_start {
                 // One boundary at a time: render reaches the previous one first.
@@ -964,11 +959,7 @@ impl CamelEngine {
                     break Ok(());
                 }
                 segment.boundary_start = None;
-                self.boundary_start_frame.store(start, Ordering::Release);
-                self.boundary_at.store(
-                    self.written_frames.load(Ordering::Acquire),
-                    Ordering::Release,
-                );
+                self.publish_boundary(start);
             }
             let available = segment.frames - segment.read;
             let tail_frames = segment.tail_frames();
@@ -1019,11 +1010,7 @@ impl CamelEngine {
                     break Err(ENGINE_E_INVALID_STATE);
                 }
                 if let Some(start) = segments[1].boundary_start.take() {
-                    self.boundary_start_frame.store(start, Ordering::Release);
-                    self.boundary_at.store(
-                        self.written_frames.load(Ordering::Acquire),
-                        Ordering::Release,
-                    );
+                    self.publish_boundary(start);
                 }
                 let (outgoing, incoming, mixed) = buffers.lend();
                 *fade = Some(Fade {
@@ -1150,6 +1137,36 @@ impl CamelEngine {
         Ok(written)
     }
 
+    // The next track starts at the frames written so far. Render reads boundary_at first, so the start it then reads
+    // must already be stored.
+    fn publish_boundary(&self, start: u64) {
+        self.boundary_start_frame.store(start, Ordering::Release);
+        self.boundary_at.store(
+            self.written_frames.load(Ordering::Acquire),
+            Ordering::Release,
+        );
+    }
+
+    // Writes as much of `converter`'s pending output as `space` frames of the ring hold; the frames written.
+    fn flush_pending(
+        &self,
+        converter: &mut Converter,
+        space: u64,
+        bytes_per_frame: usize,
+    ) -> Result<u64, i32> {
+        let frames = converter.pending_frames().min(space);
+        if frames == 0 {
+            return Ok(0);
+        }
+        let bytes = frames as usize * bytes_per_frame;
+        if self.ring.write(&converter.pending()[..bytes]) != bytes {
+            return Err(ENGINE_E_INVALID_STATE);
+        }
+        converter.consume(frames);
+        self.written_frames.fetch_add(frames, Ordering::AcqRel);
+        Ok(frames)
+    }
+
     // Output frames of the crossfade from the first segment into the track after it: what that track asks for, at most
     // half of either track; 0 when it follows gaplessly, either is raw DSD or nothing follows yet.
     fn fade_after_first(&self, segments: &std::collections::VecDeque<Segment>) -> u64 {
@@ -1241,19 +1258,13 @@ impl CamelEngine {
         let space = (self.ring.writable() / bytes_per_frame) as u64;
         // The outgoing track has output of its own left only after a change during a crossfade; it plays first.
         for converter in [&mut outgoing.converter, &mut incoming.converter] {
-            let pending = converter.pending_frames();
-            if pending > 0 {
-                let frames = pending.min(space);
-                if frames == 0 {
-                    return Ok(FadeStep::Wait);
-                }
-                let bytes = frames as usize * bytes_per_frame;
-                if self.ring.write(&converter.pending()[..bytes]) != bytes {
-                    return Err(ENGINE_E_INVALID_STATE);
-                }
-                converter.consume(frames);
-                self.written_frames.fetch_add(frames, Ordering::AcqRel);
-                return Ok(FadeStep::Wrote(frames));
+            if converter.pending_frames() > 0 {
+                let frames = self.flush_pending(converter, space, bytes_per_frame)?;
+                return Ok(if frames == 0 {
+                    FadeStep::Wait
+                } else {
+                    FadeStep::Wrote(frames)
+                });
             }
         }
         if fade.done >= fade.length {
@@ -1268,11 +1279,7 @@ impl CamelEngine {
                     return Ok(FadeStep::Wait);
                 }
                 if let Some(start) = incoming.boundary_start.take() {
-                    self.boundary_start_frame.store(start, Ordering::Release);
-                    self.boundary_at.store(
-                        self.written_frames.load(Ordering::Acquire),
-                        Ordering::Release,
-                    );
+                    self.publish_boundary(start);
                 }
                 fade.waiting = false;
             } else {
