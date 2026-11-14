@@ -18,6 +18,7 @@
 #include <utility>
 #include "Common/util/Md5.h"
 #include "Server/Library/LibraryIdentity.h"
+#include "Server/Library/LibraryScanner.h"
 #include "Common/util/Text.h"
 
 namespace camel::server {
@@ -147,19 +148,6 @@ StoredCover storedCover(const sqlite::Statement& row) {
     return {"s" + toHex(md5.finish()), source == "embedded", Path(toWide(path))};
 }
 
-// The library's key for a playback path, worked out without opening it: lowercase, extended-length, a share as UNC.
-std::string libraryKey(const Path& path) {
-    std::wstring text = path.wstring();
-    if (!text.empty()) // as the scanner lowercases its keys
-        LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, text.data(), int(text.size()), text.data(), int(text.size()),
-                      nullptr, nullptr, 0);
-    if (text.starts_with(LR"(\\)") && !text.starts_with(LR"(\\?\)"))
-        text = LR"(\\?\unc\)" + text.substr(2);
-    else if (text.size() > 1 && text[1] == L':')
-        text = LR"(\\?\)" + text;
-    return toUtf8(text);
-}
-
 std::optional<StoredCover> albumCover(sqlite::Database& db, int64_t album) {
     auto row = db.prepare("SELECT c.source,f.path,f.size,f.mtime,f.volume_serial,f.file_index,f.created,f.volume_key "
                           "FROM albums a JOIN covers c ON c.id=a.cover_id JOIN files f ON f.id=c.file_id "
@@ -234,6 +222,7 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
                                                   const CancellationToken& token) {
     if (token.cancelled()) return {};
     if (request.kind == ArtworkKind::Artist) return store ? artist(*store, request.name, token) : std::nullopt;
+    int64_t trackAlbum = 0; // a library track's album, looked up once
     if (store) {
         try {
             if (request.kind != ArtworkKind::Track) {
@@ -243,8 +232,10 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
                 auto db = store->openReader();
                 auto row = db.prepare("SELECT t.album_id FROM tracks t JOIN files f ON f.id=t.file_id "
                                       "WHERE f.path=? AND f.available=1 AND t.album_id IS NOT NULL LIMIT 1");
-                if (row.bind(1, libraryKey(Path(toWide(request.path)))).step())
-                    if (auto ref = stored(*store, {ArtworkKind::Album, row.integer(0), {}}, token)) return ref;
+                if (row.bind(1, toUtf8(spelledLibraryPath(Path(toWide(request.path))).wstring())).step()) {
+                    trackAlbum = row.integer(0);
+                    if (auto ref = stored(*store, {ArtworkKind::Album, trackAlbum, {}}, token)) return ref;
+                }
             }
         } catch (const std::exception&) {
         }
@@ -289,15 +280,7 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
             first = Path(toWide(request.path));
             if (auto ref = track(first)) return ref;
             folder = first.parent_path();
-            album = 0;
-            if (store) {
-                auto db = store->openReader();
-                auto row = db.prepare(
-                    "SELECT t.album_id FROM tracks t JOIN files f ON f.id=t.file_id WHERE f.path=? AND f.available=1 LIMIT 1");
-                auto key = library::storageKey(first);
-                row.bind(1, toUtf8(key));
-                if (row.step()) album = row.integer(0);
-            }
+            album = trackAlbum;
         } else if (request.kind == ArtworkKind::Folder && store) {
             auto db = store->openReader();
             auto row = db.prepare(
