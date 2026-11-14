@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use crate::dsd2pcm::Ring;
 use crate::fft::{Complex, RealFft};
 
 const HEAD_TAPS: usize = 128;
@@ -276,9 +277,8 @@ pub(crate) struct Convolver {
     inputs: usize,
     outputs: usize,
     frame: u64,
-    // Per input channel: the last `head` samples twice over, so they read as one contiguous slice.
-    history: Vec<Vec<f64>>,
-    history_at: usize,
+    // Per input channel: the last `head` samples.
+    history: Vec<Ring<f64>>,
     levels: Vec<LevelState>,
 }
 
@@ -304,8 +304,9 @@ impl Convolver {
             })
             .collect();
         Convolver {
-            history: vec![vec![0.0; 2 * ir.layout.head]; inputs],
-            history_at: 0,
+            history: (0..inputs)
+                .map(|_| Ring::new(ir.layout.head, 0.0))
+                .collect(),
             ir,
             inputs,
             outputs,
@@ -377,7 +378,6 @@ impl Convolver {
 
     /// Convolves interleaved frames of `channels` in place; channels the response does not reach pass unchanged.
     pub(crate) fn process(&mut self, samples: &mut [f64], channels: usize) {
-        let head = self.ir.layout.head;
         let mut input = [0.0; 2];
         for frame in samples.chunks_exact_mut(channels) {
             for l in 0..self.levels.len() {
@@ -389,10 +389,8 @@ impl Convolver {
             for (c, x) in input.iter_mut().enumerate().take(self.inputs) {
                 *x = frame.get(c).copied().unwrap_or(0.0);
             }
-            self.history_at = (self.history_at + 1) % head;
             for (c, h) in self.history.iter_mut().enumerate() {
-                h[self.history_at] = input[c];
-                h[self.history_at + head] = input[c];
+                h.push(input[c]);
             }
             for (l, state) in self.levels.iter_mut().enumerate() {
                 let b = self.ir.levels[l].block;
@@ -404,8 +402,7 @@ impl Convolver {
             for (o, out) in frame.iter_mut().enumerate().take(self.outputs) {
                 let mut y = 0.0;
                 for path in self.ir.paths.iter().filter(|p| p.output == o) {
-                    let recent =
-                        &self.history[path.input][self.history_at + 1..=self.history_at + head];
+                    let recent = self.history[path.input].window();
                     y += path
                         .head
                         .iter()

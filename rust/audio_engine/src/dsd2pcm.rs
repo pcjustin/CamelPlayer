@@ -15,8 +15,6 @@ pub(crate) const PCM_RATE: u32 = 352_800;
 pub(crate) const PASSBAND_HZ: f64 = 40_000.0;
 /// Attenuation of everything that aliases into the passband.
 pub(crate) const STOPBAND_DB: f64 = 120.0;
-// Kaiser's length estimate is approximate; designing for more keeps every stage clear of STOPBAND_DB.
-const DESIGN_DB: f64 = STOPBAND_DB + 10.0;
 
 pub(crate) fn bessel_i0(x: f64) -> f64 {
     let mut sum = 1.0;
@@ -31,14 +29,22 @@ pub(crate) fn bessel_i0(x: f64) -> f64 {
     sum
 }
 
-/// A lowpass for decimating from `rate_in` to `rate_out`: flat to PASSBAND_HZ, STOPBAND_DB from `rate_out` -
-/// PASSBAND_HZ, length a multiple of `multiple`, taps summing to 1.
-pub(crate) fn design_lowpass(rate_in: f64, rate_out: f64, multiple: usize) -> Vec<f64> {
-    let transition = (rate_out - 2.0 * PASSBAND_HZ) / rate_in;
-    let estimate = (DESIGN_DB - 8.0) / (2.285 * 2.0 * std::f64::consts::PI * transition);
+/// A Kaiser-windowed lowpass at `rate`: flat to `pass`, `atten` dB down from `stop`, its length a multiple of
+/// `multiple`, taps summing to 1.
+pub(crate) fn kaiser_lowpass(
+    rate: f64,
+    pass: f64,
+    stop: f64,
+    atten: f64,
+    multiple: usize,
+) -> Vec<f64> {
+    // Kaiser's length estimate is approximate; designing for 10 dB more keeps the filter clear of `atten`.
+    let design = atten + 10.0;
+    let transition = (stop - pass) / rate;
+    let estimate = (design - 8.0) / (2.285 * 2.0 * std::f64::consts::PI * transition);
     let taps = (estimate.ceil() as usize + 1).div_ceil(multiple) * multiple;
-    let cutoff = rate_out / 2.0 / rate_in;
-    let beta = 0.1102 * (DESIGN_DB - 8.7);
+    let cutoff = (pass + stop) / 2.0 / rate;
+    let beta = 0.1102 * (design - 8.7);
     let centre = (taps - 1) as f64 / 2.0;
     let mut h: Vec<f64> = (0..taps)
         .map(|n| {
@@ -70,6 +76,17 @@ pub(crate) fn response(taps: &[f64], frequency: f64) -> f64 {
     (re * re + im * im).sqrt()
 }
 
+// A decimating stage from `rate_in` to `rate_out`: flat to PASSBAND_HZ, STOPBAND_DB down over what aliases into it.
+fn decimating_lowpass(rate_in: f64, rate_out: f64, multiple: usize) -> Vec<f64> {
+    kaiser_lowpass(
+        rate_in,
+        PASSBAND_HZ,
+        rate_out - PASSBAND_HZ,
+        STOPBAND_DB,
+        multiple,
+    )
+}
+
 /// The newest `length` values, kept twice over so they are always one slice, oldest first.
 pub(crate) struct Ring<T> {
     values: Vec<T>,
@@ -94,7 +111,18 @@ impl<T: Copy> Ring<T> {
         if self.at == length {
             self.at = 0;
         }
-        &self.values[self.at..self.at + length]
+        self.window()
+    }
+
+    /// The window, oldest first.
+    #[inline]
+    pub(crate) fn window(&self) -> &[T] {
+        &self.values[self.at..self.at + self.values.len() / 2]
+    }
+
+    /// Every value `value`, as before the first.
+    pub(crate) fn fill(&mut self, value: T) {
+        self.values.fill(value);
     }
 }
 
@@ -125,7 +153,7 @@ impl DsdDecimator {
         if !byte_rate.is_multiple_of(PCM_RATE) || channels == 0 {
             return None;
         }
-        let stage1 = design_lowpass(f64::from(byte_rate) * 8.0, f64::from(byte_rate), 8);
+        let stage1 = decimating_lowpass(f64::from(byte_rate) * 8.0, f64::from(byte_rate), 8);
         let tables = stage1
             .as_chunks::<8>()
             .0
@@ -147,7 +175,7 @@ impl DsdDecimator {
         let mut rate = f64::from(byte_rate);
         let halves = (0..halvings)
             .map(|_| {
-                let taps = design_lowpass(rate, rate / 2.0, 1);
+                let taps = decimating_lowpass(rate, rate / 2.0, 1);
                 rate /= 2.0;
                 HalfStage {
                     history: (0..channels).map(|_| Ring::new(taps.len(), 0.0)).collect(),
@@ -237,7 +265,7 @@ mod tests {
             let mut rate_out = f64::from(dsd * PCM_RATE);
             let mut multiple = 8; // the byte-table stage, then the 2x stages
             while rate_out >= f64::from(PCM_RATE) {
-                let taps = design_lowpass(rate_in, rate_out, multiple);
+                let taps = decimating_lowpass(rate_in, rate_out, multiple);
                 multiple = 1;
                 assert!((taps.iter().sum::<f64>() - 1.0).abs() < 1e-12);
                 for i in 0..=40 {

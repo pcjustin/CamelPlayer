@@ -14,7 +14,7 @@
 
 use std::f64::consts::PI;
 
-use crate::dsd2pcm::{bessel_i0, dot, DsdDecimator, Ring, PASSBAND_HZ, PCM_RATE};
+use crate::dsd2pcm::{dot, kaiser_lowpass, DsdDecimator, Ring, PASSBAND_HZ, PCM_RATE};
 use crate::fft::Complex;
 
 pub(crate) const ORDER: usize = 7;
@@ -217,27 +217,6 @@ impl Modulator {
         }
     }
 }
-/// A Kaiser-windowed lowpass at `rate`: flat to `pass`, `atten` dB from `stop`, taps summing to 1.
-fn kaiser_lowpass(rate: f64, pass: f64, stop: f64, atten: f64) -> Vec<f64> {
-    let design = atten + 10.0;
-    let taps = ((design - 8.0) / (2.285 * 2.0 * PI * (stop - pass) / rate)).ceil() as usize + 1;
-    let taps = taps + taps % 2; // an even length splits into two equal phases
-    let cutoff = (pass + stop) / 2.0 / rate;
-    let beta = 0.1102 * (design - 8.7);
-    let centre = (taps - 1) as f64 / 2.0;
-    let mut h: Vec<f64> = (0..taps)
-        .map(|n| {
-            let t = n as f64 - centre;
-            let sinc = (2.0 * PI * cutoff * t).sin() / (PI * t);
-            let r = t / centre;
-            sinc * bessel_i0(beta * (1.0 - r * r).max(0.0).sqrt()) / bessel_i0(beta)
-        })
-        .collect();
-    let sum: f64 = h.iter().sum();
-    h.iter_mut().for_each(|v| *v /= sum);
-    h
-}
-
 // A 2x interpolator's two phases, each with the zero-stuffing gain of 2, oldest input's tap first.
 struct Phases {
     even: Vec<f64>,
@@ -304,12 +283,20 @@ impl DsdRemodulator {
         }
         let decimator = DsdDecimator::new(in_rate, channels)?;
         let rate = f64::from(PCM_RATE);
-        let first = Phases::new(&kaiser_lowpass(2.0 * rate, PASSBAND_HZ, STOP_HZ, STOP_DB));
+        // An even length splits into two equal phases.
+        let first = Phases::new(&kaiser_lowpass(
+            2.0 * rate,
+            PASSBAND_HZ,
+            STOP_HZ,
+            STOP_DB,
+            2,
+        ));
         let second = Phases::new(&kaiser_lowpass(
             4.0 * rate,
             STOP_HZ,
             2.0 * rate - STOP_HZ,
             STOP_DB,
+            2,
         ));
         let lanes = (0..channels)
             .map(|_| Lane {
@@ -431,7 +418,7 @@ pub(crate) mod tests {
         let mut pcm = Vec::new();
         d.process(bytes, bytes.len(), &mut pcm);
         let rate = f64::from(PCM_RATE);
-        let h = kaiser_lowpass(rate, 21_000.0, 30_000.0, 160.0);
+        let h = kaiser_lowpass(rate, 21_000.0, 30_000.0, 160.0, 2);
         let x: Vec<f64> = (WARM..WARM + N)
             .map(|n| h.iter().enumerate().map(|(j, c)| c * pcm[n - j]).sum())
             .collect();
