@@ -400,7 +400,7 @@ void MainWindow::InitializeComponent() {
     setButtonTip(ShuffleButton(), L"Tip_Shuffle");
     setButtonTip(RepeatButton(), L"Tip_RepeatOff");
     setButtonTip(QueueToggleButton(), L"Tip_Queue");
-    for (const TextBlock note :
+    for (const TextBlock& note :
          {VolumeNote(), ReplayGainNote(), CrossfadeNote(), DspOrderNote(), EqNote(), CrossfeedNote(), ConvolutionNote()})
         foldNote(note);
 
@@ -760,7 +760,7 @@ hstring outputLabel(const camel::server::OutputRow& row) {
 
 // The same DAC through WASAPI and through ASIO are two entries, told apart by the backend.
 hstring outputMenuLabel(const camel::server::OutputRow& row) {
-    const hstring label = outputLabel(row);
+    hstring label = outputLabel(row);
     if (!row.alias.empty() || row.id.empty()) return label;
     return label + L" (" + ui::utf8(camel::backendName(row.backend)) + L")";
 }
@@ -1094,7 +1094,7 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
             ToggleMenuFlyoutItem item;
             item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
             item.IsChecked(row.grouped);
-            item.IsEnabled(row.connected && !(row.grouped && grouped < 2));
+            item.IsEnabled(row.connected && (!row.grouped || grouped >= 2));
             add(item, [this, row] {
                 changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                     camel::server::setInAirPlayGroup(s, row.id, !row.grouped, devices);
@@ -1261,10 +1261,11 @@ void MainWindow::OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, 
 void MainWindow::settingsChanged() {
     if (populating_ || !server_) return;
     if (editingOutput_) {
-        readOutputParameters(editingOutput_->parameters);
+        auto& editing = *editingOutput_;
+        readOutputParameters(editing.parameters);
         auto real = nativeSettings(settings_);
-        camel::server::keepOutputParameters(real, nativeSettings(editingOutput_->parameters), editingOutput_->backend,
-                                            editingOutput_->id, server_->snapshot().devices);
+        camel::server::keepOutputParameters(real, nativeSettings(editing.parameters), editing.backend, editing.id,
+                                            server_->snapshot().devices);
         settings_ = settingsDto(real);
         Command command;
         command.kind = CommandKind::ApplySettings;
@@ -1319,7 +1320,7 @@ void MainWindow::showScanProgress() {
     if (progress.scans && progress.finishing == progress.scans) {
         text = tr(L"Library_Finishing");
     } else if (progress.scans) {
-        text = ui::format(L"Library_Scanning", {ui::count(int64_t(progress.checked)), ui::count(int64_t(progress.found))});
+        text = ui::format(L"Library_Scanning", {ui::count(progress.checked), ui::count(progress.found)});
     }
     if (text == shownScan_) return;
     shownScan_ = hstring(text);
@@ -2639,7 +2640,7 @@ winrt::fire_and_forget MainWindow::OnDiagnosticBundleClick(Windows::Foundation::
              t.wHour, t.wMinute, t.wSecond);
     const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), types, true, L"zip", name.data());
     if (!chosen) co_return;
-    const std::filesystem::path file = *chosen;
+    const std::filesystem::path& file = *chosen;
     const auto checked = DiagnosticPathsCheck().IsChecked();
     const bool includePaths = checked && checked.Value();
     DiagnosticButton().IsEnabled(false);
@@ -3863,7 +3864,7 @@ void MainWindow::OnEqImportClick(Windows::Foundation::IInspectable const&, Route
     constexpr COMDLG_FILTERSPEC types[] = {{L"Equalizer APO / AutoEq", L"*.txt"}};
     const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), types);
     if (!chosen) return;
-    const std::filesystem::path file = *chosen;
+    const std::filesystem::path& file = *chosen;
     std::ifstream in(file, std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(in)), {});
     camel::EqImportNotes notes;
@@ -3901,7 +3902,7 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
     const auto name = settings_.eq.preset.empty() ? std::wstring(L"CamelPlayer EQ") : camel::toWide(settings_.eq.preset);
     const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), types, true, L"txt", name + L".txt");
     if (!chosen) return;
-    const std::filesystem::path file = *chosen;
+    const std::filesystem::path& file = *chosen;
     auto shown = settings_.eq;
     shown.enabled = true;
     const auto text = camel::formatEqualizerApo(settings_.eq.bands, analyzeDsp(eqChain(shown), eqRate()).preampDb);
@@ -4008,7 +4009,7 @@ void MainWindow::showReplayGain() {
 // A feature's own fields are disabled while it is off, so what depends on what shows.
 void MainWindow::enableDependentFields() {
     const bool replayGain = ReplayGainModeCombo().SelectedIndex() > 0;
-    for (const Control control :
+    for (const Control& control :
          {Control(ReplayGainPreampBox()), Control(ReplayGainNoValueBox()), Control(ReplayGainClipSwitch())})
         control.IsEnabled(replayGain);
     CrossfadeSecondsBox().IsEnabled(CrossfadeSwitch().IsOn());
@@ -4539,7 +4540,7 @@ void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Wind
     replayGain.Text(tr(L"Settings_ReplayGain/Text"));
     constexpr const wchar_t* kModes[] = {L"Settings_ReplayGainOff/Content", L"Settings_ReplayGainTrack/Content",
                                          L"Settings_ReplayGainAlbum/Content", L"Settings_ReplayGainAuto/Content"};
-    for (int mode = 0; mode < int(std::size(kModes)); ++mode) {
+    for (int mode = 0; std::cmp_less(mode, std::size(kModes)); ++mode) {
         RadioMenuFlyoutItem item;
         item.Text(tr(kModes[mode]));
         item.GroupName(L"ReplayGainModes");

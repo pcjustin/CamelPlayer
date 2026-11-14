@@ -80,7 +80,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     // What a screen reader announces for the tile or row.
     hstring ToString() const {
         const auto title = row_.number.empty() ? row_.title : row_.number + L" " + row_.title;
-        const auto named = row_.subtitle.empty() ? title : title + L", " + row_.subtitle;
+        auto named = row_.subtitle.empty() ? title : title + L", " + row_.subtitle;
         if (!IsPlaying()) return named;
         return named + L", " + ui::tr(ui::nowPlaying().paused ? L"Library_PausedMark" : L"Library_PlayingMark");
     }

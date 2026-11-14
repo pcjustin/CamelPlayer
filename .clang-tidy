@@ -42,5 +42,7 @@ CheckOptions:
   # value() throws bad_optional_access, a checked access
   bugprone-unchecked-optional-access.IgnoreValueCalls: true
   modernize-use-using.IgnoreExternC: true
+  # ui::nowPlaying() is what plays now and changes with it; a copy of it is a snapshot on purpose
+  performance-unnecessary-copy-initialization.AllowedTypes: '^ui::NowPlaying$'
 HeaderFilterRegex: '.*[\\/]src[\\/].*'
 ExcludeHeaderFilterRegex: '.*(Generated Files|\.g\.h).*'

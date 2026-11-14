@@ -1534,7 +1534,7 @@ void LibraryView::OnChoosePictureClick(Windows::Foundation::IInspectable const&,
     constexpr COMDLG_FILTERSPEC kPictures[] = {{L"JPEG, PNG, WebP", L"*.jpg;*.jpeg;*.png;*.webp"}};
     const auto chosen = ui::pickFile(window_(), kPictures);
     if (!chosen) return;
-    const std::filesystem::path file = *chosen;
+    const std::filesystem::path& file = *chosen;
     changeArtistPicture(
         [name = current_.filter->value, file](IServer& server) {
             std::error_code ec;

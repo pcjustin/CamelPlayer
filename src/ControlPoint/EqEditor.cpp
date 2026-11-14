@@ -357,7 +357,7 @@ void EqEditor::redraw() {
             e.Handled(true);
         });
         handle.PointerMoved([this, i](auto&&, Input::PointerRoutedEventArgs const& e) {
-            if (dragging_ != int(i)) return;
+            if (std::cmp_not_equal(dragging_, i)) return;
             const auto at = e.GetCurrentPoint(curve_).Position();
             auto& band = eq_.bands[i];
             band.frequencyHz = std::round(frequencyAt(at.X));

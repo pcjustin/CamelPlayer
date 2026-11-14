@@ -22,6 +22,11 @@ public:
     using IInspectable = winrt::Windows::Foundation::IInspectable;
     using CollectionChange = winrt::Windows::Foundation::Collections::CollectionChange;
 
+private:
+    ItemsVector() = default;
+    friend Derived;
+
+public:
     uint32_t GetMany(uint32_t start, winrt::array_view<IInspectable> out) {
         uint32_t n = 0;
         for (; n < out.size() && start + n < derived().Size(); ++n) out[n] = derived().GetAt(start + n);
