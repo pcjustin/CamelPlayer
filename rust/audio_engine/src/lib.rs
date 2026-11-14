@@ -1675,6 +1675,38 @@ unsafe fn track_host(
     DecoderHost::from_abi(decoder_host).ok_or(ENGINE_E_INVALID_ARGUMENT)
 }
 
+// Play and pause: the command is recorded and the state stored; decoding in progress stays valid, so the source keeps
+// its full MD5 coverage.
+unsafe fn set_playback_state(
+    engine: *mut CamelEngine,
+    command: *const CamelCommandStampV1,
+    state: u32,
+) -> i32 {
+    if engine.is_null() || command.is_null() {
+        return ENGINE_E_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let engine = &*engine;
+        let command = &*command;
+        if let Err(status) = validate_command(command) {
+            return status as i32;
+        }
+        if engine.view().is_none() {
+            return ENGINE_E_INVALID_STATE;
+        }
+        if let Err(status) = record_command(engine, command) {
+            return status as i32;
+        }
+        engine
+            .playback_state
+            .store(state as usize, Ordering::Release);
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
 fn operation_is_current(engine: &CamelEngine, epoch: u64) -> bool {
     engine.operation_epoch.load(Ordering::Acquire) == epoch
 }
@@ -1822,30 +1854,7 @@ pub unsafe extern "C" fn camel_engine_play_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
 ) -> i32 {
-    if engine.is_null() || command.is_null() {
-        return ENGINE_E_INVALID_ARGUMENT;
-    }
-    match catch_unwind(AssertUnwindSafe(|| {
-        let engine = &*engine;
-        let command = &*command;
-        if let Err(status) = validate_command(command) {
-            return status as i32;
-        }
-        if engine.view().is_none() {
-            return ENGINE_E_INVALID_STATE;
-        }
-        // Only the state changes: decoding in progress stays valid, so the source keeps its full MD5 coverage.
-        if let Err(status) = record_command(engine, command) {
-            return status as i32;
-        }
-        engine
-            .playback_state
-            .store(PLAYBACK_PLAYING as usize, Ordering::Release);
-        ENGINE_OK
-    })) {
-        Ok(status) => status,
-        Err(_) => ENGINE_E_PANIC,
-    }
+    set_playback_state(engine, command, PLAYBACK_PLAYING)
 }
 
 /// # Safety
@@ -1855,30 +1864,7 @@ pub unsafe extern "C" fn camel_engine_pause_v1(
     engine: *mut CamelEngine,
     command: *const CamelCommandStampV1,
 ) -> i32 {
-    if engine.is_null() || command.is_null() {
-        return ENGINE_E_INVALID_ARGUMENT;
-    }
-    match catch_unwind(AssertUnwindSafe(|| {
-        let engine = &*engine;
-        let command = &*command;
-        if let Err(status) = validate_command(command) {
-            return status as i32;
-        }
-        if engine.view().is_none() {
-            return ENGINE_E_INVALID_STATE;
-        }
-        // Only the state changes: decoding in progress stays valid, so the source keeps its full MD5 coverage.
-        if let Err(status) = record_command(engine, command) {
-            return status as i32;
-        }
-        engine
-            .playback_state
-            .store(PLAYBACK_PAUSED as usize, Ordering::Release);
-        ENGINE_OK
-    })) {
-        Ok(status) => status,
-        Err(_) => ENGINE_E_PANIC,
-    }
+    set_playback_state(engine, command, PLAYBACK_PAUSED)
 }
 
 /// # Safety
