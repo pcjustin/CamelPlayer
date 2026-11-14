@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <thread>
 
+#include "AppIcon.h"
 #include "ThemeBrush.h"
 #include "CaptionButtons.h"
 #include "UiText.h"
@@ -184,10 +185,7 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
 
     const auto app = window_.AppWindow();
     app.TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
-    wchar_t executable[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, executable, MAX_PATH);
-    const auto icon = std::filesystem::path(executable).parent_path() / L"assets" / L"CamelPlayer.ico";
-    if (std::error_code error; std::filesystem::exists(icon, error)) app.SetIcon(icon.c_str());
+    setAppIcon(app);
     // Owned by the main window, so it stays above it and goes with it when it is minimized.
     const HWND own = Microsoft::UI::GetWindowFromWindowId(app.Id());
     SetWindowLongPtrW(own, GWLP_HWNDPARENT, LONG_PTR(owner));

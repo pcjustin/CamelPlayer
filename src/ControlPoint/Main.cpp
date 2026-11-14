@@ -38,15 +38,24 @@ std::vector<std::wstring> applyPendingReset(const std::filesystem::path& data) {
 }
 
 // Windows names the media flyout, notifications and the taskbar group after the AUMID; an app without a Start menu
-// shortcut supplies the name and icon under the current user (docs/Plan.md §8.4).
+// shortcut supplies the name and icon under the current user (docs/Plan.md §8.4). Every copy shares the AUMID, so the
+// icon is changed only when the one it names is gone, as after a copy was moved or cleaned.
 void registerAppUserModelId(const wchar_t* id) {
     wchar_t executable[MAX_PATH];
     if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return;
-    const auto icon = (std::filesystem::path(executable).parent_path() / L"assets" / L"CamelPlayer.ico").wstring();
     const std::wstring key = std::wstring(L"Software\\Classes\\AppUserModelId\\") + id;
     const std::wstring name = L"CamelPlayer";
     RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"DisplayName", REG_SZ, name.c_str(),
                     DWORD((name.size() + 1) * sizeof(wchar_t)));
+    std::wstring stored(32768, L'\0');
+    auto bytes = DWORD(stored.size() * sizeof(wchar_t));
+    if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"IconUri", RRF_RT_REG_SZ, nullptr, stored.data(), &bytes) ==
+            ERROR_SUCCESS &&
+        bytes >= sizeof(wchar_t)) {
+        stored.resize(bytes / sizeof(wchar_t) - 1);
+        if (std::error_code error; std::filesystem::exists(stored, error)) return;
+    }
+    const auto icon = (std::filesystem::path(executable).parent_path() / L"assets" / L"CamelPlayer.ico").wstring();
     RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), L"IconUri", REG_SZ, icon.c_str(), DWORD((icon.size() + 1) * sizeof(wchar_t)));
 }
 

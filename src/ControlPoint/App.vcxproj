@@ -108,6 +108,7 @@
     </ClInclude>
     <ClInclude Include="QueueCollection.h" />
     <ClInclude Include="ArtworkLoader.h" />
+    <ClInclude Include="AppIcon.h" />
     <ClInclude Include="TrayIcon.h" />
     <ClInclude Include="GlobalHotkeys.h" />
     <ClInclude Include="MediaControls.h" />

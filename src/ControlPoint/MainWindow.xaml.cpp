@@ -25,6 +25,7 @@
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
 #include "CreditText.h"
+#include "AppIcon.h"
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
 #include "OutputsFollow.h"
@@ -279,6 +280,7 @@ void MainWindow::InitializeComponent() {
         presenter.PreferredMinimumHeight(static_cast<int32_t>(600 * scale));
         presenter.Maximize(); // starts maximized; restoring returns to the size above
     }
+    ui::setAppIcon(AppWindow());
     std::wstring executablePath(32768, L'\0');
     const DWORD executablePathLength =
         ::GetModuleFileNameW(nullptr, executablePath.data(), static_cast<DWORD>(executablePath.size()));
@@ -287,7 +289,6 @@ void MainWindow::InitializeComponent() {
         const auto iconPath = std::filesystem::path(executablePath).parent_path() / L"assets" / L"CamelPlayer.ico";
         std::error_code error;
         if (std::filesystem::exists(iconPath, error)) {
-            AppWindow().SetIcon(iconPath.c_str());
             ImageIconSource icon;
             icon.ImageSource(Media::Imaging::BitmapImage(Windows::Foundation::Uri(iconPath.wstring())));
             AppTitleBar().IconSource(icon);

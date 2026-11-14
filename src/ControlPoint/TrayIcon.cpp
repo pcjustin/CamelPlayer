@@ -6,7 +6,7 @@
 
 #include "TrayIcon.h"
 
-#include <filesystem>
+#include <commctrl.h>
 #include <shellapi.h>
 
 #include "Common/util/Log.h"
@@ -17,12 +17,6 @@ namespace {
 constexpr UINT kIconId = 1;
 constexpr UINT kCallbackMessage = WM_APP + 1;
 constexpr UINT kOpenCommand = 1, kExitCommand = 2;
-
-std::filesystem::path iconPath() {
-    std::wstring executable(32768, L'\0');
-    executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
-    return std::filesystem::path(executable).parent_path() / L"assets" / L"CamelPlayer.ico";
-}
 
 } // namespace
 
@@ -39,9 +33,8 @@ TrayIcon::TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitTe
     taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
     // A second launch runs unelevated like this one; let its show request through UIPI either way.
     ChangeWindowMessageFilterEx(window_, kShowMessage, MSGFLT_ALLOW, nullptr);
-    icon_ = HICON(LoadImageW(nullptr, iconPath().c_str(), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-                             GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
-    if (!icon_) icon_ = LoadIconW(nullptr, IDI_APPLICATION);
+    // The executable's own icon (App.rc), at the notification area's size for the display's DPI.
+    if (FAILED(LoadIconMetric(instance, MAKEINTRESOURCEW(1), LIM_SMALL, &icon_))) icon_ = LoadIconW(nullptr, IDI_APPLICATION);
     add();
 }
 
