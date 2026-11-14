@@ -465,7 +465,7 @@ void HomeView::showTiles() {
     }
 }
 
-// Listening time per day, week or month; empty days, weeks or months in between show as gaps on the baseline.
+// Listening time per day or month; empty days or months in between show as gaps on the baseline.
 void HomeView::drawChart() {
     Chart().Children().Clear();
     ChartAxis().Children().Clear();
@@ -473,7 +473,6 @@ void HomeView::drawChart() {
     const auto step = chart_.step;
     const auto next = [&](Date d) {
         if (step == PlayBucketSize::Day) return Date(std::chrono::sys_days(d) + std::chrono::days(1));
-        if (step == PlayBucketSize::Week) return Date(std::chrono::sys_days(d) + std::chrono::days(7));
         return Date(d + std::chrono::months(1));
     };
     std::vector<std::pair<Date, const PlayBucket*>> bars;
@@ -535,12 +534,11 @@ void HomeView::drawChart() {
             swprintf_s(value, L"%02u-%02u", unsigned(d.month()), unsigned(d.day()));
         return std::wstring(value);
     };
-    // Every bar's date when they fit, otherwise every few: by week, fortnight or quarter for days and weeks.
+    // Every bar's date when they fit, otherwise every few: by week, fortnight or quarter for days.
     const double room = text(label(bars.back().first)).DesiredSize().Width + 12;
     size_t every = 1;
-    for (const size_t candidate : step == PlayBucketSize::Month  ? std::vector<size_t>{1, 2, 3, 6, 12}
-                                  : step == PlayBucketSize::Week ? std::vector<size_t>{1, 2, 4, 13, 26, 52}
-                                                                 : std::vector<size_t>{1, 2, 7, 14, 28, 91, 182, 364}) {
+    for (const size_t candidate : step == PlayBucketSize::Month ? std::vector<size_t>{1, 2, 3, 6, 12}
+                                                                : std::vector<size_t>{1, 2, 7, 14, 28, 91, 182, 364}) {
         every = candidate;
         if (slot * double(candidate) >= room) break;
     }

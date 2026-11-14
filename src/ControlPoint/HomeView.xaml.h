@@ -52,7 +52,7 @@ struct HomeView : HomeViewT<HomeView> {
                                   Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
 
 private:
-    // The days, weeks or months the chart shows for the chosen period, and the listening in each.
+    // The days or months the chart shows for the chosen period, and the listening in each.
     struct ChartData {
         std::chrono::year_month_day first, last;
         camel::server::PlayBucketSize step = camel::server::PlayBucketSize::Day;
