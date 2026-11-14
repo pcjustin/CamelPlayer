@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -686,6 +686,8 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
 
 Listing list(const Path& path, const CancellationToken& token, bool network, std::atomic<ListedIds>& listedIds) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+    // Restored on every way out, an exception's too, which left a pool thread at background priority for later work.
+    auto restore = wil::scope_exit([] { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); });
     Listing out{path};
     wil::unique_handle directory;
     try {
@@ -696,7 +698,6 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
     } catch (const std::exception& e) {
         out.complete = false;
         out.error = e.what();
-        SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
         return out;
     }
     if (network && listedIds.load() != ListedIds::Rejected) {
@@ -735,7 +736,6 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
             }
             if (listedIds.load() == ListedIds::Rejected)
                 for (auto& entry : out.files) entry.listedVersion = false;
-            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
             return out;
         }
         if (!token.cancelled()) listedIds = ListedIds::Rejected;
@@ -772,7 +772,6 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
             out.error = key(path) + ": directory enumeration interrupted";
         }
     }
-    SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
     return out;
 }
 
