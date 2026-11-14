@@ -1927,7 +1927,6 @@ mod tests {
     /// (round 5) carries the 16 bits the wiki documents after the
     /// optional CRC field (multirate_inter, version, copy_history,
     /// PCMR, front_sum, surround_sum, dialnorm) MSB-first.
-    #[allow(clippy::too_many_arguments)]
     fn build_be_header(
         ftype: u32,
         sample_count_m1: u32,    // 5 bits
@@ -2301,7 +2300,6 @@ mod tests {
 
     /// Build a 14-bit BE-packed buffer carrying the same DTS frame
     /// the `build_be_header` helper produces in raw-BE form.
-    #[allow(clippy::too_many_arguments)]
     fn build_14bit_packed_header(
         order: FourteenBitByteOrder,
         ftype: u32,

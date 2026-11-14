@@ -515,7 +515,6 @@ pub struct AdpcmContext<'a> {
 /// VQ / ADPCM-coefficient blockers surface
 /// [`AudioArrayError::VqCodebookUnavailable`] wrapped through the
 /// [`AudioArrayDecodeError`] return type.
-#[allow(clippy::too_many_arguments)]
 pub fn decode_audio_data_subframe_at(
     bytes: &[u8],
     bit_offset: usize,
@@ -579,7 +578,6 @@ pub fn decode_audio_data_subframe_at(
 /// termination-frame gating ("exists only in a termination frame")
 /// is the frame-level caller's to enforce, since this walk does not
 /// see the §5.3.1 `FTYPE`.
-#[allow(clippy::too_many_arguments)]
 pub fn decode_audio_data_subframe_partial_at(
     bytes: &[u8],
     bit_offset: usize,
@@ -638,7 +636,6 @@ pub fn decode_audio_data_subframe_partial_at(
 /// capture that does not match the per-channel `[nVQSUB, nSUBS)`
 /// shape, and [`AudioArrayError::MissingPvqIndex`] for a hand-built
 /// `PMODE != 0` subband lacking its captured index.
-#[allow(clippy::too_many_arguments)]
 pub fn decode_audio_data_subframe_vq_at(
     bytes: &[u8],
     bit_offset: usize,
@@ -746,7 +743,6 @@ pub fn decode_audio_data_subframe_vq_at(
             // `n` is the subband index, used to address ch_side.abits /
             // tmode / scales and matrix[row][n]; an enumerate() over any
             // single one would not capture the cross-array indexing.
-            #[allow(clippy::needless_range_loop)]
             for n in 0..n_vqsub[ch] {
                 let abits = ch_side.abits[n];
                 let sel_val = sel(ch, abits);

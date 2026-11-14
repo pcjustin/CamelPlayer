@@ -351,7 +351,6 @@ pub const SAMPLES_PER_SUBSUBFRAME: usize = 8;
 ///
 /// Returns [`Error::InvalidStepSize`] for an invalid `ABITS`, or
 /// [`Error::SampleCountMismatch`] when a slice is not eight samples.
-#[allow(clippy::too_many_arguments)]
 pub fn dequant_subsubframe(
     side: &ChannelSideInfo,
     n: usize,

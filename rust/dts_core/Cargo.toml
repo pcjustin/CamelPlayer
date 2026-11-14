@@ -8,3 +8,9 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 license = "MPL-2.0 AND MIT"
+
+# The decoder's code is copied from oxideav-dts, which keeps long parameter lists and indexed loops; the two lints
+# are set here rather than allowed in the source (AGENTS.md).
+[lints.clippy]
+too_many_arguments = "allow"
+needless_range_loop = "allow"

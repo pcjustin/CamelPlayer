@@ -571,7 +571,6 @@ mod tests {
     /// the reference body remains a 1:1 textual match of the
     /// pseudocode; iterator-flavoured rewrites would obscure the
     /// correspondence with the spec.
-    #[allow(clippy::needless_range_loop)]
     fn cos_mod_stage_reference(
         ra_xin: &[f64; NUM_SUBBAND],
         ra_cos_mod: &[f64; COS_MOD_LEN],

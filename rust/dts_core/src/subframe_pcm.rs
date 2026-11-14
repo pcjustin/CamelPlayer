@@ -394,7 +394,6 @@ impl SubframePcmDecoder {
     /// * [`SubframePcmError::AudioData`] for any §5.5 walk failure
     ///   (including the §D.10 VQ blockers);
     /// * [`SubframePcmError::Synthesis`] for any §C.2.5 driver failure.
-    #[allow(clippy::too_many_arguments)]
     pub fn decode_subframe(
         &mut self,
         bytes: &[u8],
@@ -423,7 +422,6 @@ impl SubframePcmDecoder {
     /// note ("For joint intensity coded subbands, it must be set to that
     /// of the source channel, in order to reflect the true subband
     /// activity"), so the imported sub-bands actually reach the output.
-    #[allow(clippy::too_many_arguments)]
     pub fn decode_subframe_with_joint(
         &mut self,
         bytes: &[u8],
@@ -477,7 +475,6 @@ impl SubframePcmDecoder {
     /// # Errors
     ///
     /// See [`Self::decode_subframe_with_joint`].
-    #[allow(clippy::too_many_arguments)]
     pub fn decode_subframe_partial(
         &mut self,
         bytes: &[u8],
