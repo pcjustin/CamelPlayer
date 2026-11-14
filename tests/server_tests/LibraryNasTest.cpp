@@ -1044,10 +1044,16 @@ TEST(LibraryNas, DISABLED_CoversDuringAFirstScan) {
     std::ranges::sort(times);
     const auto at = [&](double share) { return times.empty() ? 0.0 : times[size_t(share * double(times.size() - 1))]; };
     const auto progress = server.libraryScanProgress();
-    Json report{{"albums_listed", covers.size()},    {"covers_answered", times.size()}, {"covers_found", found},
+    Json report{{"albums_listed", covers.size()},
+                {"covers_answered", times.size()},
+                {"covers_found", found},
                 {"covers_within_half_a_second", std::ranges::count_if(times, [](double t) { return t < 0.5; })},
-                {"median_seconds", at(0.5)},         {"p90_seconds", at(0.9)},          {"max_seconds", at(1.0)},
-                {"files_checked", progress.checked}, {"files_found", progress.found},   {"scan_seconds", 240}};
+                {"median_seconds", at(0.5)},
+                {"p90_seconds", at(0.9)},
+                {"max_seconds", at(1.0)},
+                {"files_checked", progress.checked},
+                {"files_found", progress.found},
+                {"scan_seconds", 240}};
     std::cout << "covers: " << report.dump() << '\n' << std::flush;
     std::ofstream(local / "covers-report.json") << report.dump(2);
     server.shutdown();
