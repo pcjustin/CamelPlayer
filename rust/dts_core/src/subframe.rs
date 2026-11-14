@@ -43,8 +43,8 @@
 //!   guess the variable `JOIN_SCALES` bit count.
 //!
 //! The `RANGE` code the tail decoder captures is 8-bit signed Q2
-//! (`dB = (int8)code × 0.25`, [`crate::dts_dynrng_to_db`] /
-//! [`crate::dts_dynrng_to_linear`], per
+//! (`dB = (int8)code × 0.25`, [`crate::drc_range::dts_dynrng_to_db`] /
+//! [`crate::drc_range::dts_dynrng_to_linear`], per
 //! `docs/audio/dts/dts-drc-dynrng.md`); the §5.4.1 pseudocode applies
 //! that linear gain to every reconstructed PCM sample *after* QMF
 //! synthesis. The `bits_consumed` cursor of the SCALES-block walk
@@ -71,7 +71,7 @@ pub const MAX_PRIMARY_CHANNELS: usize = 5;
 pub struct ChannelSideInfoParams {
     /// `nSUBS[ch] = SUBS[ch] + 2` — the number of active subbands
     /// for this channel (Table 5-21 / PDF p.25 "Subband Activity
-    /// Count"). Must be ≤ [`NUM_SUBBAND`](crate::NUM_SUBBAND) (= 32).
+    /// Count"). Must be ≤ [`NUM_SUBBAND`](crate::cos_mod::NUM_SUBBAND) (= 32).
     pub n_subs: usize,
     /// `nVQSUB[ch] = VQSUB[ch] + 1` — the first high-frequency
     /// VQ-encoded subband (PDF p.25 "High Frequency VQ Start
@@ -93,7 +93,7 @@ pub struct ChannelSideInfoParams {
 
 /// Decoded §5.4.1 side information for one primary audio channel.
 ///
-/// Every plane is a fixed [`NUM_SUBBAND`](crate::NUM_SUBBAND)-slot array so downstream
+/// Every plane is a fixed [`NUM_SUBBAND`](crate::cos_mod::NUM_SUBBAND)-slot array so downstream
 /// consumers can index by subband without re-checking the per-channel
 /// bounds; slots at or beyond the corresponding loop bound keep the
 /// all-zero / `None` initial value (matching the spec's explicit
@@ -197,7 +197,7 @@ pub struct PrimarySideInfo {
 ///
 /// * [`Error::InvalidSideInfo`] with field `"nPCHS"` when
 ///   `params.len() > 5` (PDF p.25: `nPCHS ≤ 5`), `"nSUBS"` when a
-///   channel's `n_subs` exceeds [`NUM_SUBBAND`](crate::NUM_SUBBAND), or `"VQSUB"` when
+///   channel's `n_subs` exceeds [`NUM_SUBBAND`](crate::cos_mod::NUM_SUBBAND), or `"VQSUB"` when
 ///   `n_vqsub > n_subs`;
 /// * [`Error::InvalidSideInfo`] with field `"SCALES"` when a
 ///   scale-factor index walks outside its RMS table (per the
@@ -351,11 +351,11 @@ pub struct SideInfoTail {
     /// `Some` iff the frame header's `DYNF != 0`, `None` otherwise.
     /// The code is **8-bit signed Q2 two's-complement**
     /// (`dB = (int8)code × 0.25`); feed it to
-    /// [`crate::dts_dynrng_to_linear`] to obtain the linear multiplier
+    /// [`crate::drc_range::dts_dynrng_to_linear`] to obtain the linear multiplier
     /// the §5.4.1 pseudocode applies to every reconstructed PCM sample
     /// **after** QMF synthesis. (Do not use it to raw-index the
     /// offset-binary §D.4 presentation table — see
-    /// [`crate::dts_dynrng_to_db`].)
+    /// [`crate::drc_range::dts_dynrng_to_db`].)
     pub range_index: Option<u8>,
     /// Whether a 16-bit `SICRC` side-info CRC word was present and
     /// skipped (`true` iff the frame header's `CPF == 1`). Per §5.4.1
@@ -397,7 +397,7 @@ pub struct SideInfoTail {
 /// When a channel carries `JOINX[ch] > 0`, this walker decodes the
 /// `JOIN_SHUFF[ch]` (3-bit code-book selector) then, for each imported
 /// sub-band `n ∈ [nSUBS[ch], nSUBS[nSourceCh])`, one `JOIN_SCALES[ch][n]`
-/// via [`crate::decode_join_scale_at`] (the §D.3 `JScaleTbl` look-up of
+/// via [`crate::side_info::decode_join_scale_at`] (the §D.3 `JScaleTbl` look-up of
 /// the biased `QSCALES` index). The resolved factors are returned in
 /// [`SideInfoTail::join_scales`]; a channel with `JOINX[ch] == 0`
 /// contributes an empty vector.
@@ -410,7 +410,7 @@ pub struct SideInfoTail {
 ///
 /// The `RANGE` (DYNF) and `SICRC` (CPF) fields are both fully specified
 /// and handled: `RANGE`'s 8-bit signed-Q2 code is captured (the
-/// [`crate::dts_dynrng_to_linear`] gain is applied later, post-QMF)
+/// [`crate::drc_range::dts_dynrng_to_linear`] gain is applied later, post-QMF)
 /// and `SICRC`'s 16 bits are consumed for framing.
 ///
 /// Returns `(SideInfoTail, bits_consumed)`.
@@ -443,16 +443,16 @@ pub fn decode_primary_side_info_tail_at(
     // 1. for (ch) if (JOINX[ch] > 0) JOIN_SHUFF[ch] = ExtractBits(3).
     //    The selectors are read for every joint channel first (Table
     //    5-28 groups all JOIN_SHUFF reads before the JOIN_SCALES loop).
-    let mut join_codebook: Vec<Option<crate::ScalesCodebook>> = vec![None; n_pchs];
+    let mut join_codebook: Vec<Option<crate::side_info::ScalesCodebook>> = vec![None; n_pchs];
     for (ch, &j) in joinx.iter().enumerate() {
         if j > 0 {
             let shuff = br.read_bits(3)? as u8;
-            join_codebook[ch] = Some(crate::ScalesCodebook::from_shuff(shuff).map_err(|_| {
-                Error::InvalidSideInfo {
+            join_codebook[ch] = Some(crate::side_info::ScalesCodebook::from_shuff(shuff).map_err(
+                |_| Error::InvalidSideInfo {
                     field: "JOIN_SHUFF",
                     value: shuff as u32,
-                }
-            })?);
+                },
+            )?);
         }
     }
 
@@ -516,16 +516,6 @@ pub fn decode_primary_side_info_tail_at(
 mod tests {
     use super::*;
     use crate::side_info::{RMS_6BIT, RMS_7BIT};
-
-    /// Pack a series of (value, bit_width) fields into a byte stream
-    /// MSB-first. Trailing bits are zero-padded.
-    /// `(code, len)` of a SCALES difference symbol in the SA129 book
-    /// (§D.5.12 Table A129).
-    fn sa129(diff: i16) -> (u32, u8) {
-        let table = crate::side_info::scales_table(ScalesCodebook::Sa129).unwrap();
-        let &(_, len, code) = table.iter().find(|&&(s, _, _)| s == diff).unwrap();
-        (u32::from(code), len)
-    }
 
     fn pack_fields(fields: &[(u32, u8)]) -> Vec<u8> {
         let total_bits: usize = fields.iter().map(|(_, w)| *w as usize).sum();
@@ -679,83 +669,6 @@ mod tests {
     }
 
     #[test]
-    fn huffman_walk_accumulates_scale_sum_across_hf_vq_tail() {
-        // BHUFF=A12 / THUFF=A4 / SHUFF=SA129 (difference codebook
-        // A5 + 6-bit RMS). One channel, nSUBS=3, nVQSUB=2, nSSC=1.
-        // A12: symbol 2 = code 10 (2 bits). A5 differences: +2 is
-        // code 1110 (4 bits), +1 is code 10 (2 bits), 0 is code 0
-        // (1 bit). nScaleSum walks 0 -> +2 -> +3 -> +3 across the
-        // coded subband and the two HF VQ subbands — one running
-        // accumulator across both loops, per Table 5-28.
-        let stream = pack_fields(&[
-            (0, 2),
-            (0, 3),    // SSC=0, PSC=0
-            (0, 3),    // PMODE[0..3] = 0
-            (0b10, 2), // ABITS[0] = 2 (A12)
-            (0b10, 2), // ABITS[1] = 2 (A12)
-            sa129(2),  // SCALES[0][0]: diff +2 -> sum 2
-            sa129(1),  // SCALES[1][0]: diff +1 -> sum 3
-            sa129(0),  // SCALES[2][0] (HF): diff 0 -> sum 3
-        ]);
-        let params = [ChannelSideInfoParams {
-            n_subs: 3,
-            n_vqsub: 2,
-            abits_codebook: AbitsCodebook::A12,
-            tmode_codebook: TmodeCodebook::A4,
-            scales_codebook: ScalesCodebook::Sa129,
-        }];
-        let (info, bits) = decode_primary_side_info_at(&stream, 0, &params).unwrap();
-        let ch = &info.channels[0];
-        assert_eq!(&ch.abits[..3], &[2, 2, 0]);
-        assert_eq!(ch.scales[0][0], RMS_6BIT[2]);
-        assert_eq!(ch.scales[1][0], RMS_6BIT[3]);
-        assert_eq!(ch.scales[2][0], RMS_6BIT[3]);
-        let scale_bits: u8 = [2, 1, 0].iter().map(|&d| sa129(d).1).sum();
-        assert_eq!(bits, 5 + 3 + 4 + usize::from(scale_bits));
-    }
-
-    #[test]
-    fn scale_sum_accumulator_resets_per_channel() {
-        // Two channels on the SA129 difference codebook. ch0
-        // accumulates to +3; ch1's first difference (+1) must be
-        // applied to a fresh nScaleSum of 0 (per-channel
-        // `nScaleSum = 0;` in Table 5-28), not to ch0's +3.
-        let stream = pack_fields(&[
-            (0, 2),
-            (0, 3),
-            (0, 1),    // PMODE ch0[0] (nSUBS = 1)
-            (0, 2),    // PMODE ch1[0..2] (nSUBS = 2)
-            (0b10, 2), // ABITS ch0[0] = 2 (A12)
-            (0b10, 2), // ABITS ch1[0] = 2 (A12)
-            sa129(2),  // ch0 SCALES[0][0]: diff +2 -> sum 2
-            sa129(1),  // ch1 SCALES[0][0]: diff +1 -> fresh sum 1
-            sa129(1),  // ch1 SCALES[1][0] (HF VQ): diff +1 -> sum 2
-        ]);
-        // Layout note: ch0 has nSUBS = nVQSUB = 1 so its SCALES block
-        // is the single +2 difference (no HF tail); ch1 (nSUBS = 2,
-        // nVQSUB = 1) has one coded subband followed by one HF VQ
-        // subband.
-        let ch0 = ChannelSideInfoParams {
-            n_subs: 1,
-            n_vqsub: 1,
-            abits_codebook: AbitsCodebook::A12,
-            tmode_codebook: TmodeCodebook::A4,
-            scales_codebook: ScalesCodebook::Sa129,
-        };
-        let ch1 = ChannelSideInfoParams {
-            n_subs: 2,
-            n_vqsub: 1,
-            ..ch0
-        };
-        let (info, _) = decode_primary_side_info_at(&stream, 0, &[ch0, ch1]).unwrap();
-        // ch0: sum walked 0 -> 2.
-        assert_eq!(info.channels[0].scales[0][0], RMS_6BIT[2]);
-        // ch1: fresh accumulator 0 -> +1 -> +2 (not 3 -> 4 -> 5).
-        assert_eq!(info.channels[1].scales[0][0], RMS_6BIT[1]);
-        assert_eq!(info.channels[1].scales[1][0], RMS_6BIT[2]);
-    }
-
-    #[test]
     fn linear7_scales_route_through_7bit_rms_table() {
         // SHUFF=6 (Linear7Bit) reads 7-bit absolute indexes and
         // resolves them through the §D.1.2 7-bit RMS table.
@@ -798,16 +711,6 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(bits_a, bits_b);
         assert_eq!(bits_a, 17);
-    }
-
-    #[test]
-    fn empty_channel_list_consumes_only_the_prefix() {
-        let stream = pack_fields(&[(0b10, 2), (0b011, 3)]);
-        let (info, bits) = decode_primary_side_info_at(&stream, 0, &[]).unwrap();
-        assert_eq!(bits, SubsubframeCount::WIRE_BITS as usize);
-        assert!(info.channels.is_empty());
-        assert_eq!(info.subsubframe_count.n_ssc(), 3);
-        assert_eq!(info.subsubframe_count.psc, 0b011);
     }
 
     #[test]
@@ -903,7 +806,7 @@ mod tests {
         assert_eq!(bits, 8);
         assert_eq!(tail.range_index, Some(80));
         assert!(!tail.side_info_crc_present);
-        let gain = crate::dts_dynrng_to_linear(tail.range_index.unwrap());
+        let gain = crate::drc_range::dts_dynrng_to_linear(tail.range_index.unwrap());
         assert!((gain - 10.0).abs() < 1e-12);
     }
 
@@ -928,7 +831,7 @@ mod tests {
         assert_eq!(bits, 24);
         assert_eq!(tail.range_index, Some(0));
         assert!(tail.side_info_crc_present);
-        assert_eq!(crate::dts_dynrng_to_linear(0), 1.0);
+        assert_eq!(crate::drc_range::dts_dynrng_to_linear(0), 1.0);
     }
 
     #[test]
@@ -952,7 +855,10 @@ mod tests {
         assert!(tail.join_scales[0].is_empty()); // source channel: no import
         assert_eq!(tail.join_scales[1].len(), 2);
         assert_eq!(tail.join_scales[1][0], 1.0);
-        assert_eq!(tail.join_scales[1][1], crate::JOIN_SCALE_FACTOR[127]);
+        assert_eq!(
+            tail.join_scales[1][1],
+            crate::join_scale::JOIN_SCALE_FACTOR[127]
+        );
     }
 
     #[test]

@@ -48,19 +48,6 @@ use crate::{Error, Result};
 /// `0..=240`).
 pub const DMIX_TABLE_LEN: usize = 241;
 
-/// The §D.11 `DmixTable` unity-gain index (`32768` = `1.0` in Q15,
-/// `0 dB`).
-pub const DMIX_TABLE_UNITY_INDEX: usize = 240;
-
-/// Number of entries in the §D.11 `InvDmixTbl` (`InvDmixTblIndex`
-/// `0..=200`).
-pub const INV_DMIX_TABLE_LEN: usize = 201;
-
-/// Offset between the two §D.11 index columns: inverse entries exist
-/// only for `DmixTblIndex >= 40`, and
-/// `InvDmixTblIndex = DmixTblIndex - 40`.
-pub const INV_DMIX_INDEX_OFFSET: usize = 40;
-
 /// §D.11 `DmixTable` column: unsigned 16-bit Q15 downmix scale
 /// factors (`AbsValues * 2^15`, rounded to nearest), indexed by
 /// `DmixTblIndex` `0..=240`. Entry 0 is `-60 dB` (`33`), entry 240
@@ -95,42 +82,6 @@ pub static DMIX_TABLE: [u16; DMIX_TABLE_LEN] = [
     32768, // 240
 ];
 
-/// §D.11 `InvDmixTbl` column: unsigned 24-bit Q16 inverse downmix
-/// scale factors (`InvAbsValues * 2^16`, rounded to nearest), indexed
-/// by `InvDmixTblIndex` `0..=200` (i.e. `DmixTblIndex - 40`). Entry 0
-/// inverts `-40 dB` (`6553600` = `100.0` in Q16), entry 200 inverts
-/// unity (`65536`).
-///
-/// Transcribed from ETSI TS 102 114 V1.3.1 §D.11 (PDF p.256-259).
-pub static INV_DMIX_TABLE: [u32; INV_DMIX_TABLE_LEN] = [
-    6553600, 6186997, 5840902, 5514167, 5205710, 4914507, 4639593, 4380059, // 0..=7
-    4135042, 3903731, 3685360, 3479204, 3284581, 3100844, 2927386, 2763630, // 8..=15
-    2609035, 2463088, 2325305, 2195230, 2072430, 2013631, 1956500, 1900990, // 16..=23
-    1847055, 1794651, 1743733, 1694260, 1646190, 1599484, 1554103, 1510010, // 24..=31
-    1467168, 1425542, 1385096, 1345798, 1307615, 1270515, 1234468, 1199444, // 32..=39
-    1165413, 1132348, 1100221, 1069005, 1038676, 1009206, 980573, 952752, // 40..=47
-    925721, 899456, 873937, 849141, 825049, 801641, 778897, 756798, // 48..=55
-    735326, 714463, 694193, 674497, 655360, 636766, 618700, 601146, // 56..=63
-    584090, 567518, 551417, 535772, 520571, 505801, 491451, 477507, // 64..=71
-    463959, 450796, 438006, 425579, 413504, 401772, 390373, 379297, // 72..=79
-    368536, 363270, 358080, 352964, 347920, 342949, 338049, 333219, // 80..=87
-    328458, 323765, 319139, 314579, 310084, 305654, 301287, 296982, // 88..=95
-    292739, 288556, 284433, 280369, 276363, 272414, 268522, 264685, // 96..=103
-    260904, 257176, 253501, 249879, 246309, 242790, 239321, 235901, // 104..=111
-    232531, 229208, 225933, 222705, 219523, 216386, 213295, 210247, // 112..=119
-    207243, 204282, 201363, 198486, 195650, 192855, 190099, 187383, // 120..=127
-    184706, 182066, 179465, 176901, 174373, 171882, 169426, 167005, // 128..=135
-    164619, 162267, 159948, 157663, 155410, 153190, 151001, 148844, // 136..=143
-    146717, 144621, 142554, 140517, 138510, 136531, 134580, 132657, // 144..=151
-    130762, 128893, 127052, 125236, 123447, 121683, 119944, 118231, // 152..=159
-    116541, 114876, 113235, 111617, 110022, 108450, 106901, 105373, // 160..=167
-    103868, 102383, 100921, 99479, 98057, 96656, 95275, 93914, // 168..=175
-    92682, 91249, 89946, 88660, 87394, 86145, 84914, 83701, // 176..=183
-    82505, 81326, 80164, 79019, 77890, 76777, 75680, 74598, // 184..=191
-    73533, 72482, 71446, 70425, 69419, 68427, 67450, 66486, // 192..=199
-    65536, // 200
-];
-
 /// Look up the §D.11 `DmixTable` scale factor for a `DmixTblIndex`,
 /// returned as the real-valued gain (`DmixTable[index] / 2^15`).
 ///
@@ -138,22 +89,6 @@ pub static INV_DMIX_TABLE: [u32; INV_DMIX_TABLE_LEN] = [
 #[must_use]
 pub fn dmix_scale(index: usize) -> Option<f64> {
     DMIX_TABLE.get(index).map(|&q15| f64::from(q15) / 32768.0)
-}
-
-/// Look up the §D.11 `InvDmixTbl` inverse scale factor for a
-/// `DmixTblIndex` (**not** an `InvDmixTblIndex` — the
-/// [`INV_DMIX_INDEX_OFFSET`] rebasing is applied internally),
-/// returned as the real-valued inverse gain
-/// (`InvDmixTbl[index - 40] / 2^16`).
-///
-/// Returns `None` when `index < 40` (the spec prints `N/A` for the
-/// quietest 40 rows) or `index > 240`.
-#[must_use]
-pub fn inv_dmix_scale(index: usize) -> Option<f64> {
-    let inv_index = index.checked_sub(INV_DMIX_INDEX_OFFSET)?;
-    INV_DMIX_TABLE
-        .get(inv_index)
-        .map(|&q16| f64::from(q16) / 65536.0)
 }
 
 /// Resolve one §5.7.1 Table 5-31 9-bit dynamic-downmix coefficient
@@ -217,21 +152,6 @@ mod tests {
     }
 
     #[test]
-    fn table_lengths_and_anchors() {
-        assert_eq!(DMIX_TABLE.len(), DMIX_TABLE_LEN);
-        assert_eq!(INV_DMIX_TABLE.len(), INV_DMIX_TABLE_LEN);
-        // Verbatim §D.11 anchor rows from the staged PDF.
-        assert_eq!(DMIX_TABLE[0], 33); // -60.0 dB
-        assert_eq!(DMIX_TABLE[40], 328); // -40.0 dB
-        assert_eq!(DMIX_TABLE[100], 3277); // -20.0 dB
-        assert_eq!(DMIX_TABLE[216], 23170); // 1/sqrt(2)
-        assert_eq!(DMIX_TABLE[DMIX_TABLE_UNITY_INDEX], 32768); // 0 dB
-        assert_eq!(INV_DMIX_TABLE[0], 6553600); // inverts -40.0 dB
-        assert_eq!(INV_DMIX_TABLE[60], 655360); // inverts -20.0 dB
-        assert_eq!(INV_DMIX_TABLE[200], 65536); // inverts 0 dB
-    }
-
-    #[test]
     fn dmix_table_matches_db_ramp_closed_form() {
         // Every DmixTable entry is round(10^(dB/20) * 2^15) on the
         // piecewise dB ramp — except index 216, which the spec prints
@@ -246,68 +166,6 @@ mod tests {
             let predicted = (abs * 32768.0).round() as u16;
             assert_eq!(q15, predicted, "DmixTable[{i}]");
         }
-    }
-
-    #[test]
-    fn inv_dmix_table_matches_db_ramp_closed_form() {
-        // Every InvDmixTbl entry is round(2^16 / 10^(dB/20)) on the
-        // same ramp rebased by INV_DMIX_INDEX_OFFSET, with the same
-        // index-216 half-power exception (inv index 176).
-        for (j, &q16) in INV_DMIX_TABLE.iter().enumerate() {
-            let i = j + INV_DMIX_INDEX_OFFSET;
-            let abs = if i == 216 {
-                std::f64::consts::FRAC_1_SQRT_2
-            } else {
-                10f64.powf(spec_db(i) / 20.0)
-            };
-            let predicted = (65536.0 / abs).round() as u32;
-            assert_eq!(q16, predicted, "InvDmixTbl[{j}]");
-        }
-    }
-
-    #[test]
-    fn tables_are_strictly_monotone() {
-        for i in 1..DMIX_TABLE_LEN {
-            assert!(DMIX_TABLE[i] > DMIX_TABLE[i - 1], "DmixTable[{i}]");
-        }
-        for j in 1..INV_DMIX_TABLE_LEN {
-            assert!(INV_DMIX_TABLE[j] < INV_DMIX_TABLE[j - 1], "InvDmixTbl[{j}]");
-        }
-    }
-
-    #[test]
-    fn forward_and_inverse_columns_agree() {
-        // DmixTable (Q15) x InvDmixTbl (Q16) ~= 2^31 wherever both
-        // columns are printed. Both are independently rounded from
-        // the real-valued column, so the worst relative slack is half
-        // a quantization step of each integer column.
-        for j in 0..INV_DMIX_TABLE_LEN {
-            let dmix = u64::from(DMIX_TABLE[j + INV_DMIX_INDEX_OFFSET]);
-            let inv = u64::from(INV_DMIX_TABLE[j]);
-            let product = dmix * inv;
-            let rel = (product as f64 - 2f64.powi(31)).abs() / 2f64.powi(31);
-            let bound = 0.5 / dmix as f64 + 0.5 / inv as f64 + 1e-9;
-            assert!(
-                rel < bound,
-                "row {j}: product {product} rel err {rel} bound {bound}"
-            );
-        }
-    }
-
-    #[test]
-    fn dmix_scale_bounds() {
-        assert_eq!(dmix_scale(DMIX_TABLE_UNITY_INDEX), Some(1.0));
-        assert_eq!(dmix_scale(241), None);
-        let quietest = dmix_scale(0).unwrap();
-        assert!((quietest - 33.0 / 32768.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn inv_dmix_scale_bounds() {
-        assert_eq!(inv_dmix_scale(240), Some(1.0));
-        assert_eq!(inv_dmix_scale(40), Some(100.0)); // inverts -40 dB
-        assert_eq!(inv_dmix_scale(39), None); // spec prints N/A
-        assert_eq!(inv_dmix_scale(241), None);
     }
 
     #[test]

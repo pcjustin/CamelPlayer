@@ -18,14 +18,14 @@
 //!   identifier — the **non-perfect reconstruction** set, selected by
 //!   the `FILTS == 0` branch.
 //!
-//! [`crate::FilterBankSelection::coefficients`] resolves the typed
+//! [`crate::filter_bank::FilterBankSelection::coefficients`] resolves the typed
 //! round-263 selector to the matching table.
 //!
 //! The same §D.8 table also carries two LFE interpolation FIR columns
 //! ("64 x Interpolation" / "128 x Interpolation"); those drive the
 //! LFE decimation/interpolation path, not the 32-band synthesis QMF,
 //! and live in a separate module ([`crate::lfe_fir_coeff`], selected
-//! by [`crate::LfeInterpolationSelection`]).
+//! by [`crate::lfe_interp::LfeInterpolationSelection`]).
 //!
 //! Both tables are exactly antisymmetric in their printed digits
 //! (`coeff[i] == -coeff[511 - i]` for every `i`); the test suite
@@ -35,7 +35,7 @@
 
 /// Number of taps in each §D.8 32-band interpolation FIR set, fixed
 /// by the §C.2.5 FIR step's `for (j=0; j<512; j+=64)` bound and equal
-/// to [`crate::X_HISTORY_LEN`] (the `raX[]` register the taps are
+/// to [`crate::qmf_assemble::X_HISTORY_LEN`] (the `raX[]` register the taps are
 /// convolved against).
 pub const FIR_COEFF_LEN: usize = 512;
 

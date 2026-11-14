@@ -7,7 +7,7 @@
 //!   (SHA-256 `65ee69cd518229b5e0936844db794e49dec2e993af39440fef36658e0dfa30d9`),
 //!   the §D.10.1 `ADPCMCoeffVQ` book: 4096 vectors × 4 signed Q13
 //!   integers. Actual prediction coefficient = entry ÷ 2¹³
-//!   ([`crate::adpcm_vq_coeff`]); the spec's printed anchor is entry
+//!   ([`crate::d10_vq::adpcm_vq_coeff`]); the spec's printed anchor is entry
 //!   `9928` → `1.2119140625`, which is row 0 element 0 here.
 //! * [`HFREQ_VQ_TABLE`] — `docs/audio/dts/tables/dts-d10-2-hfreq-vq.csv`
 //!   (SHA-256 `3d5d409a975f57720fa67760c2ec96cc1d00d12b9aa1c7de3e5b48a982acede6`),
@@ -15,7 +15,7 @@
 //!   elements, already unpacked from the 16-bit two-element wire
 //!   entries into vector-element order (element `2k` is entry `k`'s
 //!   low byte). Actual subband sample = element ÷ 2⁴
-//!   ([`crate::HFREQ_VQ_ELEMENT_DIVISOR`]).
+//!   ([`crate::d10_vq::HFREQ_VQ_ELEMENT_DIVISOR`]).
 //!
 //! The spec defines both books normatively but omits their values
 //! ("Due to its extensive size, this table is not included here",

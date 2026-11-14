@@ -51,7 +51,7 @@
 //! field — the parser reads it there (the spec's own "jump forward"
 //! locator), which also skips the reserved field of "unspecified
 //! duration". The check word uses the Annex B algorithm (CRC-CCITT,
-//! polynomial `0x1021`, init `0xFFFF` — [`crate::dts_crc16`],
+//! polynomial `0x1021`, init `0xFFFF` — [`crate::crc16::dts_crc16`],
 //! `docs/audio/dts/dts-crc16.md`) over the `nRev2AUXDataByteSize - 2`
 //! bytes starting at the size field; the parser recomputes it and
 //! reports the outcome in [`Rev2AuxChunk::crc_valid`].
@@ -70,7 +70,7 @@
 //! dts_dynrng_to_db()", recovered as a closed form in
 //! `docs/audio/dts/dts-drc-dynrng.md`: the byte is 8-bit signed Q2
 //! two's-complement, `dB = (int8)code × 0.25`
-//! ([`crate::dts_dynrng_to_db`]). §5.7.2.2 states these values
+//! ([`crate::drc_range::dts_dynrng_to_db`]). §5.7.2.2 states these values
 //! "should be used instead of any dynamic range control coefficients
 //! found in the legacy core stream (indicated by flag DYNF)";
 //! [`Rev2Drc::gains_db`] / [`Rev2Drc::multipliers`] resolve the codes
@@ -78,7 +78,10 @@
 
 use crate::bitreader::BitReader;
 use crate::header::DtsFrameHeader;
-use crate::{Error, Result, dmix_scale, dts_dynrng_to_db, dts_dynrng_to_linear};
+use crate::{
+    Error, Result, dmix_coeff::dmix_scale, drc_range::dts_dynrng_to_db,
+    drc_range::dts_dynrng_to_linear,
+};
 
 /// The §5.7.2 Rev2 auxiliary-data sync word (`nSYNCRev2AUX`),
 /// DWORD-aligned from the beginning of the core frame.
@@ -106,7 +109,7 @@ pub struct Rev2Drc {
 impl Rev2Drc {
     /// The per-subsubframe DRC gains in dB, resolving each 8-bit code
     /// through the §5.7.2 `dts_dynrng_to_db()` function
-    /// ([`crate::dts_dynrng_to_db`]: the code is 8-bit signed Q2
+    /// ([`crate::drc_range::dts_dynrng_to_db`]: the code is 8-bit signed Q2
     /// two's-complement, `dB = (int8)code × 0.25`, per
     /// `docs/audio/dts/dts-drc-dynrng.md`).
     #[must_use]
@@ -115,7 +118,7 @@ impl Rev2Drc {
     }
 
     /// The per-subsubframe linear DRC multipliers
-    /// (`10^(gains_db/20)`, [`crate::dts_dynrng_to_linear`]) — the
+    /// (`10^(gains_db/20)`, [`crate::drc_range::dts_dynrng_to_linear`]) — the
     /// gain applied to the decoded samples of each subsubframe.
     /// §5.7.2.2: "the DRC values in the Rev2AUX data chunk should be
     /// used instead of any dynamic range control coefficients found
@@ -155,7 +158,7 @@ pub struct Rev2AuxChunk {
     pub dialnorm: Option<u8>,
     /// The raw 16-bit `nRev2AUXCRC16` word, read at byte offset
     /// `data_byte_size - 2` from the size field (Annex B CRC-CCITT,
-    /// see [`crate::dts_crc16`]).
+    /// see [`crate::crc16::dts_crc16`]).
     pub crc16: u16,
     /// Whether [`Self::crc16`] matches the Annex B CRC-16 recomputed
     /// over the chunk's protected region — the
@@ -335,7 +338,7 @@ pub fn parse_rev2_aux_at(
     // The size counts the protected span + CRC: the Annex B CRC-16
     // covers the `data_byte_size - 2` bytes starting at the size
     // field (right after the 4 sync bytes) up to the CRC exclusive.
-    let crc_valid = crate::dts_crc16(&frame[byte_offset + 4..crc_byte_offset]) == crc16;
+    let crc_valid = crate::crc16::dts_crc16(&frame[byte_offset + 4..crc_byte_offset]) == crc16;
 
     Ok(Rev2AuxChunk {
         offset: byte_offset,
@@ -366,7 +369,6 @@ pub fn parse_rev2_aux(frame: &[u8], header: &DtsFrameHeader) -> Result<Option<Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DMIX_TABLE_UNITY_INDEX;
     use crate::test_util::{BitWriter, synth_header, synth_header_with_blocks};
 
     /// Build a frame: 32 bytes of non-sync filler, then the chunk
@@ -400,7 +402,7 @@ mod tests {
     /// chunk).
     fn patch_crc(chunk: &mut [u8], size: u8) {
         let crc_start = 4 + usize::from(size) - 2;
-        let crc = crate::dts_crc16(&chunk[4..crc_start]);
+        let crc = crate::crc16::dts_crc16(&chunk[4..crc_start]);
         chunk[crc_start..crc_start + 2].copy_from_slice(&crc.to_be_bytes());
     }
 
@@ -445,30 +447,12 @@ mod tests {
         let frame = frame_with_chunk(&bytes);
         let parsed = parse_rev2_aux(&frame, &header).unwrap().unwrap();
         assert!(parsed.crc_valid);
-        assert_eq!(parsed.crc16, crate::dts_crc16(&bytes[4..4 + 8 - 2]));
+        assert_eq!(parsed.crc16, crate::crc16::dts_crc16(&bytes[4..4 + 8 - 2]));
 
         let mut corrupt = frame.clone();
         corrupt[32 + 6] ^= 0x01; // inside the covered span
         let parsed = parse_rev2_aux_at(&corrupt, 32, &header).unwrap();
         assert!(!parsed.crc_valid);
-    }
-
-    #[test]
-    fn parses_es_downmix_scale() {
-        let bytes = chunk(
-            4,
-            |w| {
-                w.push_bits(1, 1); // bESMetaDataFlag
-                w.push_bits(DMIX_TABLE_UNITY_INDEX as u64, 8);
-            },
-            0x0102,
-        );
-        let frame = frame_with_chunk(&bytes);
-        let chunk = parse_rev2_aux(&frame, &synth_header(2, 0))
-            .unwrap()
-            .unwrap();
-        assert_eq!(chunk.es_downmix_scale_index, Some(240));
-        assert_eq!(chunk.es_downmix_scale(), Some(1.0));
     }
 
     #[test]

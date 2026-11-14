@@ -18,11 +18,11 @@
 //!   identifier — the **128x interpolation** set, selected when
 //!   `nDecimationSelect == 1` (decimation factor 128).
 //!
-//! [`crate::LfeInterpolationSelection::coefficients`] resolves the
+//! [`crate::lfe_interp::LfeInterpolationSelection::coefficients`] resolves the
 //! typed selector to the matching table.
 //!
 //! Unlike the two 32-band synthesis-QMF columns of the same §D.8
-//! table ([`crate::RA_COEFF_LOSSLESS`] / [`crate::RA_COEFF_LOSSY`],
+//! table ([`crate::fir_coeff::RA_COEFF_LOSSLESS`] / [`crate::fir_coeff::RA_COEFF_LOSSY`],
 //! which are *anti-symmetric*, `coeff[i] == -coeff[511 - i]`), the
 //! two LFE columns are **symmetric** about the centre
 //! (`coeff[i] == coeff[511 - i]` for every `i`) — the expected
@@ -34,16 +34,16 @@
 //! # Scope: tables only
 //!
 //! This module lands the §D.8 LFE coefficient *data* and the typed
-//! [`crate::LfeInterpolationSelection`] selector. The §C.2.6
+//! [`crate::lfe_interp::LfeInterpolationSelection`] selector. The §C.2.6
 //! `InterpolationFIR()` driver's per-sample polyphase convolution loop
 //! body consumes these tables and is implemented in
-//! [`crate::LfeInterpolator`] (`src/lfe_synth.rs`), transcribed from
+//! [`crate::lfe_synth::LfeInterpolator`] (`src/lfe_synth.rs`), transcribed from
 //! `docs/audio/dts/dts-lfe-interpolation-and-audio-walker.md` §1.
 
 /// Number of taps in each §D.8 LFE interpolation FIR set, fixed by
 /// the §C.2.6 `InterpolationFIR()` driver's `NumFIRCoef = 512`
 /// (`docs/audio/dts/dts-qmf-driver.md` §3). Matches the 512-tap
-/// length of the two 32-band columns ([`crate::FIR_COEFF_LEN`]).
+/// length of the two 32-band columns ([`crate::fir_coeff::FIR_COEFF_LEN`]).
 pub const LFE_FIR_COEFF_LEN: usize = 512;
 
 /// §D.8 "64 x Interpolation" 512-tap LFE interpolation FIR — the
@@ -428,11 +428,13 @@ mod tests {
         // alias either 32-band column (which are anti-symmetric, so a
         // distinctness check also guards against a column mix-up).
         assert!(
-            (0..LFE_FIR_COEFF_LEN).any(|i| RA_COEFF_LFE64[i] != crate::RA_COEFF_LOSSY[i]),
+            (0..LFE_FIR_COEFF_LEN)
+                .any(|i| RA_COEFF_LFE64[i] != crate::fir_coeff::RA_COEFF_LOSSY[i]),
             "64x LFE table aliases the non-perfect 32-band column"
         );
         assert!(
-            (0..LFE_FIR_COEFF_LEN).any(|i| RA_COEFF_LFE128[i] != crate::RA_COEFF_LOSSLESS[i]),
+            (0..LFE_FIR_COEFF_LEN)
+                .any(|i| RA_COEFF_LFE128[i] != crate::fir_coeff::RA_COEFF_LOSSLESS[i]),
             "128x LFE table aliases the perfect 32-band column"
         );
     }

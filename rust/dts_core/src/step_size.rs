@@ -48,7 +48,7 @@
 //! step-size accessors that divide out the §D.2 `× 2²²` scaling, the
 //! §5.5 transient-aware `rScale` composition, and the eight-sample
 //! `rScale · AUDIO[m]` scaling. The `arADJ[][]` adjustment multiplier
-//! (the round-241 [`crate::ScaleFactorAdjustment`]) is a caller-passed
+//! (the round-241 [`crate::side_info::ScaleFactorAdjustment`]) is a caller-passed
 //! factor — the §5.5 pseudocode comments it is "assumed 1 unless
 //! changed by bit stream when SEL indicates Huffman code", so callers
 //! that did not read an `ADJ` field pass `1.0`.
@@ -56,18 +56,16 @@
 //! # Scope and follow-ups
 //!
 //! The §C.2.1 block-code / Huffman decode that *produces* `AUDIO[m]`
-//! is already landed ([`crate::decode_block_code`] and the
+//! is already landed ([`crate::block_code::decode_block_code`] and the
 //! [`crate::side_info`] Huffman decoders); the §D.2 step-size table
 //! selection by `RATE` is exposed here as
 //! [`StepSizeTable::for_rate`]. The §C.2.2 inverse-ADPCM step that the
 //! §5.5 pseudocode runs *after* this scaling (when `PMODE != 0`) is
-//! the separate round-228 [`crate::inverse_adpcm_decode_f64`]; this
+//! the separate round-228 [`crate::inverse_adpcm::inverse_adpcm_decode_f64`]; this
 //! module stops at the `rScale · AUDIO[m]` product, leaving the
 //! ADPCM pass and the DSYNC trailer to the per-subsubframe driver
 //! that composes them.
 
-use crate::side_info::ScaleFactorAdjustment;
-use crate::subframe::ChannelSideInfo;
 use crate::{Error, Result};
 
 /// Number of `ABITS` bit-allocation indices the §D.2 step-size tables
@@ -265,108 +263,11 @@ pub fn transient_scale_index(tmode: u8, n_ssc: usize, subsubframe: usize) -> usi
     if subsubframe < n_tmode { 0 } else { 1 }
 }
 
-/// Compose the §5.5 per-subband real scale `rScale` for one
-/// subsubframe:
-///
-/// ```text
-/// rScale  = rStepSize * SCALES[ch][n][transient-selected];
-/// rScale *= arADJ[ch][SEL[ch][nABITS-1]];   // adjustment multiplier
-/// ```
-///
-/// * `table` is the §5.5 `RATE`-selected step-size table.
-/// * `abits` is `ABITS[ch][n]`; the matching §D.2 step size is looked
-///   up internally.
-/// * `scale` is the §D.1.1 / §D.1.2 RMS square-root value already
-///   resolved for `SCALES[ch][n][transient-selected]` — the §5.5
-///   pseudocode's `(real)SCALES[ch][n][…]` cast (passed as the raw
-///   integer the RMS table returns).
-/// * `adj` is the round-241 [`ScaleFactorAdjustment`] multiplier; pass
-///   [`ScaleFactorAdjustment::Adj0`] when no `ADJ` field was read
-///   (the §5.5 default of `arADJ == 1`).
-///
-/// Returns [`Error::InvalidStepSize`] when `abits` is an invalid §D.2
-/// index.
-pub fn dequant_scale(
-    table: StepSizeTable,
-    abits: u8,
-    scale: u32,
-    adj: ScaleFactorAdjustment,
-) -> Result<f64> {
-    let step = table.step_size(abits)?;
-    Ok(step * f64::from(scale) * adj.multiplier_f64())
-}
-
-/// Apply the §5.5 `aSample[m] = rScale · AUDIO[m]` scaling to one
-/// subsubframe's eight quantization indices, writing the resulting
-/// subband samples into `out`.
-///
-/// `audio` carries the eight §C.2.1 / Huffman-decoded `AUDIO[m]`
-/// quantization indices for the current `(ch, n, subsubframe)`; `out`
-/// receives the eight scaled subband samples. Both slices must hold
-/// exactly [`SAMPLES_PER_SUBSUBFRAME`] entries, matching the §5.5
-/// `for (m=0; m<8; m++)` loop.
-///
-/// Returns [`Error::SampleCountMismatch`] when either slice is not
-/// exactly eight samples long.
-pub fn scale_subsubframe_samples(audio: &[i32], r_scale: f64, out: &mut [f64]) -> Result<()> {
-    if audio.len() != SAMPLES_PER_SUBSUBFRAME || out.len() != SAMPLES_PER_SUBSUBFRAME {
-        return Err(Error::SampleCountMismatch {
-            expected: SAMPLES_PER_SUBSUBFRAME,
-            found: audio.len().max(out.len()),
-        });
-    }
-    for (dst, &index) in out.iter_mut().zip(audio.iter()) {
-        *dst = r_scale * f64::from(index);
-    }
-    Ok(())
-}
-
 /// Number of subband samples in one subsubframe (one subband analysis
 /// subwindow): the §5.5 / §C.1 fixed `8` samples per subsubframe ("A
 /// subsubframe consists of eight subband samples … for each
 /// subband", PDF p.181).
 pub const SAMPLES_PER_SUBSUBFRAME: usize = 8;
-
-/// End-to-end §5.5 dequantization of one `(ch, n, subsubframe)`
-/// subsubframe: resolve the transient-aware scale index, look up the
-/// matching `SCALES[ch][n][…]` factor from the side-info, compose the
-/// §5.5 `rScale`, and write the eight `rScale · AUDIO[m]` subband
-/// samples into `out`.
-///
-/// This composes [`transient_scale_index`], [`dequant_scale`], and
-/// [`scale_subsubframe_samples`] against the round-281
-/// [`ChannelSideInfo`] plane: `abits = side.abits[n]`,
-/// `tmode = side.tmode[n]`, and the scale factor is
-/// `side.scales[n][transient-selected]`.
-///
-/// * `side` is the decoded §5.4.1 side information for channel `ch`.
-/// * `n` is the subband index (`0..n_vqsub`; high-frequency VQ
-///   subbands take the separate §5.5 VQ path, not this one).
-/// * `n_ssc` is the subframe's subsubframe count (`SSC + 1`).
-/// * `subsubframe` is the current subsubframe index (`0..n_ssc`).
-/// * `table` is the §5.5 `RATE`-selected step-size table.
-/// * `adj` is the §5.5 `arADJ` multiplier (unity by default).
-/// * `audio` is the eight decoded `AUDIO[m]` quantization indices.
-/// * `out` receives the eight scaled subband samples.
-///
-/// Returns [`Error::InvalidStepSize`] for an invalid `ABITS`, or
-/// [`Error::SampleCountMismatch`] when a slice is not eight samples.
-pub fn dequant_subsubframe(
-    side: &ChannelSideInfo,
-    n: usize,
-    n_ssc: usize,
-    subsubframe: usize,
-    table: StepSizeTable,
-    adj: ScaleFactorAdjustment,
-    audio: &[i32],
-    out: &mut [f64],
-) -> Result<()> {
-    let abits = side.abits[n];
-    let scale_idx = transient_scale_index(side.tmode[n], n_ssc, subsubframe);
-    let scale = side.scales[n][scale_idx];
-    let r_scale = dequant_scale(table, abits, scale, adj)?;
-    scale_subsubframe_samples(audio, r_scale, out)
-}
 
 #[cfg(test)]
 mod tests {
@@ -456,122 +357,5 @@ mod tests {
         assert_eq!(transient_scale_index(2, 4, 1), 0);
         assert_eq!(transient_scale_index(2, 4, 2), 1);
         assert_eq!(transient_scale_index(2, 4, 3), 1);
-    }
-
-    #[test]
-    fn dequant_scale_composes_step_scale_adj() {
-        // Lossy ABITS 2 step = 1.0; SCALES = 200; ADJ unity ->
-        // rScale = 1.0 * 200 * 1.0 = 200.
-        let r = dequant_scale(StepSizeTable::Lossy, 2, 200, ScaleFactorAdjustment::Adj0).unwrap();
-        assert!((r - 200.0).abs() < 1e-9);
-        // ABITS 5 step = 0.5; SCALES = 10 -> rScale = 5.0.
-        let r = dequant_scale(StepSizeTable::Lossy, 5, 10, ScaleFactorAdjustment::Adj0).unwrap();
-        assert!((r - 5.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn scale_samples_applies_product() {
-        let audio = [1, -1, 2, -2, 4, -4, 8, -8];
-        let mut out = [0.0f64; SAMPLES_PER_SUBSUBFRAME];
-        scale_subsubframe_samples(&audio, 3.0, &mut out).unwrap();
-        let expected = [3.0, -3.0, 6.0, -6.0, 12.0, -12.0, 24.0, -24.0];
-        for (got, want) in out.iter().zip(expected.iter()) {
-            assert!((got - want).abs() < 1e-9);
-        }
-    }
-
-    #[test]
-    fn scale_samples_zero_scale_zeros_all() {
-        // ABITS 0 produces a zero step size -> zero rScale -> all
-        // samples zero regardless of AUDIO[m].
-        let audio = [100, -100, 50, -50, 25, -25, 12, -12];
-        let mut out = [9.9f64; SAMPLES_PER_SUBSUBFRAME];
-        let r = dequant_scale(StepSizeTable::Lossy, 0, 500, ScaleFactorAdjustment::Adj0).unwrap();
-        assert_eq!(r, 0.0);
-        scale_subsubframe_samples(&audio, r, &mut out).unwrap();
-        assert!(out.iter().all(|&v| v == 0.0));
-    }
-
-    #[test]
-    fn scale_samples_length_mismatch_errors() {
-        let audio = [1, 2, 3];
-        let mut out = [0.0f64; SAMPLES_PER_SUBSUBFRAME];
-        assert!(matches!(
-            scale_subsubframe_samples(&audio, 1.0, &mut out),
-            Err(Error::SampleCountMismatch { .. })
-        ));
-        let audio8 = [0i32; SAMPLES_PER_SUBSUBFRAME];
-        let mut out_short = [0.0f64; 4];
-        assert!(matches!(
-            scale_subsubframe_samples(&audio8, 1.0, &mut out_short),
-            Err(Error::SampleCountMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn dequant_subsubframe_end_to_end() {
-        // Build a side-info plane with one active subband.
-        let mut side = ChannelSideInfo::cleared();
-        side.abits[0] = 2; // lossy step = 1.0
-        side.tmode[0] = 0; // no transient -> factor 0
-        side.scales[0][0] = 10;
-        side.scales[0][1] = 999; // must be ignored (no transient)
-
-        let audio = [1, 2, 3, 4, 5, 6, 7, 8];
-        let mut out = [0.0f64; SAMPLES_PER_SUBSUBFRAME];
-        dequant_subsubframe(
-            &side,
-            0,
-            4,
-            0,
-            StepSizeTable::Lossy,
-            ScaleFactorAdjustment::Adj0,
-            &audio,
-            &mut out,
-        )
-        .unwrap();
-        // rScale = 1.0 * 10 * 1.0 = 10 -> samples = 10*AUDIO[m].
-        for (i, &v) in out.iter().enumerate() {
-            assert!((v - 10.0 * (i as f64 + 1.0)).abs() < 1e-9);
-        }
-    }
-
-    #[test]
-    fn dequant_subsubframe_transient_picks_second_factor() {
-        let mut side = ChannelSideInfo::cleared();
-        side.abits[0] = 5; // lossy step = 0.5
-        side.tmode[0] = 2; // transient -> nTmode = 2
-        side.scales[0][0] = 4; // pre-transient factor
-        side.scales[0][1] = 8; // post-transient factor
-
-        let audio = [2i32; SAMPLES_PER_SUBSUBFRAME];
-        // Pre-transient subsubframe 0 -> factor 0 (4): rScale = 0.5*4 = 2.
-        let mut out = [0.0f64; SAMPLES_PER_SUBSUBFRAME];
-        dequant_subsubframe(
-            &side,
-            0,
-            4,
-            0,
-            StepSizeTable::Lossy,
-            ScaleFactorAdjustment::Adj0,
-            &audio,
-            &mut out,
-        )
-        .unwrap();
-        assert!(out.iter().all(|&v| (v - 4.0).abs() < 1e-9)); // 2 * 2.0
-
-        // Post-transient subsubframe 3 -> factor 1 (8): rScale = 0.5*8 = 4.
-        dequant_subsubframe(
-            &side,
-            0,
-            4,
-            3,
-            StepSizeTable::Lossy,
-            ScaleFactorAdjustment::Adj0,
-            &audio,
-            &mut out,
-        )
-        .unwrap();
-        assert!(out.iter().all(|&v| (v - 8.0).abs() < 1e-9)); // 2 * 4.0
     }
 }

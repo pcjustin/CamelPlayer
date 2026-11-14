@@ -3,7 +3,7 @@
 //! windows, and a minimal parseable raw-BE frame-header builder.
 
 use crate::header::DtsFrameHeader;
-use crate::parse_frame_header;
+use crate::header::parse_frame_header;
 
 /// Minimal MSB-first bit writer for constructing synthetic bitstream
 /// chunks in tests.

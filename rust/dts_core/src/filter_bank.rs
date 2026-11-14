@@ -21,19 +21,19 @@
 //! the *perfect reconstruction* 512-tap interpolation FIR) are
 //! defined in §D.8 "32-Band Interpolation and LFE Interpolation FIR"
 //! (staged PDF p.238-246) and transcribed at the crate
-//! root as [`crate::RA_COEFF_LOSSY`] / [`crate::RA_COEFF_LOSSLESS`].
+//! root as [`crate::fir_coeff::RA_COEFF_LOSSY`] / [`crate::fir_coeff::RA_COEFF_LOSSLESS`].
 //!
 //! This module exposes the §C.2.5 selection step as a typed
 //! [`FilterBankSelection`] enum plus a [`FilterBankSelection::from_filts`]
 //! resolver that mirrors the spec's `if (FILTS==0) … else …` branch,
 //! and [`FilterBankSelection::coefficients`] resolves the selection
 //! to the matching §D.8 512-tap table for the §C.2.5 FIR step
-//! ([`crate::fir_step`]).
+//! ([`crate::qmf_assemble::fir_step`]).
 //!
 //! ## Relationship to the frame-header `multirate_inter` bit
 //!
 //! The DTS Core frame header carries a one-bit `MULTIRATE_INTER`
-//! field, surfaced as [`crate::DtsFrameHeader::multirate_inter`].
+//! field, surfaced as [`crate::header::DtsFrameHeader::multirate_inter`].
 //! Per ETSI TS 102 114 §5.3 (cited in `wiki/DTS.wiki` line 87) the
 //! `MULTIRATE_INTER` bit selects between the same two filter modes
 //! the §C.2.5 `FILTS` parameter selects, but the precise polarity
@@ -57,8 +57,8 @@
 ///
 /// Each variant names exactly one of the two §D.8 "32-Band
 /// Interpolation and LFE Interpolation FIR" coefficient tables
-/// (PDF p.238-246), transcribed as [`crate::RA_COEFF_LOSSY`] /
-/// [`crate::RA_COEFF_LOSSLESS`] and reachable through
+/// (PDF p.238-246), transcribed as [`crate::fir_coeff::RA_COEFF_LOSSY`] /
+/// [`crate::fir_coeff::RA_COEFF_LOSSLESS`] and reachable through
 /// [`Self::coefficients`]. The variant names
 /// mirror the spec pseudocode's identifiers (`raCoeffLossy` for
 /// the non-perfect set, `raCoeffLossLess` for the perfect set)
@@ -136,12 +136,12 @@ impl FilterBankSelection {
     /// The §D.8 512-tap coefficient table this selection picks —
     /// the spec's `prCoeff` after the §C.2.5
     /// `if (FILTS==0) prCoeff = raCoeffLossy; else prCoeff = raCoeffLossLess;`
-    /// assignment, ready for the FIR step ([`crate::fir_step`]).
+    /// assignment, ready for the FIR step ([`crate::qmf_assemble::fir_step`]).
     ///
-    /// Returns [`crate::RA_COEFF_LOSSY`] (the §D.8 "Non-Perfect
+    /// Returns [`crate::fir_coeff::RA_COEFF_LOSSY`] (the §D.8 "Non-Perfect
     /// Reconstruction" column) for
     /// [`FilterBankSelection::NonPerfectReconstruction`] and
-    /// [`crate::RA_COEFF_LOSSLESS`] (the "Perfect Reconstruction"
+    /// [`crate::fir_coeff::RA_COEFF_LOSSLESS`] (the "Perfect Reconstruction"
     /// column) for [`FilterBankSelection::PerfectReconstruction`],
     /// both transcribed verbatim from the staged PDF p.238-246.
     #[must_use]

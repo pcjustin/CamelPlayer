@@ -2,7 +2,7 @@
 //! (ETSI TS 102 114 V1.3.1, Table 5-21, staged PDF p.24-28).
 //!
 //! Round 340 (2026-06-19) lands the Table 5-21 header decoder that the
-//! round-281 [`crate::decode_primary_side_info_at`] side-info walker
+//! round-281 [`crate::subframe::decode_primary_side_info_at`] side-info walker
 //! and the §5.5 audio-data array walk both need: it produces the
 //! per-channel loop bounds and codebook selectors (`nSUBFS`, `nPCHS`,
 //! `nSUBS[ch]`, `nVQSUB[ch]`, `JOINX[ch]`, `THUFF`/`SHUFF`/`BHUFF`),
@@ -42,14 +42,14 @@
 //!
 //! The `AHCRC` Header CRC tail (transmitted only when `CPF == 1`) is
 //! skipped: the algorithm is the Annex B CRC-CCITT
-//! ([`crate::dts_crc16`], `docs/audio/dts/dts-crc16.md`), but the
+//! ([`crate::crc16::dts_crc16`], `docs/audio/dts/dts-crc16.md`), but the
 //! spec text states "the CRC value test shall not be applied" for the
 //! core check words (`HCRC` / `AHCRC` / `SICRC` / `OCRC`) — they are
 //! informational placeholders. The 16-bit field is consumed (so the cursor lands
 //! at the first §5.4 subframe bit) but not verified. `CPF` is the
 //! §5.3.1 frame-header "Predictor History Flag Switch" companion — it
 //! is passed in by the caller (the round-202 header carries it as
-//! [`crate::DtsFrameHeader::predictor_history`]).
+//! [`crate::header::DtsFrameHeader::predictor_history`]).
 
 use crate::bitreader::BitReader;
 use crate::side_info::{AbitsCodebook, ScaleFactorAdjustment, ScalesCodebook, TmodeCodebook};
@@ -80,7 +80,7 @@ pub struct AudioCodingHeader {
     /// `0` = disabled, `>0` = source channel `JOINX[ch]`.
     pub joinx: Vec<u8>,
     /// Per-channel side-info loop bounds + Huffman codebook selectors,
-    /// ready to hand to [`crate::decode_primary_side_info_at`].
+    /// ready to hand to [`crate::subframe::decode_primary_side_info_at`].
     pub channel_params: Vec<ChannelSideInfoParams>,
     /// `SEL[ch][n]` — the quantization-index codebook selector for
     /// `ABITS` index `n` (`0..26` ↔ `ABITS 1..26`), per channel. Slots
@@ -135,8 +135,8 @@ impl AudioCodingHeader {
 
     /// The per-channel `nSUBS[ch]` loop bound (number of active subbands)
     /// collected from [`Self::channel_params`], in channel order. This
-    /// is the slice the §5.5 [`crate::decode_audio_data_subframe_at`]
-    /// walk and the §C.2.5 [`crate::MultiChannelQmf`] driver both take.
+    /// is the slice the §5.5 [`crate::audio_array::decode_audio_data_subframe_at`]
+    /// walk and the §C.2.5 [`crate::qmf_multichannel::MultiChannelQmf`] driver both take.
     #[must_use]
     pub fn n_subs(&self) -> Vec<usize> {
         self.channel_params.iter().map(|p| p.n_subs).collect()
@@ -150,30 +150,6 @@ impl AudioCodingHeader {
     #[must_use]
     pub fn n_vqsub(&self) -> Vec<usize> {
         self.channel_params.iter().map(|p| p.n_vqsub).collect()
-    }
-
-    /// Test-only constructor for a single-channel [`AudioCodingHeader`]
-    /// with a uniform `sel` across the whole SEL plane, used by the
-    /// `subframe_pcm` bridge tests that need a header without parsing a
-    /// full §5.3.2 bit stream. `n_subs` / `n_vqsub` set the channel's
-    /// loop bounds; `joinx` defaults to 0 (no joint coding).
-    #[cfg(test)]
-    pub(crate) fn single_channel_for_test(n_subs: usize, n_vqsub: usize, sel: u8) -> Self {
-        use crate::subframe::ChannelSideInfoParams;
-        AudioCodingHeader {
-            n_subframes: 1,
-            n_pchs: 1,
-            joinx: vec![0],
-            channel_params: vec![ChannelSideInfoParams {
-                n_subs,
-                n_vqsub,
-                abits_codebook: AbitsCodebook::from_bhuff(0).unwrap(),
-                tmode_codebook: TmodeCodebook::from_thuff(0),
-                scales_codebook: ScalesCodebook::from_shuff(0).unwrap(),
-            }],
-            sel: vec![[sel; SEL_PLANE_LEN]],
-            adj: vec![[ScaleFactorAdjustment::Adj0; SEL_PLANE_LEN]],
-        }
     }
 
     /// Test-only setter for `joinx[ch]`, used by the `subframe_pcm`
@@ -243,7 +219,7 @@ fn adj_transmitted(n: usize, sel: u8) -> bool {
 /// `cpf` is the §5.3.1 frame-header `CPF` (CRC Present Flag, Table 5-1)
 /// bit — when set, a 16-bit `AHCRC` Header CRC trailer is consumed (but
 /// not verified; see the module docs). Pass
-/// [`crate::DtsFrameHeader::crc_present`], **not** `predictor_history`:
+/// [`crate::header::DtsFrameHeader::crc_present`], **not** `predictor_history`:
 /// `CPF` is the same flag that gates the §5.3.1 `HCRC`, the §5.4.1
 /// `SICRC`, and this `AHCRC`.
 ///
@@ -255,7 +231,7 @@ fn adj_transmitted(n: usize, sel: u8) -> bool {
 ///
 /// * [`Error::InvalidSideInfo`] with field `"nPCHS"` when
 ///   `nPCHS > 5`, `"nSUBS"` when a channel's `nSUBS` exceeds
-///   [`NUM_SUBBAND`](crate::NUM_SUBBAND), or `"VQSUB"` when
+///   [`NUM_SUBBAND`](crate::cos_mod::NUM_SUBBAND), or `"VQSUB"` when
 ///   `nVQSUB > nSUBS`;
 /// * [`Error::InvalidSideInfo`] with field `"BHUFF"` / `"SHUFF"` when a
 ///   reserved selector value `7` is read;

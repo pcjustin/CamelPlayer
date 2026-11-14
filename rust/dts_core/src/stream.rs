@@ -8,9 +8,11 @@
 use std::borrow::Cow;
 
 use crate::{
-    AmodeArrangement, CoreFrameDecodeError, CoreStreamDecoder, DtsFrameHeader, Error,
-    FourteenBitByteOrder, SyncWordEncoding, decode_audio_coding_header_at, find_next_sync,
-    parse_frame_header, parse_frame_header_14bit, unpack_14bit_to_16bit,
+    Error, audio_header::decode_audio_coding_header_at, header::AmodeArrangement,
+    header::DtsFrameHeader, header::SyncWordEncoding, header::parse_frame_header,
+    header::parse_frame_header_14bit, iter::find_next_sync, subframe_pcm::CoreFrameDecodeError,
+    subframe_pcm::CoreStreamDecoder, unpack14::FourteenBitByteOrder,
+    unpack14::unpack_14bit_to_16bit,
 };
 
 const FULL_SCALE: f32 = 2_147_483_648.0;

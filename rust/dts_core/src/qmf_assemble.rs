@@ -2,7 +2,7 @@
 //! Core 32-band synthesis QMF.
 //!
 //! These two FIR-independent primitives bracket round 255's
-//! [`crate::cos_mod_stage`] inside the §C.2.5 `QMFInterpolation()`
+//! [`crate::cos_mod::cos_mod_stage`] inside the §C.2.5 `QMFInterpolation()`
 //! per-sample loop body, transcribed verbatim in
 //! `docs/audio/dts/dts-core-extracts.md` §2.4 (ETSI TS 102 114
 //! V1.3.1 Annex C §C.2.5, staged PDF p.185).
@@ -47,9 +47,9 @@
 //! per-subband sample arrays, and the synthesis filter's `raX[]`
 //! shift register. Step (c), [`fir_step`], convolves the §D.8
 //! `raCoeffLossy` / `raCoeffLossLess` 512-tap FIR coefficient
-//! tables ([`crate::RA_COEFF_LOSSY`] / [`crate::RA_COEFF_LOSSLESS`],
+//! tables ([`crate::fir_coeff::RA_COEFF_LOSSY`] / [`crate::fir_coeff::RA_COEFF_LOSSLESS`],
 //! selected through
-//! [`crate::FilterBankSelection::coefficients`]) against `raX[]`,
+//! [`crate::filter_bank::FilterBankSelection::coefficients`]) against `raX[]`,
 //! accumulating into the `raZ[]` output accumulator the PCM step
 //! (d) reads.
 //!
@@ -104,7 +104,7 @@ pub const Z_OUTPUT_LEN: usize = 2 * NUM_SUBBAND;
 /// staged pseudocode).
 ///
 /// Builds the per-sample input vector `raXin[0..32]` that
-/// [`crate::cos_mod_stage`] consumes by:
+/// [`crate::cos_mod::cos_mod_stage`] consumes by:
 ///
 /// 1. Copying `subband_samples[i]` into `raXin[i]` for every
 ///    active subband `i ∈ 0..n_subs`, per the spec's
@@ -169,7 +169,7 @@ pub fn assemble_xin(
 /// high end: after the call, `raX[32..512]` holds what `raX[0..480]`
 /// held on entry, and `raX[0..32]` is left untouched. The §C.2.5
 /// driver overwrites `raX[0..32]` with the next per-sample
-/// cosine-modulation output ([`crate::cos_mod_stage`]) before the
+/// cosine-modulation output ([`crate::cos_mod::cos_mod_stage`]) before the
 /// following FIR step reads it.
 ///
 /// The shift runs from `i = 511` down to `i = 32` (inclusive) so
@@ -253,10 +253,10 @@ pub fn shift_z_output(ra_z: &mut [f64; Z_OUTPUT_LEN]) {
 ///
 /// `pr_coeff` is the §D.8 512-tap coefficient set the §C.2.5 `FILTS`
 /// branch selected — pass
-/// [`crate::FilterBankSelection::coefficients`]'s result
-/// ([`crate::RA_COEFF_LOSSY`] for `FILTS == 0`,
-/// [`crate::RA_COEFF_LOSSLESS`] otherwise). `ra_x` is the 512-entry
-/// shift register whose low block [`crate::cos_mod_stage`] just
+/// [`crate::filter_bank::FilterBankSelection::coefficients`]'s result
+/// ([`crate::fir_coeff::RA_COEFF_LOSSY`] for `FILTS == 0`,
+/// [`crate::fir_coeff::RA_COEFF_LOSSLESS`] otherwise). `ra_x` is the 512-entry
+/// shift register whose low block [`crate::cos_mod::cos_mod_stage`] just
 /// refreshed (steps (b)/(e)); `ra_z` is the 64-entry output
 /// accumulator this step **accumulates into** (`+=`, exactly as the
 /// pseudocode writes it — the rotate step [`shift_z_output`] cleared
@@ -340,7 +340,7 @@ pub const PCM_OUTPUT_PER_SAMPLE: usize = NUM_SUBBAND;
 /// The §C.2.5 clause writes the result into the integer `naCh[]`
 /// array without a stated per-width saturation; any clamping to the
 /// transmitted source-PCM resolution
-/// ([`crate::SourcePcmResolution`]) is a separate output-format step
+/// ([`crate::header::SourcePcmResolution`]) is a separate output-format step
 /// the clause does not define here, so this primitive emits the
 /// faithful truncated value.
 ///

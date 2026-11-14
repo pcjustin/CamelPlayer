@@ -6,15 +6,15 @@
 //! Rounds 255–285 landed every FIR-independent per-sample step of the
 //! §C.2.5 loop body as a standalone primitive:
 //!
-//! * [`crate::assemble_xin`] — step (a), build `raXin[0..32]` from one
+//! * [`crate::qmf_assemble::assemble_xin`] — step (a), build `raXin[0..32]` from one
 //!   sample per active subband (inactive subbands zero-filled);
-//! * [`crate::cos_mod_stage`] — step (b), the cosine-modulation
+//! * [`crate::cos_mod::cos_mod_stage`] — step (b), the cosine-modulation
 //!   matrix multiply that refreshes `raX[0..32]`;
-//! * [`crate::fir_step`] — step (c), the 512-tap §D.8 FIR convolution
+//! * [`crate::qmf_assemble::fir_step`] — step (c), the 512-tap §D.8 FIR convolution
 //!   that accumulates into `raZ[0..64]`;
-//! * [`crate::write_pcm_output`] — step (d), `int(rScale·raZ[i])` for
+//! * [`crate::qmf_assemble::write_pcm_output`] — step (d), `int(rScale·raZ[i])` for
 //!   the 32 low accumulator entries;
-//! * [`crate::shift_x_history`] / [`crate::shift_z_output`] — step
+//! * [`crate::qmf_assemble::shift_x_history`] / [`crate::qmf_assemble::shift_z_output`] — step
 //!   (e), the per-sample shift-register / accumulator rotates.
 //!
 //! This module is the **fused driver** that composes those primitives
@@ -55,9 +55,9 @@
 //!
 //! # FIR independence
 //!
-//! Only step (c) ([`crate::fir_step`]) reads the §D.8 coefficient
+//! Only step (c) ([`crate::qmf_assemble::fir_step`]) reads the §D.8 coefficient
 //! tables. This driver selects the table once per call from the
-//! caller-supplied [`crate::FilterBankSelection`] (the resolved
+//! caller-supplied [`crate::filter_bank::FilterBankSelection`] (the resolved
 //! `FILTS` branch) and threads it into every per-sample FIR step,
 //! exactly as the spec hoists the `prCoeff = …` assignment out of the
 //! per-sample loop.
@@ -220,39 +220,11 @@ impl QmfSynthesis {
 
         Ok(())
     }
-
-    /// Borrow the current `raX[]` shift register (the §C.2.5 512-tap
-    /// synthesis history). Exposed for callers that want to inspect or
-    /// checkpoint the inter-subframe filter tail; the driver maintains
-    /// it automatically across [`QmfSynthesis::synthesize`] calls.
-    #[must_use]
-    pub fn x_history(&self) -> &[f64; X_HISTORY_LEN] {
-        &self.ra_x
-    }
-
-    /// Borrow the current `raZ[]` output accumulator (the §C.2.5
-    /// 64-entry partial-sum buffer). Exposed for the same
-    /// checkpoint/inspection use as [`QmfSynthesis::x_history`].
-    #[must_use]
-    pub fn z_accumulator(&self) -> &[f64; Z_OUTPUT_LEN] {
-        &self.ra_z
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A fresh filter starts with a fully-cleared history, matching the
-    /// §C.2.5 per-channel filter state before the first subframe.
-    #[test]
-    fn new_starts_with_cleared_history() {
-        let q = QmfSynthesis::new();
-        assert!(q.x_history().iter().all(|&v| v == 0.0));
-        assert!(q.z_accumulator().iter().all(|&v| v == 0.0));
-        // The cosine-modulation matrix is precomputed (non-trivial).
-        assert_eq!(q.ra_cos_mod.len(), COS_MOD_LEN);
-    }
 
     /// Each per-sample row appends exactly 32 PCM samples to the
     /// output, per the §C.2.5 PCM-output step's `i < 32` loop.
@@ -380,47 +352,6 @@ mod tests {
 
         assert_eq!(single, split);
         assert!(single.iter().any(|&s| s != 0));
-    }
-
-    /// `n_subs > 32` is rejected before any sample is processed.
-    #[test]
-    fn rejects_n_subs_beyond_num_subband() {
-        let mut q = QmfSynthesis::new();
-        let rows = vec![[0.0_f64; NUM_SUBBAND]; 1];
-        let mut out = Vec::new();
-        assert_eq!(
-            q.synthesize(
-                &rows,
-                33,
-                FilterBankSelection::NonPerfectReconstruction,
-                1.0,
-                &mut out
-            )
-            .unwrap_err(),
-            QmfAssembleError::SubsOutOfRange { n_subs: 33 }
-        );
-        // No output written and the history is untouched on the error.
-        assert!(out.is_empty());
-        assert!(q.x_history().iter().all(|&v| v == 0.0));
-    }
-
-    /// An empty input block is a no-op: no PCM is appended and the
-    /// per-channel history is untouched (the §C.2.5 outer loop runs
-    /// zero iterations when `nStart == nEnd`).
-    #[test]
-    fn empty_input_is_a_noop() {
-        let mut q = QmfSynthesis::new();
-        let mut out = Vec::new();
-        q.synthesize(
-            &[],
-            8,
-            FilterBankSelection::PerfectReconstruction,
-            1.0,
-            &mut out,
-        )
-        .unwrap();
-        assert!(out.is_empty());
-        assert!(q.x_history().iter().all(|&v| v == 0.0));
     }
 
     /// `n_subs = 0` is the spec's fully-silenced channel: `raXin` is

@@ -9,7 +9,7 @@
 //! # What this module covers
 //!
 //! The §5.5 `Audio Data` walker dispatches each subband on its
-//! `nQType` (see [`crate::audio_quant_type`]). For `nQType == 1` the
+//! `nQType` (see [`crate::audio_data::audio_quant_type`]). For `nQType == 1` the
 //! eight `AUDIO[m]` quantization indices are Huffman-coded, decoded
 //! through the §D.5 code book that the `(ABITS, SEL)` pair selects
 //! (Table 5-26, staged PDF p.27). This module transcribes the
@@ -31,7 +31,7 @@
 //! | 10    | 129    | §D.5.12 | SEL 0..6 → `A129/B129/…/G129`   |
 //!
 //! (The terminal `SEL` entry of each group is the `V…` block code —
-//! `nQType == 3`, handled by [`crate::decode_block_code`] — not a
+//! `nQType == 3`, handled by [`crate::block_code::decode_block_code`] — not a
 //! Huffman book, so it is *not* in this module. For the 17-level group
 //! that terminal entry is `V17` at SEL 7.)
 //!
@@ -41,7 +41,7 @@
 //! column runs `0, 1, -1, 2, -2, …`, mirroring the mid-tread
 //! quantizer's symmetric output. The decoded level is the signed
 //! integer `AUDIO[m]` that §5.5 then scales by `rScale`
-//! ([`crate::dequant_subsubframe`]).
+//! ([`crate::step_size::dequant_subsubframe`]).
 //!
 //! # Scope and follow-ups
 //!
@@ -56,7 +56,7 @@
 //! The Table 5-26 (staged PDF p.27) `(ABITS, SEL)` mapping is the
 //! authoritative selector: for ABITS 5 (13 levels) the group is
 //! `A13 B13 C13 V13`, so SEL 0/1/2 select the Huffman books and SEL 3
-//! the terminal `V13` 4-element block code ([`crate::decode_block_code`],
+//! the terminal `V13` 4-element block code ([`crate::block_code::decode_block_code`],
 //! `nQType == 3`).
 
 use crate::bitreader::BitReader;
@@ -2430,8 +2430,8 @@ impl AudioHuffCodebook {
     /// Returns `None` when the `(ABITS, SEL)` pair does not select a
     /// Huffman book in this module: an `ABITS` outside `1..=7`, or a
     /// `SEL` at (or past) the group's terminal `V…` block-code entry
-    /// (the [`crate::AudioQuantType::BlockCode`] path, not Huffman).
-    /// Use [`crate::audio_quant_type`] first to confirm the subband is
+    /// (the [`crate::audio_data::AudioQuantType::BlockCode`] path, not Huffman).
+    /// Use [`crate::audio_data::audio_quant_type`] first to confirm the subband is
     /// `nQType == 1` before calling this.
     #[must_use]
     pub fn from_abits_sel(abits: u8, sel: u8) -> Option<Self> {
@@ -2485,51 +2485,6 @@ impl AudioHuffCodebook {
             (10, 5) => Some(Self::F129),
             (10, 6) => Some(Self::G129),
             _ => None,
-        }
-    }
-
-    /// The `ABITS` family (= mid-tread quantizer level count) this book
-    /// belongs to: 1 (3 levels), 2 (5 levels), 3 (7 levels), 4
-    /// (9 levels), 5 (13 levels), 6 (17 levels), or 7 (25 levels).
-    #[must_use]
-    pub fn abits(self) -> u8 {
-        match self {
-            Self::A3 => 1,
-            Self::A5 | Self::B5 | Self::C5 => 2,
-            Self::A7 | Self::B7 | Self::C7 => 3,
-            Self::A9 | Self::B9 | Self::C9 => 4,
-            Self::A13 | Self::B13 | Self::C13 => 5,
-            Self::A17 | Self::B17 | Self::C17 | Self::D17 | Self::E17 | Self::F17 | Self::G17 => 6,
-            Self::A25 | Self::B25 | Self::C25 | Self::D25 | Self::E25 | Self::F25 | Self::G25 => 7,
-            Self::A33 | Self::B33 | Self::C33 | Self::D33 | Self::E33 | Self::F33 | Self::G33 => 8,
-            Self::A65 | Self::B65 | Self::C65 | Self::D65 | Self::E65 | Self::F65 | Self::G65 => 9,
-            Self::A129
-            | Self::B129
-            | Self::C129
-            | Self::D129
-            | Self::E129
-            | Self::F129
-            | Self::G129 => 10,
-        }
-    }
-
-    /// The number of quantizer levels of this book's `ABITS` family
-    /// (Table 5-26 "Number of Index Quantization Levels"): 3, 5, 7, 9,
-    /// 13, 17, or 25. Equals the number of entries in the underlying
-    /// §D.5 table.
-    #[must_use]
-    pub fn levels(self) -> u16 {
-        match self.abits() {
-            1 => 3,
-            2 => 5,
-            3 => 7,
-            4 => 9,
-            5 => 13,
-            6 => 17,
-            7 => 25,
-            8 => 33,
-            9 => 65,
-            _ => 129,
         }
     }
 
@@ -2874,19 +2829,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn higher_families_abits_and_levels() {
-        assert_eq!(AudioHuffCodebook::A33.abits(), 8);
-        assert_eq!(AudioHuffCodebook::A33.levels(), 33);
-        assert_eq!(AudioHuffCodebook::G33.levels(), 33);
-        assert_eq!(AudioHuffCodebook::A65.abits(), 9);
-        assert_eq!(AudioHuffCodebook::A65.levels(), 65);
-        assert_eq!(AudioHuffCodebook::G65.levels(), 65);
-        assert_eq!(AudioHuffCodebook::A129.abits(), 10);
-        assert_eq!(AudioHuffCodebook::A129.levels(), 129);
-        assert_eq!(AudioHuffCodebook::G129.levels(), 129);
-    }
-
     /// The §D.5.11 / §D.5.12 families reach the crate-wide deepest
     /// audio-data codeword of 16 bits; the bit-at-a-time walk must be
     /// able to resolve them.
@@ -2915,42 +2857,6 @@ mod tests {
         assert_eq!(AudioHuffCodebook::from_abits_sel(9, 7), None); // NFE
         assert_eq!(AudioHuffCodebook::from_abits_sel(10, 7), None); // NFE
         assert_eq!(AudioHuffCodebook::from_abits_sel(11, 0), None);
-    }
-
-    #[test]
-    fn abits_and_levels_match_family() {
-        assert_eq!(AudioHuffCodebook::A3.abits(), 1);
-        assert_eq!(AudioHuffCodebook::A3.levels(), 3);
-        assert_eq!(AudioHuffCodebook::C5.abits(), 2);
-        assert_eq!(AudioHuffCodebook::C5.levels(), 5);
-        assert_eq!(AudioHuffCodebook::B7.abits(), 3);
-        assert_eq!(AudioHuffCodebook::B7.levels(), 7);
-        assert_eq!(AudioHuffCodebook::C9.abits(), 4);
-        assert_eq!(AudioHuffCodebook::C9.levels(), 9);
-        assert_eq!(AudioHuffCodebook::A13.abits(), 5);
-        assert_eq!(AudioHuffCodebook::A13.levels(), 13);
-        assert_eq!(AudioHuffCodebook::C13.abits(), 5);
-        assert_eq!(AudioHuffCodebook::C13.levels(), 13);
-        assert_eq!(AudioHuffCodebook::A17.abits(), 6);
-        assert_eq!(AudioHuffCodebook::A17.levels(), 17);
-        assert_eq!(AudioHuffCodebook::G17.abits(), 6);
-        assert_eq!(AudioHuffCodebook::G17.levels(), 17);
-        assert_eq!(AudioHuffCodebook::A25.abits(), 7);
-        assert_eq!(AudioHuffCodebook::A25.levels(), 25);
-        assert_eq!(AudioHuffCodebook::G25.abits(), 7);
-        assert_eq!(AudioHuffCodebook::G25.levels(), 25);
-    }
-
-    #[test]
-    fn level_count_equals_table_length() {
-        for &book in ALL_BOOKS {
-            let (table, _) = book.table();
-            assert_eq!(
-                table.len() as u16,
-                book.levels(),
-                "{book:?} table length must equal its level count"
-            );
-        }
     }
 
     #[test]
@@ -2999,24 +2905,6 @@ mod tests {
                 let (got, bits) = decode_audio_huff_at(&stream, 0, book).unwrap();
                 assert_eq!(got, level, "{book:?}: level for code {code:b}/{code_len}");
                 assert_eq!(bits, code_len as usize, "{book:?}: consumed bits");
-            }
-        }
-    }
-
-    #[test]
-    fn books_decode_signed_levels_symmetrically() {
-        // Each family carries a symmetric ± level set around 0; verify
-        // the printed level columns include both signs up to the family
-        // amplitude.
-        let max_amp = |book: AudioHuffCodebook| (book.levels() as i16 - 1) / 2;
-        for &book in ALL_BOOKS {
-            let (table, _) = book.table();
-            let amp = max_amp(book);
-            for lvl in -amp..=amp {
-                assert!(
-                    table.iter().any(|&(l, _, _)| l == lvl),
-                    "{book:?}: missing level {lvl}"
-                );
             }
         }
     }

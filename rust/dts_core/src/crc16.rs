@@ -34,10 +34,10 @@
 //!   are informational placeholders).
 //! * `nAUXCRC16` (§5.6/§5.7.1) — genuinely verified over the aux data
 //!   from `bAUXTimeStampFlag` to the byte before the CRC
-//!   ([`crate::AuxData::crc_valid`]).
+//!   ([`crate::aux_data::AuxData::crc_valid`]).
 //! * `nRev2AUXCRC16` (§5.7.2) — genuinely verified over
 //!   `nRev2AUXDataByteSize − 2` bytes starting at the size field
-//!   ([`crate::Rev2AuxChunk::crc_valid`]).
+//!   ([`crate::rev2_aux::Rev2AuxChunk::crc_valid`]).
 //! * Extension substreams (§6, e.g. `nCRC16HeaderX96`) — reference
 //!   the same Annex-B algorithm; used during sync detection to reject
 //!   false sync words.

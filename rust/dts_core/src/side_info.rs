@@ -242,51 +242,6 @@ fn decode_huffman(
     Err(Error::HuffmanDecodeFailed { table: table_name })
 }
 
-/// Decode a single ABITS field from the bit stream given the channel-
-/// wide `BHUFF[ch]` codebook selector. Implements the BHUFF dispatch
-/// in §5.4.1 Table 5-28:
-///
-/// ```text
-/// nQSelect = BHUFF[ch];
-/// for (n=0; n<nVQSUB[ch]; n++) {   // Not for VQ encoded subbands.
-///     QABITS.ppQ[nQSelect]->InverseQ(InputFrame, ABITS[ch][n]);
-/// }
-/// ```
-///
-/// Returns the per-subband ABITS index for one subband. The caller is
-/// responsible for the `nVQSUB[ch]` loop (subbands ≥ `nVQSUB[ch]` are
-/// VQ-encoded and have no ABITS).
-/// Public entry point: decode an ABITS field starting at `bit_offset`
-/// in `bytes`, returning `(decoded_abits, bits_consumed)`. The bit
-/// offset is measured from the MSB of `bytes[0]`, matching the
-/// MSB-first convention used elsewhere in this crate. Use this when
-/// the caller is driving the side-info loop directly (e.g. from a
-/// future subframe walker) and only needs the dispatch + Huffman
-/// decode, not the full §5.4.1 SCALES / TMODE bookkeeping.
-pub fn decode_abits_at(
-    bytes: &[u8],
-    bit_offset: usize,
-    codebook: AbitsCodebook,
-) -> Result<(u8, usize)> {
-    // BitReader::from_byte_offset takes byte offsets; for the typical
-    // case where the caller is positioned mid-byte we need an
-    // arbitrary bit offset. Bit-shifting the buffer by `bit_offset`
-    // would copy; instead we synthesise a leading byte alignment by
-    // letting BitReader::from_byte_offset start at the byte that
-    // contains `bit_offset` and then skipping the remaining
-    // intra-byte bits via a no-op read.
-    let byte_offset = bit_offset / 8;
-    let intra_byte = bit_offset % 8;
-    let mut br = BitReader::from_byte_offset(bytes, byte_offset);
-    if intra_byte > 0 {
-        br.read_bits(intra_byte as u32)?;
-    }
-    let start = bit_offset;
-    let value = decode_abits(&mut br, codebook)?;
-    let bits_consumed = br.absolute_bit_position() - start;
-    Ok((value, bits_consumed))
-}
-
 pub(crate) fn decode_abits(br: &mut BitReader<'_>, codebook: AbitsCodebook) -> Result<u8> {
     match codebook {
         AbitsCodebook::A12 => decode_huffman(br, TABLE_A12, "A12").map(|s| s as u8),
@@ -348,17 +303,6 @@ impl TmodeCodebook {
             _ => Self::D4,
         }
     }
-
-    /// The canonical 2-bit `THUFF[ch]` wire value for this variant
-    /// (the inverse of [`Self::from_thuff`]).
-    pub fn thuff(self) -> u8 {
-        match self {
-            Self::A4 => 0,
-            Self::B4 => 1,
-            Self::C4 => 2,
-            Self::D4 => 3,
-        }
-    }
 }
 
 // ---------------------------------------------------------------
@@ -379,42 +323,6 @@ const TABLE_C4: &[HuffmanEntry] = &[(0, 3, 6), (1, 3, 7), (2, 1, 0), (3, 2, 2)];
 /// their quantization level, so this codebook degenerates to a raw
 /// 2-bit field.
 const TABLE_D4: &[HuffmanEntry] = &[(0, 2, 0), (1, 2, 1), (2, 2, 2), (3, 2, 3)];
-
-/// Decode a single TMODE field from the bit stream given the
-/// channel-wide `THUFF[ch]` codebook selector. Implements the THUFF
-/// dispatch in §5.4.1 Table 5-28 (staged PDF p.28):
-///
-/// ```text
-/// nQSelect = THUFF[ch];
-/// for (n=0; n<nVQSUB[ch]; n++)   // No VQ encoded subbands
-///   if ( ABITS[ch][n] > 0 )      // Present only if bits allocated
-///     QTMODE.ppQ[nQSelect]->InverseQ(InputFrame, TMODE[ch][n]);
-/// ```
-///
-/// Returns `(tmode, bits_consumed)` where `tmode` is in `0..=3`:
-/// `0` means no transient in the subframe for this subband, and a
-/// non-zero value means the transition occurred in subsubframe
-/// `TMODE[ch][n] + 1` (PDF p.30 field description). The
-/// `ABITS[ch][n] > 0` / `nSSC > 1` transmission conditions are the
-/// caller's responsibility (see PDF p.30: TMODE is not transmitted
-/// when only one subsubframe is present, for VQ-encoded high-
-/// frequency subbands, or for subbands without bit allocation).
-pub fn decode_tmode_at(
-    bytes: &[u8],
-    bit_offset: usize,
-    codebook: TmodeCodebook,
-) -> Result<(u8, usize)> {
-    let byte_offset = bit_offset / 8;
-    let intra_byte = bit_offset % 8;
-    let mut br = BitReader::from_byte_offset(bytes, byte_offset);
-    if intra_byte > 0 {
-        br.read_bits(intra_byte as u32)?;
-    }
-    let start = bit_offset;
-    let value = decode_tmode(&mut br, codebook)?;
-    let bits_consumed = br.absolute_bit_position() - start;
-    Ok((value, bits_consumed))
-}
 
 pub(crate) fn decode_tmode(br: &mut BitReader<'_>, codebook: TmodeCodebook) -> Result<u8> {
     let (table, name) = match codebook {
@@ -552,29 +460,6 @@ fn scales_huffman_codebook(codebook: ScalesCodebook) -> (&'static [HuffmanEntry]
     }
 }
 
-/// `(code, code_length)` of the SCALES / JOIN_SCALES difference
-/// `symbol` under a Huffman selector — `None` for the linear selectors
-/// or a symbol outside the book's ±64 alphabet. Exposed for tests and
-/// fuzz harnesses that build spec-shaped streams; not a stable API.
-#[doc(hidden)]
-#[must_use]
-pub fn scales_code(codebook: ScalesCodebook, symbol: i16) -> Option<(u32, u8)> {
-    scales_table(codebook)?
-        .iter()
-        .find(|&&(sym, _, _)| sym == symbol)
-        .map(|&(_, len, code)| (u32::from(code), len))
-}
-
-/// Encoder-side view of the SCALES / JOIN_SCALES Huffman book for a
-/// selector (`None` for the two linear selectors).
-pub(crate) fn scales_table(codebook: ScalesCodebook) -> Option<&'static [HuffmanEntry]> {
-    if codebook.is_huffman_encoded() {
-        Some(scales_huffman_codebook(codebook).0)
-    } else {
-        None
-    }
-}
-
 // ---------------------------------------------------------------
 // Annex D §D.1.1 — 6-bit Quantization (Nominal 2,2 dB Step).
 // 64 entries; index 63 is reserved/invalid.
@@ -621,116 +506,6 @@ pub const RMS_7BIT: [u32; 128] = [
     // doesn't pull in a phantom value.
     0, 0, 0,
 ];
-
-/// Decode a single SCALES field given the channel-wide `SHUFF[ch]`
-/// codebook and the running scale-index accumulator `n_scale_sum`
-/// (= `nScaleSum` in §5.4.1 Table 5-28). Implements one iteration of:
-///
-/// ```text
-/// nQSelect = SHUFF[ch];
-/// if (nQSelect == 6)   pScaleTable = &RMS7Bit;   // 7-bit (D.1.2)
-/// else                 pScaleTable = &RMS6Bit;   // 6-bit (D.1.1)
-/// nScaleSum = 0;
-/// for (n=0; n<nVQSUB[ch]; n++)
-///   if (ABITS[ch][n] > 0) {
-///     QSCALES.ppQ[nQSelect]->InverseQ(InputFrame, nScale);
-///     if (nQSelect < 5)        // Huffman encoded -> difference
-///       nScaleSum += nScale;
-///     else                     // linear -> absolute
-///       nScaleSum = nScale;
-///     pScaleTable->LookUp(nScaleSum, SCALES[ch][n][0]);
-///     if (TMODE[ch][n] > 0) {  // transient -> 2nd factor
-///       QSCALES.ppQ[nQSelect]->InverseQ(InputFrame, nScale);
-///       if (nQSelect < 5)  nScaleSum += nScale;
-///       else               nScaleSum  = nScale;
-///       pScaleTable->LookUp(nScaleSum, SCALES[ch][n][1]);
-///     }
-///   }
-/// ```
-///
-/// Returns the resolved scale-factor value (the
-/// `pScaleTable->LookUp(...)` output, i.e. the actual quantisation
-/// level from §D.1.1 / §D.1.2) and the updated `n_scale_sum`. The
-/// caller passes `0` for the first call in a SCALES loop and the
-/// returned `n_scale_sum` for subsequent calls.
-///
-/// The check on `ABITS[ch][n] > 0` is the caller's responsibility
-/// (subbands with no allocated bits skip the SCALES decode entirely
-/// per §5.4.1). The check on `TMODE[ch][n] > 0` for a second scale
-/// factor is also caller-driven (call `decode_scales` twice with the
-/// updated `n_scale_sum` for transient subbands).
-/// Public entry point: decode a SCALES field starting at `bit_offset`
-/// in `bytes`, returning `(scale_factor, updated_n_scale_sum,
-/// bits_consumed)`. The `n_scale_sum` parameter is the running
-/// accumulator; pass `0` for the first call in a SCALES loop and the
-/// returned `updated_n_scale_sum` for subsequent calls.
-pub fn decode_scales_at(
-    bytes: &[u8],
-    bit_offset: usize,
-    codebook: ScalesCodebook,
-    n_scale_sum: i32,
-) -> Result<(u32, i32, usize)> {
-    let byte_offset = bit_offset / 8;
-    let intra_byte = bit_offset % 8;
-    let mut br = BitReader::from_byte_offset(bytes, byte_offset);
-    if intra_byte > 0 {
-        br.read_bits(intra_byte as u32)?;
-    }
-    let start = bit_offset;
-    let (scale, new_sum) = decode_scales(&mut br, codebook, n_scale_sum)?;
-    let bits_consumed = br.absolute_bit_position() - start;
-    Ok((scale, new_sum, bits_consumed))
-}
-
-/// Decode a single §5.4.1 `JOIN_SCALES` field starting at `bit_offset`,
-/// returning `(join_scale_factor, biased_index, bits_consumed)`.
-///
-/// Per the §5.4.1 Table 5-28 joint-intensity walk (staged PDF p.29):
-///
-/// ```text
-/// nQSelect = JOIN_SHUFF[ch];
-/// for (n = nSUBS[ch]; n < nSUBS[nSourceCh]; n++) {
-///     QSCALES.ppQ[nQSelect]->InverseQ(InputFrame, nJScale);
-///     nJScale = nJScale + 64;                 // fixed +64 bias
-///     JScaleTbl.LookUp(nJScale, JOIN_SCALES[ch][n]);
-/// }
-/// ```
-///
-/// Unlike the regular SCALES walk, the `JOIN_SCALES` loop does **not**
-/// carry a running `nScaleSum` accumulator: each decoded `QSCALES`
-/// symbol is biased by a fixed `+64` and directly indexes the §D.3
-/// [`crate::join_scale`] table ([`crate::JOIN_SCALE_FACTOR`]). The raw
-/// symbol is therefore taken as-is — the Huffman code books emit a
-/// signed value in a small window around zero, and the `+64` bias maps
-/// the zero symbol to the D.3 unity entry (index 64).
-///
-/// `codebook` is [`ScalesCodebook::from_shuff`] of the channel's 3-bit
-/// `JOIN_SHUFF[ch]`. The Huffman variants (`SA129..SE129`) decode one
-/// entropy symbol; the two linear variants read a raw 6- or 7-bit
-/// absolute index (which is likewise biased by 64 before the D.3 lookup).
-///
-/// # Errors
-///
-/// * [`Error::InvalidSideInfo`] with field `"JOIN_SCALES"` when the
-///   biased index falls outside the §D.3 table (`0..=128`) — a
-///   well-formed stream keeps it in range by construction;
-/// * [`Error::UnexpectedEof`] when the buffer ends mid-symbol.
-pub fn decode_join_scale_at(
-    bytes: &[u8],
-    bit_offset: usize,
-    codebook: ScalesCodebook,
-) -> Result<(f64, i32, usize)> {
-    let byte_offset = bit_offset / 8;
-    let intra_byte = bit_offset % 8;
-    let mut br = BitReader::from_byte_offset(bytes, byte_offset);
-    if intra_byte > 0 {
-        br.read_bits(intra_byte as u32)?;
-    }
-    let start = bit_offset;
-    let (factor, biased) = decode_join_scale(&mut br, codebook)?;
-    let bits_consumed = br.absolute_bit_position() - start;
-    Ok((factor, biased, bits_consumed))
-}
 
 /// In-place §5.4.1 `JOIN_SCALES` field decode against a live
 /// [`BitReader`]. Returns `(join_scale_factor, biased_index)`. See
@@ -896,32 +671,6 @@ impl ScaleFactorAdjustment {
         }
     }
 
-    /// The 2-bit ADJ wire code (`0..=3`) corresponding to this
-    /// variant; the inverse of [`Self::from_index`].
-    pub fn code(self) -> u8 {
-        match self {
-            Self::Adj0 => 0b00,
-            Self::Adj1 => 0b01,
-            Self::Adj2 => 0b10,
-            Self::Adj3 => 0b11,
-        }
-    }
-
-    /// Adjustment multiplier per Table 5-27 (`f32`).
-    ///
-    /// All four multipliers have exact binary representations:
-    /// `1.0`, `1.125 = 9 / 8`, `1.25 = 5 / 4`, and
-    /// `1.4375 = 23 / 16`. The constants below are therefore
-    /// representable as `f32` (and as `f64`) with no rounding.
-    pub fn multiplier(self) -> f32 {
-        match self {
-            Self::Adj0 => 1.0000,
-            Self::Adj1 => 1.1250,
-            Self::Adj2 => 1.2500,
-            Self::Adj3 => 1.4375,
-        }
-    }
-
     /// Adjustment multiplier per Table 5-27 (`f64`).
     ///
     /// Provided for callers that hold SCALES in `f64`; the four
@@ -935,44 +684,6 @@ impl ScaleFactorAdjustment {
             Self::Adj3 => 1.4375,
         }
     }
-
-    /// The adjustment multiplier as a rational with denominator 16:
-    /// `(numerator, 16)`. Every Table 5-27 multiplier is a multiple
-    /// of `1/16`, so a `u8` numerator over the fixed denominator
-    /// `16` is an exact representation for integer-arithmetic
-    /// callers: `Adj0 → 16/16`, `Adj1 → 18/16`, `Adj2 → 20/16`,
-    /// `Adj3 → 23/16`.
-    pub fn multiplier_rational(self) -> (u8, u8) {
-        let num = match self {
-            Self::Adj0 => 16, // 1.0000   = 16/16
-            Self::Adj1 => 18, // 1.1250   = 18/16
-            Self::Adj2 => 20, // 1.2500   = 20/16
-            Self::Adj3 => 23, // 1.4375   = 23/16
-        };
-        (num, 16)
-    }
-}
-
-/// Public entry point: decode an `ADJ` field starting at
-/// `bit_offset` in `bytes`, returning `(adjustment, bits_consumed)`.
-///
-/// The bit offset is measured from the MSB of `bytes[0]`, matching
-/// the MSB-first convention used elsewhere in this crate. The field
-/// width is fixed at 2 bits per Table 5-21 (PDF p.25). Returns
-/// [`Error::UnexpectedEof`] when fewer than 2 bits remain after
-/// `bit_offset`.
-pub fn decode_adj_at(bytes: &[u8], bit_offset: usize) -> Result<(ScaleFactorAdjustment, usize)> {
-    let byte_offset = bit_offset / 8;
-    let intra_byte = bit_offset % 8;
-    let mut br = BitReader::from_byte_offset(bytes, byte_offset);
-    if intra_byte > 0 {
-        br.read_bits(intra_byte as u32)?;
-    }
-    let start = bit_offset;
-    let raw = br.read_bits(2)? as u8;
-    let adj = ScaleFactorAdjustment::from_index(raw);
-    let bits_consumed = br.absolute_bit_position() - start;
-    Ok((adj, bits_consumed))
 }
 
 // ---------------------------------------------------------------
@@ -1052,9 +763,6 @@ impl SubsubframeCount {
     pub const MAX_SSC: u8 = 0b11;
     /// Maximum 3-bit `PSC` wire value (`0b111 = 7`).
     pub const MAX_PSC: u8 = 0b111;
-    /// Total wire width of the `SSC` + `PSC` prefix, in bits:
-    /// `2 + 3 = 5`.
-    pub const WIRE_BITS: u32 = 5;
 
     /// Construct from the raw 2-bit `SSC` and 3-bit `PSC` fields.
     ///
@@ -1078,69 +786,6 @@ impl SubsubframeCount {
     pub fn n_ssc(self) -> u8 {
         self.ssc + 1
     }
-
-    /// Convenience: subband-sample stride for a *normal* (non-
-    /// partial) subsubframe span, equal to `8 * nSSC` (the quantity
-    /// used by Annex C §C.2.3 / §C.2.4 / §C.2.5 to size per-
-    /// subband sample arrays). Returns a `usize` for direct use as
-    /// a loop bound. Result fits in `5..=32` for any valid `ssc`.
-    pub fn samples_per_subsubframe_normal(self) -> usize {
-        // 8 samples per active subband per subsubframe, times nSSC
-        // subsubframes per audio subframe. Max value 8 * 4 = 32
-        // fits comfortably in u8, but we promote to usize because
-        // downstream callers index into per-subband sample slices.
-        8usize * self.n_ssc() as usize
-    }
-
-    /// Returns `Some(psc)` when this audio subframe ends with a
-    /// partial subsubframe (`psc > 0`, termination-frame signal
-    /// per PDF p.30), or `None` when no partial tail is present
-    /// (`psc == 0`).
-    ///
-    /// The returned value is the partial subsubframe's sample
-    /// count per active subband (so `< 8`, since a partial
-    /// subsubframe by definition holds fewer than 8 subband
-    /// samples).
-    pub fn partial_sample_count(self) -> Option<u8> {
-        if self.psc == 0 { None } else { Some(self.psc) }
-    }
-
-    /// Returns `true` if this prefix signals a termination frame
-    /// tail (i.e. `psc > 0`, per PDF p.30).
-    pub fn is_termination_tail(self) -> bool {
-        self.psc != 0
-    }
-}
-
-/// Decode the 5-bit `SSC` + `PSC` head of the §5.4.1 Primary
-/// Audio Side Information block from `bytes`, starting at
-/// `bit_offset` (MSB-first from `bytes[0]`).
-///
-/// Returns `(SubsubframeCount, bits_consumed)` on success. The
-/// width of the prefix is exactly [`SubsubframeCount::WIRE_BITS`]
-/// (5 bits) per Table 5-28: SSC is read first as a 2-bit
-/// `ExtractBits(2)`, then PSC as a 3-bit `ExtractBits(3)`.
-///
-/// Returns [`Error::UnexpectedEof`] when fewer than 5 bits remain
-/// after `bit_offset`.
-pub fn decode_subsubframe_count_at(
-    bytes: &[u8],
-    bit_offset: usize,
-) -> Result<(SubsubframeCount, usize)> {
-    let byte_offset = bit_offset / 8;
-    let intra_byte = bit_offset % 8;
-    let mut br = BitReader::from_byte_offset(bytes, byte_offset);
-    if intra_byte > 0 {
-        br.read_bits(intra_byte as u32)?;
-    }
-    let start = bit_offset;
-    // SSC = ExtractBits(2)
-    let ssc = br.read_bits(2)? as u8;
-    // PSC = ExtractBits(3)
-    let psc = br.read_bits(3)? as u8;
-    let prefix = SubsubframeCount::new(ssc, psc);
-    let bits_consumed = br.absolute_bit_position() - start;
-    Ok((prefix, bits_consumed))
 }
 
 #[cfg(test)]
@@ -1326,19 +971,6 @@ mod tests {
     }
 
     #[test]
-    fn thuff_dispatch_masks_high_bits_and_round_trips() {
-        // Only the low 2 bits are consulted (Table 5-21 fixes the
-        // wire width at ExtractBits(2)); every u8 input resolves to
-        // the variant of its low 2 bits, and thuff() inverts it.
-        for raw in 0..=u8::MAX {
-            let cb = TmodeCodebook::from_thuff(raw);
-            assert_eq!(cb, TmodeCodebook::from_thuff(raw & 0b11));
-            assert_eq!(cb.thuff(), raw & 0b11);
-            assert_eq!(TmodeCodebook::from_thuff(cb.thuff()), cb);
-        }
-    }
-
-    #[test]
     fn decode_tmode_every_codebook_walks_every_symbol() {
         // Each of A4/B4/C4/D4 must round-trip every symbol it lists
         // (the four §D.5.2 tables, staged PDF p.198).
@@ -1363,21 +995,6 @@ mod tests {
     }
 
     #[test]
-    fn decode_tmode_at_reports_code_length_and_offset_handling() {
-        // A4's symbol 0 is the 1-bit code `0`; symbol 3 is the
-        // 3-bit code `111`. Pack `0` then `111` then `10` (= symbol
-        // 1) back-to-back starting at bit offset 3 after three
-        // leading filler 1-bits: 0b111_0_111_1, 0b0_0000000.
-        let stream = [0b1110_1111, 0b0000_0000];
-        let (s0, used0) = decode_tmode_at(&stream, 3, TmodeCodebook::A4).unwrap();
-        assert_eq!((s0, used0), (0, 1));
-        let (s1, used1) = decode_tmode_at(&stream, 4, TmodeCodebook::A4).unwrap();
-        assert_eq!((s1, used1), (3, 3));
-        let (s2, used2) = decode_tmode_at(&stream, 7, TmodeCodebook::A4).unwrap();
-        assert_eq!((s2, used2), (1, 2));
-    }
-
-    #[test]
     fn decode_tmode_d4_is_a_raw_two_bit_field() {
         // Table D4 maps every 2-bit code to itself; one byte packs
         // four consecutive symbols 0b00_01_10_11 -> 0, 1, 2, 3.
@@ -1386,15 +1003,6 @@ mod tests {
         for expected in 0..=3u8 {
             assert_eq!(decode_tmode(&mut br, TmodeCodebook::D4).unwrap(), expected);
         }
-    }
-
-    #[test]
-    fn decode_tmode_short_buffer_surfaces_eof() {
-        let stream: [u8; 0] = [];
-        assert_eq!(
-            decode_tmode_at(&stream, 0, TmodeCodebook::B4).unwrap_err(),
-            Error::UnexpectedEof
-        );
     }
 
     // -----------------------------------------------------------
@@ -1621,32 +1229,6 @@ mod tests {
     // -----------------------------------------------------------
 
     #[test]
-    fn adj_table_5_27_row_by_row() {
-        // Every documented (ADJ, Adjustment Value) row from Table 5-27.
-        let rows: [(u8, ScaleFactorAdjustment, f32); 4] = [
-            (0b00, ScaleFactorAdjustment::Adj0, 1.0000),
-            (0b01, ScaleFactorAdjustment::Adj1, 1.1250),
-            (0b10, ScaleFactorAdjustment::Adj2, 1.2500),
-            (0b11, ScaleFactorAdjustment::Adj3, 1.4375),
-        ];
-        for (code, expected_variant, expected_value) in rows {
-            let v = ScaleFactorAdjustment::from_index(code);
-            assert_eq!(v, expected_variant, "from_index({code:#04b})");
-            assert_eq!(v.code(), code, "code() round-trip for {v:?}");
-            assert_eq!(
-                v.multiplier(),
-                expected_value,
-                "multiplier() (f32) for {v:?}"
-            );
-            assert_eq!(
-                v.multiplier_f64(),
-                expected_value as f64,
-                "multiplier_f64() for {v:?}"
-            );
-        }
-    }
-
-    #[test]
     fn adj_from_index_masks_high_bits() {
         // The wire field is 2 bits; widths beyond are masked off.
         // `0b1100` & 0b11 == 0b00 → Adj0; `0b1111` & 0b11 == 0b11 → Adj3.
@@ -1668,95 +1250,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn adj_multiplier_rational_matches_table_5_27() {
-        // Every Table 5-27 row, rationalised with denominator 16.
-        assert_eq!(ScaleFactorAdjustment::Adj0.multiplier_rational(), (16, 16));
-        assert_eq!(ScaleFactorAdjustment::Adj1.multiplier_rational(), (18, 16));
-        assert_eq!(ScaleFactorAdjustment::Adj2.multiplier_rational(), (20, 16));
-        assert_eq!(ScaleFactorAdjustment::Adj3.multiplier_rational(), (23, 16));
-
-        // Each rational equals the f32 multiplier exactly (every
-        // numerator is a multiple of 1/16, and 1/16 is exact in
-        // IEEE-754 binary32).
-        for v in [
-            ScaleFactorAdjustment::Adj0,
-            ScaleFactorAdjustment::Adj1,
-            ScaleFactorAdjustment::Adj2,
-            ScaleFactorAdjustment::Adj3,
-        ] {
-            let (num, den) = v.multiplier_rational();
-            assert_eq!(
-                v.multiplier(),
-                num as f32 / den as f32,
-                "rational == f32 for {v:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn decode_adj_at_byte_aligned() {
-        // Four ADJ fields packed back-to-back in one byte:
-        // 0b00 0b01 0b10 0b11 = 0b00_01_10_11 = 0x1B.
-        let stream = [0x1B];
-        let mut bit_offset = 0;
-        for expected in [
-            ScaleFactorAdjustment::Adj0,
-            ScaleFactorAdjustment::Adj1,
-            ScaleFactorAdjustment::Adj2,
-            ScaleFactorAdjustment::Adj3,
-        ] {
-            let (v, n) = decode_adj_at(&stream, bit_offset).unwrap();
-            assert_eq!(v, expected, "decode_adj_at(@{bit_offset})");
-            assert_eq!(n, 2, "bits_consumed @{bit_offset}");
-            bit_offset += n;
-        }
-        assert_eq!(bit_offset, 8);
-    }
-
-    #[test]
-    fn decode_adj_at_unaligned_bit_offset() {
-        // 5 leading filler bits, then the ADJ pair `0b10` (Adj2),
-        // then trailing bits. Layout:
-        //   bit 0..5  = 0b11111 (filler, ignored)
-        //   bit 5..7  = 0b10    (ADJ)
-        //   bit 7     = 0b1     (filler, ignored)
-        // Combined: 0b1111_1101 = 0xFD.
-        let stream = [0xFD];
-        let (v, n) = decode_adj_at(&stream, 5).unwrap();
-        assert_eq!(v, ScaleFactorAdjustment::Adj2);
-        assert_eq!(n, 2);
-    }
-
-    #[test]
-    fn decode_adj_at_crosses_byte_boundary() {
-        // Place the 2-bit ADJ across the byte boundary: bit 7 of
-        // byte 0 (MSB-most) carries the ADJ MSB; bit 0 of byte 1
-        // carries the ADJ LSB. Pick `0b11` (Adj3).
-        //   byte 0: 0b0000_0001 = 0x01 (ADJ MSB in bit 7)
-        //   byte 1: 0b1000_0000 = 0x80 (ADJ LSB in bit 0)
-        let stream = [0x01, 0x80];
-        let (v, n) = decode_adj_at(&stream, 7).unwrap();
-        assert_eq!(v, ScaleFactorAdjustment::Adj3);
-        assert_eq!(n, 2);
-    }
-
-    #[test]
-    fn decode_adj_at_reports_eof_when_buffer_short() {
-        // Only 1 bit left after `bit_offset` → EOF on the 2-bit read.
-        let stream = [0x00];
-        let err = decode_adj_at(&stream, 7).unwrap_err();
-        assert!(matches!(err, Error::UnexpectedEof));
-    }
-
-    #[test]
-    fn adj_code_round_trips_every_value() {
-        for code in 0u8..=3 {
-            let v = ScaleFactorAdjustment::from_index(code);
-            assert_eq!(v.code(), code);
-        }
-    }
-
     // -----------------------------------------------------------
     // §5.4.1 Table 5-28 — SSC / nSSC / PSC tests (Round 249,
     // staged PDF p.28–p.30).
@@ -1774,19 +1267,6 @@ mod tests {
     }
 
     #[test]
-    fn subsubframe_count_samples_per_subsubframe_normal_is_8_times_n_ssc() {
-        // The 8 * nSSC quantity is the §C.2.3 / §C.2.4 / §C.2.5
-        // per-subband sample stride, also referenced in this
-        // crate's `sum_diff.rs` and `joint_subband.rs` doc-comments
-        // as the "8 * nSSC" inner-loop bound.
-        let cases = [(0u8, 8usize), (1, 16), (2, 24), (3, 32)];
-        for (raw_ssc, expected_samples) in cases {
-            let prefix = SubsubframeCount::new(raw_ssc, 0);
-            assert_eq!(prefix.samples_per_subsubframe_normal(), expected_samples);
-        }
-    }
-
-    #[test]
     fn subsubframe_count_masks_high_bits_of_ssc_and_psc() {
         // ExtractBits(2) / ExtractBits(3) semantics: only the low
         // 2 / 3 bits should reach the typed prefix.
@@ -1798,193 +1278,5 @@ mod tests {
         assert_eq!(max.ssc, SubsubframeCount::MAX_SSC);
         assert_eq!(max.psc, SubsubframeCount::MAX_PSC);
         assert_eq!(max.n_ssc(), 4);
-    }
-
-    #[test]
-    fn subsubframe_count_partial_sample_count_signals_termination_tail() {
-        // PSC == 0 → no partial subsubframe at the tail of the
-        // current audio subframe (PDF p.30: partial subsubframe
-        // "exists only in a termination frame").
-        let normal = SubsubframeCount::new(2, 0);
-        assert_eq!(normal.partial_sample_count(), None);
-        assert!(!normal.is_termination_tail());
-        // PSC > 0 → termination tail; the returned count is the
-        // partial subsubframe's sample count per active subband.
-        for psc in 1u8..=7 {
-            let tail = SubsubframeCount::new(2, psc);
-            assert_eq!(tail.partial_sample_count(), Some(psc));
-            assert!(tail.is_termination_tail());
-        }
-    }
-
-    #[test]
-    fn subsubframe_count_wire_bits_constant_matches_table_5_28() {
-        // SSC = ExtractBits(2); PSC = ExtractBits(3); total 5 bits
-        // per the first two rows of Table 5-28 (PDF p.28).
-        assert_eq!(SubsubframeCount::WIRE_BITS, 5);
-    }
-
-    #[test]
-    fn decode_subsubframe_count_at_byte_aligned() {
-        // Five-bit prefix at bit-offset 0: pack SSC=0b10 and
-        // PSC=0b011 into the top 5 bits of byte 0.
-        //   bit 0..=1 (MSB-first) = SSC = 0b10
-        //   bit 2..=4             = PSC = 0b011
-        //   bit 5..=7             = 0b000 (zero padding)
-        //   → 0b10011000 = 0x98
-        let stream = [0x98];
-        let (prefix, n) = decode_subsubframe_count_at(&stream, 0).unwrap();
-        assert_eq!(prefix.ssc, 0b10);
-        assert_eq!(prefix.psc, 0b011);
-        assert_eq!(prefix.n_ssc(), 3);
-        assert_eq!(n, 5);
-    }
-
-    #[test]
-    fn decode_subsubframe_count_at_non_byte_aligned() {
-        // Three filler bits, then SSC=0b11, PSC=0b101.
-        //   bit 0..=2 = 0b111
-        //   bit 3..=4 = SSC = 0b11
-        //   bit 5..=7 = PSC = 0b101
-        //   → 0b1111_1101 = 0xFD
-        let stream = [0xFD];
-        let (prefix, n) = decode_subsubframe_count_at(&stream, 3).unwrap();
-        assert_eq!(prefix.ssc, 0b11);
-        assert_eq!(prefix.psc, 0b101);
-        assert_eq!(prefix.n_ssc(), 4);
-        assert_eq!(prefix.partial_sample_count(), Some(5));
-        assert_eq!(n, 5);
-    }
-
-    #[test]
-    fn decode_subsubframe_count_at_crosses_byte_boundary() {
-        // Place the 5-bit prefix straddling the byte boundary,
-        // starting at bit-offset 5 within byte 0:
-        //   byte 0: 0b0000_0010 = 0x02 → bit 5..=7 = 0b010,
-        //                                  so SSC MSB=0, SSC LSB=1,
-        //                                  PSC MSB=0 (bit 7).
-        //   Actually: bit 5..=6 = SSC (=0b01), bit 7 = top bit of PSC.
-        //   We pick SSC=0b01 and PSC=0b001 ⇒ bit 7 of byte 0 = 0,
-        //   bit 0..=1 of byte 1 = 0b01.
-        //   byte 0 bits = 0b0000_0010 = 0x02 (SSC LSB at bit 6,
-        //                                     PSC top bit at bit 7 = 0)
-        //   byte 1 bits = 0b0100_0000 = 0x40 (PSC mid bit at bit 0 = 0,
-        //                                     PSC LSB at bit 1 = 1)
-        // Wait: redo it. At bit-offset 5 (MSB-first counting from
-        // byte 0 bit 7 = position 0), bits read are:
-        //   pos 5 → byte 0 bit 2 = SSC[1] (MSB of SSC)
-        //   pos 6 → byte 0 bit 1 = SSC[0] (LSB of SSC)
-        //   pos 7 → byte 0 bit 0 = PSC[2] (MSB of PSC)
-        //   pos 8 → byte 1 bit 7 = PSC[1]
-        //   pos 9 → byte 1 bit 6 = PSC[0] (LSB of PSC)
-        // For SSC=0b01 and PSC=0b001:
-        //   byte 0 bit 2 = 0, byte 0 bit 1 = 1, byte 0 bit 0 = 0
-        //                              → byte 0 = 0b0000_0010 = 0x02
-        //   byte 1 bit 7 = 0, byte 1 bit 6 = 1
-        //                              → byte 1 = 0b0100_0000 = 0x40
-        let stream = [0x02, 0x40];
-        let (prefix, n) = decode_subsubframe_count_at(&stream, 5).unwrap();
-        assert_eq!(prefix.ssc, 0b01);
-        assert_eq!(prefix.psc, 0b001);
-        assert_eq!(prefix.n_ssc(), 2);
-        assert_eq!(n, 5);
-    }
-
-    #[test]
-    fn decode_subsubframe_count_at_reports_eof_when_buffer_short() {
-        // Only 4 bits left after `bit_offset` → EOF before the
-        // full 5-bit prefix can be consumed.
-        let stream = [0x00];
-        let err = decode_subsubframe_count_at(&stream, 4).unwrap_err();
-        assert!(matches!(err, Error::UnexpectedEof));
-    }
-
-    #[test]
-    fn decode_subsubframe_count_at_covers_every_ssc_psc_pair() {
-        // Exhaustively pack each of the 4 * 8 = 32 (SSC, PSC)
-        // combinations into a single byte at bit-offset 0
-        // (SSC occupies bits 0..=1, PSC occupies bits 2..=4, low
-        // 3 bits are zero padding), then decode and check.
-        for ssc in 0u8..=3 {
-            for psc in 0u8..=7 {
-                let byte = (ssc << 6) | (psc << 3);
-                let stream = [byte];
-                let (prefix, n) = decode_subsubframe_count_at(&stream, 0).unwrap();
-                assert_eq!(prefix.ssc, ssc);
-                assert_eq!(prefix.psc, psc);
-                assert_eq!(n, 5);
-                assert_eq!(prefix.n_ssc(), ssc + 1);
-                assert_eq!(
-                    prefix.samples_per_subsubframe_normal(),
-                    8 * (ssc as usize + 1)
-                );
-                assert_eq!(prefix.is_termination_tail(), psc != 0);
-            }
-        }
-    }
-
-    #[test]
-    fn decode_join_scale_huffman_zero_symbol_is_unity() {
-        // The SA129 (A129) zero symbol, after the +64 bias, lands on
-        // the §D.3 unity entry (1.0).
-        let (table, _) = scales_huffman_codebook(ScalesCodebook::Sa129);
-        let (code, len) = code_of(table, 0);
-        let stream = pack_codes(&[(code, len)]);
-        let (factor, biased, bits) =
-            decode_join_scale_at(&stream, 0, ScalesCodebook::Sa129).unwrap();
-        assert_eq!(biased, 64);
-        assert_eq!(factor, 1.0);
-        assert_eq!(bits, usize::from(len));
-    }
-
-    #[test]
-    fn decode_join_scale_huffman_walks_every_a129_symbol() {
-        // Each SA129 symbol biases by +64 onto a valid §D.3 entry: the
-        // ±64 alphabet maps exactly onto the 129-entry table.
-        let (table, _) = scales_huffman_codebook(ScalesCodebook::Sa129);
-        for &(symbol, len, code) in table {
-            let stream = pack_codes(&[(code, len)]);
-            let (factor, biased, _) =
-                decode_join_scale_at(&stream, 0, ScalesCodebook::Sa129).unwrap();
-            assert_eq!(biased, i32::from(symbol) + 64);
-            assert_eq!(
-                factor,
-                crate::JOIN_SCALE_FACTOR[(i32::from(symbol) + 64) as usize]
-            );
-        }
-    }
-
-    #[test]
-    fn decode_join_scale_linear6_reads_raw_index() {
-        // Linear-6-bit: a raw 6-bit absolute index. Index 0 biases to
-        // 64 (unity); index 63 biases to 127 (a high §D.3 factor).
-        let stream = pack_codes(&[(0, 6)]);
-        let (factor, biased, bits) =
-            decode_join_scale_at(&stream, 0, ScalesCodebook::Linear6Bit).unwrap();
-        assert_eq!(biased, 64);
-        assert_eq!(factor, 1.0);
-        assert_eq!(bits, 6);
-
-        let stream = pack_codes(&[(63, 6)]);
-        let (factor, biased, _) =
-            decode_join_scale_at(&stream, 0, ScalesCodebook::Linear6Bit).unwrap();
-        assert_eq!(biased, 127);
-        assert_eq!(factor, crate::JOIN_SCALE_FACTOR[127]);
-    }
-
-    #[test]
-    fn decode_join_scale_linear7_out_of_range_rejected() {
-        // Linear-7-bit index 65 biases to 129, which is outside the
-        // §D.3 table (0..=128); the decode must reject it rather than
-        // index out of bounds.
-        let stream = pack_codes(&[(65, 7)]);
-        let err = decode_join_scale_at(&stream, 0, ScalesCodebook::Linear7Bit).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::InvalidSideInfo {
-                field: "JOIN_SCALES",
-                value: 129
-            }
-        ));
     }
 }

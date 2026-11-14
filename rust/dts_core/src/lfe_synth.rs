@@ -5,7 +5,7 @@
 //! (`InterpolationFIR()`, printed PDF p.186), staged as pseudocode in
 //! `docs/audio/dts/dts-lfe-interpolation-and-audio-walker.md` §1. The
 //! companion table *selection* step lives in
-//! [`crate::LfeInterpolationSelection`]; this module is the
+//! [`crate::lfe_interp::LfeInterpolationSelection`]; this module is the
 //! **convolution body** that consumes the selected §D.8 512-tap
 //! coefficient set and the decimated LFE sample stream and emits the
 //! upsampled per-channel PCM.
@@ -129,15 +129,6 @@ impl LfeInterpolator {
         Self {
             history: [0.0; LFE_HISTORY_LEN],
         }
-    }
-
-    /// Borrow the current decimated-sample history (most-recent first).
-    /// Exposed for callers that want to inspect or checkpoint the
-    /// inter-sub-frame tail; [`LfeInterpolator::process`] maintains it
-    /// automatically.
-    #[must_use]
-    pub fn history(&self) -> &[f64; LFE_HISTORY_LEN] {
-        &self.history
     }
 
     /// Run the §C.2.6 `InterpolationFIR()` polyphase convolution over
@@ -274,7 +265,7 @@ impl LfeInterpolator {
 }
 
 /// The §5.5 LFE-phase quantiser step constant: `rScale = nScale * 0.035`
-/// where `nScale` is the [`crate::RMS_7BIT`] (§D.1.2) entry the 8-bit
+/// where `nScale` is the [`crate::side_info::RMS_7BIT`] (§D.1.2) entry the 8-bit
 /// `LFEscaleIndex` selects. Per the §5.5 LFE phase pseudocode in
 /// `docs/audio/dts/dts-lfe-interpolation-and-audio-walker.md` §2.2.
 pub const LFE_SCALE_STEP: f64 = 0.035;
@@ -301,7 +292,7 @@ pub const LFE_OUTPUT_CALIBRATION: f64 = 256.0;
 #[non_exhaustive]
 pub enum LfeChannelError {
     /// The 8-bit `LFEscaleIndex` selected a reserved/invalid
-    /// [`crate::RMS_7BIT`] entry (§D.1.2 indices 125..=127), so no
+    /// [`crate::side_info::RMS_7BIT`] entry (§D.1.2 indices 125..=127), so no
     /// quantiser scale is defined.
     ReservedScaleIndex {
         /// The offending 8-bit scale index.
@@ -360,63 +351,12 @@ impl LfeChannel {
         }
     }
 
-    /// Borrow the underlying §C.2.6 interpolator (for history
-    /// inspection / checkpointing).
-    #[must_use]
-    pub fn interpolator(&self) -> &LfeInterpolator {
-        &self.interp
-    }
-
     /// Resolve the §C.2.6 decimation selection from the frame header's
     /// `LFF` value (the §5.5 LFE phase's `InterpolationFIR(LFF)` call):
     /// `LFF == 1 → 128×`, every other non-zero `LFF → 64×`.
     #[must_use]
     pub fn selection_for_lff(lff: u8) -> LfeInterpolationSelection {
         LfeInterpolationSelection::from_decimation_select(lff)
-    }
-
-    /// Run the §5.5 LFE phase for one sub-frame: dequantise the 8-bit
-    /// two's-complement `lfe_samples` with the `scale_index`-selected
-    /// §D.1.2 RMS scale and the `0.035` quantiser step, then upsample
-    /// via the §C.2.6 polyphase convolution.
-    ///
-    /// `lfe_samples` are the raw `LFE[n]` bytes the §5.5 walker read
-    /// (`2·LFF·nSSC` of them); `scale_index` is the 8-bit
-    /// `LFEscaleIndex`; `lff` is the frame header's non-zero `LFF`
-    /// selecting the decimation factor. Returns the integer PCM
-    /// (`(int)rTmp`, truncate-toward-zero) the LFE channel contributes,
-    /// `lfe_samples.len() * (64 | 128)` samples long, and advances the
-    /// inter-sub-frame history.
-    ///
-    /// # Errors
-    ///
-    /// [`LfeChannelError::NoLfeChannel`] if `lff == 0`;
-    /// [`LfeChannelError::ReservedScaleIndex`] if `scale_index` selects a
-    /// reserved §D.1.2 entry (125..=127).
-    pub fn decode_subframe(
-        &mut self,
-        lfe_samples: &[i8],
-        scale_index: u8,
-        lff: u8,
-    ) -> Result<Vec<i32>, LfeChannelError> {
-        if lff == 0 {
-            return Err(LfeChannelError::NoLfeChannel);
-        }
-        // §D.1.2 reserves indices 125..=127 (the RMS_7BIT tail).
-        if (scale_index as usize) >= crate::side_info::RMS_7BIT.len() - 3 {
-            return Err(LfeChannelError::ReservedScaleIndex { index: scale_index });
-        }
-        let n_scale = crate::side_info::RMS_7BIT[scale_index as usize] as f64;
-        let r_scale = n_scale * LFE_SCALE_STEP;
-
-        // rLFE[n] = LFE[n] * rScale.
-        let decimated: Vec<f64> = lfe_samples
-            .iter()
-            .map(|&s| f64::from(s) * r_scale)
-            .collect();
-
-        let selection = Self::selection_for_lff(lff);
-        Ok(self.interp.interpolate(&decimated, selection))
     }
 
     /// [`Self::decode_subframe`] with the implementation-defined
@@ -454,14 +394,6 @@ impl LfeChannel {
 mod tests {
     use super::*;
 
-    /// A fresh interpolator starts with a cleared decimated-sample
-    /// history.
-    #[test]
-    fn new_starts_with_cleared_history() {
-        let lfe = LfeInterpolator::new();
-        assert!(lfe.history().iter().all(|&v| v == 0.0));
-    }
-
     /// The output length is exactly `decimated.len() * nDeciFactor` for
     /// both decimation factors.
     #[test]
@@ -475,30 +407,6 @@ mod tests {
             let out = lfe.process_to_vec(&decimated, sel);
             assert_eq!(out.len(), 5 * sel.decimation_factor() as usize);
         }
-    }
-
-    /// A too-short output slice is rejected before any sample is written
-    /// and the history is left untouched.
-    #[test]
-    fn rejects_short_output_slice() {
-        let mut lfe = LfeInterpolator::new();
-        let decimated = vec![1.0_f64; 3];
-        let mut out = vec![0.0_f64; 3 * 64 - 1]; // one short for 64×
-        let err = lfe
-            .process(
-                &decimated,
-                LfeInterpolationSelection::Decimation64,
-                &mut out,
-            )
-            .unwrap_err();
-        assert_eq!(
-            err,
-            LfeInterpError::OutputSliceTooShort {
-                required: 3 * 64,
-                available: 3 * 64 - 1,
-            }
-        );
-        assert!(lfe.history().iter().all(|&v| v == 0.0));
     }
 
     /// An all-zero decimated input with cleared history yields all-zero
@@ -567,68 +475,9 @@ mod tests {
         assert!(single.iter().any(|&s| s != 0.0));
     }
 
-    /// History depth is honoured: after a sub-frame, the stored history
-    /// holds the last `taps_per_phase - 1` decimated samples,
-    /// most-recent first.
-    #[test]
-    fn history_holds_last_samples_most_recent_first() {
-        let sel = LfeInterpolationSelection::Decimation64; // 8 taps/phase → keep 7
-        let decimated: Vec<f64> = (0..10).map(|i| i as f64 + 1.0).collect();
-        let mut lfe = LfeInterpolator::new();
-        let _ = lfe.process_to_vec(&decimated, sel);
-        // keep = 7: history[0] = decimated[9] = 10, history[1] = 9, …
-        for slot in 0..7 {
-            assert_eq!(lfe.history()[slot], decimated[9 - slot]);
-        }
-    }
-
-    /// A sub-frame shorter than the history depth retains older entries
-    /// behind the new ones (no history is dropped prematurely).
-    #[test]
-    fn short_subframe_retains_older_history() {
-        let sel = LfeInterpolationSelection::Decimation64; // keep 7
-        let mut lfe = LfeInterpolator::new();
-        // First a long sub-frame to seed the history.
-        let first: Vec<f64> = (0..8).map(|i| (i + 1) as f64).collect();
-        let _ = lfe.process_to_vec(&first, sel);
-        // history = [8,7,6,5,4,3,2]
-        // Now a short sub-frame of 2 samples [100, 200].
-        let _ = lfe.process_to_vec(&[100.0, 200.0], sel);
-        // New history most-recent first: [200, 100, then old[0..5] = 8,7,6,5,4]
-        assert_eq!(lfe.history()[0], 200.0);
-        assert_eq!(lfe.history()[1], 100.0);
-        assert_eq!(lfe.history()[2], 8.0);
-        assert_eq!(lfe.history()[3], 7.0);
-        assert_eq!(lfe.history()[4], 6.0);
-        assert_eq!(lfe.history()[5], 5.0);
-        assert_eq!(lfe.history()[6], 4.0);
-    }
-
     // -----------------------------------------------------------
     // §5.5 LFE phase — LfeChannel dequant + interpolation.
     // -----------------------------------------------------------
-
-    /// `LFF == 0` has no LFE channel, so decode_subframe declines.
-    #[test]
-    fn lfe_channel_declines_no_lfe() {
-        let mut ch = LfeChannel::new();
-        assert_eq!(
-            ch.decode_subframe(&[0, 0], 0, 0).unwrap_err(),
-            LfeChannelError::NoLfeChannel
-        );
-    }
-
-    /// A reserved §D.1.2 scale index (125..=127) is rejected.
-    #[test]
-    fn lfe_channel_rejects_reserved_scale_index() {
-        let mut ch = LfeChannel::new();
-        for idx in [125u8, 126, 127] {
-            assert_eq!(
-                ch.decode_subframe(&[0], idx, 1).unwrap_err(),
-                LfeChannelError::ReservedScaleIndex { index: idx }
-            );
-        }
-    }
 
     /// `selection_for_lff` maps `LFF` per the §C.2.6 / §5.5 split:
     /// `1 → 128×`, `2 → 64×`.
@@ -642,36 +491,6 @@ mod tests {
             LfeChannel::selection_for_lff(2),
             LfeInterpolationSelection::Decimation64
         );
-    }
-
-    /// The decoded LFE PCM has length `lfe_samples.len() * nDeciFactor`
-    /// and an all-zero input yields silence.
-    #[test]
-    fn lfe_channel_decodes_zero_input_to_silence() {
-        let mut ch = LfeChannel::new();
-        // LFF == 1 → 128×.
-        let pcm = ch.decode_subframe(&[0, 0, 0], 10, 1).unwrap();
-        assert_eq!(pcm.len(), 3 * 128);
-        assert!(pcm.iter().all(|&s| s == 0));
-    }
-
-    /// A non-zero LFE sample is dequantised by `nScale·0.035` and feeds
-    /// the polyphase phase-lead taps: the phase-0 first output equals
-    /// `(int)(LFE[0]·nScale·0.035·prCoeff[0])`.
-    #[test]
-    fn lfe_channel_applies_rms_scale_and_step() {
-        let scale_index = 60u8; // a mid-table RMS_7BIT entry
-        let n_scale = crate::side_info::RMS_7BIT[scale_index as usize] as f64;
-        let r_scale = n_scale * LFE_SCALE_STEP;
-        let lfe0 = 5_i8;
-        let lff = 1u8; // 128×
-        let sel = LfeInterpolationSelection::Decimation128;
-        let coeff = sel.coefficients();
-        let expected0 = (f64::from(lfe0) * r_scale * coeff[0]) as i32;
-
-        let mut ch = LfeChannel::new();
-        let pcm = ch.decode_subframe(&[lfe0], scale_index, lff).unwrap();
-        assert_eq!(pcm[0], expected0);
     }
 
     /// The integer cast truncates toward zero (the spec's `(int)rTmp`),

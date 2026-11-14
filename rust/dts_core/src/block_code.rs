@@ -149,19 +149,6 @@ use crate::{Error, Result};
 /// pseudocode's success condition is `nCode == 0` regardless of
 /// element count, so the zero-element decode succeeds when (and
 /// only when) `code == 0`.
-///
-/// # Example
-///
-/// Spec worked example (§C.2.1 PDF p.182):
-///
-/// ```rust
-/// use dts_core::decode_block_code;
-///
-/// let mut out = [0_i32; 4];
-/// decode_block_code(64, 3, &mut out).unwrap();
-/// // 3-level 4-element block code: `64` decodes to (0, -1, 0, +1).
-/// assert_eq!(out, [0, -1, 0, 1]);
-/// ```
 pub fn decode_block_code(code: u32, n_levels: u32, output: &mut [i32]) -> Result<()> {
     if n_levels < 2 {
         return Err(Error::BlockCodeLevelsOutOfRange { n_levels });
@@ -196,77 +183,6 @@ pub fn decode_block_code(code: u32, n_levels: u32, output: &mut [i32]) -> Result
     Ok(())
 }
 
-/// Compute the §C.2.1 mid-range offset `nOffset = (nNumLevel - 1) >>
-/// 1` for the given quantisation-level count.
-///
-/// This is the bias applied to each `(nCode % nNumLevel)` remainder
-/// so the decoded quantisation-index alphabet is centred on zero
-/// (`{-(n_levels-1)/2, ..., 0, ..., (n_levels-1)/2}`). Exposed as a
-/// public helper for callers that need to size index buffers or
-/// validate alphabet ranges by the same invariant the spec writes
-/// against.
-///
-/// Returns the offset for any `n_levels >= 1`. For `n_levels == 0`
-/// the offset is mathematically undefined and the function returns
-/// `0` (the integer-arithmetic interpretation of `(0 - 1) >> 1`
-/// after an unsigned `wrapping_sub` would be `u32::MAX >> 1`, which
-/// is not what the spec means); guard `n_levels == 0` at the call
-/// site if a numeric answer is required.
-///
-/// # Example
-///
-/// ```rust
-/// use dts_core::block_code_offset;
-///
-/// // 3-level: indices in {-1, 0, +1} → offset 1
-/// assert_eq!(block_code_offset(3), 1);
-/// // 5-level: indices in {-2, -1, 0, +1, +2} → offset 2
-/// assert_eq!(block_code_offset(5), 2);
-/// // 7-level: indices in {-3, -2, -1, 0, +1, +2, +3} → offset 3
-/// assert_eq!(block_code_offset(7), 3);
-/// // 25-level (largest in §D.6): offset 12
-/// assert_eq!(block_code_offset(25), 12);
-/// ```
-pub fn block_code_offset(n_levels: u32) -> i32 {
-    if n_levels == 0 {
-        0
-    } else {
-        ((n_levels - 1) >> 1) as i32
-    }
-}
-
-/// Compute the maximum code-word value the §C.2.1 block decoder
-/// will accept without a [`Error::BlockCodeResidual`] error, for the
-/// given `(n_elements, n_levels)` block dimensions.
-///
-/// The mixed-radix encoding represents each element as a digit in
-/// base `n_levels`, so an `n_elements`-element block uses values in
-/// `0..n_levels.pow(n_elements as u32)`. The largest valid code word
-/// is therefore `n_levels.pow(n_elements as u32) - 1`. Returns
-/// `None` when the exponentiation overflows `u32` (which the §D.6
-/// tables stay within: even 25-level × 1-element fits in five bits,
-/// and the largest tabulated block-size product fits well inside
-/// 32 bits).
-///
-/// # Example
-///
-/// ```rust
-/// use dts_core::block_code_max_code;
-///
-/// // §D.6.1 3-level 4-element block code: 3^4 - 1 = 80
-/// assert_eq!(block_code_max_code(4, 3), Some(80));
-/// // 5-level 3-element: 5^3 - 1 = 124
-/// assert_eq!(block_code_max_code(3, 5), Some(124));
-/// ```
-pub fn block_code_max_code(n_elements: usize, n_levels: u32) -> Option<u32> {
-    if n_elements == 0 {
-        return Some(0);
-    }
-    let exp = u32::try_from(n_elements).ok()?;
-    let total = n_levels.checked_pow(exp)?;
-    Some(total.saturating_sub(1))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,24 +196,6 @@ mod tests {
         let mut out = [0_i32; 4];
         decode_block_code(64, 3, &mut out).unwrap();
         assert_eq!(out, [0, -1, 0, 1]);
-    }
-
-    /// All-zero code word decodes to the all-`-offset` (bottom of
-    /// alphabet) quantisation-index array: every digit is the
-    /// remainder `0 % n_levels = 0`, biased by `-offset`. For a
-    /// 3-level alphabet (offset 1) this is `-1`; for a 5-level
-    /// alphabet (offset 2) it is `-2`; etc.
-    #[test]
-    fn zero_code_decodes_to_bottom_of_alphabet() {
-        for (n_elements, n_levels) in [(1, 3), (4, 3), (1, 5), (3, 5), (4, 7), (3, 25)] {
-            let mut out = vec![i32::MAX; n_elements];
-            decode_block_code(0, n_levels, &mut out).unwrap();
-            let expected = -block_code_offset(n_levels);
-            assert!(
-                out.iter().all(|&v| v == expected),
-                "n_elements={n_elements} n_levels={n_levels} expected all={expected} got {out:?}"
-            );
-        }
     }
 
     /// Maximum valid code word for `(n_elements, n_levels)` decodes
@@ -377,124 +275,6 @@ mod tests {
         ));
     }
 
-    /// Round-trip: every valid `code ∈ [0, n_levels.pow(n_elements))`
-    /// for a small `(n_elements, n_levels)` block decodes to a
-    /// distinct quantisation-index array, and re-encoding the array
-    /// via the mixed-radix base recovers the original `code`. This
-    /// exercises the entire valid-code-word domain.
-    #[test]
-    fn round_trip_three_level_four_element_block() {
-        for code in 0..81_u32 {
-            let mut out = [0_i32; 4];
-            decode_block_code(code, 3, &mut out).unwrap();
-            let offset = block_code_offset(3);
-            // Re-encode least-significant-first (matches the
-            // decoder's first-element-first extraction).
-            let mut recovered = 0_u32;
-            for &idx in out.iter().rev() {
-                recovered = recovered * 3 + (idx + offset) as u32;
-            }
-            assert_eq!(recovered, code, "round-trip failed for code={code}");
-        }
-    }
-
-    /// Round-trip for the 5-level 3-element block-code domain.
-    #[test]
-    fn round_trip_five_level_three_element_block() {
-        for code in 0..125_u32 {
-            let mut out = [0_i32; 3];
-            decode_block_code(code, 5, &mut out).unwrap();
-            let offset = block_code_offset(5);
-            let mut recovered = 0_u32;
-            for &idx in out.iter().rev() {
-                recovered = recovered * 5 + (idx + offset) as u32;
-            }
-            assert_eq!(recovered, code, "round-trip failed for code={code}");
-        }
-    }
-
-    /// Every decoded index falls within the §C.2.1 alphabet bounds
-    /// `[-(n_levels - 1) / 2, (n_levels - 1) / 2]`. Exhaustive over
-    /// the 3-level 4-element domain.
-    #[test]
-    fn decoded_indices_within_alphabet_bounds() {
-        let n_levels = 3_u32;
-        let offset = block_code_offset(n_levels);
-        for code in 0..81_u32 {
-            let mut out = [0_i32; 4];
-            decode_block_code(code, n_levels, &mut out).unwrap();
-            for v in out {
-                assert!(
-                    (-offset..=offset).contains(&v),
-                    "code={code} produced out-of-alphabet index {v}"
-                );
-            }
-        }
-    }
-
-    /// `block_code_offset` matches the spec's `(n_levels - 1) >> 1`
-    /// integer-shift formula across the §D.6 enumerated alphabets.
-    #[test]
-    fn offset_helper_matches_spec_formula() {
-        for n_levels in [3_u32, 5, 7, 9, 13, 17, 25] {
-            assert_eq!(block_code_offset(n_levels), ((n_levels - 1) >> 1) as i32);
-        }
-    }
-
-    /// `block_code_offset(0)` is `0` (guarded fallback), and
-    /// `block_code_offset(1)` is `0` (the single-element alphabet
-    /// is just the zero index).
-    #[test]
-    fn offset_helper_degenerate_alphabets() {
-        assert_eq!(block_code_offset(0), 0);
-        assert_eq!(block_code_offset(1), 0);
-        assert_eq!(block_code_offset(2), 0);
-    }
-
-    /// `block_code_max_code` matches `n_levels.pow(n_elements) - 1`
-    /// for the §D.6 enumerated dimensions and reports `None` on
-    /// overflow.
-    #[test]
-    fn max_code_helper_matches_formula() {
-        // §D.6.1 3-level 4-element: 80
-        assert_eq!(block_code_max_code(4, 3), Some(80));
-        // 5-level 3-element: 124
-        assert_eq!(block_code_max_code(3, 5), Some(124));
-        // 7-level 2-element: 48
-        assert_eq!(block_code_max_code(2, 7), Some(48));
-        // 25-level 1-element: 24
-        assert_eq!(block_code_max_code(1, 25), Some(24));
-        // Zero-element block: max code is 0 (only the empty
-        // decode succeeds).
-        assert_eq!(block_code_max_code(0, 3), Some(0));
-    }
-
-    /// Worked-example trace — the §C.2.1 PDF p.182 step-by-step
-    /// table for `nCode = 64` (3-level 4-element) records
-    /// quotient/remainder pairs `(21, 1)`, `(7, 0)`, `(2, 1)`,
-    /// `(0, 2)` producing indices `(0, -1, 0, +1)`. Verify each
-    /// intermediate quotient by stepping the recurrence manually.
-    #[test]
-    fn spec_worked_example_intermediate_quotients() {
-        let n_levels = 3_u32;
-        let offset = block_code_offset(n_levels);
-        let mut residual = 64_u32;
-        let expected = [(1_u32, 21_u32), (0, 7), (1, 2), (2, 0)];
-        for (i, &(rem, next_q)) in expected.iter().enumerate() {
-            assert_eq!(
-                residual % n_levels,
-                rem,
-                "step {i} expected remainder {rem}"
-            );
-            let idx = (residual % n_levels) as i32 - offset;
-            // Expected indices from the spec's worked example.
-            assert_eq!(idx, [0, -1, 0, 1][i], "step {i} index disagrees");
-            residual /= n_levels;
-            assert_eq!(residual, next_q, "step {i} expected next quotient {next_q}");
-        }
-        assert_eq!(residual, 0);
-    }
-
     /// Three-level 1-element block decode (smallest non-trivial
     /// alphabet × single element). Codes `0/1/2` decode to indices
     /// `-1/0/+1`.
@@ -516,29 +296,5 @@ mod tests {
                 n_levels: 3,
             }
         ));
-    }
-
-    /// `n_levels == 2` is the smallest accepted alphabet. Index
-    /// alphabet is `{0, 1}` (offset = 0), and the recurrence
-    /// reads the code's bits LSB-first.
-    #[test]
-    fn two_level_block_decodes_binary() {
-        // 4-bit code 0b1011 = 11 decodes to bits LSB-first.
-        let mut out = [0_i32; 4];
-        decode_block_code(0b1011, 2, &mut out).unwrap();
-        assert_eq!(out, [1, 1, 0, 1]);
-        assert_eq!(block_code_offset(2), 0);
-    }
-
-    /// 25-level 1-element decode — the largest §D.6 alphabet.
-    /// Codes `0..25` decode to indices `-12..=12`.
-    #[test]
-    fn twenty_five_level_single_element_alphabet() {
-        let offset = block_code_offset(25);
-        for code in 0..25_u32 {
-            let mut out = [0_i32; 1];
-            decode_block_code(code, 25, &mut out).unwrap();
-            assert_eq!(out[0], code as i32 - offset);
-        }
     }
 }

@@ -4,7 +4,7 @@
 //! Round 346 (2026-06-20) composes the two already-landed halves of the
 //! Core reconstruction chain into one per-subframe call:
 //!
-//! 1. the round-340 §5.5 [`crate::decode_audio_data_subframe_at`] walk, which
+//! 1. the round-340 §5.5 [`crate::audio_array::decode_audio_data_subframe_at`] walk, which
 //!    turns the §5.4.1 side information + the §5.5 `Audio Data` arrays
 //!    into the per-channel subband-sample matrices
 //!    `aPrmCh[ch].aSubband[n].aSample[m]`, and
@@ -70,7 +70,7 @@
 //!
 //! Joint-intensity subband coding (`JOINX[ch] > 0`) is not applied here:
 //! the §C.2.3 joint-subband decode is landed
-//! ([`crate::joint_subband_decode_range_f64`]) but it needs the
+//! ([`crate::joint_subband::joint_subband_decode_range_f64`]) but it needs the
 //! `JOIN_SCALES[ch][n]` Huffman factors, whose §5.4.x bit-stream decode
 //! is not yet wired. [`SubframePcmDecoder::decode_subframe`] therefore
 //! surfaces [`SubframePcmError::JointSubbandUnsupported`] when any
@@ -128,7 +128,7 @@ const SIXTEEN_BIT_R_SCALE: f64 = 32_768.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SubframePcmError {
-    /// The §5.5 [`crate::decode_audio_data_subframe_at`] walk failed: a
+    /// The §5.5 [`crate::audio_array::decode_audio_data_subframe_at`] walk failed: a
     /// bit-stream-level error, or an Annex D VQ-codebook blocker
     /// (`PMODE != 0` / `nVQSUB < nSUBS`). Carries the underlying
     /// [`AudioArrayDecodeError`].
@@ -267,7 +267,7 @@ pub struct SubframePcmDecoder {
     /// `LFF` is non-zero, carrying the §C.2.6 inter-subframe
     /// interpolation history. Idle (and never read from the bitstream)
     /// for LFF-absent frames.
-    lfe: crate::LfeChannel,
+    lfe: crate::lfe_synth::LfeChannel,
     /// The LFE PCM decoded from the most recent [`Self::decode_subframe`]
     /// call (empty when the frame had no LFE channel). Surfaced via
     /// [`Self::take_last_lfe_pcm`] so the primary-channel return tuple is
@@ -291,46 +291,11 @@ impl SubframePcmDecoder {
     pub fn new(channels: usize) -> Self {
         Self {
             qmf: MultiChannelQmf::new(channels),
-            lfe: crate::LfeChannel::new(),
+            lfe: crate::lfe_synth::LfeChannel::new(),
             last_lfe_pcm: Vec::new(),
             vq_codebooks: VqCodebooks::builtin(),
             adpcm_history: AdpcmHistory::new(channels),
         }
-    }
-
-    /// Replace the §D.10 VQ code books ([`VqCodebooks`]). The decoder
-    /// starts with the built-in real books ([`VqCodebooks::builtin`]),
-    /// so the high-frequency-VQ (`nVQSUB < nSUBS`) and inverse-ADPCM
-    /// (`PMODE != 0`) §5.5 sub-paths decode by default; supplying
-    /// [`VqCodebooks::none`] strips them, restoring the typed
-    /// [`AudioArrayError::VqCodebookUnavailable`] blocker on those
-    /// sub-paths.
-    pub fn set_vq_codebooks(&mut self, books: VqCodebooks) {
-        self.vq_codebooks = books;
-    }
-
-    /// The currently attached §D.10 books (default: the built-in real
-    /// books).
-    #[must_use]
-    pub fn vq_codebooks(&self) -> &VqCodebooks {
-        &self.vq_codebooks
-    }
-
-    /// Borrow the persistent §C.2.2 reconstruction history.
-    #[must_use]
-    pub fn adpcm_history(&self) -> &AdpcmHistory {
-        &self.adpcm_history
-    }
-
-    /// Zero the §C.2.2 reconstruction history — the §5.3.1
-    /// `HFLAG = 0` entry-point state ("these frames can be coded
-    /// without the previous frame predictor history … Otherwise, the
-    /// history will be ignored"). The frame-level walks
-    /// ([`decode_core_frame`] / [`CoreStreamDecoder::decode_frame`])
-    /// apply this automatically from the frame header; it is public
-    /// for callers driving the per-subframe API directly.
-    pub fn reset_adpcm_history(&mut self) {
-        self.adpcm_history.clear();
     }
 
     /// Take the LFE PCM decoded by the most recent
@@ -350,102 +315,6 @@ impl SubframePcmDecoder {
         self.qmf.channel_count()
     }
 
-    /// Borrow the persistent §C.2.5 driver (e.g. to inspect a channel's
-    /// inter-subframe filter tail).
-    #[must_use]
-    pub fn qmf(&self) -> &MultiChannelQmf {
-        &self.qmf
-    }
-
-    /// Decode one §5.4/§5.5 audio subframe to planar PCM, end to end.
-    ///
-    /// Runs the §5.5 [`crate::decode_audio_data_subframe_at`] walk to get the
-    /// per-channel subband-sample matrices, then the §C.2.5
-    /// [`MultiChannelQmf`] synthesis to turn them into PCM. The
-    /// per-channel filter state persists into the next call.
-    ///
-    /// * `bytes` / `bit_offset` — the bit stream positioned at the first
-    ///   §5.5 `Audio Data` bit of this subframe (after the subframe's
-    ///   §5.4.1 side information).
-    /// * `header` — the parsed §5.3.1 [`DtsFrameHeader`]; supplies the
-    ///   frame-wide `FILTS` ([`DtsFrameHeader::filter_bank_selection`])
-    ///   and the output `rScale` ([`DtsFrameHeader::output_r_scale`]).
-    /// * `coding` — the §5.3.2 [`AudioCodingHeader`]; supplies the
-    ///   `SEL` / `arADJ` planes and the per-channel `nSUBS` / `nVQSUB`
-    ///   loop bounds and `JOINX`.
-    /// * `side` — the per-channel decoded §5.4.1 [`ChannelSideInfo`].
-    /// * `n_ssc` — this subframe's subsubframe count (`SSC + 1`).
-    /// * `aspf` — the §5.3.1 Audio Sync-Word Insertion Flag.
-    ///
-    /// Returns `(SubframePcm, bits_consumed)`: planar PCM (one
-    /// `Vec<i32>` per channel, `n_ssc * 256` samples each) plus the
-    /// number of §5.5 bits the audio-data walk consumed (so the caller
-    /// can advance to the next subframe).
-    ///
-    /// # Errors
-    ///
-    /// * [`SubframePcmError::ChannelCountMismatch`] if `side`'s length
-    ///   differs from the configured channel count;
-    /// * [`SubframePcmError::JointSubbandUnsupported`] if any channel
-    ///   carries `JOINX[ch] > 0`;
-    /// * [`SubframePcmError::ReservedPcmResolution`] if the header's
-    ///   `PCMR` code is reserved;
-    /// * [`SubframePcmError::InvalidLfe`] if the header's `LFF` is 3;
-    /// * [`SubframePcmError::AudioData`] for any §5.5 walk failure
-    ///   (including the §D.10 VQ blockers);
-    /// * [`SubframePcmError::Synthesis`] for any §C.2.5 driver failure.
-    pub fn decode_subframe(
-        &mut self,
-        bytes: &[u8],
-        bit_offset: usize,
-        header: &DtsFrameHeader,
-        coding: &AudioCodingHeader,
-        side: &[ChannelSideInfo],
-        n_ssc: usize,
-        aspf: bool,
-    ) -> Result<(SubframePcm, usize), SubframePcmError> {
-        self.decode_subframe_with_joint(bytes, bit_offset, header, coding, side, n_ssc, aspf, &[])
-    }
-
-    /// Like [`Self::decode_subframe`] but also applies the §C.2.3
-    /// joint-intensity sub-band copy when `join_scales` is non-empty.
-    ///
-    /// `join_scales[ch]` is the [`crate::SideInfoTail::join_scales`]
-    /// vector for destination channel `ch` (empty for channels whose
-    /// `JOINX[ch] == 0`). After the §5.5 audio-data walk fills every
-    /// channel's sub-band matrix, each jointly-coded channel imports
-    /// sub-bands `[nSUBS[ch], nSUBS[nSourceCh])` from its source channel
-    /// (`JOINX[ch] - 1`), each scaled by the matching `JOIN_SCALES`
-    /// factor, **before** the §C.2.5 QMF synthesis runs — and the QMF's
-    /// per-channel active-subband count is widened to the source
-    /// channel's `nSUBS` for those channels, per the §C.2.5 driving-call
-    /// note ("For joint intensity coded subbands, it must be set to that
-    /// of the source channel, in order to reflect the true subband
-    /// activity"), so the imported sub-bands actually reach the output.
-    pub fn decode_subframe_with_joint(
-        &mut self,
-        bytes: &[u8],
-        bit_offset: usize,
-        header: &DtsFrameHeader,
-        coding: &AudioCodingHeader,
-        side: &[ChannelSideInfo],
-        n_ssc: usize,
-        aspf: bool,
-        join_scales: &[Vec<f64>],
-    ) -> Result<(SubframePcm, usize), SubframePcmError> {
-        self.decode_subframe_partial(
-            bytes,
-            bit_offset,
-            header,
-            coding,
-            side,
-            n_ssc,
-            0,
-            aspf,
-            join_scales,
-        )
-    }
-
     /// Like [`Self::decode_subframe_with_joint`] but with the §5.4.1
     /// `PSC` (Partial Subsubframe Sample Count) of a **termination
     /// frame** applied: when `psc ∈ 1..=7`, the last of this
@@ -454,7 +323,7 @@ impl SubframePcmDecoder {
     /// subframe reconstructs to `((n_ssc - 1) * 8 + psc) * 32` PCM
     /// samples per channel and the §5.5 bit budget shrinks exactly by
     /// the untransmitted samples (see
-    /// [`crate::decode_audio_data_subframe_partial_at`] for the
+    /// [`crate::audio_array::decode_audio_data_subframe_partial_at`] for the
     /// spec-clause derivation). `psc = 0` is the normal-frame case and
     /// reproduces [`Self::decode_subframe_with_joint`] verbatim.
     ///
@@ -509,7 +378,7 @@ impl SubframePcmDecoder {
                 pcmr: header.source_pcm_resolution_index,
             });
         }
-        if header.lfe == crate::LfeMode::Mode3 {
+        if header.lfe == crate::header::LfeMode::Mode3 {
             return Err(SubframePcmError::InvalidLfe);
         }
         // PCMR tells what the source was, not how the core's samples
@@ -675,7 +544,7 @@ impl SubframePcmDecoder {
         // destination) keeps the destination's own count.
         let mut eff_n_subs = n_subs.clone();
         for (ch, &joinx) in coding.joinx.iter().enumerate().take(channels) {
-            if let Some(src) = crate::joint_source_channel(joinx) {
+            if let Some(src) = crate::joint_subband::joint_source_channel(joinx) {
                 let src = usize::from(src);
                 if src < n_subs.len() && n_subs[src] > eff_n_subs[ch] {
                     eff_n_subs[ch] = n_subs[src];
@@ -712,99 +581,6 @@ impl SubframePcmDecoder {
 
         Ok((pcm, bits_consumed))
     }
-
-    /// Decode all `nSUBFS` subframes of one core frame to a single block
-    /// of planar PCM, appending each subframe's output (in order) onto
-    /// the per-channel vectors so the persistent §C.2.5 filter tail
-    /// carries across subframe boundaries (§5.3.2 `nSUBFS`; §C.2.5
-    /// per-channel filter continuity).
-    ///
-    /// `bytes` is the frame's bit-stream buffer; `first_audio_bit` is the
-    /// bit offset of the **first** subframe's §5.5 `Audio Data` region
-    /// (the cursor a caller is left at after the first subframe's §5.4.1
-    /// side info). Each [`Subframe`] supplies that subframe's already-
-    /// decoded §5.4.1 [`ChannelSideInfo`], its `n_ssc`, and the byte gap
-    /// (`side_info_bits`) the caller must skip between this subframe's
-    /// §5.5 region and the next subframe's §5.5 region — i.e. the bits of
-    /// the *next* subframe's side info, which this driver does not itself
-    /// decode (that §5.4.x region — `JOIN_SHUFF` onward — is not yet
-    /// transcribed). The last subframe's `side_info_bits` is ignored.
-    ///
-    /// Returns the concatenated planar PCM (one `Vec<i32>` per channel,
-    /// `Σ nSSC · 256` samples each) plus the total bits consumed from
-    /// `first_audio_bit`. This driver assumes whole subsubframes
-    /// (`PSC = 0` in every supplied subframe); for a termination
-    /// frame's partial subsubframe use
-    /// [`Self::decode_subframe_partial`] per subframe or the
-    /// header-driven [`decode_core_frame`] walk, which reads each
-    /// subframe's own `SSC`/`PSC` prefix.
-    ///
-    /// # Errors
-    ///
-    /// The same errors as [`SubframePcmDecoder::decode_subframe`], plus
-    /// [`SubframePcmError::ChannelCountMismatch`] if a subframe's
-    /// side-info channel count disagrees with the driver. A failure on
-    /// the *k*-th subframe leaves the PCM from subframes `0..k` already
-    /// appended (the §C.2.5 filter state is likewise advanced through
-    /// `k-1`); callers that need all-or-nothing semantics should clone
-    /// the decoder first.
-    pub fn decode_frame(
-        &mut self,
-        bytes: &[u8],
-        first_audio_bit: usize,
-        header: &DtsFrameHeader,
-        coding: &AudioCodingHeader,
-        subframes: &[Subframe<'_>],
-        aspf: bool,
-    ) -> Result<(SubframePcm, usize), SubframePcmError> {
-        let channels = self.qmf.channel_count();
-        let mut pcm: SubframePcm = vec![Vec::new(); channels];
-        let mut bit = first_audio_bit;
-        // Accumulate the per-subframe LFE PCM across the whole frame so
-        // take_last_lfe_pcm() returns the frame's full LFE output (each
-        // decode_subframe call leaves only its own subframe's LFE PCM).
-        let mut frame_lfe: Vec<i32> = Vec::new();
-
-        for (k, sf) in subframes.iter().enumerate() {
-            let (block, audio_bits) =
-                self.decode_subframe(bytes, bit, header, coding, sf.side, sf.n_ssc, aspf)?;
-            frame_lfe.append(&mut self.last_lfe_pcm);
-            for (ch, samples) in block.into_iter().enumerate() {
-                pcm[ch].extend(samples);
-            }
-            bit += audio_bits;
-            // Skip the next subframe's §5.4.1 side-info region (the bits
-            // the caller pre-measured); the last subframe has no
-            // successor side info to skip.
-            if k + 1 < subframes.len() {
-                bit += sf.side_info_bits;
-            }
-        }
-
-        self.last_lfe_pcm = frame_lfe;
-        Ok((pcm, bit - first_audio_bit))
-    }
-}
-
-/// One subframe's already-decoded inputs for
-/// [`SubframePcmDecoder::decode_frame`].
-///
-/// The driver decodes each subframe's §5.5 `Audio Data` region from the
-/// shared bit-stream buffer; this struct carries the per-subframe §5.4.1
-/// side information the audio-data walk needs plus the framing offsets
-/// the driver uses to step from one subframe's §5.5 region to the next.
-#[derive(Debug, Clone, Copy)]
-pub struct Subframe<'a> {
-    /// This subframe's decoded §5.4.1 per-channel side information (the
-    /// round-281 [`crate::decode_primary_side_info_at`] output).
-    pub side: &'a [ChannelSideInfo],
-    /// This subframe's subsubframe count `nSSC = SSC + 1` (§5.4.1).
-    pub n_ssc: usize,
-    /// The bit length of the **next** subframe's §5.4.1 side-info region
-    /// — the gap the driver skips after this subframe's §5.5 region to
-    /// reach the next subframe's §5.5 region. Ignored for the last
-    /// subframe of the frame.
-    pub side_info_bits: usize,
 }
 
 /// Why a Core frame could not be decoded straight from its bytes by
@@ -876,98 +652,6 @@ impl From<crate::Error> for CoreFrameDecodeError {
     }
 }
 
-/// Decode one whole DTS Core frame to planar PCM straight from its
-/// bytes, for the common Core case (§5.3 / §5.4 / §5.5 + §C.2.5).
-///
-/// This is the top-level orchestrator that chains the landed stages:
-///
-/// 1. the §5.3.2 [`crate::decode_audio_coding_header_at`] (Table 5-21)
-///    from the bit just after the §5.3.1 frame header
-///    ([`DtsFrameHeader::header_bit_length`]);
-/// 2. for each of the `nSUBFS` subframes, the §5.4.1
-///    [`crate::decode_primary_side_info_at`] (Table 5-28) walk, then the
-///    §5.5 + §C.2.5 [`SubframePcmDecoder::decode_subframe`] reconstruction;
-///    the per-channel §C.2.5 filter tail carries across subframes.
-///
-/// `header` is the already-parsed §5.3.1 frame header; `bytes` is the
-/// frame's unpacked (16-bit-word-domain) bit-stream buffer.
-///
-/// # Scope
-///
-/// Joint-intensity sub-band coding (`JOINX > 0`) **is** decoded: each
-/// subframe's [`crate::decode_primary_side_info_tail_at`] resolves the
-/// Table 5-28 `JOIN_SHUFF` / `JOIN_SCALES` tail (the §D.3 joint-scale
-/// table), and the §C.2.3 sub-band copy imports the source channel's
-/// sub-bands, scaled by `JOIN_SCALES`, before QMF synthesis.
-///
-/// The frame header's `DYNF` (embedded dynamic range) and `CPF`
-/// (side-info CRC) tail fields are likewise handled: each subframe's
-/// tail walk consumes the 8-bit signed-Q2 `RANGE` code (`DYNF != 0`)
-/// and the 16-bit `SICRC` word (`CPF == 1`), and the
-/// [`crate::dts_dynrng_to_linear`] gain is applied to that subframe's
-/// reconstructed PCM after QMF synthesis (per §5.4.1).
-///
-/// §D.10 frames (`nVQSUB < nSUBS` / `PMODE != 0`) decode through the
-/// built-in code books; the typed VQ-book blocker surfaces (as
-/// [`CoreFrameDecodeError::Decode`]) only for a caller-stripped
-/// decoder ([`VqCodebooks::none`]).
-///
-/// Returns planar PCM (one `Vec<i32>` per channel, `Σ nSSC · 256`
-/// samples each; a termination frame's trailing partial subsubframe
-/// shrinks its subframe's contribution to `((nSSC-1)·8 + PSC) · 32` —
-/// the frame total is always `(NBLKS + 1) · 32`).
-///
-/// # Errors
-///
-/// * [`CoreFrameDecodeError::Bitstream`] for a §5.3.2 / §5.4.1 walk
-///   failure;
-/// * [`CoreFrameDecodeError::Decode`] for a §5.5 / §C.2.5 failure
-///   (including the §D.10 VQ blockers and a reserved `PCMR`).
-pub fn decode_core_frame(
-    bytes: &[u8],
-    header: &DtsFrameHeader,
-) -> Result<SubframePcm, CoreFrameDecodeError> {
-    // §5.3.2 Primary Audio Coding Header begins right after the §5.3.1
-    // frame header; the channel count it declares sizes the per-channel
-    // §C.2.5 filter bank. A fresh per-call decoder gives single-frame
-    // semantics (cleared filter history) — for a multi-frame elementary
-    // stream use [`CoreStreamDecoder`], which persists the per-channel
-    // §C.2.5 filter tail across frame boundaries (the spec's filter is a
-    // continuous per-channel object, not reset between frames).
-    let header_bits = header.header_bit_length() as usize;
-    let cpf = header.crc_present;
-    let (coding, _ach_bits) = crate::decode_audio_coding_header_at(bytes, header_bits, cpf)?;
-    let mut decoder = SubframePcmDecoder::new(coding.n_pchs);
-    decoder.decode_core_frame_into(bytes, header)
-}
-
-/// [`decode_core_frame`] plus the frame's §5.6 Table 5-30
-/// optional-information region: after the last audio-data array the
-/// walk continues through the flag-gated `TIMES` (time code stamp,
-/// `TIMEF`), `AUXCT`/`AUXD` (auxiliary bytes, `AUXF`), and `OCRC`
-/// (`CPF && DYNF`) fields via [`crate::decode_optional_info_at`],
-/// returning them alongside the planar PCM.
-///
-/// Same single-frame semantics (cleared filter history) as
-/// [`decode_core_frame`]; use
-/// [`CoreStreamDecoder::decode_frame_with_info`] for the multi-frame
-/// path.
-///
-/// # Errors
-///
-/// See [`decode_core_frame`]; a truncated optional-information region
-/// additionally surfaces as [`CoreFrameDecodeError::Bitstream`].
-pub fn decode_core_frame_with_info(
-    bytes: &[u8],
-    header: &DtsFrameHeader,
-) -> Result<(SubframePcm, crate::OptionalInfo), CoreFrameDecodeError> {
-    let header_bits = header.header_bit_length() as usize;
-    let cpf = header.crc_present;
-    let (coding, _ach_bits) = crate::decode_audio_coding_header_at(bytes, header_bits, cpf)?;
-    let mut decoder = SubframePcmDecoder::new(coding.n_pchs);
-    decoder.decode_core_frame_with_info_into(bytes, header)
-}
-
 /// Persistent §5.3/§5.4/§5.5 + §C.2.5 Core-stream decoder.
 ///
 /// The §C.2.5 `aPrmCh[ch]` synthesis filter is a **continuous**
@@ -1013,31 +697,6 @@ impl CoreStreamDecoder {
         self.decoder.channel_count()
     }
 
-    /// Borrow the persistent per-subframe decoder (e.g. to inspect a
-    /// channel's inter-frame §C.2.5 filter tail via
-    /// [`SubframePcmDecoder::qmf`]).
-    #[must_use]
-    pub fn subframe_decoder(&self) -> &SubframePcmDecoder {
-        &self.decoder
-    }
-
-    /// Replace the §D.10 VQ code books for the whole stream — see
-    /// [`SubframePcmDecoder::set_vq_codebooks`] (the built-in real
-    /// books are the default). The §C.2.2 reconstruction history
-    /// carries across frames per each frame header's `HFLAG` gate
-    /// (§5.3.1: history used when `HFLAG = 1`, ignored — zeroed —
-    /// otherwise).
-    pub fn set_vq_codebooks(&mut self, books: VqCodebooks) {
-        self.decoder.set_vq_codebooks(books);
-    }
-
-    /// The currently attached §D.10 books (default: the built-in real
-    /// books).
-    #[must_use]
-    pub fn vq_codebooks(&self) -> &VqCodebooks {
-        self.decoder.vq_codebooks()
-    }
-
     /// Take the LFE PCM decoded by the most recent
     /// [`Self::decode_frame`] call (empty when the frame carried no LFE
     /// channel, `LFF == 0`). See
@@ -1075,24 +734,6 @@ impl CoreStreamDecoder {
     ) -> Result<SubframePcm, CoreFrameDecodeError> {
         self.decoder.decode_core_frame_into(bytes, header)
     }
-
-    /// [`Self::decode_frame`] plus the frame's §5.6 Table 5-30
-    /// optional-information region (`TIMES` / `AUXD` / `OCRC`),
-    /// walked from the end-of-audio bit cursor. See
-    /// [`SubframePcmDecoder::decode_core_frame_with_info_into`].
-    ///
-    /// # Errors
-    ///
-    /// See [`Self::decode_frame`]; a truncated optional-information
-    /// region additionally surfaces as
-    /// [`CoreFrameDecodeError::Bitstream`].
-    pub fn decode_frame_with_info(
-        &mut self,
-        bytes: &[u8],
-        header: &DtsFrameHeader,
-    ) -> Result<(SubframePcm, crate::OptionalInfo), CoreFrameDecodeError> {
-        self.decoder.decode_core_frame_with_info_into(bytes, header)
-    }
 }
 
 impl SubframePcmDecoder {
@@ -1116,28 +757,6 @@ impl SubframePcmDecoder {
             .map(|(pcm, _)| pcm)
     }
 
-    /// [`Self::decode_core_frame_into`] plus the §5.6 Table 5-30
-    /// optional-information region that follows the last audio-data
-    /// array: the walk continues from the end-of-audio bit cursor
-    /// through the flag-gated `TIMES` / `AUXCT` / `AUXD` / `OCRC`
-    /// fields ([`crate::decode_optional_info_at`]).
-    ///
-    /// # Errors
-    ///
-    /// See [`decode_core_frame`]; a truncated optional-information
-    /// region additionally surfaces as
-    /// [`CoreFrameDecodeError::Bitstream`].
-    pub fn decode_core_frame_with_info_into(
-        &mut self,
-        bytes: &[u8],
-        header: &DtsFrameHeader,
-    ) -> Result<(SubframePcm, crate::OptionalInfo), CoreFrameDecodeError> {
-        let (pcm, end_bit) = self.decode_core_frame_cursor(bytes, header)?;
-        let (info, _info_bits) = crate::decode_optional_info_at(bytes, end_bit, header)
-            .map_err(CoreFrameDecodeError::Bitstream)?;
-        Ok((pcm, info))
-    }
-
     /// Shared §5.3.2 → §5.4.1 → §5.5 + §C.2.5 frame walk, returning
     /// the planar PCM plus the bit cursor at the end of the last
     /// audio-data array (where the §5.6 Table 5-30 region begins).
@@ -1152,7 +771,8 @@ impl SubframePcmDecoder {
         // trailer of every subframe's §5.4.1 side info.
         let header_bits = header.header_bit_length() as usize;
         let cpf = header.crc_present;
-        let (coding, ach_bits) = crate::decode_audio_coding_header_at(bytes, header_bits, cpf)?;
+        let (coding, ach_bits) =
+            crate::audio_header::decode_audio_coding_header_at(bytes, header_bits, cpf)?;
 
         let channels = coding.n_pchs;
         if channels != self.channel_count() {
@@ -1195,21 +815,23 @@ impl SubframePcmDecoder {
         for subframe_index in 0..coding.n_subframes {
             // §5.4.1 side info (Table 5-28) through the end of the
             // SCALES block.
-            let (side, side_bits) = crate::decode_primary_side_info_at(bytes, bit, &params)?;
+            let (side, side_bits) =
+                crate::subframe::decode_primary_side_info_at(bytes, bit, &params)?;
             bit += side_bits;
 
             // The Table 5-28 JOIN_SHUFF / JOIN_SCALES / RANGE (DYNF) /
             // SICRC (CPF) tail sits between the SCALES block and the §5.5
             // region. The joint-intensity JOIN_SCALES factors (if any)
             // feed the §C.2.3 sub-band copy below.
-            let (tail, tail_bits): (SideInfoTail, usize) = crate::decode_primary_side_info_tail_at(
-                bytes,
-                bit,
-                &coding.joinx,
-                &n_subs,
-                header.dynamic_range,
-                cpf,
-            )?;
+            let (tail, tail_bits): (SideInfoTail, usize) =
+                crate::subframe::decode_primary_side_info_tail_at(
+                    bytes,
+                    bit,
+                    &coding.joinx,
+                    &n_subs,
+                    header.dynamic_range,
+                    cpf,
+                )?;
             bit += tail_bits;
 
             let n_ssc = side.subsubframe_count.n_ssc() as usize;
@@ -1226,7 +848,7 @@ impl SubframePcmDecoder {
                     },
                 ));
             }
-            blocks += n_ssc * crate::SAMPLES_PER_SUBSUBFRAME;
+            blocks += n_ssc * crate::step_size::SAMPLES_PER_SUBSUBFRAME;
             if blocks > header_blocks {
                 return Err(CoreFrameDecodeError::Decode(
                     SubframePcmError::MoreBlocksThanHeader {
@@ -1286,7 +908,8 @@ fn apply_joint_subband(
             continue;
         }
         let joinx = coding.joinx.get(ch).copied().unwrap_or(0);
-        let Some(source_ch) = crate::joint_source_channel(joinx).map(usize::from) else {
+        let Some(source_ch) = crate::joint_subband::joint_source_channel(joinx).map(usize::from)
+        else {
             return Err(SubframePcmError::JointSubbandShape { ch });
         };
         if source_ch >= channels || ch >= n_subs.len() || source_ch >= n_subs.len() {
@@ -1392,148 +1015,6 @@ fn apply_sum_difference(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::side_info::ScaleFactorAdjustment;
-    use crate::step_size::SAMPLES_PER_SUBSUBFRAME;
-    use crate::subframe::ChannelSideInfo;
-
-    /// Pack a list of `(value, width)` MSB-first into bytes.
-    fn pack_fields(fields: &[(u32, u8)]) -> Vec<u8> {
-        let total_bits: usize = fields.iter().map(|(_, w)| *w as usize).sum();
-        let mut out = vec![0u8; total_bits.div_ceil(8)];
-        let mut bit_pos = 0usize;
-        for &(value, width) in fields {
-            for i in (0..width).rev() {
-                let bit = ((value >> i) & 1) as u8;
-                out[bit_pos / 8] |= bit << (7 - (bit_pos % 8));
-                bit_pos += 1;
-            }
-        }
-        out
-    }
-
-    /// A single-channel single-subsubframe NFE subframe reconstructs to
-    /// PCM end to end, and the PCM equals running the §5.5 walk + the
-    /// §C.2.5 driver by hand.
-    #[test]
-    fn nfe_subframe_round_trips_to_pcm() {
-        // ABITS 8 -> NFE width 5; SEL 7 selects the terminal NFE entry.
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-
-        let vals = [3i32, -3, 5, -5, 7, -7, 2, -2];
-        let mut fields: Vec<(u32, u8)> = vals.iter().map(|&v| ((v as u32) & 0x1f, 5u8)).collect();
-        fields.push((0xffff, 16)); // DSYNC
-        let stream = pack_fields(&fields);
-
-        // Build a parsed header carrying FILTS / PCMR via the public
-        // parser: reuse the registry test fixture's real BE header
-        // (PCMR index 0 -> 16-bit -> rScale 32768, FILTS = 0).
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        assert_eq!(header.output_r_scale(), Some(32768.0));
-
-        // A one-channel AudioCodingHeader with nSUBS=nVQSUB=1, JOINX=0,
-        // SEL[ch][ABITS 8-1] = 7 (terminal NFE). Build it through the
-        // public test constructor.
-        let coding = AudioCodingHeader::single_channel_for_test(1, 1, 7);
-
-        let mut dec = SubframePcmDecoder::new(1);
-        let (pcm, bits) = dec
-            .decode_subframe(&stream, 0, &header, &coding, &side, 1, false)
-            .unwrap();
-
-        // Reference: walk + driver by hand.
-        let table = StepSizeTable::for_rate(header.rate_index);
-        let (mats, ref_bits) = crate::audio_array::decode_audio_data_subframe_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            table,
-            false,
-        )
-        .unwrap();
-        let refs: Vec<&[[f64; NUM_SUBBAND]]> = mats.iter().map(|m| m.as_slice()).collect();
-        let mut mc = MultiChannelQmf::new(1);
-        let mut expect = vec![Vec::new(); 1];
-        mc.synthesize_planar(
-            &refs,
-            &[1],
-            header.filter_bank_selection(),
-            32768.0 * OUTPUT_LEVEL_CALIBRATION,
-            &mut expect,
-        )
-        .unwrap();
-
-        assert_eq!(bits, ref_bits);
-        assert_eq!(pcm, expect);
-        // One subsubframe of 8 rows -> 8 * 32 = 256 PCM samples.
-        assert_eq!(pcm[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        assert!(pcm[0].iter().any(|&s| s != 0));
-    }
-
-    /// A reserved PCMR code fails cleanly without disturbing the filter
-    /// state.
-    #[test]
-    fn reserved_pcmr_declines() {
-        // PCMR index 4 (0b100) is one of the reserved codes -> rScale
-        // None. Construct a header with that PCMR via the test setter.
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let mut header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        header.source_pcm_resolution_index = 4; // reserved
-        assert_eq!(header.output_r_scale(), None);
-
-        let side = vec![ChannelSideInfo::cleared()];
-        let coding = AudioCodingHeader::single_channel_for_test(1, 1, 0);
-        let mut dec = SubframePcmDecoder::new(1);
-        let err = dec
-            .decode_subframe(&[0u8; 4], 0, &header, &coding, &side, 1, false)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            SubframePcmError::ReservedPcmResolution { pcmr: 4 }
-        ));
-        // Filter untouched.
-        assert!(
-            dec.qmf()
-                .channels()
-                .iter()
-                .all(|q| q.x_history().iter().all(|&v| v == 0.0))
-        );
-    }
-
-    /// A JOINX > 0 channel is declined.
-    #[test]
-    fn joint_subband_declined() {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        let side = vec![ChannelSideInfo::cleared()];
-        let mut coding = AudioCodingHeader::single_channel_for_test(1, 1, 0);
-        coding.set_joinx_for_test(0, 2);
-        let mut dec = SubframePcmDecoder::new(1);
-        let err = dec
-            .decode_subframe(&[0u8; 4], 0, &header, &coding, &side, 1, false)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            SubframePcmError::JointSubbandUnsupported { ch: 0, joinx: 2 }
-        ));
-    }
 
     /// The §C.2.3 joint copy overwrites the destination channel's
     /// imported sub-band columns with the source channel's samples,
@@ -1593,348 +1074,10 @@ mod tests {
         assert!(matches!(err, SubframePcmError::JointSubbandShape { ch: 1 }));
     }
 
-    /// A channel-count mismatch between the decoder and the side-info
-    /// slice is rejected before any decode.
-    #[test]
-    fn channel_count_mismatch_rejected() {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        let side = vec![ChannelSideInfo::cleared(), ChannelSideInfo::cleared()];
-        let coding = AudioCodingHeader::single_channel_for_test(1, 1, 0);
-        let mut dec = SubframePcmDecoder::new(1);
-        let err = dec
-            .decode_subframe(&[0u8; 4], 0, &header, &coding, &side, 1, false)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            SubframePcmError::ChannelCountMismatch {
-                expected: 1,
-                got: 2
-            }
-        ));
-    }
-
-    /// A no-bits subframe yields all-zero PCM of the right length.
-    #[test]
-    fn no_bits_subframe_zero_pcm() {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        let side = vec![ChannelSideInfo::cleared()]; // ABITS all 0
-        let coding = AudioCodingHeader::single_channel_for_test(1, 1, 0);
-        // nSSC = 2 -> two DSYNC trailers (last subsubframe only; ASPF
-        // false means only the final one).
-        let stream = pack_fields(&[(0xffff, 16)]);
-        let mut dec = SubframePcmDecoder::new(1);
-        let (pcm, _) = dec
-            .decode_subframe(&stream, 0, &header, &coding, &side, 1, false)
-            .unwrap();
-        assert_eq!(pcm.len(), 1);
-        assert_eq!(pcm[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        assert!(pcm[0].iter().all(|&s| s == 0));
-    }
-
-    /// An LFE-present frame (`LFF != 0`) consumes the §5.5 LFE phase
-    /// before the audio-data phase, and the decoded LFE PCM has the same
-    /// per-subframe length as the primary channels (`nSSC·256`): the
-    /// §C.2.6 interpolation expands `2·LFF·nSSC` decimated samples by
-    /// `nDeciFactor` to exactly that length. The cursor stays aligned, so
-    /// the trailing DSYNC still validates.
-    #[test]
-    fn lfe_present_subframe_consumes_lfe_phase_and_matches_primary_length() {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let mut header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        header.lfe = crate::LfeMode::Mode1; // LFF == 1 -> 128×
-        let side = vec![ChannelSideInfo::cleared()]; // ABITS all 0
-        let coding = AudioCodingHeader::single_channel_for_test(1, 1, 0);
-
-        // §5.5 region for nSSC = 1, LFF = 1:
-        //   LFE phase: 2·1·1 = 2 sample bytes + 1 scale-index byte
-        //   audio-data phase: ABITS all 0 -> just a 16-bit DSYNC.
-        let mut fields: Vec<(u32, u8)> = vec![(0, 8), (0, 8), (10, 8)];
-        fields.push((0xffff, 16));
-        let stream = pack_fields(&fields);
-
-        let mut dec = SubframePcmDecoder::new(1);
-        let (pcm, bits) = dec
-            .decode_subframe(&stream, 0, &header, &coding, &side, 1, false)
-            .unwrap();
-
-        // Primary channel: nSSC·256 samples, all zero (no audio bits).
-        assert_eq!(pcm.len(), 1);
-        assert_eq!(pcm[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        // The cursor consumed LFE (3 bytes) + DSYNC (2 bytes) = 40 bits.
-        assert_eq!(bits, (3 + 2) * 8);
-        // LFE PCM is the same per-subframe length as the primary channel.
-        let lfe = dec.take_last_lfe_pcm();
-        assert_eq!(lfe.len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        // All-zero LFE samples -> silence.
-        assert!(lfe.iter().all(|&s| s == 0));
-        // Taking it again yields empty (it was moved out).
-        assert!(dec.take_last_lfe_pcm().is_empty());
-    }
-
-    /// `decode_frame` over two NFE subframes equals running
-    /// `decode_subframe` twice on the same persistent decoder — the
-    /// §C.2.5 filter tail carries across the subframe boundary and the
-    /// PCM is concatenated in order.
-    #[test]
-    fn decode_frame_concatenates_and_carries_filter_state() {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        let coding = AudioCodingHeader::single_channel_for_test(1, 1, 7);
-
-        // Two subframes, each: 8 NFE 5-bit values + a 16-bit DSYNC. The
-        // second subframe's §5.5 region directly follows the first (no
-        // inter-subframe side info in this synthetic stream, so
-        // side_info_bits = 0).
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-
-        let mk_sf = |base: i32| -> Vec<(u32, u8)> {
-            let mut f: Vec<(u32, u8)> = (0..8).map(|i| (((base + i) as u32) & 0x1f, 5u8)).collect();
-            f.push((0xffff, 16));
-            f
-        };
-        let mut fields = mk_sf(1);
-        let sf0_bits: usize = fields.iter().map(|(_, w)| *w as usize).sum();
-        fields.extend(mk_sf(-4));
-        let stream = pack_fields(&fields);
-
-        let subframes = [
-            Subframe {
-                side: &side,
-                n_ssc: 1,
-                side_info_bits: 0, // next subframe's §5.5 immediately follows
-            },
-            Subframe {
-                side: &side,
-                n_ssc: 1,
-                side_info_bits: 0,
-            },
-        ];
-
-        let mut frame_dec = SubframePcmDecoder::new(1);
-        let (frame_pcm, frame_bits) = frame_dec
-            .decode_frame(&stream, 0, &header, &coding, &subframes, false)
-            .unwrap();
-
-        // Reference: two decode_subframe calls on one persistent decoder.
-        let mut seq_dec = SubframePcmDecoder::new(1);
-        let (b0, n0) = seq_dec
-            .decode_subframe(&stream, 0, &header, &coding, &side, 1, false)
-            .unwrap();
-        let (b1, n1) = seq_dec
-            .decode_subframe(&stream, n0, &header, &coding, &side, 1, false)
-            .unwrap();
-        let mut expect = b0;
-        for (ch, samples) in b1.into_iter().enumerate() {
-            expect[ch].extend(samples);
-        }
-
-        assert_eq!(frame_pcm, expect);
-        assert_eq!(frame_bits, n0 + n1);
-        // Each subframe is one subsubframe -> 256 PCM samples; two -> 512.
-        assert_eq!(
-            frame_pcm[0].len(),
-            2 * SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW
-        );
-        // Sanity: the first subframe's §5.5 region was sf0_bits long.
-        assert_eq!(n0, sf0_bits);
-        assert!(frame_pcm[0].iter().any(|&s| s != 0));
-    }
-
-    /// Encode a clean §5.3.1 header (single channel, byte-aligned, with
-    /// `dynamic_range`/`predictor_history`/`aspf` as given) by parsing
-    /// the fixture, mutating the flags, and re-encoding. Returns the
-    /// encoded header bytes (a body packed separately concatenates
-    /// straight onto them; the caller parses the assembled buffer).
-    fn encode_clean_header(dynf: bool, cpf: bool) -> Vec<u8> {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let mut header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        header.dynamic_range = dynf;
-        // CPF is the §5.3.1 CRC-Present-Flag (`crc_present`), the flag
-        // that gates HCRC / AHCRC / SICRC — NOT `predictor_history`.
-        header.crc_present = cpf;
-        // When CPF is set the header carries a 16-bit HCRC; supply a
-        // value so the BE encoder serialises the field (its value is not
-        // verified on decode per §5.3.1).
-        header.header_crc = if cpf { Some(0) } else { None };
-        header.aspf = false;
-        crate::encode_frame_header_be(&header).unwrap()
-    }
-
-    /// A one-channel, one-subframe, all-`ABITS==0` (NoBits) Core frame
-    /// decodes end to end from raw bytes through `decode_core_frame` to
-    /// all-zero PCM of the right length.
-    #[test]
-    fn decode_core_frame_no_bits_round_trips() {
-        let mut bytes = encode_clean_header(false, false);
-
-        // §5.3.2 Audio Coding Header (Table 5-21), one channel:
-        //   SUBFS=0 -> 1 subframe; PCHS=0 -> 1 channel;
-        //   SUBS=0 -> nSUBS=2; VQSUB=1 -> nVQSUB=2 (== nSUBS, no HF VQ);
-        //   JOINX=0; THUFF=0; SHUFF=0; BHUFF=0.
-        //   SEL plane: ABITS1 1 bit, ABITS2-5 4×2 bits, ABITS6-10 5×3 bits.
-        //   With every SEL=0, every group transmits a 2-bit ADJ -> 10 ADJ.
-        let mut body: Vec<(u32, u8)> = vec![
-            (0, 4), // SUBFS
-            (0, 3), // PCHS
-            (0, 5), // SUBS -> nSUBS 2
-            (1, 5), // VQSUB -> nVQSUB 2
-            (0, 3), // JOINX
-            (0, 2), // THUFF
-            (0, 3), // SHUFF
-            (6, 3), // BHUFF=6 -> Linear5Bit (5-bit ABITS reads)
-        ];
-        body.push((0, 1)); // SEL ABITS1
-        for _ in 1..5 {
-            body.push((0, 2));
-        }
-        for _ in 5..10 {
-            body.push((0, 3));
-        }
-        for _ in 0..10 {
-            body.push((0, 2)); // ADJ
-        }
-
-        // §5.4.1 side info (Table 5-28), one subframe:
-        //   SSC=0 -> nSSC=1; PSC=0; PMODE[0][0..2]=0 (2 bits);
-        //   no PVQ (PMODE all 0); ABITS[0][0..2]=0 (2× the BHUFF=6
-        //   Linear5Bit code -> 5 bits each, value 0); nSSC==1 so no
-        //   TMODE plane; all ABITS 0 so no SCALES factors for the two
-        //   primary subbands, and nVQSUB==nSUBS so no HF VQ scales.
-        body.push((0, 2)); // SSC
-        body.push((0, 3)); // PSC
-        body.push((0, 1)); // PMODE[0][0]
-        body.push((0, 1)); // PMODE[0][1]
-        body.push((0, 5)); // ABITS[0][0] (BHUFF=6 Linear5Bit) = 0
-        body.push((0, 5)); // ABITS[0][1] = 0
-
-        // §5.5 Audio Data: nSSC=1, all ABITS 0 -> NoBits -> no audio
-        // bits, then the single DSYNC trailer.
-        body.push((0xffff, 16));
-
-        let body_bytes = pack_fields(&body);
-        bytes.extend_from_slice(&body_bytes);
-        // A little trailing slack so the header parser's lookahead is
-        // always satisfied.
-        bytes.extend_from_slice(&[0u8; 4]);
-
-        let header = crate::parse_frame_header(&bytes).unwrap();
-        assert!(!header.dynamic_range);
-        assert!(!header.crc_present);
-        assert_eq!(header.header_bit_length() % 8, 0);
-
-        let pcm = decode_core_frame(&bytes, &header).unwrap();
-        assert_eq!(pcm.len(), 1);
-        // One subframe, one subsubframe -> 8 rows -> 256 PCM samples.
-        assert_eq!(pcm[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        assert!(pcm[0].iter().all(|&s| s == 0));
-    }
-
-    /// The §5.3.2 one-channel NoBits ACH body shared by the tail tests:
-    /// SUBFS=0/PCHS=0/SUBS=0(nSUBS 2)/VQSUB=1(nVQSUB 2)/JOINX=0, all
-    /// codebook selectors 0 except BHUFF=6 (Linear5Bit), the SEL plane,
-    /// and the 10 ADJ groups. When `cpf` is set a 16-bit AHCRC trailer
-    /// is appended (consumed by `decode_audio_coding_header_at`).
-    fn nobits_ach_body(cpf: bool) -> Vec<(u32, u8)> {
-        let mut body: Vec<(u32, u8)> = vec![
-            (0, 4), // SUBFS
-            (0, 3), // PCHS
-            (0, 5), // SUBS -> nSUBS 2
-            (1, 5), // VQSUB -> nVQSUB 2
-            (0, 3), // JOINX
-            (0, 2), // THUFF
-            (0, 3), // SHUFF
-            (6, 3), // BHUFF=6 -> Linear5Bit
-        ];
-        body.push((0, 1)); // SEL ABITS1
-        for _ in 1..5 {
-            body.push((0, 2));
-        }
-        for _ in 5..10 {
-            body.push((0, 3));
-        }
-        for _ in 0..10 {
-            body.push((0, 2)); // ADJ
-        }
-        if cpf {
-            body.push((0, 16)); // AHCRC
-        }
-        body
-    }
-
-    /// The §5.4.1 one-subframe NoBits side-info SCALES block (SSC/PSC,
-    /// 2 PMODE bits, 2 zero ABITS Linear5Bit reads — no SCALES, no HF
-    /// VQ since nVQSUB==nSUBS).
-    fn nobits_side_info() -> Vec<(u32, u8)> {
-        vec![
-            (0, 2), // SSC
-            (0, 3), // PSC
-            (0, 1), // PMODE[0][0]
-            (0, 1), // PMODE[0][1]
-            (0, 5), // ABITS[0][0] = 0
-            (0, 5), // ABITS[0][1] = 0
-        ]
-    }
-
-    /// A frame of two subframes with an LFE: the stream decoder gives the LFE of the whole frame, as long as the
-    /// primary channel, not the last subframe's alone.
-    #[test]
-    fn core_stream_gathers_the_lfe_of_every_subframe() {
-        let hdr_bytes: [u8; 16] = [
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ];
-        let mut header = crate::parse_frame_header(&hdr_bytes).unwrap();
-        header.dynamic_range = false;
-        header.crc_present = false;
-        header.header_crc = None;
-        header.aspf = false;
-        header.lfe = crate::LfeMode::Mode1; // LFF == 1 -> 128x
-        let mut bytes = crate::encode_frame_header_be(&header).unwrap();
-        let mut body = nobits_ach_body(false);
-        body[0] = (1, 4); // SUBFS = 1 -> two subframes
-        for _ in 0..2 {
-            body.extend(nobits_side_info());
-            // §5.5 for nSSC = 1, LFF = 1: two LFE sample bytes and the scale index, then the DSYNC.
-            body.extend([(20, 8), (236, 8), (10, 8), (0xffff, 16)]);
-        }
-        bytes.extend_from_slice(&pack_fields(&body));
-        bytes.extend_from_slice(&[0u8; 4]);
-        let header = crate::parse_frame_header(&bytes).unwrap();
-
-        let mut stream = CoreStreamDecoder::new(1);
-        let pcm = stream.decode_frame(&bytes, &header).unwrap();
-        let lfe = stream.take_last_lfe_pcm();
-        assert_eq!(
-            pcm[0].len(),
-            2 * SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW
-        );
-        assert_eq!(lfe.len(), pcm[0].len());
-    }
-
     /// The first frame of the 5.1 fixture, decoded on a fresh stream decoder: its primary channels and LFE.
     fn surround_frame_pcm(frame: &[u8]) -> (SubframePcm, Vec<i32>) {
-        let header = crate::parse_frame_header(frame).unwrap();
-        let (coding, _) = crate::decode_audio_coding_header_at(
+        let header = crate::header::parse_frame_header(frame).unwrap();
+        let (coding, _) = crate::audio_header::decode_audio_coding_header_at(
             frame,
             header.header_bit_length() as usize,
             header.crc_present,
@@ -1978,16 +1121,17 @@ mod tests {
     #[test]
     fn the_legacy_dynamic_range_gain_is_not_applied() {
         let frame = &SURROUND[..1024];
-        let header = crate::parse_frame_header(frame).unwrap();
+        let header = crate::header::parse_frame_header(frame).unwrap();
         assert!(!header.dynamic_range && !header.crc_present);
         let header_bits = header.header_bit_length() as usize;
         let (coding, ach_bits) =
-            crate::decode_audio_coding_header_at(frame, header_bits, false).unwrap();
+            crate::audio_header::decode_audio_coding_header_at(frame, header_bits, false).unwrap();
         assert_eq!(coding.n_subframes, 1);
         assert!(coding.joinx.iter().all(|&j| j == 0));
         let at = header_bits + ach_bits;
         let (_, side_bits) =
-            crate::decode_primary_side_info_at(frame, at, &coding.channel_params).unwrap();
+            crate::subframe::decode_primary_side_info_at(frame, at, &coding.channel_params)
+                .unwrap();
 
         // The 8-bit RANGE code goes where the side-info tail starts: -20 dB.
         let mut bits = bits_of(frame);
@@ -1996,7 +1140,7 @@ mod tests {
         put_bits(&mut bits, FSIZE_BIT, 14, 1024);
         let compressed = bytes_of(&bits);
         assert!(
-            crate::parse_frame_header(&compressed)
+            crate::header::parse_frame_header(&compressed)
                 .unwrap()
                 .dynamic_range
         );
@@ -2014,7 +1158,7 @@ mod tests {
         // Sync, 7-bit size - 1, the ES, broadcast, DRC and dialnorm flags, the DRC version, then one code per
         // subsubframe (two: -20 dB each), zero-padded to the CRC.
         let size = 8usize;
-        let mut chunk = crate::REV2_AUX_SYNC_WORD.to_be_bytes().to_vec();
+        let mut chunk = crate::rev2_aux::REV2_AUX_SYNC_WORD.to_be_bytes().to_vec();
         let mut fields = vec![0u8; 7 + 4 + 4];
         let size_code = size as u32 - 1;
         put_bits(&mut fields, 0, 7, size_code);
@@ -2023,22 +1167,22 @@ mod tests {
             &mut fields,
             11,
             4,
-            u32::from(crate::REV2_DRC_VERSION_SINGLE_BAND),
+            u32::from(crate::rev2_aux::REV2_DRC_VERSION_SINGLE_BAND),
         );
         fields.resize(16, 0); // nByteAlign0
         fields.extend(bits_of(&[0xB0, 0xB0]));
         fields.resize((size - 2) * 8, 0);
         chunk.extend(bytes_of(&fields));
-        let crc = crate::dts_crc16(&chunk[4..]);
+        let crc = crate::crc16::dts_crc16(&chunk[4..]);
         chunk.extend(crc.to_be_bytes());
 
         let mut bits = bits_of(frame);
         put_bits(&mut bits, FSIZE_BIT, 14, (1024 + chunk.len() - 1) as u32);
         let mut compressed = bytes_of(&bits);
         compressed.extend(&chunk);
-        let found = crate::parse_rev2_aux(
+        let found = crate::rev2_aux::parse_rev2_aux(
             &compressed,
-            &crate::parse_frame_header(&compressed).unwrap(),
+            &crate::header::parse_frame_header(&compressed).unwrap(),
         )
         .unwrap()
         .unwrap();
@@ -2048,258 +1192,6 @@ mod tests {
             surround_frame_pcm(&compressed) == surround_frame_pcm(frame),
             "the gain was applied"
         );
-    }
-
-    /// A frame whose header sets `CPF` (a 16-bit `SICRC` side-info tail)
-    /// now decodes end to end: the `SICRC` word is consumed for framing
-    /// (its CRC test is not applied per §5.4.1) and the §5.5 region lands
-    /// at the right cursor, yielding all-zero PCM of the right length.
-    #[test]
-    fn decode_core_frame_consumes_sicrc_tail() {
-        let mut bytes = encode_clean_header(false, true); // DYNF=0, CPF=1
-        let mut body = nobits_ach_body(true);
-        body.extend(nobits_side_info());
-        body.push((0xABCD, 16)); // SICRC (CPF=1) — consumed, not verified
-        body.push((0xffff, 16)); // §5.5 DSYNC
-        let body_bytes = pack_fields(&body);
-        bytes.extend_from_slice(&body_bytes);
-        bytes.extend_from_slice(&[0u8; 4]);
-
-        let header = crate::parse_frame_header(&bytes).unwrap();
-        assert!(header.crc_present);
-
-        let pcm = decode_core_frame(&bytes, &header).unwrap();
-        assert_eq!(pcm.len(), 1);
-        assert_eq!(pcm[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        assert!(pcm[0].iter().all(|&s| s == 0));
-    }
-
-    /// A frame whose header sets `DYNF` carries an 8-bit `RANGE` code in
-    /// each subframe's side-info tail; `decode_core_frame` consumes it
-    /// and (for a non-unity code) the signed-Q2 linear gain scales the
-    /// PCM. With an all-zero (NoBits) subframe the PCM is zero
-    /// regardless of `RANGE`, which proves only the framing/cursor is
-    /// correct; the gain itself is not applied
-    /// (`the_legacy_dynamic_range_gain_is_not_applied`).
-    #[test]
-    fn decode_core_frame_consumes_range_tail() {
-        let mut bytes = encode_clean_header(true, false); // DYNF=1, CPF=0
-        let mut body = nobits_ach_body(false);
-        body.extend(nobits_side_info());
-        body.push((0, 8)); // RANGE code 0 -> unity (no SICRC, CPF=0)
-        body.push((0xffff, 16)); // §5.5 DSYNC
-        let body_bytes = pack_fields(&body);
-        bytes.extend_from_slice(&body_bytes);
-        bytes.extend_from_slice(&[0u8; 4]);
-
-        let header = crate::parse_frame_header(&bytes).unwrap();
-        assert!(header.dynamic_range);
-
-        let pcm = decode_core_frame(&bytes, &header).unwrap();
-        assert_eq!(pcm.len(), 1);
-        assert_eq!(pcm[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        assert!(pcm[0].iter().all(|&s| s == 0));
-    }
-
-    /// A frame with a single `JOINX = 1` channel that references itself
-    /// (source == destination, equal `nSUBS`) has an empty joint import
-    /// range: the JOIN_SHUFF selector is read but no JOIN_SCALES follow,
-    /// and the frame decodes normally (no more decline). This exercises
-    /// the JOIN_SHUFF read on the decode path without needing a source
-    /// channel wider than the destination.
-    #[test]
-    fn decode_core_frame_joint_self_empty_range_decodes() {
-        let mut bytes = encode_clean_header(false, false);
-        // ACH mirrors decode_core_frame_no_bits_round_trips but sets
-        // JOINX[0] = 1 (source channel 0 == self); nSUBS[0] == nSUBS[src]
-        // so the joint import range is empty. The JOIN_SHUFF selector is
-        // still read from the side-info tail; no JOIN_SCALES follow.
-        let mut body: Vec<(u32, u8)> = vec![
-            (0, 4), // SUBFS
-            (0, 3), // PCHS
-            (0, 5), // SUBS  -> nSUBS = 2
-            (1, 5), // VQSUB -> nVQSUB = 2 (== nSUBS, Core case)
-            (1, 3), // JOINX = 1 (source channel 0 == self)
-            (0, 2), // THUFF
-            (0, 3), // SHUFF
-            (6, 3), // BHUFF=6 -> Linear5Bit
-        ];
-        body.push((0, 1)); // SEL ABITS1
-        for _ in 1..5 {
-            body.push((0, 2));
-        }
-        for _ in 5..10 {
-            body.push((0, 3));
-        }
-        for _ in 0..10 {
-            body.push((0, 2)); // ADJ
-        }
-
-        // §5.4.1 side info, one subframe (as in the no-bits round trip).
-        body.push((0, 2)); // SSC
-        body.push((0, 3)); // PSC
-        body.push((0, 1)); // PMODE[0][0]
-        body.push((0, 1)); // PMODE[0][1]
-        body.push((0, 5)); // ABITS[0][0] = 0
-        body.push((0, 5)); // ABITS[0][1] = 0
-
-        // §5.4.1 tail: JOINX[0] > 0 -> a 3-bit JOIN_SHUFF[0] precedes the
-        // (absent) RANGE/SICRC. The empty import range emits no
-        // JOIN_SCALES.
-        body.push((0, 3)); // JOIN_SHUFF[0] = SA129
-
-        // §5.5 Audio Data: all ABITS 0 -> NoBits -> just the DSYNC.
-        body.push((0xffff, 16));
-
-        let body_bytes = pack_fields(&body);
-        bytes.extend_from_slice(&body_bytes);
-        bytes.extend_from_slice(&[0u8; 4]);
-
-        let header = crate::parse_frame_header(&bytes).unwrap();
-        // No longer declined: the empty-range joint frame decodes.
-        let pcm = decode_core_frame(&bytes, &header).unwrap();
-        assert_eq!(pcm.len(), 1);
-        // All-zero side info -> all-zero subband samples -> silent PCM.
-        assert!(pcm[0].iter().all(|&s| s == 0));
-    }
-
-    /// Build a complete one-channel all-`ABITS==0` (NoBits) raw-BE Core
-    /// frame — the same proven layout `decode_core_frame_no_bits_round_trips`
-    /// uses — with a signed-Q2 `RANGE` code optionally injected, read
-    /// for framing though not applied, over silent §5.5 audio
-    /// data. When `dynf` is `false` no `RANGE` field is
-    /// present and the frame decodes to all-zero PCM.
-    fn build_nobits_frame(dynf: bool, range_index: u8) -> Vec<u8> {
-        let mut header = crate::parse_frame_header(&[
-            0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x3f, 0xf0, 0xb5, 0xe0, 0x01, 0x38, 0x00, 0x03,
-            0xef, 0x7f,
-        ])
-        .unwrap();
-        header.dynamic_range = dynf;
-        header.crc_present = false;
-        header.header_crc = None;
-        header.aspf = false;
-        let mut bytes = crate::encode_frame_header_be(&header).unwrap();
-
-        // §5.3.2 ACH: one channel, nSUBS=2/nVQSUB=2, BHUFF=6 Linear5Bit,
-        // SEL plane all zero (every group transmits a 2-bit ADJ), 10 ADJ.
-        let mut body: Vec<(u32, u8)> = vec![
-            (0, 4), // SUBFS -> 1 subframe
-            (0, 3), // PCHS -> 1 channel
-            (0, 5), // SUBS -> nSUBS 2
-            (1, 5), // VQSUB -> nVQSUB 2
-            (0, 3), // JOINX
-            (0, 2), // THUFF
-            (0, 3), // SHUFF
-            (6, 3), // BHUFF=6 Linear5Bit
-        ];
-        body.push((0, 1)); // SEL ABITS1
-        for _ in 1..5 {
-            body.push((0, 2));
-        }
-        for _ in 5..10 {
-            body.push((0, 3));
-        }
-        for _ in 0..10 {
-            body.push((0, 2)); // ADJ
-        }
-
-        // §5.4.1 side info: SSC/PSC, 2 PMODE bits, 2 zero ABITS reads.
-        body.push((0, 2)); // SSC -> nSSC 1
-        body.push((0, 3)); // PSC
-        body.push((0, 1)); // PMODE[0][0]
-        body.push((0, 1)); // PMODE[0][1]
-        body.push((0, 5)); // ABITS[0][0] = 0
-        body.push((0, 5)); // ABITS[0][1] = 0
-
-        // Table 5-28 tail: an 8-bit RANGE index when DYNF (CPF=0 so no
-        // SICRC), then the §5.5 DSYNC trailer.
-        if dynf {
-            body.push((range_index as u32, 8));
-        }
-        body.push((0xffff, 16)); // DSYNC
-
-        bytes.extend_from_slice(&pack_fields(&body));
-        bytes.extend_from_slice(&[0u8; 4]);
-        bytes
-    }
-
-    /// [`CoreStreamDecoder::decode_frame`] reproduces the standalone
-    /// [`decode_core_frame`] result frame-for-frame (the per-frame body
-    /// is the shared [`SubframePcmDecoder::decode_core_frame_into`]); the
-    /// difference is only in the persistent filter state carried between
-    /// calls, which an all-zero stream cannot expose, so this pins the
-    /// per-frame equivalence.
-    #[test]
-    fn core_stream_decode_matches_decode_core_frame_per_frame() {
-        let f0 = build_nobits_frame(false, 0);
-        let f1 = build_nobits_frame(false, 0);
-        let h0 = crate::parse_frame_header(&f0).unwrap();
-        let h1 = crate::parse_frame_header(&f1).unwrap();
-
-        let mut stream = CoreStreamDecoder::new(1);
-        let s0 = stream.decode_frame(&f0, &h0).unwrap();
-        let s1 = stream.decode_frame(&f1, &h1).unwrap();
-        assert_eq!(stream.channel_count(), 1);
-
-        // Each frame matches the fresh-per-frame decode (silent stream:
-        // the carried filter tail is zero, so the two paths agree).
-        assert_eq!(s0, decode_core_frame(&f0, &h0).unwrap());
-        assert_eq!(s1, decode_core_frame(&f1, &h1).unwrap());
-        assert_eq!(s0[0].len(), SAMPLES_PER_SUBSUBFRAME * PCM_PER_SUBBAND_ROW);
-        assert!(s0[0].iter().all(|&v| v == 0));
-    }
-
-    /// [`CoreStreamDecoder`] reuses one persistent per-channel §C.2.5
-    /// filter across frames rather than resetting it — the structural
-    /// precondition for inter-frame filter continuity. (The end-to-end
-    /// proof that this makes our PCM shape-identical to a black-box
-    /// `ffmpeg -c:a dca` reference decode of a real multi-frame stream is
-    /// the `decodes_real_fixture_stream_matching_ffmpeg_shape`
-    /// integration test; with non-zero §5.5 audio the carried tail
-    /// changes the next frame's leading samples, which an all-`ABITS==0`
-    /// synthetic frame cannot exercise.)
-    #[test]
-    fn core_stream_reuses_persistent_filter_across_frames() {
-        let f0 = build_nobits_frame(false, 0);
-        let f1 = build_nobits_frame(false, 0);
-        let h0 = crate::parse_frame_header(&f0).unwrap();
-        let h1 = crate::parse_frame_header(&f1).unwrap();
-        let mut stream = CoreStreamDecoder::new(1);
-
-        // The same filter object (and its history) must survive a decode:
-        // a silent stream leaves the history all-zero, so we assert the
-        // decoder neither panics nor reallocates the channel filters.
-        let _ = stream.decode_frame(&f0, &h0).unwrap();
-        assert_eq!(stream.subframe_decoder().qmf().channel_count(), 1);
-        let _ = stream.decode_frame(&f1, &h1).unwrap();
-        assert_eq!(stream.subframe_decoder().qmf().channel_count(), 1);
-        assert!(
-            stream
-                .subframe_decoder()
-                .qmf()
-                .channels()
-                .iter()
-                .all(|q| q.x_history().iter().all(|&v| v == 0.0))
-        );
-    }
-
-    /// A [`CoreStreamDecoder`] built for the wrong channel count rejects
-    /// a frame whose `nPCHS` disagrees, without panicking.
-    #[test]
-    fn core_stream_channel_count_mismatch_rejected() {
-        let frame = build_nobits_frame(false, 0);
-        let header = crate::parse_frame_header(&frame).unwrap();
-        // The frame is one channel; a 2-channel decoder must decline.
-        let mut stream = CoreStreamDecoder::new(2);
-        let err = stream.decode_frame(&frame, &header).unwrap_err();
-        assert!(matches!(
-            err,
-            CoreFrameDecodeError::Decode(SubframePcmError::ChannelCountMismatch {
-                expected: 2,
-                got: 1
-            })
-        ));
     }
 
     /// A pure unit test of the §C.2.4 matrix: feeding a two-channel pair
@@ -2360,51 +1252,5 @@ mod tests {
             assert_eq!((left[27], right[27]), (5.0, 5.0));
         }
         assert_eq!(n_subs, [28, 28]);
-    }
-
-    /// End-to-end: forcing the `SUMF` flag on a real fixture frame routes
-    /// the §C.2.4 front sum/difference decode through the full
-    /// reconstruction chain. The bundled fixture's two channels are
-    /// identical at the sub-band level (`L == R`), so the matrix produces
-    /// `(L+R, L-R) = (2L, 0)`: the difference channel decodes to **exact
-    /// silence**, and — since the §C.2.5 QMF is linear over cleared
-    /// per-frame history — the sum channel is twice the un-summed decode
-    /// (within the ±1 truncation of the integer output cast).
-    #[test]
-    fn sumf_forced_zeros_difference_channel_on_real_fixture() {
-        const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/dts_5_frames.bin");
-        let frame = &FIXTURE[0..1024];
-        let header = crate::parse_frame_header(frame).unwrap();
-        // The fixture is AMODE 2 (Stereo) with the sum flags clear.
-        assert_eq!(header.amode_arrangement(), AmodeArrangement::Stereo);
-        assert!(!header.front_sum && !header.surround_sum);
-
-        // Baseline decode (fresh, cleared history).
-        let base = decode_core_frame(frame, &header).unwrap();
-        assert_eq!(base.len(), 2);
-        assert_eq!(base[0], base[1], "fixture channels are identical");
-        assert!(base[0].iter().any(|&s| s != 0), "baseline is non-silent");
-
-        // Force SUMF and decode the same bytes.
-        let mut sumf_header = header;
-        sumf_header.front_sum = true;
-        let sumf = decode_core_frame(frame, &sumf_header).unwrap();
-
-        // Difference channel (ch1 = L - R = 0) is exactly silent.
-        assert!(
-            sumf[1].iter().all(|&s| s == 0),
-            "SUMF difference channel must decode to exact silence when L == R"
-        );
-        // Sum channel (ch0 = L + R = 2L) ~= twice the baseline, within the
-        // integer output cast's ±1 truncation slack.
-        for (i, (&s, &b)) in sumf[0].iter().zip(&base[0]).enumerate() {
-            let diff = (i64::from(s) - 2 * i64::from(b)).abs();
-            assert!(
-                diff <= 1,
-                "sum channel sample {i}: got {s}, expected ~{} (2x baseline)",
-                2 * b
-            );
-        }
-        assert!(sumf[0].iter().any(|&s| s != 0), "sum channel is non-silent");
     }
 }

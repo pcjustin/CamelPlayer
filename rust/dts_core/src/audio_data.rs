@@ -48,7 +48,7 @@
 //!   quantization indices read directly from the bit stream;
 //! * [`AudioQuantType::BlockCode`] → two block-code words, each
 //!   expanded to four samples by the round-232
-//!   [`crate::decode_block_code`].
+//!   [`crate::block_code::decode_block_code`].
 //!
 //! # Scope and follow-ups
 //!
@@ -164,7 +164,7 @@ pub enum AudioQuantType {
     /// `nQType == 3` — "Block code" (`ABITS <= 7` with `SEL` at the
     /// group's terminal `V…` entry): two block-code words follow, each
     /// expanded to four samples by the §C.2.1 block-code book
-    /// ([`crate::decode_block_code`]).
+    /// ([`crate::block_code::decode_block_code`]).
     BlockCode,
 }
 
@@ -388,7 +388,7 @@ mod tests {
     fn block_code_two_words_of_four_equals_eight_samples() {
         // The §5.5 block-code path expands two code words to four
         // samples each, matching SAMPLES_PER_SUBSUBFRAME = 8.
-        assert_eq!(crate::SAMPLES_PER_SUBSUBFRAME, 8);
+        assert_eq!(crate::step_size::SAMPLES_PER_SUBSUBFRAME, 8);
     }
 
     #[test]

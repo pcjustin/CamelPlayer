@@ -178,7 +178,7 @@ pub fn pack_16bit_to_14bit(input: &[u8], order: FourteenBitByteOrder) -> (Vec<u8
 /// requested [`FourteenBitByteOrder`]; the lower 14 bits of each
 /// container are concatenated MSB-first and re-packed into a
 /// big-endian byte stream. The output is suitable to feed straight
-/// into [`crate::parse_frame_header`].
+/// into [`crate::header::parse_frame_header`].
 ///
 /// The input length must be even (each 14-bit container occupies
 /// exactly two input bytes); an odd length returns

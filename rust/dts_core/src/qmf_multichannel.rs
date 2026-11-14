@@ -11,7 +11,7 @@
 //! ```
 //!
 //! where `aPrmCh[ch]` is the persistent per-channel filter object
-//! ([`crate::QmfSynthesis`]) and `nSUBS[ch]` is that channel's count of
+//! ([`crate::qmf_synth::QmfSynthesis`]) and `nSUBS[ch]` is that channel's count of
 //! active subbands (§C.2.5: "higher subbands zero; joint-intensity-coded
 //! subbands take the source channel's value"). `FILTS` (the §5.3.1
 //! Table 5-15 "Multirate Interpolator Switch") is a single frame-header
@@ -36,13 +36,13 @@
 //! step — the only spec construct it materialises is the channel loop
 //! around `aPrmCh[ch].QMFInterpolation(...)` and the planar/interleaved
 //! arrangement of the per-channel `naCh[]` outputs. The header-sourced
-//! `FILTS` / `rScale` come from [`crate::DtsFrameHeader`] accessors
-//! ([`crate::DtsFrameHeader::filter_bank_selection`] /
-//! [`crate::DtsFrameHeader::output_r_scale`]) per the round-335 bridge.
+//! `FILTS` / `rScale` come from [`crate::header::DtsFrameHeader`] accessors
+//! ([`crate::header::DtsFrameHeader::filter_bank_selection`] /
+//! [`crate::header::DtsFrameHeader::output_r_scale`]) per the round-335 bridge.
 
 use crate::cos_mod::NUM_SUBBAND;
 use crate::filter_bank::FilterBankSelection;
-use crate::qmf_assemble::{PCM_OUTPUT_PER_SAMPLE, QmfAssembleError};
+use crate::qmf_assemble::QmfAssembleError;
 use crate::qmf_synth::QmfSynthesis;
 
 /// Errors specific to the multi-channel synthesis driver, layered over
@@ -138,7 +138,7 @@ impl MultiChannelQmf {
     /// per-channel filter's initial state before the first subframe).
     ///
     /// `channels` is the frame's audio-channel count — e.g. the value
-    /// from [`crate::DtsFrameHeader::channel_count`]. A zero-channel
+    /// from [`crate::header::DtsFrameHeader::channel_count`]. A zero-channel
     /// driver is permitted (it produces no output) for callers that
     /// resolve the channel count dynamically.
     #[must_use]
@@ -152,14 +152,6 @@ impl MultiChannelQmf {
     #[must_use]
     pub fn channel_count(&self) -> usize {
         self.channels.len()
-    }
-
-    /// Borrow the per-channel [`QmfSynthesis`] filter objects (the
-    /// §C.2.5 `aPrmCh[]` array). Exposed for callers that want to
-    /// inspect or checkpoint a channel's inter-frame filter tail.
-    #[must_use]
-    pub fn channels(&self) -> &[QmfSynthesis] {
-        &self.channels
     }
 
     /// Run the §C.2.5 per-channel `QMFInterpolation()` call for every
@@ -211,91 +203,6 @@ impl MultiChannelQmf {
             .map_err(|source| MultiChannelQmfError::Channel { ch, source })?;
         }
         Ok(())
-    }
-
-    /// Run the §C.2.5 per-channel call for every channel and append the
-    /// result **interleaved** (sample-major: for each output sample
-    /// index, channel 0's value then channel 1's, …) to `output`.
-    ///
-    /// All channels emit the same number of PCM samples
-    /// (`rows * 32`), so the interleaving is well-defined: the output
-    /// length grows by `channels * rows * 32`. Arguments otherwise
-    /// match [`MultiChannelQmf::synthesize_planar`].
-    ///
-    /// # Errors
-    ///
-    /// Same as [`MultiChannelQmf::synthesize_planar`]. With zero
-    /// channels this is a no-op.
-    pub fn synthesize_interleaved(
-        &mut self,
-        channel_samples: &[&[[f64; NUM_SUBBAND]]],
-        n_subs: &[usize],
-        filter: FilterBankSelection,
-        r_scale: f64,
-        output: &mut Vec<i32>,
-    ) -> Result<(), MultiChannelQmfError> {
-        let channels = self.channels.len();
-        self.check_lengths(channel_samples, n_subs, channels)?;
-        if channels == 0 {
-            return Ok(());
-        }
-
-        // Every channel produces `rows * 32` samples (verified equal by
-        // check_lengths' row-count check). Synthesize each channel into
-        // a scratch planar buffer, then interleave.
-        let rows = channel_samples[0].len();
-        let per_channel = rows * PCM_OUTPUT_PER_SAMPLE;
-
-        let mut planar: Vec<Vec<i32>> = (0..channels)
-            .map(|_| Vec::with_capacity(per_channel))
-            .collect();
-        for (ch, q) in self.channels.iter_mut().enumerate() {
-            q.synthesize(
-                channel_samples[ch],
-                n_subs[ch],
-                filter,
-                r_scale,
-                &mut planar[ch],
-            )
-            .map_err(|source| MultiChannelQmfError::Channel { ch, source })?;
-        }
-
-        output.reserve(channels * per_channel);
-        for s in 0..per_channel {
-            for plane in &planar {
-                output.push(plane[s]);
-            }
-        }
-        Ok(())
-    }
-
-    /// Convenience: drive [`MultiChannelQmf::synthesize_planar`] with
-    /// the two frame-wide §C.2.5 parameters sourced directly from a
-    /// parsed [`crate::DtsFrameHeader`] — `FILTS` via
-    /// [`crate::DtsFrameHeader::filter_bank_selection`] and the output
-    /// `rScale` via [`crate::DtsFrameHeader::output_r_scale`] (the
-    /// round-335 header bridge).
-    ///
-    /// # Errors
-    ///
-    /// Returns `Ok(None)` if the header's `PCMR` code is one of the two
-    /// reserved values (so [`crate::DtsFrameHeader::output_r_scale`]
-    /// yields `None` and no full-scale gain is defined); otherwise
-    /// runs the synthesis and returns `Ok(Some(()))`, or the same
-    /// errors as [`MultiChannelQmf::synthesize_planar`].
-    pub fn synthesize_planar_from_header(
-        &mut self,
-        header: &crate::header::DtsFrameHeader,
-        channel_samples: &[&[[f64; NUM_SUBBAND]]],
-        n_subs: &[usize],
-        output: &mut [Vec<i32>],
-    ) -> Result<Option<()>, MultiChannelQmfError> {
-        let Some(r_scale) = header.output_r_scale() else {
-            return Ok(None);
-        };
-        let filter = header.filter_bank_selection();
-        self.synthesize_planar(channel_samples, n_subs, filter, r_scale, output)?;
-        Ok(Some(()))
     }
 
     /// Validate the per-channel slice lengths and equal-row-count
@@ -391,55 +298,6 @@ mod tests {
         assert!(planar.iter().any(|p| p.iter().any(|&s| s != 0)));
     }
 
-    /// Interleaved output is the planar output transposed sample-major:
-    /// `interleaved[s*channels + ch] == planar[ch][s]`.
-    #[test]
-    fn interleaved_is_planar_transposed() {
-        let channels = 2;
-        let filter = FilterBankSelection::NonPerfectReconstruction;
-        let r_scale = 8192.0;
-        let n_subs = [5usize, 3];
-
-        let rows0: Vec<[f64; NUM_SUBBAND]> = (0..4)
-            .map(|s| {
-                let mut r = [0.0; NUM_SUBBAND];
-                r[0] = (s as f64 + 1.0) * 1e5;
-                r
-            })
-            .collect();
-        let rows1: Vec<[f64; NUM_SUBBAND]> = (0..4)
-            .map(|s| {
-                let mut r = [0.0; NUM_SUBBAND];
-                r[1] = (s as f64 + 1.0) * -1e5;
-                r
-            })
-            .collect();
-        let refs: Vec<&[[f64; NUM_SUBBAND]]> = vec![rows0.as_slice(), rows1.as_slice()];
-
-        let mut mc_p = MultiChannelQmf::new(channels);
-        let mut planar = vec![Vec::new(); channels];
-        mc_p.synthesize_planar(&refs, &n_subs, filter, r_scale, &mut planar)
-            .unwrap();
-
-        let mut mc_i = MultiChannelQmf::new(channels);
-        let mut interleaved = Vec::new();
-        mc_i.synthesize_interleaved(&refs, &n_subs, filter, r_scale, &mut interleaved)
-            .unwrap();
-
-        let per_channel = planar[0].len();
-        assert_eq!(interleaved.len(), channels * per_channel);
-        for s in 0..per_channel {
-            for (ch, plane) in planar.iter().enumerate() {
-                assert_eq!(
-                    interleaved[s * channels + ch],
-                    plane[s],
-                    "interleave mismatch at sample {s} channel {ch}"
-                );
-            }
-        }
-        assert!(interleaved.iter().any(|&s| s != 0));
-    }
-
     /// Persisting one [`MultiChannelQmf`] across two calls equals a
     /// single call over the concatenated per-channel input — every
     /// channel's inter-frame filter tail (`raX[]`) carries across calls.
@@ -487,57 +345,6 @@ mod tests {
         assert!(single.iter().any(|p| p.iter().any(|&s| s != 0)));
     }
 
-    /// Length-mismatch errors are returned before any channel's filter
-    /// state is touched.
-    #[test]
-    fn length_mismatches_are_rejected_before_synthesis() {
-        let mut mc = MultiChannelQmf::new(2);
-        let rows = vec![[0.0_f64; NUM_SUBBAND]; 2];
-        let refs: Vec<&[[f64; NUM_SUBBAND]]> = vec![rows.as_slice(), rows.as_slice()];
-
-        // n_subs too short.
-        let mut out = vec![Vec::new(); 2];
-        assert_eq!(
-            mc.synthesize_planar(
-                &refs,
-                &[4],
-                FilterBankSelection::PerfectReconstruction,
-                1.0,
-                &mut out
-            )
-            .unwrap_err(),
-            MultiChannelQmfError::NSubsLenMismatch {
-                channels: 2,
-                got: 1
-            }
-        );
-
-        // channel-slices count wrong.
-        let one: Vec<&[[f64; NUM_SUBBAND]]> = vec![rows.as_slice()];
-        assert_eq!(
-            mc.synthesize_planar(
-                &one,
-                &[4, 4],
-                FilterBankSelection::PerfectReconstruction,
-                1.0,
-                &mut out
-            )
-            .unwrap_err(),
-            MultiChannelQmfError::ChannelSlicesLenMismatch {
-                channels: 2,
-                got: 1
-            }
-        );
-
-        // No output written, filters untouched.
-        assert!(out.iter().all(|p| p.is_empty()));
-        assert!(
-            mc.channels()
-                .iter()
-                .all(|q| q.x_history().iter().all(|&v| v == 0.0))
-        );
-    }
-
     /// Channels with differing row counts are rejected (the §C.2.5
     /// outer loop runs identically for every channel of one frame).
     #[test]
@@ -562,34 +369,5 @@ mod tests {
                 got: 3
             }
         );
-    }
-
-    /// A zero-channel driver is a no-op for both layouts.
-    #[test]
-    fn zero_channels_is_a_noop() {
-        let mut mc = MultiChannelQmf::new(0);
-        assert_eq!(mc.channel_count(), 0);
-
-        let mut planar: Vec<Vec<i32>> = Vec::new();
-        mc.synthesize_planar(
-            &[],
-            &[],
-            FilterBankSelection::PerfectReconstruction,
-            1.0,
-            &mut planar,
-        )
-        .unwrap();
-        assert!(planar.is_empty());
-
-        let mut interleaved = Vec::new();
-        mc.synthesize_interleaved(
-            &[],
-            &[],
-            FilterBankSelection::PerfectReconstruction,
-            1.0,
-            &mut interleaved,
-        )
-        .unwrap();
-        assert!(interleaved.is_empty());
     }
 }

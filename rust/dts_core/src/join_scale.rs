@@ -40,11 +40,6 @@
 /// depends on the code-book symbol range.
 pub const JOIN_SCALE_LEN: usize = 129;
 
-/// The §D.3 unity-gain index (`JOIN_SCALES == 1.0`). A `QSCALES` symbol
-/// of `0` biased by 64 lands here, meaning "copy the source sub-band
-/// with no scaling".
-pub const JOIN_SCALE_UNITY_INDEX: usize = 64;
-
 /// §D.3 "Scale Factor for Joint Intensity Coding" table (`JScaleTbl`),
 /// indexed by the biased `nJScale` (`InverseQ` symbol + 64). Entry `i`
 /// is the linear scale factor applied to a sub-band sample copied from
@@ -93,14 +88,6 @@ mod tests {
     fn table_has_129_entries() {
         assert_eq!(JOIN_SCALE_FACTOR.len(), 129);
         assert_eq!(JOIN_SCALE_LEN, 129);
-    }
-
-    #[test]
-    fn unity_at_index_64() {
-        // §D.3: index 64 -> Scale Factor 1.0. The +64 bias means a
-        // QSCALES symbol of 0 resolves to unity ("copy unchanged").
-        assert_eq!(join_scale(64), Some(1.0));
-        assert_eq!(JOIN_SCALE_UNITY_INDEX, 64);
     }
 
     #[test]

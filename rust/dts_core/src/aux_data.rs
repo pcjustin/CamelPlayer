@@ -51,12 +51,12 @@
 //! `3/0`+`2/1 → 3`, `2/2`+`3/1 → 4`, `Unused → 0`. The coefficients
 //! are packed as an N×M table walked output-channel-major
 //! (`for nIndPrmCh ... for nIndXCh`), each a 9-bit code resolved
-//! through [`crate::decode_dmix_code`] into the §D.11 `DmixTable`.
+//! through [`crate::dmix_coeff::decode_dmix_code`] into the §D.11 `DmixTable`.
 //!
 //! The `nAUXCRC16` value "is calculated for the auxiliary data from
 //! positions bAUXTimeStampFlag to the byte prior to the start of the
 //! CRC inclusive" using the Annex B algorithm (CRC-CCITT, polynomial
-//! `0x1021`, init `0xFFFF` — see [`crate::dts_crc16`] and
+//! `0x1021`, init `0xFFFF` — see [`crate::crc16::dts_crc16`] and
 //! `docs/audio/dts/dts-crc16.md`). `bAUXTimeStampFlag` begins on a
 //! byte boundary (right after the 32-bit sync word) and the
 //! `ByteAlign` pad closes the region on one, so the coverage span is
@@ -69,7 +69,7 @@
 use crate::bitreader::BitReader;
 use crate::crc16::dts_crc16;
 use crate::header::DtsFrameHeader;
-use crate::{Error, Result, decode_dmix_code};
+use crate::{Error, Result, dmix_coeff::decode_dmix_code};
 
 /// The §5.7.1 auxiliary-data sync word (`nSYNCAUX`), DWORD-aligned
 /// from the beginning of the core frame.
@@ -188,7 +188,7 @@ impl DynamicDownmix {
 
     /// The real-valued coefficient folding input channel `in_ch` into
     /// output channel `out_ch`, resolved through
-    /// [`crate::decode_dmix_code`] (§D.11 `DmixTable`, phase MSB,
+    /// [`crate::dmix_coeff::decode_dmix_code`] (§D.11 `DmixTable`, phase MSB,
     /// one-biased index, `0` → exact `0.0`).
     ///
     /// # Errors
@@ -285,7 +285,7 @@ pub struct AuxData {
     /// `bAUXDynamCoeffFlag` is set).
     pub dynamic_downmix: Option<DynamicDownmix>,
     /// The raw 16-bit `nAUXCRC16` word (Annex B CRC-CCITT, see
-    /// [`crate::dts_crc16`]).
+    /// [`crate::crc16::dts_crc16`]).
     pub crc16: u16,
     /// Whether [`Self::crc16`] matches the Annex B CRC-16 recomputed
     /// over the chunk's protected region — "the auxiliary data from

@@ -18,7 +18,7 @@
 //! FIR, and `raCoeff128`, the 128x-interpolation LFE FIR) are defined
 //! in §D.8 "32-Band Interpolation and LFE Interpolation FIR" (staged
 //! PDF p.238-246) and transcribed at the crate root as
-//! [`crate::RA_COEFF_LFE64`] / [`crate::RA_COEFF_LFE128`]. Both are
+//! [`crate::lfe_fir_coeff::RA_COEFF_LFE64`] / [`crate::lfe_fir_coeff::RA_COEFF_LFE128`]. Both are
 //! 512 taps (`NumFIRCoef = 512`, §C.2.6).
 //!
 //! This module exposes the §C.2.6 selection step as a typed
@@ -27,13 +27,13 @@
 //! mirrors the spec's `if (nDecimationSelect == 1) … else …` branch,
 //! and [`LfeInterpolationSelection::coefficients`] resolves the
 //! selection to the matching §D.8 512-tap table — exactly the
-//! companion of [`crate::FilterBankSelection`] for the LFE path.
+//! companion of [`crate::filter_bank::FilterBankSelection`] for the LFE path.
 //!
 //! # Driver-body scope
 //!
 //! This module lands the table *selection* and the table *data*. The
 //! §C.2.6 `InterpolationFIR()` per-sample polyphase convolution loop
-//! **body** is implemented in [`crate::LfeInterpolator`]
+//! **body** is implemented in [`crate::lfe_synth::LfeInterpolator`]
 //! (`src/lfe_synth.rs`), transcribed from
 //! `docs/audio/dts/dts-lfe-interpolation-and-audio-walker.md` §1. LFE
 //! samples are pre-scaled at dequant time
@@ -47,8 +47,8 @@
 ///
 /// Each variant names exactly one of the two §D.8 LFE-interpolation
 /// columns ("64 x Interpolation" / "128 x Interpolation",
-/// PDF p.238-246), transcribed as [`crate::RA_COEFF_LFE64`] /
-/// [`crate::RA_COEFF_LFE128`] and reachable through
+/// PDF p.238-246), transcribed as [`crate::lfe_fir_coeff::RA_COEFF_LFE64`] /
+/// [`crate::lfe_fir_coeff::RA_COEFF_LFE128`] and reachable through
 /// [`Self::coefficients`]. The variant names mirror the spec
 /// pseudocode's identifiers (`raCoeff64` for the 64x set,
 /// `raCoeff128` for the 128x set) rendered in idiomatic Rust.
@@ -85,23 +85,6 @@ impl LfeInterpolationSelection {
         }
     }
 
-    /// Inverse of [`Self::from_decimation_select`]: the **canonical**
-    /// `nDecimationSelect` value the §C.2.6 driver reads to select
-    /// this coefficient set.
-    ///
-    /// Returns `0` for [`LfeInterpolationSelection::Decimation64`]
-    /// (the `else` branch's canonical representative; the driver
-    /// collapses every non-`1` value to the same branch, so `0` is the
-    /// natural choice) and `1` for
-    /// [`LfeInterpolationSelection::Decimation128`].
-    #[must_use]
-    pub fn decimation_select(self) -> u8 {
-        match self {
-            LfeInterpolationSelection::Decimation64 => 0,
-            LfeInterpolationSelection::Decimation128 => 1,
-        }
-    }
-
     /// The LFE decimation factor this selection corresponds to — `64`
     /// for [`LfeInterpolationSelection::Decimation64`] and `128` for
     /// [`LfeInterpolationSelection::Decimation128`], per the
@@ -114,31 +97,15 @@ impl LfeInterpolationSelection {
         }
     }
 
-    /// The §C.2.6 coefficient-table identifier this selection names,
-    /// as written in the staged driver resolution (`raCoeff64` or
-    /// `raCoeff128`).
-    ///
-    /// Returned as a `&'static str` so callers can format spec-
-    /// referencing diagnostics without reaching into the enum
-    /// variants; the strings match the pseudocode's identifiers
-    /// verbatim.
-    #[must_use]
-    pub fn spec_table_name(self) -> &'static str {
-        match self {
-            LfeInterpolationSelection::Decimation64 => "raCoeff64",
-            LfeInterpolationSelection::Decimation128 => "raCoeff128",
-        }
-    }
-
     /// The §D.8 512-tap LFE coefficient table this selection picks —
     /// the §C.2.6 driver's `prCoeff` after the
     /// `if (nDecimationSelect == 1) … else …` selection, ready for the
     /// LFE interpolation step.
     ///
-    /// Returns [`crate::RA_COEFF_LFE64`] (the §D.8 "64 x
+    /// Returns [`crate::lfe_fir_coeff::RA_COEFF_LFE64`] (the §D.8 "64 x
     /// Interpolation" column) for
     /// [`LfeInterpolationSelection::Decimation64`] and
-    /// [`crate::RA_COEFF_LFE128`] (the "128 x Interpolation" column)
+    /// [`crate::lfe_fir_coeff::RA_COEFF_LFE128`] (the "128 x Interpolation" column)
     /// for [`LfeInterpolationSelection::Decimation128`], both
     /// transcribed verbatim from the staged PDF p.238-246.
     #[must_use]
@@ -196,26 +163,6 @@ mod tests {
     // decimation_select — canonical inverse.
     // -----------------------------------------------------------
 
-    #[test]
-    fn decimation_select_round_trips_64x() {
-        let sel = LfeInterpolationSelection::Decimation64;
-        assert_eq!(sel.decimation_select(), 0);
-        assert_eq!(
-            LfeInterpolationSelection::from_decimation_select(sel.decimation_select()),
-            sel
-        );
-    }
-
-    #[test]
-    fn decimation_select_round_trips_128x() {
-        let sel = LfeInterpolationSelection::Decimation128;
-        assert_eq!(sel.decimation_select(), 1);
-        assert_eq!(
-            LfeInterpolationSelection::from_decimation_select(sel.decimation_select()),
-            sel
-        );
-    }
-
     // -----------------------------------------------------------
     // decimation_factor — the spec's decimation factor.
     // -----------------------------------------------------------
@@ -235,22 +182,6 @@ mod tests {
     // -----------------------------------------------------------
     // spec_table_name — pseudocode identifier passthrough.
     // -----------------------------------------------------------
-
-    #[test]
-    fn spec_table_name_matches_the_c26_identifiers() {
-        assert_eq!(
-            LfeInterpolationSelection::Decimation64.spec_table_name(),
-            "raCoeff64"
-        );
-        assert_eq!(
-            LfeInterpolationSelection::Decimation128.spec_table_name(),
-            "raCoeff128"
-        );
-        assert_ne!(
-            LfeInterpolationSelection::Decimation64.spec_table_name(),
-            LfeInterpolationSelection::Decimation128.spec_table_name()
-        );
-    }
 
     // -----------------------------------------------------------
     // coefficients — §D.8 LFE table resolution.

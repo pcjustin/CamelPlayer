@@ -53,29 +53,29 @@
 //! the ETSI spec deliberately omits ("Due to its extensive size, this
 //! table is not included here", §D.10.1 / §D.10.2, PDF p.255) and
 //! which are now staged as clean-room data and **built into the
-//! crate** ([`crate::VqCodebooks::builtin`], round 439 — see
+//! crate** ([`crate::d10_vq::VqCodebooks::builtin`], round 439 — see
 //! `docs/audio/dts/dts-d10-vq-tables-GAP.md`, CLOSED):
 //!
 //! * The **high-frequency VQ subbands** loop (`n ∈ [nVQSUB, nSUBS)`,
 //!   `nVQIndex = ExtractBits(10); HFreqVQ.LookUp(...)`) uses the §D.10.2
 //!   "High Frequency Subbands" 32-sample VQ code book (1024 vectors;
 //!   entries decode as two 8-bit signed integers, low byte first,
-//!   **each ÷ 2⁴** — [`crate::unpack_hfreq_vq_entry`]). Its 10-bit
+//!   **each ÷ 2⁴** — [`crate::d10_vq::unpack_hfreq_vq_entry`]). Its 10-bit
 //!   indices are captured structurally
-//!   ([`crate::scan_hf_vq_indices_at`]) and the book supplied as an
+//!   ([`crate::d10_vq::scan_hf_vq_indices_at`]) and the book supplied as an
 //!   [`HfVqFill`] to [`decode_audio_data_subframe_vq_at`]
 //!   reconstructs the subband (`SCALES[ch][n][0] · HFREQ[m]` over the
 //!   subframe's rows).
 //! * The **inverse-ADPCM coefficient lookup** (`PMODE != 0`, the §5.4.1
 //!   `ADPCMCoeffVQ.LookUp(nVQIndex, PVQ[ch][n])`) uses the §D.10.1
 //!   ADPCM-coefficient VQ code book (4096 × 4 stored integers, actual
-//!   coefficient = entry ÷ 2¹³ — [`crate::adpcm_vq_coeff`]); with the
+//!   coefficient = entry ÷ 2¹³ — [`crate::d10_vq::adpcm_vq_coeff`]); with the
 //!   book supplied as an [`AdpcmContext`] the §C.2.2
 //!   predictor runs per subsubframe from the captured 12-bit
 //!   `pvq_index`, primed by the persistent [`AdpcmHistory`].
 //!
 //! Without the matching book (a caller-stripped decoder,
-//! [`crate::VqCodebooks::none`]) each sub-path surfaces the typed
+//! [`crate::d10_vq::VqCodebooks::none`]) each sub-path surfaces the typed
 //! [`AudioArrayError::VqCodebookUnavailable`] refusal. A frame
 //! whose primary channels are all linearly / Huffman / block coded with
 //! `PMODE == 0` and `nVQSUB == nSUBS` (the common Core case) decodes to
@@ -101,7 +101,7 @@ use crate::{Error, Result};
 pub enum AudioArrayError {
     /// A subband required an Annex D §D.10 VQ code book that the
     /// caller stripped from the decoder
-    /// ([`crate::VqCodebooks::none`]; the built-in books are the
+    /// ([`crate::d10_vq::VqCodebooks::none`]; the built-in books are the
     /// default since round 439, so this fires only on an explicit
     /// opt-out). Either the §D.10.2 high-frequency VQ book (a
     /// `nVQSUB < nSUBS` subband) or the §D.10.1 ADPCM-coefficient VQ
@@ -118,8 +118,8 @@ pub enum AudioArrayError {
     },
     /// The §5.5 LFE phase (§2.2) dequant failed — a reserved §D.1.2
     /// `RMS_7BIT` scale index or an absent LFE channel
-    /// ([`crate::LfeChannelError`]).
-    LfePhase(crate::LfeChannelError),
+    /// ([`crate::lfe_synth::LfeChannelError`]).
+    LfePhase(crate::lfe_synth::LfeChannelError),
     /// The caller-supplied §5.5 phase-1 HF-VQ index capture does not
     /// match the per-channel `[nVQSUB, nSUBS)` shape the walk needs
     /// (wrong channel count or wrong per-channel index count).
@@ -331,12 +331,12 @@ pub type SubbandSampleMatrix = Vec<[f64; NUM_SUBBAND]>;
 /// two's-complement decimated LFE samples followed by an 8-bit
 /// `LFEscaleIndex`, dequantises (`rLFE[n] = LFE[n]·nScale·0.035` with the
 /// §D.1.2 `RMS_7BIT` scale), then upsamples via the §C.2.6
-/// `InterpolationFIR(LFF)` polyphase convolution ([`crate::LfeChannel`]).
+/// `InterpolationFIR(LFF)` polyphase convolution ([`crate::lfe_synth::LfeChannel`]).
 ///
 /// * `bytes` / `bit_offset` — positioned at the first LFE-phase bit.
 /// * `lff` — the frame header's non-zero `LFF` (1 → 128×, 2 → 64×).
 /// * `n_ssc` — the subframe's subsubframe count (`SSC + 1`).
-/// * `lfe` — the persistent per-channel [`crate::LfeChannel`] whose
+/// * `lfe` — the persistent per-channel [`crate::lfe_synth::LfeChannel`] whose
 ///   §C.2.6 history carries across subframes.
 ///
 /// Returns `(lfe_pcm, bits_consumed)`. The PCM length is
@@ -345,14 +345,14 @@ pub type SubbandSampleMatrix = Vec<[f64; NUM_SUBBAND]>;
 /// # Errors
 ///
 /// * [`Error::UnexpectedEof`] on a truncated LFE region;
-/// * [`AudioArrayError::LfePhase`] wrapping a [`crate::LfeChannelError`]
+/// * [`AudioArrayError::LfePhase`] wrapping a [`crate::lfe_synth::LfeChannelError`]
 ///   (a reserved §D.1.2 scale index, or `lff == 0`).
 pub fn decode_lfe_phase_at(
     bytes: &[u8],
     bit_offset: usize,
     lff: u8,
     n_ssc: usize,
-    lfe: &mut crate::LfeChannel,
+    lfe: &mut crate::lfe_synth::LfeChannel,
 ) -> core::result::Result<(Vec<i32>, usize), AudioArrayDecodeError> {
     let byte_offset = bit_offset / 8;
     let intra_byte = bit_offset % 8;
@@ -413,12 +413,6 @@ impl AdpcmHistory {
         }
     }
 
-    /// The configured channel count.
-    #[must_use]
-    pub fn channel_count(&self) -> usize {
-        self.per_channel.len()
-    }
-
     /// Zero every subband's history (the §5.3.1 `HFLAG = 0` frame
     /// gate: "Otherwise, the history will be ignored").
     pub fn clear(&mut self) {
@@ -436,7 +430,7 @@ impl AdpcmHistory {
     /// subframe's reconstructed sample matrices (`matrices[ch]` with
     /// `rows` rows): the last four rows become the new history, with
     /// the short-subframe (`rows < 4`) shift semantics of
-    /// [`crate::update_history_f64`].
+    /// [`crate::inverse_adpcm::update_history_f64`].
     pub fn absorb_matrices(&mut self, matrices: &[SubbandSampleMatrix]) {
         for (ch_hist, matrix) in self.per_channel.iter_mut().zip(matrices) {
             let rows = matrix.len();
@@ -456,7 +450,7 @@ impl AdpcmHistory {
 /// The §5.5 phase-1 high-frequency-VQ inputs for
 /// [`decode_audio_data_subframe_vq_at`]: a recovered §D.10.2 book
 /// plus the 10-bit indices captured (in walk order) by
-/// [`crate::scan_hf_vq_indices_at`] from the region that precedes the
+/// [`crate::d10_vq::scan_hf_vq_indices_at`] from the region that precedes the
 /// LFE phase.
 #[derive(Debug, Clone, Copy)]
 pub struct HfVqFill<'a> {
@@ -480,127 +474,11 @@ pub struct AdpcmContext<'a> {
     pub history: &'a mut AdpcmHistory,
 }
 
-/// Decode the §5.5 `Audio Data` block for one subframe, given the
-/// already-decoded §5.4.1 side information and §5.3.2 header context.
-///
-/// Walks the Table 5-29 `nSubSubFrame × ch × n` loop, extracting and
-/// dequantizing every primary subband, running inverse-ADPCM where
-/// `PMODE != 0`, and consuming the `DSYNC` trailers. Returns one
-/// [`SubbandSampleMatrix`] per channel (length `n_ssc * 8` rows).
-///
-/// * `bytes` / `bit_offset` — the bit stream positioned at the first
-///   §5.5 `Audio Data` bit (after the §5.4.1 side-info block).
-/// * `side` — the per-channel [`ChannelSideInfo`] (round-281).
-/// * `sel` — `|ch, abits| -> u8`, the §5.3.2 `SEL[ch][nABITS-1]`
-///   selector ([`crate::AudioCodingHeader::sel`]).
-/// * `adj` — `|ch, abits| -> ScaleFactorAdjustment`, the §5.5
-///   `arADJ[ch][SEL[ch][nABITS-1]]` multiplier
-///   ([`crate::AudioCodingHeader::adj`]).
-/// * `n_vqsub` / `n_subs` — per-channel loop bounds.
-/// * `n_ssc` — the subframe's subsubframe count (`SSC + 1`).
-/// * `table` — the §5.5 `RATE`-selected step-size table.
-/// * `aspf` — the §5.3.1 Audio Sync-Word Insertion Flag (a `DSYNC`
-///   trailer follows every subsubframe when set, else only the last).
-///
-/// Returns `(Vec<SubbandSampleMatrix>, bits_consumed)`.
-///
-/// # Errors
-///
-/// * [`Error::InvalidStepSize`] for an out-of-range `ABITS`;
-/// * [`Error::HuffmanDecodeFailed`] on a corrupt audio Huffman prefix
-///   or an `(ABITS, SEL)` pair with no §D.5 book;
-/// * [`Error::DsyncMismatch`] when a `DSYNC` trailer is not `0xffff`;
-/// * [`Error::UnexpectedEof`] on a truncated array.
-///
-/// VQ / ADPCM-coefficient blockers surface
-/// [`AudioArrayError::VqCodebookUnavailable`] wrapped through the
-/// [`AudioArrayDecodeError`] return type.
-pub fn decode_audio_data_subframe_at(
-    bytes: &[u8],
-    bit_offset: usize,
-    side: &[ChannelSideInfo],
-    sel: impl Fn(usize, u8) -> u8,
-    adj: impl Fn(usize, u8) -> ScaleFactorAdjustment,
-    n_vqsub: &[usize],
-    n_subs: &[usize],
-    n_ssc: usize,
-    table: StepSizeTable,
-    aspf: bool,
-) -> core::result::Result<(Vec<SubbandSampleMatrix>, usize), AudioArrayDecodeError> {
-    decode_audio_data_subframe_partial_at(
-        bytes, bit_offset, side, sel, adj, n_vqsub, n_subs, n_ssc, 0, table, aspf,
-    )
-}
-
-/// [`decode_audio_data_subframe_at`] with the §5.4.1 `PSC` (Partial
-/// Subsubframe Sample Count) semantics of a **termination frame**
-/// applied: when `psc ∈ 1..=7`, the **last** of the subframe's `n_ssc`
-/// subsubframes is *partial* — it holds `psc` subband samples per
-/// active subband instead of 8 (PDF p.30: "PSC indicates the number
-/// of subband samples held in a partial subsubframe for each of the
-/// active subbands. A partial subsubframe is one which has less than
-/// 8 subband samples. It exists only in a termination frame and is
-/// always at the end of last normal subsubframe. A DSYNC word will
-/// always occur after a partial subsubframe.").
-///
-/// That the partial subsubframe is the last one **counted by** `nSSC`
-/// (rather than an extra, uncounted tail after them) follows from the
-/// staged spec's own ranges: a termination frame's `NBLKS` "can take
-/// any value in its valid range" `[5, 127]` (PDF p.18), so the
-/// minimum legal termination frame carries 6 subband-sample blocks —
-/// which is expressible as `nSSC = 1` with a 6-sample partial
-/// subsubframe but not as one full subsubframe *plus* a tail (8 + PSC
-/// ≥ 8 > 6); and §5.2's frame layout caps a subframe at "up to 4
-/// subsubframes" (PDF p.16), which an uncounted fifth tail after
-/// `nSSC = 4` would violate.
-///
-/// The partial subsubframe changes only the last iteration of the
-/// Table 5-29 sample loop:
-///
-/// * per-sample carriers (§D.5 Huffman, NFE binary) extract exactly
-///   `psc` codewords per active subband;
-/// * the four-sample §D.6 block-code carrier extracts
-///   `ceil(psc / 4)` words and keeps the first `psc` samples (see
-///   [`extract_subband_audio`]);
-/// * `ABITS = 0` subbands extract nothing, as always;
-/// * the `DSYNC` trailer placement is unchanged — after the last
-///   (here: partial) subsubframe always, and after every subsubframe
-///   when `ASPF` is set, which realises the p.30 "A DSYNC word will
-///   always occur after a partial subsubframe" clause.
-///
-/// The returned matrices have `(n_ssc - 1) * 8 + psc` rows per
-/// channel when `psc > 0` (the frame-level row budget is `NBLKS + 1`
-/// across all subframes), and `bits_consumed` accounts exactly for
-/// the truncated extraction.
-///
-/// `psc = 0` reproduces [`decode_audio_data_subframe_at`] verbatim.
-/// `psc` is trusted to be `< 8` (it is a 3-bit wire field); the
-/// termination-frame gating ("exists only in a termination frame")
-/// is the frame-level caller's to enforce, since this walk does not
-/// see the §5.3.1 `FTYPE`.
-pub fn decode_audio_data_subframe_partial_at(
-    bytes: &[u8],
-    bit_offset: usize,
-    side: &[ChannelSideInfo],
-    sel: impl Fn(usize, u8) -> u8,
-    adj: impl Fn(usize, u8) -> ScaleFactorAdjustment,
-    n_vqsub: &[usize],
-    n_subs: &[usize],
-    n_ssc: usize,
-    psc: u8,
-    table: StepSizeTable,
-    aspf: bool,
-) -> core::result::Result<(Vec<SubbandSampleMatrix>, usize), AudioArrayDecodeError> {
-    decode_audio_data_subframe_vq_at(
-        bytes, bit_offset, side, sel, adj, n_vqsub, n_subs, n_ssc, psc, table, aspf, None, None,
-    )
-}
-
 /// [`decode_audio_data_subframe_partial_at`] with the two §D.10
 /// VQ-book sub-paths **enabled** by caller-supplied recovered books:
 ///
 /// * `hf` — the §5.5 phase-1 high-frequency-VQ reconstruction. The
-///   10-bit indices (captured by [`crate::scan_hf_vq_indices_at`]
+///   10-bit indices (captured by [`crate::d10_vq::scan_hf_vq_indices_at`]
 ///   from the region *before* the LFE phase) select 32-element
 ///   §D.10.2 vectors, and each HF subband's samples are
 ///   `SCALES[ch][n][0] · HFREQ[ch][n][m]` for the subframe's `m`
@@ -887,461 +765,9 @@ mod tests {
         assert_eq!(block_code_word_bits(8), None);
     }
 
-    /// A single-channel, single-subsubframe, no-bits subband stream
-    /// decodes to an all-zero matrix and a single DSYNC trailer.
-    #[test]
-    fn no_bits_subband_zeroes_matrix() {
-        // nSSC = 1, one channel, nVQSUB = nSUBS = 1, ABITS = 0.
-        let side = vec![ChannelSideInfo::cleared()];
-        let stream = pack_fields(&[(0xffff, 16)]); // just the DSYNC
-        let (mats, bits) = decode_audio_data_subframe_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        assert_eq!(mats.len(), 1);
-        assert_eq!(mats[0].len(), 8);
-        assert!(mats[0].iter().all(|row| row.iter().all(|&v| v == 0.0)));
-        assert_eq!(bits, 16);
-    }
-
-    /// A NoEncoding (NFE) subband with ABITS 8 reads eight 5-bit
-    /// sign-extended fields and scales them by the dequant rScale.
-    #[test]
-    fn nfe_subband_dequantizes() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8; // NFE width 5; lossy step for 8 = 796918/2^22
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-
-        // Eight 5-bit values: 1,-1,2,-2,3,-3,4,-4 (two's complement).
-        let vals = [1i32, -1, 2, -2, 3, -3, 4, -4];
-        let mut fields: Vec<(u32, u8)> = vals.iter().map(|&v| ((v as u32) & 0x1f, 5u8)).collect();
-        fields.push((0xffff, 16)); // DSYNC
-        let stream = pack_fields(&fields);
-
-        // SEL must select the terminal NFE entry for ABITS 8 (group of
-        // 8 -> top SEL 7).
-        let (mats, _) = decode_audio_data_subframe_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        let step = StepSizeTable::Lossy.step_size(8).unwrap();
-        let r = step * 4.0;
-        for (m, &v) in vals.iter().enumerate() {
-            assert!((mats[0][m][0] - r * f64::from(v)).abs() < 1e-9);
-        }
-    }
-
-    /// A bad DSYNC surfaces a typed mismatch.
-    #[test]
-    fn bad_dsync_rejected() {
-        let side = vec![ChannelSideInfo::cleared()];
-        let stream = pack_fields(&[(0x1234, 16)]);
-        let err = decode_audio_data_subframe_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Bitstream(Error::DsyncMismatch { found: 0x1234, .. })
-        ));
-    }
-
-    /// A subband with high-frequency VQ (nVQSUB < nSUBS) is blocked.
-    #[test]
-    fn high_frequency_vq_blocked() {
-        let side = vec![ChannelSideInfo::cleared()];
-        let err = decode_audio_data_subframe_at(
-            &[0u8; 8],
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1], // nVQSUB
-            &[3], // nSUBS > nVQSUB -> VQ subbands
-            1,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Blocked(AudioArrayError::VqCodebookUnavailable {
-                high_frequency_vq: true,
-                ..
-            })
-        ));
-    }
-
-    /// A PMODE-active subband is blocked on the §D.10.1 coefficient VQ.
-    #[test]
-    fn adpcm_subband_blocked() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.pmode[0] = 1;
-        let side = vec![ch];
-        let err = decode_audio_data_subframe_at(
-            &[0u8; 8],
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Blocked(AudioArrayError::VqCodebookUnavailable {
-                high_frequency_vq: false,
-                ..
-            })
-        ));
-    }
-
-    /// ASPF == 1 inserts a DSYNC after every subsubframe; two
-    /// subsubframes therefore carry two trailers.
-    #[test]
-    fn aspf_inserts_dsync_each_subsubframe() {
-        let side = vec![ChannelSideInfo::cleared()];
-        // nSSC = 2, ABITS 0 -> no audio bits, two DSYNC trailers.
-        let stream = pack_fields(&[(0xffff, 16), (0xffff, 16)]);
-        let (_, bits) = decode_audio_data_subframe_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            2,
-            StepSizeTable::Lossy,
-            true,
-        )
-        .unwrap();
-        assert_eq!(bits, 32);
-    }
-
     // -----------------------------------------------------------
     // §5.4.1 PSC — termination-frame partial subsubframe.
     // -----------------------------------------------------------
-
-    /// `psc = 0` through the partial entry point is bit-for-bit the
-    /// normal walk: same matrices, same bit count.
-    #[test]
-    fn psc_zero_is_identity_with_normal_walk() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-        let vals = [1i32, -1, 2, -2, 3, -3, 4, -4];
-        let mut fields: Vec<(u32, u8)> = vals.iter().map(|&v| ((v as u32) & 0x1f, 5u8)).collect();
-        fields.push((0xffff, 16));
-        let stream = pack_fields(&fields);
-
-        let normal = decode_audio_data_subframe_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        let partial = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            0,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        assert_eq!(normal, partial);
-    }
-
-    /// NFE (per-sample binary) partial subsubframe: `nSSC = 2`,
-    /// `PSC = 3` extracts 8 + 3 five-bit fields, returns 11 rows, and
-    /// the bit budget is exactly `11·5 + 16` (one DSYNC).
-    #[test]
-    fn psc_nfe_truncates_rows_and_bits_exactly() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-
-        let vals = [1i32, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6];
-        let mut fields: Vec<(u32, u8)> = vals.iter().map(|&v| ((v as u32) & 0x1f, 5u8)).collect();
-        fields.push((0xffff, 16)); // DSYNC after the partial subsubframe
-        let stream = pack_fields(&fields);
-
-        let (mats, bits) = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            2,
-            3,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        assert_eq!(mats[0].len(), 11, "(nSSC-1)*8 + PSC rows");
-        assert_eq!(bits, 11 * 5 + 16, "bit budget exact through truncation");
-        let step = StepSizeTable::Lossy.step_size(8).unwrap();
-        let r = step * 4.0;
-        for (m, &v) in vals.iter().enumerate() {
-            assert!((mats[0][m][0] - r * f64::from(v)).abs() < 1e-9);
-        }
-    }
-
-    /// §D.6 block-code partial subsubframe, `PSC ≤ 4`: one four-sample
-    /// word is extracted (`ceil(3/4) = 1`), the first three decoded
-    /// samples are kept, the fourth (encoder pad) is discarded.
-    #[test]
-    fn psc_block_code_single_word_keeps_live_samples() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 1; // V3: 3 levels, 7-bit word, 4 samples/word
-        ch.scales[0][0] = 1;
-        let side = vec![ch];
-
-        // Base-3 digits LSD-first (element i = code%3 - 1): live
-        // samples (+1, -1, 0), pad digit 2 (= +1, must be ignored).
-        // code = 2 + 3·0 + 9·1 + 27·2 = 65.
-        let stream = pack_fields(&[(65, 7), (0xffff, 16)]);
-
-        let (mats, bits) = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 1, // terminal SEL for the ABITS=1 group -> block code
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            3,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        assert_eq!(mats[0].len(), 3);
-        assert_eq!(bits, 7 + 16, "one 7-bit V3 word + DSYNC");
-        let step = StepSizeTable::Lossy.step_size(1).unwrap();
-        let got: Vec<f64> = (0..3).map(|m| mats[0][m][0]).collect();
-        let want = [step, -step, 0.0];
-        for (g, w) in got.iter().zip(want) {
-            assert!((g - w).abs() < 1e-9, "got {got:?}");
-        }
-    }
-
-    /// §D.6 block-code partial subsubframe, `PSC = 5`: two words
-    /// (`ceil(5/4) = 2`), the second word contributes one live sample.
-    #[test]
-    fn psc_block_code_two_words_for_five_samples() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 1;
-        ch.scales[0][0] = 1;
-        let side = vec![ch];
-
-        // Word 1: (+1, +1, -1, -1) -> digits (2,2,0,0) -> 2 + 6 = 8.
-        // Word 2: live (-1), pads 0 -> digits (0,1,1,1) -> 3+9+27 = 39.
-        let stream = pack_fields(&[(8, 7), (39, 7), (0xffff, 16)]);
-
-        let (mats, bits) = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 1,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            5,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        assert_eq!(mats[0].len(), 5);
-        assert_eq!(bits, 2 * 7 + 16, "two 7-bit V3 words + DSYNC");
-        let step = StepSizeTable::Lossy.step_size(1).unwrap();
-        let want = [step, step, -step, -step, -step];
-        for (m, w) in want.iter().enumerate() {
-            assert!((mats[0][m][0] - w).abs() < 1e-9);
-        }
-    }
-
-    /// Find the `(code, len)` pair a §D.5 book decodes to `level`, by
-    /// scanning prefixes through the decoder itself (test-side encode
-    /// for books whose encode direction is not otherwise needed).
-    fn huff_codeword(book: AudioHuffCodebook, level: i16) -> (u32, u8) {
-        for len in 1..=16u8 {
-            for code in 0..(1u32 << len) {
-                // Lay the candidate at the front of a padded buffer.
-                let padded = (code << (32 - len)) | ((1 << (32 - len)) - 1) >> 1;
-                let bytes = padded.to_be_bytes();
-                if let Ok((got, consumed)) = decode_audio_huff_at(&bytes, 0, book)
-                    && consumed == usize::from(len)
-                    && got == level
-                {
-                    return (code, len);
-                }
-            }
-        }
-        panic!("no codeword for level {level}");
-    }
-
-    /// §D.5 Huffman partial subsubframe: the per-sample carrier
-    /// extracts exactly `PSC` codewords — verified with the 3-level
-    /// `ABITS = 1` book, `nSSC = 1`, `PSC = 3`, bit budget exact.
-    #[test]
-    fn psc_huffman_extracts_exactly_psc_codewords() {
-        let book = AudioHuffCodebook::from_abits_sel(1, 0).expect("ABITS=1 SEL=0 book exists");
-        let levels = [1i16, -1, 0];
-        let mut fields: Vec<(u32, u8)> = Vec::new();
-        let mut audio_bits = 0usize;
-        for &level in &levels {
-            let (code, len) = huff_codeword(book, level);
-            fields.push((code, len));
-            audio_bits += usize::from(len);
-        }
-        fields.push((0xffff, 16)); // DSYNC after the partial subsubframe
-        let stream = pack_fields(&fields);
-
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 1;
-        ch.scales[0][0] = 1;
-        let side = vec![ch];
-
-        let (mats, bits) = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0, // SEL = 0 -> Huffman book A3
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            3,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap();
-        assert_eq!(mats[0].len(), 3);
-        assert_eq!(bits, audio_bits + 16, "exactly PSC codewords + DSYNC");
-        let step = StepSizeTable::Lossy.step_size(1).unwrap();
-        for (m, &level) in levels.iter().enumerate() {
-            assert!((mats[0][m][0] - step * f64::from(level)).abs() < 1e-9);
-        }
-    }
-
-    /// ASPF on a partial subframe: a DSYNC follows the full
-    /// subsubframe *and* the partial one (the p.30 "A DSYNC word will
-    /// always occur after a partial subsubframe" clause composes with
-    /// the per-subsubframe ASPF rule).
-    #[test]
-    fn psc_with_aspf_places_dsync_after_both_subsubframes() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-
-        let mut fields: Vec<(u32, u8)> = (0..8).map(|_| (0u32, 5u8)).collect();
-        fields.push((0xffff, 16)); // ASPF DSYNC after subsubframe 0
-        fields.extend((0..2).map(|_| (0u32, 5u8))); // partial: PSC = 2
-        fields.push((0xffff, 16)); // DSYNC after the partial subsubframe
-        let stream = pack_fields(&fields);
-
-        let (mats, bits) = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            2,
-            2,
-            StepSizeTable::Lossy,
-            true,
-        )
-        .unwrap();
-        assert_eq!(mats[0].len(), 10);
-        assert_eq!(bits, 10 * 5 + 2 * 16);
-    }
-
-    /// A truncated partial subsubframe (stream ends inside the PSC
-    /// samples) surfaces a typed EOF, not a panic or a padded matrix.
-    #[test]
-    fn psc_truncated_stream_is_typed_eof() {
-        let mut ch = ChannelSideInfo::cleared();
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 4;
-        let side = vec![ch];
-
-        // 8 full samples then only 1 of the 3 partial samples.
-        let fields: Vec<(u32, u8)> = (0..9).map(|_| (0u32, 5u8)).collect();
-        let stream = pack_fields(&fields);
-
-        let err = decode_audio_data_subframe_partial_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            2,
-            3,
-            StepSizeTable::Lossy,
-            false,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Bitstream(Error::UnexpectedEof)
-        ));
-    }
 
     // -----------------------------------------------------------
     // §5.5 LFE phase walker (§2.2).
@@ -1358,7 +784,7 @@ mod tests {
         let mut fields: Vec<(u32, u8)> = vec![(0, 8); n_lfe];
         fields.push((10, 8));
         let stream = pack_fields(&fields);
-        let mut lfe = crate::LfeChannel::new();
+        let mut lfe = crate::lfe_synth::LfeChannel::new();
         let (pcm, bits) = decode_lfe_phase_at(&stream, 0, lff, n_ssc, &mut lfe).unwrap();
         assert_eq!(bits, (n_lfe + 1) * 8);
         // Each decimated sample expands to 128 PCM samples.
@@ -1382,15 +808,16 @@ mod tests {
         fields.push((u32::from(scale_index), 8));
         let stream = pack_fields(&fields);
 
-        let mut lfe = crate::LfeChannel::new();
+        let mut lfe = crate::lfe_synth::LfeChannel::new();
         let (pcm, _) = decode_lfe_phase_at(&stream, 0, lff, n_ssc, &mut lfe).unwrap();
 
         // Reference: phase-0 first output =
         // (int)((-1)·nScale·0.035·calibration·c0) — the walker uses the
         // calibrated LFE decode (see LFE_OUTPUT_CALIBRATION).
         let n_scale = crate::side_info::RMS_7BIT[scale_index as usize] as f64;
-        let r_scale = n_scale * crate::LFE_SCALE_STEP * crate::LFE_OUTPUT_CALIBRATION;
-        let sel = crate::LfeInterpolationSelection::Decimation64;
+        let r_scale =
+            n_scale * crate::lfe_synth::LFE_SCALE_STEP * crate::lfe_synth::LFE_OUTPUT_CALIBRATION;
+        let sel = crate::lfe_interp::LfeInterpolationSelection::Decimation64;
         let c0 = sel.coefficients()[0];
         let expected0 = (-(r_scale * c0)) as i32;
         assert_eq!(pcm[0], expected0);
@@ -1399,158 +826,6 @@ mod tests {
     // -----------------------------------------------------------
     // §D.10 recovered-book walk (round 434).
     // -----------------------------------------------------------
-
-    fn tiny_hf_book() -> crate::HfVqCodebook {
-        // Vector v, element m: (v + m) / 24 — small, distinct, exact.
-        let vectors: Vec<[f64; 32]> = (0i32..1024)
-            .map(|v| core::array::from_fn(|m| f64::from(v + m as i32) / 24.0))
-            .collect();
-        crate::HfVqCodebook::from_elements(&vectors).unwrap()
-    }
-
-    fn tiny_adpcm_book() -> crate::AdpcmVqCodebook {
-        // Vector i: coefficients (i mod 5 − 2) / 16 in every tap.
-        let vectors: Vec<[f64; 4]> = (0i32..4096)
-            .map(|i| [(f64::from(i % 5) - 2.0) / 16.0; 4])
-            .collect();
-        crate::AdpcmVqCodebook::from_coefficients(&vectors).unwrap()
-    }
-
-    /// A supplied HF fill whose capture shape disagrees with the
-    /// per-channel `[nVQSUB, nSUBS)` bounds surfaces the typed shape
-    /// error (wrong outer length and wrong per-channel count).
-    #[test]
-    fn hf_fill_shape_mismatch_is_typed() {
-        let book = tiny_hf_book();
-        let side = vec![ChannelSideInfo::cleared()];
-        let stream = pack_fields(&[(0xffff, 16)]);
-
-        // Outer capture length 2 for a 1-channel walk.
-        let indices = vec![vec![0u16], vec![]];
-        let err = decode_audio_data_subframe_vq_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[2],
-            1,
-            0,
-            StepSizeTable::Lossy,
-            false,
-            Some(HfVqFill {
-                book: &book,
-                indices: &indices,
-            }),
-            None,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Blocked(AudioArrayError::HfVqIndexShape { ch: 1 })
-        ));
-
-        // Right outer length, wrong per-channel count (2 for 1 HF
-        // subband).
-        let indices = vec![vec![0u16, 1]];
-        let err = decode_audio_data_subframe_vq_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[2],
-            1,
-            0,
-            StepSizeTable::Lossy,
-            false,
-            Some(HfVqFill {
-                book: &book,
-                indices: &indices,
-            }),
-            None,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Blocked(AudioArrayError::HfVqIndexShape { ch: 0 })
-        ));
-    }
-
-    /// A hand-built `PMODE != 0` subband with no captured PVQ index is
-    /// rejected with the typed error even when the book is present.
-    #[test]
-    fn missing_pvq_index_is_typed() {
-        let book = tiny_adpcm_book();
-        let mut ch = ChannelSideInfo::cleared();
-        ch.pmode[0] = 1; // pvq_index stays None — impossible via decode
-        let side = vec![ch];
-        let mut history = AdpcmHistory::new(1);
-        let err = decode_audio_data_subframe_vq_at(
-            &[0u8; 8],
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            0,
-            StepSizeTable::Lossy,
-            false,
-            None,
-            Some(AdpcmContext {
-                book: &book,
-                history: &mut history,
-            }),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            AudioArrayDecodeError::Blocked(AudioArrayError::MissingPvqIndex { ch: 0, n: 0 })
-        ));
-    }
-
-    /// The HF fill populates exactly the `[nVQSUB, nSUBS)` columns
-    /// with `SCALES[ch][n][0] · vector[m]`, consumes no §5.5 bits,
-    /// and lifts the bookless blocker.
-    #[test]
-    fn hf_fill_populates_hf_columns() {
-        let book = tiny_hf_book();
-        let mut ch = ChannelSideInfo::cleared();
-        ch.scales[1][0] = 3; // HF subband n=1: SCALES[ch][1][0] = 3
-        ch.scales[2][0] = 5; // HF subband n=2
-        let side = vec![ch];
-        let stream = pack_fields(&[(0xffff, 16)]); // just the DSYNC
-        let indices = vec![vec![7u16, 100]];
-        let (mats, bits) = decode_audio_data_subframe_vq_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 0,
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[3],
-            1,
-            0,
-            StepSizeTable::Lossy,
-            false,
-            Some(HfVqFill {
-                book: &book,
-                indices: &indices,
-            }),
-            None,
-        )
-        .unwrap();
-        assert_eq!(bits, 16, "the fill itself reads no bits");
-        for (m, row) in mats[0].iter().enumerate() {
-            assert_eq!(row[0], 0.0, "coded subband (ABITS=0) stays 0");
-            assert_eq!(row[1], 3.0 * (f64::from(7 + m as i32) / 24.0));
-            assert_eq!(row[2], 5.0 * (f64::from(100 + m as i32) / 24.0));
-        }
-    }
 
     /// [`AdpcmHistory::absorb_matrices`] slides the last four rows in
     /// (oldest first), with the short-subframe shift semantics for
@@ -1574,72 +849,6 @@ mod tests {
         assert_eq!(hist.subband(0, 0), &[4.0, 5.0, 10.0, 11.0]);
     }
 
-    /// The ADPCM context reconstructs a predicted subband: residuals
-    /// plus the 4-tap dot product over the priming history, history
-    /// advanced to the block's final rows.
-    #[test]
-    fn adpcm_context_predicts_and_advances_history() {
-        let book = tiny_adpcm_book();
-        // PVQ index 1 -> coefficients [-1/16; 4].
-        let mut ch = ChannelSideInfo::cleared();
-        ch.pmode[0] = 1;
-        ch.pvq_index[0] = Some(1);
-        ch.abits[0] = 8;
-        ch.scales[0][0] = 1;
-        let side = vec![ch];
-
-        // One subsubframe of NFE residuals: 16, 0, 0, 0, 0, 0, 0, 0
-        // — but NFE range for ABITS=8 is 5 bits, so use 8.
-        let vals = [8i32, 0, 0, 0, 0, 0, 0, 0];
-        let mut fields: Vec<(u32, u8)> = vals.iter().map(|&v| ((v as u32) & 0x1f, 5u8)).collect();
-        fields.push((0xffff, 16));
-        let stream = pack_fields(&fields);
-
-        let mut history = AdpcmHistory::new(1);
-        let (mats, _) = decode_audio_data_subframe_vq_at(
-            &stream,
-            0,
-            &side,
-            |_, _| 7, // terminal NFE SEL for ABITS=8
-            |_, _| ScaleFactorAdjustment::Adj0,
-            &[1],
-            &[1],
-            1,
-            0,
-            StepSizeTable::Lossy,
-            false,
-            None,
-            Some(AdpcmContext {
-                book: &book,
-                history: &mut history,
-            }),
-        )
-        .unwrap();
-
-        // Analytic: r[0] = 8·step; r[m] = Σ c·r[m-1..m-4], c = -1/16.
-        let step = StepSizeTable::Lossy.step_size(8).unwrap();
-        let c = -1.0 / 16.0;
-        let mut expect = [0.0f64; 8];
-        let residual = [8.0 * step, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        for m in 0..8 {
-            let mut acc = residual[m];
-            for t in 0..4usize {
-                if m > t {
-                    acc += c * expect[m - t - 1];
-                }
-            }
-            expect[m] = acc;
-        }
-        for m in 0..8 {
-            assert!((mats[0][m][0] - expect[m]).abs() < 1e-12, "row {m}");
-        }
-        // History advanced to rows 4..8.
-        let h = history.subband(0, 0);
-        for k in 0..4 {
-            assert!((h[k] - expect[4 + k]).abs() < 1e-12);
-        }
-    }
-
     /// A reserved §D.1.2 scale index surfaces the typed LFE-phase blocker.
     #[test]
     fn lfe_phase_rejects_reserved_scale_index() {
@@ -1649,12 +858,12 @@ mod tests {
         let mut fields: Vec<(u32, u8)> = vec![(0, 8); n_lfe];
         fields.push((126, 8)); // reserved
         let stream = pack_fields(&fields);
-        let mut lfe = crate::LfeChannel::new();
+        let mut lfe = crate::lfe_synth::LfeChannel::new();
         let err = decode_lfe_phase_at(&stream, 0, lff, n_ssc, &mut lfe).unwrap_err();
         assert!(matches!(
             err,
             AudioArrayDecodeError::Blocked(AudioArrayError::LfePhase(
-                crate::LfeChannelError::ReservedScaleIndex { index: 126 }
+                crate::lfe_synth::LfeChannelError::ReservedScaleIndex { index: 126 }
             ))
         ));
     }
