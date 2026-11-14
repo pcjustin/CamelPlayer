@@ -216,6 +216,13 @@ static json eqBandsJson(const std::vector<EqBand>& bands) {
     return out;
 }
 
+// A number between `minimum` and `maximum`, else `def`.
+static double num(const json& o, const char* k, double def, double minimum, double maximum) {
+    if (!o.contains(k) || !o[k].is_number()) return def;
+    const double value = o[k].get<double>();
+    return std::isfinite(value) && value >= minimum && value <= maximum ? value : def;
+}
+
 // Bands that cannot be read are dropped; `fallback` stands in for a missing or unreadable list.
 static std::vector<EqBand> eqBandsFrom(const json& list, const std::vector<EqBand>& fallback) {
     if (!list.is_array()) return fallback;
@@ -232,16 +239,11 @@ static std::vector<EqBand> eqBandsFrom(const json& list, const std::vector<EqBan
         band.kind = EqKind(kind - std::begin(kEqKindIds) + 1);
         const auto channels = std::ranges::find(kEqChannelIds, text("channels", "all"));
         band.channels = channels == std::end(kEqChannelIds) ? EqChannels::All : EqChannels(channels - std::begin(kEqChannelIds));
-        const auto number = [&](const char* key, double fallbackValue, double minimum, double maximum) {
-            if (!item.contains(key) || !item[key].is_number()) return fallbackValue;
-            const double value = item[key].get<double>();
-            return std::isfinite(value) && value >= minimum && value <= maximum ? value : fallbackValue;
-        };
-        const double slope = number("slope", 12, 6, 48);
+        const double slope = num(item, "slope", 12, 6, 48);
         band.slope = std::fmod(slope, 6.0) == 0.0 ? uint32_t(slope) : 12;
-        band.frequencyHz = number("frequency", 1000.0, EqBand::kMinFrequencyHz, EqBand::kMaxFrequencyHz);
-        band.gainDb = number("gain", 0.0, EqBand::kMinGainDb, EqBand::kMaxGainDb);
-        band.q = number("q", 0.71, EqBand::kMinQ, EqBand::kMaxQ);
+        band.frequencyHz = num(item, "frequency", 1000.0, EqBand::kMinFrequencyHz, EqBand::kMaxFrequencyHz);
+        band.gainDb = num(item, "gain", 0.0, EqBand::kMinGainDb, EqBand::kMaxGainDb);
+        band.q = num(item, "q", 0.71, EqBand::kMinQ, EqBand::kMaxQ);
         band.enabled = !item.contains("enabled") || !item["enabled"].is_boolean() || item["enabled"].get<bool>();
         bands.push_back(band);
     }
@@ -316,12 +318,6 @@ audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat
 
 static std::string str(const json& o, const char* k, const std::string& def) {
     return o.contains(k) && o[k].is_string() ? o[k].get<std::string>() : def;
-}
-
-static double num(const json& o, const char* k, double def, double minimum, double maximum) {
-    if (!o.contains(k) || !o[k].is_number()) return def;
-    const double value = o[k].get<double>();
-    return std::isfinite(value) && value >= minimum && value <= maximum ? value : def;
 }
 
 static int integer(const json& o, const char* k, int def, int minimum, int maximum) {
@@ -703,14 +699,10 @@ Settings fromJson(const std::string& text) {
         s.convolution.enabled = boolean(j["convolution"], "enabled", false);
         s.convolution.file = str(j["convolution"], "file", "");
     }
-    const auto bounded = [](const json& o, const char* k, double def, double low, double high) {
-        return o.contains(k) && o[k].is_number() && o[k].get<double>() >= low && o[k].get<double>() <= high ? o[k].get<double>()
-                                                                                                            : def;
-    };
     if (j.contains("volume") && j["volume"].is_object()) {
         const json& v = j["volume"];
         s.volume.mode = volumeModeFromId(str(v, "mode", "fixed"));
-        s.volume.db = bounded(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
+        s.volume.db = num(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
         s.volume.muted = boolean(v, "muted", false);
     }
     if (j.contains("replayGain") && j["replayGain"].is_object()) {
@@ -718,15 +710,15 @@ Settings fromJson(const std::string& text) {
         const auto mode = std::ranges::find(kReplayGainModeIds, str(r, "mode", "off"));
         s.replayGain.mode =
             mode == std::end(kReplayGainModeIds) ? ReplayGainMode::Off : ReplayGainMode(mode - std::begin(kReplayGainModeIds));
-        s.replayGain.preampDb = bounded(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+        s.replayGain.preampDb = num(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
         s.replayGain.noValuePreampDb =
-            bounded(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+            num(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
         s.replayGain.preventClipping = boolean(r, "preventClipping", true);
     }
     if (j.contains("crossfade") && j["crossfade"].is_object()) {
         const json& c = j["crossfade"];
         s.crossfade.enabled = boolean(c, "enabled", false);
-        const double seconds = bounded(c, "seconds", 3.0, CrossfadeSettings::kMinSeconds, CrossfadeSettings::kMaxSeconds);
+        const double seconds = num(c, "seconds", 3.0, CrossfadeSettings::kMinSeconds, CrossfadeSettings::kMaxSeconds);
         s.crossfade.seconds = std::round(seconds * 2.0) / 2.0;
     }
     if (j.contains("dspOrder") && j["dspOrder"].is_array() && j["dspOrder"].size() == 3) {

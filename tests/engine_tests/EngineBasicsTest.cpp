@@ -208,6 +208,26 @@ TEST(Settings, JsonRoundTrip) {
     EXPECT_EQ(u.wasapi.maxDsdRate, 0u);
 }
 
+// Numbers out of their range keep their defaults, through the one reader every number takes. One too large for a
+// double never reaches it: the JSON parser refuses the file.
+TEST(Settings, NumbersOutOfRangeKeepTheirDefaults) {
+    const auto schema = R"({"schema":)" + std::to_string(Settings::kSchemaVersion);
+    const auto read = fromJson(schema + R"(,
+        "volume":{"mode":"software","db":-81},
+        "replayGain":{"preamp":100,"noValuePreamp":-100},
+        "crossfade":{"seconds":60},
+        "eq":{"bands":[{"type":"peaking","frequency":0.5,"gain":-99,"q":0}]}})");
+    EXPECT_EQ(read.volume.db, 0.0);
+    EXPECT_EQ(read.replayGain.preampDb, 0.0);
+    EXPECT_EQ(read.replayGain.noValuePreampDb, 0.0);
+    EXPECT_EQ(read.crossfade.seconds, 3.0);
+    ASSERT_EQ(read.eq.bands.size(), 1u);
+    EXPECT_EQ(read.eq.bands[0].frequencyHz, 1000.0);
+    EXPECT_EQ(read.eq.bands[0].gainDb, 0.0);
+    EXPECT_EQ(read.eq.bands[0].q, 0.71);
+    EXPECT_THROW(fromJson(schema + R"(,"volume":{"db":-1e999}})"), nlohmann::json::out_of_range);
+}
+
 TEST(Settings, CorruptFileFallsBackToDefaults) {
     auto p = testutil::tempDir() / L"settings-corrupt.json";
     {
