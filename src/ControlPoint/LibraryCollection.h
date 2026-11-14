@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -8,9 +8,9 @@
 #pragma once
 
 #include <functional>
-#include <unordered_map>
 
 #include "BrowseItem.h"
+#include "ItemsVector.h"
 #include "Server/Api/PagedListing.h"
 
 namespace ui {
@@ -24,14 +24,8 @@ struct BrowsePage {
 // Runs off the UI thread; a pinned revision makes it throw once the library changed.
 using BrowseFetch = std::function<BrowsePage(int64_t offset, int64_t limit, std::optional<uint64_t> revision)>;
 
-class LibraryCollection
-    : public winrt::implements<
-          LibraryCollection, winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable>,
-          winrt::Windows::Foundation::Collections::IVector<winrt::Windows::Foundation::IInspectable>,
-          winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable>,
-          winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::IInspectable>> {
+class LibraryCollection : public ItemsVector<LibraryCollection> {
 public:
-    using IInspectable = winrt::Windows::Foundation::IInspectable;
     using Item = winrt::CamelPlayer::BrowseItem;
 
     LibraryCollection(winrt::Microsoft::UI::Dispatching::DispatcherQueue queue, BrowseFetch fetch)
@@ -66,42 +60,8 @@ public:
         return item;
     }
 
-    uint32_t GetMany(uint32_t start, winrt::array_view<IInspectable> out) {
-        uint32_t n = 0;
-        for (; n < out.size() && start + n < Size(); ++n) out[n] = GetAt(start + n);
-        return n;
-    }
-
-    // The rows made so far; a row made later reads its state then.
-    template <class F> void forEachItem(F&& f) const {
-        for (const auto& [index, item] : items_)
-            if (item) f(item);
-    }
-    bool IndexOf(IInspectable const& value, uint32_t& index) const {
-        for (const auto& [i, item] : items_)
-            if (item == value) {
-                index = uint32_t(i);
-                return true;
-            }
-        return false;
-    }
-
-    winrt::Windows::Foundation::Collections::IVectorView<IInspectable> GetView() { return *this; }
-    winrt::Windows::Foundation::Collections::IIterator<IInspectable> First() { return winrt::make<Iterator>(*this); }
-
-    void SetAt(uint32_t, IInspectable const&) { throw winrt::hresult_illegal_method_call(); }
     void InsertAt(uint32_t, IInspectable const&) { throw winrt::hresult_illegal_method_call(); }
     void RemoveAt(uint32_t) { throw winrt::hresult_illegal_method_call(); }
-    void Append(IInspectable const&) { throw winrt::hresult_illegal_method_call(); }
-    void RemoveAtEnd() { throw winrt::hresult_illegal_method_call(); }
-    void Clear() { throw winrt::hresult_illegal_method_call(); }
-    void ReplaceAll(winrt::array_view<IInspectable const>) { throw winrt::hresult_illegal_method_call(); }
-
-    winrt::event_token
-    VectorChanged(winrt::Windows::Foundation::Collections::VectorChangedEventHandler<IInspectable> const& handler) {
-        return changed_.add(handler);
-    }
-    void VectorChanged(winrt::event_token const& token) noexcept { changed_.remove(token); }
 
     // The row behind a realized item, for click handling.
     static const BrowseRow& rowOf(IInspectable const& item) {
@@ -109,29 +69,6 @@ public:
     }
 
 private:
-    struct ChangeArgs : winrt::implements<ChangeArgs, winrt::Windows::Foundation::Collections::IVectorChangedEventArgs> {
-        ChangeArgs(winrt::Windows::Foundation::Collections::CollectionChange change, uint32_t index)
-            : change_(change), index_(index) {}
-        winrt::Windows::Foundation::Collections::CollectionChange CollectionChange() const { return change_; }
-        uint32_t Index() const { return index_; }
-        winrt::Windows::Foundation::Collections::CollectionChange change_;
-        uint32_t index_;
-    };
-
-    struct Iterator : winrt::implements<Iterator, winrt::Windows::Foundation::Collections::IIterator<IInspectable>> {
-        explicit Iterator(LibraryCollection& owner) : owner_(owner.get_strong()) {}
-        IInspectable Current() const { return owner_->GetAt(index_); }
-        bool HasCurrent() const { return index_ < owner_->Size(); }
-        bool MoveNext() { return ++index_ < owner_->Size(); }
-        uint32_t GetMany(winrt::array_view<IInspectable> out) {
-            const auto n = owner_->GetMany(index_, out);
-            index_ += n;
-            return n;
-        }
-        winrt::com_ptr<LibraryCollection> owner_;
-        uint32_t index_ = 0;
-    };
-
     // Batches the pages wanted by one layout pass into fetches after it.
     void schedule() {
         if (scheduled_) return;
@@ -178,7 +115,7 @@ private:
                 revise(before);
             else {
                 items_.clear();
-                changed_(*this, winrt::make<ChangeArgs>(winrt::Windows::Foundation::Collections::CollectionChange::Reset, 0u));
+                notify(CollectionChange::Reset, 0u);
             }
             if (reset_) reset_(listing_.size());
             return;
@@ -209,7 +146,6 @@ private:
     // realized items show the new rows at their positions (pages not yet cached arrive as usual), and only the end of
     // the list grows or shrinks. A reset would scroll back to the top on every library change.
     void revise(uint32_t before) {
-        using winrt::Windows::Foundation::Collections::CollectionChange;
         const uint32_t after = Size();
         std::erase_if(items_, [after](const auto& pair) { return pair.first >= after; });
         for (auto& [index, item] : items_) {
@@ -217,14 +153,8 @@ private:
             if (const auto* row = listing_.at(index)) self->fill(*row);
         }
         schedule();
-        for (uint32_t i = before; i < after; ++i) changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemInserted, i));
-        for (uint32_t i = before; i > after; --i) changed_(*this, winrt::make<ChangeArgs>(CollectionChange::ItemRemoved, i - 1));
-    }
-
-    // Keeps the items around the reading position so scrolling a 100k-row view does not keep 100k objects alive.
-    void trim(uint32_t index) {
-        if (items_.size() <= 4000) return;
-        std::erase_if(items_, [index](const auto& pair) { return pair.first + 2000 < index || pair.first > index + 2000; });
+        for (uint32_t i = before; i < after; ++i) notify(CollectionChange::ItemInserted, i);
+        for (uint32_t i = before; i > after; --i) notify(CollectionChange::ItemRemoved, i - 1);
     }
 
     winrt::Microsoft::UI::Dispatching::DispatcherQueue queue_;
@@ -232,8 +162,6 @@ private:
     BrowseFetch fetch_;
     std::function<void(int64_t)> reset_;
     camel::server::PagedListing<BrowseRow> listing_{100, 64};
-    std::unordered_map<uint32_t, IInspectable> items_;
-    winrt::event<winrt::Windows::Foundation::Collections::VectorChangedEventHandler<IInspectable>> changed_;
     bool scheduled_ = false, refreshing_ = false;
 };
 
