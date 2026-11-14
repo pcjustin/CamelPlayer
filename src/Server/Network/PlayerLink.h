@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -51,7 +51,6 @@ public:
     void expectNext(std::string track);
     // The player moved on to the next track without saying so; what it reported until now means nothing more.
     void advance();
-    void expectPosition(uint64_t positionMs, std::chrono::milliseconds now);
     std::vector<PlayerEvent> observe(const PlayerObservation& observation, std::chrono::milliseconds now);
     std::vector<PlayerEvent> lost();
 
@@ -85,7 +84,6 @@ public:
     bool play();
     bool pause();
     bool stop();
-    bool seek(uint64_t positionMs);
     uint64_t positionMs() const; // in the current track, as last polled
     bool stopped() const;        // as last polled
     bool playing() const;        // as last polled

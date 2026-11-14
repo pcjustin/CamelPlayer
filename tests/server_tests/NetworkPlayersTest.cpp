@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -333,18 +333,6 @@ TEST(PlayerFollowerTest, ThePositionRightAfterANewTrackIsNotASeek) {
     seen.positionMs = 200000; // of what it played before
     follower.observe(seen, 100ms);
     seen.positionMs = 0;
-    EXPECT_TRUE(follower.observe(seen, 200ms).empty());
-}
-
-TEST(PlayerFollowerTest, ASeekAskedByCamelPlayerIsNotReportedBack) {
-    PlayerFollower follower;
-    follower.expect({"a", "", ""});
-    PlayerObservation seen;
-    seen.state = TransportState::Paused;
-    seen.positionMs = 10000;
-    follower.observe(seen, 0ms);
-    follower.expectPosition(90000, 100ms);
-    seen.positionMs = 90000;
     EXPECT_TRUE(follower.observe(seen, 200ms).empty());
 }
 
@@ -700,11 +688,9 @@ TEST(PlayerLinkTest, CommandsReachTheTransport) {
     PlayerLink link(describe(renderer), into(events), {60s, 2, 1800, 500});
     EXPECT_TRUE(link.play());
     EXPECT_TRUE(link.pause());
-    EXPECT_TRUE(link.seek(61000));
     EXPECT_TRUE(link.stop());
     const auto actions = renderer.actions();
-    for (const char* action : {"Play", "Pause", "Seek", "Stop"})
-        EXPECT_NE(std::ranges::find(actions, action), actions.end()) << action;
+    for (const char* action : {"Play", "Pause", "Stop"}) EXPECT_NE(std::ranges::find(actions, action), actions.end()) << action;
     renderer.refuseSoap(true);
     EXPECT_FALSE(link.play());
 }
@@ -756,16 +742,6 @@ TEST(PlayerLinkTest, ASourceChangeOnAnOpenHomePlayerIsATakeover) {
     link.expect({"7", "", ""});
     renderer.emitVariable("Product", "SourceIndex", "3");
     EXPECT_TRUE(events->waitFor(PlayerEventKind::TakenOver));
-}
-
-TEST(PlayerLinkTest, OpenHomeCommandsUseThePlaylist) {
-    FakeRenderer renderer(RendererKind::OpenHome);
-    auto events = std::make_shared<Events>();
-    PlayerLink link(describe(renderer), into(events), {60s, 2, 1800, 500});
-    EXPECT_TRUE(link.play());
-    EXPECT_TRUE(link.seek(30000));
-    const auto actions = renderer.actions();
-    EXPECT_NE(std::ranges::find(actions, "SeekSecondAbsolute"), actions.end());
 }
 
 TEST(PlayerLinkTest, AForgedEventIsIgnored) {

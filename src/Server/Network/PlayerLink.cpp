@@ -69,11 +69,6 @@ void PlayerFollower::advance() {
     position_.reset();
 }
 
-void PlayerFollower::expectPosition(uint64_t positionMs, milliseconds now) {
-    position_ = positionMs;
-    positionAt_ = now;
-}
-
 void PlayerFollower::followTrack(const std::string& track, milliseconds now, std::vector<PlayerEvent>& events) {
     if (expected_.current.empty() || track == expected_.current || track == left_) return;
     if (track == justLeft_ && now < leftUntil_) return;
@@ -420,17 +415,6 @@ bool PlayerLink::pause() {
 bool PlayerLink::stop() {
     if (impl_->player.protocol == upnp::PlayerProtocol::OpenHome) return impl_->attempt("Playlist", "Stop", {});
     return impl_->attempt("AVTransport", "Stop", {{"InstanceID", "0"}});
-}
-
-bool PlayerLink::seek(uint64_t positionMs) {
-    {
-        std::scoped_lock lock(impl_->mutex);
-        impl_->follower.expectPosition(positionMs, impl_->now());
-    }
-    if (impl_->player.protocol == upnp::PlayerProtocol::OpenHome)
-        return impl_->attempt("Playlist", "SeekSecondAbsolute", {{"Value", std::to_string(positionMs / 1000)}});
-    return impl_->attempt("AVTransport", "Seek",
-                          {{"InstanceID", "0"}, {"Unit", "REL_TIME"}, {"Target", upnp::formatDuration(positionMs)}});
 }
 
 void PlayerLink::advance() {
