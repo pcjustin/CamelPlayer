@@ -205,12 +205,7 @@ impl Converter {
                 in_float: false,
                 out: *out,
                 out_channels,
-                // Like any processed source: 24-bit at most, MSB-aligned in a 32-bit container.
-                quantize_bits: if out.sample_format == SAMPLE_F32_LE {
-                    0
-                } else {
-                    out.valid_bits.min(24)
-                },
+                quantize_bits: Self::device_bits(out),
                 gain: 1.0,
                 dsp_bits: Self::device_bits(out),
                 matrix: Some(
