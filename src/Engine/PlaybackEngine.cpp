@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #include "Engine/decode/FormatProbe.h"
 #include "Engine/Dsp.h"
@@ -38,6 +39,7 @@ constexpr double kStartFillSeconds = 0.5; // buffered before the output starts
 // Playing a slow source pauses to buffer again when less than this is buffered ahead.
 constexpr double kLowWaterSeconds = 1.5;
 constexpr auto kFillWindow = std::chrono::seconds(2); // how long the read rate is measured over while it plays
+constexpr auto kStopDeviceAfterPause = std::chrono::seconds(2);
 // A network player or AirPlay receiver takes the audio over the network a slow source is read from, and stops when
 // reading leaves it too little: while it plays, the source is read at this share of the rate measured.
 constexpr double kStreamReadShare = 0.4;
@@ -372,7 +374,7 @@ public:
             if (state_ == PlayState::Paused) {
                 if (!openDeferredOutput()) return;
                 startRust();
-                output_->start();
+                if (!std::exchange(runsPaused_, false)) output_->start();
                 setState(PlayState::Playing);
             }
             return;
@@ -384,12 +386,25 @@ public:
         resumeOnDefault_ = false;
         if (buffering_.exchange(false)) publish();
         if (active_ && state_ == PlayState::Playing) {
-            output_->pause();
+            // The Engine falls silent at once. A device plays that silence for a while before it stops, as a driver can
+            // take half a second to stop (the DAVE's ASIO driver) and a play meanwhile would wait for it; a network
+            // player is told at once.
+            playing_ = false;
             leadSilence_ = 0;
             leadDone_ = false;
             rust_->pause();
             setState(PlayState::Paused);
+            if (isNetworkPlayer(settings_.backend))
+                output_->pause();
+            else
+                runsPaused_ = true;
         }
+    }
+
+    void stopDeviceOncePaused() {
+        if (!runsPaused_ || std::chrono::steady_clock::now() - pausedAt_ < kStopDeviceAfterPause) return;
+        runsPaused_ = false;
+        output_->pause();
     }
 
     void stop() {
@@ -405,7 +420,7 @@ public:
 
     void seek(uint64_t frame) {
         if (active_)
-            startSession(frame, playsOn());
+            startSession(frame, playsOn(), false, true);
         else {
             position_ = frame;
             publish();
@@ -717,6 +732,7 @@ private:
             refreshTotal();
             checkBuffering();
         }
+        if (active_ && state_ == PlayState::Paused) stopDeviceOncePaused();
         if (active_ && state_ == PlayState::Paused && !buffering_) releaseAfterPause();
     }
 
@@ -936,7 +952,12 @@ private:
         std::error_code error;
         const uint64_t size = std::filesystem::file_size(file_, error);
         const uint64_t at = error ? 0 : uint64_t(double(size) * double(from) / double(shown));
-        const auto read = measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
+        // A seek in the file measured when it started uses that rate: measuring takes up to 4 MB from the share.
+        const auto read = measuredFile_ == file_ && measuredRate_
+                              ? measuredRate_
+                              : measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
+        measuredFile_ = file_;
+        measuredRate_ = read;
         if (!read) return configured;
         const double left = framesToSeconds(shown - from, src.sampleRate);
         const bool streamed = isNetworkPlayer(settings_.backend);
@@ -1040,8 +1061,8 @@ private:
     }
 
     // `deviceChange`: reopening after the Windows default changed; a device that cannot play pauses instead of ending the
-    // track, so the user can resume (docs/Plan.md §2). `keepOutput`: a manual change, which plays on the open device when
-    // the new file takes its format.
+    // track, so the user can resume (docs/Plan.md §2). `keepOutput`: a manual change or a seek, which plays on the open
+    // device when the file takes its format.
     void startSession(uint64_t startFrame, bool playNow, bool deviceChange = false, bool keepOutput = false) {
         const PlayState onDeviceFailure = deviceChange ? PlayState::Paused : PlayState::Stopped;
         teardown(keepOutput && playNow && !deviceChange);
@@ -1354,6 +1375,7 @@ private:
             }
         }
         outputOpen_ = false;
+        runsPaused_ = false;
         switching_ = false; // a closed device renders nothing
     }
 
@@ -1628,6 +1650,7 @@ private:
     std::optional<Opened> lastOpened_;
     bool pendingSilence_ = false; // the open stream changed format and has not started yet
     std::chrono::steady_clock::time_point pausedAt_;
+    bool runsPaused_ = false; // paused, with the device still playing silence until stopDeviceOncePaused()
     std::atomic<uint32_t> sourceRate_{0}, outputRate_{0}; // read by snapshot() while the stream plays
 
     // shared with the decode / output threads
@@ -1657,7 +1680,9 @@ private:
     FadeSkip refusedSkip_ = FadeSkip::None;
     std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
     // A source read slower than it plays (Engine/SlowSource.h).
-    std::optional<double> readRate_;    // bytes per second: measured, then followed while the ring fills
+    std::optional<double> readRate_; // bytes per second: measured, then followed while the ring fills
+    std::wstring measuredFile_;      // the file measureReadRate() last measured, at measuredRate_
+    std::optional<double> measuredRate_;
     double neededRate_ = 0;             // bytes per second neededFor_ plays at
     double streamRate_ = 0;             // bytes per second it is read at while it streams; 0 when it does not
     std::atomic<double> streamPace_{0}; // seconds of it decoded per second while it streams; 0 when unpaced

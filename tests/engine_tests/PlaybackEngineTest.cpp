@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <fstream>
 #include <optional>
 #include <thread>
@@ -27,7 +28,7 @@ struct OutputProbe {
     std::mutex renderMutex;
     IRenderSource* source = nullptr;
     DeviceFormat format;
-    int creations = 0, opens = 0, starts = 0, pauses = 0, closes = 0;
+    std::atomic<int> creations = 0, opens = 0, starts = 0, pauses = 0, closes = 0; // read while the Engine runs
     bool accepts = true;
     std::optional<ErrorCode> openError, startError, pauseError;
     bool unexpectedStartError = false;
@@ -93,6 +94,12 @@ protected:
         engine->openAndPlay(testutil::testFile("24-96k"));
         engine->waitIdle();
     }
+    // A pause then keeps the device open however long it lasts, rather than closing it after a second.
+    void keepDeviceWhenPaused() {
+        settings.wasapi.timing.releaseAfterPauseSeconds = 0;
+        engine.reset();
+        SetUp();
+    }
     // Pulls like a device that waits for the Engine: the device ring holds only a short lead, so a long pull takes
     // several renders. Stops when the stream ends or nothing arrives for a second.
     size_t pull(size_t frames) {
@@ -151,13 +158,13 @@ TEST_F(EngineStateTest, PauseResumeAndTogglePreservePosition) {
     engine->pause();
     engine->pause();
     engine->waitIdle();
-    EXPECT_EQ(probe.pauses, 1);
+    EXPECT_EQ(probe.pauses, 0); // the device plays silence a while before it stops
     EXPECT_EQ(engine->snapshot().position, 123u);
     EXPECT_EQ(engine->snapshot().state, PlayState::Paused);
     engine->play();
     engine->play();
     engine->waitIdle();
-    EXPECT_EQ(probe.starts, 2);
+    EXPECT_EQ(probe.starts, 1); // still running
     engine->togglePause();
     engine->waitIdle();
     EXPECT_EQ(engine->snapshot().state, PlayState::Paused);
@@ -800,10 +807,33 @@ TEST_F(EngineStateTest, ExceptionBetweenCommandsIsPublished) {
     EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
 }
 
+// A driver can take half a second to stop, which a play soon after a pause would wait for.
+TEST_F(EngineStateTest, APausedDeviceStopsOnlyAfterAWhile) {
+    keepDeviceWhenPaused();
+    open();
+    ASSERT_EQ(pull(100), 100u);
+    engine->pause();
+    engine->waitIdle();
+    EXPECT_EQ(pull(100), 0u); // silence, the position held
+    EXPECT_EQ(probe.pauses, 0);
+    const auto stopped = std::chrono::steady_clock::now() + 5s;
+    while (probe.pauses == 0 && std::chrono::steady_clock::now() < stopped) std::this_thread::sleep_for(10ms);
+    EXPECT_EQ(probe.pauses, 1);
+    EXPECT_EQ(engine->snapshot().position, 100u);
+    engine->play();
+    engine->waitIdle();
+    EXPECT_EQ(probe.starts, 2);
+    EXPECT_EQ(engine->snapshot().state, PlayState::Playing);
+}
+
 TEST_F(EngineStateTest, ResumeFailureIsPublished) {
+    keepDeviceWhenPaused();
     open();
     engine->pause();
     engine->waitIdle();
+    const auto stopped = std::chrono::steady_clock::now() + 5s;
+    while (probe.pauses == 0 && std::chrono::steady_clock::now() < stopped) std::this_thread::sleep_for(10ms);
+    ASSERT_EQ(probe.pauses, 1);
     probe.startError = ErrorCode::DeviceLost;
     engine->play();
     engine->waitIdle();
@@ -812,10 +842,12 @@ TEST_F(EngineStateTest, ResumeFailureIsPublished) {
 }
 
 TEST_F(EngineStateTest, PauseFailureIsPublished) {
+    keepDeviceWhenPaused();
     open();
     probe.pauseError = ErrorCode::DeviceLost;
     engine->pause();
-    engine->waitIdle();
+    const auto failed = std::chrono::steady_clock::now() + 5s;
+    while (!engine->snapshot().error && std::chrono::steady_clock::now() < failed) std::this_thread::sleep_for(10ms);
     EXPECT_EQ(engine->snapshot().error, ErrorCode::DeviceLost);
     EXPECT_EQ(probe.source, nullptr);
 }

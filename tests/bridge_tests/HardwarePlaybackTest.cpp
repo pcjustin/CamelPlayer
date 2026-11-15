@@ -5,8 +5,16 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <iterator>
+#include <numbers>
+#include <string>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 #include "Engine/PlaybackEngine.h"
 #include "TestUtil.h"
@@ -77,6 +85,27 @@ void expectPlaying(PlaybackEngine& engine, Backend backend, DecoderKind decoder,
     EXPECT_GT(snap.position, position) << stallTrace(engine);
     EXPECT_EQ(snap.underruns, 0u);
 }
+
+// Milliseconds until `done` holds, polled every millisecond; -1 after 5 s.
+template <class Done> double msUntil(Done done) {
+    const auto start = std::chrono::steady_clock::now();
+    while (!done()) {
+        if (std::chrono::steady_clock::now() - start > 5s) return -1;
+        std::this_thread::sleep_for(1ms);
+    }
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+
+double median(std::vector<double> times) {
+    std::ranges::sort(times);
+    return times[times.size() / 2];
+}
+
+std::string listed(const std::vector<double>& times) {
+    std::string text;
+    for (const double t : times) text += (text.empty() ? "" : ", ") + std::to_string(std::lround(t));
+    return "median " + std::to_string(std::lround(median(times))) + " ms (" + text + ")";
+}
 } // namespace
 
 class HardwarePlayback : public ::testing::TestWithParam<std::tuple<int, DecoderKind>> {};
@@ -146,6 +175,118 @@ TEST_P(HardwarePlayback, DISABLED_PlayPauseSeekStopAndSwitch) {
         expectPlaying(engine, settings.backend, decoderFor(settings.decoderByFormat, AudioFormat::Flac), "replay"));
     engine.stop();
     engine.waitIdle();
+}
+
+namespace {
+// From the request until the new position is heard, the next track is heard, or the engine is paused, on the Chord over
+// ASIO, for two files in one format of 30 s each. Played from CAMEL_ASIO_RESPONSE_DIR (a share, say) when it is set,
+// where the times are only reported, as they are the network's too.
+void measureResponse(std::filesystem::path first, std::filesystem::path second, uint32_t rate) {
+    Settings settings;
+    ASSERT_TRUE(selectDevice(settings, Backend::Asio, "Chord"));
+    wchar_t dir[MAX_PATH];
+    const DWORD length = GetEnvironmentVariableW(L"CAMEL_ASIO_RESPONSE_DIR", dir, DWORD(std::size(dir)));
+    const bool local = !length || length >= std::size(dir);
+    if (!local) {
+        for (auto* file : {&first, &second}) {
+            const auto copy = std::filesystem::path(dir) / file->filename();
+            std::filesystem::copy_file(*file, copy, std::filesystem::copy_options::overwrite_existing);
+            *file = copy;
+        }
+    }
+    PlaybackEngine engine(settings);
+    std::vector<double> seeks, changes, pauses, plays;
+    for (int round = 0; round < 5; ++round) {
+        const auto& file = round % 2 ? second : first;
+        engine.openAndPlay(file);
+        ASSERT_TRUE(engine.waitForState(PlayState::Playing, 5s)) << engine.snapshot().errorDetail;
+        std::this_thread::sleep_for(1s);
+
+        const uint64_t target = uint64_t(10 + round) * rate;
+        engine.seek(target);
+        seeks.push_back(msUntil([&] {
+            const auto s = engine.snapshot();
+            return s.state == PlayState::Playing && s.position > target;
+        }));
+        std::this_thread::sleep_for(1s);
+
+        const auto& next = round % 2 ? first : second;
+        engine.openAndPlay(next);
+        changes.push_back(msUntil([&] {
+            const auto s = engine.snapshot();
+            return s.file == next.wstring() && s.state == PlayState::Playing && s.position > 0 && s.position < 5ull * rate;
+        }));
+        std::this_thread::sleep_for(1s);
+
+        engine.pause();
+        pauses.push_back(msUntil([&] { return engine.snapshot().state == PlayState::Paused; }));
+        std::this_thread::sleep_for(100ms);
+        const uint64_t paused = engine.snapshot().position;
+        std::this_thread::sleep_for(200ms);
+        EXPECT_EQ(engine.snapshot().position, paused);
+        engine.play();
+        plays.push_back(msUntil([&] {
+            const auto s = engine.snapshot();
+            return s.state == PlayState::Playing && s.position > paused;
+        }));
+        std::this_thread::sleep_for(500ms);
+        EXPECT_FALSE(engine.snapshot().error) << engine.snapshot().errorDetail;
+        EXPECT_EQ(engine.snapshot().underruns, 0u);
+    }
+    const auto status = engine.snapshot().outputStatus;
+    // Paused for longer, the device has stopped, and starts again at play.
+    engine.pause();
+    std::this_thread::sleep_for(3s);
+    const uint64_t paused = engine.snapshot().position;
+    engine.play();
+    const double resumed = msUntil([&] {
+        const auto s = engine.snapshot();
+        return s.state == PlayState::Playing && s.position > paused;
+    });
+    EXPECT_GE(resumed, 0);
+    EXPECT_LT(resumed, 500);
+    engine.stop();
+    engine.waitIdle();
+    std::printf("%s, %s, buffer %u frames (%.1f ms)\n", status.mode.c_str(), status.detail.c_str(), status.bufferFrames,
+                status.periodMs);
+    std::printf("seek: %s\nchange: %s\npause: %s\nplay: %s\n", listed(seeks).c_str(), listed(changes).c_str(),
+                listed(pauses).c_str(), listed(plays).c_str());
+    if (!local) return;
+    EXPECT_LT(median(seeks), 120);
+    EXPECT_LT(median(changes), 120);
+    EXPECT_LT(median(pauses), 50);
+    EXPECT_LT(median(plays), 50);
+}
+} // namespace
+
+// Opt in with --gtest_also_run_disabled_tests --gtest_filter=AsioResponseHardware.*. A -40 dB tone.
+TEST(AsioResponseHardware, DISABLED_SeekChangeAndPauseOnTheChord) {
+    constexpr uint32_t kRate = 44100;
+    measureResponse(testutil::generatedFile({"asio-response-a", kRate, 16, 2, 30.0, true, -40.0}),
+                    testutil::generatedFile({"asio-response-b", kRate, 16, 2, 30.0, true, -40.0}), kRate);
+}
+
+// A file read at over 1 MB/s, which a share measures before it plays: a -40 dB tone over noise in its 14 lowest bits
+// (about -60 dB), so it does not compress.
+TEST(AsioResponseHardware, DISABLED_SeekChangeAndPauseOnTheChordInHighResolution) {
+    constexpr uint32_t kRate = 352800;
+    std::vector<std::filesystem::path> files;
+    for (const char* name : {"asio-response-hires-a.flac", "asio-response-hires-b.flac"}) {
+        const auto path = testutil::tempDir() / name;
+        if (!std::filesystem::exists(path)) {
+            uint32_t noise = 7; // the same noise every time, from a linear congruential generator
+            std::vector<int32_t> samples(size_t(kRate) * 30 * 2);
+            for (size_t i = 0; i < samples.size(); ++i) {
+                const size_t frame = i / 2;
+                const double tone = 0.01 * std::sin(2 * std::numbers::pi * 440.0 * double(frame) / kRate);
+                noise = noise * 1664525u + 1013904223u;
+                samples[i] = int32_t(std::lround(tone * 8388607.0)) + int32_t((noise >> 8) & 0x3fff) - 0x2000;
+            }
+            camel::audio::testaudio::writeFlacSamples(path, samples, kRate, 24, 2);
+        }
+        files.push_back(path);
+    }
+    measureResponse(files[0], files[1], kRate);
 }
 
 INSTANTIATE_TEST_SUITE_P(M0_21, HardwarePlayback,

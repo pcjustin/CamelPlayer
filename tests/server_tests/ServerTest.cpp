@@ -4,9 +4,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <future>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <thread>
 
@@ -1597,7 +1599,7 @@ TEST(ServerGaplessTest, ClearingTheQueueDropsTheEntryAlreadyDecoding) {
     std::filesystem::remove(capture);
 }
 
-TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
+TEST(ServerGaplessTest, SeekPlaysOnTheOpenDeviceAndQueuesTheNextFileAgain) {
     const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
                                                       testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3})};
     const auto capture = testutil::tempDir() / "server-gapless-seek.raw";
@@ -1626,12 +1628,19 @@ TEST(ServerGaplessTest, SeekRestartsTheStreamAndQueuesTheNextFileAgain) {
         EXPECT_EQ(s.queueEntryId, ids[1]);
         EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
     }
-    EXPECT_EQ(opens.load(), 2); // the seek reopens; the next file then follows without another open
+    EXPECT_EQ(opens.load(), 1); // the seek plays on the open device; the next file then follows without another open
     const auto first = testaudio::referenceDecode(files[0]);
     auto expected = std::vector<int32_t>(first.samples.begin() + ptrdiff_t(96000) * 3, first.samples.end());
     const auto second = concatenatedReferences({files[1]});
     expected.insert(expected.end(), second.begin(), second.end());
-    EXPECT_TRUE(capturedSamples(capture) == expected);
+    // a from its start up to the seek, the silence the device plays while the seek starts, then a from 1.5 s and b.
+    const auto got = capturedSamples(capture);
+    ASSERT_GE(got.size(), expected.size());
+    const auto seekAt = got.end() - ptrdiff_t(expected.size());
+    EXPECT_TRUE(std::equal(expected.begin(), expected.end(), seekAt));
+    const auto heardEnd = std::find_if(std::make_reverse_iterator(seekAt), got.rend(), [](int32_t v) { return v != 0; }).base();
+    ASSERT_LE(heardEnd - got.begin(), ptrdiff_t(first.samples.size()));
+    EXPECT_TRUE(std::equal(got.begin(), heardEnd, first.samples.begin()));
     std::filesystem::remove(capture);
 }
 
