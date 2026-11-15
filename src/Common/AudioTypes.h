@@ -100,6 +100,8 @@ enum class ErrorCode {
     DeviceLost,
     FormatNotSupported, // device cannot take the file's rate / bit depth without conversion
     DriverError,
+    AccessDenied,  // the device refuses this computer, as an AirPlay receiver its access setting keeps from it
+    DeviceChanged, // the device is another now, as AirPlay speakers paired or separated in the Home app
     Other,
 };
 

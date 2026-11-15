@@ -1642,7 +1642,10 @@ private:
         state_.devices = std::move(catalog);
         const auto outputs = settings_.outputs;
         const auto followed = settings_.followedDefault;
+        const auto receiver = settings_.backend == Backend::AirPlay ? settings_.airplay.deviceId : std::string();
         syncOutputs(settings_, state_.devices);
+        // Speakers paired while one of them played: the pair is in use now and plays on once it can.
+        if (!receiver.empty() && settings_.airplay.deviceId != receiver) pairedAt_ = std::chrono::steady_clock::now();
         if (settings_.outputs == outputs && settings_.followedDefault == followed) return;
         engine_->applySettings(settings_);
         persist();
@@ -1689,14 +1692,59 @@ private:
 
     // The receivers of the group in use as the output asks for them, from any thread (AirPlayOutput.h).
     std::unique_ptr<audio::IOutput> airplayOutput(const Settings&) {
+        // A group refused, by its access setting or by its answer, is asked again at the Play its message asks for: the
+        // user may just have let this computer in, which the finder learns only when it asks.
+        std::vector<std::string> refused;
+        {
+            std::scoped_lock lock(groupMutex_);
+            if (airplayRefused_ &&
+                std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); }))
+                for (const auto& member : airplayMembers_) refused.push_back(member.id);
+        }
+        if (!refused.empty()) {
+            {
+                std::scoped_lock lock(finderMutex_);
+                if (airplayFinder_) {
+                    airplayFinder_->search();
+                    for (const auto& id : refused) airplayFinder_->check(id);
+                }
+            }
+            // The finder's answer is taken here: the Server thread, which follows the group, may be waiting for this output.
+            const auto deadline = std::chrono::steady_clock::now() + kAskAgainAtPlay;
+            while (std::chrono::steady_clock::now() < deadline) {
+                std::vector<airplay::Receiver> found;
+                {
+                    std::scoped_lock lock(finderMutex_);
+                    if (airplayFinder_) found = airplayFinder_->receivers();
+                }
+                {
+                    std::scoped_lock lock(groupMutex_);
+                    for (auto& member : airplayMembers_) {
+                        const auto receiver = std::ranges::find(found, member.id, &airplay::Receiver::id);
+                        if (receiver == found.end()) continue;
+                        member.support = receiver->support;
+                        if (receiver->support == airplay::Support::Supported) member.receiver = *receiver;
+                    }
+                    if (std::ranges::any_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); })) {
+                        airplayRefused_ = false;
+                        break;
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
         {
             std::scoped_lock lock(groupMutex_);
             if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); }))
-                throw airplayRefused_ ? audio::Error(audio::ErrorCode::FormatNotSupported, "the receiver refuses this connection")
+                throw airplayRefused_ ? audio::Error(audio::ErrorCode::AccessDenied, "the receiver refuses this connection")
                                       : audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
         }
         AirPlayOutputOptions options;
         options.details = [this](const std::wstring& file) { return trackDetails(file); };
+        options.lookAgain = [this] {
+            std::scoped_lock lock(finderMutex_);
+            if (airplayFinder_) airplayFinder_->search();
+        };
         options.members = [this] {
             std::scoped_lock lock(groupMutex_);
             return airplayMembers_;
@@ -1767,6 +1815,26 @@ private:
 
     // What the output reads from any thread: the group's receivers as found, their channels and levels. A receiver
     // that left while the others play on leaves the group, which says why.
+    // The stream to the speaker ends as it goes into the pair, before or after the pair is found: within a while of the
+    // pairing, a stream that ended so plays on as the pair once the pair can take it.
+    void resumeAsPairOnceFound() {
+        if (!pairedAt_) return;
+        if (std::chrono::steady_clock::now() - *pairedAt_ > kResumeAsPairWithin) {
+            pairedAt_.reset();
+            return;
+        }
+        const auto playback = engine_->snapshot();
+        if (playback.state != audio::PlayState::Paused ||
+            (playback.error != audio::ErrorCode::DeviceChanged && playback.error != audio::ErrorCode::DeviceInUse))
+            return;
+        {
+            std::scoped_lock lock(groupMutex_);
+            if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); })) return;
+        }
+        pairedAt_.reset();
+        resumePlayback();
+    }
+
     void followAirPlayGroup() {
         std::vector<std::pair<std::string, audio::Error>> left;
         {
@@ -1796,6 +1864,7 @@ private:
             AirPlayMember member{id};
             const auto receiver = std::ranges::find(found, id, &airplay::Receiver::id);
             if (receiver != found.end()) {
+                member.support = receiver->support;
                 if (receiver->support == airplay::Support::Supported)
                     member.receiver = *receiver;
                 else
@@ -1972,6 +2041,7 @@ private:
                 refreshDevicesAfterChange();
                 followPlayerVolume();
                 followAirPlayGroup();
+                resumeAsPairOnceFound();
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -2094,6 +2164,8 @@ private:
     // Held shared by other threads while they use loudness_, libraryMonitor_ or discord_; shutdown takes them away.
     mutable std::shared_mutex partsMutex_;
     static constexpr std::chrono::seconds kDevicesSettle{1};
+    static constexpr std::chrono::seconds kAskAgainAtPlay{3};
+    static constexpr std::chrono::seconds kResumeAsPairWithin{60};
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
     FinderOptions finderOptions_;
     std::mutex finderMutex_;
@@ -2105,6 +2177,7 @@ private:
     _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, audio::Error>> airplayLeft_;
     std::optional<ReceiverLeft> receiverLeft_;
+    std::optional<std::chrono::steady_clock::time_point> pairedAt_; // when the receiver in use went into a pair
     mutable std::mutex lyricsMutex_;
     _Guarded_by_(lyricsMutex_) mutable std::string lyricsPath_;
     _Guarded_by_(lyricsMutex_) mutable Lyrics lyrics_;

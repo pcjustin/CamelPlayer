@@ -115,6 +115,8 @@
   <data name="Error_DeviceNotFound" xml:space="preserve"><value>找不到輸出裝置</value></data>
   <data name="Error_DeviceInUse" xml:space="preserve"><value>裝置被其他程式佔用，按播放重試</value></data>
   <data name="Error_DeviceLost" xml:space="preserve"><value>裝置已中斷，接回後按播放</value></data>
+  <data name="Error_AccessDenied" xml:space="preserve"><value>裝置拒絕這台電腦</value></data>
+  <data name="Error_DeviceChanged" xml:space="preserve"><value>裝置已變更，請重新選擇輸出</value></data>
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>裝置無法以 bit-perfect 播放這個格式，已跳過</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>驅動程式錯誤</value></data>
   <data name="Library_GoToPlaying.AutomationProperties.Name" xml:space="preserve"><value>跳到正在播放 (Ctrl+L)</value></data>
@@ -124,6 +126,8 @@
   <data name="Error_Other" xml:space="preserve"><value>播放錯誤</value></data>
   <data name="Error_PlayerInUse" xml:space="preserve"><value>播放器正被其他來源使用，按播放可改回這裡播放</value></data>
   <data name="Error_PlayerLost" xml:space="preserve"><value>播放器未連接，恢復連線後按播放</value></data>
+  <data name="Error_ReceiverRefuses" xml:space="preserve"><value>接收端拒絕這台電腦：請在「家庭」App 的「家庭設定 › 喇叭與電視 › 允許喇叭與電視存取」選「同一網路上的任何人」，再按播放</value></data>
+  <data name="Error_ReceiverRegrouped" xml:space="preserve"><value>接收端已變更，例如在「家庭」App 中組成或拆開了立體聲：請在輸出選單重新選擇；剛組成的立體聲會自動接著播放</value></data>
   <data name="Error_PlayerDidNotPlay" xml:space="preserve"><value>播放器沒有開始播放，請確認它已開機且不在待機，再按播放</value></data>
   <data name="Library_Empty.Text" xml:space="preserve"><value>還沒有音樂。請到「設定 › 媒體庫」加入資料夾，會在背景建立索引。</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>未知</value></data>
@@ -698,12 +702,15 @@
   <data name="Output_DeleteTitle" xml:space="preserve"><value>要刪除 {0} 的設定嗎？</value></data>
   <data name="Output_DeleteText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除。之後再找到時，會從預設值開始。</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
+  <data name="Output_Unsupported" xml:space="preserve"><value>{0}（不支援）</value></data>
+  <data name="Output_InUseUnsupported" xml:space="preserve"><value>使用中；{0}</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>音訊輸出設定…</value></data>
   <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>輸出</value></data>
   <data name="Settings_AboutAirPlay.Text" xml:space="preserve"><value>AirPlay 是 Apple Inc. 的商標。</value></data>
   <data name="Output_AirPlayEncrypted" xml:space="preserve"><value>不支援：只接受加密音訊</value></data>
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>不支援：需要密碼</value></data>
   <data name="Output_AirPlayFormat" xml:space="preserve"><value>不支援：不接受此音訊格式</value></data>
+  <data name="Output_AirPlayHomeOnly" xml:space="preserve"><value>不支援：只允許共享此家庭的成員（「家庭」App › 家庭設定 › 喇叭與電視）</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>不支援：拒絕此連線</value></data>
   <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay 接收器</value></data>
   <data name="Volume_NoteAirPlay" xml:space="preserve"><value>播放器音量會調整接收器本身的音量，串流維持 bit-perfect。AirPlay 無法讀回音量，所以 CamelPlayer 會記住你為每台接收器設定的最後音量；在接收器上調整的變動不會顯示在這裡。</value></data>

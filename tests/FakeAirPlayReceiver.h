@@ -346,6 +346,11 @@ public:
         for (auto& record : records_)
             if (record.deviceId == deviceId) record.address = address;
     }
+    void announce(const std::string& deviceId, std::vector<std::string> airplayTxt) {
+        std::scoped_lock lock(mutex_);
+        for (auto& record : records_)
+            if (record.deviceId == deviceId) record.airplayTxt = airplayTxt;
+    }
     void rename(const std::string& deviceId, const std::string& name) {
         std::scoped_lock lock(mutex_);
         for (auto& record : records_)

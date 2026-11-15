@@ -57,6 +57,10 @@ winrt::hstring errorTitle(camel::audio::ErrorCode code) {
         return tr(L"Error_FormatNotSupported");
     case ErrorCode::DriverError:
         return tr(L"Error_DriverError");
+    case ErrorCode::AccessDenied:
+        return tr(L"Error_AccessDenied");
+    case ErrorCode::DeviceChanged:
+        return tr(L"Error_DeviceChanged");
     case ErrorCode::Other:
         break;
     }
@@ -72,6 +76,10 @@ winrt::hstring playerErrorTitle(camel::audio::ErrorCode code) {
         return tr(L"Error_PlayerLost");
     case ErrorCode::DriverError:
         return tr(L"Error_PlayerDidNotPlay");
+    case ErrorCode::AccessDenied:
+        return tr(L"Error_ReceiverRefuses");
+    case ErrorCode::DeviceChanged:
+        return tr(L"Error_ReceiverRegrouped");
     default:
         return {};
     }

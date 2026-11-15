@@ -769,7 +769,15 @@ const wchar_t* unsupportedReason(const std::string& reason) {
     if (reason == "encrypted") return L"Output_AirPlayEncrypted";
     if (reason == "password") return L"Output_AirPlayPassword";
     if (reason == "format") return L"Output_AirPlayFormat";
+    if (reason == "home") return L"Output_AirPlayHomeOnly";
     return L"Output_AirPlayRefused";
+}
+
+// What a row of the output menu says: a receiver not connected, or one that refuses this computer, says so.
+hstring outputMenuText(const camel::server::OutputRow& row) {
+    if (!row.connected) return ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))});
+    if (!row.unsupported.empty()) return ui::format(L"Output_Unsupported", {std::wstring(outputMenuLabel(row))});
+    return outputMenuLabel(row);
 }
 
 } // namespace
@@ -831,9 +839,14 @@ void MainWindow::populateOutputs() {
         names.Children().Append(name);
         if (row.selected || !row.connected || !row.unsupported.empty()) {
             TextBlock state;
-            state.Text(tr(row.selected     ? L"Output_InUse"
-                          : !row.connected ? L"Device_NotConnected"
-                                           : unsupportedReason(row.unsupported)));
+            // One in use that its receiver now refuses says why, as its stream ends.
+            state.Text(row.selected && !row.connected
+                           ? ui::format(L"Output_InUseUnsupported", {std::wstring(tr(L"Device_NotConnected"))})
+                       : row.selected && !row.unsupported.empty()
+                           ? ui::format(L"Output_InUseUnsupported", {std::wstring(tr(unsupportedReason(row.unsupported)))})
+                           : tr(row.selected     ? L"Output_InUse"
+                                : !row.connected ? L"Device_NotConnected"
+                                                 : unsupportedReason(row.unsupported)));
             state.TextWrapping(TextWrapping::Wrap);
             state.Style(unbox_value<Microsoft::UI::Xaml::Style>(
                 Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle"))));
@@ -1092,7 +1105,7 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
         if (row.backend == Backend::AirPlay && settings_.backend == Backend::AirPlay) {
             // Receivers join and leave the group in use; the last one stays.
             ToggleMenuFlyoutItem item;
-            item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
+            item.Text(outputMenuText(row));
             item.IsChecked(row.grouped);
             item.IsEnabled(row.connected && (!row.grouped || grouped >= 2));
             add(item, [this, row] {
@@ -1105,7 +1118,7 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
         }
         RadioMenuFlyoutItem item;
         item.GroupName(L"Outputs");
-        item.Text(row.connected ? outputMenuLabel(row) : ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))}));
+        item.Text(outputMenuText(row));
         item.IsChecked(row.selected);
         item.IsEnabled(row.connected);
         add(item, [this, row] {

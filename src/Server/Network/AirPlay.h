@@ -43,7 +43,8 @@ std::vector<DnsRecord> parseRecords(std::string_view message);
 std::optional<std::pair<std::string, std::string>> parseRaopName(std::string_view label);
 std::string deviceIdFrom(std::string_view text); // upper case, without separators
 
-enum class Support { Supported, EncryptedOnly, Password, Format, Refused };
+// HomeOnly: its access setting allows only people sharing its home (`acl=1` in _airplay._tcp), which this computer is not.
+enum class Support { Supported, EncryptedOnly, Password, Format, Refused, HomeOnly };
 const char* supportId(Support support);     // empty for Supported
 Support supportFrom(const TxtRecord& raop); // what the receiver declares; only a session shows whether it holds
 

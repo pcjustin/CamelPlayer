@@ -57,6 +57,8 @@ constexpr int kStatusUnauthorized = 401;
 constexpr int kStatusForbidden = 403;
 constexpr int kStatusBusy = 453;
 constexpr auto kInUse = "the receiver is in use by another source";
+constexpr auto kHomeOnly = "the receiver allows only people sharing its home";
+constexpr auto kChanged = "the receiver is no longer found as it was: paired or separated";
 constexpr auto kNotConnected = "the AirPlay receiver is not connected";
 
 struct Packet {
@@ -108,6 +110,7 @@ struct Member {
     std::vector<Destination> destinations;
     uint32_t latency = kDefaultAudioLatency;
     std::optional<double> volumeSent;
+    std::optional<std::chrono::steady_clock::time_point> closedAt; // when the receiver closed its connection
 };
 
 // A speaker as the stream sends to it.
@@ -147,7 +150,7 @@ void check(const RtspReply& reply, std::string_view step) {
     if (reply.status == kStatusOk) return;
     if (reply.status == kStatusBusy) throw Error(ErrorCode::DeviceInUse, kInUse);
     if (reply.status == kStatusForbidden || reply.status == kStatusUnauthorized)
-        throw Error(ErrorCode::FormatNotSupported, "the receiver refuses this connection");
+        throw Error(ErrorCode::AccessDenied, "the receiver refuses this connection");
     throw Error(ErrorCode::DriverError, std::format("the receiver answered {} to {}", reply.status, step));
 }
 
@@ -477,7 +480,9 @@ private:
         if (changed) publishTargets();
     }
 
-    // A connection the receiver closes means another sender took it; one that stops answering means it has gone.
+    // A connection the receiver closes means another sender took it, unless within a moment its announcement says that
+    // its access setting now keeps this computer out, or it is no longer found as it was, as speakers paired or separated
+    // in the Home app: a HomePod closes it then too. One that stops answering means it has gone.
     void tendSession(const std::optional<TrackNotice>& notice, const TrackDetails& details) {
         std::scoped_lock lock(rtspMutex_);
         if (notice) playing_.emplace(*notice, details);
@@ -489,22 +494,35 @@ private:
         if (heartbeat) nextHeartbeat_ = now + options_.heartbeat;
         std::vector<std::pair<std::string, ErrorCode>> lost;
         for (auto& member : members_) {
+            const auto w = std::ranges::find_if(wanted, [&](const AirPlayMember& m) { return m.id == member.id; });
             try {
                 for (const auto& client : member.sessions)
                     if (client->closed()) throw RtspClosed();
-                const auto w = std::ranges::find_if(wanted, [&](const AirPlayMember& m) { return m.id == member.id; });
                 if (w != wanted.end()) tellVolume(member, w->volumeDb);
                 if (notice) tellTrack(member, *notice, details);
                 if (heartbeat)
                     for (const auto& client : member.sessions) client->request("OPTIONS", "*");
             } catch (const RtspClosed&) {
-                lost.emplace_back(member.id, ErrorCode::DeviceInUse);
+                if (w != wanted.end() && w->support == airplay::Support::HomeOnly)
+                    lost.emplace_back(member.id, ErrorCode::AccessDenied);
+                else if (w != wanted.end() && !w->receiver && member.closedAt)
+                    lost.emplace_back(member.id, ErrorCode::DeviceChanged);
+                else if (!member.closedAt) {
+                    member.closedAt = now;
+                    if (options_.lookAgain) options_.lookAgain();
+                } else if (now - *member.closedAt >= options_.closedVerdictAfter)
+                    lost.emplace_back(member.id, ErrorCode::DeviceInUse);
             } catch (const std::exception& e) {
                 log::info("AirPlay receiver %s: %s", member.name.c_str(), e.what());
                 lost.emplace_back(member.id, ErrorCode::DeviceLost);
             }
         }
-        for (const auto& [id, code] : lost) lose(id, code, code == ErrorCode::DeviceInUse ? kInUse : kNotConnected);
+        for (const auto& [id, code] : lost)
+            lose(id, code,
+                 code == ErrorCode::DeviceInUse     ? kInUse
+                 : code == ErrorCode::AccessDenied  ? kHomeOnly
+                 : code == ErrorCode::DeviceChanged ? kChanged
+                                                    : kNotConnected);
         if (!members_.empty() && now >= closeAt_.load()) endSession();
     }
 

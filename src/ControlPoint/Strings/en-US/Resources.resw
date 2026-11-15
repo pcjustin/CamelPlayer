@@ -115,6 +115,8 @@
   <data name="Error_DeviceNotFound" xml:space="preserve"><value>Output device not found</value></data>
   <data name="Error_DeviceInUse" xml:space="preserve"><value>The device is in use by another program; press play to retry</value></data>
   <data name="Error_DeviceLost" xml:space="preserve"><value>The device was disconnected; press play when it is back</value></data>
+  <data name="Error_AccessDenied" xml:space="preserve"><value>The device refuses this computer</value></data>
+  <data name="Error_DeviceChanged" xml:space="preserve"><value>The device changed; choose an output again</value></data>
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>The device cannot play this format bit-perfectly; skipped</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>Driver error</value></data>
   <data name="Library_GoToPlaying.AutomationProperties.Name" xml:space="preserve"><value>Go to playing (Ctrl+L)</value></data>
@@ -124,6 +126,8 @@
   <data name="Error_Other" xml:space="preserve"><value>Playback error</value></data>
   <data name="Error_PlayerInUse" xml:space="preserve"><value>The player is in use by another source; press play to play here again</value></data>
   <data name="Error_PlayerLost" xml:space="preserve"><value>The player is not connected; press play when it is back</value></data>
+  <data name="Error_ReceiverRefuses" xml:space="preserve"><value>The receiver refuses this computer: in the Home app, set Home Settings › Speakers &amp; TV › Allow Speaker &amp; TV Access to Anyone On the Same Network, then press play</value></data>
+  <data name="Error_ReceiverRegrouped" xml:space="preserve"><value>The receiver changed, as when speakers are paired or separated in the Home app: choose it again in the output menu; a pair just made plays on by itself</value></data>
   <data name="Error_PlayerDidNotPlay" xml:space="preserve"><value>The player did not start playing; check that it is on and not in standby, then press play</value></data>
   <data name="Library_Empty.Text" xml:space="preserve"><value>No music yet. Add a folder under Settings › Library; it is indexed in the background.</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>Unknown</value></data>
@@ -698,12 +702,15 @@ Details: {0}</value></data>
   <data name="Output_DeleteTitle" xml:space="preserve"><value>Delete the settings of {0}?</value></data>
   <data name="Output_DeleteText" xml:space="preserve"><value>Its settings, name and place in the output menu are cleared. If it is found again, it starts from the defaults.</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0} (not connected)</value></data>
+  <data name="Output_Unsupported" xml:space="preserve"><value>{0} (not supported)</value></data>
+  <data name="Output_InUseUnsupported" xml:space="preserve"><value>In use; {0}</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>Audio output settings…</value></data>
   <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>Output</value></data>
   <data name="Settings_AboutAirPlay.Text" xml:space="preserve"><value>AirPlay is a trademark of Apple Inc.</value></data>
   <data name="Output_AirPlayEncrypted" xml:space="preserve"><value>Not supported: takes only encrypted audio</value></data>
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>Not supported: asks for a password</value></data>
   <data name="Output_AirPlayFormat" xml:space="preserve"><value>Not supported: does not take this audio format</value></data>
+  <data name="Output_AirPlayHomeOnly" xml:space="preserve"><value>Not supported: allows only people sharing its home (Home app › Home Settings › Speakers &amp; TV)</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>Not supported: refuses this connection</value></data>
   <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay receiver</value></data>
   <data name="Volume_NoteAirPlay" xml:space="preserve"><value>The receiver's volume moves its own level, and the stream stays bit-perfect. AirPlay cannot read the level back, so CamelPlayer remembers the last one you set for each receiver and a change on the receiver itself is not shown.</value></data>

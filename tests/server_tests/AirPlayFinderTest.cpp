@@ -146,6 +146,22 @@ TEST(AirPlayTest, OnlyApplesReceiversAreListed) {
     EXPECT_EQ(receivers[2].name, "Mac");
 }
 
+// The Home app's "Only People Sharing This Home" announces acl=1, "Anyone On the Same Network" and "Everyone" acl=0, as
+// the owner's HomePods did on 2026-11-15.
+TEST(AirPlayTest, AReceiverForItsHomeOnlyIsNotSupported) {
+    const TxtRecord raop = {{"am", "AudioAccessory5,1"}, {"et", "0,3,5"}, {"cn", "0,1,2,3"}};
+    const auto receivers = receiversFrom({{"A", "Home", "192.168.0.1", 7000, raop, {{"acl", "1"}}},
+                                          {"B", "Network", "192.168.0.2", 7000, raop, {{"acl", "0"}}},
+                                          {"C", "Older", "192.168.0.3", 7000, raop, {}}});
+    ASSERT_EQ(receivers.size(), 3U);
+    EXPECT_EQ(receivers[0].support, Support::HomeOnly);
+    EXPECT_STREQ(supportId(receivers[0].support), "home");
+    EXPECT_EQ(receivers[1].support, Support::Supported);
+    EXPECT_EQ(receivers[2].support, Support::Supported);
+    const TxtRecord password = {{"am", "AudioAccessory5,1"}, {"et", "0"}, {"cn", "1"}, {"pw", "true"}};
+    EXPECT_EQ(receiversFrom({{"D", "Both", "192.168.0.4", 7000, password, {{"acl", "1"}}}}).front().support, Support::Password);
+}
+
 TEST(AirPlayTest, AStereoPairIsOneReceiverReachedThroughItsLeader) {
     const TxtRecord raop = {{"am", "AudioAccessory5,1"}, {"et", "0"}, {"cn", "1"}, {"vs", "1005.13.2"}};
     const TxtRecord follower = {{"tsid", "GROUP"}, {"gpn", "主臥"}, {"igl", "0"}};
@@ -458,10 +474,11 @@ TEST(AirPlayOutputsTest, AStereoPairPairedAgainKeepsItsSettings) {
     EXPECT_EQ(s.airplay.timing.releaseAfterPauseSeconds, 30);
     EXPECT_EQ(s.airplayLevels.count("EB1DD2A4"), 0u);
     EXPECT_EQ(s.airplayLevels.at("F2C47A35").level, 50u);
-    EXPECT_FALSE(row(after, "32FBAAAB399D").connected); // the speaker played alone keeps its own entry
+    // The speaker played alone went into the pair (the owner, 2026-11-15).
+    EXPECT_EQ(std::ranges::count_if(after, [](const OutputRow& r) { return r.id == "32FBAAAB399D"; }), 0);
 }
 
-// A pair saved before its speakers were recorded is known again by its name, and a speaker's own entry is not taken.
+// A pair saved before its speakers were recorded is known again by its name; a speaker's own entry goes into the pair.
 TEST(AirPlayOutputsTest, APairSavedWithoutItsSpeakersIsKnownByItsName) {
     DeviceCatalog before;
     before.revision = 1;
@@ -476,11 +493,40 @@ TEST(AirPlayOutputsTest, APairSavedWithoutItsSpeakersIsKnownByItsName) {
     again.airplay = {{"F2C47A35", "主臥", "", {"32FBAAAB399D", "FAE2708FA125"}}};
     syncOutputs(s, again);
     const auto rows = outputRows(s, again);
-    ASSERT_EQ(rows.size(), 3u); // Windows default, the pair and the speaker
+    ASSERT_EQ(rows.size(), 2u); // Windows default and the pair
     EXPECT_EQ(rows[1].id, "F2C47A35");
     EXPECT_TRUE(rows[1].enabled);
-    EXPECT_EQ(rows[2].id, "32FBAAAB399D");
-    EXPECT_EQ(rows[2].name, "Left");
+}
+
+// Two speakers paired in the Home app are one receiver from then on: what was saved for each alone goes into the pair,
+// which is in use and in the group where either was, rather than staying as two receivers that are never connected.
+TEST(AirPlayOutputsTest, SpeakersPairedGoIntoThePair) {
+    DeviceCatalog alone;
+    alone.revision = 1;
+    alone.airplay = {{"32FBAAAB399D", "主臥"}, {"FAE2708FA125", "主臥 (2)"}};
+    Settings s;
+    s.adoptOutputSets = false;
+    selectOutput(s, Backend::AirPlay, "32FBAAAB399D", alone);
+    setOutputEnabled(s, Backend::AirPlay, "FAE2708FA125", true, alone);
+    setInAirPlayGroup(s, "FAE2708FA125", true, alone);
+    s.airplayLevels["32FBAAAB399D"] = {40, false};
+    ASSERT_EQ(s.airplayGroup, (std::vector<std::string>{"32FBAAAB399D", "FAE2708FA125"}));
+
+    DeviceCatalog paired;
+    paired.revision = 2;
+    paired.airplay = {{"0F6771AD", "主臥", "", {"32FBAAAB399D", "FAE2708FA125"}}};
+    syncOutputs(s, paired);
+    const auto rows = outputRows(s, paired);
+    EXPECT_EQ(std::ranges::count_if(rows, [](const OutputRow& r) { return r.id == "32FBAAAB399D" || r.id == "FAE2708FA125"; }),
+              0);
+    const auto pair = std::ranges::find_if(rows, [](const OutputRow& r) { return r.id == "0F6771AD"; });
+    ASSERT_NE(pair, rows.end());
+    EXPECT_TRUE(pair->selected);
+    EXPECT_TRUE(pair->enabled);
+    EXPECT_EQ(s.airplay.deviceId, "0F6771AD");
+    EXPECT_EQ(s.airplayGroup, (std::vector<std::string>{"0F6771AD"}));
+    EXPECT_EQ(s.airplayLevels.at("0F6771AD").level, 40u);
+    EXPECT_EQ(s.airplayLevels.count("32FBAAAB399D"), 0u);
 }
 
 TEST(AirPlayOutputsTest, AnUnsupportedReceiverSaysWhyAndDoesNotStayEnabled) {

@@ -127,6 +127,34 @@ bool holds(const std::vector<std::string>& ids, const std::string& id) {
     return std::ranges::find(ids, id) != ids.end();
 }
 
+// What was saved for the AirPlay receiver `from` goes to `to`: the entry, or its turning on when `to` has one, the use,
+// the group's place and the level.
+void moveReceiver(Settings& s, const std::string& from, const std::string& to) {
+    const auto saved = [&](const std::string& id) {
+        return std::ranges::find_if(s.outputs, [&](const SavedOutput& o) { return o.backend == Backend::AirPlay && o.id == id; });
+    };
+    if (const auto old = saved(from); old != s.outputs.end()) {
+        if (const auto kept = saved(to); kept != s.outputs.end()) {
+            kept->enabled = kept->enabled || old->enabled;
+            s.outputs.erase(old);
+        } else {
+            old->id = old->airplay.deviceId = to;
+        }
+    }
+    if (s.backend == Backend::AirPlay && s.airplay.deviceId == from) s.airplay.deviceId = to;
+    for (auto& member : s.airplayGroup)
+        if (member == from) member = to;
+    std::erase_if(s.airplayGroup, [seen = std::vector<std::string>()](const std::string& id) mutable {
+        if (holds(seen, id)) return true;
+        seen.push_back(id);
+        return false;
+    });
+    if (auto level = s.airplayLevels.extract(from); level && !s.airplayLevels.contains(to)) {
+        level.key() = to;
+        s.airplayLevels.insert(std::move(level));
+    }
+}
+
 // A stereo pair paired again in the Home app comes back under a new ID. It is known by a speaker it shares with a saved
 // pair, or by its name for one saved before its speakers were, and takes over what was saved under the old ID.
 void followRepairedPairs(Settings& s, const DeviceCatalog& devices) {
@@ -137,24 +165,20 @@ void followRepairedPairs(Settings& s, const DeviceCatalog& devices) {
             if (o.speakers.empty()) return o.name == device.name && !holds(device.speakers, o.id);
             return std::ranges::any_of(o.speakers, [&](const std::string& id) { return holds(device.speakers, id); });
         });
-        if (old == s.outputs.end()) continue;
-        const std::string from = old->id;
-        if (findOutput(s, Backend::AirPlay, device.id))
-            s.outputs.erase(old);
-        else
-            old->id = old->airplay.deviceId = device.id;
-        if (s.backend == Backend::AirPlay && s.airplay.deviceId == from) s.airplay.deviceId = device.id;
-        for (auto& member : s.airplayGroup)
-            if (member == from) member = device.id;
-        std::erase_if(s.airplayGroup, [&, seen = std::vector<std::string>()](const std::string& id) mutable {
-            if (holds(seen, id)) return true;
-            seen.push_back(id);
-            return false;
-        });
-        if (auto level = s.airplayLevels.extract(from); level && !s.airplayLevels.contains(device.id)) {
-            level.key() = device.id;
-            s.airplayLevels.insert(std::move(level));
-        }
+        if (old != s.outputs.end()) moveReceiver(s, std::string(old->id), device.id);
+    }
+}
+
+// Speakers paired in the Home app are one receiver from then on (the owner, 2026-11-15): what was saved for each alone goes
+// into the pair, which is in use and in the group where either was. A speaker still found alone keeps its own.
+void mergePairedSpeakers(Settings& s, const DeviceCatalog& devices) {
+    for (const auto& device : devices.airplay) {
+        if (device.speakers.size() < 2) continue;
+        for (const auto& speaker : device.speakers)
+            if (speaker != device.id && !findDevice(devices, Backend::AirPlay, speaker) &&
+                (findOutput(s, Backend::AirPlay, speaker) || holds(s.airplayGroup, speaker) ||
+                 (s.backend == Backend::AirPlay && s.airplay.deviceId == speaker)))
+                moveReceiver(s, speaker, device.id);
     }
 }
 
@@ -196,6 +220,7 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     if (devices.revision == 0) return;
     adoptSets(s, devices);
     followRepairedPairs(s, devices);
+    mergePairedSpeakers(s, devices);
     if (followsDefault(s) && !devices.defaultWasapi.empty() && s.followedDefault != devices.defaultWasapi) {
         keepParameters(s, Backend::Wasapi, s.followedDefault);
         loadParameters(s, Backend::Wasapi, devices.defaultWasapi, {});

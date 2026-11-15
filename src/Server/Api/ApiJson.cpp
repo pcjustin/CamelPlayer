@@ -115,7 +115,7 @@ constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
 constexpr Names<EventKind, 2> kEventKinds = {{EventKind::StateChanged, "stateChanged"},
                                              {EventKind::CommandCompleted, "commandCompleted"}};
-constexpr Names<ErrorCode, 10> kErrorCodes = {{ErrorCode::FileOpen, "fileOpen"},
+constexpr Names<ErrorCode, 12> kErrorCodes = {{ErrorCode::FileOpen, "fileOpen"},
                                               {ErrorCode::UnsupportedStream, "unsupportedStream"},
                                               {ErrorCode::DecodeFailed, "decodeFailed"},
                                               {ErrorCode::SeekFailed, "seekFailed"},
@@ -124,6 +124,8 @@ constexpr Names<ErrorCode, 10> kErrorCodes = {{ErrorCode::FileOpen, "fileOpen"},
                                               {ErrorCode::DeviceLost, "deviceLost"},
                                               {ErrorCode::FormatNotSupported, "formatNotSupported"},
                                               {ErrorCode::DriverError, "driverError"},
+                                              {ErrorCode::AccessDenied, "accessDenied"},
+                                              {ErrorCode::DeviceChanged, "deviceChanged"},
                                               {ErrorCode::Other, "other"}};
 constexpr Names<SampleType, 6> kSampleTypes = {{SampleType::Int16, "16"},         {SampleType::Int24, "24"},
                                                {SampleType::Int24In32, "24in32"}, {SampleType::Int32, "32"},

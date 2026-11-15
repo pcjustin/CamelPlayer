@@ -59,6 +59,10 @@ const char* errorCodeName(ErrorCode c) {
         return "FormatNotSupported";
     case ErrorCode::DriverError:
         return "DriverError";
+    case ErrorCode::AccessDenied:
+        return "AccessDenied";
+    case ErrorCode::DeviceChanged:
+        return "DeviceChanged";
     case ErrorCode::Other:
         return "Other";
     }

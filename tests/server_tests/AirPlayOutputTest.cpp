@@ -93,6 +93,7 @@ protected:
         options.requestTimeoutMs = 500;
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
+        options.closedVerdictAfter = 300ms;
         auto created = createAirPlayOutput(receiver(), options);
         created->setErrorHandler([this](const audio::Error& e) { error_ = int(e.code()) + 1; });
         return created;
@@ -496,7 +497,7 @@ TEST_F(AirPlayOutputTest, AReceiverThatStopsAnsweringIsNotConnected) {
     out->close();
 }
 
-TEST_F(AirPlayOutputTest, ARefusalIsNotAFormatTheReceiverCouldTake) {
+TEST_F(AirPlayOutputTest, ARefusalIsTheReceiverRefusingThisComputer) {
     rtsp_.answer("ANNOUNCE", 403);
     CountingSource source(44100);
     auto out = output();
@@ -504,7 +505,7 @@ TEST_F(AirPlayOutputTest, ARefusalIsNotAFormatTheReceiverCouldTake) {
         out->open(kCd, &source);
         FAIL() << "opened";
     } catch (const audio::Error& e) {
-        EXPECT_EQ(e.code(), audio::ErrorCode::FormatNotSupported);
+        EXPECT_EQ(e.code(), audio::ErrorCode::AccessDenied);
     }
 }
 
@@ -533,7 +534,7 @@ namespace {
 // Plays through the whole Server to a fake on the network, found the way a real receiver is.
 class AirPlayStreamingTest : public ::testing::Test {
 protected:
-    std::unique_ptr<LocalServer> serverFor(Settings settings = {}) {
+    std::unique_ptr<LocalServer> serverFor(Settings settings = {}, std::chrono::milliseconds searchInterval = 100ms) {
         FakeReceiverRecord record;
         record.deviceId = "800A805D016B";
         record.name = "DMP-A6";
@@ -545,7 +546,7 @@ protected:
         AirPlayFinderOptions options;
         options.queryHost = "127.0.0.1";
         options.queryPort = mdns_.port();
-        options.searchInterval = 100ms;
+        options.searchInterval = searchInterval;
         options.retryInterval = 50ms;
         server->setAirPlayFinderOptions(options);
         EXPECT_TRUE(waitFor([&] {
@@ -584,6 +585,32 @@ protected:
 };
 
 } // namespace
+
+// Refused by its access setting, a receiver says how to let this computer in, and the Play the message asks for then plays
+// once the user has, without its turning on again in Settings or waiting for the next search.
+TEST_F(AirPlayStreamingTest, AReceiverLetInAgainPlaysAtThePlayItsRefusalAsksFor) {
+    const auto file = testutil::generatedFile({"airplay-let-in", 44100, 16, 2, 6.0});
+    auto server = serverFor({}, std::chrono::minutes(10));
+    mdns_.announce("800A805D016B", {"deviceid=80:0A:80:5D:01:6B", "acl=1"});
+    Command refresh;
+    refresh.kind = CommandKind::RefreshDevices;
+    ASSERT_TRUE(waitFor([&] {
+        server->submit(refresh);
+        server->waitIdle();
+        const auto& found = server->snapshot().devices.airplay;
+        return !found.empty() && found.front().unsupported == "home";
+    }));
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.error.has_value(); }));
+    EXPECT_EQ(server->snapshot().playback.error, audio::ErrorCode::AccessDenied);
+    EXPECT_EQ(rtsp_.packetCount(), 0U);
+    mdns_.announce("800A805D016B", {"deviceid=80:0A:80:5D:01:6B", "acl=0"});
+    Command play;
+    play.kind = CommandKind::Play;
+    server->submit(play);
+    EXPECT_TRUE(waitFor([&] { return rtsp_.packetCount() > 20; }, 8s)) << server->snapshot().playback.errorDetail;
+    server->shutdown();
+}
 
 TEST_F(AirPlayStreamingTest, ATrackReachesTheReceiverBitForBit) {
     const auto file = testutil::generatedFile({"airplay-bitperfect", 44100, 16, 2, 0.5});
@@ -772,6 +799,8 @@ protected:
         options.requestTimeoutMs = 500;
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
+        options.closedVerdictAfter = 300ms;
+        options.lookAgain = [this] { ++lookedAgain_; };
         auto created = createAirPlayGroupOutput(options);
         created->setErrorHandler([this](const audio::Error& e) { error_ = int(e.code()) + 1; });
         return created;
@@ -802,6 +831,7 @@ protected:
     std::vector<AirPlayMember> members_;
     std::vector<std::pair<std::string, audio::ErrorCode>> left_;
     std::atomic<int> error_ = 0;
+    std::atomic<int> lookedAgain_ = 0;
 };
 
 bool oneChannel(const testutil::FakeRtp& p) {
@@ -986,6 +1016,45 @@ TEST_F(AirPlayGroupOutputTest, AReceiverThatCannotJoinIsToldAsLeaving) {
     out->close();
 }
 
+// A HomePod whose Home app access is set to people sharing its home closes the connection, and says so a moment later in
+// its announcement: the stream ends with the refusal, not as taken by another source.
+TEST_F(AirPlayGroupOutputTest, AReceiverItsAccessSettingNowKeepsOutRefusesRatherThanIsInUse) {
+    want({member(a_, "A")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() > 5; }));
+    a_.takeOver();
+    EXPECT_TRUE(waitFor([&] { return lookedAgain_ > 0; })) << "the announcements were not asked again";
+    auto homeOnly = member(a_, "A");
+    homeOnly.receiver.reset();
+    homeOnly.support = airplay::Support::HomeOnly;
+    want({homeOnly});
+    EXPECT_TRUE(waitFor([&] { return error_ != 0; }));
+    EXPECT_EQ(error_, int(audio::ErrorCode::AccessDenied) + 1);
+    out->close();
+}
+
+// Speakers paired or separated in the Home app close the connection and are no longer found as they were: the stream ends
+// as the receiver changed, not as taken by another source.
+TEST_F(AirPlayGroupOutputTest, AReceiverNoLongerFoundAsItClosedHasChanged) {
+    want({member(a_, "A")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() > 5; }));
+    a_.takeOver();
+    std::this_thread::sleep_for(100ms);
+    auto gone = member(a_, "A");
+    gone.receiver.reset();
+    want({gone});
+    EXPECT_TRUE(waitFor([&] { return error_ != 0; }));
+    EXPECT_EQ(error_, int(audio::ErrorCode::DeviceChanged) + 1);
+    out->close();
+}
+
 TEST_F(AirPlayGroupOutputTest, OnlyTheLastReceiverLostEndsTheStream) {
     want({member(a_, "A"), member(b_, "B")});
     CountingSource source(kSecond * 10);
@@ -1055,6 +1124,31 @@ protected:
 
 } // namespace
 
+// Paired in the Home app while one of them plays, two speakers go on as the pair, from where the one stopped.
+TEST_F(AirPlayGroupStreamingTest, SpeakersPairedWhileOnePlaysGoOnAsThePair) {
+    const auto file = testutil::generatedFile({"airplay-paired-playing", 44100, 16, 2, 20.0});
+    auto server = groupServer();
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.packetCount() > 300; })) << server->snapshot().playback.errorDetail;
+    const uint64_t before = server->snapshot().playback.position;
+    mdns_.announce("800A805D016B", {"deviceid=80:0A:80:5D:01:6B", "tsid=PAIR", "gpn=Pair", "igl=0"});
+    mdns_.announce("FAE2708FA125", {"deviceid=FA:E2:70:8F:A1:25", "tsid=PAIR", "gpn=Pair", "igl=1"});
+    rtsp_.takeOver();
+    std::optional<audio::ErrorCode> seen;
+    EXPECT_TRUE(waitFor(
+        [&] {
+            const auto snapshot = server->snapshot();
+            if (snapshot.playback.error) seen = snapshot.playback.error;
+            return second_.packetCount() > 20;
+        },
+        20s))
+        << server->snapshot().playback.errorDetail;
+    EXPECT_NE(seen, audio::ErrorCode::DeviceInUse);
+    EXPECT_EQ(nativeSettings(server->snapshot().settings).airplay.deviceId, "PAIR");
+    EXPECT_GT(server->snapshot().playback.position, before); // from where the speaker stopped, not the start
+    server->shutdown();
+}
+
 TEST_F(AirPlayGroupStreamingTest, BothReceiversPlayTheGroupAndItIsRemembered) {
     const auto file = testutil::generatedFile({"airplay-group", 44100, 16, 2, 4.0});
     auto server = groupServer();
@@ -1107,7 +1201,7 @@ TEST_F(AirPlayGroupStreamingTest, ADragInManyStepsKeepsTheProportions) {
 }
 
 TEST_F(AirPlayGroupStreamingTest, AReceiverTakenLeavesTheGroupSayingWhyAndTheOtherPlaysOn) {
-    const auto file = testutil::generatedFile({"airplay-group-leave", 44100, 16, 2, 6.0});
+    const auto file = testutil::generatedFile({"airplay-group-leave", 44100, 16, 2, 16.0});
     auto server = groupServer();
     change(*server, [](Settings& s, const DeviceCatalog& d) { setInAirPlayGroup(s, "FAE2708FA125", true, d); });
     server->submit(queue({file}));

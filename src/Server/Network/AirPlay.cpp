@@ -244,6 +244,8 @@ const char* supportId(Support support) {
         return "format";
     case Support::Refused:
         return "refused";
+    case Support::HomeOnly:
+        return "home";
     }
     return "";
 }
@@ -284,8 +286,10 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
             }
         if (others.empty()) speakers.clear();
         std::ranges::sort(speakers);
-        receivers.push_back({id, group.empty() ? lead->name : group, lead->address, lead->port, textOf(lead->raop, "vs"),
-                             supportFrom(lead->raop), std::move(others), std::move(speakers)});
+        auto support = supportFrom(lead->raop);
+        if (support == Support::Supported && textOf(lead->airplay, "acl") == "1") support = Support::HomeOnly;
+        receivers.push_back({id, group.empty() ? lead->name : group, lead->address, lead->port, textOf(lead->raop, "vs"), support,
+                             std::move(others), std::move(speakers)});
     }
     std::ranges::sort(receivers, {}, [](const Receiver& r) { return std::pair(r.name, r.id); });
     return receivers;

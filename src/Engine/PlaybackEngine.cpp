@@ -686,8 +686,10 @@ private:
         } catch (const Error& e) {
             teardown();
             output_.reset();
-            fail(e, e.code() == ErrorCode::DeviceLost || e.code() == ErrorCode::DeviceInUse ? PlayState::Paused
-                                                                                            : PlayState::Stopped);
+            fail(e,
+                 e.code() == ErrorCode::DeviceLost || e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceChanged
+                     ? PlayState::Paused
+                     : PlayState::Stopped);
         } catch (const std::exception& e) {
             teardown();
             output_.reset();
@@ -1238,7 +1240,8 @@ private:
             rust_.reset();
             position_ = startFrame;
             // Device busy or unplugged: pause and wait for the user (docs/Plan.md §2)
-            const bool waitForDevice = deviceChange || e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceLost;
+            const bool waitForDevice = deviceChange || e.code() == ErrorCode::DeviceInUse || e.code() == ErrorCode::DeviceLost ||
+                                       e.code() == ErrorCode::DeviceChanged;
             if (!waitForDevice) output_.reset();
             return fail(e, waitForDevice ? PlayState::Paused : PlayState::Stopped);
         }

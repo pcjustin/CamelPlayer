@@ -29,7 +29,8 @@ struct AirPlayMember {
     std::string id;
     std::optional<airplay::Receiver> receiver; // nothing while it is not found: one playing stays, one missing waits
     AirPlayChannels channels = AirPlayChannels::Stereo;
-    std::optional<double> volumeDb; // what to tell the receiver; nothing while its volume is fixed
+    std::optional<double> volumeDb;                         // what to tell the receiver; nothing while its volume is fixed
+    airplay::Support support = airplay::Support::Supported; // as found now, which a receiver that refuses changes
     bool operator==(const AirPlayMember&) const = default;
 };
 
@@ -39,9 +40,13 @@ struct AirPlayOutputOptions {
     std::function<std::vector<AirPlayMember>()> members; // a group's, asked again as it plays
     // A receiver that left the group while the others play on: taken by another source, gone or refusing.
     std::function<void(const std::string& id, const audio::Error& why)> memberLeft;
+    // Asks the receivers' announcements again, as one whose access setting changed closes its connection only then.
+    std::function<void()> lookAgain;
     int requestTimeoutMs = 3000;
     std::chrono::milliseconds heartbeat{5000};
     std::chrono::milliseconds closeSessionAfter{5000};
+    // How long a connection the receiver closed waits for its announcement to tell that its access setting changed.
+    std::chrono::milliseconds closedVerdictAfter{2000};
 };
 
 // The options' functions run on the output's own threads.
