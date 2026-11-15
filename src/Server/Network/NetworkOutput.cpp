@@ -678,7 +678,12 @@ private:
         std::optional<uint64_t> end;
         const bool ranged = rangeOf(request, start, end);
         const uint64_t total = body->totalBytes;
-        if (start >= total && total) {
+        // Past what its header holds, a WAV stream says its data is 0xFFFFFFFF bytes: a player looking for a chunk after
+        // them, at their end or after their pad byte, as the Chord Poly does, finds the end of the stream as with any other.
+        constexpr uint64_t kDeclaredEnd = kWavHeader + 0xFFFFFFFFULL;
+        const bool headerEnd =
+            body->extension == "wav" && total > kDeclaredEnd && (start == kDeclaredEnd || start == kDeclaredEnd + 1);
+        if ((start >= total && total) || headerEnd) {
             lock.unlock();
             return respond(client, "416 Range Not Satisfiable");
         }

@@ -523,6 +523,23 @@ TEST(NetworkOutputTest, AWavStreamPastFourGigabytesSaysItsSizeIsUnknown) {
     EXPECT_EQ(le32(head.body, 40), 0xFFFFFFFFU) << "data size";
 }
 
+// A player that reads the header looks for a chunk after the data where its size says the data ends, as the Chord Poly
+// does: that is the end of the stream as the header tells it, not a seek, which would restart the stream there.
+TEST(NetworkOutputTest, AStreamPastFourGigabytesEndsWhereItsHeaderSays) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 1'100'000'000ULL);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.currentUri().empty() && source.rendered() > 0; }));
+    const auto next = http::send("GET", renderer.currentUri(), "Range: bytes=4294967340-", "", 2000, 1 << 20);
+    EXPECT_EQ(next.status, 416U);
+    std::this_thread::sleep_for(200ms);
+    const auto events = output.events();
+    EXPECT_TRUE(std::ranges::none_of(events, [](const PlayerEvent& e) { return e.kind == PlayerEventKind::Seeked; }))
+        << "the request was taken for a seek";
+}
+
 TEST(NetworkOutputTest, APlayerThatReconnectsGetsTheStartAgain) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     CountingSource source(k16.bytesPerFrame(), 20000);
