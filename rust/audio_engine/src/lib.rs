@@ -570,24 +570,47 @@ pub struct CamelEngine {
     command: Mutex<CamelCommandStampV1>,
     source: Mutex<Option<DecoderSource>>,
     source_view: Mutex<Option<SourceView>>,
-    // The view of the source decoding left at the pending boundary: integrity queries report the track still heard.
-    finished_view: Mutex<Option<SourceView>>,
     // Gapless: prefill swaps `next_source` in at the current source's end without clearing the ring. Frames are
-    // counted since the last ring reset; `boundary_at` is the frame where the next track starts, or NO_BOUNDARY.
+    // counted since the last ring reset; `boundaries` holds where the next tracks start in them.
     next_source: Mutex<Option<DecoderSource>>,
     written_frames: AtomicU64,
     read_frames: AtomicU64,
-    boundary_at: AtomicU64,
-    boundary_start_frame: AtomicU64,
-    // Decoding moved on to the queued track and render has not reached it yet.
-    pending_boundary: AtomicBool,
+    boundaries: BoundaryQueue<MAX_BOUNDARIES>,
+    // Taken after `source` and `stage`, never before them.
+    heard: Mutex<Heard>,
     transitions: AtomicU64,
     next_occupied: AtomicBool,
     // DoP: the marker the next rendered frame carries. Only render touches it.
     dop_phase: AtomicUsize,
 }
 
-use boundary::NO_BOUNDARY;
+use boundary::BoundaryQueue;
+
+// Boundaries on their way to the device at once; the DSP stage waits for render past more.
+const MAX_BOUNDARIES: usize = 8;
+
+// Tracks are numbered by the boundaries before them, so the one render plays is number `boundaries.reached()`.
+// Decoding may be tracks ahead of it; the sources it has left stay until render has left them too, so the state and a
+// seek reach the track heard.
+struct Heard {
+    decoding: u64,
+    left: std::collections::VecDeque<(u64, DecoderSource)>,
+}
+
+impl Heard {
+    // Decoding moves on from `source`, track `self.decoding`, to the next track.
+    fn leave(&mut self, source: DecoderSource) {
+        self.left.push_back((self.decoding, source));
+        self.decoding += 1;
+    }
+
+    // Drops the sources of the tracks render has left.
+    fn forget_before(&mut self, track: u64) {
+        while self.left.front().is_some_and(|(left, _)| *left < track) {
+            self.left.pop_front();
+        }
+    }
+}
 
 // The source frames of one track in `source_ring` and the converter that takes them to the device format.
 struct Segment {
@@ -601,6 +624,8 @@ struct Segment {
     ended: bool,
     // A track following gaplessly: the output frame its position restarts at, until the stage reaches it.
     boundary_start: Option<u64>,
+    // Its number among the tracks (Heard).
+    track: u64,
     rate: u32,
     // Source frames the track was expected to hold when it started, 0 when its length is unknown.
     expected: u64,
@@ -621,6 +646,7 @@ impl Segment {
         converter: Converter,
         source: &DecoderSource,
         boundary_start: Option<u64>,
+        track: u64,
         fade_in: u64,
     ) -> Self {
         Segment {
@@ -631,6 +657,7 @@ impl Segment {
             read: 0,
             ended: false,
             boundary_start,
+            track,
             rate: source.info.sample_rate,
             expected: source.remaining_frames(),
             fade_in,
@@ -878,22 +905,30 @@ impl CamelEngine {
         self.ring.clear();
         self.written_frames.store(0, Ordering::Release);
         self.read_frames.store(0, Ordering::Release);
-        self.boundary_at.store(NO_BOUNDARY, Ordering::Release);
-        self.pending_boundary.store(false, Ordering::Release);
+        self.boundaries.clear();
+        let mut heard = self.heard.lock().unwrap();
+        heard.left.clear();
+        heard.decoding = self.boundaries.reached();
     }
 
+    // Decoding has moved on past the track render plays.
     fn boundary_pending(&self) -> bool {
-        self.pending_boundary.load(Ordering::Acquire)
+        self.heard.lock().unwrap().decoding > self.boundaries.reached()
     }
 
-    // The source being heard: the one decoding has moved past while a boundary is still to be rendered.
+    // The source being heard: one decoding has moved past while its boundary is still to be rendered, or the one
+    // decoding.
     fn heard_view(&self) -> Option<SourceView> {
-        let finished = if self.boundary_pending() {
-            *self.finished_view.lock().unwrap()
-        } else {
-            None
-        };
-        finished.or_else(|| self.view())
+        let reached = self.boundaries.reached();
+        let left = self
+            .heard
+            .lock()
+            .unwrap()
+            .left
+            .iter()
+            .find(|(track, _)| *track == reached)
+            .map(|(_, source)| SourceView::of(source));
+        left.or_else(|| self.view())
     }
 
     // The DSP stage: converts decoded frames into device bytes until `ring` is full or no decoded frames wait.
@@ -954,12 +989,10 @@ impl CamelEngine {
                 }
             }
             if let Some(start) = segment.boundary_start {
-                // One boundary at a time: render reaches the previous one first.
-                if self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
+                if !self.publish_boundary(start) {
                     break Ok(());
                 }
                 segment.boundary_start = None;
-                self.publish_boundary(start);
             }
             let available = segment.frames - segment.read;
             let tail_frames = segment.tail_frames();
@@ -982,8 +1015,8 @@ impl CamelEngine {
                 && segment.ended
                 && (convertible == 0 || segment.cut && next_ready == Some(true))
             {
-                // The next track starts at the fade, which waits for it to be staged and for the previous boundary.
-                if next_ready.is_none() || self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
+                // The next track starts at the fade, which waits for it to be staged and for room for its boundary.
+                if next_ready.is_none() || self.boundaries.full() {
                     break Ok(());
                 }
                 let length =
@@ -1010,7 +1043,8 @@ impl CamelEngine {
                     break Err(ENGINE_E_INVALID_STATE);
                 }
                 if let Some(start) = segments[1].boundary_start.take() {
-                    self.publish_boundary(start);
+                    let published = self.publish_boundary(start);
+                    debug_assert!(published, "the queue had room");
                 }
                 let (outgoing, incoming, mixed) = buffers.lend();
                 *fade = Some(Fade {
@@ -1137,14 +1171,10 @@ impl CamelEngine {
         Ok(written)
     }
 
-    // The next track starts at the frames written so far. Render reads boundary_at first, so the start it then reads
-    // must already be stored.
-    fn publish_boundary(&self, start: u64) {
-        self.boundary_start_frame.store(start, Ordering::Release);
-        self.boundary_at.store(
-            self.written_frames.load(Ordering::Acquire),
-            Ordering::Release,
-        );
+    // The next track starts at the frames written so far; false while render has too many boundaries to reach first.
+    fn publish_boundary(&self, start: u64) -> bool {
+        self.boundaries
+            .publish(self.written_frames.load(Ordering::Acquire), start)
     }
 
     // Writes as much of `converter`'s pending output as `space` frames of the ring hold; the frames written.
@@ -1274,12 +1304,12 @@ impl CamelEngine {
         if fade.waiting {
             let spare = ((fade.outgoing.len() / channels) as u64).saturating_sub(fade.length);
             if incoming.frames > incoming.read || incoming.ended || spare == 0 {
-                // The incoming track starts at the fade, after the previous boundary.
-                if self.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
-                    return Ok(FadeStep::Wait);
-                }
-                if let Some(start) = incoming.boundary_start.take() {
-                    self.publish_boundary(start);
+                // The incoming track starts at the fade.
+                if let Some(start) = incoming.boundary_start {
+                    if !self.publish_boundary(start) {
+                        return Ok(FadeStep::Wait);
+                    }
+                    incoming.boundary_start = None;
                 }
                 fade.waiting = false;
             } else {
@@ -1609,13 +1639,14 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     }),
                     source: Mutex::new(None),
                     source_view: Mutex::new(None),
-                    finished_view: Mutex::new(None),
                     next_source: Mutex::new(None),
                     written_frames: AtomicU64::new(0),
                     read_frames: AtomicU64::new(0),
-                    boundary_at: AtomicU64::new(NO_BOUNDARY),
-                    boundary_start_frame: AtomicU64::new(0),
-                    pending_boundary: AtomicBool::new(false),
+                    boundaries: BoundaryQueue::new(),
+                    heard: Mutex::new(Heard {
+                        decoding: 0,
+                        left: std::collections::VecDeque::new(),
+                    }),
                     transitions: AtomicU64::new(0),
                     next_occupied: AtomicBool::new(false),
                     dop_phase: AtomicUsize::new(0),
@@ -1796,16 +1827,26 @@ pub unsafe extern "C" fn camel_engine_seek_v1(
         if !operation_is_current(engine, epoch) {
             return ENGINE_E_NOT_READY;
         }
-        let Some(source) = source.as_mut() else {
+        let Some(decoding) = source.as_mut() else {
             return ENGINE_E_INVALID_STATE;
         };
-        // After a gapless swap the decoder already reads the next track while render still plays this one.
-        if engine.boundary_pending() {
-            return ENGINE_E_INVALID_STATE;
+        // After a gapless swap the decoder already reads the next track while render still plays this one, which the
+        // seek is in: its source takes the place of the tracks decoded after it.
+        {
+            let reached = engine.boundaries.reached();
+            let mut heard = engine.heard.lock().unwrap();
+            let left = heard.left.iter().position(|(track, _)| *track == reached);
+            let target = left.map_or(&*decoding, |at| &heard.left[at].1);
+            if !target.can_seek(frame) {
+                return ENGINE_E_SEEK;
+            }
+            if let Some((_, source)) = left.and_then(|at| heard.left.remove(at)) {
+                *decoding = source;
+                *engine.next_source.lock().unwrap() = None;
+                engine.next_occupied.store(false, Ordering::Release);
+            }
         }
-        if !source.can_seek(frame) {
-            return ENGINE_E_SEEK;
-        }
+        let source = decoding;
         // Resampler state and pending output belong to the old position.
         let converter = match engine.converter(source) {
             Ok(converter) => converter,
@@ -1967,11 +2008,17 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
             let frame_bytes = {
                 let mut stage = engine.stage.lock().unwrap();
                 stage.retired.clear();
+                engine
+                    .heard
+                    .lock()
+                    .unwrap()
+                    .forget_before(engine.boundaries.reached());
                 // A loaded, seeked or stopped source starts its segment with the converter it was given.
                 if let Some(converter) = source.converter.take() {
+                    let track = engine.heard.lock().unwrap().decoding;
                     stage
                         .segments
-                        .push_back(Segment::new(converter, source, None, 0));
+                        .push_back(Segment::new(converter, source, None, track, 0));
                 }
                 // With no segment the track has ended and was played out; reading only finds its end.
                 stage.segments.back().map_or_else(
@@ -2021,33 +2068,29 @@ pub unsafe extern "C" fn camel_engine_prefill_v1(
                     segment.ended = true;
                 }
                 let mut next = engine.next_source.lock().unwrap();
-                if next.is_some() {
-                    // One boundary at a time: a second queued track waits until render reaches the first.
-                    if !engine.boundary_pending() {
-                        if let Some(mut next) = next.take() {
-                            *engine.finished_view.lock().unwrap() = Some(SourceView::of(source));
-                            let start =
-                                engine.output_frames(next.start_frame(), next.info.sample_rate);
-                            let converter = next
-                                .converter
-                                .take()
-                                .expect("queued sources have a converter");
-                            let fade_in = engine.fade_frames(next.crossfade_ms);
-                            let mut segment = Segment::new(converter, &next, Some(start), fade_in);
-                            segment.held = std::mem::take(&mut next.held);
-                            stage.segments.push_back(segment);
-                            *source = next;
-                        }
-                        engine.next_occupied.store(false, Ordering::Release);
-                        engine.pending_boundary.store(true, Ordering::Release);
-                        stage.stream_ended = false;
-                        // Its own end plays the chain's whole tail again.
-                        stage.tail_left = None;
-                        // A track queued after the previous end was reached keeps the stream going.
-                        engine
-                            .render_source_state
-                            .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
-                    }
+                if let Some(mut next) = next.take() {
+                    let start = engine.output_frames(next.start_frame(), next.info.sample_rate);
+                    let converter = next
+                        .converter
+                        .take()
+                        .expect("queued sources have a converter");
+                    let fade_in = engine.fade_frames(next.crossfade_ms);
+                    let mut heard = engine.heard.lock().unwrap();
+                    heard.forget_before(engine.boundaries.reached());
+                    let mut segment =
+                        Segment::new(converter, &next, Some(start), heard.decoding + 1, fade_in);
+                    segment.held = std::mem::take(&mut next.held);
+                    stage.segments.push_back(segment);
+                    heard.leave(std::mem::replace(source, next));
+                    drop(heard);
+                    engine.next_occupied.store(false, Ordering::Release);
+                    stage.stream_ended = false;
+                    // Its own end plays the chain's whole tail again.
+                    stage.tail_left = None;
+                    // A track queued after the previous end was reached keeps the stream going.
+                    engine
+                        .render_source_state
+                        .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
                     return ENGINE_OK;
                 }
                 stage.stream_ended = true;
@@ -2451,10 +2494,9 @@ pub unsafe extern "C" fn camel_engine_clear_next_v1(
 ///
 /// A manual change during playback (docs/Plan.md §5.4): keeps the next `crossfade_ms` of the playing track and a second
 /// more while `source` starts decoding, discards the rest and any queued track, and crossfades into `source`, which
-/// becomes current at the fade. During a crossfade what it would still play fades out as one track. A boundary still on
-/// its way to the device is heard first, so the new track's is the next transition. Fails with
-/// `CAMEL_ENGINE_E_INVALID_STATE` when nothing plays that can be mixed with it, or that boundary is not heard within a
-/// second; the caller then loads the track instead.
+/// becomes current at the fade. During a crossfade what it would still play fades out as one track. Boundaries still on
+/// their way to the device are heard first, and the new track's transition follows them. Fails with
+/// `CAMEL_ENGINE_E_INVALID_STATE` when nothing plays that can be mixed with it; the caller then loads the track instead.
 #[no_mangle]
 pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
     engine: *mut CamelEngine,
@@ -2494,24 +2536,12 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
         if !converter.mixes() {
             return ENGINE_E_INVALID_STATE;
         }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-        while engine.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY
-            && std::time::Instant::now() < deadline
-        {
-            thread::sleep(std::time::Duration::from_millis(2));
-        }
-        if !operation_is_current(engine, epoch) {
-            return ENGINE_E_NOT_READY;
-        }
         let mut current_source = engine.source.lock().unwrap();
         let _current_command = engine.command.lock().unwrap();
         if !operation_is_current(engine, epoch) {
             return ENGINE_E_NOT_READY;
         }
         let mut stage = engine.stage.lock().unwrap();
-        if engine.boundary_at.load(Ordering::Acquire) != NO_BOUNDARY {
-            return ENGINE_E_INVALID_STATE;
-        }
         let fade_in = engine.fade_frames(next.crossfade_ms);
         let keep_frames = fade_in + engine.fade_frames(CUT_MARGIN_MS);
         let next_length = engine.output_frames(next.remaining_frames(), next.info.sample_rate);
@@ -2603,17 +2633,30 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
         }
         *stream_ended = false;
         *tail_left = None;
+        // The track kept plays on until the new one's boundary; those decoded after it, which this change drops, were
+        // never heard.
+        let kept = segments[0].track;
+        {
+            let mut heard = engine.heard.lock().unwrap();
+            if heard.decoding == kept {
+                if let Some(playing) = current_source.take() {
+                    heard.left.push_back((kept, playing));
+                }
+            }
+            heard.left.retain(|(track, _)| *track <= kept);
+            heard.decoding = kept + 1;
+        }
         let start = engine.output_frames(next.start_frame(), next.info.sample_rate);
-        segments.push_back(Segment::new(converter, &next, Some(start), fade_in));
+        segments.push_back(Segment::new(
+            converter,
+            &next,
+            Some(start),
+            kept + 1,
+            fade_in,
+        ));
         drop(stage);
         *engine.next_source.lock().unwrap() = None;
         engine.next_occupied.store(false, Ordering::Release);
-        // While a boundary is still to be rendered, the track heard is already the finished one; the source decoding,
-        // which this change drops, was never heard.
-        if !engine.boundary_pending() {
-            *engine.finished_view.lock().unwrap() = current_source.as_ref().map(SourceView::of);
-        }
-        engine.pending_boundary.store(true, Ordering::Release);
         engine
             .render_source_state
             .store(RENDER_STATE_ACTIVE as usize, Ordering::Release);
@@ -2805,18 +2848,14 @@ pub unsafe extern "C" fn camel_engine_render_v1(
             .read_frames
             .fetch_add(rendered_frames as u64, Ordering::AcqRel);
         let after = before + rendered_frames as u64;
-        if let Some((boundary, start)) = boundary::reach(
-            &engine.boundary_at,
-            &engine.boundary_start_frame,
-            &engine.pending_boundary,
-            after,
-        ) {
-            // The queued track is now audible: its position restarts at the boundary.
+        if let Some((count, boundary, start)) = engine.boundaries.reach(after) {
+            // The queued tracks are now audible, short ones possibly several at once: the position restarts at the
+            // last boundary.
             engine
                 .submitted_position
                 .store(start + (after - boundary), Ordering::Release);
             engine.audible_position.store(start, Ordering::Release);
-            engine.transitions.fetch_add(1, Ordering::AcqRel);
+            engine.transitions.fetch_add(count, Ordering::AcqRel);
         } else {
             engine
                 .submitted_position
@@ -4803,12 +4842,155 @@ mod tests {
             unsafe { camel_engine_clear_next_v1(engine2, &command_stamp(3)) },
             ENGINE_E_INVALID_STATE
         );
-        assert_eq!(
-            unsafe { camel_engine_seek_v1(engine2, &command_stamp(4), 1) },
-            ENGINE_E_INVALID_STATE
-        );
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
         assert_eq!(unsafe { camel_engine_destroy_v1(engine2) }, ENGINE_OK);
+    }
+
+    fn left_channel(output: &[u8], frames: u64) -> Vec<i16> {
+        output[..frames as usize * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect()
+    }
+
+    // Decoding moves on to a second queued track while the first queued one is still on its way to the device.
+    #[test]
+    fn a_second_queued_track_follows_before_the_first_is_heard() {
+        let engine = mock_engine_at_48k();
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        assert_eq!(queue_mock_next(engine, 3), ENGINE_OK);
+        assert_eq!(prefill_until_end(engine), 8);
+        assert_eq!(queue_mock_next(engine, 4), ENGINE_OK);
+        let mut decoded = 0;
+        for _ in 0..20 {
+            let mut frames = 0;
+            let status = unsafe { camel_engine_prefill_v1(engine, 4, &mut frames) };
+            decoded += frames;
+            if status == ENGINE_END {
+                break;
+            }
+        }
+        assert_eq!(decoded, 4);
+        let mut output = [0u8; 56];
+        let request = render_request(14, &mut output);
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_END
+        );
+        assert_eq!(result.units_rendered, 12);
+        assert_eq!(left_channel(&output, 12), [1, 2, 3, 4].repeat(3));
+        assert_eq!(transitions(engine), (2, 4, 0));
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    // A seek after decoding has moved on to the queued track, before that track is heard, seeks the track being heard.
+    #[test]
+    fn a_seek_before_the_queued_track_is_heard_seeks_the_heard_track() {
+        let engine = mock_engine_at_48k();
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        assert_eq!(queue_mock_next(engine, 3), ENGINE_OK);
+        assert_eq!(prefill_until_end(engine), 8);
+        assert_eq!(
+            unsafe { camel_engine_seek_v1(engine, &command_stamp(4), 1) },
+            ENGINE_OK
+        );
+        assert_eq!(prefill_until_end(engine), 3);
+        let mut output = [0u8; 32];
+        let request = render_request(8, &mut output);
+        let mut result = render_result();
+        assert_eq!(
+            unsafe { camel_engine_render_v1(engine, &request, &mut result) },
+            ENGINE_END
+        );
+        assert_eq!(left_channel(&output, result.units_rendered), [2, 3, 4]);
+        assert_eq!(transitions(engine).0, 0);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    // A manual change while the queued track's boundary is still on its way to the device does not wait for render to
+    // reach it; the new track follows that boundary.
+    #[test]
+    fn a_manual_change_does_not_wait_for_a_boundary_on_its_way_to_the_device() {
+        let cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let host = tone_host();
+        let first = tone_source("8000:4800:48000", 0, 0);
+        assert_eq!(
+            unsafe {
+                camel_engine_load_flac_v1(
+                    engine,
+                    &command_stamp(1),
+                    &first,
+                    decoder_host::DECODER_SYMPHONIA,
+                    &host,
+                )
+            },
+            ENGINE_OK
+        );
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(2)) },
+            ENGINE_OK
+        );
+        assert_eq!(queue_tone(engine, 3, "1000:48000:48000", 0, 0), ENGINE_OK);
+        // Decoded past the first track's end, so the queued track's boundary waits in the device ring.
+        let fill = || {
+            for _ in 0..20 {
+                let mut frames = 0;
+                // A swap to the queued track decodes nothing, so a frameless prefill does not end the loop.
+                if unsafe { camel_engine_prefill_v1(engine, 4096, &mut frames) } != ENGINE_OK {
+                    break;
+                }
+            }
+            let mut processed = 0;
+            unsafe { camel_engine_process_v1(engine, &mut processed) };
+        };
+        fill();
+        assert!(engine_ref(engine).boundary_pending());
+        let change = tone_source("-4000:48000:48000", 100, 0);
+        let asked = std::time::Instant::now();
+        assert_eq!(
+            unsafe {
+                camel_engine_crossfade_to_v1(
+                    engine,
+                    &command_stamp(4),
+                    &change,
+                    decoder_host::DECODER_SYMPHONIA,
+                    &host,
+                )
+            },
+            ENGINE_OK
+        );
+        assert!(asked.elapsed() < std::time::Duration::from_millis(500));
+        let mut left = Vec::new();
+        for _ in 0..1_000 {
+            fill();
+            let mut output = [0u8; 480 * 4];
+            let request = render_request(480, &mut output);
+            let mut result = render_result();
+            let status = unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+            left.extend(left_channel(&output, result.units_rendered));
+            if status == ENGINE_END {
+                break;
+            }
+        }
+        assert_eq!(transitions(engine).0, 2);
+        assert!(left[..4_800].iter().all(|&v| v == 8000));
+        assert_eq!(left[4_800], 1000);
+        assert!(left[left.len() - 1_000..].iter().all(|&v| v == -4000));
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
     #[test]

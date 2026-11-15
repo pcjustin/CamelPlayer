@@ -315,7 +315,7 @@ public:
         if (!next || !rust_->crossfadeTo(file, next->decoder, gainDb, {crossfadeMs(), next->convert})) {
             if (fades)
                 log::info("engine: %s opens without a crossfade: %s", toUtf8(file.wstring()).c_str(),
-                          next ? "the stream is between tracks" : "it cannot follow in the open format");
+                          next ? "nothing plays that it can be mixed with" : "it cannot follow in the open format");
             return openAndPlay(file, requested, gainDb, false);
         }
         resumeOnDefault_ = false;
@@ -1678,7 +1678,7 @@ private:
     FadeSkip fadeSkip_ = FadeSkip::None; // why the change into the current file did not crossfade
     std::wstring refusedFile_;           // the last file that could not follow in the open format, and why
     FadeSkip refusedSkip_ = FadeSkip::None;
-    std::deque<Queued> queued_; // queued files not yet audible: at most one in the decoder and one in the slot
+    std::deque<Queued> queued_; // queued files not yet audible: those decoding has reached, then the one in the slot
     // A source read slower than it plays (Engine/SlowSource.h).
     std::optional<double> readRate_; // bytes per second: measured, then followed while the ring fills
     std::wstring measuredFile_;      // the file measureReadRate() last measured, at measuredRate_

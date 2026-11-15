@@ -1477,7 +1477,7 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
 
 TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
     const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
-                                                      testutil::generatedFile({"gapless-b-24-96k", 96000, 24, 2, 0.3}),
+                                                      testutil::generatedFile({"gapless-b-2s-24-96k", 96000, 24, 2, 2.0}),
                                                       testutil::generatedFile({"gapless-c-24-96k", 96000, 24, 2, 0.4}),
                                                       testutil::generatedFile({"gapless-d-24-96k", 96000, 24, 2, 0.5})};
     const auto capture = testutil::tempDir() / "server-gapless-reorder.raw";
@@ -1487,16 +1487,18 @@ TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
     options.realtime = true;
     std::atomic<int> opens = 0;
     {
-        LocalServer server(withoutAutoplay(), {}, [&](const Settings&) {
-            return std::make_unique<CountingOutput>(createCaptureOutput(options), opens);
-        });
+        // Decoding a second ahead of the device, it is in b while c waits in the slot, from a's last second to b's.
+        Settings settings = withoutAutoplay();
+        settings.wasapi.timing.predecodeSeconds = 1;
+        LocalServer server(
+            settings, {}, [&](const Settings&) { return std::make_unique<CountingOutput>(createCaptureOutput(options), opens); });
         std::vector<TrackSource> sources;
         sources.reserve(files.size());
         for (const auto& file : files) sources.emplace_back(toUtf8(file.wstring()));
         server.submit(queueReplace(sources));
         server.waitIdle();
         const auto ids = entryIds(server.snapshot());
-        std::this_thread::sleep_for(500ms); // b is already decoding behind a; c waits in the slot
+        std::this_thread::sleep_for(1500ms); // b is already decoding behind a; c waits in the slot
         Command reorder = command(CommandKind::QueueReorder);
         reorder.entryIds = {ids[0], ids[1], ids[3], ids[2]};
         server.submit(reorder);

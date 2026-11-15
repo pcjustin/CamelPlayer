@@ -2,32 +2,83 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Render's side of the boundary between tracks, which the decoding thread publishes by storing the next track's start
-//! frame and then the output frame it starts at, once render has reached the previous one.
+//! The boundaries between tracks on their way to the device: the DSP stage publishes each (the output frame the track
+//! starts at, and the frame its position restarts at), render takes them as it sends those frames. One producer, the
+//! DSP stage under the stage lock, and one consumer, render.
 
 #[cfg(loom)]
-use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use loom::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(loom))]
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-pub(crate) const NO_BOUNDARY: u64 = u64::MAX;
+pub(crate) struct BoundaryQueue<const N: usize> {
+    at: [AtomicU64; N],
+    start: [AtomicU64; N],
+    // Counts since the engine was created: the boundaries published, and those render has taken.
+    published: AtomicU64,
+    reached: AtomicU64,
+}
 
-/// Render has sent the device up to output frame `after`: a published boundary at or before it is taken, leaving room
-/// for the next, and its output frame and its track's start frame are returned.
-pub(crate) fn reach(
-    at: &AtomicU64,
-    start_frame: &AtomicU64,
-    pending: &AtomicBool,
-    after: u64,
-) -> Option<(u64, u64)> {
-    let boundary = at.load(Ordering::Acquire);
-    if boundary == NO_BOUNDARY || boundary > after {
-        return None;
+impl<const N: usize> BoundaryQueue<N> {
+    pub(crate) fn new() -> Self {
+        BoundaryQueue {
+            at: std::array::from_fn(|_| AtomicU64::new(0)),
+            start: std::array::from_fn(|_| AtomicU64::new(0)),
+            published: AtomicU64::new(0),
+            reached: AtomicU64::new(0),
+        }
     }
-    // The start is read and the pending mark cleared before the boundary is given up: once it is, the decoding thread
-    // may publish the next track's start, and a crossfade mark its own boundary pending.
-    let start = start_frame.load(Ordering::Acquire);
-    pending.store(false, Ordering::Release);
-    at.store(NO_BOUNDARY, Ordering::Release);
-    Some((boundary, start))
+
+    pub(crate) fn published(&self) -> u64 {
+        self.published.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn reached(&self) -> u64 {
+        self.reached.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn full(&self) -> bool {
+        self.published() - self.reached() == N as u64
+    }
+
+    /// The producer: the next track starts at output frame `at`, its position at `start`. False while the queue is
+    /// full, until render takes the oldest. The entry is stored before the count that hands it to render.
+    pub(crate) fn publish(&self, at: u64, start: u64) -> bool {
+        let published = self.published.load(Ordering::Relaxed);
+        if published - self.reached.load(Ordering::Acquire) == N as u64 {
+            return false;
+        }
+        let slot = (published % N as u64) as usize;
+        self.start[slot].store(start, Ordering::Relaxed);
+        self.at[slot].store(at, Ordering::Relaxed);
+        self.published.store(published + 1, Ordering::Release);
+        true
+    }
+
+    /// The consumer: render has sent the device up to output frame `after`. Takes every boundary at or before it and
+    /// returns how many, with the output frame and position start of the last.
+    pub(crate) fn reach(&self, after: u64) -> Option<(u64, u64, u64)> {
+        let reached = self.reached.load(Ordering::Relaxed);
+        let published = self.published.load(Ordering::Acquire);
+        let mut taken = 0;
+        let mut last = None;
+        while reached + taken < published {
+            let slot = ((reached + taken) % N as u64) as usize;
+            let at = self.at[slot].load(Ordering::Relaxed);
+            if at > after {
+                break;
+            }
+            last = Some((at, self.start[slot].load(Ordering::Relaxed)));
+            taken += 1;
+        }
+        let (at, start) = last?;
+        // The slots are read before they are given back to the producer.
+        self.reached.store(reached + taken, Ordering::Release);
+        Some((taken, at, start))
+    }
+
+    /// Drops what is still to be reached. Only with render drained and the producer's lock held.
+    pub(crate) fn clear(&self) {
+        self.reached.store(self.published(), Ordering::Release);
+    }
 }

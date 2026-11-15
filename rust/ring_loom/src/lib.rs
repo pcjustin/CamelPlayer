@@ -12,6 +12,7 @@ mod ring;
 #[path = "../../audio_engine/src/boundary.rs"]
 mod boundary;
 
+use boundary::BoundaryQueue;
 use loom::sync::Arc;
 use loom::thread;
 use ring::SpscByteRing;
@@ -108,52 +109,113 @@ fn the_reader_clearing_keeps_what_follows_in_order() {
     });
 }
 
-// The decoding thread publishes the next boundary as soon as render has taken the last: render still reports the
-// start of the track whose boundary it reached.
+// Each boundary render takes gives its own track's start, however publishing and reaching interleave.
 #[test]
 fn a_boundary_reached_gives_its_own_tracks_start() {
-    use boundary::NO_BOUNDARY;
-    use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     model(|| {
-        let at = Arc::new(AtomicU64::new(10));
-        let start = Arc::new(AtomicU64::new(100));
-        let pending = Arc::new(AtomicBool::new(true));
-        let decoder = {
-            let (at, start) = (Arc::clone(&at), Arc::clone(&start));
+        let queue = Arc::new(BoundaryQueue::<2>::new());
+        let stage = {
+            let queue = Arc::clone(&queue);
             thread::spawn(move || {
-                while at.load(Ordering::Acquire) != NO_BOUNDARY {
-                    thread::yield_now();
-                }
-                start.store(200, Ordering::Release);
-                at.store(20, Ordering::Release);
+                assert!(queue.publish(10, 100));
+                assert!(queue.publish(20, 200));
             })
         };
-        assert_eq!(boundary::reach(&at, &start, &pending, 15), Some((10, 100)));
-        decoder.join().unwrap();
+        let mut taken = 0;
+        while taken < 2 {
+            match queue.reach(25) {
+                Some((count, at, start)) => {
+                    assert_eq!(start, at * 10);
+                    taken += count;
+                }
+                None => thread::yield_now(),
+            }
+        }
+        stage.join().unwrap();
+        assert_eq!(taken, 2);
     });
 }
 
-// A crossfade marks its new boundary pending once render has reached the last: render's taking of that one does not
-// clear the new mark.
+// A boundary past what render has sent stays for later, and those before it are taken together.
 #[test]
-fn a_boundary_marked_after_one_is_reached_stays_pending() {
-    use boundary::NO_BOUNDARY;
-    use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+fn render_takes_only_the_boundaries_it_has_sent() {
     model(|| {
-        let at = Arc::new(AtomicU64::new(10));
-        let start = Arc::new(AtomicU64::new(100));
-        let pending = Arc::new(AtomicBool::new(true));
-        let crossfade = {
-            let (at, pending) = (Arc::clone(&at), Arc::clone(&pending));
+        let queue = Arc::new(BoundaryQueue::<2>::new());
+        let stage = {
+            let queue = Arc::clone(&queue);
             thread::spawn(move || {
-                while at.load(Ordering::Acquire) != NO_BOUNDARY {
-                    thread::yield_now();
-                }
-                pending.store(true, Ordering::Release);
+                assert!(queue.publish(10, 100));
+                assert!(queue.publish(30, 300));
             })
         };
-        assert!(boundary::reach(&at, &start, &pending, 15).is_some());
-        crossfade.join().unwrap();
-        assert!(pending.load(Ordering::Acquire));
+        let first = queue.reach(15);
+        stage.join().unwrap();
+        assert!(first.is_none() || first == Some((1, 10, 100)));
+        let rest = queue.reach(40);
+        assert_eq!(
+            rest.map(|(count, _, _)| count),
+            Some(if first.is_some() { 1 } else { 2 })
+        );
+        assert_eq!(rest.map(|(_, at, start)| (at, start)), Some((30, 300)));
+    });
+}
+
+// A full queue takes no more until render has taken the oldest; nothing is lost or overwritten.
+#[test]
+fn a_full_queue_waits_for_render() {
+    model(|| {
+        let queue = Arc::new(BoundaryQueue::<2>::new());
+        let stage = {
+            let queue = Arc::clone(&queue);
+            thread::spawn(move || {
+                for at in [10, 20, 30] {
+                    while !queue.publish(at, at * 10) {
+                        thread::yield_now();
+                    }
+                }
+            })
+        };
+        let mut taken = 0;
+        let mut last = 0;
+        while taken < 3 {
+            match queue.reach(u64::MAX) {
+                Some((count, at, start)) => {
+                    assert_eq!(start, at * 10);
+                    assert!(at > last);
+                    last = at;
+                    taken += count;
+                }
+                None => thread::yield_now(),
+            }
+        }
+        stage.join().unwrap();
+        assert_eq!((taken, last), (3, 30));
+    });
+}
+
+// A reset drops what waits, with render drained; what is published after it is all render takes.
+#[test]
+fn a_reset_drops_what_waits() {
+    model(|| {
+        let queue = Arc::new(BoundaryQueue::<2>::new());
+        assert!(queue.publish(10, 100));
+        assert!(queue.publish(20, 200));
+        assert!(queue.full());
+        queue.clear();
+        assert_eq!(queue.reached(), queue.published());
+        assert!(!queue.full());
+        let stage = {
+            let queue = Arc::clone(&queue);
+            thread::spawn(move || assert!(queue.publish(5, 50)))
+        };
+        let taken = loop {
+            if let Some(taken) = queue.reach(u64::MAX) {
+                break taken;
+            }
+            thread::yield_now();
+        };
+        stage.join().unwrap();
+        assert_eq!(taken, (1, 5, 50));
+        assert!(queue.reach(u64::MAX).is_none());
     });
 }
