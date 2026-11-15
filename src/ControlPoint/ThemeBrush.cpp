@@ -40,9 +40,9 @@ Media::Brush themeBrush(ElementTheme theme, const wchar_t* key) {
         themes[0] = L"Dark";
         themes[1] = L"Default";
     }
-    for (const wchar_t* theme : themes)
-        if (theme)
-            if (const auto value = themed(resources, theme, name)) return value.try_as<Media::Brush>();
+    for (const wchar_t* dictionary : themes)
+        if (dictionary)
+            if (const auto value = themed(resources, dictionary, name)) return value.try_as<Media::Brush>();
     return resources.TryLookup(name).try_as<Media::Brush>();
 }
 
