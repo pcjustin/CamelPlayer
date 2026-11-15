@@ -21,13 +21,11 @@ $vs = & $vswhere -latest -prerelease -property installationPath
 
 $fuzzSeconds = 600
 
-# Time and memory limits that an instrumented build does not meet, and a crash that holds the heap, where ASan's heap
-# hooks block the dump's writer only after it has suspended the crashed thread; the ordinary Release suite holds them.
+# Time and memory limits that an instrumented build does not meet; the ordinary Release suite holds them.
 $asanExceptions = 'LibraryBrowse.WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredThousandTracks',
                   'QueuePolicyTest.AWholeLibraryQueueReordersRestoresAndAdvancesWithoutQuadraticWork',
                   'QueuePolicyTest.AWholeQueueOfUnavailableEntriesIsPassedOverWithoutQuadraticWork',
-                  'ImpulseResponse.AResponseTooLongIsRefusedFromItsHeaderAndOnlyOnce',
-                  'CrashDump.ACrashThatHoldsTheHeapEndsWithoutWaitingForItsDump'
+                  'ImpulseResponse.AResponseTooLongIsRefusedFromItsHeaderAndOnlyOnce'
 
 $lockAnnotated = 'src\Engine\PlaybackEngine.cpp', 'src\Server\Playback\LocalServer.cpp',
                  'src\Server\Network\NetworkOutput.cpp', 'src\Server\Network\AirPlayOutput.cpp'

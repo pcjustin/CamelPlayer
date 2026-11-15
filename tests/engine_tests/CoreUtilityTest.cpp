@@ -19,6 +19,7 @@
 #include "Tools/camelcli/ScanBenchData.h"
 #include "TestUtil.h"
 // after windows.h, which TestUtil.h includes
+#include <dbghelp.h>
 #include <psapi.h>
 
 using namespace camel;
@@ -146,6 +147,26 @@ TEST(CrashDump, UnhandledChildExceptionCreatesDump) {
         dump.read(signature, sizeof signature);
         EXPECT_EQ(std::string(signature, sizeof signature), "MDMP");
         EXPECT_GT(std::filesystem::file_size(entry.path()), 32u);
+        // The dump tells the exception, and the crashed thread is among its threads.
+        dump.close();
+        const HANDLE file = CreateFileW(entry.path().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        ASSERT_NE(file, INVALID_HANDLE_VALUE);
+        const HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        void* view = mapping ? MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0) : nullptr;
+        ASSERT_NE(view, nullptr);
+        void* stream = nullptr;
+        ULONG size = 0;
+        ASSERT_TRUE(MiniDumpReadDumpStream(view, ExceptionStream, nullptr, &stream, &size));
+        const auto* exception = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(stream);
+        EXPECT_EQ(exception->ExceptionRecord.ExceptionCode, 0xE0424242u);
+        ASSERT_TRUE(MiniDumpReadDumpStream(view, ThreadListStream, nullptr, &stream, &size));
+        const auto* threads = static_cast<const MINIDUMP_THREAD_LIST*>(stream);
+        EXPECT_TRUE(std::any_of(threads->Threads, threads->Threads + threads->NumberOfThreads,
+                                [&](const MINIDUMP_THREAD& t) { return t.ThreadId == exception->ThreadId; }));
+        UnmapViewOfFile(view);
+        CloseHandle(mapping);
+        CloseHandle(file);
     }
     EXPECT_EQ(dumps, 1u);
     for (const auto& entry : std::filesystem::directory_iterator(directory)) std::filesystem::remove(entry.path());

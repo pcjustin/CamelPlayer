@@ -6,6 +6,7 @@
 
 #include <windows.h>
 #include <dbghelp.h>
+#include <processsnapshot.h>
 #include <psapi.h>
 
 #include <algorithm>
@@ -47,7 +48,21 @@ DWORD WINAPI writeDump(void* parameter) {
     // The memory the stacks point at holds the paths and names being worked on, small enough to send.
     const auto type =
         MINIDUMP_TYPE(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithUnloadedModules);
-    MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), f, type, request.exception ? &info : nullptr, nullptr, nullptr);
+    // Written from a snapshot, the process's threads are stopped only while it is taken: written from the process itself,
+    // they stay stopped until the dump is done, and a crashed thread waiting for it could not end the process when the
+    // writer waits for a lock that thread holds.
+    constexpr auto kCapture = PSS_CAPTURE_VA_CLONE | PSS_CAPTURE_THREADS | PSS_CAPTURE_THREAD_CONTEXT | PSS_CREATE_BREAKAWAY |
+                              PSS_CREATE_BREAKAWAY_OPTIONAL | PSS_CREATE_USE_VM_ALLOCATIONS;
+    HPSS snapshot = nullptr;
+    const bool snapped = PssCaptureSnapshot(GetCurrentProcess(), kCapture, CONTEXT_ALL, &snapshot) == ERROR_SUCCESS;
+    MINIDUMP_CALLBACK_INFORMATION fromSnapshot{[](void*, const PMINIDUMP_CALLBACK_INPUT input, PMINIDUMP_CALLBACK_OUTPUT output) {
+                                                   if (input->CallbackType == IsProcessSnapshotCallback) output->Status = S_FALSE;
+                                                   return TRUE;
+                                               },
+                                               nullptr};
+    MiniDumpWriteDump(snapped ? HANDLE(snapshot) : GetCurrentProcess(), GetCurrentProcessId(), f, type,
+                      request.exception ? &info : nullptr, nullptr, snapped ? &fromSnapshot : nullptr);
+    if (snapped) PssFreeSnapshot(GetCurrentProcess(), snapshot);
     CloseHandle(f);
     return 0;
 }
