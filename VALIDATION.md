@@ -1,8 +1,18 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3, 0.3.0, 0.4.0 and 0.4.1 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0, 0.4.0 or 0.4.1, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.1. [README.md](README.md#testing) explains how to run the tests.
+This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3, 0.3.0, 0.4.0, 0.4.1 and 0.4.2 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0, 0.4.0 or 0.4.1, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.1; the library performance runs were not repeated for 0.4.2 either. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
+
+On 2026-11-15, for 0.4.2, a full Release run of the release build on `4b8f038`, rebuilt from clean, passed all 1140 enabled C++ tests, the 100k-track search latency target included, and 113 Rust Engine tests passed, one ignored. The package was then made again on `ceabcc9`, which changes only CHANGELOG.md. No Debug run was made for 0.4.2: the disk had no room for a Debug build.
+
+The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt` by path, size and hash, the program reports version 0.4.2 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started through Explorer on an empty data folder, it recorded the installation as checked for 0.4.2, and left through the tray's Exit at 12 s it exited in 1.4 s.
+
+Updates were checked from a packaged build to a packaged build on 2026-11-15, the packaged 0.4.1 updated to the packaged 0.4.2 from its offer through a local stand-in for the release feed, then a deleted program file repaired from the repair offer, which 0.4.2's own updater installs:
+
+- in a folder of its own: the update and the repair each left the 250 files matching the manifest, with no backup or journal left;
+- in a folder holding other files: the update deleted the two other files, as 0.4.1's updater does with everything beside it; the repair by 0.4.2's updater kept both, unchanged. The 0.4.2 changelog tells users of 0.4.1 to move CamelPlayer to a folder of its own first;
+- in a folder under Program Files, which needs administrator rights: 0.4.1's updater and then 0.4.2's asked for them, the owner allowed each in the UAC prompt, and both left the 250 files matching the manifest, with no backup or journal left.
 
 On 2026-11-10, for 0.4.1, a full Release run of the release build on `49c54d8` passed all 976 enabled C++ tests, the 100k-track search latency target included, and all 97 Rust Engine tests passed. No Debug run was made for 0.4.1.
 
@@ -17,6 +27,14 @@ On 2026-11-08, for 0.3.0, a full Release run of the release build passed all 904
 The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt`, the program reports version 0.3.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started on an empty data folder and closed through the tray at 6–20 s, it exited cleanly every time. Before the fix to exiting, 3 of 8 such runs crashed on exit.
 
 ## Sanitizers
+
+On 2026-11-15, for 0.4.2, on `ea54a23` with the version, changelog and guide changes of `4b8f038`, 7 of the 9 checks passed:
+
+- Loom on the Engine's ring, and Miri on the DTS and DSD-to-PCM C ABIs and the ring;
+- the C++ suite under UndefinedBehaviorSanitizer, all 1139 tests then enabled;
+- 600 s each of fuzzing: the DTS frame reader 69,249 runs, the format probe 69,101, the network messages 411,744 and the zip reader 13,023,835, none failing.
+
+`/analyze` found `NetworkOutput::finish` reading the format without saying it holds the lock, which each of its three callers does; the annotation was added in `13d0f0a`. Under AddressSanitizer three tests added since 0.4.1 failed on the instrumentation alone, and join the two time limits left to the Release suite: a queue of unavailable entries at 1.19 s against its 1 s limit, the too-long impulse response growing the process by 120 MB against 100 MB with ASan's quarantine, and the crash that holds the heap, whose dump writer ASan's heap hooks block only after it has suspended the crashed thread (the Release build ends that crash in 2.4 s). On `13d0f0a` `/analyze` and the suite under AddressSanitizer, 1134 tests, passed.
 
 On 2026-11-10, for 0.4.1, on `49c54d8`, all 8 checks passed in 6,136 s:
 
@@ -47,6 +65,8 @@ Two earlier runs that day also passed all 8: on `52449ef`, before Symphonia left
 
 ## Hardware
 
+On 2026-11-15, before 0.4.2, all 98 hardware tests passed twice on the build of `da58f6f`, in 192 seconds each, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing. The commits after it change the network players' stream and the changelog.
+
 On 2026-11-10, before 0.4.1, all 97 hardware tests passed twice on the release build, in 184 and 183 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
 
 On 2026-11-09, before 0.4.0, all 97 hardware tests passed twice on the release candidate, in 196 and 185 seconds, on the Chord DAVE and the built-in Cirrus codec; the network-player case read the DMP-A6 and the Essential Bravo as UPnP AV and sent them nothing.
@@ -71,6 +91,10 @@ The hardware runs of 2026-10-20 and 2026-10-21 played through the Engine and Ser
 
 ## Network players and AirPlay receivers
 
+Checked on 2026-11-15 for 0.4.2, from a silent demo copy, the decoder dr_flac: a 65-minute 24-bit 192 kHz FLAC of digital silence, 4.49 GB as WAV, whose header says its sizes are unknown (0xFFFFFFFF), played to each player with its volume set to 5 first. The Essential Bravo and the DMP-A6 played it on, their position moving for 30 s. The Chord Poly asked for the chunk after the data where the header says it ends, at byte 4,294,967,340; CamelPlayer took that for a seek to 62 minutes, and the Poly refused the restarted stream and stopped after 4 s. With such a request answered as the end of the stream (`4fad0a5`) it played on, showing 1:02:08, the length the header gives.
+
+The two HomePod minis, two receivers grouped in CamelPlayer, were checked with the owner listening, on a copy of the owner's library and settings: a receiver turned off in Settings stopped and left the group while the other played on; one added back mid-track joined in step; and with the Home app allowing only people sharing the home, a receiver turned on was refused, then, allowed again, was asked again when turned on and played without a restart. The Home app shows no track for either receiver, so the track a joining receiver is told was seen only on the fake receiver of the tests. While refused, the engine logged "the receiver is in use by another source" rather than the refusal.
+
 Checked on 2026-11-07 and 2026-11-08 for 0.3.0 with the owner at home, in Release builds started from Explorer on a copy of the owner's library and settings, music on a NAS over Wi-Fi. The players:
 
 - **Eversolo DMP-A6**, wired: UPnP AV, no DSD among its 392 protocolInfo entries, so DSD goes to it as DoP in WAV. Over AirPlay (`et=0,1`, `vs=105.1`, `pw=false`) it takes an unencrypted session.
@@ -84,6 +108,8 @@ Over UPnP, each of the three players played FLAC from the NAS with seeks and gap
 The HomePod pair played from the NAS with a seek, a pause, a track change, a DSP change, the receiver's own volume and a language change that did not stop the music, both speakers heard and no noise; an iPhone taking it over stopped CamelPlayer with "in use by another source". It then played 2 hours and 3 minutes unbroken, 27 CD-format tracks in order, "bit-perfect to the receiver" throughout and no AirPlay warning, error or resend in the log, and the owner heard the two speakers still in step afterwards. Separated in the Home app, one HomePod alone was found and played. Paired again, the pair came back under a new device ID; on 2026-11-08 the release build found it and moved the saved pair's entry, enabled state and volume (29) to the new ID, recording its two speakers, and the old entry went.
 
 ## In the app
+
+Checked on 2026-11-15 for 0.4.2 on a copy of the owner's library and settings, the owner listening on the Chord DAVE: the tracks of 陳綺貞 – 沙發海, which skipped to the next about 10 s before their end, played to their last second, and Previous went back to the track before. Gapless changes, crossfades, EQ changes while playing and the end of a DSD stream sent short were checked by the tests and the hardware matrix only, not by ear.
 
 Checked by hand on 2026-11-10 in Release builds for 0.4.1:
 
@@ -151,6 +177,17 @@ The run before the speed-up, earlier the same day, measured a 100k-track search 
 
 ## NAS
 
+On 2026-11-15, for 0.4.2, the release build played from the NAS on the Chord DAVE over ASIO, on a copy of the owner's library and settings at schema 21, so that the start upgraded it, the volume in software at -80 dB and muted and DSD converted to PCM so that the mute held. The first startup scan of the 86,578 files read every MP3 again and took 690 s; a fingerprint the album wall's covers had put off made the scan incomplete, and a second full scan of 268 s followed at once. The next start's scan took 115 s and was complete. No underrun was logged. Measured on that next start, with the CPU as a share of one core:
+
+| Span | Seconds | Read (MB) | Network (MB) | CPU |
+|---|---|---|---|---|
+| Idle after the scan | 34 | 1.1 | 0.0 | 0.1% |
+| A FLAC 16/44.1 track | 93 | 179.0 | 70.2 | 81.1% |
+| A DSD64 track, to PCM | 88 | 172.5 | 131.3 | 17.4% |
+| An MP3 track | 69 | 60.8 | 16.2 | 9.7% |
+
+The FLAC track kept about one core busy for its first 70 s, in WinUI's composition thread, and then 1–5%; played again, and another FLAC played for the first time, it took 48% for 10 s and about 1% after, so the 70 s were not seen again.
+
 On 2026-11-09, for 0.4.0, the release candidate played from the NAS on the Chord DAVE over ASIO, on a copy of the owner's library and settings with the library still at schema 20, so that the start upgraded it. The first startup scan of the 86,565 files took 593 s, as the first complete scan of a new version reads every MP3 and every file an earlier version refused again; the next start's scan took 113 s, at the Low scan speed. No underrun was logged, and the FLAC played bit-perfect with its waveform shown. Measured on the process, with the CPU as a share of one core:
 
 | Span | Seconds | Read (MB) | Network (MB) | CPU |
@@ -171,6 +208,8 @@ A Release run on a real SMB share on 2026-10-23 and 2026-10-24 passed:
 
 ## Known limits
 
+- An update from 0.4.1 runs 0.4.1's updater, which deletes every file and folder beside CamelPlayer; from 0.4.2 on, updates touch only the program's own files.
+- Symphonia does not open a FLAC whose every frame is two CONSTANT subframes of silence, as the 4 GB stream check's file; dr_flac and libsndfile decode it.
 - In that NAS environment, tag edits did not reach the index through change notifications within 120 seconds; a test-only 2-second polling interval recovered them. Network shares are polled every 6 hours and local folders every 30 minutes, so a change that notifications miss can stay stale until the next poll.
 - A physical network interruption during a scan remains untested.
 - On this computer's Wi-Fi the NAS gives 0.7–2.3 MB/s, and DSD256 needs 2.82 MB/s, so DSD256 from the NAS breaks up on any output, as DoP or converted to PCM; DSD128 fits.
