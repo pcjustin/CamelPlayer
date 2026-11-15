@@ -2,7 +2,7 @@
 
 ## 0.4.2
 
-Upgrading from 0.4.1: the library gains two indexes (library schema 22), and a copy of the library as it was is kept beside it as `library.db.v21.bak`. 0.4.1 refuses the newer library, so to go back to it, close CamelPlayer and, in `%LOCALAPPDATA%\CamelPlayer`, replace `library.db` with that copy. The settings keep their schema.
+Upgrading from 0.4.1: the library gains two indexes (library schema 22), and a copy of the library as it was is kept beside it as `library.db.v21.bak`. 0.4.1 refuses the newer library, so to go back to it, close CamelPlayer and, in `%LOCALAPPDATA%\CamelPlayer`, replace `library.db` with that copy. The settings keep their schema. This update is still installed by 0.4.1's updater, which deletes every other file and folder beside CamelPlayer: if it lies in a folder with other files, such as Downloads, the desktop or a music folder, move it to a folder of its own, or copy those files elsewhere, before updating. From 0.4.2 on, updates leave them alone.
 
 As with every new version, the first complete library scan reads every MP3, and every file an earlier version could not read, once more.
 
