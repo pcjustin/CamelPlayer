@@ -859,7 +859,7 @@ private:
 
     // What is missing of a length that was only estimated is silence, as the player was told the length. Zeros are not
     // silence in DSD.
-    void finish(Body& body) {
+    _Requires_lock_held_(mutex_) void finish(Body& body) {
         if (body.complete) return;
         if (body.lengthKnown && format_.type == SampleType::Dsd8 && body.framesWritten < body.totalFrames) {
             log::info("network player: %s ended %llu frames short of its length", toUtf8(body.track.file).c_str(),
