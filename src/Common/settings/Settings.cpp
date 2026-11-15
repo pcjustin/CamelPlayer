@@ -953,15 +953,39 @@ void saveSettings(const Settings& s, const std::filesystem::path& path) {
         out.close();
         if (!out) throw std::runtime_error("cannot write settings");
     }
+    // A virus scanner or the search indexer may hold either file for a moment without letting it be written or replaced.
+    const auto patiently = [&tmp](const auto& step, const char* failure) {
+        for (int attempt = 0;; ++attempt) {
+            if (step()) return;
+            const DWORD error = GetLastError();
+            if ((error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) || attempt == 100) {
+                std::error_code ignored;
+                std::filesystem::remove(tmp, ignored);
+                throw std::runtime_error(failure);
+            }
+            Sleep(20);
+        }
+    };
     // The bytes reach the disk before the rename can: MOVEFILE_WRITE_THROUGH waits for the rename alone, and a power cut
     // after it could otherwise leave an empty or cut settings.json.
-    const HANDLE written = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (written == INVALID_HANDLE_VALUE) throw std::runtime_error("cannot flush settings");
-    const bool flushed = FlushFileBuffers(written) != FALSE;
-    CloseHandle(written);
-    if (!flushed) throw std::runtime_error("cannot flush settings");
-    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    patiently(
+        [&tmp] {
+            const HANDLE written =
+                CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (written == INVALID_HANDLE_VALUE) return false;
+            const bool flushed = FlushFileBuffers(written) != FALSE;
+            CloseHandle(written);
+            if (!flushed) SetLastError(ERROR_WRITE_FAULT);
+            return flushed;
+        },
+        "cannot flush settings");
+    // A folder in its place denies the rename as a held file does, but for good.
+    if (std::error_code error; std::filesystem::is_directory(path, error)) {
+        std::filesystem::remove(tmp, error);
         throw std::runtime_error("cannot replace settings file");
+    }
+    patiently([&] { return MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE; },
+              "cannot replace settings file");
 }
 
 } // namespace camel

@@ -5,7 +5,9 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <set>
+#include <thread>
 #include <vector>
 #include <fstream>
 #include <limits>
@@ -684,6 +686,27 @@ TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
         EXPECT_EQ(loadSettings(file).language, "en-US");
         EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(file).concat(L".tmp")));
     }
+    std::filesystem::remove(file);
+}
+
+// A program that opens settings.json for a moment without letting it be deleted, as a virus scanner or the search
+// indexer can, holds up the save rather than failing it.
+TEST(SettingsBoundary, ASettingsFileHeldForAMomentIsStillReplaced) {
+    const auto file = caseFile(".json");
+    Settings settings;
+    saveSettings(settings, file);
+    HANDLE held =
+        CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    std::thread release([held] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CloseHandle(held);
+    });
+    settings.language = "en-US";
+    EXPECT_NO_THROW(saveSettings(settings, file));
+    release.join();
+    EXPECT_EQ(loadSettings(file).language, "en-US");
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(file).concat(L".tmp")));
     std::filesystem::remove(file);
 }
 
