@@ -218,7 +218,9 @@ TEST_F(LibraryIdentityTest, UniqueRecordedHashRecoversUntrustedOrCrossVolumeIden
     fs::copy_file(source, music / "new.lrc");
     fs::remove(source);
     playing = true;
-    EXPECT_FALSE(scanner.scan(root).complete);
+    const auto deferred = scanner.scan(root);
+    EXPECT_TRUE(deferred.complete);
+    EXPECT_EQ(deferred.deferred.size(), 1U);
     EXPECT_EQ(id(store, "new.lrc"), 0);
     playing = false;
     EXPECT_EQ(scanner.scan(root).moved, 1);
@@ -916,9 +918,9 @@ TEST_F(LibraryIdentityTest, MonitorRetriesDeferredMoveMatchingAfterPlaybackWitho
     const auto ahead = [&] { return playing ? PlaybackReads{{music / "playing.flac"}, true} : PlaybackReads{}; };
     LibraryScanner gated(store, {}, ahead);
     const auto deferred = gated.scan(root);
-    ASSERT_TRUE(deferred.deferred);
-    ASSERT_FALSE(deferred.complete);
-    EXPECT_EQ(id(store, "old.lrc"), original);
+    ASSERT_EQ(deferred.deferred.size(), 1U);
+    ASSERT_TRUE(deferred.complete);
+    EXPECT_EQ(id(store, "old.lrc"), 0);
     LibraryMonitor::Options options;
     options.pollInterval = std::chrono::milliseconds(0);
     options.playback = ahead;
@@ -935,6 +937,41 @@ TEST_F(LibraryIdentityTest, MonitorRetriesDeferredMoveMatchingAfterPlaybackWitho
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_EQ(id(store, "new.lrc"), original);
     EXPECT_EQ(scalar(store, "SELECT rating FROM stats"), 5);
+}
+
+// A fingerprint put off while music plays leaves only its folder to be scanned again: the rest of the scan is done, and
+// a file put in another folder meanwhile, with no change notifications, waits for the next poll.
+TEST_F(LibraryIdentityTest, AFingerprintPutOffScansOnlyItsFolderAgain) {
+    fs::create_directories(music / "a");
+    fs::create_directories(music / "b");
+    fs::create_directories(music / "c");
+    const auto source = music / "a" / "old.lrc";
+    std::ofstream(source, std::ios::binary) << "abc";
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto original = id(store, "old.lrc");
+    rate(store, original);
+    distrustIds(store);
+    fs::rename(source, music / "b" / "new.lrc");
+    std::atomic<bool> playing = true;
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::milliseconds(0);
+    options.watchChanges = false;
+    options.playback = [&] { return playing ? PlaybackReads{{music / "playing.flac"}, true} : PlaybackReads{}; };
+    LibraryMonitor monitor(store, options);
+    const auto wait = [&](const std::function<bool()>& check) {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!check() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return check();
+    };
+    EXPECT_TRUE(wait([&] { return id(store, "old.lrc") == 0; })) << "the scan is done but for the file put off";
+    std::ofstream(music / "c" / "other.lrc", std::ios::binary) << "other words";
+    playing = false;
+    EXPECT_TRUE(wait([&] { return id(store, "new.lrc") == original; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(id(store, "other.lrc"), 0) << "the root was scanned again";
 }
 
 } // namespace

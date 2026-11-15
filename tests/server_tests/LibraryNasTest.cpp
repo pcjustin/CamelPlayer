@@ -638,6 +638,63 @@ TEST(LibraryNas, DISABLED_ServerPlaybackOnNasLetsFingerprintsGoOnWhileAhead) {
         {"nas_fixture_removed", true}}.dump(2);
 }
 
+// A move found while music plays from the share has its fingerprint put off; once nothing plays, only the folder it went
+// to is scanned again. Reports that scan's time against a scan of the whole fixture, which the monitor ran before.
+TEST(LibraryNas, DISABLED_AFingerprintPutOffScansOnlyItsFolderAgain) {
+    const auto share = nasRoot();
+    const auto fixture = share / (L".camelplayer-nas-test-put-off-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                  std::to_wstring(GetTickCount64()));
+    ASSERT_EQ(fixture.parent_path(), share);
+    ASSERT_TRUE(fs::create_directory(fixture));
+    auto cleanup = wil::scope_exit([&] {
+        std::error_code error;
+        fs::remove_all(fixture, error);
+    });
+    constexpr int kFolders = 20, kFiles = 10;
+    for (int folder = 0; folder < kFolders; ++folder) {
+        const auto album = fixture / ("album " + std::to_string(folder));
+        fs::create_directory(album);
+        for (int file = 0; file < kFiles; ++file)
+            fs::copy_file(testutil::testFile("16-44.1k"), album / (std::to_string(file) + ".flac"));
+    }
+    std::ofstream(fixture / "album 0" / "moved.lrc") << "words that only this file holds";
+    const auto local = localRun("put-off");
+    std::cout << "NAS put-off results: " << camel::toUtf8(local.wstring()) << '\n' << std::flush;
+    LibraryStore store(local / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(fixture);
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_TRUE(scanner.fingerprint(root).complete);
+    const auto original = count(store, "SELECT id FROM files WHERE path LIKE '%moved.lrc'");
+    store
+        .write([=](sqlite::Database& db) { db.prepare("INSERT INTO stats(file_id,rating) VALUES(?,5)").bind(1, original).run(); })
+        .get();
+    fs::rename(fixture / "album 0" / "moved.lrc", fixture / "album 1" / "moved.lrc");
+    std::atomic<bool> playing = true;
+    LibraryMonitor::Options options;
+    options.pollInterval = options.networkPollInterval = std::chrono::milliseconds(0);
+    options.watchChanges = false;
+    options.playback = [&] { return playing ? PlaybackReads{{fixture / "playing.flac"}, true} : PlaybackReads{}; };
+    const auto moved = [&] {
+        return count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE '%album 1\\moved.lrc'") == 1;
+    };
+    const auto started = Clock::now();
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(
+        waitFor([&] { return count(store, "SELECT COUNT(*) FROM files WHERE path LIKE '%moved.lrc' AND available=1") == 0; }));
+    const auto whole = std::chrono::duration<double>(Clock::now() - started).count();
+    EXPECT_FALSE(moved());
+    const auto stopped = Clock::now();
+    playing = false;
+    ASSERT_TRUE(waitFor(moved));
+    const auto again = std::chrono::duration<double>(Clock::now() - stopped).count();
+    EXPECT_EQ(count(store, "SELECT file_id FROM stats"), original);
+    EXPECT_LT(again, whole);
+    const Json report{{"files", kFolders * kFiles + 1}, {"scan_while_playing_s", whole}, {"scan_once_stopped_s", again}};
+    std::ofstream(local / "report.json") << report.dump(2);
+    std::cout << report.dump() << '\n' << std::flush;
+}
+
 TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
     const auto share = nasRoot();
     const auto remote = share / (L".camelplayer-nas-test-cross-volume-" + std::to_wstring(GetCurrentProcessId()) + L"-" +

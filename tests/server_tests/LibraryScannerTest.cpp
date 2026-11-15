@@ -996,7 +996,7 @@ TEST_F(LibraryScannerTest, UnchangedPendingFilesReuseTheirRecordedFingerprint) {
     playing = true;
     const auto report = scanner.scan(root);
     EXPECT_TRUE(report.complete);
-    EXPECT_FALSE(report.deferred);
+    EXPECT_TRUE(report.deferred.empty());
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL AND identity_state=0"), 1);
 }
 
@@ -1382,7 +1382,7 @@ TEST_F(LibraryScannerTest, AFolderThatCannotBeCheckedKeepsItsFiles) {
         ASSERT_EQ(GetLastError(), DWORD(ERROR_ACCESS_DENIED));
         const auto report = scanner.scan(root, {}, {stored / "album" / "disc"});
         EXPECT_FALSE(report.complete);
-        EXPECT_TRUE(report.deferred) << "the monitor scans it again";
+        EXPECT_EQ(report.deferred, std::vector<fs::path>{stored / "album" / "disc"}) << "the monitor scans it again";
     }
     EXPECT_EQ(count(store), 1);
 }

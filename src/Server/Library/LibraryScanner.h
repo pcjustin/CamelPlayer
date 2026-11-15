@@ -40,7 +40,8 @@ std::filesystem::path spelledLibraryPath(const std::filesystem::path& path);
 
 struct ScanReport {
     bool complete = false;
-    bool deferred = false; // work left for the monitor to do again: fingerprints while music played, a folder not checked
+    // Folders left for the monitor to scan again: fingerprints put off while music played, a folder not checked.
+    std::vector<std::filesystem::path> deferred;
     bool online = true;
     uint32_t rootError = 0; // Win32 error distinguishes access denial from a missing/offline root
     size_t seen = 0, updated = 0, moved = 0;

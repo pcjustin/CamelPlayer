@@ -661,9 +661,9 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
                 if (!directoryValid()) break;
                 entry.digest = library::fileDigest(child, entry.version, token, busy, hashSizes.at(entry.version.size));
+                // The file is not recorded yet; the rest of the scan goes on, and only this folder is scanned again.
                 if (!entry.digest) {
                     out.deferred = true;
-                    out.complete = false;
                     throw std::runtime_error("fingerprint deferred while cancelled or playing");
                 }
             }
@@ -1099,7 +1099,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         if (const DWORD error = GetLastError();
             attributes == INVALID_FILE_ATTRIBUTES && error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
             complete = false;
-            report.deferred = true;
+            report.deferred.push_back(folder);
             report.diagnostics.push_back(key(folder) + ": " + std::to_string(error));
         }
     }
@@ -1256,7 +1256,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         auto listing = ready->get();
         active.erase(ready);
         complete = complete && listing.complete;
-        report.deferred = report.deferred || listing.deferred;
+        if (listing.deferred) report.deferred.push_back(listing.path);
         if (!listing.error.empty()) report.diagnostics.push_back(listing.error);
         if (!listing.fileWork) {
             submit([&token, root, folder = key(listing.path),
@@ -1607,7 +1607,7 @@ private:
         std::array<uint8_t, 32768> buffer{};
         Clock::time_point due, lastPoll;
         bool pending = false;
-        bool deferred = false;
+        std::set<Path> deferred;  // folders to scan again once nothing plays from this storage
         bool unwatchable = false; // its storage gives no change notifications, so it is only polled
         std::function<BackgroundPace()> pace;
         Path root;
@@ -1761,10 +1761,10 @@ private:
                         std::lock_guard lock(userMutex_);
                         userRoots_.insert(id);
                     }
-                    if (watch.deferred && watch.pace() == BackgroundPace::Full) {
-                        watch.deferred = false;
+                    if (!watch.deferred.empty() && watch.pace() == BackgroundPace::Full) {
+                        watch.changed.merge(watch.deferred);
+                        watch.deferred.clear();
                         watch.due = Clock::now();
-                        watch.full = true;
                     }
                     if (watch.pending && WaitForSingleObject(watch.event.get(), 0) == WAIT_OBJECT_0) {
                         DWORD bytes = 0;
@@ -1824,7 +1824,12 @@ private:
                     };
                     try {
                         const auto report = job.get();
-                        if (watch != watches.end()) watch->second->deferred = report.deferred;
+                        // A whole scan replaces what was left from before; one of some folders adds to it.
+                        if (watch != watches.end()) {
+                            auto& deferred = watch->second->deferred;
+                            if (folders.empty()) deferred.clear();
+                            deferred.insert(report.deferred.begin(), report.deferred.end());
+                        }
                         if (!report.complete) again();
                         for (const auto& diagnostic : report.diagnostics) log::warn("library: %s", diagnostic.c_str());
                     } catch (const std::exception& e) {
