@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Server/Playback/QueuePolicy.h"
+#include "TestUtil.h"
 
 using namespace camel::server;
 
@@ -213,7 +214,7 @@ TEST(QueuePolicyTest, AWholeLibraryQueueReordersRestoresAndAdvancesWithoutQuadra
     EXPECT_EQ(id(restored.next(false)), id(queue.next(false)));
     EXPECT_TRUE(restored.upcoming());
     // Each step is linear; the quadratic versions took minutes for this size.
-    EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(2));
+    EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(2) * testutil::kSlowdown);
 }
 
 TEST(QueuePolicyTest, AWholeQueueOfUnavailableEntriesIsPassedOverWithoutQuadraticWork) {
@@ -229,7 +230,7 @@ TEST(QueuePolicyTest, AWholeQueueOfUnavailableEntriesIsPassedOverWithoutQuadrati
     queue.setUnavailable(ids.back(), true);
     EXPECT_FALSE(queue.upcoming());
     const auto took = std::chrono::steady_clock::now() - started;
-    EXPECT_LT(took, std::chrono::seconds(1));
+    EXPECT_LT(took, std::chrono::seconds(1) * testutil::kSlowdown);
 }
 TEST(QueuePolicyTest, RemovingAndAddingManyEntriesInALargeQueueIsNotQuadratic) {
     std::vector<uint64_t> ids(100'000);

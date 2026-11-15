@@ -18,6 +18,14 @@
 
 namespace testutil {
 
+// How many times longer an AddressSanitizer build takes, for time limits that stand for an algorithm's cost: a quadratic
+// step still misses them by far.
+#if defined(__SANITIZE_ADDRESS__)
+inline constexpr int kSlowdown = 4;
+#else
+inline constexpr int kSlowdown = 1;
+#endif
+
 // build\testtmp (next to build\<Configuration>\tests\tests.exe); avoids %TEMP%, which Storage Sense may wipe.
 inline std::filesystem::path tempDir() {
     wchar_t exe[MAX_PATH];

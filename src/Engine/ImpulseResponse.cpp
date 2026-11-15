@@ -86,10 +86,15 @@ std::optional<Wav> readWav(const std::string& data, bool withSamples) {
     return wav;
 }
 
+// Read in one piece: grown as it is read, a long response was copied again at every doubling.
 std::string readFile(const std::filesystem::path& file) {
-    std::ifstream in(file, std::ios::binary);
+    std::ifstream in(file, std::ios::binary | std::ios::ate);
     if (!in) throw ImpulseError(ImpulseProblem::Unreadable, "cannot open " + toUtf8(file.wstring()));
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    std::string data(size_t(in.tellg()), '\0');
+    in.seekg(0);
+    if (!in.read(data.data(), std::streamsize(data.size())))
+        throw ImpulseError(ImpulseProblem::Unreadable, "cannot read " + toUtf8(file.wstring()));
+    return data;
 }
 
 uint64_t fnv1a(const std::string& data) {

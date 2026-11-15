@@ -21,12 +21,6 @@ $vs = & $vswhere -latest -prerelease -property installationPath
 
 $fuzzSeconds = 600
 
-# Time and memory limits that an instrumented build does not meet; the ordinary Release suite holds them.
-$asanExceptions = 'LibraryBrowse.WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredThousandTracks',
-                  'QueuePolicyTest.AWholeLibraryQueueReordersRestoresAndAdvancesWithoutQuadraticWork',
-                  'QueuePolicyTest.AWholeQueueOfUnavailableEntriesIsPassedOverWithoutQuadraticWork',
-                  'ImpulseResponse.AResponseTooLongIsRefusedFromItsHeaderAndOnlyOnce'
-
 $lockAnnotated = 'src\Engine\PlaybackEngine.cpp', 'src\Server\Playback\LocalServer.cpp',
                  'src\Server\Network\NetworkOutput.cpp', 'src\Server\Network\AirPlayOutput.cpp'
 
@@ -53,7 +47,7 @@ function Invoke-Logged([string] $Name, [string] $Program, [string[]] $Arguments,
 function Test-Asan {
     Invoke-Build 'tests\tests.vcxproj' '-p:CamelAsan=true'
     Copy-AsanRuntime 'build\Asan\tests'
-    & (Join-Path $root 'build\Asan\tests\tests.exe') --gtest_brief=1 "--gtest_filter=-$($asanExceptions -join ':')"
+    & (Join-Path $root 'build\Asan\tests\tests.exe') --gtest_brief=1
     if ($LASTEXITCODE) { throw "the suite under ASan failed ($LASTEXITCODE)" }
 }
 
