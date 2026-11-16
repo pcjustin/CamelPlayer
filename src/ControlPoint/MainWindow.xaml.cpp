@@ -257,6 +257,69 @@ uint32_t maxDsdAt(int index) {
     return index > 0 && size_t(index) <= std::size(kMaxDsdRates) ? kMaxDsdRates[size_t(index) - 1] : 0;
 }
 
+// An output's sample-rate choice and conversion filter (docs/Plan.md §6), as WASAPI exclusive, ASIO, KS and network
+// players have them. The choice lists follow the file, the three upsampling modes, then the set rates.
+struct RateControls {
+    ComboBox rate, multiple, quality, phase, passband, dsdRate;
+};
+
+constexpr int kUpsamplingModes = 3;
+
+template <class T> void showRateControls(const RateControls& c, const T& t) {
+    auto rates = rateItems();
+    rates.insert(rates.begin() + 1, {tr(L"Rate_IntegerHighest"), tr(L"Rate_IntegerMultiple"), tr(L"Rate_AnyHighest")});
+    const int setRate = rateIndex(t.fixedRate);
+    fill(c.rate, rates, setRate ? setRate + kUpsamplingModes : int(t.upsampling));
+    std::vector<hstring> multiples;
+    for (const uint32_t m : kUpsamplingMultiples) multiples.push_back(to_hstring(m) + L"×");
+    const auto multiple = std::ranges::find(kUpsamplingMultiples, t.upsamplingMultiple);
+    fill(c.multiple, multiples, int(multiple - std::begin(kUpsamplingMultiples)));
+    fill(c.quality, {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")}, int(t.filter.quality));
+    fill(c.phase, {tr(L"Phase_Linear"), tr(L"Phase_Intermediate"), tr(L"Phase_Minimum")}, int(t.filter.phase));
+    fill(c.passband, {tr(L"Passband_Standard"), tr(L"Passband_Steep"), tr(L"Passband_Gentle")}, int(t.filter.passband));
+}
+
+template <class T> void readRateControls(const RateControls& c, T& t) {
+    const int choice = std::max(0, c.rate.SelectedIndex());
+    t.upsampling = choice <= kUpsamplingModes ? Upsampling(choice) : Upsampling::Off;
+    t.fixedRate = choice > kUpsamplingModes ? rateAt(choice - kUpsamplingModes) : 0;
+    t.upsamplingMultiple =
+        kUpsamplingMultiples[std::clamp(c.multiple.SelectedIndex(), 0, int(std::size(kUpsamplingMultiples)) - 1)];
+    t.filter.quality = ResampleQuality(std::clamp(c.quality.SelectedIndex(), 0, 2));
+    t.filter.phase = FilterPhase(std::clamp(c.phase.SelectedIndex(), 0, 2));
+    t.filter.passband = FilterPassband(std::clamp(c.passband.SelectedIndex(), 0, 2));
+}
+
+// The multiple only for upsampling by one, phase and passband not for soxr's quick cubic interpolator, and DSD to PCM's
+// own rate only while the choice follows the file, as DSD converted to PCM otherwise follows the choice.
+template <class T> void enableRateControls(const RateControls& c, const T& t, bool enabled) {
+    c.rate.IsEnabled(enabled);
+    c.multiple.IsEnabled(enabled && !t.fixedRate && t.upsampling == Upsampling::IntegerMultiple);
+    c.quality.IsEnabled(enabled);
+    c.phase.IsEnabled(enabled && t.filter.quality != ResampleQuality::Quick);
+    c.passband.IsEnabled(enabled && t.filter.quality != ResampleQuality::Quick);
+    c.dsdRate.IsEnabled(!enabled || (!t.fixedRate && t.upsampling == Upsampling::Off));
+}
+
+RateControls wasapiRateControls(MainWindow& w) {
+    return {w.WasapiRateCombo(),  w.WasapiMultipleCombo(), w.WasapiQualityCombo(),
+            w.WasapiPhaseCombo(), w.WasapiPassbandCombo(), w.WasapiDsdRateCombo()};
+}
+
+RateControls asioRateControls(MainWindow& w) {
+    return {w.AsioRateCombo(),  w.AsioMultipleCombo(), w.AsioQualityCombo(),
+            w.AsioPhaseCombo(), w.AsioPassbandCombo(), w.AsioDsdRateCombo()};
+}
+
+RateControls ksRateControls(MainWindow& w) {
+    return {w.KsRateCombo(), w.KsMultipleCombo(), w.KsQualityCombo(), w.KsPhaseCombo(), w.KsPassbandCombo(), w.KsDsdRateCombo()};
+}
+
+RateControls networkRateControls(MainWindow& w) {
+    return {w.NetworkSampleRateCombo(), w.NetworkMultipleCombo(), w.NetworkQualityCombo(),
+            w.NetworkPhaseCombo(),      w.NetworkPassbandCombo(), w.NetworkDsdRateCombo()};
+}
+
 void showTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, const PlaybackTiming& t) {
     predecode.Value(t.predecodeSeconds);
     silence.Value(t.formatChangeSilenceMs);
@@ -648,7 +711,7 @@ void MainWindow::showOutputParameters(const SettingsDto& p) {
     const auto rates = rateItems();
     const std::vector<hstring> tasks = {L"Pro Audio", L"Playback", tr(L"Mmcss_Disabled")};
     const std::vector<hstring> priorities = {tr(L"Priority_Normal"), tr(L"Priority_High"), tr(L"Priority_Critical")};
-    fill(WasapiRateCombo(), rates, rateIndex(p.wasapi.fixedRate));
+    showRateControls(wasapiRateControls(*this), p.wasapi);
     // WASAPI and KS have no native DSD; a stored Native plays as DoP.
     const std::vector<hstring> dopOrPcm = {tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")};
     const auto dsdRates = dsdRateItems();
@@ -667,7 +730,7 @@ void MainWindow::showOutputParameters(const SettingsDto& p) {
     AsioBufferBox().Value(double(p.asio.bufferSize));
     AsioLeftBox().Value(p.asio.outLeft + 1);
     AsioRightBox().Value(p.asio.outRight + 1);
-    fill(AsioRateCombo(), rates, rateIndex(p.asio.fixedRate));
+    showRateControls(asioRateControls(*this), p.asio);
     fill(AsioDsdCombo(), {tr(L"Dsd_Native"), tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")}, int(p.asio.dsdOutput));
     fill(AsioDsdRateCombo(), dsdRates, dsdRateIndex(p.asio.dsdPcmRate));
     fill(AsioMaxRateCombo(), deviceLimits, rateIndex(p.asio.maxSampleRate));
@@ -680,7 +743,7 @@ void MainWindow::showOutputParameters(const SettingsDto& p) {
     KsPacketCountBox().Value(p.ks.packetCount);
     KsPacketMsBox().Value(p.ks.packetMs);
     fill(KsFormatCombo(), formats, formatIndex(p.ks.sampleType));
-    fill(KsRateCombo(), rates, rateIndex(p.ks.fixedRate));
+    showRateControls(ksRateControls(*this), p.ks);
     fill(KsDsdCombo(), dopOrPcm, p.ks.dsdOutput == DsdOutput::Pcm ? 1 : 0);
     fill(KsDsdRateCombo(), dsdRates, dsdRateIndex(p.ks.dsdPcmRate));
     fill(KsMaxRateCombo(), deviceLimits, rateIndex(p.ks.maxSampleRate));
@@ -689,6 +752,7 @@ void MainWindow::showOutputParameters(const SettingsDto& p) {
     fill(KsMmcssPriorityCombo(), priorities, int(p.ks.mmcssPriority));
     showTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), p.ks.timing);
 
+    showRateControls(networkRateControls(*this), p.network);
     auto limits = rates;
     limits.front() = tr(L"Limit_FollowPlayer");
     fill(NetworkRateCombo(), limits, rateIndex(p.network.maxSampleRate));
@@ -1232,7 +1296,7 @@ void MainWindow::readOutputParameters(SettingsDto& p) {
     p.wasapi.period = WasapiPeriod(std::min(idx(WasapiPeriodCombo()), 2));
     p.wasapi.customPeriodMs = numberOr(WasapiPeriodBox(), p.wasapi.customPeriodMs);
     p.wasapi.sampleType = kFormatChoices[std::min(idx(WasapiFormatCombo()), 4)];
-    p.wasapi.fixedRate = rateAt(idx(WasapiRateCombo()));
+    readRateControls(wasapiRateControls(*this), p.wasapi);
     p.wasapi.dsdOutput = idx(WasapiDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
     p.wasapi.dsdPcmRate = dsdRateAt(idx(WasapiDsdRateCombo()));
     p.wasapi.maxSampleRate = rateAt(idx(WasapiMaxRateCombo()));
@@ -1245,7 +1309,7 @@ void MainWindow::readOutputParameters(SettingsDto& p) {
     p.asio.bufferSize = long(numberOr(AsioBufferBox(), double(p.asio.bufferSize)));
     p.asio.outLeft = int(numberOr(AsioLeftBox(), p.asio.outLeft + 1)) - 1;
     p.asio.outRight = int(numberOr(AsioRightBox(), p.asio.outRight + 1)) - 1;
-    p.asio.fixedRate = rateAt(idx(AsioRateCombo()));
+    readRateControls(asioRateControls(*this), p.asio);
     p.asio.dsdOutput = DsdOutput(std::min(idx(AsioDsdCombo()), 2));
     p.asio.dsdPcmRate = dsdRateAt(idx(AsioDsdRateCombo()));
     p.asio.maxSampleRate = rateAt(idx(AsioMaxRateCombo()));
@@ -1257,7 +1321,7 @@ void MainWindow::readOutputParameters(SettingsDto& p) {
     p.ks.packetCount = int(numberOr(KsPacketCountBox(), p.ks.packetCount));
     p.ks.packetMs = numberOr(KsPacketMsBox(), p.ks.packetMs);
     p.ks.sampleType = kFormatChoices[std::min(idx(KsFormatCombo()), 4)];
-    p.ks.fixedRate = rateAt(idx(KsRateCombo()));
+    readRateControls(ksRateControls(*this), p.ks);
     p.ks.dsdOutput = idx(KsDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Dop;
     p.ks.dsdPcmRate = dsdRateAt(idx(KsDsdRateCombo()));
     p.ks.maxSampleRate = rateAt(idx(KsMaxRateCombo()));
@@ -1266,6 +1330,7 @@ void MainWindow::readOutputParameters(SettingsDto& p) {
     p.ks.mmcssPriority = MmcssPriority(std::min(idx(KsMmcssPriorityCombo()), 2));
     readTiming(KsPredecodeBox(), KsSilenceBox(), KsReleaseBox(), p.ks.timing);
 
+    readRateControls(networkRateControls(*this), p.network);
     p.network.maxSampleRate = rateAt(idx(NetworkRateCombo()));
     p.network.maxBits = idx(NetworkBitsCombo()) == 1 ? 16 : 0;
     p.network.dsdOutput = idx(NetworkDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
@@ -1388,7 +1453,10 @@ void MainWindow::updateBackendGroups() {
     NetworkGroup().Visibility(p.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
     AirPlayGroup().Visibility(p.backend == Backend::AirPlay ? Visibility::Visible : Visibility::Collapsed);
     WasapiPeriodBox().IsEnabled(p.wasapi.period == WasapiPeriod::Custom);
-    WasapiRateCombo().IsEnabled(!p.wasapi.shared); // the mixer sets the rate in shared mode
+    enableRateControls(wasapiRateControls(*this), p.wasapi, !p.wasapi.shared); // the mixer sets the rate in shared mode
+    enableRateControls(asioRateControls(*this), p.asio, true);
+    enableRateControls(ksRateControls(*this), p.ks, true);
+    enableRateControls(networkRateControls(*this), p.network, true);
     WasapiMaxRateCombo().IsEnabled(!p.wasapi.shared);
     WasapiMaxDsdCombo().IsEnabled(!p.wasapi.shared);
     WasapiPollBufferBox().IsEnabled(!p.wasapi.eventDriven);

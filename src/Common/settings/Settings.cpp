@@ -378,10 +378,50 @@ uint32_t fixedRate(const Settings& s) {
     case Backend::Ks:
         return s.ks.fixedRate;
     case Backend::Network:
+        return s.network.fixedRate;
     case Backend::AirPlay:
         return 0;
     }
     return 0;
+}
+
+Upsampling upsampling(const Settings& s) {
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return s.wasapi.shared ? Upsampling::Off : s.wasapi.upsampling;
+    case Backend::Asio:
+        return s.asio.upsampling;
+    case Backend::Ks:
+        return s.ks.upsampling;
+    case Backend::Network:
+        return s.network.upsampling;
+    case Backend::AirPlay:
+        return Upsampling::Off;
+    }
+    return Upsampling::Off;
+}
+
+uint32_t upsamplingMultiple(const Settings& s) {
+    return s.backend == Backend::Asio      ? s.asio.upsamplingMultiple
+           : s.backend == Backend::Ks      ? s.ks.upsamplingMultiple
+           : s.backend == Backend::Network ? s.network.upsamplingMultiple
+                                           : s.wasapi.upsamplingMultiple;
+}
+
+ResampleFilter resampleFilter(const Settings& s) {
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return s.wasapi.shared ? ResampleFilter{.quality = s.wasapi.sharedResampleQuality} : s.wasapi.filter;
+    case Backend::Asio:
+        return s.asio.filter;
+    case Backend::Ks:
+        return s.ks.filter;
+    case Backend::Network:
+        return s.network.filter;
+    case Backend::AirPlay:
+        return {.quality = s.resampleQuality};
+    }
+    return {};
 }
 
 uint32_t maxSampleRate(const Settings& s) {
@@ -442,6 +482,38 @@ static bool boolean(const json& o, const char* k, bool def) {
     return o.contains(k) && o[k].is_boolean() ? o[k].get<bool>() : def;
 }
 
+static constexpr const char* kUpsamplingIds[] = {"off", "integerHighest", "integerMultiple", "anyHighest"};
+static constexpr const char* kPhaseIds[] = {"linear", "intermediate", "minimum"};
+static constexpr const char* kPassbandIds[] = {"standard", "steep", "gentle"};
+
+template <class T, size_t N> static T fromIds(const json& o, const char* k, const char* const (&ids)[N]) {
+    const auto found = std::ranges::find(ids, str(o, k, ids[0]));
+    return found == std::end(ids) ? T{} : T(found - std::begin(ids));
+}
+
+// An output's sample-rate choice and filter, as WASAPI, ASIO, KS and network players keep them.
+template <class T> static json rateJson(const T& t) {
+    return {{"fixedRate", t.fixedRate},
+            {"upsampling", kUpsamplingIds[int(t.upsampling)]},
+            {"upsamplingMultiple", t.upsamplingMultiple},
+            {"filter",
+             {{"quality", resampleQualityId(t.filter.quality)},
+              {"phase", kPhaseIds[int(t.filter.phase)]},
+              {"passband", kPassbandIds[int(t.filter.passband)]}}}};
+}
+
+// An output saved before it had a filter of its own starts from `quality`, the one every output resampled with.
+template <class T> static void readRate(const json& o, T& t, ResampleQuality quality) {
+    t.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    t.upsampling = fromIds<Upsampling>(o, "upsampling", kUpsamplingIds);
+    const auto multiple = uint32_t(integer(o, "upsamplingMultiple", 2, 2, 8));
+    t.upsamplingMultiple = std::ranges::find(kUpsamplingMultiples, multiple) != std::end(kUpsamplingMultiples) ? multiple : 2;
+    const json& filter = o.contains("filter") && o["filter"].is_object() ? o["filter"] : json::object();
+    t.filter.quality = filter.contains("quality") ? resampleQualityFromId(str(filter, "quality", "high")) : quality;
+    t.filter.phase = fromIds<FilterPhase>(filter, "phase", kPhaseIds);
+    t.filter.passband = fromIds<FilterPassband>(filter, "passband", kPassbandIds);
+}
+
 static void readTiming(const json& o, PlaybackTiming& t) {
     t.predecodeSeconds = uint32_t(integer(o, "predecodeSeconds", 10, 1, 60));
     t.formatChangeSilenceMs = uint32_t(integer(o, "formatChangeSilenceMs", 0, 0, 2000));
@@ -466,17 +538,17 @@ static json wasapiJson(const WasapiSettings& w) {
               {"sampleType", w.sampleType ? sampleTypeId(*w.sampleType) : ""},
               {"dsdOutput", dsdOutputId(w.dsdOutput)},
               {"dsdPcmRate", w.dsdPcmRate},
-              {"fixedRate", w.fixedRate},
               {"maxSampleRate", w.maxSampleRate},
               {"maxDsdRate", w.maxDsdRate},
               {"pollBufferMs", w.pollBufferMs},
               {"mmcssTask", mmcssTaskId(w.mmcssTask)},
               {"mmcssPriority", mmcssPriorityId(w.mmcssPriority)}};
+    j.update(rateJson(w));
     j.update(timingJson(w.timing));
     return j;
 }
 
-static void readWasapi(const json& o, WasapiSettings& w) {
+static void readWasapi(const json& o, WasapiSettings& w, ResampleQuality quality) {
     w.deviceId = str(o, "device", "");
     w.shared = str(o, "shareMode", "exclusive") == "shared";
     w.sharedResampleQuality = resampleQualityFromId(str(o, "sharedResampleQuality", "high"));
@@ -487,7 +559,7 @@ static void readWasapi(const json& o, WasapiSettings& w) {
     w.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Dop);
     if (w.dsdOutput == DsdOutput::Native) w.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
     w.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
-    w.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    readRate(o, w, quality);
     w.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
     w.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     w.pollBufferMs = num(o, "pollBufferMs", 200.0, 20.0, 2000.0);
@@ -503,21 +575,21 @@ static json asioJson(const AsioSettings& a) {
               {"outRight", a.outRight},
               {"dsdOutput", dsdOutputId(a.dsdOutput)},
               {"dsdPcmRate", a.dsdPcmRate},
-              {"fixedRate", a.fixedRate},
               {"maxSampleRate", a.maxSampleRate},
               {"maxDsdRate", a.maxDsdRate}};
+    j.update(rateJson(a));
     j.update(timingJson(a.timing));
     return j;
 }
 
-static void readAsio(const json& o, AsioSettings& a) {
+static void readAsio(const json& o, AsioSettings& a, ResampleQuality quality) {
     a.driverClsid = str(o, "driver", "");
     a.bufferSize = integer(o, "bufferSize", 0, 0, 65536);
     a.outLeft = integer(o, "outLeft", 0, 0, 63);
     a.outRight = integer(o, "outRight", 1, 0, 63);
     a.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Native);
     a.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
-    a.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    readRate(o, a, quality);
     a.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
     a.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     readTiming(o, a.timing);
@@ -532,16 +604,16 @@ static json ksJson(const KsSettings& k) {
               {"sampleType", k.sampleType ? sampleTypeId(*k.sampleType) : ""},
               {"dsdOutput", dsdOutputId(k.dsdOutput)},
               {"dsdPcmRate", k.dsdPcmRate},
-              {"fixedRate", k.fixedRate},
               {"maxSampleRate", k.maxSampleRate},
               {"maxDsdRate", k.maxDsdRate},
               {"mmcssTask", mmcssTaskId(k.mmcssTask)},
               {"mmcssPriority", mmcssPriorityId(k.mmcssPriority)}};
+    j.update(rateJson(k));
     j.update(timingJson(k.timing));
     return j;
 }
 
-static void readKs(const json& o, KsSettings& k) {
+static void readKs(const json& o, KsSettings& k, ResampleQuality quality) {
     k.deviceId = str(o, "device", "");
     k.mode = ksModeFromId(str(o, "mode", "auto"));
     k.bufferMs = num(o, "bufferMs", 20.0, 2.0, 1000.0);
@@ -551,7 +623,7 @@ static void readKs(const json& o, KsSettings& k) {
     k.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Dop);
     if (k.dsdOutput == DsdOutput::Native) k.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
     k.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
-    k.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    readRate(o, k, quality);
     k.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
     k.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     k.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
@@ -563,12 +635,14 @@ static json networkJson(const NetworkSettings& n) {
     json j = {{"player", n.udn},      {"maxSampleRate", n.maxSampleRate},      {"maxDsdRate", n.maxDsdRate},
               {"maxBits", n.maxBits}, {"dsdOutput", dsdOutputId(n.dsdOutput)}, {"dsdPcmRate", n.dsdPcmRate},
               {"gapless", n.gapless}};
+    j.update(rateJson(n));
     j.update(timingJson(n.timing));
     return j;
 }
 
-static void readNetwork(const json& o, NetworkSettings& n) {
+static void readNetwork(const json& o, NetworkSettings& n, ResampleQuality quality) {
     n.udn = str(o, "player", "");
+    readRate(o, n, quality);
     n.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
     n.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     n.maxBits = integer(o, "maxBits", 0, 0, 16) == 16 ? 16 : 0;
@@ -610,7 +684,7 @@ static json outputJson(const SavedOutput& o) {
 }
 
 // An output saved before each had its own DSP takes `shared`, the one DSP of every output then.
-static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& shared) {
+static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& shared, ResampleQuality quality) {
     SavedOutput saved;
     if (!o.is_object() || !backendFromId(str(o, "backend", ""), saved.backend)) return std::nullopt;
     saved.id = str(o, "id", "");
@@ -624,15 +698,15 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
             if (speaker.is_string()) saved.speakers.push_back(speaker.get<std::string>());
     const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
     if (saved.backend == Backend::Network)
-        readNetwork(parameters, saved.network);
+        readNetwork(parameters, saved.network, quality);
     else if (saved.backend == Backend::AirPlay)
         readAirPlay(parameters, saved.airplay);
     else if (saved.backend == Backend::Asio)
-        readAsio(parameters, saved.asio);
+        readAsio(parameters, saved.asio, quality);
     else if (saved.backend == Backend::Ks)
-        readKs(parameters, saved.ks);
+        readKs(parameters, saved.ks, quality);
     else
-        readWasapi(parameters, saved.wasapi);
+        readWasapi(parameters, saved.wasapi, quality);
     saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId = saved.id;
     return saved;
 }
@@ -727,6 +801,7 @@ Settings fromJson(const std::string& text) {
     // decodes to 24-bit PCM.
     s.convertWhenUnsupported = boolean(j, "convertUnsupported", true);
     s.resampleQuality = resampleQualityFromId(str(j, "resampleQuality", "high"));
+    s.wasapi.filter.quality = s.asio.filter.quality = s.ks.filter.quality = s.network.filter.quality = s.resampleQuality;
     s.convertDsdWhenUnsupported = boolean(j, "convertDsdWhenUnsupported", false);
     s.language = str(j, "language", "");
     s.closeAction = str(j, "closeAction", "tray") == "exit" ? CloseAction::Exit : CloseAction::Tray;
@@ -805,15 +880,15 @@ Settings fromJson(const std::string& text) {
     }
     if (j.contains("dspOrder")) readDspOrder(j["dspOrder"], s.dspOrder);
     s.lastFile = toWide(str(j, "lastFile", ""));
-    if (j.contains("wasapi") && j["wasapi"].is_object()) readWasapi(j["wasapi"], s.wasapi);
-    if (j.contains("asio") && j["asio"].is_object()) readAsio(j["asio"], s.asio);
-    if (j.contains("ks") && j["ks"].is_object()) readKs(j["ks"], s.ks);
-    if (j.contains("network") && j["network"].is_object()) readNetwork(j["network"], s.network);
+    if (j.contains("wasapi") && j["wasapi"].is_object()) readWasapi(j["wasapi"], s.wasapi, s.resampleQuality);
+    if (j.contains("asio") && j["asio"].is_object()) readAsio(j["asio"], s.asio, s.resampleQuality);
+    if (j.contains("ks") && j["ks"].is_object()) readKs(j["ks"], s.ks, s.resampleQuality);
+    if (j.contains("network") && j["network"].is_object()) readNetwork(j["network"], s.network, s.resampleQuality);
     if (j.contains("airplay") && j["airplay"].is_object()) readAirPlay(j["airplay"], s.airplay);
     if (j.contains("outputs") && j["outputs"].is_array()) {
         const OutputDsp shared = outputDsp(s);
         for (const auto& item : j["outputs"])
-            if (auto output = outputFrom(item, shared)) s.outputs.push_back(std::move(*output));
+            if (auto output = outputFrom(item, shared, s.resampleQuality)) s.outputs.push_back(std::move(*output));
     }
     if (j.contains("airplayGroup") && j["airplayGroup"].is_array())
         for (const auto& id : j["airplayGroup"])

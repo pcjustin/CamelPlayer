@@ -53,10 +53,42 @@ extern "C" {
     fn soxr_io_spec(itype: c_uint, otype: c_uint) -> SoxrIoSpec;
 }
 
-/// soxr recipes behind the quick / high / very high setting.
+/// soxr recipes behind the quick / high / very high setting, in the low four bits of the configured quality.
 pub const QUALITY_QUICK: u32 = 0;
 pub const QUALITY_HIGH: u32 = 1;
 pub const QUALITY_VERY_HIGH: u32 = 2;
+/// The filter's phase and passband, ORed into the quality; linear phase and the standard passband are 0.
+pub const PHASE_INTERMEDIATE: u32 = 0x10;
+pub const PHASE_MINIMUM: u32 = 0x20;
+pub const PASSBAND_STEEP: u32 = 0x40;
+pub const PASSBAND_GENTLE: u32 = 0x80;
+
+const SOXR_INTERMEDIATE_PHASE: c_ulong = 0x10;
+const SOXR_MINIMUM_PHASE: c_ulong = 0x30;
+const SOXR_STEEP_FILTER: c_ulong = 0x40;
+
+// The quality spec of a configured quality. Gentle has three times the standard transition band below Nyquist, as
+// steep has a fifth of it in soxr.
+fn quality_spec(quality: u32) -> SoxrQualitySpec {
+    let mut recipe: c_ulong = match quality & 0xF {
+        QUALITY_QUICK => 0,     // SOXR_QQ
+        QUALITY_VERY_HIGH => 6, // SOXR_VHQ
+        _ => 4,                 // SOXR_HQ
+    };
+    if quality & PHASE_MINIMUM != 0 {
+        recipe |= SOXR_MINIMUM_PHASE;
+    } else if quality & PHASE_INTERMEDIATE != 0 {
+        recipe |= SOXR_INTERMEDIATE_PHASE;
+    }
+    if quality & PASSBAND_STEEP != 0 {
+        recipe |= SOXR_STEEP_FILTER;
+    }
+    let mut spec = unsafe { soxr_quality_spec(recipe, 0) };
+    if quality & PASSBAND_GENTLE != 0 && quality & PASSBAND_STEEP == 0 {
+        spec.passband_end = 1.0 - 3.0 * (1.0 - spec.passband_end);
+    }
+    spec
+}
 
 pub(crate) struct Resampler {
     handle: *mut c_void,
@@ -74,15 +106,10 @@ impl Resampler {
         channels: usize,
         quality: u32,
     ) -> Option<Self> {
-        let recipe: c_ulong = match quality {
-            QUALITY_QUICK => 0,     // SOXR_QQ
-            QUALITY_VERY_HIGH => 6, // SOXR_VHQ
-            _ => 4,                 // SOXR_HQ
-        };
         let mut error: *const c_char = std::ptr::null();
+        let quality = quality_spec(quality);
         let handle = unsafe {
             let io = soxr_io_spec(SOXR_FLOAT64_I, SOXR_FLOAT64_I);
-            let quality = soxr_quality_spec(recipe, 0);
             soxr_create(
                 f64::from(input_rate),
                 f64::from(output_rate),
@@ -176,7 +203,65 @@ impl Drop for Resampler {
 
 #[cfg(test)]
 mod tests {
-    use super::{Resampler, QUALITY_HIGH};
+    use super::{
+        quality_spec, Resampler, PASSBAND_GENTLE, PASSBAND_STEEP, PHASE_INTERMEDIATE,
+        PHASE_MINIMUM, QUALITY_HIGH, QUALITY_VERY_HIGH,
+    };
+
+    #[test]
+    fn each_phase_and_passband_reaches_the_quality_spec() {
+        for quality in [QUALITY_HIGH, QUALITY_VERY_HIGH] {
+            assert_eq!(quality_spec(quality).phase_response, 50.0);
+            assert_eq!(
+                quality_spec(quality | PHASE_INTERMEDIATE).phase_response,
+                25.0
+            );
+            assert_eq!(quality_spec(quality | PHASE_MINIMUM).phase_response, 0.0);
+            let standard = quality_spec(quality).passband_end;
+            let steep = quality_spec(quality | PASSBAND_STEEP).passband_end;
+            let gentle = quality_spec(quality | PASSBAND_GENTLE).passband_end;
+            assert!(
+                gentle < standard && standard < steep,
+                "{gentle} {standard} {steep}"
+            );
+            assert!((1.0 - gentle - 3.0 * (1.0 - standard)).abs() < 1e-12);
+            assert_eq!(
+                quality_spec(quality).precision,
+                quality_spec(quality | PASSBAND_GENTLE).precision
+            );
+        }
+    }
+
+    // A linear-phase filter rings before an impulse as long as after it; a minimum-phase one hardly before it.
+    #[test]
+    fn a_minimum_phase_filter_rings_less_before_an_impulse() {
+        let ringing_before = |quality: u32| {
+            let mut resampler = Resampler::new(44_100, 96_000, 1, quality).unwrap();
+            let mut input = vec![0.0; 8192];
+            input[4096] = 1.0;
+            let mut output = Vec::new();
+            resampler.process(&input, &mut output).unwrap();
+            resampler.flush(&mut output).unwrap();
+            let peak = output
+                .iter()
+                .enumerate()
+                .fold(
+                    (0, 0.0),
+                    |best, (i, v)| if v.abs() > best.1 { (i, v.abs()) } else { best },
+                )
+                .0;
+            let level = output[peak].abs();
+            let onset = output.iter().position(|v| v.abs() > level * 1e-3).unwrap();
+            peak - onset
+        };
+        let linear = ringing_before(QUALITY_HIGH);
+        let intermediate = ringing_before(QUALITY_HIGH | PHASE_INTERMEDIATE);
+        let minimum = ringing_before(QUALITY_HIGH | PHASE_MINIMUM);
+        assert!(
+            minimum < intermediate && intermediate < linear,
+            "{minimum} {intermediate} {linear}"
+        );
+    }
 
     fn tone(frames: usize, start: usize) -> Vec<f64> {
         (start..start + frames)

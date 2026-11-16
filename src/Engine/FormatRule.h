@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Common/AudioTypes.h"
+#include "Common/settings/Settings.h"
 
 namespace camel::audio {
 
@@ -63,6 +64,14 @@ std::optional<OutputPlan> negotiateOutput(const SourceInfo& src, bool lossy, std
 // 192 kHz, 352.8 and 705.6 kHz become 176.4 kHz and 384 and 768 kHz become 192 kHz. `rate` itself when not above.
 uint32_t limitedRate(uint32_t rate, uint32_t maxRate);
 
+// The rates `mode` tries for a source at `source` Hz (44.1 kHz for DSD converted to PCM), best first, each one a fixed
+// rate of negotiateOutput; none while it is Off. IntegerHighest: the rates of the source's family, highest first;
+// IntegerMultiple: the source times `multiple`, then the smaller multiples down to the source itself and the rates of
+// its family below it, highest first; AnyHighest: the
+// rates of both families, highest first. A nonzero `maxRate` takes out every rate above it and ends the list with
+// limitedRate of the source, so a source above it is converted down, its own family first.
+std::vector<uint32_t> upsamplingRates(Upsampling mode, uint32_t multiple, uint32_t source, uint32_t maxRate);
+
 // Raw DSD (`src` from the DSD Nexus decoder: byte frames, 1 bit per sample), docs/Plan.md §5.3 item 4: native DSD
 // when `native` is requested and the device takes it, else DoP at DSD rate / 16 in a 24-bit, 24-in-32 or 32-bit
 // carrier (`fixedType` restricts it). Never PCM; mono is duplicated, more channels are refused. A carrier above
@@ -75,11 +84,11 @@ std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::
                                        uint32_t maxPcmRate = 0);
 
 // DSD converted to PCM: decimated to 352.8 kHz, then delivered like a 24-bit source at `rate` (the setting), with
-// `convert` governing other rates, downmix and depth exactly as for PCM, and `maxRate` as for negotiateOutput. Always
-// Processed; nullopt when nothing fits.
+// `convert` governing other rates, downmix and depth exactly as for PCM, and `maxRate` as for negotiateOutput; with
+// `onlyRate` no other rate is tried. Always Processed; nullopt when nothing fits.
 std::optional<OutputPlan> negotiateDsdToPcm(const SourceInfo& src, uint32_t rate, std::optional<SampleType> fixedType,
                                             bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports,
-                                            uint32_t maxRate = 0);
+                                            uint32_t maxRate = 0, bool onlyRate = false);
 
 // The DoP carrier rate for a DSD source of `byteFrameRate` byte frames per second.
 constexpr uint32_t dopCarrierRate(uint32_t byteFrameRate) {

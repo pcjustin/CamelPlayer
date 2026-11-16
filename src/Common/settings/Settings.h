@@ -42,6 +42,22 @@ const char* dsdOutputId(DsdOutput d);
 enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
 const char* resampleQualityId(ResampleQuality q);
 
+// An output's conversion filter (docs/Plan.md §6): soxr's quality, phase and passband. Soxr's quick recipe is a cubic
+// interpolator, which no phase or passband changes.
+enum class FilterPhase : uint8_t { Linear, Intermediate, Minimum };
+enum class FilterPassband : uint8_t { Standard, Steep, Gentle };
+struct ResampleFilter {
+    ResampleQuality quality = ResampleQuality::High;
+    FilterPhase phase = FilterPhase::Linear;
+    FilterPassband passband = FilterPassband::Standard;
+    bool operator==(const ResampleFilter&) const = default;
+};
+
+// An output's sample-rate choice besides following the file and its set rate (docs/Plan.md §6): the highest rate of
+// the source's family, the source's rate times a multiple, or the highest rate of either family the output takes.
+enum class Upsampling : uint8_t { Off, IntegerHighest, IntegerMultiple, AnyHighest };
+constexpr uint32_t kUpsamplingMultiples[] = {2, 4, 8};
+
 // Fixed output rates (docs/Plan.md §6): 0 follows the file. Also the choices of an output's highest PCM rate.
 constexpr uint32_t kFixedRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000};
 // The choices of an output's highest DSD rate, as multiples of 44.1 kHz: DSD64, DSD128 and DSD256.
@@ -76,8 +92,12 @@ struct WasapiSettings {
     std::optional<audio::SampleType> sampleType; // nullopt = automatic
     DsdOutput dsdOutput = DsdOutput::Dop;
     uint32_t dsdPcmRate = 176400;
-    // Exclusive mode only; choosing a rate is the permission to resample PCM to it (raw DSD is never resampled).
+    // Exclusive mode only; choosing a rate, or upsampling, is the permission to resample PCM (raw DSD is never
+    // resampled). A set rate wins over upsampling.
     uint32_t fixedRate = 0;
+    Upsampling upsampling = Upsampling::Off;
+    uint32_t upsamplingMultiple = 2;
+    ResampleFilter filter;
     // The highest PCM rate (from kFixedRates) and DSD rate (from kMaxDsdRates) to send, 0 following the device;
     // exclusive mode only. Choosing one is the permission to convert above it (docs/Plan.md §6).
     uint32_t maxSampleRate = 0;
@@ -95,8 +115,11 @@ struct AsioSettings {
     int outLeft = 0, outRight = 1;
     DsdOutput dsdOutput = DsdOutput::Native;
     uint32_t dsdPcmRate = 176400;
-    uint32_t fixedRate = 0;
-    uint32_t maxSampleRate = 0; // as for WASAPI
+    uint32_t fixedRate = 0; // as for WASAPI
+    Upsampling upsampling = Upsampling::Off;
+    uint32_t upsamplingMultiple = 2;
+    ResampleFilter filter;
+    uint32_t maxSampleRate = 0;
     uint32_t maxDsdRate = 0;
     PlaybackTiming timing;
     bool operator==(const AsioSettings&) const = default;
@@ -114,8 +137,11 @@ struct KsSettings {
     std::optional<audio::SampleType> sampleType;
     DsdOutput dsdOutput = DsdOutput::Dop;
     uint32_t dsdPcmRate = 176400;
-    uint32_t fixedRate = 0;
-    uint32_t maxSampleRate = 0; // as for WASAPI
+    uint32_t fixedRate = 0; // as for WASAPI
+    Upsampling upsampling = Upsampling::Off;
+    uint32_t upsamplingMultiple = 2;
+    ResampleFilter filter;
+    uint32_t maxSampleRate = 0;
     uint32_t maxDsdRate = 0;
     MmcssTask mmcssTask = MmcssTask::ProAudio;
     MmcssPriority mmcssPriority = MmcssPriority::High;
@@ -126,6 +152,10 @@ struct KsSettings {
 // A UPnP AV or OpenHome player (docs/Plan.md §5.10), kept by its UDN and never by its address.
 struct NetworkSettings {
     std::string udn;
+    uint32_t fixedRate = 0; // as for WASAPI
+    Upsampling upsampling = Upsampling::Off;
+    uint32_t upsamplingMultiple = 2;
+    ResampleFilter filter;
     uint32_t maxSampleRate = 0;              // as for WASAPI
     uint32_t maxDsdRate = 0;                 // as for WASAPI
     uint32_t maxBits = 0;                    // 0 follows the player, else 16
@@ -362,6 +392,7 @@ struct Settings {
     // "Convert when unsupported" (docs/Plan.md §2, §5.3): resample, downmix, reduce depth or decode DTS instead of
     // skipping. On by default; the signal path then shows the conversion, and turning it off plays bit-perfect only.
     bool convertWhenUnsupported = true;
+    // The quality of outputs without a filter of their own (AirPlay), and the one each filter started from.
     ResampleQuality resampleQuality = ResampleQuality::High;
     // "Convert DSD when unsupported" (docs/Plan.md §5.3 item 4): DSD to PCM after native/DoP failed. Independent of
     // convertWhenUnsupported, which still governs rates, downmix and depth of the PCM it produces.
@@ -418,6 +449,12 @@ Settings resetInterface(const Settings& s);
 
 // The selected backend's fixed rate (0: follow the file) and timing.
 uint32_t fixedRate(const Settings& s);
+// The selected backend's upsampling and its multiple; Off for WASAPI shared mode and AirPlay, whose rate is set for
+// them.
+Upsampling upsampling(const Settings& s);
+uint32_t upsamplingMultiple(const Settings& s);
+// The filter the selected backend resamples with: its own, the shared mode's quality, or AirPlay's global quality.
+ResampleFilter resampleFilter(const Settings& s);
 // The selected backend's highest PCM rate in Hz and highest DSD rate as a DSD byte frame rate; 0 has no limit, as for
 // WASAPI shared mode and AirPlay.
 uint32_t maxSampleRate(const Settings& s);

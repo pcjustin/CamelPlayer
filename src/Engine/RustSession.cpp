@@ -109,9 +109,16 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
     command_.struct_size = sizeof(command_);
     command_.abi_version = CAMEL_ENGINE_ABI_VERSION;
     command_.generation = 1;
-    const uint32_t quality = conversion.quality == ResampleQuality::Quick      ? CAMEL_RESAMPLE_QUICK
-                             : conversion.quality == ResampleQuality::VeryHigh ? CAMEL_RESAMPLE_VERY_HIGH
-                                                                               : CAMEL_RESAMPLE_HIGH;
+    const ResampleFilter& filter = conversion.filter;
+    const uint32_t quality = (filter.quality == ResampleQuality::Quick      ? CAMEL_RESAMPLE_QUICK
+                              : filter.quality == ResampleQuality::VeryHigh ? CAMEL_RESAMPLE_VERY_HIGH
+                                                                            : CAMEL_RESAMPLE_HIGH) |
+                             (filter.phase == FilterPhase::Intermediate ? CAMEL_RESAMPLE_PHASE_INTERMEDIATE
+                              : filter.phase == FilterPhase::Minimum    ? CAMEL_RESAMPLE_PHASE_MINIMUM
+                                                                        : 0u) |
+                             (filter.passband == FilterPassband::Steep    ? CAMEL_RESAMPLE_PASSBAND_STEEP
+                              : filter.passband == FilterPassband::Gentle ? CAMEL_RESAMPLE_PASSBAND_GENTLE
+                                                                          : 0u);
     const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1),   CAMEL_ENGINE_ABI_VERSION,   CAMEL_ENGINE_MAX_RENDER_UNITS,
                                      abiFormat(format, dsd),        conversion.allow ? 1u : 0u, quality,
                                      conversion.allowDsd ? 1u : 0u, predecodeSeconds * 1000};

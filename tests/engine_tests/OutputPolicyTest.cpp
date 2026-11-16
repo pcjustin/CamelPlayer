@@ -268,8 +268,7 @@ TEST(ConversionSettings, OneThatChangesThePathStillReopensTheStream) {
     rig.engine->openAndPlay(testutil::testFile("16-44.1k"));
     ASSERT_TRUE(waitFor(*rig.engine, playing));
     const int opens = rig.device.opens;
-    settings.resampleQuality =
-        settings.resampleQuality == ResampleQuality::High ? ResampleQuality::VeryHigh : ResampleQuality::High;
+    settings.wasapi.filter.phase = FilterPhase::Minimum;
     rig.engine->applySettings(settings);
     ASSERT_TRUE(waitFor(*rig.engine, [&](const EngineSnapshot& s) { return rig.device.opens > opens && playing(s); }));
     rig.engine->stop();

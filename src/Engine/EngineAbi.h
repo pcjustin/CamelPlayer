@@ -86,9 +86,14 @@ typedef int32_t CamelEngineStatus;
 // crossfade permits.
 #define CAMEL_TRACK_CONVERT 1u
 
+// CamelEngineConfigV1.resample_quality: one quality, ORed with one phase and one passband (linear and standard are 0).
 #define CAMEL_RESAMPLE_QUICK 0u
 #define CAMEL_RESAMPLE_HIGH 1u
 #define CAMEL_RESAMPLE_VERY_HIGH 2u
+#define CAMEL_RESAMPLE_PHASE_INTERMEDIATE 0x10u
+#define CAMEL_RESAMPLE_PHASE_MINIMUM 0x20u
+#define CAMEL_RESAMPLE_PASSBAND_STEEP 0x40u
+#define CAMEL_RESAMPLE_PASSBAND_GENTLE 0x80u
 
 // CamelSourceInfoV1.sample_encoding: lossy decoders hand float32 bit patterns through the int32 read buffer; a DSD
 // source hands one byte per channel per frame (eight samples, oldest in the MSB), counts these byte frames in
@@ -115,7 +120,7 @@ typedef struct CamelEngineConfigV1 {
     uint64_t max_render_units;
     CamelAudioFormatV1 format;
     uint32_t allow_conversion; // nonzero permits resampling, downmix and bit reduction
-    uint32_t resample_quality; // CAMEL_RESAMPLE_*
+    uint32_t resample_quality; // CAMEL_RESAMPLE_* quality | phase | passband
     uint32_t allow_dsd_to_pcm; // nonzero permits DSD to PCM and to a lower DSD rate; otherwise DSD plays only as native
                                // DSD or DoP at its own rate
     uint32_t prebuffer_ms;     // predecoded audio the ring holds; 0 = 10 s; capped at 64 MiB

@@ -101,15 +101,21 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
         return plan;
     }
     const uint32_t maxRate = maxSampleRate(s);
+    // The set rate, else the rates upsampling tries; DSD converted to PCM is taken for a 44.1 kHz source.
+    const auto chosenRates = [&](uint32_t source) {
+        if (const uint32_t rate = limitedRate(fixedRate(s), maxRate)) return std::vector<uint32_t>{rate};
+        return upsamplingRates(upsampling(s), upsamplingMultiple(s), source, maxRate);
+    };
     if (src.bitsPerSample != 1) {
-        const uint32_t rate = limitedRate(fixedRate(s), maxRate);
-        if (rate)
+        const auto rates = chosenRates(src.sampleRate);
+        for (const uint32_t rate : rates)
             if (auto plan = negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports, rate))
                 return plan;
         auto plan = negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports, 0, maxRate);
-        if (rate && plan && adjustment)
-            *adjustment = requestedVsActive("Fixed sample rate", std::to_string(rate) + " Hz",
-                                            std::to_string(plan->format.sampleRate) + " Hz (the device refused it)");
+        if (!rates.empty() && plan && adjustment)
+            *adjustment =
+                requestedVsActive(fixedRate(s) ? "Fixed sample rate" : "Upsampling", std::to_string(rates.front()) + " Hz",
+                                  std::to_string(plan->format.sampleRate) + " Hz (the device refused it)");
         return plan;
     }
     const DsdOutput mode = dsdOutput(s);
@@ -117,9 +123,11 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
     if (mode != DsdOutput::Pcm)
         plan = negotiateDsd(src, (s.backend == Backend::Asio || s.backend == Backend::Network) && mode == DsdOutput::Native,
                             fixedSampleType(s), supports, maxDsdByteRate(s), maxRate);
-    if (!plan && (mode == DsdOutput::Pcm || s.convertDsdWhenUnsupported))
-        plan = negotiateDsdToPcm(src, dsdPcmRate(s), fixedSampleType(s), s.convertWhenUnsupported, supports, maxRate);
-    return plan;
+    if (plan || (mode != DsdOutput::Pcm && !s.convertDsdWhenUnsupported)) return plan;
+    for (const uint32_t rate : chosenRates(44100))
+        if (auto converted = negotiateDsdToPcm(src, rate, fixedSampleType(s), s.convertWhenUnsupported, supports, maxRate, true))
+            return converted;
+    return negotiateDsdToPcm(src, dsdPcmRate(s), fixedSampleType(s), s.convertWhenUnsupported, supports, maxRate);
 }
 
 // Timing applies without reopening the stream.
@@ -146,7 +154,8 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
 }
 
 bool samePlayerPath(const NetworkSettings& a, const NetworkSettings& b) {
-    return a.maxSampleRate == b.maxSampleRate && a.maxDsdRate == b.maxDsdRate && a.maxBits == b.maxBits &&
+    return a.fixedRate == b.fixedRate && a.upsampling == b.upsampling && a.upsamplingMultiple == b.upsamplingMultiple &&
+           a.filter == b.filter && a.maxSampleRate == b.maxSampleRate && a.maxDsdRate == b.maxDsdRate && a.maxBits == b.maxBits &&
            a.dsdOutput == b.dsdOutput && a.dsdPcmRate == b.dsdPcmRate;
 }
 
@@ -876,12 +885,13 @@ private:
     }
 
     RustSession::Conversion conversion() const {
-        if (plan_.shared) return {true, settings_.wasapi.sharedResampleQuality, plan_.dsd == DsdPath::Pcm};
+        if (plan_.shared) return {true, resampleFilter(settings_), plan_.dsd == DsdPath::Pcm};
         // A fixed rate is the permission to resample to it, a highest rate to resample above it and to modulate DSD
         // again below it (docs/Plan.md §6).
         const bool chosenResample =
-            plan_.dsd == DsdPath::None && plan_.resample && (fixedRate(settings_) || maxSampleRate(settings_));
-        return {settings_.convertWhenUnsupported || chosenResample, settings_.resampleQuality,
+            plan_.dsd == DsdPath::None && plan_.resample &&
+            (fixedRate(settings_) || upsampling(settings_) != Upsampling::Off || maxSampleRate(settings_));
+        return {settings_.convertWhenUnsupported || chosenResample, resampleFilter(settings_),
                 plan_.dsd == DsdPath::Pcm || plan_.remodulate};
     }
 
@@ -1593,7 +1603,7 @@ private:
 
     // Whether settings `s` would convert the open stream differently: another path, or another resampling quality.
     bool conversionPathChanges(const Settings& s) {
-        if (plan_.resample && settings_.resampleQuality != s.resampleQuality) return true;
+        if (plan_.resample && resampleFilter(settings_) != resampleFilter(s)) return true;
         const auto source = snapshot().source;
         if (!source) return false;
         // As the stream negotiated it, before the DSP chain, ReplayGain, volume and crossfade decorate it.

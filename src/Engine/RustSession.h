@@ -30,10 +30,10 @@ struct TrackFade {
 
 class RustSession {
 public:
-    // Whether the Engine may resample, downmix or reduce depth, and with which soxr quality.
+    // Whether the Engine may resample, downmix or reduce depth, and with which soxr filter.
     struct Conversion {
         bool allow = false;
-        ResampleQuality quality = ResampleQuality::High;
+        ResampleFilter filter;
         bool allowDsd = false; // DSD to PCM, or to a lower DSD rate
     };
 

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <ranges>
 #include <span>
 
 #include "Engine/SamplePacker.h"
@@ -57,6 +58,33 @@ uint32_t limitedRate(uint32_t rate, uint32_t maxRate) {
     if (const uint32_t same = highest(family44 ? kFamily44 : kFamily48)) return same;
     if (const uint32_t other = highest(family44 ? kFamily48 : kFamily44)) return other;
     return maxRate;
+}
+
+std::vector<uint32_t> upsamplingRates(Upsampling mode, uint32_t multiple, uint32_t source, uint32_t maxRate) {
+    std::vector<uint32_t> rates;
+    const bool family44 = source % 11025 == 0;
+    switch (mode) {
+    case Upsampling::Off:
+        return rates;
+    case Upsampling::IntegerHighest:
+        rates.assign(std::rbegin(family44 ? kFamily44 : kFamily48), std::rend(family44 ? kFamily44 : kFamily48));
+        break;
+    case Upsampling::IntegerMultiple:
+        for (uint32_t m = multiple; m >= 1; m /= 2) rates.push_back(source * m);
+        for (const uint32_t rate : std::views::reverse(family44 ? kFamily44 : kFamily48))
+            if (rate < source) rates.push_back(rate);
+        break;
+    case Upsampling::AnyHighest:
+        rates.assign(std::begin(kFamily44), std::end(kFamily44));
+        rates.insert(rates.end(), std::begin(kFamily48), std::end(kFamily48));
+        std::sort(rates.rbegin(), rates.rend());
+        break;
+    }
+    if (maxRate) {
+        std::erase_if(rates, [&](uint32_t rate) { return rate > maxRate; });
+        rates.push_back(limitedRate(source, maxRate));
+    }
+    return rates;
 }
 
 std::vector<SampleType> bitPerfectCandidates(uint32_t bits) {
@@ -144,9 +172,10 @@ std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::
 
 std::optional<OutputPlan> negotiateDsdToPcm(const SourceInfo& src, uint32_t rate, std::optional<SampleType> fixedType,
                                             bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports,
-                                            uint32_t maxRate) {
+                                            uint32_t maxRate, bool onlyRate) {
     if (src.bitsPerSample != 1) return std::nullopt;
-    auto plan = negotiateOutput({rate, src.channels, 24}, false, fixedType, convert, deviceSupports, 0, maxRate);
+    auto plan =
+        negotiateOutput({rate, src.channels, 24}, false, fixedType, convert, deviceSupports, onlyRate ? rate : 0, maxRate);
     if (!plan) return std::nullopt;
     plan->dsd = DsdPath::Pcm;
     plan->resample = plan->format.sampleRate != 352800; // from the decimator's 352.8 kHz

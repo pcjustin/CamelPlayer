@@ -41,7 +41,7 @@
   <data name="Dsd_Dop" xml:space="preserve"><value>DoP (DSD over PCM)</value></data>
   <data name="Dsd_Pcm" xml:space="preserve"><value>Convert to PCM</value></data>
   <data name="Settings_DsdPcmRate.Header" xml:space="preserve"><value>DSD to PCM sample rate</value></data>
-  <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>Resampling quality</value></data>
+  <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>AirPlay resampling quality</value></data>
   <data name="Quality_Quick" xml:space="preserve"><value>Quick</value></data>
   <data name="Quality_High" xml:space="preserve"><value>High</value></data>
   <data name="Quality_VeryHigh" xml:space="preserve"><value>Very high</value></data>
@@ -66,8 +66,21 @@
   <data name="Settings_KsPacketMs.Header" xml:space="preserve"><value>Packet length (ms)</value></data>
   <data name="Settings_KsNote.Text" xml:space="preserve"><value>While Kernel Streaming holds the device, Windows and other apps cannot play through it (system sounds included).</value></data>
   <data name="Settings_FixedRate.Header" xml:space="preserve"><value>Sample rate</value></data>
-  <data name="Settings_FixedRate.Description" xml:space="preserve"><value>Other rates resample PCM files (shown as processed).</value></data>
+  <data name="Settings_FixedRate.Description" xml:space="preserve"><value>Every choice but Follow the file resamples PCM files (shown as processed), up to the highest PCM sample rate.</value></data>
   <data name="Rate_FollowFile" xml:space="preserve"><value>Follow the file</value></data>
+  <data name="Rate_IntegerHighest" xml:space="preserve"><value>Integer, to the highest</value></data>
+  <data name="Rate_IntegerMultiple" xml:space="preserve"><value>Integer, by a multiple</value></data>
+  <data name="Rate_AnyHighest" xml:space="preserve"><value>Any rate, to the highest</value></data>
+  <data name="Settings_UpsamplingMultiple.Header" xml:space="preserve"><value>Multiple</value></data>
+  <data name="Settings_FilterQuality.Header" xml:space="preserve"><value>Filter quality</value></data>
+  <data name="Settings_FilterPhase.Header" xml:space="preserve"><value>Filter phase</value></data>
+  <data name="Settings_FilterPassband.Header" xml:space="preserve"><value>Filter passband</value></data>
+  <data name="Phase_Linear" xml:space="preserve"><value>Linear</value></data>
+  <data name="Phase_Intermediate" xml:space="preserve"><value>Intermediate</value></data>
+  <data name="Phase_Minimum" xml:space="preserve"><value>Minimum</value></data>
+  <data name="Passband_Standard" xml:space="preserve"><value>Standard</value></data>
+  <data name="Passband_Steep" xml:space="preserve"><value>Steep</value></data>
+  <data name="Passband_Gentle" xml:space="preserve"><value>Gentle</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>Polling buffer (ms)</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS task</value></data>
   <data name="Mmcss_Disabled" xml:space="preserve"><value>Disabled</value></data>

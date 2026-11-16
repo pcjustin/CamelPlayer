@@ -103,7 +103,10 @@ pub use decoder_host::{
 use decoder_host::{DecoderHost, DecoderSource};
 use dsd::{fill_silence, stamp_markers, units_per_frame};
 use packing::bytes_per_frame;
-pub use resample::{QUALITY_HIGH, QUALITY_QUICK, QUALITY_VERY_HIGH};
+pub use resample::{
+    PASSBAND_GENTLE, PASSBAND_STEEP, PHASE_INTERMEDIATE, PHASE_MINIMUM, QUALITY_HIGH,
+    QUALITY_QUICK, QUALITY_VERY_HIGH,
+};
 use ring::SpscByteRing;
 
 pub const ABI_VERSION: u32 = 1;
@@ -235,7 +238,8 @@ pub struct CamelEngineConfigV1 {
     pub format: CamelAudioFormatV1,
     /// Nonzero permits resampling, downmix and bit reduction ("convert when unsupported").
     pub allow_conversion: u32,
-    /// QUALITY_QUICK, QUALITY_HIGH or QUALITY_VERY_HIGH.
+    /// QUALITY_QUICK, QUALITY_HIGH or QUALITY_VERY_HIGH, ORed with a PHASE_* and a PASSBAND_* (linear and standard
+    /// are 0).
     pub resample_quality: u32,
     /// Nonzero permits DSD to PCM; without it a DSD source plays only as native DSD or DoP.
     pub allow_dsd_to_pcm: u32,

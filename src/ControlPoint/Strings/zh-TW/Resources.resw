@@ -41,7 +41,7 @@
   <data name="Dsd_Dop" xml:space="preserve"><value>DoP（DSD over PCM）</value></data>
   <data name="Dsd_Pcm" xml:space="preserve"><value>轉換為 PCM</value></data>
   <data name="Settings_DsdPcmRate.Header" xml:space="preserve"><value>DSD 轉 PCM 取樣率</value></data>
-  <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>重新取樣品質</value></data>
+  <data name="Settings_ResampleQuality.Header" xml:space="preserve"><value>AirPlay 重新取樣品質</value></data>
   <data name="Quality_Quick" xml:space="preserve"><value>快速</value></data>
   <data name="Quality_High" xml:space="preserve"><value>高</value></data>
   <data name="Quality_VeryHigh" xml:space="preserve"><value>極高</value></data>
@@ -66,8 +66,21 @@
   <data name="Settings_KsPacketMs.Header" xml:space="preserve"><value>封包長度（ms）</value></data>
   <data name="Settings_KsNote.Text" xml:space="preserve"><value>Kernel Streaming 佔用裝置時，Windows 和其他程式都無法透過這個裝置發聲（包括系統音效）。</value></data>
   <data name="Settings_FixedRate.Header" xml:space="preserve"><value>取樣率</value></data>
-  <data name="Settings_FixedRate.Description" xml:space="preserve"><value>非「跟隨檔案」時，PCM 會重新取樣（顯示為已處理）。</value></data>
+  <data name="Settings_FixedRate.Description" xml:space="preserve"><value>非「跟隨檔案」時，PCM 會重新取樣（顯示為已處理），且不超過最高 PCM 取樣率。</value></data>
   <data name="Rate_FollowFile" xml:space="preserve"><value>跟隨檔案</value></data>
+  <data name="Rate_IntegerHighest" xml:space="preserve"><value>整數倍，到最高</value></data>
+  <data name="Rate_IntegerMultiple" xml:space="preserve"><value>整數倍，依倍數</value></data>
+  <data name="Rate_AnyHighest" xml:space="preserve"><value>任意取樣率，到最高</value></data>
+  <data name="Settings_UpsamplingMultiple.Header" xml:space="preserve"><value>倍數</value></data>
+  <data name="Settings_FilterQuality.Header" xml:space="preserve"><value>濾波器品質</value></data>
+  <data name="Settings_FilterPhase.Header" xml:space="preserve"><value>濾波器相位</value></data>
+  <data name="Settings_FilterPassband.Header" xml:space="preserve"><value>濾波器通帶</value></data>
+  <data name="Phase_Linear" xml:space="preserve"><value>線性</value></data>
+  <data name="Phase_Intermediate" xml:space="preserve"><value>中間</value></data>
+  <data name="Phase_Minimum" xml:space="preserve"><value>最小</value></data>
+  <data name="Passband_Standard" xml:space="preserve"><value>標準</value></data>
+  <data name="Passband_Steep" xml:space="preserve"><value>陡峭</value></data>
+  <data name="Passband_Gentle" xml:space="preserve"><value>平緩</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>輪詢緩衝長度（ms）</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS 任務</value></data>
   <data name="Mmcss_Disabled" xml:space="preserve"><value>停用</value></data>
