@@ -62,7 +62,14 @@ DWORD WINAPI writeDump(void* parameter) {
                                                nullptr};
     MiniDumpWriteDump(snapped ? HANDLE(snapshot) : GetCurrentProcess(), GetCurrentProcessId(), f, type,
                       request.exception ? &info : nullptr, nullptr, snapped ? &fromSnapshot : nullptr);
-    if (snapped) PssFreeSnapshot(GetCurrentProcess(), snapshot);
+    if (snapped) {
+        // Freeing the snapshot left its copy of the process, a whole copy of its memory, running until Windows restarted.
+        PSS_VA_CLONE_INFORMATION clone{};
+        if (PssQuerySnapshot(snapshot, PSS_QUERY_VA_CLONE_INFORMATION, &clone, sizeof clone) == ERROR_SUCCESS &&
+            clone.VaCloneHandle)
+            TerminateProcess(clone.VaCloneHandle, 0);
+        PssFreeSnapshot(GetCurrentProcess(), snapshot);
+    }
     CloseHandle(f);
     return 0;
 }

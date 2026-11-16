@@ -21,6 +21,7 @@
 // after windows.h, which TestUtil.h includes
 #include <dbghelp.h>
 #include <psapi.h>
+#include <tlhelp32.h>
 
 using namespace camel;
 using namespace camel::audio;
@@ -395,6 +396,39 @@ TEST(CrashDump, UnansweredPingWritesOneHangDump) {
     const auto names = dumpNames(directory);
     ASSERT_EQ(names.size(), 1u);
     EXPECT_TRUE(names.front().ends_with(L"-hang.dmp"));
+    std::filesystem::remove_all(directory);
+}
+
+// A dump is written from a copy of the process made for it, which ends with the dump: none is left running, holding a
+// copy of the whole process's memory.
+TEST(CrashDump, AHangDumpLeavesNoCopyOfTheProcessRunning) {
+    const auto children = [] {
+        std::vector<DWORD> found;
+        const HANDLE list = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        PROCESSENTRY32W entry{};
+        entry.dwSize = sizeof entry;
+        for (BOOL more = Process32FirstW(list, &entry); more; more = Process32NextW(list, &entry))
+            if (entry.th32ParentProcessID == GetCurrentProcessId()) found.push_back(entry.th32ProcessID);
+        CloseHandle(list);
+        return found;
+    };
+    const auto directory = testutil::tempDir() / "hangdump-copy";
+    std::filesystem::remove_all(directory);
+    installCrashDumps(directory);
+    const auto before = children();
+    {
+        HangWatch watch([](const std::function<void()>&) { return true; }, std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    }
+    ASSERT_EQ(dumpNames(directory).size(), 1u);
+    auto after = children();
+    std::erase_if(after, [&](DWORD id) { return std::ranges::find(before, id) != before.end(); });
+    EXPECT_TRUE(after.empty()) << after.size() << " processes left, the first " << after.front();
+    for (const DWORD id : after)
+        if (const HANDLE left = OpenProcess(PROCESS_TERMINATE, FALSE, id)) {
+            TerminateProcess(left, 1);
+            CloseHandle(left);
+        }
     std::filesystem::remove_all(directory);
 }
 
