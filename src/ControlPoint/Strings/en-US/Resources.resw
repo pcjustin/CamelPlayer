@@ -103,7 +103,6 @@
   <data name="Status_Adjusted" xml:space="preserve"><value>Requested ≠ active</value></data>
   <data name="Lang_System" xml:space="preserve"><value>Follow Windows</value></data>
   <data name="NoFile" xml:space="preserve"><value>No file open</value></data>
-  <data name="Lamp_Idle" xml:space="preserve"><value>No output</value></data>
   <data name="Status_Idle" xml:space="preserve"><value>No stream open.</value></data>
   <data name="SignalPath_File" xml:space="preserve"><value>File</value></data>
   <data name="SignalPath_Pad" xml:space="preserve"><value>Integer zero padding</value></data>
@@ -185,12 +184,8 @@
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>Close queue</value></data>
   <data name="Queue_Empty.Text" xml:space="preserve"><value>The queue is empty. Right-click a track or folder and choose Play next or Add to end of queue.</value></data>
   <data name="Queue_CountWindowed" xml:space="preserve"><value>{0} tracks; the {1} around the current track are listed</value></data>
-  <data name="State_Playing" xml:space="preserve"><value>Playing</value></data>
-  <data name="State_Paused" xml:space="preserve"><value>Paused</value></data>
   <data name="State_Buffering" xml:space="preserve"><value>Buffering, about {0} s</value></data>
   <data name="State_BufferingDetail" xml:space="preserve"><value>The file reads slower than it plays, so it is buffered first to avoid breaks.</value></data>
-  <data name="State_Stopped" xml:space="preserve"><value>Stopped</value></data>
-  <data name="State_Error" xml:space="preserve"><value>Error</value></data>
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
   <data name="Badge_Lossy.Text" xml:space="preserve"><value>Lossy source</value></data>
   <data name="Badge_DspBypassedTip" xml:space="preserve"><value>Raw DSD goes to the device unchanged; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>

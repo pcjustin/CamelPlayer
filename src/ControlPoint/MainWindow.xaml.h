@@ -299,7 +299,6 @@ private:
     ui::RepeatedPlay repeatedPlay_;
     std::vector<PathStep> shownPath_;
     // The theme brushes the playback state shows now, painted again when the theme changes.
-    const wchar_t* stateColor_ = L"TextFillColorSecondaryBrush";
     const wchar_t* lampColor_ = L"ControlStrongFillColorDisabledBrush";
     const wchar_t* dspColor_ = L"TextFillColorPrimaryBrush";
     int volumeWheel_ = 0;                  // the part of a wheel notch not yet applied
@@ -325,7 +324,7 @@ private:
     bool populating_ = false;     // ignore control events while filling controls
     bool sliderUpdating_ = false; // ignore slider events caused by position updates
     bool queueOpen_ = false;
-    bool buffering_ = false; // waiting for a slow source; the state badge keeps its place in the bar
+    hstring shownPlayName_, shownPlayTip_;
     bool navCompacted_ = false;
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;

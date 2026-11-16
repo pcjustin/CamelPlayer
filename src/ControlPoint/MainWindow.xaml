@@ -923,10 +923,21 @@
                         </Button>
                     </StackPanel>
                 </Grid>
-                <Button x:Name="PlayPauseButton" Grid.Column="1" Click="OnPlayPauseClick" Style="{StaticResource AccentButtonStyle}"
-                        Width="48" Height="48" Padding="0" CornerRadius="24" VerticalAlignment="Center">
-                    <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
-                </Button>
+                <!-- As in Roon the play button alone shows whether it plays: a ring around it while a slow source is
+                     buffered, and a dot on it for an error whose bar was closed. -->
+                <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <!-- Drawn outside the button's box, so the bar keeps its room. -->
+                    <ProgressRing x:Name="BufferingRing" Width="64" Height="64" Margin="-8" IsActive="False" IsHitTestVisible="False" />
+                    <Button x:Name="PlayPauseButton" Click="OnPlayPauseClick" Style="{StaticResource AccentButtonStyle}"
+                            Width="48" Height="48" Padding="0" CornerRadius="24" HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                        <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
+                    </Button>
+                    <Ellipse x:Name="ErrorDot" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
+                             Margin="0,2,2,0" Fill="{ThemeResource SystemFillColorCriticalBrush}"
+                             Stroke="{ThemeResource SolidBackgroundFillColorBaseBrush}" StrokeThickness="2"
+                             IsHitTestVisible="False" Visibility="Collapsed" />
+                </Grid>
                 <Grid Grid.Column="2" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -941,19 +952,12 @@
                             <SymbolIcon x:Name="RepeatIcon" Symbol="RepeatAll" />
                         </ToggleButton>
                     </StackPanel>
-                    <!-- Playback state, bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) beside the
-                         volume; where they do not fit, the state badge and the lamp's words give way, and the lamp opens the
-                         signal path. The row makes buttons transparent, so these set the badge look themselves. -->
+                    <!-- The bit-perfect indicator and source badges (docs/Plan.md §5.2, §8.1) beside the volume; where they
+                         do not fit, the lamp's words give way, and the lamp opens the signal path. The row makes buttons
+                         transparent, so these set the badge look themselves. -->
                     <Grid x:Name="StatusArea" Grid.Column="1" SizeChanged="OnStatusAreaSizeChanged">
                         <StackPanel x:Name="StatusBadges" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right"
                                     VerticalAlignment="Center">
-                            <Border x:Name="StateBadge" Style="{StaticResource BadgeStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon x:Name="StateIcon" Glyph="&#xE71A;" FontSize="10" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="StateText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
-                                               AutomationProperties.LiveSetting="Polite" />
-                                </StackPanel>
-                            </Border>
                             <!-- The lamp opens the signal path. -->
                             <Button x:Name="LampButton" x:Uid="SignalPath_Lamp" Padding="10,2" MinHeight="32"
                                     CornerRadius="16" VerticalAlignment="Center"

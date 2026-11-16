@@ -536,6 +536,9 @@ void MainWindow::InitializeComponent() {
         minimized_ = minimized;
         setRefreshing(!minimized);
     });
+    // Closing the bar brings no new snapshot, so the dot that keeps a playback error is shown here.
+    ErrorBar().Closed(
+        [this](auto&&, auto&&) { ErrorDot().Visibility(shown_.playback.error ? Visibility::Visible : Visibility::Collapsed); });
     AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& e) {
         if (exiting_ || settings_.closeAction == CloseAction::Exit) return;
         e.Cancel(true);
@@ -1415,13 +1418,22 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (s.pathUtf8 != lyricsPath_) loadLyrics(s.pathUtf8);
     followLyrics(pos);
 
-    // The play button and the repeat button are named for what they do or show now.
-    if (const Symbol symbol = s.state == PlaybackState::Playing || s.bufferingSeconds ? Symbol::Pause : Symbol::Play;
-        PlayPauseIcon().Symbol() != symbol) {
-        PlayPauseIcon().Symbol(symbol);
-        const hstring tip = tr(symbol == Symbol::Pause ? L"Tip_Pause" : L"Tip_Play");
-        setBadgeTip(PlayPauseButton(), tip, tip);
+    // The play button and the repeat button are named for what they do or show now. As in Roon, the play button alone
+    // shows whether it plays: a ring turns around it while a slow source is buffered, and a dot on it stays for an error
+    // once its bar is closed; its tip says how long playback waits, or what failed.
+    const bool buffering = !s.error && s.bufferingSeconds;
+    const Symbol symbol = s.state == PlaybackState::Playing || s.bufferingSeconds ? Symbol::Pause : Symbol::Play;
+    if (PlayPauseIcon().Symbol() != symbol) PlayPauseIcon().Symbol(symbol);
+    const hstring action = tr(symbol == Symbol::Pause ? L"Tip_Pause" : L"Tip_Play");
+    const hstring playTip = s.error     ? ui::errorTitle(*s.error)
+                            : buffering ? ui::format(L"State_Buffering", {std::to_wstring(*s.bufferingSeconds)})
+                                        : action;
+    if (action != shownPlayName_ || playTip != shownPlayTip_) {
+        shownPlayName_ = action;
+        shownPlayTip_ = playTip;
+        setBadgeTip(PlayPauseButton(), action, playTip);
     }
+    BufferingRing().IsActive(buffering);
     // The waveform appears once the Server has it: made at once for the playing track, asked for every 2 seconds.
     if (s.pathUtf8 != waveformPath_) {
         waveformPath_ = s.pathUtf8;
@@ -1521,42 +1533,6 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                        total);
     }
 
-    // Playing, paused, stopped or failed, never only implied by the play button's icon
-    {
-        const wchar_t* glyph = L"\xE71A";
-        const wchar_t* key = L"State_Stopped";
-        const wchar_t* color = L"TextFillColorSecondaryBrush";
-        hstring text;
-        buffering_ = !s.error && s.bufferingSeconds;
-        if (s.error) {
-            glyph = L"\xE783";
-            key = L"State_Error";
-            color = L"SystemFillColorCriticalBrush";
-        } else if (buffering_) {
-            glyph = L"\xE916"; // stopwatch
-            key = L"State_Buffering";
-            color = L"AccentTextFillColorPrimaryBrush";
-            text = ui::format(key, {std::to_wstring(*s.bufferingSeconds)});
-        } else if (s.state == PlaybackState::Playing) {
-            glyph = L"\xE768";
-            key = L"State_Playing";
-            color = L"AccentTextFillColorPrimaryBrush";
-        } else if (s.state == PlaybackState::Paused) {
-            glyph = L"\xE769";
-            key = L"State_Paused";
-            color = L"TextFillColorPrimaryBrush";
-        }
-        StateIcon().Glyph(glyph);
-        stateColor_ = color;
-        StateIcon().Foreground(themeBrush(stateColor_));
-        if (text.empty()) text = tr(key);
-        setAnnounced(StateText(), text);
-        setBadgeTip(StateBadge(), text,
-                    s.error      ? ui::utf8(s.errorDetail)
-                    : buffering_ ? tr(L"State_BufferingDetail")
-                                 : hstring{});
-    }
-
     // Bit-perfect indicator and signal path (docs/Plan.md §5.2, §16.2)
     bool dspActive = false;
     const hstring decoder = ui::utf8(decoderName(s.decoder));
@@ -1585,10 +1561,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         }
         // Source lossiness is its own field; a processed lossy file shows both (docs/Plan.md §5.2).
         SourceBadge().Visibility(lossy && plan.state != PipelineState::LossySource ? Visibility::Visible : Visibility::Collapsed);
-        // While buffering, the bar has room for how long playback waits rather than how DSD will play.
-        BypassBadge().Visibility((plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native) && !buffering_
-                                     ? Visibility::Visible
-                                     : Visibility::Collapsed);
+        BypassBadge().Visibility(plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native ? Visibility::Visible
+                                                                                         : Visibility::Collapsed);
         BypassText().Text((plan.dsd == DsdPath::Dop ? hstring(L"DoP") : hstring(L"DSD")) + L" · " +
                           tr(L"SignalPath_DspBypassed"));
         setBadgeTip(BypassBadge(), BypassText().Text(), tr(bypassTip(plan)));
@@ -1703,12 +1677,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         dspActive = processed;
     } else {
         lampColor_ = L"ControlStrongFillColorDisabledBrush";
-        setAnnounced(LampText(), tr(L"Lamp_Idle"));
+        setAnnounced(LampText(), {});
         SourceBadge().Visibility(Visibility::Collapsed);
         BypassBadge().Visibility(Visibility::Collapsed);
         PathRouteText().Text(ui::utf8(backendName(s.backend)) + L" · " + decoder);
         showSignalPath({});
     }
+    // As in Roon, the lamp tells how a stream plays, so it shows only while one is open.
+    LampButton().Visibility(s.output && s.source ? Visibility::Visible : Visibility::Collapsed);
     Lamp().Fill(themeBrush(lampColor_));
     PathVerdictDot().Fill(themeBrush(lampColor_));
     PathVerdictText().Text(LampText().Text());
@@ -1727,8 +1703,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
     SignalNoteText().Text(note);
     SignalNoteText().Visibility(note.empty() ? Visibility::Collapsed : Visibility::Visible);
-    std::wstring status =
-        std::wstring(StateText().Text()) + L"|" + std::wstring(LampText().Text()) + L"|" + std::wstring(BypassText().Text());
+    std::wstring status = std::wstring(LampText().Text()) + L"|" + std::wstring(BypassText().Text());
     status += SourceBadge().Visibility() == Visibility::Visible ? L"|lossy" : L"";
     status += BypassBadge().Visibility() == Visibility::Visible ? L"|bypass" : L"";
     if (status != shownStatus_) {
@@ -1741,7 +1716,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownRevision_ = s.revision;
         if (s.error) {
             showError(*s.error, s.errorDetail, snapshot.settings.backend);
-        } else if (buffering_) {
+        } else if (buffering) {
             // Pause ends the wait, and with it the bar.
             ErrorBar().Severity(InfoBarSeverity::Warning);
             ErrorBar().Title(ui::format(L"State_Buffering", {std::to_wstring(*s.bufferingSeconds)}));
@@ -1752,6 +1727,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             ErrorBar().IsOpen(false);
         }
     }
+    ErrorDot().Visibility(s.error && !ErrorBar().IsOpen() ? Visibility::Visible : Visibility::Collapsed);
 
     if (snapshot.command.id != shownCommandId_) {
         shownCommandId_ = snapshot.command.id;
@@ -2299,7 +2275,6 @@ Media::Brush MainWindow::themeBrush(const wchar_t* key) const {
 // Colors set from code take the theme's brushes again once the window shows another theme.
 void MainWindow::repaintTheme() {
     if (waveformBar_) waveformBar_->repaint();
-    StateIcon().Foreground(themeBrush(stateColor_));
     Lamp().Fill(themeBrush(lampColor_));
     PathVerdictDot().Fill(themeBrush(lampColor_));
     DspButtonText().Foreground(themeBrush(dspColor_));
@@ -3990,20 +3965,21 @@ void MainWindow::OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const
     fitStatus();
 }
 
-// Where the badges do not fit the state badge gives way, then the lamp's words; the dot stays and opens the signal path.
-// While buffering, the state badge says how long playback waits, so the lamp's words give way first.
+// Where the badges do not fit the lamp's words give way, then the lamp and DSP buttons draw in their sides; the lamp's dot
+// stays and opens the signal path.
 void MainWindow::fitStatus() {
     const auto fits = [this] {
         StatusBadges().Measure({std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()});
         return StatusBadges().DesiredSize().Width <= StatusArea().ActualWidth();
     };
-    StateBadge().Visibility(Visibility::Visible);
+    const auto sides = [this](double width) {
+        for (const auto& button : {LampButton(), DspButton()}) button.Padding(ThicknessHelper::FromLengths(width, 2, width, 2));
+    };
     LampText().Visibility(Visibility::Visible);
+    sides(10);
     if (StatusArea().ActualWidth() == 0 || fits()) return;
-    UIElement first = StateBadge(), second = LampText();
-    if (buffering_) std::swap(first, second);
-    first.Visibility(Visibility::Collapsed);
-    if (!fits()) second.Visibility(Visibility::Collapsed);
+    LampText().Visibility(Visibility::Collapsed);
+    if (!fits()) sides(4);
 }
 
 void MainWindow::showReplayGain() {
