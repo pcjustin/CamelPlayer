@@ -648,6 +648,8 @@
                                 <StackPanel Spacing="4">
                                     <TextBlock x:Name="AboutVersionText" Style="{StaticResource BodyStrongTextBlockStyle}" IsTextSelectionEnabled="True" />
                                     <TextBlock x:Uid="Settings_AboutLicense" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <HyperlinkButton x:Name="AboutGitHubLink" x:Uid="Settings_AboutGitHub" Padding="0"
+                                                     NavigateUri="https://github.com/pcjustin/CamelPlayer" />
                                     <TextBlock x:Uid="Settings_AboutAirPlay" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Spacing="12">

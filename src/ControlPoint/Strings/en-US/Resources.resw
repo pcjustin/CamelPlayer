@@ -286,6 +286,7 @@ Details: {0}</value></data>
   <data name="Recovery_Kept" xml:space="preserve"><value>The damaged files are kept in {0} with the .bad extension.</value></data>
   <data name="Settings_About.Text" xml:space="preserve"><value>About</value></data>
   <data name="Settings_AboutLicense.Text" xml:space="preserve"><value>© Justin Lu · Mozilla Public License 2.0</value></data>
+  <data name="Settings_AboutGitHub.Content" xml:space="preserve"><value>CamelPlayer on GitHub</value></data>
   <data name="Settings_Diagnostics.Text" xml:space="preserve"><value>Diagnostics</value></data>
   <data name="Settings_DiagnosticsText.Text" xml:space="preserve"><value>Collects logs, settings, the output devices and the formats they accept, the installation check and the newest crash report into one zip file to attach to a GitHub issue.</value></data>
   <data name="Settings_DiagnosticPaths.Content" xml:space="preserve"><value>Include file and folder paths</value></data>
