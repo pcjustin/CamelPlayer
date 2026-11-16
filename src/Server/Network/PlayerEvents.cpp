@@ -84,6 +84,8 @@ struct PlayerEvents::Impl {
     LinkOptions options;
     SOCKET listener = INVALID_SOCKET;
     std::string callback;
+    // The addresses of the player's event URLs, the only hosts whose NOTIFY is taken; set before the listener runs.
+    std::vector<std::string> playerHosts;
     std::vector<Subscription> subscriptions;
     std::mutex mutex; // the queue
     std::deque<Received> received;
@@ -93,6 +95,8 @@ struct PlayerEvents::Impl {
         : options(linkOptions) {
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
+        for (const auto& service : player.services)
+            if (const auto host = upnp::hostOf(service.eventUrl); !host.empty()) playerHosts.push_back(host);
         try {
             openListener(player);
         } catch (...) {
@@ -191,9 +195,17 @@ struct PlayerEvents::Impl {
         subscribe(subscription);
     }
 
+    bool fromPlayer(const sockaddr_in& peer) const {
+        char text[INET_ADDRSTRLEN] = {};
+        return inet_ntop(AF_INET, &peer.sin_addr, text, sizeof(text)) &&
+               std::ranges::find(playerHosts, text) != playerHosts.end();
+    }
+
     void listen() {
         for (;;) {
-            const SOCKET client = accept(listener, nullptr, nullptr);
+            sockaddr_in peer{};
+            int peerLength = sizeof(peer);
+            const SOCKET client = accept(listener, reinterpret_cast<sockaddr*>(&peer), &peerLength);
             if (client == kNoSocket) return;
             const DWORD timeout = kNotifyTimeoutMs;
             setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
@@ -223,7 +235,8 @@ struct PlayerEvents::Impl {
             }
             if (headEnd != std::string::npos && !chunked) body = request.substr(headEnd + 4);
             bool accepted = false;
-            if (body && request.starts_with("NOTIFY ")) {
+            // Another host on the network may have seen the SID; only the player's own address is believed.
+            if (body && request.starts_with("NOTIFY ") && fromPlayer(peer)) {
                 const auto head = request.substr(0, headEnd);
                 std::scoped_lock lock(mutex);
                 received.push_back({headerValue(head, "SID"), std::move(*body)});

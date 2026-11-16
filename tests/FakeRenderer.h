@@ -192,6 +192,12 @@ public:
     void refuseSoap(bool refuse) { refuseSoap_ = refuse; }
     // Sends its events with chunked transfer encoding, in two chunks that arrive apart.
     void chunkEvents(bool chunk) { chunkEvents_ = chunk; }
+    // Sends its events from another loopback address, as another host on the network that saw the SID could; empty for
+    // its own.
+    void sendEventsFrom(std::string address) {
+        std::scoped_lock lock(mutex_);
+        eventSource_ = std::move(address);
+    }
     // Answers a subscription to this service with an error, as a player at its limit of subscribers does.
     void refuseSubscriptions(std::string service) {
         std::scoped_lock lock(mutex_);
@@ -652,7 +658,7 @@ private:
     }
 
     void emit(const std::string& service, const std::string& properties) {
-        std::string sid, callback;
+        std::string sid, callback, source;
         int sequence = 0;
         {
             std::scoped_lock lock(mutex_);
@@ -661,9 +667,16 @@ private:
             sid = found->second.sid;
             callback = found->second.callback;
             sequence = found->second.sequence++;
+            source = eventSource_;
         }
         const auto hostStart = callback.find("://") + 3, colon = callback.find(':', hostStart), slash = callback.find('/', colon);
         const SOCKET out = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (!source.empty()) {
+            sockaddr_in from{};
+            from.sin_family = AF_INET;
+            inet_pton(AF_INET, source.c_str(), &from.sin_addr);
+            bind(out, reinterpret_cast<sockaddr*>(&from), sizeof(from));
+        }
         sockaddr_in target = loopback();
         target.sin_port = htons(uint16_t(std::strtol(callback.substr(colon + 1, slash - colon - 1).c_str(), nullptr, 10)));
         inet_pton(AF_INET, callback.substr(hostStart, colon - hostStart).c_str(), &target.sin_addr);
@@ -711,6 +724,7 @@ private:
     std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
                       refuseStreams_ = false, standby_ = false;
     std::atomic<bool> chunkEvents_ = false;
+    std::string eventSource_;
     std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false,
                       toPlaylistSource_ = false;
     std::atomic<bool> oldTrack_ = false;

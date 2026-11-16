@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -15,6 +16,7 @@
 #include "FakeRenderer.h"
 #include "Server/Network/Firewall.h"
 #include "Server/Network/LocalAddresses.h"
+#include "Server/Network/PlayerEvents.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerLink.h"
 #include "Server/Support/Http.h"
@@ -583,6 +585,24 @@ TEST(PlayerLinkTest, FollowsAnEventSentInChunks) {
     EXPECT_TRUE(events->waitFor(PlayerEventKind::Paused));
 }
 
+// A NOTIFY with the subscription's SID from another host on the network is not taken for the player's own.
+TEST(PlayerLinkTest, AnEventFromAnotherHostIsNotTaken) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.set("track", "http://camel/a");
+    renderer.set("state", "PLAYING");
+    auto events = std::make_shared<Events>();
+    PlayerLink link(describe(renderer), into(events), {60s, 2, 1800, 500});
+    link.expect({"http://camel/a", "http://camel/b", ""});
+    ASSERT_TRUE(events->waitFor(PlayerEventKind::Playing));
+    renderer.sendEventsFrom("127.0.0.2");
+    renderer.emitLastChange(R"(<TransportState val="PAUSED_PLAYBACK"/>)");
+    std::this_thread::sleep_for(500ms);
+    EXPECT_FALSE(events->saw(PlayerEventKind::Paused));
+    renderer.sendEventsFrom({});
+    renderer.emitLastChange(R"(<TransportState val="PAUSED_PLAYBACK"/>)");
+    EXPECT_TRUE(events->waitFor(PlayerEventKind::Paused));
+}
+
 TEST(PlayerLinkTest, FollowsASeekFromThePlayersRemoteThroughThePoll) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.set("track", "http://camel/a");
@@ -772,5 +792,25 @@ TEST(NetworkPlayerHardwareTest, DISABLED_ReadsThePlayersOnThisNetwork) {
         std::this_thread::sleep_for(1s);
         EXPECT_FALSE(events->saw(PlayerEventKind::Lost)) << d.name;
         printf("  playing=%d paused=%d\n", int(events->saw(PlayerEventKind::Playing)), int(events->saw(PlayerEventKind::Paused)));
+    }
+}
+
+// Each player's first event after a subscription is taken, so its NOTIFY comes from the address of its event URLs.
+// Only subscribes: nothing plays.
+TEST(NetworkPlayerHardwareTest, DISABLED_TakesEachPlayersOwnEvents) {
+    PlayerFinder finder(FinderOptions{"239.255.255.250", 1900, 0}, {});
+    std::this_thread::sleep_for(6s);
+    const auto players = finder.players();
+    ASSERT_FALSE(players.empty());
+    for (const auto& player : players) {
+        const auto& d = player.description;
+        PlayerEvents events(d, {"AVTransport", "RenderingControl"}, {2000ms, 2, 300, 3000});
+        std::deque<PlayerEvents::Notification> taken;
+        EXPECT_TRUE(waitFor([&] {
+            auto more = events.take();
+            taken.insert(taken.end(), more.begin(), more.end());
+            return !taken.empty();
+        })) << d.name;
+        printf("%s: %zu events, first from %s\n", d.name.c_str(), taken.size(), taken.empty() ? "-" : taken.front().kind.c_str());
     }
 }
