@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "Server/Network/HQPlayer.h"
+#include "Server/Support/Http.h"
 
 namespace testutil {
 
@@ -43,6 +44,12 @@ public:
     std::atomic<bool> pushBeforeReply = false; // a Status pushed between a command and its reply
     std::atomic<bool> answerDiscovery = true;
     std::string name = "FAKE-HQP", version = "Signalyst HQPlayer Desktop 6";
+    // Plays as HQPlayer does: probes each URL added (HEAD, then a GET broken off), and on Play fetches the tracks of its
+    // playlist one after the other, the position moving with the time played, a new track_serial at each.
+    std::atomic<bool> plays = false;
+    std::atomic<bool> outputFails = false; // as with its DAC off: Play is OK, a moment of playing, then stopped
+    // No Status pushed for this long after Play, as HQPlayer starting DSD (about 4 s on 2026-11-16).
+    std::chrono::milliseconds quietAfterPlay{0};
 
     FakeHQPlayer() {
         WSADATA wsa;
@@ -59,10 +66,13 @@ public:
         discovery_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         EXPECT_EQ(bind(discovery_, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
         acceptor_ = std::thread([this] { accept(); });
+        player_ = std::thread([this] { play(); });
         answerer_ = std::thread([this] { answer(); });
     }
     ~FakeHQPlayer() {
         stopping_ = true;
+        if (player_.joinable()) player_.join();
+        for (auto& f : fetchers_) f.join();
         closesocket(listener_);
         closesocket(discovery_);
         dropConnections();
@@ -87,6 +97,15 @@ public:
         return raw_;
     }
     size_t accepted() const { return accepted_; }
+    // The streams fetched whole, by URL, and the URLs as they were added.
+    std::map<std::string, std::string> received() const {
+        std::scoped_lock lock(mutex_);
+        return received_;
+    }
+    std::vector<std::string> added() const {
+        std::scoped_lock lock(mutex_);
+        return added_;
+    }
 
     // The next command of this name is not answered.
     void dropNext(const std::string& command) {
@@ -120,6 +139,7 @@ public:
         std::string status;
         {
             std::scoped_lock lock(mutex_);
+            if (quietAfterPlay.count() && std::chrono::steady_clock::now() - playStarted_ < quietAfterPlay) return;
             targets.assign(subscribed_.begin(), subscribed_.end());
             status = statusDocument();
         }
@@ -189,6 +209,7 @@ private:
                     commands_.push_back(element.name);
                     raw_.push_back(document);
                     if (act_) act_(element.name, element, state_);
+                    if (plays) simulate(element);
                     dropped = drop_.erase(element.name) > 0;
                     if (element.name == "Status") {
                         const auto subscribe = element.attributes.find("subscribe");
@@ -229,6 +250,153 @@ private:
         if (open_.erase(s)) closesocket(s);
     }
 
+    void simulate(const camel::server::upnp::XmlNode& element) {
+        if (element.name == "PlaylistAdd") {
+            const std::string uri = element.attributes.at("uri");
+            playlist_.push_back(uri);
+            added_.push_back(uri);
+            ++state_.transportSerial;
+            probes_.push_back(uri);
+        } else if (element.name == "PlaylistClear") {
+            playlist_.clear();
+            current_ = 0;
+            ++state_.transportSerial;
+            ++state_.trackSerial; // as HQPlayer did on 2026-11-16
+        } else if (element.name == "Play") {
+            if (state_.state != 1) playedBefore_ = state_.position;
+            state_.state = 2;
+            playStarted_ = std::chrono::steady_clock::now();
+            wantPlay_ = true;
+        } else if (element.name == "Pause") {
+            state_.state = 1;
+            playedBefore_ = state_.position;
+        } else if (element.name == "Stop") {
+            state_.state = 0;
+            state_.position = 0;
+        }
+    }
+
+    // A WAV body's length in seconds, from its header; 0 for anything else.
+    static double secondsOf(const std::string& body) {
+        if (body.size() < 44 || body.compare(0, 4, "RIFF") != 0) return 0.0;
+        const auto le32 = [&](size_t at) { return *reinterpret_cast<const uint32_t*>(body.data() + at); };
+        const uint32_t byteRate = le32(28);
+        return byteRate ? double(body.size() - 44) / byteRate : 0.0;
+    }
+
+    // Probes, fetches and position, as HQPlayer's own playing: a track is fetched on a thread of its own while the
+    // position moves on, and lasts as long as its samples.
+    void play() {
+        while (!stopping_) {
+            std::vector<std::string> probes;
+            std::string fetch;
+            bool failNow = false;
+            {
+                std::scoped_lock lock(mutex_);
+                probes.swap(probes_);
+                if (state_.state == 2 && wantPlay_ && current_ < playlist_.size()) {
+                    const std::string& uri = playlist_[current_];
+                    if (outputFails) {
+                        failNow = true;
+                    } else if (!fetching_.contains(uri) && !received_.contains(uri)) {
+                        fetching_.insert(uri);
+                        fetch = uri;
+                    }
+                }
+            }
+            for (const auto& uri : probes) probe(uri);
+            if (failNow) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                change([](State& s) { s.state = 0; });
+                std::scoped_lock lock(mutex_);
+                wantPlay_ = false;
+                continue;
+            }
+            if (!fetch.empty())
+                fetchers_.emplace_back([this, fetch] {
+                    std::string body;
+                    try {
+                        body = camel::server::http::send("GET", fetch, "", "", 30000, size_t{256} << 20).body;
+                    } catch (const std::exception&) {
+                    }
+                    std::scoped_lock lock(mutex_);
+                    fetching_.erase(fetch);
+                    received_[fetch] = std::move(body);
+                });
+            {
+                std::scoped_lock lock(mutex_);
+                if (state_.state == 2 && wantPlay_) {
+                    state_.position = playedBefore_ + 0.1 +
+                                      std::chrono::duration<double>(std::chrono::steady_clock::now() - playStarted_).count();
+                    if (current_ < playlist_.size())
+                        if (const auto known = lengths_.find(playlist_[current_]); known != lengths_.end())
+                            state_.length = known->second;
+                    const auto got = current_ < playlist_.size() ? received_.find(playlist_[current_]) : received_.end();
+                    if (got != received_.end()) {
+                        state_.length = secondsOf(got->second);
+                        if (state_.position >= state_.length) {
+                            if (current_ + 1 < playlist_.size()) {
+                                ++current_;
+                                ++state_.trackSerial;
+                                state_.position = 0;
+                                state_.length = 0;
+                                playStarted_ = std::chrono::steady_clock::now();
+                                playedBefore_ = 0;
+                            } else {
+                                state_.state = 0;
+                                state_.position = 0;
+                                ++state_.trackSerial; // as HQPlayer does when its playlist runs out
+                                wantPlay_ = false;
+                            }
+                        }
+                    }
+                }
+            }
+            pushStatus();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    // HEAD, then a GET read for its first bytes and broken off, as HQPlayer probes a URL it is given.
+    void probe(const std::string& uri) {
+        try {
+            camel::server::http::send("HEAD", uri, "", "", 3000, 1 << 16);
+        } catch (const std::exception&) {
+        }
+        std::string host;
+        uint16_t port = 0;
+        const auto start = uri.find("://") + 3, slash = uri.find('/', start);
+        if (!camel::server::hqplayer::splitAddress(uri.substr(start, slash - start), host, port)) return;
+        const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(port);
+        inet_pton(AF_INET, host.c_str(), &address.sin_addr);
+        if (connect(s, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0) {
+            const std::string request = "GET " + uri.substr(slash) + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n";
+            send(s, request.data(), int(request.size()), 0);
+            char chunk[8192];
+            std::string head;
+            size_t read = 0;
+            while (read < 128 * 1024) {
+                const int n = recv(s, chunk, sizeof(chunk), 0);
+                if (n <= 0) break;
+                if (head.size() < 4096) head.append(chunk, size_t(n));
+                read += size_t(n);
+            }
+            // The length HQPlayer reports comes from the stream's header.
+            if (const auto body = head.find("\r\n\r\n"); body != std::string::npos && head.size() >= body + 4 + 44) {
+                const std::string wav = head.substr(body + 4);
+                const auto le32 = [&](size_t at) { return *reinterpret_cast<const uint32_t*>(wav.data() + at); };
+                if (wav.compare(0, 4, "RIFF") == 0 && le32(28)) {
+                    std::scoped_lock lock(mutex_);
+                    lengths_[uri] = double(le32(40)) / le32(28);
+                }
+            }
+        }
+        closesocket(s);
+    }
+
     void answer() {
         char buffer[2048];
         while (!stopping_) {
@@ -253,7 +421,16 @@ private:
     uint16_t port_ = 0;
     std::atomic<bool> stopping_ = false;
     std::atomic<size_t> accepted_ = 0;
-    std::thread acceptor_, answerer_;
+    std::thread acceptor_, answerer_, player_;
+    std::vector<std::string> playlist_, added_, probes_;
+    size_t current_ = 0;
+    bool wantPlay_ = false;
+    double playedBefore_ = 0;
+    std::chrono::steady_clock::time_point playStarted_;
+    std::map<std::string, std::string> received_;
+    std::set<std::string> fetching_;
+    std::map<std::string, double> lengths_;
+    std::vector<std::thread> fetchers_;
     std::vector<std::thread> connections_;
     mutable std::mutex mutex_;
     State state_;

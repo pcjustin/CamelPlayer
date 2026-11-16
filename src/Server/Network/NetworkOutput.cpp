@@ -47,7 +47,6 @@ constexpr auto kPatience = milliseconds(1500);
 constexpr uint64_t kNearStartMs = 2000, kNearEndMs = 3000, kClockSlackMs = 2000;
 constexpr int64_t kSlowStartMs = 3000;
 constexpr auto kChangeSettles = milliseconds(3000);
-constexpr auto kStartLimit = milliseconds(5000);
 
 void putLe(std::string& out, uint64_t value, int bytes) {
     for (int i = 0; i < bytes; ++i) out.push_back(char((value >> (8 * i)) & 0xFF));
@@ -105,6 +104,79 @@ uint8_t reverseBits(uint8_t value) {
     return uint8_t((value & 0xAA) >> 1 | (value & 0x55) << 1);
 }
 
+// A UPnP AV or OpenHome player: what its ConnectionManager declares, whether its AVTransport takes a next track, and
+// its control through PlayerLink.
+class UpnpStreamPlayer final : public StreamPlayer {
+public:
+    UpnpStreamPlayer(upnp::PlayerDescription player, LinkOptions options) : player_(std::move(player)), options_(options) {}
+
+    std::string name() const override { return player_.name; }
+    std::string mode() const override { return "UPnP · " + player_.name; }
+
+    upnp::PlayerFormats formats(bool& known) override {
+        upnp::PlayerFormats formats;
+        known = false;
+        try {
+            if (const auto* manager = player_.service("ConnectionManager")) {
+                const auto parsed = upnp::call(*manager, "GetProtocolInfo", {}, options_.requestTimeoutMs);
+                if (const auto sink = parsed.values.find("Sink"); sink != parsed.values.end())
+                    formats = upnp::parseProtocolInfo(sink->second);
+                known = parsed.ok;
+            } else {
+                known = true;
+            }
+        } catch (const std::exception& e) {
+            log::warn("network player %s: %s", player_.name.c_str(), e.what());
+        }
+        if (player_.protocol == upnp::PlayerProtocol::OpenHome && !formats.wav && !formats.l16)
+            formats.wav = true; // OpenHome players take WAV by URL
+        return formats;
+    }
+
+    bool gapless(bool& known) override {
+        known = false;
+        const auto* transport = player_.service("AVTransport");
+        if (player_.protocol == upnp::PlayerProtocol::OpenHome || !transport || transport->scpdUrl.empty()) {
+            known = true;
+            return player_.protocol == upnp::PlayerProtocol::OpenHome;
+        }
+        try {
+            const auto reply = http::send("GET", transport->scpdUrl, "", "", options_.requestTimeoutMs, upnp::kMaxMessageBytes);
+            if (reply.status != 200) return false;
+            const auto actions = upnp::parseActions(reply.body);
+            known = true;
+            return std::ranges::find(actions, "SetNextAVTransportURI") != actions.end();
+        } catch (const std::exception& e) {
+            log::warn("network player %s: %s", player_.name.c_str(), e.what());
+        }
+        return false;
+    }
+
+    upnp::Listener listen() override {
+        try {
+            return upnp::listenFor(player_);
+        } catch (const upnp::NoRoute&) {
+            throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: no route to it");
+        } catch (const std::runtime_error&) {
+            throw Error(ErrorCode::DeviceNotFound, "cannot serve the stream");
+        }
+    }
+
+    std::string metadata(const upnp::DidlTrack& track) const override { return upnp::didlLite(track); }
+
+    std::unique_ptr<PlayerControl> connect(std::function<void(const PlayerEvent&)> onEvent) override {
+        try {
+            return std::make_unique<PlayerLink>(player_, std::move(onEvent), options_);
+        } catch (const std::exception& e) {
+            throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: " + std::string(e.what()));
+        }
+    }
+
+private:
+    upnp::PlayerDescription player_;
+    LinkOptions options_;
+};
+
 // One track of the stream: bytes the player has asked for or may ask for again.
 struct Body {
     uint32_t id = 0;
@@ -124,7 +196,7 @@ struct Body {
 
 class NetworkOutput final : public audio::IOutput {
 public:
-    NetworkOutput(upnp::PlayerDescription player, std::function<TrackDetails(const std::wstring&)> details,
+    NetworkOutput(std::unique_ptr<StreamPlayer> player, std::function<TrackDetails(const std::wstring&)> details,
                   std::function<void(const PlayerEvent&)> follow, NetworkOutputOptions options)
         : player_(std::move(player)), details_(std::move(details)), follow_(std::move(follow)), options_(options) {
         WSADATA wsa;
@@ -240,7 +312,7 @@ public:
         announcer_.join();
         for (auto& connection : connections_) connection.join();
         connections_.clear();
-        std::unique_ptr<PlayerLink> ended;
+        std::unique_ptr<PlayerControl> ended;
         {
             std::scoped_lock lock(mutex_);
             source_ = nullptr;
@@ -255,7 +327,8 @@ public:
 
     OutputStatus status() const override {
         OutputStatus status;
-        status.mode = "UPnP · " + player_.name;
+        status.mode = player_->mode();
+        status.detail = player_->detail();
         status.heldFrames = held();
         if (options_.gapless && !gapless_)
             status.adjustments.emplace_back("this player cannot follow one track with the next without a gap");
@@ -265,49 +338,14 @@ public:
 private:
     // What the player takes, read again later for what it could not tell yet, as when it was waking from standby.
     void readCapabilities() {
-        if (!formatsRead_) {
-            try {
-                if (const auto* manager = player_.service("ConnectionManager")) {
-                    const auto parsed = upnp::call(*manager, "GetProtocolInfo", {}, options_.link.requestTimeoutMs);
-                    if (const auto sink = parsed.values.find("Sink"); sink != parsed.values.end())
-                        formats_ = upnp::parseProtocolInfo(sink->second);
-                    formatsRead_ = parsed.ok;
-                } else {
-                    formatsRead_ = true;
-                }
-            } catch (const std::exception& e) {
-                log::warn("network player %s: %s", player_.name.c_str(), e.what());
-            }
-            if (player_.protocol == upnp::PlayerProtocol::OpenHome && !formats_.wav && !formats_.l16)
-                formats_.wav = true; // OpenHome players take WAV by URL
-        }
-        if (gaplessRead_) return;
-        const auto* transport = player_.service("AVTransport");
-        if (player_.protocol == upnp::PlayerProtocol::OpenHome || !transport || transport->scpdUrl.empty()) {
-            gapless_ = player_.protocol == upnp::PlayerProtocol::OpenHome;
-            gaplessRead_ = true;
-            return;
-        }
-        try {
-            const auto reply =
-                http::send("GET", transport->scpdUrl, "", "", options_.link.requestTimeoutMs, upnp::kMaxMessageBytes);
-            if (reply.status != 200) return;
-            const auto actions = upnp::parseActions(reply.body);
-            gapless_ = std::ranges::find(actions, "SetNextAVTransportURI") != actions.end();
-            gaplessRead_ = true;
-        } catch (const std::exception& e) {
-            log::warn("network player %s: %s", player_.name.c_str(), e.what());
-        }
+        if (!formatsRead_) formats_ = player_->formats(formatsRead_);
+        if (!gaplessRead_) gapless_ = player_->gapless(gaplessRead_);
     }
 
     void ensureLink() {
         if (link_ && !link_->lost()) return;
         link_.reset();
-        try {
-            link_ = std::make_unique<PlayerLink>(player_, [this](const PlayerEvent& event) { onPlayer(event); }, options_.link);
-        } catch (const std::exception& e) {
-            throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: " + std::string(e.what()));
-        }
+        link_ = player_->connect([this](const PlayerEvent& event) { onPlayer(event); });
     }
 
     // A player another source took, or one gone, is sent nothing more, not even a stop, until it is played to again.
@@ -322,11 +360,11 @@ private:
 
     void onPlayer(const PlayerEvent& event) {
         if (event.kind == PlayerEventKind::Lost) {
-            release(Error(ErrorCode::DeviceLost, "the network player is not connected"));
+            release(Error(ErrorCode::DeviceLost, player_->notConnected()));
             return;
         }
         if (event.kind == PlayerEventKind::TakenOver) {
-            release(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+            release(Error(ErrorCode::DeviceInUse, player_->inUseByAnother()));
             return;
         }
         {
@@ -336,7 +374,7 @@ private:
         }
         if (event.kind == PlayerEventKind::Stopped) {
             // Another source playing by other means than AVTransport, or the player's own remote, stopped it.
-            if (stoppedByItself()) release(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+            if (stoppedByItself()) release(Error(ErrorCode::DeviceInUse, player_->inUseByAnother()));
             return;
         }
         if (event.kind == PlayerEventKind::NextTrack) {
@@ -378,15 +416,15 @@ private:
         {
             std::scoped_lock lock(mutex_);
             if (closing_ || released_ || !playing_ || askedToPlay_ == Clock::time_point{} ||
-                Clock::now() - askedToPlay_ < kStartLimit || bodies_.empty() || bodies_.front().complete)
+                Clock::now() - askedToPlay_ < options_.startLimit || bodies_.empty() || bodies_.front().complete)
                 return;
             if (!link_->stopped() && (link_->played() || !link_->idle())) return;
             started = link_->positionMs() != 0 || highestMs_ != 0;
         }
         if (started)
-            release(Error(ErrorCode::DeviceInUse, "the player is in use by another source"));
+            release(Error(ErrorCode::DeviceInUse, player_->inUseByAnother()));
         else
-            release(Error(ErrorCode::DriverError, "the player did not start playing"));
+            release(Error(ErrorCode::DriverError, player_->didNotStart()));
     }
 
     _Requires_lock_held_(mutex_) uint64_t playedFrames() const {
@@ -491,21 +529,15 @@ private:
                                       ? std::string()
                                       : base_ + "/c/" + std::to_string(generation_) + "/" + std::to_string(body.id) + ".jpg";
         const uint64_t durationMs = body.totalFrames * 1000 / std::max(format_.sampleRate, 1U);
-        body.didl = upnp::didlLite(
+        body.didl = player_->metadata(
             {details.title, details.artist, details.album, cover, body.protocolInfo, body.uri, durationMs, body.totalBytes});
         return body;
     }
 
     void openListener() {
-        try {
-            const auto listening = upnp::listenFor(player_);
-            listener_ = SOCKET(listening.socket);
-            base_ = listening.base;
-        } catch (const upnp::NoRoute&) {
-            throw Error(ErrorCode::DeviceNotFound, "the network player is not connected: no route to it");
-        } catch (const std::runtime_error&) {
-            throw Error(ErrorCode::DeviceNotFound, "cannot serve the stream");
-        }
+        const auto listening = player_->listen();
+        listener_ = SOCKET(listening.socket);
+        base_ = listening.base;
     }
 
     void acceptLoop() {
@@ -560,7 +592,7 @@ private:
         announcedBody_ = bodies_[1].id;
         const std::string uri = bodies_[1].uri, didl = bodies_[1].didl;
         lock.unlock();
-        if (!link_->loadNext(uri, didl)) log::warn("network player %s refused the next track", player_.name.c_str());
+        if (!link_->loadNext(uri, didl)) log::warn("network player %s refused the next track", player_->name().c_str());
     }
 
     // The player finished a track before it heard of the next, as with a very short one: it starts that one like any other.
@@ -585,7 +617,7 @@ private:
             }
             if (link_->play()) return;
         }
-        log::warn("network player %s refused the next track", player_.name.c_str());
+        log::warn("network player %s refused the next track", player_->name().c_str());
     }
 
     // Renders on once every track is sent, for the Engine to reach its end or its next track.
@@ -893,14 +925,14 @@ private:
         body.retainedFrom += drop;
     }
 
-    upnp::PlayerDescription player_;
+    std::unique_ptr<StreamPlayer> player_;
     std::function<TrackDetails(const std::wstring&)> details_;
     std::function<void(const PlayerEvent&)> follow_;
     NetworkOutputOptions options_;
     upnp::PlayerFormats formats_;
     bool gapless_ = false;
     bool formatsRead_ = false, gaplessRead_ = false;
-    std::unique_ptr<PlayerLink> link_;
+    std::unique_ptr<PlayerControl> link_;
 
     SOCKET listener_ = kNoSocket;
     std::string base_;
@@ -946,6 +978,13 @@ std::unique_ptr<audio::IOutput> createNetworkOutput(upnp::PlayerDescription play
                                                     std::function<TrackDetails(const std::wstring&)> details,
                                                     std::function<void(const PlayerEvent&)> follow,
                                                     NetworkOutputOptions options) {
+    return createStreamOutput(std::make_unique<UpnpStreamPlayer>(std::move(player), options.link), std::move(details),
+                              std::move(follow), options);
+}
+
+std::unique_ptr<audio::IOutput> createStreamOutput(std::unique_ptr<StreamPlayer> player,
+                                                   std::function<TrackDetails(const std::wstring&)> details,
+                                                   std::function<void(const PlayerEvent&)> follow, NetworkOutputOptions options) {
     return std::make_unique<NetworkOutput>(std::move(player), std::move(details), std::move(follow), options);
 }
 

@@ -389,6 +389,10 @@ Listener listenFor(const PlayerDescription& player) {
     const auto* first = player.services.empty() ? nullptr : &player.services.front();
     const std::string local = localAddressFor(first ? hostOf(first->controlUrl) : std::string());
     if (local.empty()) throw NoRoute();
+    return listenOn(local);
+}
+
+Listener listenOn(const std::string& local) {
     constexpr auto kNoSocket = INVALID_SOCKET;
     const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listener == kNoSocket) throw std::runtime_error("cannot make a socket");

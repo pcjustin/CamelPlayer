@@ -61,7 +61,8 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
 
 DsdOutput dsdOutput(const Settings& s) {
     if (s.backend == Backend::Network) return s.network.dsdOutput;
-    if (s.backend == Backend::AirPlay) return DsdOutput::Native; // no raw DSD, so PCM only with the permission
+    if (s.backend == Backend::AirPlay) return DsdOutput::Native;  // no raw DSD, so PCM only with the permission
+    if (s.backend == Backend::HQPlayer) return DsdOutput::Native; // raw DSD as DSF for HQPlayer to process
     return s.backend == Backend::Asio ? s.asio.dsdOutput : s.backend == Backend::Ks ? s.ks.dsdOutput : s.wasapi.dsdOutput;
 }
 
@@ -122,7 +123,9 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
     const DsdOutput mode = dsdOutput(s);
     std::optional<OutputPlan> plan;
     if (mode != DsdOutput::Pcm)
-        plan = negotiateDsd(src, (s.backend == Backend::Asio || s.backend == Backend::Network) && mode == DsdOutput::Native,
+        plan = negotiateDsd(src,
+                            (s.backend == Backend::Asio || s.backend == Backend::Network || s.backend == Backend::HQPlayer) &&
+                                mode == DsdOutput::Native,
                             fixedSampleType(s), supports, maxDsdByteRate(s), maxRate);
     if (plan || (mode != DsdOutput::Pcm && !s.convertDsdWhenUnsupported)) return plan;
     for (const uint32_t rate : chosenRates(44100))
@@ -322,7 +325,8 @@ public:
 
     void crossfadeTo(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
         const bool fades = settings_.crossfade.enabled && active_ && state_ == PlayState::Playing && !rawDsd_ &&
-                           settings_.backend != Backend::Network && !leadSilence_.load(std::memory_order_acquire);
+                           settings_.backend != Backend::Network && settings_.backend != Backend::HQPlayer &&
+                           !leadSilence_.load(std::memory_order_acquire);
         const auto next = fades ? prepareNext(file, requested) : std::nullopt;
         if (!next || !rust_->crossfadeTo(file, next->decoder, gainDb, {crossfadeMs(), next->convert})) {
             if (fades)
@@ -406,7 +410,7 @@ public:
             leadDone_ = false;
             rust_->pause();
             setState(PlayState::Paused);
-            if (isNetworkPlayer(settings_.backend))
+            if (isStreamed(settings_.backend))
                 output_->pause();
             else
                 runsPaused_ = true;
@@ -502,7 +506,8 @@ public:
         const bool wasPlaying = playsOn();
         const uint64_t pos = currentPosition();
         // What a network player holds cannot change, so a new chain is heard only from a new stream.
-        const bool restart = outputChanged || decoderChanged || (dspChanged && s.backend == Backend::Network);
+        const bool restart =
+            outputChanged || decoderChanged || (dspChanged && (s.backend == Backend::Network || s.backend == Backend::HQPlayer));
         if (restart && wasActive) teardown();
         if (outputChanged) output_.reset();
         settings_ = s;
@@ -940,7 +945,7 @@ private:
     }
 
     // Its next file is read only once it ends, as reading it would take the network from the stream.
-    bool streamsSlowSource() const { return readRate_ && isNetworkPlayer(settings_.backend); }
+    bool streamsSlowSource() const { return readRate_ && isStreamed(settings_.backend); }
 
     // The bytes per second `file` plays at, from its size and length; 0 when either is unknown.
     static double playedBytesPerSecond(const std::wstring& file, uint64_t frames, uint32_t rate) {
@@ -973,7 +978,7 @@ private:
         measuredRate_ = read;
         if (!read) return configured;
         const double left = framesToSeconds(shown - from, src.sampleRate);
-        const bool streamed = isNetworkPlayer(settings_.backend);
+        const bool streamed = isStreamed(settings_.backend);
         const double wait = bufferSeconds(left, *read / needed) <= 0
                                 ? 0.0
                                 : bufferSeconds(left, *read * (streamed ? kStreamReadShare : 1.0) / needed);
@@ -1209,7 +1214,7 @@ private:
         heard_ = 0;
         renderedFrames_ = 0;
         trackStartFrame_ = 0;
-        pulled_ = isNetworkPlayer(settings_.backend);
+        pulled_ = isStreamed(settings_.backend);
         base_ = startFrame;
         consumed_ = 0;
         prefilled_ = 0;
@@ -1263,7 +1268,7 @@ private:
         try {
             // A network player hears of the track only when it is to play it, not minutes earlier while the source is
             // read (openDeferredOutput()).
-            if (!buffering_ || !isNetworkPlayer(settings_.backend)) {
+            if (!buffering_ || !isStreamed(settings_.backend)) {
                 if (!kept) output_->open(fmt_, this);
                 outputOpen_ = true;
             }
@@ -1402,7 +1407,7 @@ private:
     // `keepOutput`: the device plays silence on while another session is prepared, which reuses it if it takes the
     // same format; closing and reopening an ASIO driver costs about half a second at every manual change.
     void teardown(bool keepOutput = false) {
-        if (keepOutput && !isNetworkPlayer(settings_.backend) && canKeepOutput()) { // a network player starts anew
+        if (keepOutput && !isStreamed(settings_.backend) && canKeepOutput()) { // a network player starts anew
             switching_ = true;
             while (rendering_.load()) std::this_thread::yield();
         } else {

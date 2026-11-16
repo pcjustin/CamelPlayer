@@ -27,6 +27,8 @@ std::string addressOf(std::string_view host, uint16_t port);
 bool splitAddress(std::string_view address, std::string& host, uint16_t& port);
 // localhost, 127.x.x.x, ::1 or one of this computer's own addresses.
 bool isLocalHost(std::string_view host);
+// The host's first IPv4 address, a name resolved; empty when it has none.
+std::string ipv4Of(const std::string& host);
 
 // Takes every whole document off the front of `buffer`, leaving a document still arriving. Text that is not XML before a
 // document is dropped.

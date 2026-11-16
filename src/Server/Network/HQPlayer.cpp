@@ -212,6 +212,18 @@ bool isLocalHost(std::string_view host) {
     return std::ranges::any_of(localAddresses(), [&](const in_addr& local) { return local.s_addr == address.s_addr; });
 }
 
+std::string ipv4Of(const std::string& host) {
+    WinsockScope winsock;
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    addrinfo* found = nullptr;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &found) != 0 || !found) return {};
+    char text[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &reinterpret_cast<const sockaddr_in*>(found->ai_addr)->sin_addr, text, sizeof(text));
+    freeaddrinfo(found);
+    return text;
+}
+
 std::vector<std::string> takeDocuments(std::string& buffer) {
     std::vector<std::string> documents;
     while (true) {

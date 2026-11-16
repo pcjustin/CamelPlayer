@@ -110,6 +110,8 @@ struct Listener {
     std::string base;
 };
 Listener listenFor(const PlayerDescription& player);
+// The same on this computer's address `local`.
+Listener listenOn(const std::string& local);
 
 std::optional<uint64_t> parseDuration(std::string_view text); // h:mm:ss[.fff] in milliseconds
 std::string formatDuration(uint64_t milliseconds);

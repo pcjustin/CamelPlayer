@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "Server/Network/PlayerControl.h"
 #include "Server/Network/PlayerEvents.h"
 #include "Server/Network/Upnp.h"
 
@@ -68,28 +69,28 @@ private:
     std::chrono::milliseconds settledAt_{};
 };
 
-class PlayerLink {
+class PlayerLink final : public PlayerControl {
 public:
     // `onEvent` runs on the link's thread. Throws std::runtime_error when the player cannot be reached for events.
     PlayerLink(upnp::PlayerDescription player, std::function<void(const PlayerEvent&)> onEvent, LinkOptions options = {});
-    ~PlayerLink();
+    ~PlayerLink() override;
     PlayerLink(const PlayerLink&) = delete;
     PlayerLink& operator=(const PlayerLink&) = delete;
 
     void expect(ExpectedTracks tracks);
     // False when the player refused or did not answer.
-    bool load(const std::string& uri, const std::string& metadata);
-    bool loadNext(const std::string& uri, const std::string& metadata);
-    void advance();
-    bool play();
-    bool pause();
-    bool stop();
-    uint64_t positionMs() const; // in the current track, as last polled
-    bool stopped() const;        // as last polled
-    bool playing() const;        // as last polled
-    bool idle() const;           // stopped or without media as last polled, whether or not it played since the last load
-    bool played() const;         // reported playing since the last load
-    bool lost() const;           // the player stopped answering; the link follows it no more
+    bool load(const std::string& uri, const std::string& metadata) override;
+    bool loadNext(const std::string& uri, const std::string& metadata) override;
+    void advance() override;
+    bool play() override;
+    bool pause() override;
+    bool stop() override;
+    uint64_t positionMs() const override; // in the current track, as last polled
+    bool stopped() const override;        // as last polled
+    bool playing() const override;        // as last polled
+    bool idle() const override;           // stopped or without media as last polled, whether or not it played since the last load
+    bool played() const override;         // reported playing since the last load
+    bool lost() const override;           // the player stopped answering; the link follows it no more
 
 private:
     struct Impl;

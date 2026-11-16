@@ -1759,7 +1759,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         switch (plan.state) {
         case PipelineState::BitPerfect:
             lampColor_ = L"SystemFillColorSuccessBrush";
-            setAnnounced(LampText(), tr(L"Lamp_BitPerfect"));
+            // HQPlayer processes what it is sent: only CamelPlayer's part is bit-perfect (docs/Plan.md §5.11).
+            setAnnounced(LampText(), tr(s.backend == Backend::HQPlayer ? L"Lamp_BitPerfectToHQPlayer" : L"Lamp_BitPerfect"));
             break;
         case PipelineState::LosslessConversion:
             lampColor_ = L"SystemFillColorCautionBrush";
@@ -1880,6 +1881,12 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                         tr(receiver.channels == AirPlayChannels::Left ? L"Channels_LeftBoth" : L"Channels_RightBoth"),
                         PathState::Processed);
             }
+        } else if (s.backend == Backend::HQPlayer) {
+            // What leaves CamelPlayer, then what HQPlayer makes of it (docs/Plan.md §5.11).
+            add(tr(L"SignalPath_ToHQPlayer"), ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
+            add(tr(L"SignalPath_HQPlayer"),
+                s.outputDetail.empty() ? tr(L"SignalPath_HQPlayerProcessed") : ui::utf8(s.outputDetail), PathState::Processed);
+            add(tr(L"SignalPath_HQPlayerGapless"), tr(L"SignalPath_HQPlayerRateChange"), PathState::AtTrackChanges);
         } else {
             add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
                 ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
@@ -1994,7 +2001,9 @@ winrt::fire_and_forget MainWindow::readPlayingFolders(int64_t file) {
 
 // A network player's reason is said whole in its title; the engine's English detail stays in the log.
 void MainWindow::showError(ErrorCode code, const std::string& detail, Backend backend) {
-    const hstring player = isNetworkPlayer(backend) ? ui::playerErrorTitle(code) : hstring{};
+    const hstring player = backend == Backend::HQPlayer ? ui::hqplayerErrorTitle(code)
+                           : isNetworkPlayer(backend)   ? ui::playerErrorTitle(code)
+                                                        : hstring{};
     ErrorBar().Severity(InfoBarSeverity::Warning);
     ErrorBar().IsClosable(true);
     ErrorBar().Title(player.empty() ? ui::errorTitle(code) : player);

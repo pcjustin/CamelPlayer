@@ -14,6 +14,7 @@
 #include <string>
 
 #include "OutputBridge/IOutput.h"
+#include "Server/Network/PlayerControl.h"
 #include "Server/Network/PlayerLink.h"
 #include "Server/Network/Upnp.h"
 
@@ -31,6 +32,8 @@ struct NetworkOutputOptions {
     // Rendered ahead once a next track is queued, so that the player has time to open that track before the change.
     std::chrono::milliseconds nextTrackLead{20000};
     bool gapless = true; // off, a player that could follow one track with the next is given them one at a time
+    // How long a player may take after Play to start, its position moving, before it is taken for one that did not.
+    std::chrono::milliseconds startLimit{5000};
 };
 
 // `details` and `follow` run on the output's own threads. `follow` gets what the player did by itself.
@@ -38,5 +41,10 @@ std::unique_ptr<audio::IOutput> createNetworkOutput(upnp::PlayerDescription play
                                                     std::function<TrackDetails(const std::wstring& file)> details,
                                                     std::function<void(const PlayerEvent&)> follow,
                                                     NetworkOutputOptions options = {});
+// The stream on any player that fetches it over HTTP.
+std::unique_ptr<audio::IOutput> createStreamOutput(std::unique_ptr<StreamPlayer> player,
+                                                   std::function<TrackDetails(const std::wstring& file)> details,
+                                                   std::function<void(const PlayerEvent&)> follow,
+                                                   NetworkOutputOptions options = {});
 
 } // namespace camel::server

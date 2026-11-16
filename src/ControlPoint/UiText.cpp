@@ -85,6 +85,22 @@ winrt::hstring playerErrorTitle(camel::audio::ErrorCode code) {
     }
 }
 
+winrt::hstring hqplayerErrorTitle(camel::audio::ErrorCode code) {
+    using camel::audio::ErrorCode;
+    switch (code) {
+    case ErrorCode::DeviceInUse:
+        return tr(L"Error_HQPlayerInUse");
+    case ErrorCode::DeviceLost:
+        return tr(L"Error_HQPlayerLost");
+    case ErrorCode::DriverError:
+        return tr(L"Error_HQPlayerOutput");
+    case ErrorCode::AccessDenied:
+        return tr(L"Error_HQPlayerNetworkControl");
+    default:
+        return {};
+    }
+}
+
 winrt::hstring utf8(const std::string& s) {
     return winrt::to_hstring(s);
 }

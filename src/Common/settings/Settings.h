@@ -26,6 +26,10 @@ const char* backendName(Backend b);
 inline bool isNetworkPlayer(Backend b) {
     return b == Backend::Network || b == Backend::AirPlay;
 }
+// Played as a stream another device fetches: a network player or HQPlayer.
+inline bool isStreamed(Backend b) {
+    return isNetworkPlayer(b) || b == Backend::HQPlayer;
+}
 bool backendFromId(std::string_view id, Backend& out);
 
 enum class WasapiPeriod : uint8_t { Default, Minimum, Custom };

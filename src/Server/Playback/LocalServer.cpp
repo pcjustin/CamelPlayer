@@ -11,6 +11,7 @@
 #include "Server/Network/AirPlayOutput.h"
 #include "Server/Network/Firewall.h"
 #include "Server/Network/HQPlayer.h"
+#include "Server/Network/HQPlayerOutput.h"
 #include "Server/Network/NetworkOutput.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerVolume.h"
@@ -203,9 +204,10 @@ public:
     _No_competing_thread_ Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
         : settings_(settings), settingsFile_(std::move(settingsFile)),
           factory_([this, given = std::move(factory)](const Settings& s) {
-              return s.backend == Backend::Network   ? networkOutput(s)
-                     : s.backend == Backend::AirPlay ? airplayOutput(s)
-                                                     : given(s);
+              return s.backend == Backend::Network    ? networkOutput(s)
+                     : s.backend == Backend::AirPlay  ? airplayOutput(s)
+                     : s.backend == Backend::HQPlayer ? hqplayerOutput(s)
+                                                      : given(s);
           }),
           engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)) {
         published_.settings = settingsDto(settings_);
@@ -1925,6 +1927,13 @@ private:
         return createNetworkOutput(
             *player, [this](const std::wstring& file) { return trackDetails(file); },
             [this](const PlayerEvent& event) { followPlayer(event); }, options);
+    }
+
+    std::unique_ptr<audio::IOutput> hqplayerOutput(const Settings& settings) {
+        if (settings.hqplayer.address.empty()) throw audio::Error(audio::ErrorCode::DeviceNotFound, "no HQPlayer chosen");
+        return createHQPlayerOutput(
+            settings.hqplayer.address, [this](const std::wstring& file) { return trackDetails(file); },
+            [this](const PlayerEvent& event) { followPlayer(event); });
     }
 
     // The chosen player's own volume is followed from when it is chosen, whether it plays or not.

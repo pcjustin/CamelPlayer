@@ -199,6 +199,7 @@
   <data name="Queue_CountWindowed" xml:space="preserve"><value>{0} tracks; the {1} around the current track are listed</value></data>
   <data name="State_Buffering" xml:space="preserve"><value>Buffering, about {0} s</value></data>
   <data name="State_BufferingDetail" xml:space="preserve"><value>The file reads slower than it plays, so it is buffered first to avoid breaks.</value></data>
+  <data name="Lamp_BitPerfectToHQPlayer" xml:space="preserve"><value>Bit-perfect to HQPlayer</value></data>
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
   <data name="Badge_Lossy.Text" xml:space="preserve"><value>Lossy source</value></data>
   <data name="Badge_DspBypassedTip" xml:space="preserve"><value>Raw DSD goes to the device unchanged; volume, ReplayGain and every other PCM processing step are bypassed.</value></data>
@@ -735,12 +736,21 @@ Details: {0}</value></data>
   <data name="Output_HQPlayerPort" xml:space="preserve"><value>Port</value></data>
   <data name="Output_HQPlayerAdd" xml:space="preserve"><value>Add</value></data>
   <data name="Output_HQPlayerNote" xml:space="preserve"><value>HQPlayer on this computer is listed by itself. One on another computer needs “Allow control from network” turned on in HQPlayer and is then found by itself too, so add it here only when it is not found.</value></data>
+  <data name="Error_HQPlayerInUse" xml:space="preserve"><value>HQPlayer is in use by another source</value></data>
+  <data name="Error_HQPlayerLost" xml:space="preserve"><value>HQPlayer is not connected. An unlicensed HQPlayer quits by itself when its 30-minute trial ends.</value></data>
+  <data name="Error_HQPlayerOutput" xml:space="preserve"><value>HQPlayer could not open its output. Turning the DAC on may not be enough; HQPlayer may need restarting.</value></data>
+  <data name="Error_HQPlayerNetworkControl" xml:space="preserve"><value>HQPlayer does not answer this computer. Turn on “Allow control from network” in HQPlayer.</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>Network players</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>Let network players reach CamelPlayer?</value></data>
   <data name="Firewall_Text" xml:space="preserve"><value>Network players fetch their music from CamelPlayer, so Windows Firewall has to let them in. CamelPlayer adds one rule, for this program on private networks only. Windows asks for an administrator to do that.</value></data>
   <data name="Firewall_AddButton.Content" xml:space="preserve"><value>Add the rule</value></data>
   <data name="Firewall_Notice.Title" xml:space="preserve"><value>The firewall rule is missing</value></data>
   <data name="Firewall_Notice.Message" xml:space="preserve"><value>Network players cannot reach CamelPlayer until the rule for private networks is added.</value></data>
+  <data name="SignalPath_ToHQPlayer" xml:space="preserve"><value>To HQPlayer</value></data>
+  <data name="SignalPath_HQPlayer" xml:space="preserve"><value>HQPlayer</value></data>
+  <data name="SignalPath_HQPlayerProcessed" xml:space="preserve"><value>Processed by HQPlayer</value></data>
+  <data name="SignalPath_HQPlayerGapless" xml:space="preserve"><value>Gapless</value></data>
+  <data name="SignalPath_HQPlayerRateChange" xml:space="preserve"><value>Only between tracks of one sample rate</value></data>
   <data name="SignalPath_Renderer" xml:space="preserve"><value>Network player</value></data>
   <data name="Settings_NetworkGroup.Text" xml:space="preserve"><value>Network player</value></data>
   <data name="Settings_MaxPcmRate.Header" xml:space="preserve"><value>Highest PCM sample rate</value></data>
