@@ -727,6 +727,27 @@ TEST(NetworkOutputTest, AnOpenHomePlayerOnAnotherSourceIsPlayedAtTheFirstTry) {
     EXPECT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceInUse); }));
 }
 
+// The playlist becomes the player's source as its entry is selected, which the player tells at once; that is no takeover
+// however late CamelPlayer reads which source the playlist is.
+TEST(NetworkOutputTest, AnOpenHomePlayerMovedToItsPlaylistIsNotTakenOverWhileItsSourcesAreRead) {
+    FakeRenderer renderer(RendererKind::OpenHome);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    renderer.set("source", "1");
+    renderer.slowSourceList(true);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    output->setErrorHandler([&](const audio::Error& e) { raised = int(e.code()); });
+    ASSERT_TRUE(waitFor([&] { return renderer.subscribers() == 3; }));
+    renderer.emitVariable("Product", "SourceIndex", "1");
+    std::this_thread::sleep_for(200ms);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return source.rendered() > 0; }));
+    std::this_thread::sleep_for(1s);
+    EXPECT_EQ(raised, kNoError);
+    EXPECT_EQ(std::ranges::count(output.events(), PlayerEvent{PlayerEventKind::TakenOver}), 0);
+}
+
 TEST(NetworkOutputTest, AStopAskedForStillStopsThePlayer) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);

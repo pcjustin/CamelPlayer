@@ -142,7 +142,8 @@ struct PlayerLink::Impl {
     std::mutex mutex; // the follower and the source
     PlayerFollower follower;
     std::optional<std::string> ownSource, seenSource;
-    std::string currentId; // OpenHome: the playlist entry playing
+    std::optional<std::string> leftSource; // OpenHome: where a load moved the player from, until it reports its own
+    std::string currentId;                 // OpenHome: the playlist entry playing
     std::atomic<uint64_t> lastPositionMs = 0;
     std::atomic<bool> lastStopped = false, lastPlaying = false, lastIdle = false, sawPlaying = false;
     Clock::time_point started = Clock::now();
@@ -212,7 +213,18 @@ struct PlayerLink::Impl {
         return seen;
     }
 
-    // OpenHome tells a takeover by the player's source changing away from the one the playlist was on.
+    // OpenHome tells a takeover by the player's source changing away from the one the playlist was on. The source a load
+    // moved the player from, reported late, is where it was, not a takeover, until the player reports its own.
+    _Requires_lock_held_(mutex) bool onOtherSource(const std::string& source) {
+        seenSource = source;
+        if (!ownSource) ownSource = source;
+        if (source == *ownSource) {
+            leftSource.reset();
+            return false;
+        }
+        return source != leftSource;
+    }
+
     PlayerObservation fromOpenHome(const Values& values) {
         PlayerObservation seen;
         seen.state = stateOf(find(values, "TransportState"));
@@ -220,9 +232,7 @@ struct PlayerLink::Impl {
         if (const auto seconds = find(values, "Seconds"); !seconds.empty()) seen.positionMs = number(seconds) * 1000;
         if (const auto source = find(values, "SourceIndex"); !source.empty()) {
             std::scoped_lock lock(mutex);
-            seenSource = source;
-            if (!ownSource) ownSource = source;
-            seen.otherSource = source != *ownSource;
+            seen.otherSource = onOtherSource(source);
         }
         return seen;
     }
@@ -280,10 +290,8 @@ struct PlayerLink::Impl {
             if (time.ok) seen.positionMs = number(find(time.values, "Seconds")) * 1000;
             const auto source = call("Product", "SourceIndex", {});
             if (source.ok) {
-                const auto index = find(source.values, "Value");
                 std::scoped_lock lock(mutex);
-                if (!ownSource) ownSource = index;
-                seen.otherSource = index != *ownSource;
+                seen.otherSource = onOtherSource(find(source.values, "Value"));
             }
         } else {
             const std::vector<std::pair<std::string, std::string>> instance{{"InstanceID", "0"}};
@@ -339,6 +347,7 @@ void PlayerLink::expect(ExpectedTracks tracks) {
     std::scoped_lock lock(impl_->mutex);
     impl_->follower.expect(std::move(tracks));
     impl_->ownSource = impl_->seenSource;
+    impl_->leftSource.reset();
 }
 
 bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
@@ -350,16 +359,21 @@ bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
     link.sawPlaying = false;
     if (link.player.protocol == upnp::PlayerProtocol::OpenHome) {
         try {
+            // Selecting the entry makes the playlist the player's source, which it reports at once: its index is known first.
+            const auto playlist = link.playlistSource();
+            {
+                std::scoped_lock lock(link.mutex);
+                link.ownSource = playlist ? playlist : link.seenSource;
+                link.leftSource = link.seenSource != link.ownSource ? link.seenSource : std::nullopt;
+            }
             if (!link.call("Playlist", "DeleteAll", {}).ok) return false;
             const auto inserted = link.call("Playlist", "Insert", {{"AfterId", "0"}, {"Uri", uri}, {"Metadata", metadata}});
             const auto id = inserted.values.find("NewId");
             if (!inserted.ok || id == inserted.values.end() || !link.call("Playlist", "SeekId", {{"Value", id->second}}).ok)
                 return false;
             link.currentId = id->second;
-            const auto playlist = link.playlistSource();
             std::scoped_lock lock(link.mutex);
             link.follower.expectLoaded({id->second, {}, {}}, link.now());
-            link.ownSource = playlist ? playlist : link.seenSource;
             return true;
         } catch (const std::exception& e) {
             log::warn("network player Insert: %s", e.what());

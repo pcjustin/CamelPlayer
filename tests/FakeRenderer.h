@@ -192,6 +192,8 @@ public:
     void refuseSoap(bool refuse) { refuseSoap_ = refuse; }
     // Sends its events with chunked transfer encoding, in two chunks that arrive apart.
     void chunkEvents(bool chunk) { chunkEvents_ = chunk; }
+    // Answers SourceXml half a second late, as a busy player may, while the events it sent before reach the subscriber.
+    void slowSourceList(bool slow) { slowSourceList_ = slow; }
     // Sends its events from another loopback address, as another host on the network that saw the SID could; empty for
     // its own.
     void sendEventsFrom(std::string address) {
@@ -333,6 +335,8 @@ private:
                 }
                 if (headEnd != std::string::npos && request.size() >= total) break;
             }
+            if (slowSourceList_ && request.find("#SourceXml\"") != std::string::npos)
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
             const std::string reply = answer(request, headEnd);
             for (size_t sent = 0; sent < reply.size();) {
                 const int n = ::send(client, reply.data() + sent, int(reply.size() - sent), 0);
@@ -724,6 +728,7 @@ private:
     std::atomic<bool> gone_ = false, quiet_ = false, refuseSoap_ = false, noNext_ = false, noPosition_ = false,
                       refuseStreams_ = false, standby_ = false;
     std::atomic<bool> chunkEvents_ = false;
+    std::atomic<bool> slowSourceList_ = false;
     std::string eventSource_;
     std::atomic<bool> fetchStop_ = false, fetching_ = false, playRequested_ = false, stopRequested_ = false, nextPending_ = false,
                       toPlaylistSource_ = false;
