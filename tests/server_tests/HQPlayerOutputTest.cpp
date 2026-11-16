@@ -384,3 +384,16 @@ TEST(HQPlayerOutputTest, ANewStreamIsNotTakenForOneStandingStill) {
     EXPECT_EQ(count(fake.commands(), "Play"), 2U);
     output->close();
 }
+
+// A reply missing while a new track is loaded connects again, which clears the playlist as the load does: it plays.
+TEST(HQPlayerOutputTest, AReplyMissingWhileATrackLoadsIsNoLoss) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(fake, source, k16);
+    fake.dropNext("PlaylistClear");
+    output->start();
+    ASSERT_TRUE(eventually([&] { return fake.state().position > 0.5; }));
+    EXPECT_EQ(output.error(), kNoError);
+    EXPECT_EQ(fake.accepted(), 2U);
+}

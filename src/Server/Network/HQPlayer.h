@@ -64,7 +64,8 @@ std::optional<Found> parseDiscoverReply(std::string_view datagram, const std::st
 struct ClientOptions {
     std::chrono::milliseconds connectTimeout{3000};
     std::chrono::milliseconds firstReply{10000}; // 3-4 s measured, 5.4 s just after HQPlayer started
-    std::chrono::milliseconds reply{5000};
+    // HQPlayer on a Mac took over 5 s to answer PlaylistClear while it stopped a track (2026-11-16).
+    std::chrono::milliseconds reply{15000};
 };
 
 // One connection, kept open: each command waits for the reply of its own name, pushed Status documents going to

@@ -97,8 +97,10 @@ public:
             std::scoped_lock lock(mutex_);
             ownPlaylist_ = ownTrack_ = true;
         }
-        // A clear while paused keeps the paused track (docs/Plan.md §5.11), so the playlist is stopped first.
-        if (!command("<Stop/>") || !command("<PlaylistClear/>")) return false;
+        // A clear while paused keeps the paused track (docs/Plan.md §5.11), so the playlist is stopped first. A new
+        // connection meanwhile is no loss: it starts with the same Stop and PlaylistClear.
+        if (!command("<Stop/>", true) || !command("<PlaylistClear/>", true)) return false;
+        own(std::nullopt); // the add follows a wait for those replies, which may have been long
         if (!command(add(uri, metadata))) return false;
         std::scoped_lock lock(mutex_);
         nextQueued_ = false;
@@ -175,11 +177,17 @@ private:
     }
 
     // A command whose reply is not OK, or none, fails; a lost connection is reported once.
-    bool command(const std::string& xml) {
+    bool command(const std::string& xml, bool clearing = false) {
         try {
             const bool ok = connection_->client.ok(xml);
-            // A new connection cleared HQPlayer's playlist: what played is gone.
-            if (connection_->client.connections() != connections_) reportLost();
+            // A new connection cleared HQPlayer's playlist: what played is gone, unless it was being cleared anyway.
+            if (connection_->client.connections() != connections_) {
+                if (!clearing) reportLost();
+                // What the new connection's Stop and PlaylistClear did is CamelPlayer's; its Status starts anew.
+                std::scoped_lock lock(mutex_);
+                status_.reset();
+                connections_ = connection_->client.connections();
+            }
             return ok;
         } catch (const std::exception& e) {
             log::warn("HQPlayer: %s", e.what());
@@ -204,7 +212,9 @@ private:
         bool playAgain = false;
         {
             std::scoped_lock lock(mutex_);
-            const std::optional<hqplayer::Status> before = status_;
+            // A Status from a connection this control has not taken up yet shows only what that connection did.
+            const std::optional<hqplayer::Status> before =
+                connection_->client.connections() == connections_ ? status_ : std::nullopt;
             status_ = s;
             const auto now = Clock::now();
             const bool ours = now < ownUntil_;
@@ -311,7 +321,7 @@ private:
     std::deque<std::string> queued_;
     std::atomic<bool> lost_ = false;
     std::shared_ptr<Connection> connection_;
-    uint64_t connections_ = 0; // the client's, when this control began
+    std::atomic<uint64_t> connections_ = 0; // the client's, when this control began or last connected again
     std::thread worker_;
 };
 
