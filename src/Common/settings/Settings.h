@@ -322,8 +322,20 @@ struct TrackColumns {
     bool operator==(const TrackColumns&) const = default;
 };
 
+// An output's own DSP: EQ, crossfeed, convolution, their order and ReplayGain, all off for an output new to it. The
+// EQ presets are not part of it; every output shares them.
+struct OutputDsp {
+    EqSettings eq; // without presets
+    CrossfeedSettings crossfeed;
+    ConvolutionSettings convolution;
+    audio::DspOrder dspOrder = audio::kDefaultDspOrder;
+    ReplayGainSettings replayGain;
+    bool operator==(const OutputDsp&) const = default;
+};
+
 // An output device the user enabled, named or set up, kept by stable identity (docs/Plan.md §6). Only `backend`'s
-// parameters are used; those of the output in use live in Settings and are copied here as they change.
+// parameters are used; those of the output in use, its DSP among them, live in Settings and are copied here as they
+// change.
 struct SavedOutput {
     Backend backend = Backend::Wasapi;
     std::string id;       // as in the backend's settings; empty on WASAPI is "Windows default device", without parameters
@@ -336,6 +348,7 @@ struct SavedOutput {
     NetworkSettings network;
     AirPlaySettings airplay;
     VolumeMode volumeMode = VolumeMode::Fixed;
+    OutputDsp dsp;
     // An AirPlay stereo pair's speakers by their own device IDs, which stay when pairing it again gives it a new ID.
     std::vector<std::string> speakers;
     bool operator==(const SavedOutput&) const = default;
@@ -390,6 +403,10 @@ struct Settings {
     std::wstring lastFile;
     bool adoptOutputSets = false; // from an earlier version: each backend's set still has to reach its device
 };
+
+// The DSP of the output in use, and putting another in its place, the EQ presets staying.
+OutputDsp outputDsp(const Settings& s);
+void setOutputDsp(Settings& s, const OutputDsp& dsp);
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
 // decoders, autoplay, playing on from a folder, the library scan's speed and the DSP chain, whose saved EQ presets stay.

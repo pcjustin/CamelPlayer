@@ -11,6 +11,7 @@
 #include "PlaylistView.xaml.h"
 #include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
+#include "Server/Playback/Outputs.h"
 #include "Server/Support/Updates.h"
 #include "TrayIcon.h"
 #include "GlobalHotkeys.h"
@@ -353,6 +354,12 @@ private:
         camel::server::SettingsDto parameters; // this output's own, which the dialog's controls show and change
     };
     std::optional<OutputEdit> editingOutput_;
+    // The dialog's DSP: what its output has on, "copy DSP from" each other output listed, and turning it all off.
+    Microsoft::UI::Xaml::Controls::StackPanel outputDspSection(const OutputEdit& editing,
+                                                               const std::vector<camel::server::OutputRow>& rows);
+    void changeOutputDsp(const camel::OutputDsp& dsp);
+    Microsoft::UI::Xaml::Controls::TextBlock outputDspText_{nullptr};
+    winrt::hstring dspOutputLabel_; // the output in use, as the DSP cards and menu name it
     // The parameters the output groups show: the dialog's while it is open, else the output in use's.
     const camel::server::SettingsDto& outputParameters() const { return editingOutput_ ? editingOutput_->parameters : settings_; }
     // Whether the network players' firewall rule exists, read in the background: listing the rules takes 15-25 ms.

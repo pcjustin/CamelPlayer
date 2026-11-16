@@ -574,6 +574,13 @@
   <data name="Dsp_MoveDown" xml:space="preserve"><value>下移</value></data>
   <data name="Dsp_MenuEqPresets" xml:space="preserve"><value>等化器預設組</value></data>
   <data name="Dsp_MenuSettings" xml:space="preserve"><value>DSP 設定…</value></data>
+  <data name="Dsp_ForOutput" xml:space="preserve"><value>設定的是使用中的輸出「{0}」，每個輸出各有自己的一組。</value></data>
+  <data name="Dsp_MenuForOutput" xml:space="preserve"><value>用於 {0}</value></data>
+  <data name="Output_Dsp" xml:space="preserve"><value>DSP</value></data>
+  <data name="Output_DspNone" xml:space="preserve"><value>全部關閉</value></data>
+  <data name="Output_DspReplayGain" xml:space="preserve"><value>ReplayGain：{0}</value></data>
+  <data name="Output_CopyDspFrom" xml:space="preserve"><value>從其他輸出複製 DSP</value></data>
+  <data name="Output_DspAllOff" xml:space="preserve"><value>關閉所有 DSP</value></data>
   <data name="Settings_DspOrder.Text" xml:space="preserve"><value>處理順序</value></data>
   <data name="Settings_DspRestoreOrder.Content" xml:space="preserve"><value>恢復預設順序</value></data>
   <data name="Settings_DspOrderNote.Text" xml:space="preserve"><value>預設順序「等化器 → crossfeed → 卷積」讓房間或耳機校正最靠近喇叭或耳機。只有左右聲道處理不同時（例如只作用單一聲道的 EQ 頻段，或 true stereo 的 IR），搭配 crossfeed 才會因順序而聽起來不同。</value></data>

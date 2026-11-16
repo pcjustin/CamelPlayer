@@ -574,6 +574,13 @@ Details: {0}</value></data>
   <data name="Dsp_MoveDown" xml:space="preserve"><value>Move down</value></data>
   <data name="Dsp_MenuEqPresets" xml:space="preserve"><value>EQ presets</value></data>
   <data name="Dsp_MenuSettings" xml:space="preserve"><value>DSP settings…</value></data>
+  <data name="Dsp_ForOutput" xml:space="preserve"><value>For {0}, the output in use. Each output keeps its own.</value></data>
+  <data name="Dsp_MenuForOutput" xml:space="preserve"><value>For {0}</value></data>
+  <data name="Output_Dsp" xml:space="preserve"><value>DSP</value></data>
+  <data name="Output_DspNone" xml:space="preserve"><value>All off</value></data>
+  <data name="Output_DspReplayGain" xml:space="preserve"><value>ReplayGain: {0}</value></data>
+  <data name="Output_CopyDspFrom" xml:space="preserve"><value>Copy DSP from</value></data>
+  <data name="Output_DspAllOff" xml:space="preserve"><value>Turn all DSP off</value></data>
   <data name="Settings_DspOrder.Text" xml:space="preserve"><value>Order</value></data>
   <data name="Settings_DspRestoreOrder.Content" xml:space="preserve"><value>Restore default order</value></data>
   <data name="Settings_DspOrderNote.Text" xml:space="preserve"><value>The default order, EQ → crossfeed → convolution, puts a room or headphone correction nearest the speakers or headphones. The order changes the sound only where left and right are treated differently, such as EQ bands for one channel or a true-stereo response, next to crossfeed.</value></data>

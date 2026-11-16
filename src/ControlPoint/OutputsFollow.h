@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
 #include "Server/Api/ServerApi.h"
 
@@ -12,12 +13,23 @@ namespace ui {
 enum class OutputsRefill : uint8_t { None, Outputs, Settings };
 
 // The outputs a device scan changed on the Server, and the parameters it can move with the Windows default, reach
-// `target`, the settings the window keeps. Returns what of the page must be filled again: nothing while an output's
-// settings dialog is open, as the page is filled once it closes.
+// `target`, the settings the window keeps; so does the DSP of the device the default moved to, the EQ presets
+// excepted. Returns what of the page must be filled again: nothing while an output's settings dialog is open, as the
+// page is filled once it closes.
 inline OutputsRefill followServerOutputs(camel::server::SettingsDto& target, const camel::server::SettingsDto& server,
                                          bool dialogOpen) {
-    const bool parameters = server.backend != target.backend || server.wasapi != target.wasapi || server.asio != target.asio ||
-                            server.ks != target.ks || server.volume.mode != target.volume.mode;
+    const bool moved = server.backend != target.backend || server.followedDefault != target.followedDefault;
+    const bool parameters = moved || server.wasapi != target.wasapi || server.asio != target.asio || server.ks != target.ks ||
+                            server.volume.mode != target.volume.mode;
+    if (moved) {
+        auto presets = std::move(target.eq.presets);
+        target.eq = server.eq;
+        target.eq.presets = std::move(presets);
+        target.crossfeed = server.crossfeed;
+        target.convolution = server.convolution;
+        target.dspOrder = server.dspOrder;
+        target.replayGain = server.replayGain;
+    }
     target.outputs = server.outputs;
     target.followedDefault = server.followedDefault;
     target.backend = server.backend;

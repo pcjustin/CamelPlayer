@@ -783,6 +783,26 @@ hstring outputMenuText(const camel::server::OutputRow& row) {
     return outputMenuLabel(row);
 }
 
+// What an output's DSP has on: its nodes in order, then ReplayGain.
+hstring dspSummary(const camel::server::SettingsDto& p) {
+    std::wstring text;
+    for (const auto node : p.dspOrder) {
+        const bool on = node == DspNode::Eq          ? p.eq.enabled
+                        : node == DspNode::Crossfeed ? p.crossfeed.enabled
+                                                     : p.convolution.enabled && !p.convolution.file.empty();
+        if (!on) continue;
+        if (!text.empty()) text += L" → ";
+        text += tr(dspNodeKey(node));
+    }
+    if (p.replayGain.mode != camel::ReplayGainMode::Off) {
+        constexpr const wchar_t* kModes[] = {L"Settings_ReplayGainOff/Content", L"Settings_ReplayGainTrack/Content",
+                                             L"Settings_ReplayGainAlbum/Content", L"Settings_ReplayGainAuto/Content"};
+        if (!text.empty()) text += L" · ";
+        text += ui::format(L"Output_DspReplayGain", {std::wstring(tr(kModes[int(p.replayGain.mode)]))});
+    }
+    return text.empty() ? tr(L"Output_DspNone") : hstring(text);
+}
+
 } // namespace
 
 void MainWindow::populateOutputs() {
@@ -792,6 +812,10 @@ void MainWindow::populateOutputs() {
         ToolTipService::SetToolTip(OutputButton(), box_value(outputMenuLabel(*inUse)));
         Automation::AutomationProperties::SetName(OutputButton(),
                                                   ui::format(L"Output_ButtonName", {std::wstring(outputMenuLabel(*inUse))}));
+        dspOutputLabel_ = outputMenuLabel(*inUse);
+        const hstring forOutput = ui::format(L"Dsp_ForOutput", {std::wstring(dspOutputLabel_)});
+        DspOutputText().Text(forOutput);
+        VolumeOutputText().Text(forOutput);
     }
     auto list = OutputList().Children();
     list.Clear();
@@ -1007,17 +1031,20 @@ winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::stri
     const auto rows = camel::server::outputRows(real, server_->snapshot().devices);
     const bool inUse = std::ranges::any_of(
         rows, [&](const camel::server::OutputRow& r) { return r.selected && r.backend == backend && r.id == id; });
-    editingOutput_ =
-        OutputEdit{backend, id, settingsDto(camel::server::withOutputParameters(real, backend, id, server_->snapshot().devices))};
+    const OutputEdit& editing = editingOutput_.emplace(OutputEdit{
+        backend, id, settingsDto(camel::server::withOutputParameters(real, backend, id, server_->snapshot().devices))});
     populating_ = true;
-    showOutputParameters(editingOutput_->parameters);
+    showOutputParameters(editing.parameters);
     populating_ = false;
     updateBackendGroups();
     AsioPanelButton().IsEnabled(inUse); // the driver's panel opens for the driver in use
     const auto panel = OutputSettingsPanel();
     OutputSettingsHost().Child(nullptr);
     ScrollViewer scroller;
-    scroller.Content(panel);
+    StackPanel content;
+    content.Children().Append(panel);
+    content.Children().Append(outputDspSection(editing, rows));
+    scroller.Content(content);
     panel.Padding(ThicknessHelper::FromLengths(0, 0, 16, 0));
     ContentDialog dialog;
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
@@ -1030,11 +1057,63 @@ winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::stri
         camel::log::warn("output settings dialog: %ls", e.message().c_str());
     }
     scroller.Content(nullptr);
+    content.Children().Clear();
+    outputDspText_ = nullptr;
     OutputSettingsHost().Child(panel);
     editingOutput_.reset();
     AsioPanelButton().IsEnabled(true);
     populateSettings();
     updateBackendGroups();
+}
+
+StackPanel MainWindow::outputDspSection(const OutputEdit& editing, const std::vector<camel::server::OutputRow>& rows) {
+    StackPanel section;
+    section.Spacing(8);
+    section.Margin(ThicknessHelper::FromLengths(0, 16, 16, 0));
+    TextBlock header;
+    header.Text(tr(L"Output_Dsp"));
+    header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    section.Children().Append(header);
+    outputDspText_ = TextBlock{};
+    outputDspText_.Text(dspSummary(editing.parameters));
+    outputDspText_.TextWrapping(TextWrapping::Wrap);
+    section.Children().Append(outputDspText_);
+
+    ComboBox copy;
+    copy.Header(box_value(tr(L"Output_CopyDspFrom")));
+    copy.MinWidth(240);
+    std::vector<std::pair<Backend, std::string>> sources;
+    for (const auto& row : rows)
+        if ((row.enabled || row.selected) && (row.backend != editing.backend || row.id != editing.id)) {
+            copy.Items().Append(box_value(outputMenuLabel(row)));
+            sources.emplace_back(row.backend, row.id);
+        }
+    copy.IsEnabled(!sources.empty());
+    copy.SelectionChanged([this, sources](Windows::Foundation::IInspectable const& sender, auto&&) {
+        const auto box = sender.as<ComboBox>();
+        const int index = box.SelectedIndex();
+        if (index < 0 || size_t(index) >= sources.size()) return;
+        const auto& [backend, id] = sources[size_t(index)];
+        changeOutputDsp(camel::outputDsp(
+            camel::server::withOutputParameters(nativeSettings(settings_), backend, id, server_->snapshot().devices)));
+        box.SelectedIndex(-1);
+    });
+    section.Children().Append(copy);
+
+    Button allOff;
+    allOff.Content(box_value(tr(L"Output_DspAllOff")));
+    allOff.Click([this](auto&&, auto&&) { changeOutputDsp({}); });
+    section.Children().Append(allOff);
+    return section;
+}
+
+void MainWindow::changeOutputDsp(const camel::OutputDsp& dsp) {
+    if (!editingOutput_) return;
+    auto edited = nativeSettings(editingOutput_->parameters);
+    camel::setOutputDsp(edited, dsp);
+    editingOutput_->parameters = settingsDto(edited);
+    if (outputDspText_) outputDspText_.Text(dspSummary(editingOutput_->parameters));
+    settingsChanged();
 }
 
 winrt::fire_and_forget MainWindow::askRenameOutput(Backend backend, std::string id, std::string alias, hstring label) {
@@ -4497,6 +4576,11 @@ void MainWindow::OnConvolutionRemoveClick(Windows::Foundation::IInspectable cons
 void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
     auto items = DspMenu().Items();
     items.Clear();
+    MenuFlyoutItem forOutput;
+    forOutput.Text(ui::format(L"Dsp_MenuForOutput", {std::wstring(dspOutputLabel_)}));
+    forOutput.IsEnabled(false);
+    items.Append(forOutput);
+    items.Append(MenuFlyoutSeparator());
     const auto toggle = [&](camel::audio::DspNode node, bool on, bool available, auto flip) {
         ToggleMenuFlyoutItem item;
         item.Text(tr(dspNodeKey(node)));

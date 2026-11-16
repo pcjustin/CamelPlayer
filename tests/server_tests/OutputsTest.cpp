@@ -783,3 +783,176 @@ TEST(OutputsTest, ANameThatIsNotUtf8DoesNotStopTheSettingsBeingSaved) {
     EXPECT_NO_THROW(text = toJson(s));
     EXPECT_NE(text.find("Caf"), std::string::npos);
 }
+
+namespace {
+
+OutputDsp someDsp() {
+    OutputDsp dsp;
+    dsp.eq.enabled = true;
+    dsp.eq.bands[2].gainDb = -6.0;
+    dsp.eq.preset = "Warm";
+    dsp.crossfeed.enabled = true;
+    dsp.crossfeed.preset = CrossfeedPreset::JanMeier;
+    dsp.convolution = {true, "C:\\Rooms\\desk.wav"};
+    dsp.dspOrder = {audio::DspNode::Convolution, audio::DspNode::Eq, audio::DspNode::Crossfeed};
+    dsp.replayGain.mode = ReplayGainMode::Album;
+    dsp.replayGain.preampDb = 3.0;
+    dsp.replayGain.preventClipping = false;
+    return dsp;
+}
+
+} // namespace
+
+TEST(OutputDspTest, EachOutputKeepsItsOwnAndAChangeReachesOnlyTheOneInUse) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Wasapi, "w-dave", catalog());
+    setOutputDsp(s, someDsp());
+    syncOutputs(s, catalog());
+
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    EXPECT_EQ(outputDsp(s), OutputDsp{});
+    s.crossfeed.enabled = true;
+    syncOutputs(s, catalog());
+
+    selectOutput(s, Backend::Wasapi, "w-dave", catalog());
+    EXPECT_EQ(outputDsp(s), someDsp());
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    EXPECT_TRUE(s.crossfeed.enabled);
+    EXPECT_FALSE(s.eq.enabled);
+    EXPECT_EQ(s.replayGain.mode, ReplayGainMode::Off);
+}
+
+TEST(OutputDspTest, AnOutputNewToItStartsWithAllOfItOff) {
+    Settings s = fresh();
+    setOutputDsp(s, someDsp());
+    syncOutputs(s, catalog());
+    setOutputEnabled(s, Backend::Ks, "k-dave", true, catalog());
+    selectOutput(s, Backend::Ks, "k-dave", catalog());
+    EXPECT_EQ(outputDsp(s), OutputDsp{});
+    selectOutput(s, Backend::Wasapi, "", catalog());
+    EXPECT_EQ(outputDsp(s), someDsp());
+}
+
+TEST(OutputDspTest, EveryOutputSharesTheEqPresets) {
+    Settings s = fresh();
+    s.eq.presets = {{"Warm", defaultEqBands()}};
+    s.eq.preset = "Warm";
+    syncOutputs(s, catalog());
+
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    EXPECT_EQ(s.eq.presets.size(), 1U);
+    EXPECT_EQ(s.eq.preset, "");
+    s.eq.presets.push_back({"Flat", defaultEqBands()});
+    syncOutputs(s, catalog());
+
+    selectOutput(s, Backend::Wasapi, "", catalog());
+    EXPECT_EQ(s.eq.presets.size(), 2U);
+    EXPECT_EQ(s.eq.preset, "Warm");
+    for (const auto& output : s.outputs) EXPECT_TRUE(output.dsp.eq.presets.empty()) << output.id;
+}
+
+TEST(OutputDspTest, EachOutputsSurvivesTheFile) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Wasapi, "w-dave", catalog());
+    setOutputDsp(s, someDsp());
+    syncOutputs(s, catalog());
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+    s.replayGain.mode = ReplayGainMode::Track;
+    syncOutputs(s, catalog());
+
+    const Settings read = fromJson(toJson(s));
+    EXPECT_EQ(read.outputs, s.outputs);
+    EXPECT_EQ(saved(read, Backend::Wasapi, "w-dave")->dsp, someDsp());
+    EXPECT_EQ(saved(read, Backend::Asio, "a-dave")->dsp.replayGain.mode, ReplayGainMode::Track);
+}
+
+// settings.json as 0.4.2 wrote it, with one DSP for every output.
+TEST(OutputDspTest, AnUpgradeGivesTheOneDspToEverySavedOutput) {
+    Settings s =
+        fromJson(R"({"schema":4,"backend":"asio","eq":{"enabled":true,"bands":[{"type":"peaking","frequency":1000,"gain":-6}],)"
+                 R"("presets":[{"name":"Warm","bands":[]}]},"crossfeed":{"enabled":true,"preset":"janMeier"},)"
+                 R"("replayGain":{"mode":"album"},"asio":{"driver":"a-dave"},"outputs":[)"
+                 R"({"backend":"asio","id":"a-dave","enabled":true},{"backend":"wasapi","id":"w-dave","enabled":true}]})");
+    ASSERT_EQ(s.outputs.size(), 2U);
+    for (const auto& output : s.outputs) {
+        EXPECT_TRUE(output.dsp.eq.enabled) << output.id;
+        EXPECT_EQ(output.dsp.eq.bands.size(), 1U) << output.id;
+        EXPECT_EQ(output.dsp.crossfeed.preset, CrossfeedPreset::JanMeier) << output.id;
+        EXPECT_EQ(output.dsp.replayGain.mode, ReplayGainMode::Album) << output.id;
+        EXPECT_TRUE(output.dsp.eq.presets.empty()) << output.id;
+    }
+    syncOutputs(s, catalog());
+    selectOutput(s, Backend::Wasapi, "w-dave", catalog());
+    EXPECT_TRUE(s.eq.enabled);
+    EXPECT_EQ(s.eq.presets.size(), 1U);
+    selectOutput(s, Backend::Ks, "k-dave", catalog());
+    EXPECT_EQ(outputDsp(s), OutputDsp{});
+}
+
+TEST(OutputDspTest, AnOutputsDialogTakesAnotherOutputsDsp) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Wasapi, "w-dave", catalog());
+    setOutputDsp(s, someDsp());
+    syncOutputs(s, catalog());
+    selectOutput(s, Backend::Asio, "a-dave", catalog());
+
+    Settings edited = withOutputParameters(s, Backend::Ks, "k-dave", catalog());
+    setOutputDsp(edited, outputDsp(withOutputParameters(s, Backend::Wasapi, "w-dave", catalog())));
+    keepOutputParameters(s, edited, Backend::Ks, "k-dave", catalog());
+    EXPECT_EQ(outputDsp(s), OutputDsp{});
+    EXPECT_EQ(saved(s, Backend::Ks, "k-dave")->dsp, someDsp());
+
+    Settings inUse = withOutputParameters(s, Backend::Asio, "a-dave", catalog());
+    setOutputDsp(inUse, outputDsp(withOutputParameters(s, Backend::Ks, "k-dave", catalog())));
+    keepOutputParameters(s, inUse, Backend::Asio, "a-dave", catalog());
+    EXPECT_EQ(outputDsp(s), someDsp());
+}
+
+// The Windows default moving to another device while it is followed brings that device's DSP to the window, which would
+// otherwise write the one it shows over it at its next change.
+TEST(OutputsFollowTest, TheDspOfTheDefaultDeviceMovedToReachesTheWindow) {
+    Settings server = fresh();
+    setOutputDsp(server, someDsp());
+    server.eq.presets = {{"Warm", defaultEqBands()}};
+    syncOutputs(server, catalog());
+    SettingsDto window = settingsDto(server);
+    DeviceCatalog moved = catalog();
+    moved.defaultWasapi = "w-dave";
+    moved.revision = 2;
+    syncOutputs(server, moved);
+    window.eq.presets.push_back({"Flat", defaultEqBands()});
+
+    EXPECT_EQ(ui::followServerOutputs(window, settingsDto(server), false), ui::OutputsRefill::Settings);
+    Settings shown = nativeSettings(window);
+    EXPECT_EQ(outputDsp(shown), OutputDsp{});
+    EXPECT_EQ(shown.eq.presets.size(), 2U);
+
+    SettingsDto unmoved = settingsDto(server);
+    unmoved.eq.enabled = true; // a change the window made that the Server has not taken yet
+    EXPECT_EQ(ui::followServerOutputs(unmoved, settingsDto(server), false), ui::OutputsRefill::Outputs);
+    EXPECT_TRUE(unmoved.eq.enabled);
+}
+
+TEST_F(OutputSwitchTest, TheNewOutputPlaysWithItsOwnDsp) {
+    waitUntilPlaying();
+    const auto processed = [](const Snapshot& s) {
+        return s.playback.state == PlaybackState::Playing && s.playback.plan &&
+               s.playback.plan->state == audio::PipelineState::Processed;
+    };
+    Settings s = nativeSettings(server_.snapshot().settings);
+    s.eq.enabled = true;
+    s.eq.bands[2].gainDb = -6.0;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(s);
+    server_.submit(std::move(apply));
+    ASSERT_TRUE(waitFor(processed));
+
+    switchTo(Backend::Wasapi, "w-dave");
+    EXPECT_TRUE(waitFor([&](const Snapshot& n) {
+        return n.settings.wasapi.deviceId == "w-dave" && n.playback.state == PlaybackState::Playing && n.playback.plan &&
+               !processed(n);
+    }));
+    switchTo(Backend::Wasapi, "");
+    EXPECT_TRUE(waitFor(processed));
+}

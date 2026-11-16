@@ -52,6 +52,7 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
     if (id.empty()) return;
     SavedOutput& saved = savedOutput(s, backend, id);
     saved.volumeMode = s.volume.mode;
+    saved.dsp = outputDsp(s);
     if (backend == Backend::Asio)
         saved.asio = s.asio;
     else if (backend == Backend::Ks)
@@ -73,6 +74,7 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     s.backend = backend;
     s.volume.mode = source.volumeMode;
     if (isNetworkPlayer(backend) && s.volume.mode == VolumeMode::Software) s.volume.mode = VolumeMode::Player;
+    setOutputDsp(s, source.dsp);
     if (backend == Backend::Asio) {
         s.asio = source.asio;
         s.asio.driverClsid = std::move(selected);
@@ -253,6 +255,7 @@ void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, 
                           const DeviceCatalog& devices) {
     const bool inUse = s.backend == backend && selectedId(s) == id;
     if (inUse) {
+        setOutputDsp(s, outputDsp(edited));
         if (backend == Backend::Asio)
             s.asio = edited.asio;
         else if (backend == Backend::Ks)

@@ -195,6 +195,22 @@ std::pair<uint32_t, double> crossfeedValues(const CrossfeedSettings& crossfeed) 
     }
 }
 
+OutputDsp outputDsp(const Settings& s) {
+    OutputDsp dsp{s.eq, s.crossfeed, s.convolution, s.dspOrder, s.replayGain};
+    dsp.eq.presets.clear();
+    return dsp;
+}
+
+void setOutputDsp(Settings& s, const OutputDsp& dsp) {
+    auto presets = std::move(s.eq.presets);
+    s.eq = dsp.eq;
+    s.eq.presets = std::move(presets);
+    s.crossfeed = dsp.crossfeed;
+    s.convolution = dsp.convolution;
+    s.dspOrder = dsp.dspOrder;
+    s.replayGain = dsp.replayGain;
+}
+
 std::vector<EqBand> defaultEqBands() {
     return {{EqKind::LowShelf, EqChannels::All, 12, 100.0},
             {EqKind::Peaking, EqChannels::All, 12, 400.0},
@@ -248,6 +264,103 @@ static std::vector<EqBand> eqBandsFrom(const json& list, const std::vector<EqBan
         bands.push_back(band);
     }
     return bands;
+}
+
+static std::string str(const json& o, const char* k, const std::string& def);
+static bool boolean(const json& o, const char* k, bool def);
+
+// Without the presets, which only the top level keeps.
+static json eqJson(const EqSettings& e) {
+    return {{"enabled", e.enabled}, {"bands", eqBandsJson(e.bands)}, {"preset", e.preset}};
+}
+
+static void readEq(const json& e, EqSettings& eq) {
+    eq.enabled = boolean(e, "enabled", false);
+    eq.bands = eqBandsFrom(e.contains("bands") ? e["bands"] : json(), defaultEqBands());
+    eq.preset = str(e, "preset", "");
+}
+
+static json crossfeedJson(const CrossfeedSettings& c) {
+    return {{"enabled", c.enabled}, {"preset", kCrossfeedPresetIds[int(c.preset)]}, {"cutoff", c.cutoffHz}, {"feed", c.feedDb}};
+}
+
+static void readCrossfeed(const json& c, CrossfeedSettings& crossfeed) {
+    const CrossfeedSettings defaults;
+    crossfeed.enabled = boolean(c, "enabled", false);
+    const auto preset = std::ranges::find(kCrossfeedPresetIds, str(c, "preset", "default"));
+    crossfeed.preset =
+        preset == std::end(kCrossfeedPresetIds) ? defaults.preset : CrossfeedPreset(preset - std::begin(kCrossfeedPresetIds));
+    if (c.contains("cutoff") && c["cutoff"].is_number_unsigned() &&
+        c["cutoff"].get<uint32_t>() >= CrossfeedSettings::kMinCutoffHz &&
+        c["cutoff"].get<uint32_t>() <= CrossfeedSettings::kMaxCutoffHz)
+        crossfeed.cutoffHz = c["cutoff"].get<uint32_t>();
+    if (c.contains("feed") && c["feed"].is_number() && c["feed"].get<double>() >= CrossfeedSettings::kMinFeedDb &&
+        c["feed"].get<double>() <= CrossfeedSettings::kMaxFeedDb)
+        crossfeed.feedDb = c["feed"].get<double>();
+}
+
+static json convolutionJson(const ConvolutionSettings& c) {
+    return {{"enabled", c.enabled}, {"file", c.file}};
+}
+
+static void readConvolution(const json& c, ConvolutionSettings& convolution) {
+    convolution.enabled = boolean(c, "enabled", false);
+    convolution.file = str(c, "file", "");
+}
+
+static json replayGainJson(const ReplayGainSettings& r) {
+    return {{"mode", kReplayGainModeIds[int(r.mode)]},
+            {"preamp", r.preampDb},
+            {"noValuePreamp", r.noValuePreampDb},
+            {"preventClipping", r.preventClipping}};
+}
+
+static void readReplayGain(const json& r, ReplayGainSettings& replayGain) {
+    const auto mode = std::ranges::find(kReplayGainModeIds, str(r, "mode", "off"));
+    replayGain.mode =
+        mode == std::end(kReplayGainModeIds) ? ReplayGainMode::Off : ReplayGainMode(mode - std::begin(kReplayGainModeIds));
+    replayGain.preampDb = num(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+    replayGain.noValuePreampDb = num(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
+    replayGain.preventClipping = boolean(r, "preventClipping", true);
+}
+
+static json dspOrderJson(const audio::DspOrder& order) {
+    json out = json::array();
+    for (const auto node : order) out.push_back(kDspNodeIds[int(node) - 1]);
+    return out;
+}
+
+// An order that does not name each node once is ignored.
+static void readDspOrder(const json& list, audio::DspOrder& dspOrder) {
+    if (!list.is_array() || list.size() != 3) return;
+    audio::DspOrder order = audio::kDefaultDspOrder;
+    for (size_t i = 0; i < 3; ++i) {
+        const auto& item = list[i];
+        const auto id = std::ranges::find(kDspNodeIds, item.is_string() ? item.get<std::string>() : std::string());
+        if (id == std::end(kDspNodeIds)) return;
+        order[i] = audio::DspNode(id - std::begin(kDspNodeIds) + 1);
+    }
+    auto sorted = order;
+    std::ranges::sort(sorted);
+    if (sorted == audio::kDefaultDspOrder) dspOrder = order;
+}
+
+static json dspJson(const OutputDsp& d) {
+    return {{"eq", eqJson(d.eq)},
+            {"crossfeed", crossfeedJson(d.crossfeed)},
+            {"convolution", convolutionJson(d.convolution)},
+            {"order", dspOrderJson(d.dspOrder)},
+            {"replayGain", replayGainJson(d.replayGain)}};
+}
+
+static OutputDsp dspFrom(const json& d) {
+    OutputDsp dsp;
+    if (d.contains("eq") && d["eq"].is_object()) readEq(d["eq"], dsp.eq);
+    if (d.contains("crossfeed") && d["crossfeed"].is_object()) readCrossfeed(d["crossfeed"], dsp.crossfeed);
+    if (d.contains("convolution") && d["convolution"].is_object()) readConvolution(d["convolution"], dsp.convolution);
+    if (d.contains("order")) readDspOrder(d["order"], dsp.dspOrder);
+    if (d.contains("replayGain") && d["replayGain"].is_object()) readReplayGain(d["replayGain"], dsp.replayGain);
+    return dsp;
 }
 
 static json timingJson(const PlaybackTiming& t) {
@@ -491,11 +604,13 @@ static json outputJson(const SavedOutput& o) {
                       : o.backend == Backend::Asio    ? asioJson(o.asio)
                       : o.backend == Backend::Ks      ? ksJson(o.ks)
                                                       : wasapiJson(o.wasapi);
+    j["dsp"] = dspJson(o.dsp);
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
     return j;
 }
 
-static std::optional<SavedOutput> outputFrom(const json& o) {
+// An output saved before each had its own DSP takes `shared`, the one DSP of every output then.
+static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& shared) {
     SavedOutput saved;
     if (!o.is_object() || !backendFromId(str(o, "backend", ""), saved.backend)) return std::nullopt;
     saved.id = str(o, "id", "");
@@ -503,6 +618,7 @@ static std::optional<SavedOutput> outputFrom(const json& o) {
     saved.alias = str(o, "alias", "");
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));
+    saved.dsp = o.contains("dsp") && o["dsp"].is_object() ? dspFrom(o["dsp"]) : shared;
     if (o.contains("speakers") && o["speakers"].is_array())
         for (const auto& speaker : o["speakers"])
             if (speaker.is_string()) saved.speakers.push_back(speaker.get<std::string>());
@@ -559,20 +675,14 @@ std::string toJson(const Settings& s) {
                     {"next", {s.hotkeys.next.modifiers, s.hotkeys.next.key}}};
     json presets = json::array();
     for (const auto& p : s.eq.presets) presets.push_back({{"name", p.name}, {"bands", eqBandsJson(p.bands)}});
-    j["eq"] = {{"enabled", s.eq.enabled}, {"bands", eqBandsJson(s.eq.bands)}, {"preset", s.eq.preset}, {"presets", presets}};
-    j["crossfeed"] = {{"enabled", s.crossfeed.enabled},
-                      {"preset", kCrossfeedPresetIds[int(s.crossfeed.preset)]},
-                      {"cutoff", s.crossfeed.cutoffHz},
-                      {"feed", s.crossfeed.feedDb}};
-    j["convolution"] = {{"enabled", s.convolution.enabled}, {"file", s.convolution.file}};
+    j["eq"] = eqJson(s.eq);
+    j["eq"]["presets"] = presets;
+    j["crossfeed"] = crossfeedJson(s.crossfeed);
+    j["convolution"] = convolutionJson(s.convolution);
     j["volume"] = {{"mode", volumeModeId(s.volume.mode)}, {"db", s.volume.db}, {"muted", s.volume.muted}};
-    j["replayGain"] = {{"mode", kReplayGainModeIds[int(s.replayGain.mode)]},
-                       {"preamp", s.replayGain.preampDb},
-                       {"noValuePreamp", s.replayGain.noValuePreampDb},
-                       {"preventClipping", s.replayGain.preventClipping}};
+    j["replayGain"] = replayGainJson(s.replayGain);
     j["crossfade"] = {{"enabled", s.crossfade.enabled}, {"seconds", s.crossfade.seconds}};
-    j["dspOrder"] = json::array();
-    for (const auto node : s.dspOrder) j["dspOrder"].push_back(kDspNodeIds[int(node) - 1]);
+    j["dspOrder"] = dspOrderJson(s.dspOrder);
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = wasapiJson(s.wasapi);
     j["asio"] = asioJson(s.asio);
@@ -671,78 +781,40 @@ Settings fromJson(const std::string& text) {
     }
     if (j.contains("eq") && j["eq"].is_object()) {
         const json& e = j["eq"];
-        s.eq.enabled = boolean(e, "enabled", false);
-        s.eq.bands = eqBandsFrom(e.contains("bands") ? e["bands"] : json(), defaultEqBands());
-        s.eq.preset = str(e, "preset", "");
+        readEq(e, s.eq);
         if (e.contains("presets") && e["presets"].is_array())
             for (const auto& p : e["presets"])
                 if (p.is_object() && p.contains("name") && p["name"].is_string() && !p["name"].get<std::string>().empty())
                     s.eq.presets.push_back(
                         {p["name"].get<std::string>(), eqBandsFrom(p.contains("bands") ? p["bands"] : json(), {})});
     }
-    if (j.contains("crossfeed") && j["crossfeed"].is_object()) {
-        const json& c = j["crossfeed"];
-        const CrossfeedSettings defaults;
-        s.crossfeed.enabled = boolean(c, "enabled", false);
-        const auto preset = std::ranges::find(kCrossfeedPresetIds, str(c, "preset", "default"));
-        s.crossfeed.preset =
-            preset == std::end(kCrossfeedPresetIds) ? defaults.preset : CrossfeedPreset(preset - std::begin(kCrossfeedPresetIds));
-        if (c.contains("cutoff") && c["cutoff"].is_number_unsigned() &&
-            c["cutoff"].get<uint32_t>() >= CrossfeedSettings::kMinCutoffHz &&
-            c["cutoff"].get<uint32_t>() <= CrossfeedSettings::kMaxCutoffHz)
-            s.crossfeed.cutoffHz = c["cutoff"].get<uint32_t>();
-        if (c.contains("feed") && c["feed"].is_number() && c["feed"].get<double>() >= CrossfeedSettings::kMinFeedDb &&
-            c["feed"].get<double>() <= CrossfeedSettings::kMaxFeedDb)
-            s.crossfeed.feedDb = c["feed"].get<double>();
-    }
-    if (j.contains("convolution") && j["convolution"].is_object()) {
-        s.convolution.enabled = boolean(j["convolution"], "enabled", false);
-        s.convolution.file = str(j["convolution"], "file", "");
-    }
+    if (j.contains("crossfeed") && j["crossfeed"].is_object()) readCrossfeed(j["crossfeed"], s.crossfeed);
+    if (j.contains("convolution") && j["convolution"].is_object()) readConvolution(j["convolution"], s.convolution);
     if (j.contains("volume") && j["volume"].is_object()) {
         const json& v = j["volume"];
         s.volume.mode = volumeModeFromId(str(v, "mode", "fixed"));
         s.volume.db = num(v, "db", 0.0, VolumeSettings::kMinDb, 0.0);
         s.volume.muted = boolean(v, "muted", false);
     }
-    if (j.contains("replayGain") && j["replayGain"].is_object()) {
-        const json& r = j["replayGain"];
-        const auto mode = std::ranges::find(kReplayGainModeIds, str(r, "mode", "off"));
-        s.replayGain.mode =
-            mode == std::end(kReplayGainModeIds) ? ReplayGainMode::Off : ReplayGainMode(mode - std::begin(kReplayGainModeIds));
-        s.replayGain.preampDb = num(r, "preamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
-        s.replayGain.noValuePreampDb =
-            num(r, "noValuePreamp", 0.0, ReplayGainSettings::kMinPreampDb, ReplayGainSettings::kMaxPreampDb);
-        s.replayGain.preventClipping = boolean(r, "preventClipping", true);
-    }
+    if (j.contains("replayGain") && j["replayGain"].is_object()) readReplayGain(j["replayGain"], s.replayGain);
     if (j.contains("crossfade") && j["crossfade"].is_object()) {
         const json& c = j["crossfade"];
         s.crossfade.enabled = boolean(c, "enabled", false);
         const double seconds = num(c, "seconds", 3.0, CrossfadeSettings::kMinSeconds, CrossfadeSettings::kMaxSeconds);
         s.crossfade.seconds = std::round(seconds * 2.0) / 2.0;
     }
-    if (j.contains("dspOrder") && j["dspOrder"].is_array() && j["dspOrder"].size() == 3) {
-        audio::DspOrder order = audio::kDefaultDspOrder;
-        bool known = true;
-        for (size_t i = 0; i < 3 && known; ++i) {
-            const auto& item = j["dspOrder"][i];
-            const auto id = std::ranges::find(kDspNodeIds, item.is_string() ? item.get<std::string>() : std::string());
-            known = id != std::end(kDspNodeIds);
-            if (known) order[i] = audio::DspNode(id - std::begin(kDspNodeIds) + 1);
-        }
-        auto sorted = order;
-        std::ranges::sort(sorted);
-        if (known && sorted == audio::kDefaultDspOrder) s.dspOrder = order;
-    }
+    if (j.contains("dspOrder")) readDspOrder(j["dspOrder"], s.dspOrder);
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) readWasapi(j["wasapi"], s.wasapi);
     if (j.contains("asio") && j["asio"].is_object()) readAsio(j["asio"], s.asio);
     if (j.contains("ks") && j["ks"].is_object()) readKs(j["ks"], s.ks);
     if (j.contains("network") && j["network"].is_object()) readNetwork(j["network"], s.network);
     if (j.contains("airplay") && j["airplay"].is_object()) readAirPlay(j["airplay"], s.airplay);
-    if (j.contains("outputs") && j["outputs"].is_array())
+    if (j.contains("outputs") && j["outputs"].is_array()) {
+        const OutputDsp shared = outputDsp(s);
         for (const auto& item : j["outputs"])
-            if (auto output = outputFrom(item)) s.outputs.push_back(std::move(*output));
+            if (auto output = outputFrom(item, shared)) s.outputs.push_back(std::move(*output));
+    }
     if (j.contains("airplayGroup") && j["airplayGroup"].is_array())
         for (const auto& id : j["airplayGroup"])
             if (id.is_string() && std::ranges::find(s.airplayGroup, id.get<std::string>()) == s.airplayGroup.end())

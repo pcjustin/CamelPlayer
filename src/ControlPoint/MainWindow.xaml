@@ -382,6 +382,7 @@
                                     <FontIcon Glyph="&#xE767;" FontSize="20" />
                                     <TextBlock x:Uid="Settings_VolumeCard" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
+                                <TextBlock x:Name="VolumeOutputText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock x:Uid="Settings_Volume" Style="{StaticResource GroupHeaderStyle}" />
                                 <ComboBox x:Name="VolumeModeCombo" x:Uid="Settings_VolumeMode" Width="240" SelectionChanged="OnVolumeModeChanged">
@@ -434,6 +435,7 @@
                                     <FontIcon Glyph="&#xE7F6;" FontSize="20" />
                                     <TextBlock x:Uid="Settings_DspChain" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
+                                <TextBlock x:Name="DspOutputText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock x:Name="DspSummaryText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock x:Uid="Settings_DspOrder" Style="{StaticResource GroupHeaderStyle}" />
