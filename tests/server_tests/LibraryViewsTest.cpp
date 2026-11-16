@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <random>
 
+#include "ControlPoint/FolderTrail.h"
 #include "ControlPoint/TreeReads.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/LibraryViews.h"
@@ -422,6 +423,30 @@ INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,
     ASSERT_EQ(all.size(), 2u);
     EXPECT_TRUE(all[0].online);
     EXPECT_FALSE(all[1].online);
+}
+
+// The Folders page's trail starts with "Folders", the list of every library folder, at a library folder and two levels
+// below it; its first item opens that list from either.
+TEST_F(LibraryViewsTest, TheFolderTrailStartsWithTheListOfLibraryFolders) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec(R"sql(
+INSERT INTO folders(id,root_id,parent_id,path,name) VALUES(6,1,1,'c:\m\c','c'),(7,1,6,'c:\m\c\d','d');
+INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(8,7,1,'c:\m\c\d\1.flac','audio',1,1,1);
+INSERT INTO tracks(id,file_id,title) VALUES(7,8,'Nested');
+)sql");
+        })
+        .get();
+    const auto atRoot = ui::folderTrail(browseFolder(*store, 1).trail, "Folders");
+    EXPECT_EQ(atRoot, (std::vector<ui::FolderStep>{{std::nullopt, "Folders"}, {1, "m"}}));
+    const auto below = ui::folderTrail(browseFolder(*store, 7).trail, "Folders");
+    EXPECT_EQ(below, (std::vector<ui::FolderStep>{{std::nullopt, "Folders"}, {1, "m"}, {6, "c"}, {7, "d"}}));
+    for (const auto& trail : {atRoot, below}) {
+        const auto opened = browseFolder(*store, trail.front().folder);
+        ASSERT_EQ(opened.folders.size(), 1u); // the online library folder; the offline one is hidden
+        EXPECT_EQ(opened.folders[0].id, 1);
+        EXPECT_TRUE(opened.trail.empty());
+    }
 }
 
 TEST_F(LibraryViewsTest, FoldersCountTheTracksBelowThemAndPlayInTreeOrder) {

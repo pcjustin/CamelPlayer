@@ -1116,9 +1116,9 @@ void LibraryView::loadFolder() {
             restoreOffset();
             selectPendingTrack(FolderList());
             if (listing->trail.empty()) return;
+            folderTrail_ = ui::folderTrail(listing->trail, winrt::to_string(tr(L"Nav_Folders/Content")));
             auto names = single_threaded_vector<Windows::Foundation::IInspectable>();
-            for (const auto& step : listing->trail) names.Append(box_value(ui::utf8(step.name)));
-            folderTrail_ = listing->trail;
+            for (const auto& step : folderTrail_) names.Append(box_value(ui::utf8(step.name)));
             FolderTrail().ItemsSource(names);
             HeaderTitle().Text(ui::utf8(folderTrail_.back().name));
         });
@@ -2170,7 +2170,7 @@ void LibraryView::OnTrailClicked(BreadcrumbBar const&, BreadcrumbBarItemClickedE
     if (index + 1 >= folderTrail_.size()) return; // the folder already shown
     View view;
     view.mode = Mode::Folders;
-    view.folder = folderTrail_[index].id;
+    view.folder = folderTrail_[index].folder; // none: every library folder
     view.title = ui::utf8(folderTrail_[index].name);
     open(std::move(view), true);
 }

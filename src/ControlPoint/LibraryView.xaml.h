@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include "Server/Api/ServerApi.h"
 #include "AlbumBadges.h"
+#include "FolderTrail.h"
 
 namespace winrt::CamelPlayer::implementation {
 
@@ -279,7 +280,7 @@ private:
     int treeOpening_ = 0; // folders of treeItems_ being read; the pending track is selected once none is
     // The track artists of the album or artist page split into names, by credit; empty on other pages.
     std::unordered_map<std::string, std::vector<camel::server::LibraryNamePart>> credits_;
-    std::vector<camel::server::LibraryFolderEntry> folderTrail_;
+    std::vector<ui::FolderStep> folderTrail_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer refreshTimer_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyout rowMenu_{nullptr}, cardMenu_{nullptr};
     Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase rowScanSeparator_{nullptr};
