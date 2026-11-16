@@ -41,7 +41,8 @@ The screenshots show a demo library with made-up albums, covers and lyrics.
 - **An output menu** in the player bar switches between the outputs you enable in Settings › Audio outputs, each with a name of your choice, and playback goes on from the audible position with the queue unchanged.
 - **Network players:** UPnP AV and OpenHome players on your network, played at the source's format with raw DSD as DSF where they declare it, gapless through the player's next-track function or OpenHome playlist, and with their own remote, app and volume still working. Windows Firewall needs one rule for them, for this program on private networks only, which CamelPlayer offers to add.
 - **AirPlay:** Apple's own receivers, including HomePods and a HomePod stereo pair, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule. Several receivers play together in step, each with its own volume under the group's slider, and a single speaker can play the left or the right channel alone, so that two make a stereo pair.
-- **Output settings for each device:** a fixed sample rate, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
+- **Upsampling for each output:** follow the file, integer to the highest rate of the file's family, integer by 2×, 4× or 8×, any rate to the highest, or a set rate, with each output's own libsoxr filter (quality, linear, intermediate or minimum phase, and standard, steep or gentle passband). DSD converted to PCM follows it too.
+- **Output settings for each device:** a sample rate or upsampling, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
 
 ### Library
 
@@ -113,11 +114,11 @@ Files are recognized by their content, not their extension. Mono files are copie
 | UPnP AV, OpenHome | To the player | DSF or to PCM | Streamed at the source's format; the highest rate and bit depth can be limited for a player that declares more than it plays. |
 | AirPlay | CD format only | To PCM only | AirPlay 1: 44.1 kHz/16-bit stereo. A receiver plays about 2 seconds behind what is sent, and the position shown allows for it. |
 
-Every output except AirPlay and WASAPI shared mode can be given a highest PCM and a highest DSD sample rate, for a DAC or a converter that carries less than the device announces. PCM above the highest rate is resampled to the top rate of its own family. DSD above the highest DSD rate is modulated again at that rate, so it stays DSD, with DSP bypassed, and is shown as processed.
+Every output except AirPlay and WASAPI shared mode can be given a highest PCM and a highest DSD sample rate, for a DAC or a converter that carries less than the device announces. PCM above the highest rate is resampled to the top rate of its own family, and upsampling goes no higher than it. DSD above the highest DSD rate is modulated again at that rate, so it stays DSD, with DSP bypassed, and is shown as processed.
 
 AirPlay is a trademark of Apple Inc.
 
-DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where the device offers 1411.2 kHz. DSD becomes PCM only when you set a backend's DSD output to PCM or allow it after native DSD and DoP were refused: it is decimated to 352.8 kHz with a multistage FIR filter (100% modulation = 0 dBFS), resampled with libsoxr to 88.2, 176.4 or 352.8 kHz and quantized once. Allowed PCM conversions use libsoxr for resampling and TPDF dither for a lower bit depth.
+DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where the device offers 1411.2 kHz. DSD becomes PCM only when you set a backend's DSD output to PCM or allow it after native DSD and DoP were refused: it is decimated to 352.8 kHz with a multistage FIR filter (100% modulation = 0 dBFS), resampled with libsoxr to 88.2, 176.4 or 352.8 kHz, or to the rate the output's upsampling picks, and quantized once. Allowed PCM conversions use libsoxr for resampling, with each output's own quality, phase and passband, and TPDF dither for a lower bit depth.
 
 ## Keyboard and mouse
 
