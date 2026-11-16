@@ -27,16 +27,18 @@ SavedOutput& savedOutput(Settings& s, Backend backend, const std::string& id) {
     if (found != s.outputs.end()) return *found;
     SavedOutput added = newOutput(backend);
     added.id = id;
-    added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = added.airplay.deviceId = id;
+    added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = added.airplay.deviceId =
+        added.hqplayer.address = id;
     return s.outputs.emplace_back(std::move(added));
 }
 
 const std::string& selectedId(const Settings& s) {
-    return s.backend == Backend::Asio      ? s.asio.driverClsid
-           : s.backend == Backend::Ks      ? s.ks.deviceId
-           : s.backend == Backend::Network ? s.network.udn
-           : s.backend == Backend::AirPlay ? s.airplay.deviceId
-                                           : s.wasapi.deviceId;
+    return s.backend == Backend::Asio       ? s.asio.driverClsid
+           : s.backend == Backend::Ks       ? s.ks.deviceId
+           : s.backend == Backend::Network  ? s.network.udn
+           : s.backend == Backend::AirPlay  ? s.airplay.deviceId
+           : s.backend == Backend::HQPlayer ? s.hqplayer.address
+                                            : s.wasapi.deviceId;
 }
 
 bool followsDefault(const Settings& s) {
@@ -61,9 +63,12 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
         saved.network = s.network;
     else if (backend == Backend::AirPlay)
         saved.airplay = s.airplay;
+    else if (backend == Backend::HQPlayer)
+        saved.hqplayer = s.hqplayer;
     else
         saved.wasapi = s.wasapi;
-    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId = id;
+    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId =
+        saved.hqplayer.address = id;
 }
 
 // Puts `device`'s parameters, or the defaults for a device without any, in Settings' fields for the output `selected`.
@@ -87,6 +92,9 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     } else if (backend == Backend::AirPlay) {
         s.airplay = source.airplay;
         s.airplay.deviceId = std::move(selected);
+    } else if (backend == Backend::HQPlayer) {
+        s.hqplayer = source.hqplayer;
+        s.hqplayer.address = std::move(selected);
     } else {
         s.wasapi = source.wasapi;
         s.wasapi.deviceId = std::move(selected);
@@ -112,11 +120,12 @@ void adoptSets(Settings& s, const DeviceCatalog& devices) {
 }
 
 const std::vector<DeviceInfo>& devicesOf(const DeviceCatalog& devices, Backend backend) {
-    return backend == Backend::Asio      ? devices.asio
-           : backend == Backend::Ks      ? devices.ks
-           : backend == Backend::Network ? devices.network
-           : backend == Backend::AirPlay ? devices.airplay
-                                         : devices.wasapi;
+    return backend == Backend::Asio       ? devices.asio
+           : backend == Backend::Ks       ? devices.ks
+           : backend == Backend::Network  ? devices.network
+           : backend == Backend::AirPlay  ? devices.airplay
+           : backend == Backend::HQPlayer ? devices.hqplayer
+                                          : devices.wasapi;
 }
 
 const DeviceInfo* findDevice(const DeviceCatalog& devices, Backend backend, const std::string& id) {
@@ -208,7 +217,8 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
         }
         rows.push_back(std::move(row));
     };
-    for (const Backend backend : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network, Backend::AirPlay}) {
+    for (const Backend backend :
+         {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network, Backend::AirPlay, Backend::HQPlayer}) {
         if (backend == Backend::Wasapi) add(backend, {}, {}, true, {});
         for (const auto& device : devicesOf(devices, backend)) add(backend, device.id, device.name, true, device.unsupported);
         for (const auto& saved : s.outputs)
@@ -264,6 +274,8 @@ void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, 
             s.network = edited.network;
         else if (backend == Backend::AirPlay)
             s.airplay = edited.airplay;
+        else if (backend == Backend::HQPlayer)
+            s.hqplayer = edited.hqplayer;
         else
             s.wasapi = edited.wasapi;
         return;
@@ -316,6 +328,15 @@ void setOutputEnabled(Settings& s, Backend backend, const std::string& id, bool 
     // The output menu lists only enabled receivers, so one turned off there could never be taken out of the group.
     if (!enabled && backend == Backend::AirPlay) std::erase(s.airplayGroup, id);
     syncOutputs(s, devices);
+}
+
+bool addHQPlayer(Settings& s, const std::string& address, const std::string& name, const DeviceCatalog& devices) {
+    if (findOutput(s, Backend::HQPlayer, address)) return false;
+    SavedOutput& added = savedOutput(s, Backend::HQPlayer, address);
+    added.name = name;
+    added.enabled = true;
+    syncOutputs(s, devices);
+    return true;
 }
 
 void renameOutput(Settings& s, Backend backend, const std::string& id, const std::string& alias, const DeviceCatalog& devices) {

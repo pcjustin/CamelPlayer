@@ -53,6 +53,7 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
     case Backend::Asio:
     case Backend::Network:
     case Backend::AirPlay:
+    case Backend::HQPlayer:
         return std::nullopt; // the driver or the player dictates the type
     }
     return std::nullopt;
@@ -149,6 +150,8 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
         return a.network.udn == b.network.udn && a.network.gapless == b.network.gapless;
     case Backend::AirPlay: // the receivers come and go in the one stream (AirPlayOutput.h)
         return true;
+    case Backend::HQPlayer:
+        return a.hqplayer.address == b.hqplayer.address;
     }
     return false;
 }

@@ -548,6 +548,7 @@ json toJson(const Snapshot& s) {
               {"ks", toJson(s.devices.ks)},
               {"network", toJson(s.devices.network)},
               {"airplay", toJson(s.devices.airplay)},
+              {"hqplayer", toJson(s.devices.hqplayer)},
               {"defaultWasapi", s.devices.defaultWasapi}}},
             {"commandError", optionalJson(s.commandError)},
             {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
@@ -570,6 +571,7 @@ Snapshot snapshotFromJson(const json& j) {
     s.devices.ks = devicesFrom(devices, "ks");
     s.devices.network = devicesFrom(devices, "network");
     s.devices.airplay = devicesFrom(devices, "airplay");
+    s.devices.hqplayer = devicesFrom(devices, "hqplayer");
     s.devices.defaultWasapi = value<std::string>(devices, "defaultWasapi");
     s.commandError = optional<Failure>(j, "commandError", failureFrom);
     s.controlPanelOpened = optional<bool>(j, "controlPanelOpened", [](const json& v) {

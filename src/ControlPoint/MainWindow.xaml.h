@@ -212,6 +212,7 @@ private:
     void populateOutputs();
     void showOutputsOf(const camel::server::SettingsDto& server);
     void changeOutputs(std::function<void(camel::Settings&, const camel::server::DeviceCatalog&)> const& change);
+    winrt::fire_and_forget askAddHQPlayer();
     winrt::fire_and_forget askRenameOutput(camel::Backend backend, std::string id, std::string alias, hstring label);
     winrt::fire_and_forget askDeleteOutput(camel::Backend backend, std::string id, hstring label);
     winrt::fire_and_forget askFirewallRule();

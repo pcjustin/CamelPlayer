@@ -55,6 +55,7 @@ struct SettingsDto {
     KsSettings ks;
     NetworkSettings network;
     AirPlaySettings airplay;
+    HQPlayerSettings hqplayer;
     std::string language;
     CloseAction closeAction = CloseAction::Tray;
     Theme theme = Theme::System;
@@ -269,9 +270,10 @@ struct DeviceInfo {
 struct DeviceCatalog {
     uint64_t revision = 0;
     std::vector<DeviceInfo> wasapi, asio, ks;
-    std::vector<DeviceInfo> network; // UPnP AV and OpenHome players, by UDN
-    std::vector<DeviceInfo> airplay; // AirPlay receivers, by device ID
-    std::string defaultWasapi;       // the Windows default render endpoint; empty when there is none
+    std::vector<DeviceInfo> network;  // UPnP AV and OpenHome players, by UDN
+    std::vector<DeviceInfo> airplay;  // AirPlay receivers, by device ID
+    std::vector<DeviceInfo> hqplayer; // HQPlayers found or added that answer, by host:port
+    std::string defaultWasapi;        // the Windows default render endpoint; empty when there is none
     bool operator==(const DeviceCatalog&) const = default;
 };
 

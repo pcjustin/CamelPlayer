@@ -50,6 +50,8 @@ void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, 
                           const DeviceCatalog& devices);
 // The output in use stays enabled.
 void setOutputEnabled(Settings& s, Backend backend, const std::string& id, bool enabled, const DeviceCatalog& devices);
+// An HQPlayer by its address, "host:port", enabled; false when it is saved already.
+bool addHQPlayer(Settings& s, const std::string& address, const std::string& name, const DeviceCatalog& devices);
 void renameOutput(Settings& s, Backend backend, const std::string& id, const std::string& alias, const DeviceCatalog& devices);
 // Clears its parameters, name and enabled state; found again, it starts from the defaults. "Windows default device" is
 // not a device and stays.

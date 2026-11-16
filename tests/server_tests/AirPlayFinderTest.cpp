@@ -577,7 +577,9 @@ TEST(AirPlayServerTest, EnablingAReceiverAsksItAndARefusalTakesItBackOff) {
         return !server.snapshot().devices.airplay.front().unsupported.empty();
     }));
     const auto snapshot = server.snapshot();
-    const auto row = outputRows(nativeSettings(snapshot.settings), snapshot.devices).back();
+    const auto rows = outputRows(nativeSettings(snapshot.settings), snapshot.devices);
+    const auto row =
+        *std::ranges::find_if(rows, [](const OutputRow& r) { return r.backend == Backend::AirPlay && r.id == "800A805D016B"; });
     EXPECT_EQ(row.unsupported, "refused");
     EXPECT_FALSE(row.enabled);
 }

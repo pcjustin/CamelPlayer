@@ -730,6 +730,11 @@ Details: {0}</value></data>
   <data name="Output_AirPlayRefused" xml:space="preserve"><value>Not supported: refuses this connection</value></data>
   <data name="SignalPath_Receiver" xml:space="preserve"><value>AirPlay receiver</value></data>
   <data name="Volume_NoteAirPlay" xml:space="preserve"><value>The receiver's volume moves its own level, and the stream stays bit-perfect. AirPlay cannot read the level back, so CamelPlayer remembers the last one you set for each receiver and a change on the receiver itself is not shown.</value></data>
+  <data name="Output_AddHQPlayer" xml:space="preserve"><value>Add HQPlayer</value></data>
+  <data name="Output_HQPlayerHost" xml:space="preserve"><value>Host name or address (localhost for this computer)</value></data>
+  <data name="Output_HQPlayerPort" xml:space="preserve"><value>Port</value></data>
+  <data name="Output_HQPlayerAdd" xml:space="preserve"><value>Add</value></data>
+  <data name="Output_HQPlayerNote" xml:space="preserve"><value>HQPlayer on this computer is listed by itself. One on another computer needs “Allow control from network” turned on in HQPlayer and is then found by itself too, so add it here only when it is not found.</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>Network players</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>Let network players reach CamelPlayer?</value></data>
   <data name="Firewall_Text" xml:space="preserve"><value>Network players fetch their music from CamelPlayer, so Windows Firewall has to let them in. CamelPlayer adds one rule, for this program on private networks only. Windows asks for an administrator to do that.</value></data>

@@ -458,6 +458,7 @@ TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
                                               "ks",
                                               "network",
                                               "airplay",
+                                              "hqplayer",
                                               "airplayGroup",
                                               "airplayLevels",
                                               "outputs",

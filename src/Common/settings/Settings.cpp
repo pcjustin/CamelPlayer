@@ -38,6 +38,8 @@ const char* backendId(Backend b) {
         return "network";
     case Backend::AirPlay:
         return "airplay";
+    case Backend::HQPlayer:
+        return "hqplayer";
     }
     return "wasapi";
 }
@@ -54,12 +56,14 @@ const char* backendName(Backend b) {
         return "UPnP";
     case Backend::AirPlay:
         return "AirPlay";
+    case Backend::HQPlayer:
+        return "HQPlayer";
     }
     return "?";
 }
 
 bool backendFromId(std::string_view id, Backend& out) {
-    for (Backend b : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network, Backend::AirPlay})
+    for (Backend b : {Backend::Wasapi, Backend::Asio, Backend::Ks, Backend::Network, Backend::AirPlay, Backend::HQPlayer})
         if (id == backendId(b)) {
             out = b;
             return true;
@@ -380,6 +384,7 @@ uint32_t fixedRate(const Settings& s) {
     case Backend::Network:
         return s.network.fixedRate;
     case Backend::AirPlay:
+    case Backend::HQPlayer:
         return 0;
     }
     return 0;
@@ -396,6 +401,7 @@ Upsampling upsampling(const Settings& s) {
     case Backend::Network:
         return s.network.upsampling;
     case Backend::AirPlay:
+    case Backend::HQPlayer:
         return Upsampling::Off;
     }
     return Upsampling::Off;
@@ -419,6 +425,7 @@ ResampleFilter resampleFilter(const Settings& s) {
     case Backend::Network:
         return s.network.filter;
     case Backend::AirPlay:
+    case Backend::HQPlayer:
         return {.quality = s.resampleQuality};
     }
     return {};
@@ -435,6 +442,7 @@ uint32_t maxSampleRate(const Settings& s) {
     case Backend::Network:
         return s.network.maxSampleRate;
     case Backend::AirPlay:
+    case Backend::HQPlayer:
         return 0;
     }
     return 0;
@@ -451,17 +459,19 @@ uint32_t maxDsdByteRate(const Settings& s) {
     case Backend::Network:
         return dsdByteRate(s.network.maxDsdRate);
     case Backend::AirPlay:
+    case Backend::HQPlayer:
         return 0;
     }
     return 0;
 }
 
 const PlaybackTiming& timing(const Settings& s) {
-    return s.backend == Backend::Asio      ? s.asio.timing
-           : s.backend == Backend::Ks      ? s.ks.timing
-           : s.backend == Backend::Network ? s.network.timing
-           : s.backend == Backend::AirPlay ? s.airplay.timing
-                                           : s.wasapi.timing;
+    return s.backend == Backend::Asio       ? s.asio.timing
+           : s.backend == Backend::Ks       ? s.ks.timing
+           : s.backend == Backend::Network  ? s.network.timing
+           : s.backend == Backend::AirPlay  ? s.airplay.timing
+           : s.backend == Backend::HQPlayer ? s.hqplayer.timing
+                                            : s.wasapi.timing;
 }
 
 audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat format) {
@@ -669,15 +679,24 @@ static void readAirPlay(const json& o, AirPlaySettings& a) {
     readTiming(o, a.timing);
 }
 
+static json hqplayerJson(const HQPlayerSettings& h) {
+    return {{"address", h.address}};
+}
+
+static void readHQPlayer(const json& o, HQPlayerSettings& h) {
+    h.address = str(o, "address", "");
+}
+
 static json outputJson(const SavedOutput& o) {
     json j = {
         {"backend", backendId(o.backend)},         {"id", o.id}, {"name", o.name}, {"alias", o.alias}, {"enabled", o.enabled},
         {"volumeMode", volumeModeId(o.volumeMode)}};
-    j["parameters"] = o.backend == Backend::Network   ? networkJson(o.network)
-                      : o.backend == Backend::AirPlay ? airplayJson(o.airplay)
-                      : o.backend == Backend::Asio    ? asioJson(o.asio)
-                      : o.backend == Backend::Ks      ? ksJson(o.ks)
-                                                      : wasapiJson(o.wasapi);
+    j["parameters"] = o.backend == Backend::Network    ? networkJson(o.network)
+                      : o.backend == Backend::AirPlay  ? airplayJson(o.airplay)
+                      : o.backend == Backend::HQPlayer ? hqplayerJson(o.hqplayer)
+                      : o.backend == Backend::Asio     ? asioJson(o.asio)
+                      : o.backend == Backend::Ks       ? ksJson(o.ks)
+                                                       : wasapiJson(o.wasapi);
     j["dsp"] = dspJson(o.dsp);
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
     return j;
@@ -701,13 +720,16 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
         readNetwork(parameters, saved.network, quality);
     else if (saved.backend == Backend::AirPlay)
         readAirPlay(parameters, saved.airplay);
+    else if (saved.backend == Backend::HQPlayer)
+        readHQPlayer(parameters, saved.hqplayer);
     else if (saved.backend == Backend::Asio)
         readAsio(parameters, saved.asio, quality);
     else if (saved.backend == Backend::Ks)
         readKs(parameters, saved.ks, quality);
     else
         readWasapi(parameters, saved.wasapi, quality);
-    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId = saved.id;
+    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId =
+        saved.hqplayer.address = saved.id;
     return saved;
 }
 
@@ -763,6 +785,7 @@ std::string toJson(const Settings& s) {
     j["ks"] = ksJson(s.ks);
     j["network"] = networkJson(s.network);
     j["airplay"] = airplayJson(s.airplay);
+    j["hqplayer"] = hqplayerJson(s.hqplayer);
     j["outputs"] = json::array();
     for (const auto& output : s.outputs) j["outputs"].push_back(outputJson(output));
     if (!s.airplayGroup.empty()) j["airplayGroup"] = s.airplayGroup;
@@ -885,6 +908,7 @@ Settings fromJson(const std::string& text) {
     if (j.contains("ks") && j["ks"].is_object()) readKs(j["ks"], s.ks, s.resampleQuality);
     if (j.contains("network") && j["network"].is_object()) readNetwork(j["network"], s.network, s.resampleQuality);
     if (j.contains("airplay") && j["airplay"].is_object()) readAirPlay(j["airplay"], s.airplay);
+    if (j.contains("hqplayer") && j["hqplayer"].is_object()) readHQPlayer(j["hqplayer"], s.hqplayer);
     if (j.contains("outputs") && j["outputs"].is_array()) {
         const OutputDsp shared = outputDsp(s);
         for (const auto& item : j["outputs"])

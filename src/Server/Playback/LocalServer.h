@@ -6,6 +6,7 @@
 
 #include "Server/Api/ServerApi.h"
 #include "Server/Network/AirPlayFinder.h"
+#include "Server/Network/HQPlayer.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Engine/PlaybackEngine.h"
 
@@ -90,6 +91,7 @@ public:
     // Where to look for network players; before the first device scan.
     void setFinderOptions(const FinderOptions& options);
     void setAirPlayFinderOptions(const AirPlayFinderOptions& options);
+    void setHQPlayerFinderOptions(const hqplayer::FinderOptions& options);
     // How the settings passed in were obtained (openSettings).
     void setSettingsRecovery(SettingsRecovery recovery);
 

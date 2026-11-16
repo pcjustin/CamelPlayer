@@ -20,8 +20,8 @@
 
 namespace camel {
 
-enum class Backend : uint8_t { Wasapi, Asio, Ks, Network, AirPlay };
-const char* backendId(Backend b); // "wasapi" / "asio" / "ks" / "network" / "airplay"
+enum class Backend : uint8_t { Wasapi, Asio, Ks, Network, AirPlay, HQPlayer };
+const char* backendId(Backend b); // "wasapi" / "asio" / "ks" / "network" / "airplay" / "hqplayer"
 const char* backendName(Backend b);
 inline bool isNetworkPlayer(Backend b) {
     return b == Backend::Network || b == Backend::AirPlay;
@@ -176,6 +176,14 @@ struct AirPlaySettings {
     AirPlayChannels channels = AirPlayChannels::Stereo;
     PlaybackTiming timing{.releaseAfterPauseSeconds = 60};
     bool operator==(const AirPlaySettings&) const = default;
+};
+
+// HQPlayer Desktop or Embedded as the output (docs/Plan.md §5.11): it processes and plays, its own settings staying in
+// HQPlayer.
+struct HQPlayerSettings {
+    std::string address; // host:port, as added or found
+    PlaybackTiming timing{.releaseAfterPauseSeconds = 0};
+    bool operator==(const HQPlayerSettings&) const = default;
 };
 
 // An AirPlay 1 receiver cannot be asked for its level, so the last one is kept for each (docs/Plan.md §6).
@@ -377,6 +385,7 @@ struct SavedOutput {
     KsSettings ks;
     NetworkSettings network;
     AirPlaySettings airplay;
+    HQPlayerSettings hqplayer;
     VolumeMode volumeMode = VolumeMode::Fixed;
     OutputDsp dsp;
     // An AirPlay stereo pair's speakers by their own device IDs, which stay when pairing it again gives it a new ID.
@@ -402,6 +411,7 @@ struct Settings {
     KsSettings ks;
     NetworkSettings network;
     AirPlaySettings airplay;
+    HQPlayerSettings hqplayer;
     std::string language; // "" = follow Windows, else "zh-TW" / "en-US"
     CloseAction closeAction = CloseAction::Tray;
     Theme theme = Theme::System;

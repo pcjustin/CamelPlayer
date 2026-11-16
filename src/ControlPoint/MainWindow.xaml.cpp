@@ -49,6 +49,7 @@
 #include "Common/Version.h"
 #include "Engine/Dsp.h"
 #include "Server/Network/Firewall.h"
+#include "Server/Network/HQPlayer.h"
 #include "Server/Playback/Outputs.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
@@ -822,6 +823,9 @@ namespace {
 hstring outputLabel(const camel::server::OutputRow& row) {
     if (!row.alias.empty()) return ui::utf8(row.alias);
     if (row.id.empty()) return tr(L"Device_Default");
+    // An HQPlayer is known by its address, which its name may not tell.
+    if (row.backend == Backend::HQPlayer)
+        return row.name.empty() || row.name == row.id ? ui::utf8(row.id) : ui::utf8(row.name + " · " + row.id);
     return row.name.empty() ? tr(L"Device_NotConnected") : ui::utf8(row.name);
 }
 
@@ -883,29 +887,33 @@ void MainWindow::populateOutputs() {
     }
     auto list = OutputList().Children();
     list.Clear();
-    StackPanel groupRows{nullptr};
+    StackPanel groupRows{nullptr}, hqplayerRows{nullptr};
     std::optional<Backend> group;
+    const auto addGroup = [&](Backend rowGroup, const hstring& header) {
+        // A group in use stays open; one the user opened or closed stays so until the program restarts.
+        const bool used = std::ranges::any_of(rows, [&](const camel::server::OutputRow& r) {
+            return (camel::isNetworkPlayer(r.backend) ? Backend::Network : r.backend) == rowGroup && (r.enabled || r.selected);
+        });
+        const auto remembered = outputGroupsOpen_.find(rowGroup);
+        Expander expander;
+        expander.Header(box_value(header));
+        expander.HorizontalAlignment(HorizontalAlignment::Stretch);
+        expander.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+        expander.IsExpanded(remembered == outputGroupsOpen_.end() ? used : remembered->second);
+        expander.Expanding([this, rowGroup](auto&&, auto&&) { outputGroupsOpen_[rowGroup] = true; });
+        expander.Collapsed([this, rowGroup](auto&&, auto&&) { outputGroupsOpen_[rowGroup] = false; });
+        StackPanel panel;
+        panel.Spacing(4);
+        expander.Content(panel);
+        list.Append(expander);
+        return panel;
+    };
     for (const auto& row : rows) {
         const bool player = camel::isNetworkPlayer(row.backend);
         if (const Backend rowGroup = player ? Backend::Network : row.backend; rowGroup != group) {
             group = rowGroup;
-            // A group in use stays open; one the user opened or closed stays so until the program restarts.
-            const bool used = std::ranges::any_of(rows, [&](const camel::server::OutputRow& r) {
-                return (camel::isNetworkPlayer(r.backend) ? Backend::Network : r.backend) == rowGroup &&
-                       (r.enabled || r.selected);
-            });
-            const auto remembered = outputGroupsOpen_.find(rowGroup);
-            Expander expander;
-            expander.Header(box_value(player ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend))));
-            expander.HorizontalAlignment(HorizontalAlignment::Stretch);
-            expander.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-            expander.IsExpanded(remembered == outputGroupsOpen_.end() ? used : remembered->second);
-            expander.Expanding([this, rowGroup](auto&&, auto&&) { outputGroupsOpen_[rowGroup] = true; });
-            expander.Collapsed([this, rowGroup](auto&&, auto&&) { outputGroupsOpen_[rowGroup] = false; });
-            groupRows = StackPanel{};
-            groupRows.Spacing(4);
-            expander.Content(groupRows);
-            list.Append(expander);
+            groupRows = addGroup(rowGroup, player ? tr(L"Output_NetworkGroup") : ui::utf8(camel::backendName(row.backend)));
+            if (rowGroup == Backend::HQPlayer) hqplayerRows = groupRows;
         }
         const hstring label = row.backend == Backend::AirPlay ? outputMenuLabel(row) : outputLabel(row);
         Grid line;
@@ -1004,6 +1012,11 @@ void MainWindow::populateOutputs() {
         line.Children().Append(enabled);
         groupRows.Children().Append(line);
     }
+    if (!hqplayerRows) hqplayerRows = addGroup(Backend::HQPlayer, ui::utf8(camel::backendName(Backend::HQPlayer)));
+    HyperlinkButton addHQPlayer;
+    addHQPlayer.Content(box_value(tr(L"Output_AddHQPlayer")));
+    addHQPlayer.Click([this](auto&&, auto&&) { askAddHQPlayer(); });
+    hqplayerRows.Children().Append(addHQPlayer);
     const bool players = std::ranges::any_of(
         rows, [](const camel::server::OutputRow& r) { return camel::isNetworkPlayer(r.backend) && r.enabled; });
     if (players && !firewallRule_) readFirewallRule(); // the notice opens once it is known
@@ -1199,6 +1212,61 @@ winrt::fire_and_forget MainWindow::askRenameOutput(Backend backend, std::string 
     changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
         camel::server::renameOutput(s, backend, id, toUtf8(text), devices);
     });
+    populateOutputs();
+}
+
+// The address typed, "host:port", and the host for the HQPlayer's name until it is found.
+std::optional<std::pair<std::string, std::string>> hqplayerAddress(std::wstring host, const std::wstring& port) {
+    host.erase(0, host.find_first_not_of(L" \t"));
+    host.erase(host.find_last_not_of(L" \t") + 1);
+    if (host.empty()) host = L"localhost";
+    std::string typed = toUtf8(host);
+    if (typed.find(':') != std::string::npos && !typed.starts_with('[')) typed = "[" + typed + "]";
+    std::string parsedHost;
+    uint16_t parsedPort = 0;
+    if (!camel::server::hqplayer::splitAddress(typed + ":" + toUtf8(port), parsedHost, parsedPort)) return std::nullopt;
+    return std::pair(camel::server::hqplayer::addressOf(parsedHost, parsedPort), parsedHost);
+}
+
+winrt::fire_and_forget MainWindow::askAddHQPlayer() {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(tr(L"Output_AddHQPlayer")));
+    StackPanel fields;
+    fields.Spacing(12);
+    TextBox host;
+    host.Header(box_value(tr(L"Output_HQPlayerHost")));
+    host.PlaceholderText(L"localhost");
+    TextBox port;
+    port.Header(box_value(tr(L"Output_HQPlayerPort")));
+    port.Text(L"4321");
+    TextBlock note;
+    note.Text(tr(L"Output_HQPlayerNote"));
+    note.TextWrapping(TextWrapping::Wrap);
+    note.Style(
+        unbox_value<Microsoft::UI::Xaml::Style>(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle"))));
+    fields.Children().Append(host);
+    fields.Children().Append(port);
+    fields.Children().Append(note);
+    dialog.Content(fields);
+    dialog.PrimaryButtonText(tr(L"Output_HQPlayerAdd"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    const auto check = [dialog, host, port](auto&&, auto&&) {
+        dialog.IsPrimaryButtonEnabled(hqplayerAddress(std::wstring(host.Text()), std::wstring(port.Text())).has_value());
+    };
+    host.TextChanged(check);
+    port.TextChanged(check);
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
+    const auto chosen = hqplayerAddress(std::wstring(host.Text()), std::wstring(port.Text()));
+    if (!chosen) co_return;
+    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+        camel::server::addHQPlayer(s, chosen->first, chosen->second, devices);
+    });
+    Command refresh;
+    refresh.kind = CommandKind::RefreshDevices;
+    server_->submit(std::move(refresh));
     populateOutputs();
 }
 

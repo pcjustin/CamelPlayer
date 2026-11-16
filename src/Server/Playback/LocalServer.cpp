@@ -10,6 +10,7 @@
 
 #include "Server/Network/AirPlayOutput.h"
 #include "Server/Network/Firewall.h"
+#include "Server/Network/HQPlayer.h"
 #include "Server/Network/NetworkOutput.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerVolume.h"
@@ -519,6 +520,7 @@ public:
 
     void setFinderOptions(const FinderOptions& options) { finderOptions_ = options; }
     void setAirPlayFinderOptions(const AirPlayFinderOptions& options) { airplayFinderOptions_ = options; }
+    void setHQPlayerFinderOptions(const hqplayer::FinderOptions& options) { hqplayerFinderOptions_ = options; }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
         coversInFlight_.fetch_add(1);
@@ -1638,6 +1640,7 @@ private:
         catalog.defaultWasapi = audio::defaultWasapiDevice();
         findNetworkPlayers(catalog);
         findAirPlayReceivers(catalog);
+        findHQPlayers(catalog);
         catalog.revision = state_.devices.revision + 1;
         state_.devices = std::move(catalog);
         const auto outputs = settings_.outputs;
@@ -1666,6 +1669,32 @@ private:
         }
         for (const auto& player : finder_->players())
             catalog.network.push_back({player.description.udn, player.description.name});
+    }
+
+    // Those that answer a search, and those added by address that something listens at.
+    void findHQPlayers(DeviceCatalog& catalog) {
+        std::vector<std::string> added;
+        for (const auto& saved : settings_.outputs)
+            if (saved.backend == Backend::HQPlayer && !saved.id.empty()) added.push_back(saved.id);
+        std::scoped_lock lock(finderMutex_);
+        if (hqplayerFinder_) {
+            hqplayerFinder_->search();
+        } else {
+            hqplayerFinder_ = std::make_unique<hqplayer::Finder>(hqplayerFinderOptions_, [this] {
+                devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
+            });
+        }
+        hqplayerFinder_->watch(std::move(added));
+        for (const auto& found : hqplayerFinder_->found()) {
+            std::string name = found.name;
+            if (name.empty())
+                if (const auto saved = std::ranges::find_if(
+                        settings_.outputs,
+                        [&](const SavedOutput& o) { return o.backend == Backend::HQPlayer && o.id == found.address; });
+                    saved != settings_.outputs.end())
+                    name = saved->name;
+            catalog.hqplayer.push_back({found.address, name.empty() ? found.address : name});
+        }
     }
 
     void findAirPlayReceivers(DeviceCatalog& catalog) {
@@ -2061,6 +2090,7 @@ private:
             std::scoped_lock lock(finderMutex_);
             finder_.reset();
             airplayFinder_.reset();
+            hqplayerFinder_.reset();
         }
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
@@ -2170,6 +2200,8 @@ private:
     FinderOptions finderOptions_;
     std::mutex finderMutex_;
     _Guarded_by_(finderMutex_) std::unique_ptr<PlayerFinder> finder_; // from the first device scan
+    hqplayer::FinderOptions hqplayerFinderOptions_;
+    _Guarded_by_(finderMutex_) std::unique_ptr<hqplayer::Finder> hqplayerFinder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
     std::mutex groupMutex_; // the AirPlay group, as the output reads it
     _Guarded_by_(groupMutex_) std::vector<AirPlayMember> airplayMembers_;
@@ -2204,6 +2236,9 @@ void LocalServer::setFinderOptions(const FinderOptions& options) {
 }
 void LocalServer::setAirPlayFinderOptions(const AirPlayFinderOptions& options) {
     impl_->setAirPlayFinderOptions(options);
+}
+void LocalServer::setHQPlayerFinderOptions(const hqplayer::FinderOptions& options) {
+    impl_->setHQPlayerFinderOptions(options);
 }
 CommandStamp LocalServer::submit(Command command) {
     return impl_->enqueue(std::move(command));

@@ -21,6 +21,8 @@ std::unique_ptr<IOutput> createOutput(const Settings& s) {
         throw Error(ErrorCode::DeviceNotFound, "a network player is played through the Server");
     case Backend::AirPlay:
         throw Error(ErrorCode::DeviceNotFound, "an AirPlay receiver is played through the Server");
+    case Backend::HQPlayer:
+        throw Error(ErrorCode::DeviceNotFound, "HQPlayer is played through the Server");
     }
     return createWasapiOutput(s.wasapi);
 }
