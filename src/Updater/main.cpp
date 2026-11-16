@@ -5,7 +5,8 @@
 // CamelUpdater.exe (docs/Plan.md §8.6): started by the player from %TEMP%\CamelPlayer-update with
 //   --pid <player> --app <program folder> --files <new files> --data <data folder> --version <new version>
 //   --from <running version>
-// It waits for the player to exit, elevates only when the program folder is not writable, installs and restarts.
+// It waits for the player to exit, elevates only when the program folder is not writable, installs and restarts. Elevated,
+// it runs as the copy installed in the program folder, which only an administrator can change.
 #include <windows.h>
 #include <shlobj.h>
 #include <exdisp.h>
@@ -168,11 +169,33 @@ fs::path playerProgram(const std::wstring& pid) {
     return read ? fs::path(path) : fs::path();
 }
 
+// Elevated, this copy runs from the program folder, so it went into the backup with the rest of the previous version and
+// cannot remove itself while it runs: once it has exited, a command removes what is left.
+void removeOnceExited(const fs::path& backup) {
+    std::error_code error;
+    if (!fs::exists(backup, error)) return;
+    wchar_t system[MAX_PATH];
+    if (!GetSystemDirectoryW(system, DWORD(std::size(system)))) return;
+    const auto cmd = fs::path(system) / L"cmd.exe";
+    std::wstring command = L"\"" + cmd.wstring() + L"\" /d /c ping -n 3 127.0.0.1 > nul & rd /s /q \"" + backup.wstring() + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(cmd.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, system, &startup,
+                        &process)) {
+        log(L"could not have the backup removed: " + std::to_wstring(GetLastError()));
+        return;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    log(L"the backup is removed once the updater has exited");
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    // It runs from a folder any program of the user can write, so a DLL is never looked for beside it; the linker's
-    // /DEPENDENTLOADFLAG does the same for what it imports.
+    // Not elevated, it runs from a folder any program of the user can write, so a DLL is never looked for beside it; the
+    // linker's /DEPENDENTLOADFLAG does the same for what it imports.
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     bool elevatedRun = false;
     auto args = camel::updater::readArguments(GetCommandLineW(), elevatedRun);
@@ -188,10 +211,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         if (!player.empty()) startProcess(player);
         return 2;
     }
-    wchar_t self[MAX_PATH * 4];
-    GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
+    // Beside the new files, wherever this copy runs from.
     camel::updater::Options options{args[L"app"],     args[L"files"],
-                                    args[L"data"],    fs::path(self).parent_path() / files::kDataBackup,
+                                    args[L"data"],    fs::path(args[L"files"]).parent_path() / files::kDataBackup,
                                     args[L"version"], args[L"from"]};
     for (const wchar_t digit : args[L"manifest"]) options.manifestSha256 += char(digit); // hexadecimal
     openLog(options.data);
@@ -212,11 +234,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             log(L"the program folder is not writable; asking for administrator rights");
             std::wstring command = PathGetArgsW(GetCommandLineW());
             command += L" --elevated";
+            // The installed copy, not this one in a folder any program of the user can write, which could be replaced
+            // before the prompt is answered.
+            const auto installed = (options.app / files::kUpdater).wstring();
             SHELLEXECUTEINFOW run{};
             run.cbSize = sizeof(run);
             run.fMask = SEE_MASK_NOCLOSEPROCESS;
             run.lpVerb = L"runas";
-            run.lpFile = self;
+            run.lpFile = installed.c_str();
             run.lpParameters = command.c_str();
             run.nShow = SW_HIDE;
             if (!ShellExecuteExW(&run) || !run.hProcess) {
@@ -234,6 +259,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
 
     const bool asAdministrator = elevated();
+    if (asAdministrator) {
+        wchar_t self[MAX_PATH * 4];
+        GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
+        log(std::wstring(L"running as administrator from ") + self);
+    }
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     camel::updater::Host host;
     host.log = [](const std::wstring& text) { log(text); };
@@ -260,6 +290,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 1;
     }
     const auto outcome = camel::updater::install(options, host);
+    // Only after an install that held: a backup left by a failed rollback is what the next update puts right.
+    if (asAdministrator && outcome == camel::updater::Outcome::Installed) removeOnceExited(options.app / files::kBackup);
     if (SUCCEEDED(com)) CoUninitialize();
     return outcome == camel::updater::Outcome::Installed ? 0 : 1;
 }
