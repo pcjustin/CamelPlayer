@@ -324,6 +324,27 @@ public:
         port_ = ntohs(address.sin_port);
         thread_ = std::thread([this] { serve(); });
     }
+    // A responder in `group` on `port` over the loopback interface, as the Chord Poly: it answers only a query from the
+    // group's port, and only to the group.
+    FakeMdns(const std::string& group, uint16_t port) : group_(group), port_(port) {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+        udp_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        const BOOL reuse = TRUE;
+        setsockopt(udp_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(port);
+        ::bind(udp_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+        ip_mreq membership{};
+        inet_pton(AF_INET, group.c_str(), &membership.imr_multiaddr);
+        membership.imr_interface.s_addr = htonl(INADDR_LOOPBACK);
+        setsockopt(udp_, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&membership), sizeof(membership));
+        in_addr loopback{};
+        loopback.s_addr = htonl(INADDR_LOOPBACK);
+        setsockopt(udp_, IPPROTO_IP, IP_MULTICAST_IF, reinterpret_cast<const char*>(&loopback), sizeof(loopback));
+        thread_ = std::thread([this] { serve(); });
+    }
     ~FakeMdns() {
         closesocket(udp_);
         thread_.join();
@@ -422,11 +443,22 @@ private:
             }
             std::string reply = u16(0) + u16(0x8400) + u16(0) + u16(int(answers.size())) + u16(0) + u16(0);
             for (const auto& answer : answers) reply += answer;
-            sendto(udp_, reply.data(), int(reply.size()), 0, reinterpret_cast<sockaddr*>(&from), sizeof(from));
+            if (group_.empty()) {
+                sendto(udp_, reply.data(), int(reply.size()), 0, reinterpret_cast<sockaddr*>(&from), sizeof(from));
+                continue;
+            }
+            // Its own answers come back through the group; only a question is answered, and only from the group's port.
+            if (ntohs(from.sin_port) != port_ || query.size() < 12 || (uint8_t(query[2]) & 0x80)) continue;
+            sockaddr_in to{};
+            to.sin_family = AF_INET;
+            to.sin_port = htons(port_);
+            inet_pton(AF_INET, group_.c_str(), &to.sin_addr);
+            sendto(udp_, reply.data(), int(reply.size()), 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
         }
     }
 
     SOCKET udp_ = INVALID_SOCKET;
+    std::string group_; // empty: answers each query to its own port
     uint16_t port_ = 0;
     std::mutex mutex_;
     std::vector<FakeReceiverRecord> records_;

@@ -17,7 +17,8 @@ namespace camel::server::airplay {
 
 namespace {
 
-constexpr uint16_t kQuestionWantsUnicast = 0x8001; // class IN, answered to the asker's own port
+constexpr uint16_t kQuestionWantsUnicast = 0x8001;   // class IN, answered to the asker's own port
+constexpr uint16_t kQuestionWantsMulticast = 0x0001; // class IN, answered to the group
 constexpr uint16_t kFlagResponse = 0x8000;
 constexpr int kMaxNameJumps = 32;
 constexpr size_t kHeaderBytes = 12;
@@ -181,7 +182,7 @@ DnsName serviceName(std::string_view service) {
     return name;
 }
 
-std::string queryMessage(const std::vector<DnsQuestion>& questions) {
+std::string queryMessage(const std::vector<DnsQuestion>& questions, bool unicast) {
     std::string out(kHeaderBytes, '\0');
     out[4] = char(questions.size() >> 8);
     out[5] = char(questions.size() & 0xFF);
@@ -192,7 +193,7 @@ std::string queryMessage(const std::vector<DnsQuestion>& questions) {
         }
         out.push_back('\0');
         put16(out, uint16_t(question.type));
-        put16(out, kQuestionWantsUnicast);
+        put16(out, unicast ? kQuestionWantsUnicast : kQuestionWantsMulticast);
     }
     return out;
 }

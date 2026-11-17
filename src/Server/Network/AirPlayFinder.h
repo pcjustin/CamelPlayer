@@ -22,6 +22,10 @@ namespace camel::server {
 struct AirPlayFinderOptions {
     std::string queryHost = "224.0.0.251";
     uint16_t queryPort = 5353;
+    // The mDNS group, joined on its own port: some receivers, as the Chord Poly, answer only a query from that port, and
+    // only to the group. 0 leaves it out.
+    std::string groupHost = "224.0.0.251";
+    uint16_t groupPort = 5353;
     std::chrono::milliseconds searchInterval{60000};
     std::chrono::milliseconds retryInterval{1000}; // between the queries of a search, as answers get lost
     int sessionTimeoutMs = 3000;

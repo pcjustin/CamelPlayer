@@ -35,7 +35,8 @@ struct DnsRecord {
 };
 
 DnsName serviceName(std::string_view service); // from "_raop._tcp"
-std::string queryMessage(const std::vector<DnsQuestion>& questions);
+// Questions asking for answers to the asker's own port, or with `unicast` false for answers to the group.
+std::string queryMessage(const std::vector<DnsQuestion>& questions, bool unicast = true);
 // Every answer and additional record of a known type, up to any damage to the message.
 std::vector<DnsRecord> parseRecords(std::string_view message);
 

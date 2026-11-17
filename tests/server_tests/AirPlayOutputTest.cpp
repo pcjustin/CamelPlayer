@@ -549,6 +549,7 @@ protected:
         AirPlayFinderOptions options;
         options.queryHost = "127.0.0.1";
         options.queryPort = mdns_.port();
+        options.groupPort = 0; // the fakes only, none of the network's receivers
         options.searchInterval = searchInterval;
         options.retryInterval = 50ms;
         server->setAirPlayFinderOptions(options);

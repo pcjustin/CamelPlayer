@@ -40,6 +40,7 @@ AirPlayFinderOptions optionsFor(const FakeMdns& mdns) {
     AirPlayFinderOptions options;
     options.queryHost = "127.0.0.1";
     options.queryPort = mdns.port();
+    options.groupPort = 0;
     options.searchInterval = 100ms;
     options.retryInterval = 50ms;
     options.sessionTimeoutMs = 1000;
@@ -77,6 +78,46 @@ TEST(AirPlayTest, QuestionsAskForAnAnswerToTheAskersPort) {
     EXPECT_EQ(message[5], 1);
     EXPECT_NE(message.find(encoded + '\0'), std::string::npos);
     EXPECT_EQ(message.substr(message.size() - 4), std::string("\x00\x0C\x80\x01", 4));
+}
+
+TEST(AirPlayTest, AGroupQuestionAsksForAnAnswerToTheGroup) {
+    const auto message = queryMessage({{serviceName("_raop._tcp"), DnsType::Ptr}}, false);
+    EXPECT_EQ(message.substr(message.size() - 4), std::string("\x00\x0C\x00\x01", 4));
+}
+
+// A receiver that answers only a query from the mDNS port, and only to the group, as the Chord Poly does, is found
+// through the group: no answer comes to the finder's own port.
+TEST(AirPlayFinderGroup, AReceiverThatAnswersOnlyTheGroupIsFound) {
+    // A port no other test or responder uses, found free.
+    uint16_t port = 0;
+    {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+        const SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        ASSERT_EQ(bind(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+        int length = sizeof(address);
+        getsockname(probe, reinterpret_cast<sockaddr*>(&address), &length);
+        port = ntohs(address.sin_port);
+        closesocket(probe);
+        WSACleanup();
+    }
+    const std::string group = "239.255.53.53";
+    FakeRtsp rtsp;
+    FakeMdns mdns(group, port);
+    mdns.add(record(rtsp, "C0FFEE000001", "Chord Poly"));
+    AirPlayFinderOptions options;
+    options.queryHost = "127.0.0.1";
+    options.queryPort = 9; // discard: nothing answers there
+    options.groupHost = group;
+    options.groupPort = port;
+    options.searchInterval = 100ms;
+    options.retryInterval = 50ms;
+    options.sessionTimeoutMs = 1000;
+    AirPlayFinder finder(options, nullptr);
+    ASSERT_TRUE(waitFor([&] { return finder.receivers().size() == 1; }));
+    EXPECT_EQ(finder.receivers().front().name, "Chord Poly");
 }
 
 TEST(AirPlayTest, CompressedNamesAndDottedLabelsAreRead) {
@@ -582,4 +623,16 @@ TEST(AirPlayServerTest, EnablingAReceiverAsksItAndARefusalTakesItBackOff) {
         *std::ranges::find_if(rows, [](const OutputRow& r) { return r.backend == Backend::AirPlay && r.id == "800A805D016B"; });
     EXPECT_EQ(row.unsupported, "refused");
     EXPECT_FALSE(row.enabled);
+}
+
+// The receivers of this network as the finder lists them, the Chord Poly among them, which answers only the group:
+// opt in with --gtest_also_run_disabled_tests --gtest_filter=AirPlayFinderHardware.*
+TEST(AirPlayFinderHardware, DISABLED_ListsTheReceiversOnThisNetwork) {
+    AirPlayFinder finder(AirPlayFinderOptions{}, nullptr);
+    std::this_thread::sleep_for(15s);
+    const auto found = finder.receivers();
+    for (const auto& receiver : found)
+        std::printf("%s at %s:%u, version %s, support %s\n", receiver.name.c_str(), receiver.address.c_str(),
+                    unsigned(receiver.port), receiver.version.c_str(), supportId(receiver.support));
+    EXPECT_FALSE(found.empty());
 }

@@ -35,6 +35,7 @@ constexpr auto kPollSockets = std::chrono::milliseconds(100);
 constexpr int kQueriesInASearch = 3;
 constexpr int kSilentSearches = 2; // a service that answered no query for this many searches has gone
 constexpr DWORD kMulticastTtl = 255;
+constexpr SOCKET kNoSocket = INVALID_SOCKET;
 constexpr std::string_view kRaopService = "_raop._tcp";
 constexpr std::string_view kAirPlayService = "_airplay._tcp";
 constexpr int kStatusOk = 200;
@@ -100,6 +101,7 @@ struct AirPlayFinder::Impl {
     AirPlayFinderOptions options;
     std::function<void()> onChange;
     SOCKET udp = INVALID_SOCKET;
+    SOCKET group = kNoSocket; // on the group's port, shared with Windows' own responder
     DnsName raopService = serviceName(kRaopService);
     DnsName airplayService = serviceName(kAirPlayService);
     // Only the finder's thread.
@@ -123,6 +125,7 @@ struct AirPlayFinder::Impl {
         if (bind(udp, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
             log::warn("AirPlay receivers: cannot search (%d)", WSAGetLastError());
         setsockopt(udp, IPPROTO_IP, IP_MULTICAST_TTL, reinterpret_cast<const char*>(&kMulticastTtl), sizeof(kMulticastTtl));
+        if (options.groupPort) joinGroup();
         thread = std::thread([this] { run(); });
     }
 
@@ -130,6 +133,7 @@ struct AirPlayFinder::Impl {
         stopping = true;
         thread.join();
         closesocket(udp);
+        if (group != kNoSocket) closesocket(group);
         WSACleanup();
     }
     Impl(const Impl&) = delete;
@@ -145,7 +149,53 @@ struct AirPlayFinder::Impl {
         return list;
     }
 
+    // Joins the group on every interface, the loopback one included, for answers and announcements sent to it.
+    void joinGroup() {
+        group = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        const BOOL reuse = TRUE;
+        setsockopt(group, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(options.groupPort);
+        if (bind(group, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+            log::warn("AirPlay receivers: cannot listen on the mDNS group's port (%d)", WSAGetLastError());
+            closesocket(group);
+            group = kNoSocket;
+            return;
+        }
+        setsockopt(group, IPPROTO_IP, IP_MULTICAST_TTL, reinterpret_cast<const char*>(&kMulticastTtl), sizeof(kMulticastTtl));
+        auto interfaces = localAddresses();
+        in_addr loopback{};
+        loopback.s_addr = htonl(INADDR_LOOPBACK);
+        interfaces.push_back(loopback);
+        for (const auto& local : interfaces) {
+            ip_mreq membership{};
+            inet_pton(AF_INET, options.groupHost.c_str(), &membership.imr_multiaddr);
+            membership.imr_interface = local;
+            setsockopt(group, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&membership), sizeof(membership));
+        }
+    }
+
+    // The same questions from the group's port, to the group, answered to the group.
+    void sendGroupQuery() {
+        if (group == kNoSocket) return;
+        const std::string message = queryMessage(questions(), false);
+        sockaddr_in target{};
+        target.sin_family = AF_INET;
+        target.sin_port = htons(options.groupPort);
+        inet_pton(AF_INET, options.groupHost.c_str(), &target.sin_addr);
+        auto interfaces = localAddresses();
+        in_addr loopback{};
+        loopback.s_addr = htonl(INADDR_LOOPBACK);
+        interfaces.push_back(loopback);
+        for (const auto& local : interfaces) {
+            setsockopt(group, IPPROTO_IP, IP_MULTICAST_IF, reinterpret_cast<const char*>(&local), sizeof(local));
+            sendto(group, message.data(), int(message.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
+        }
+    }
+
     void sendQuery() {
+        sendGroupQuery();
         const std::string message = queryMessage(questions());
         sockaddr_in target{};
         target.sin_family = AF_INET;
@@ -274,11 +324,15 @@ struct AirPlayFinder::Impl {
             fd_set readable;
             FD_ZERO(&readable);
             FD_SET(udp, &readable);
+            if (group != kNoSocket) FD_SET(group, &readable);
             if (!waitReadable(readable, kPollSockets)) continue;
-            char buffer[9000];
-            const int length = recv(udp, buffer, sizeof(buffer), 0);
-            if (length <= 0) continue;
-            apply(parseRecords(std::string_view(buffer, size_t(length))));
+            for (const SOCKET from : {udp, group}) {
+                if (from == kNoSocket || !FD_ISSET(from, &readable)) continue;
+                char buffer[9000];
+                const int length = recv(from, buffer, sizeof(buffer), 0);
+                if (length <= 0) continue;
+                apply(parseRecords(std::string_view(buffer, size_t(length))));
+            }
             update();
         }
     }
