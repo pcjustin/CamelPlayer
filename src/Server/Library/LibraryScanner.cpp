@@ -1072,10 +1072,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         rows.bind(1, root).bind(2, since);
         while (rows.step()) (rows.integer(1) ? lengthMarkedExact : readAgain).insert(rows.text(0));
     }
-    // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist.
+    // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist. Read through
+    // the table: through the content_hash index each row is a lookup of its own, which read 274 MB of a 184 MB library.
     std::map<int64_t, library::Fingerprint> hashSizes;
-    auto fingerprints =
-        reader.prepare("SELECT size,MAX(length(content_hash)) FROM files WHERE content_hash IS NOT NULL GROUP BY size");
+    auto fingerprints = reader.prepare(
+        "SELECT size,MAX(length(content_hash)) FROM files NOT INDEXED WHERE content_hash IS NOT NULL GROUP BY size");
     while (fingerprints.step())
         hashSizes.emplace(fingerprints.integer(0),
                           fingerprints.integer(1) == 32 ? library::Fingerprint::Full : library::Fingerprint::Sampled);
