@@ -48,6 +48,8 @@ public:
     // playlist one after the other, the position moving with the time played, a new track_serial at each.
     std::atomic<bool> plays = false;
     std::atomic<bool> outputFails = false; // as with its DAC off: Play is OK, a moment of playing, then stopped
+    // That moment; on macOS with DoP off, DSD stopped about 3 s after Play (2026-11-17).
+    std::chrono::milliseconds outputFailsAfter{300};
     // No Status pushed for this long after Play, as HQPlayer starting DSD (about 4 s on 2026-11-16).
     std::chrono::milliseconds quietAfterPlay{0};
     // PlaylistAdd answered only once the probe read this many bytes of the stream, as HQPlayer on macOS did with DSF
@@ -311,7 +313,7 @@ private:
             }
             for (const auto& uri : probes) probe(uri);
             if (failNow) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                std::this_thread::sleep_for(outputFailsAfter);
                 change([](State& s) { s.state = 0; });
                 std::scoped_lock lock(mutex_);
                 wantPlay_ = false;

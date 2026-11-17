@@ -409,11 +409,11 @@ private:
     }
 
     // Stopped after it played, while the track it plays is still being sent: neither its end nor a change of track, which
-    // come once the track is sent whole.
+    // come once the track is sent whole. One that never played is left to `checkStarted`.
     bool stoppedByItself() const {
         std::scoped_lock lock(mutex_);
-        return playing_ && !closing_ && !released_ && link_->stopped() && !bodies_.empty() && !bodies_.front().complete &&
-               Clock::now() - askedToPlay_ >= kChangeSettles;
+        return playing_ && !closing_ && !released_ && link_->stopped() && link_->played() && !bodies_.empty() &&
+               !bodies_.front().complete && Clock::now() - askedToPlay_ >= kChangeSettles;
     }
 
     // Some seconds after Play, a player stopped while its track is still being sent: one that never got going, as the

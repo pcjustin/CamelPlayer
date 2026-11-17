@@ -266,6 +266,20 @@ TEST(HQPlayerOutputTest, AnOutputThatCannotOpenIsReportedAfterPlayIsSentOnceMore
     EXPECT_EQ(count(fake.commands(), "Play"), 2U);
 }
 
+// Stopped some seconds after Play without its position ever moving is still an output that did not open.
+TEST(HQPlayerOutputTest, AnOutputThatStopsSecondsAfterPlayWithoutPlayingDidNotOpen) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    fake.outputFails = true;
+    fake.outputFailsAfter = 3500ms;
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(fake, source, k16);
+    output->start();
+    ASSERT_TRUE(eventually([&] { return output.error() != kNoError; }, 15000ms));
+    EXPECT_EQ(output.error(), int(audio::ErrorCode::DriverError));
+    EXPECT_NE(output.detail().find("HQPlayer could not open its output"), std::string::npos);
+}
+
 TEST(HQPlayerOutputTest, AnHQPlayerThatQuitsIsNotConnected) {
     testutil::FakeHQPlayer fake;
     fake.plays = true;
