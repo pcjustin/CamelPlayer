@@ -770,6 +770,10 @@
   <data name="Volume_ModeSoftware" xml:space="preserve"><value>軟體</value></data>
   <data name="Volume_NotePlayer" xml:space="preserve"><value>播放器音量調整的是播放器自己的音量，會跟著它的遙控器和 App 變動，串流維持 bit-perfect。只有你移動滑桿或按靜音時，CamelPlayer 才會寫入。</value></data>
   <data name="Volume_PlayerUnknown" xml:space="preserve"><value>無法讀取播放器音量</value></data>
+  <data name="Volume_ModeHQPlayerItem.Content" xml:space="preserve"><value>HQPlayer 音量</value></data>
+  <data name="Volume_NoteHQPlayer" xml:space="preserve"><value>軟體音量由 CamelPlayer 在送往 HQPlayer 之前調整，範圍 −80 到 0 dB；變動要等 HQPlayer 已緩衝的部分播完才聽得到。HQPlayer 音量調整的是 HQPlayer 自己以 dB 計的音量，會跟著它的視窗變動，串流維持 bit-perfect；要先在 HQPlayer 的設定中開啟音量才能使用。</value></data>
+  <data name="Volume_HQPlayerUnknown" xml:space="preserve"><value>HQPlayer 的音量未在 HQPlayer 中開啟，或無法讀取</value></data>
+  <data name="Dsd_DsfHQPlayer" xml:space="preserve"><value>DSF，交給 HQPlayer 處理</value></data>
   <data name="SignalPath_PlayerVolume" xml:space="preserve"><value>播放器音量</value></data>
   <data name="SignalPath_GaplessOff" xml:space="preserve"><value>無縫播放已關閉</value></data>
   <data name="Settings_AirPlayChannels.Header" xml:space="preserve"><value>聲道</value></data>

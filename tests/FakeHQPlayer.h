@@ -214,6 +214,10 @@ private:
                     commands_.push_back(element.name);
                     raw_.push_back(document);
                     if (act_) act_(element.name, element, state_);
+                    // As HQPlayer Desktop 6 did on 2026-11-11: Volume sets the level in dB, VolumeMute the minimum.
+                    if (element.name == "Volume" && state_.volumeEnabled)
+                        state_.volume = std::stod(element.attributes.at("value"));
+                    if (element.name == "VolumeMute" && state_.volumeEnabled) state_.volume = state_.volumeMin;
                     if (plays) simulate(element);
                     dropped = drop_.erase(element.name) > 0;
                     if (element.name == "Status") {

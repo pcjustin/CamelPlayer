@@ -312,3 +312,19 @@ TEST(HQPlayerTest, AnAddedHQPlayerSurvivesTheSettingsFile) {
     ASSERT_EQ(read.outputs.size(), s.outputs.size());
     EXPECT_EQ(read.outputs, s.outputs);
 }
+
+TEST(HQPlayerTest, ItsDsdParameterAndVolumeModeSurviveTheSettingsFile) {
+    Settings s;
+    DeviceCatalog devices;
+    devices.revision = 1;
+    addHQPlayer(s, "192.168.0.71:4321", "192.168.0.71", devices);
+    selectOutput(s, Backend::HQPlayer, "192.168.0.71:4321", devices);
+    s.hqplayer.dsdOutput = DsdOutput::Pcm;
+    s.hqplayer.dsdPcmRate = 352800;
+    s.volume.mode = VolumeMode::Player;
+    const Settings read = fromJson(toJson(s));
+    EXPECT_EQ(read.hqplayer.dsdOutput, DsdOutput::Pcm);
+    EXPECT_EQ(read.hqplayer.dsdPcmRate, 352800U);
+    EXPECT_EQ(read.volume.mode, VolumeMode::Player);
+    EXPECT_EQ(Settings{}.hqplayer.dsdOutput, DsdOutput::Native);
+}

@@ -16,6 +16,7 @@
 #include <format>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "Common/AudioTypes.h"
 #include "Common/util/Log.h"
@@ -435,8 +436,10 @@ struct Client::Impl {
         }
         ++made;
         // A restarted HQPlayer keeps its last playlist and fetches its URLs.
-        for (const char* first : {"<Stop/>", "<PlaylistClear/>", R"(<Status subscribe="1"/>)"})
-            if (!transact(first, options.reply)) {
+        std::vector<const char*> first{R"(<Status subscribe="1"/>)"};
+        if (options.clearOnConnect) first.insert(first.begin(), {"<Stop/>", "<PlaylistClear/>"});
+        for (const char* command : first)
+            if (!transact(command, options.reply)) {
                 close();
                 throw Error(ErrorCode::DeviceNotFound, std::format("HQPlayer at {} stopped answering", address));
             }

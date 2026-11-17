@@ -14,6 +14,7 @@
 #include "Server/Network/HQPlayerOutput.h"
 #include "Server/Network/NetworkOutput.h"
 #include "Server/Network/PlayerFinder.h"
+#include "Server/Network/HQPlayerVolume.h"
 #include "Server/Network/PlayerVolume.h"
 #include "Server/Playback/Outputs.h"
 
@@ -1591,6 +1592,7 @@ private:
             p.playerMuted = level.muted;
         } else if (const auto level = playerVolume_ ? playerVolume_->current() : std::nullopt) {
             p.playerVolume = level->level;
+            p.playerVolumeDb = level->db;
             p.playerMuted = level->muted;
         }
         if (restored_ && p.state == PlaybackState::Stopped && state_.track) {
@@ -1603,8 +1605,9 @@ private:
         }
         if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
             p.underruns == state_.playback.underruns && p.playerVolume == state_.playback.playerVolume &&
-            p.playerMuted == state_.playback.playerMuted && p.receivers == state_.playback.receivers &&
-            p.receiverLeft == state_.playback.receiverLeft && state_.devices.revision == published_.devices.revision)
+            p.playerVolumeDb == state_.playback.playerVolumeDb && p.playerMuted == state_.playback.playerMuted &&
+            p.receivers == state_.playback.receivers && p.receiverLeft == state_.playback.receiverLeft &&
+            state_.devices.revision == published_.devices.revision)
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
@@ -1938,8 +1941,17 @@ private:
 
     // The chosen player's own volume is followed from when it is chosen, whether it plays or not.
     void followPlayerVolume() {
-        const std::string udn =
-            settings_.backend == Backend::Network && settings_.volume.mode == VolumeMode::Player ? settings_.network.udn : "";
+        const bool own = settings_.volume.mode == VolumeMode::Player;
+        const std::string hqplayer = own && settings_.backend == Backend::HQPlayer ? settings_.hqplayer.address : "";
+        if (hqplayer != volumeHQPlayer_) {
+            volumeHQPlayer_ = hqplayer;
+            volumePlayer_.reset();
+            volumeUdn_.clear();
+            playerVolume_.reset();
+            if (!hqplayer.empty()) playerVolume_ = std::make_unique<HQPlayerVolume>(hqplayer, hqplayerVolumeOptions_);
+        }
+        if (!hqplayer.empty()) return;
+        const std::string udn = own && settings_.backend == Backend::Network ? settings_.network.udn : "";
         if (udn == volumeUdn_ && state_.devices.revision == volumeDevices_) return;
         volumeUdn_ = udn;
         volumeDevices_ = state_.devices.revision;
@@ -2210,6 +2222,7 @@ private:
     std::mutex finderMutex_;
     _Guarded_by_(finderMutex_) std::unique_ptr<PlayerFinder> finder_; // from the first device scan
     hqplayer::FinderOptions hqplayerFinderOptions_;
+    HQPlayerVolumeOptions hqplayerVolumeOptions_;
     _Guarded_by_(finderMutex_) std::unique_ptr<hqplayer::Finder> hqplayerFinder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
     std::mutex groupMutex_; // the AirPlay group, as the output reads it
@@ -2230,7 +2243,8 @@ private:
     static constexpr auto kGroupDragSettles = std::chrono::seconds(3);
     std::optional<GroupBaseline> groupBaseline_;   // the levels a moving group slider scales from
     std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan
-    std::unique_ptr<PlayerVolume> playerVolume_;
+    std::unique_ptr<OwnVolume> playerVolume_;
+    std::string volumeHQPlayer_; // the address whose volume `playerVolume_` follows
     std::optional<upnp::PlayerDescription> volumePlayer_;
     std::string volumeUdn_;
     uint64_t volumeDevices_ = 0;

@@ -200,6 +200,12 @@ void foldNote(TextBlock const& note) {
 
 constexpr auto kPlayerVolumeSettles = std::chrono::milliseconds(2000);
 
+hstring decibels(double db) {
+    wchar_t text[32];
+    swprintf_s(text, L"%.1f dB", db);
+    return text;
+}
+
 std::vector<hstring> rateItems() {
     std::vector<hstring> items{tr(L"Rate_FollowFile")};
     for (uint32_t rate : kFixedRates) {
@@ -764,6 +770,8 @@ void MainWindow::showOutputParameters(const SettingsDto& p) {
     NetworkGaplessSwitch().IsOn(p.network.gapless);
     showTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), p.network.timing);
     fill(AirPlayChannelsCombo(), {tr(L"Channels_Stereo"), tr(L"Channels_Left"), tr(L"Channels_Right")}, int(p.airplay.channels));
+    fill(HQPlayerDsdCombo(), {tr(L"Dsd_DsfHQPlayer"), tr(L"Dsd_Pcm")}, p.hqplayer.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(HQPlayerDsdRateCombo(), dsdRates, dsdRateIndex(p.hqplayer.dsdPcmRate));
 }
 
 void MainWindow::populateSettings() {
@@ -1407,6 +1415,8 @@ void MainWindow::readOutputParameters(SettingsDto& p) {
     p.network.gapless = NetworkGaplessSwitch().IsOn();
     readTiming(NetworkPredecodeBox(), NetworkSilenceBox(), NetworkReleaseBox(), p.network.timing);
     p.airplay.channels = AirPlayChannels(std::clamp(idx(AirPlayChannelsCombo()), 0, 2));
+    p.hqplayer.dsdOutput = idx(HQPlayerDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
+    p.hqplayer.dsdPcmRate = dsdRateAt(idx(HQPlayerDsdRateCombo()));
 }
 
 void MainWindow::readSettingsFromUi() {
@@ -1520,6 +1530,7 @@ void MainWindow::updateBackendGroups() {
     KsGroup().Visibility(p.backend == Backend::Ks ? Visibility::Visible : Visibility::Collapsed);
     NetworkGroup().Visibility(p.backend == Backend::Network ? Visibility::Visible : Visibility::Collapsed);
     AirPlayGroup().Visibility(p.backend == Backend::AirPlay ? Visibility::Visible : Visibility::Collapsed);
+    HQPlayerGroup().Visibility(p.backend == Backend::HQPlayer ? Visibility::Visible : Visibility::Collapsed);
     WasapiPeriodBox().IsEnabled(p.wasapi.period == WasapiPeriod::Custom);
     enableRateControls(wasapiRateControls(*this), p.wasapi, !p.wasapi.shared); // the mixer sets the rate in shared mode
     enableRateControls(asioRateControls(*this), p.asio, true);
@@ -1594,8 +1605,10 @@ void MainWindow::showOutputsOf(const SettingsDto& server) {
 }
 
 void MainWindow::applySnapshot(const Snapshot& snapshot) {
-    if (snapshot.playback.playerVolume != playerVolume_ || snapshot.playback.playerMuted != playerMuted_) {
+    if (snapshot.playback.playerVolume != playerVolume_ || snapshot.playback.playerMuted != playerMuted_ ||
+        snapshot.playback.playerVolumeDb != playerVolumeDb_) {
         playerVolume_ = snapshot.playback.playerVolume;
+        playerVolumeDb_ = snapshot.playback.playerVolumeDb;
         playerMuted_ = snapshot.playback.playerMuted;
         showVolume();
     }
@@ -1894,7 +1907,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         if (s.backend == Backend::Network && !settings_.network.gapless)
             add(tr(L"SignalPath_GaplessOff"), {}, PathState::AtTrackChanges);
         if (s.playerVolume)
-            add(tr(L"SignalPath_PlayerVolume"), s.playerMuted ? tr(L"SignalPath_Muted") : to_hstring(*s.playerVolume), reached);
+            add(tr(L"SignalPath_PlayerVolume"),
+                s.playerMuted      ? tr(L"SignalPath_Muted")
+                : s.playerVolumeDb ? decibels(*s.playerVolumeDb)
+                                   : to_hstring(*s.playerVolume),
+                reached);
         showSignalPath(std::move(steps));
         dspActive = processed;
     } else {
@@ -4128,19 +4145,22 @@ void MainWindow::OnEqExportClick(Windows::Foundation::IInspectable const&, Route
 void MainWindow::showVolume() {
     const bool wasPopulating = std::exchange(populating_, true);
     const bool network = camel::isNetworkPlayer(settings_.backend);
+    const bool hqplayer = settings_.backend == Backend::HQPlayer;
     const bool software = settings_.volume.mode == camel::VolumeMode::Software;
     const bool wantsPlayer = settings_.volume.mode == camel::VolumeMode::Player;
     const bool player = wantsPlayer && playerVolume_.has_value();
     VolumeModeOwnItem().Content(box_value(tr(network ? L"Volume_ModePlayer" : L"Volume_ModeSoftware")));
-    VolumeModeCombo().SelectedIndex(software || wantsPlayer ? 1 : 0);
+    VolumeModeHQPlayerItem().Visibility(hqplayer ? Visibility::Visible : Visibility::Collapsed);
+    VolumeModeCombo().SelectedIndex(software ? 1 : wantsPlayer ? (hqplayer ? 2 : 1) : 0);
     VolumeNote().Text(tr(settings_.backend == Backend::AirPlay ? L"Volume_NoteAirPlay"
+                         : hqplayer                            ? L"Volume_NoteHQPlayer"
                          : network                             ? L"Volume_NotePlayer"
                                                                : L"Volume_NoteLocal"));
     FixedVolumePanel().Visibility(software || player ? Visibility::Collapsed : Visibility::Visible);
     SoftwareVolumePanel().Visibility(software ? Visibility::Visible : Visibility::Collapsed);
     PlayerVolumePanel().Visibility(player ? Visibility::Visible : Visibility::Collapsed);
     VolumeLock().Visibility(software || player ? Visibility::Collapsed : Visibility::Visible);
-    FixedVolumeTitle().Text(tr(wantsPlayer ? L"Volume_PlayerUnknown" : L"Volume_Fixed"));
+    FixedVolumeTitle().Text(tr(!wantsPlayer ? L"Volume_Fixed" : hqplayer ? L"Volume_HQPlayerUnknown" : L"Volume_PlayerUnknown"));
     VolumeSlider().Value(settings_.volume.db);
     if (player && std::chrono::steady_clock::now() - playerVolumeMovedAt_ > kPlayerVolumeSettles)
         PlayerVolumeSlider().Value(*playerVolume_);
@@ -4166,7 +4186,7 @@ void MainWindow::showVolumeLevel() {
     hstring name;
     if (volume.mode == camel::VolumeMode::Player && playerVolume_) {
         const auto shown = uint32_t(PlayerVolumeSlider().Value());
-        const auto text = to_hstring(shown);
+        const auto text = playerVolumeDb_ ? decibels(*playerVolumeDb_) : to_hstring(shown); // HQPlayer's in dB
         PlayerVolumeText().Text(text);
         VolumeIcon().Glyph(playerMuted_ ? L"\xE74F" : shown > 66 ? L"\xE995" : shown > 33 ? L"\xE994" : L"\xE993");
         name = ui::format(L"Volume_Level", {playerMuted_ ? std::wstring(tr(L"SignalPath_Muted")) : std::wstring(text)});
@@ -4245,7 +4265,9 @@ void MainWindow::showLoudnessProgress() {
 }
 
 camel::VolumeMode MainWindow::chosenVolumeMode() {
-    if (VolumeModeCombo().SelectedIndex() != 1) return camel::VolumeMode::Fixed;
+    const int chosen = VolumeModeCombo().SelectedIndex();
+    if (chosen == 2) return camel::VolumeMode::Player; // HQPlayer's
+    if (chosen != 1) return camel::VolumeMode::Fixed;
     return camel::isNetworkPlayer(settings_.backend) ? camel::VolumeMode::Player : camel::VolumeMode::Software;
 }
 

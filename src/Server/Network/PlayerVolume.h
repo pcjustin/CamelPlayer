@@ -18,20 +18,30 @@ namespace camel::server {
 struct PlayerLevel {
     uint32_t level = 0; // on the player's 0-100 scale
     bool muted = false;
+    std::optional<double> db; // a player whose volume is in dB (HQPlayer): the level `level` stands for
     bool operator==(const PlayerLevel&) const = default;
 };
 
-class PlayerVolume {
+// A player's own volume, followed and set without waiting for the player.
+class OwnVolume {
+public:
+    virtual ~OwnVolume() = default;
+    virtual std::optional<PlayerLevel> current() const = 0; // nothing while it cannot be read or used
+    virtual void setLevel(uint32_t level) = 0;
+    virtual void setMuted(bool muted) = 0;
+};
+
+class PlayerVolume final : public OwnVolume {
 public:
     // Talks to the player on its own thread, so nothing here waits for it.
     explicit PlayerVolume(upnp::PlayerDescription player, LinkOptions options = {std::chrono::seconds(5), 2, 1800, 1500});
-    ~PlayerVolume();
+    ~PlayerVolume() override;
     PlayerVolume(const PlayerVolume&) = delete;
     PlayerVolume& operator=(const PlayerVolume&) = delete;
 
-    std::optional<PlayerLevel> current() const; // nothing while the player cannot be read
-    void setLevel(uint32_t level);
-    void setMuted(bool muted);
+    std::optional<PlayerLevel> current() const override;
+    void setLevel(uint32_t level) override;
+    void setMuted(bool muted) override;
 
 private:
     struct Impl;

@@ -61,14 +61,15 @@ std::optional<SampleType> fixedSampleType(const Settings& s) {
 
 DsdOutput dsdOutput(const Settings& s) {
     if (s.backend == Backend::Network) return s.network.dsdOutput;
-    if (s.backend == Backend::AirPlay) return DsdOutput::Native;  // no raw DSD, so PCM only with the permission
-    if (s.backend == Backend::HQPlayer) return DsdOutput::Native; // raw DSD as DSF for HQPlayer to process
+    if (s.backend == Backend::AirPlay) return DsdOutput::Native;     // no raw DSD, so PCM only with the permission
+    if (s.backend == Backend::HQPlayer) return s.hqplayer.dsdOutput; // DSF for HQPlayer to process, or PCM if permitted
     return s.backend == Backend::Asio ? s.asio.dsdOutput : s.backend == Backend::Ks ? s.ks.dsdOutput : s.wasapi.dsdOutput;
 }
 
 uint32_t dsdPcmRate(const Settings& s) {
     if (s.backend == Backend::Network) return s.network.dsdPcmRate;
     if (s.backend == Backend::AirPlay) return 44100;
+    if (s.backend == Backend::HQPlayer) return s.hqplayer.dsdPcmRate;
     return s.backend == Backend::Asio ? s.asio.dsdPcmRate : s.backend == Backend::Ks ? s.ks.dsdPcmRate : s.wasapi.dsdPcmRate;
 }
 
@@ -495,19 +496,21 @@ public:
         const bool conversionChanged =
             (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality ||
              settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported ||
-             !samePlayerPath(settings_.network, s.network)) &&
+             !samePlayerPath(settings_.network, s.network) || settings_.hqplayer.dsdOutput != s.hqplayer.dsdOutput ||
+             settings_.hqplayer.dsdPcmRate != s.hqplayer.dsdPcmRate) &&
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || conversionChanged;
-        const bool dspChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
-                                settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder ||
-                                volumeDb(settings_.volume) != volumeDb(s.volume);
+        const bool chainChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
+                                  settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder;
+        const bool dspChanged = chainChanged || volumeDb(settings_.volume) != volumeDb(s.volume);
         const bool crossfadeChanged = settings_.crossfade != s.crossfade;
         const bool wasActive = active_;
         const bool wasPlaying = playsOn();
         const uint64_t pos = currentPosition();
-        // What a network player holds cannot change, so a new chain is heard only from a new stream.
-        const bool restart =
-            outputChanged || decoderChanged || (dspChanged && (s.backend == Backend::Network || s.backend == Backend::HQPlayer));
+        // What a network player holds cannot change, so a new chain is heard only from a new stream. A volume is heard
+        // once what HQPlayer holds has played, rather than after the silence of a new stream.
+        const bool restart = outputChanged || decoderChanged ||
+                             (chainChanged && (s.backend == Backend::Network || s.backend == Backend::HQPlayer));
         if (restart && wasActive) teardown();
         if (outputChanged) output_.reset();
         settings_ = s;

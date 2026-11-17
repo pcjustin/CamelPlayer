@@ -249,6 +249,7 @@ struct PlaybackSnapshot {
     uint64_t underruns = 0;
     std::optional<uint32_t> bufferingSeconds; // paused until a slow source is buffered: about this many seconds left
     std::optional<uint32_t> playerVolume;     // the network player's own level, 0-100; nothing without one to follow
+    std::optional<double> playerVolumeDb;     // what `playerVolume` stands for on a player whose volume is in dB (HQPlayer)
     bool playerMuted = false;
     std::vector<ReceiverState> receivers;     // the AirPlay group in use, the one in use first; empty otherwise
     std::optional<ReceiverLeft> receiverLeft; // the last receiver that left the group

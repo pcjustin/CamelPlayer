@@ -185,7 +185,9 @@ struct AirPlaySettings {
 // HQPlayer Desktop or Embedded as the output (docs/Plan.md §5.11): it processes and plays, its own settings staying in
 // HQPlayer.
 struct HQPlayerSettings {
-    std::string address; // host:port, as added or found
+    std::string address;                     // host:port, as added or found
+    DsdOutput dsdOutput = DsdOutput::Native; // Native is DSF; Pcm is the permission to convert
+    uint32_t dsdPcmRate = 176400;
     PlaybackTiming timing{.releaseAfterPauseSeconds = 0};
     bool operator==(const HQPlayerSettings&) const = default;
 };

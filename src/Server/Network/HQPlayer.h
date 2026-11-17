@@ -66,11 +66,12 @@ struct ClientOptions {
     std::chrono::milliseconds firstReply{10000}; // 3-4 s measured, 5.4 s just after HQPlayer started
     // HQPlayer on a Mac took over 5 s to answer PlaylistClear while it stopped a track (2026-11-16).
     std::chrono::milliseconds reply{15000};
+    bool clearOnConnect = true; // off for a connection that only follows and sets the volume
 };
 
 // One connection, kept open: each command waits for the reply of its own name, pushed Status documents going to
 // `onStatus` instead. Every new connection starts with Stop and PlaylistClear, as a restarted HQPlayer plays on from its
-// last playlist, and subscribes to Status.
+// last playlist (unless `clearOnConnect` is off), and subscribes to Status.
 class Client {
 public:
     // `onStatus` runs on the client's reader thread; keep it short. `onLost` runs there too when an open connection

@@ -306,6 +306,7 @@ private:
     int volumeWheel_ = 0;                  // the part of a wheel notch not yet applied
     std::optional<uint32_t> playerVolume_; // the network player's own level, as the Server last reported it
     bool playerMuted_ = false;
+    std::optional<double> playerVolumeDb_;                      // HQPlayer's level in dB, which `playerVolume_` stands for
     std::chrono::steady_clock::time_point playerVolumeMovedAt_; // until it settles, the slider stays where the user left it
     std::vector<camel::server::ReceiverState> receivers_;       // the AirPlay group in use
     std::map<std::string, std::chrono::steady_clock::time_point> receiverMovedAt_;

@@ -770,6 +770,10 @@ Details: {0}</value></data>
   <data name="Volume_ModeSoftware" xml:space="preserve"><value>Software</value></data>
   <data name="Volume_NotePlayer" xml:space="preserve"><value>The player's volume moves the player's own level and follows its remote and app, and the stream stays bit-perfect. CamelPlayer writes it only when you move the slider or mute.</value></data>
   <data name="Volume_PlayerUnknown" xml:space="preserve"><value>The player's volume cannot be read</value></data>
+  <data name="Volume_ModeHQPlayerItem.Content" xml:space="preserve"><value>HQPlayer's volume</value></data>
+  <data name="Volume_NoteHQPlayer" xml:space="preserve"><value>Software applies CamelPlayer's volume before HQPlayer, from −80 to 0 dB; a change is heard once what HQPlayer holds has played. HQPlayer's volume moves HQPlayer's own level in dB and follows its window, and the stream stays bit-perfect; it can be used once volume is turned on in HQPlayer's settings.</value></data>
+  <data name="Volume_HQPlayerUnknown" xml:space="preserve"><value>HQPlayer's volume is off in HQPlayer or cannot be read</value></data>
+  <data name="Dsd_DsfHQPlayer" xml:space="preserve"><value>DSF, for HQPlayer to process</value></data>
   <data name="SignalPath_PlayerVolume" xml:space="preserve"><value>Player volume</value></data>
   <data name="SignalPath_GaplessOff" xml:space="preserve"><value>Gapless off</value></data>
   <data name="Settings_AirPlayChannels.Header" xml:space="preserve"><value>Channels</value></data>

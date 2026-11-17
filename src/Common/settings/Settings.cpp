@@ -680,11 +680,13 @@ static void readAirPlay(const json& o, AirPlaySettings& a) {
 }
 
 static json hqplayerJson(const HQPlayerSettings& h) {
-    return {{"address", h.address}};
+    return {{"address", h.address}, {"dsdOutput", dsdOutputId(h.dsdOutput)}, {"dsdPcmRate", h.dsdPcmRate}};
 }
 
 static void readHQPlayer(const json& o, HQPlayerSettings& h) {
     h.address = str(o, "address", "");
+    h.dsdOutput = str(o, "dsdOutput", "") == dsdOutputId(DsdOutput::Pcm) ? DsdOutput::Pcm : DsdOutput::Native;
+    h.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
 }
 
 static json outputJson(const SavedOutput& o) {
