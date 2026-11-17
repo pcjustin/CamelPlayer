@@ -212,3 +212,71 @@ TEST_P(RateLimitHardware, DISABLED_PlaysAtTheLimitedRate) {
 
 INSTANTIATE_TEST_SUITE_P(M2, RateLimitHardware, ::testing::ValuesIn(kLimitCases),
                          [](const ::testing::TestParamInfo<LimitCase>& info) { return std::string(info.param.name); });
+
+namespace {
+
+// DSD upsampling and PCM sent as DSD on Chord/DAVE (docs/Plan.md §6, US-R02): each source modulated in real time to
+// the rate asked, natively on ASIO and as DoP on WASAPI, ASIO and KS, without an underrun.
+struct ModulatedCase {
+    const char* name;
+    Backend backend;
+    DsdOutput output;
+    uint32_t sourceMultiple; // of DSD64; 0 for PCM at `pcmRate`
+    uint32_t pcmRate;
+    DsdUpsamplingSettings upsampling;
+    uint32_t order;
+    uint32_t expectRate; // the device format's rate
+};
+
+const ModulatedCase kModulatedCases[] = {
+    {"asio_native_44k_to_DSD64", Backend::Asio, DsdOutput::Native, 0, 44100, {DsdUpsampling::Set, 2, 128, true}, 7, 352800},
+    {"asio_native_44k_to_DSD128", Backend::Asio, DsdOutput::Native, 0, 44100, {DsdUpsampling::Set, 2, 128, true}, 7, 705600},
+    {"asio_native_96k_to_DSD256_7th", Backend::Asio, DsdOutput::Native, 0, 96000, {DsdUpsampling::Set, 2, 256, true}, 7, 1411200},
+    {"asio_native_96k_to_DSD256_5th", Backend::Asio, DsdOutput::Native, 0, 96000, {DsdUpsampling::Set, 2, 256, true}, 5, 1411200},
+    {"asio_native_DSD64_x2", Backend::Asio, DsdOutput::Native, 1, 0, {DsdUpsampling::Multiple, 2, 128, false}, 7, 705600},
+    {"asio_native_DSD64_to_highest", Backend::Asio, DsdOutput::Native, 1, 0, {DsdUpsampling::Highest, 2, 128, false}, 7, 1411200},
+    {"asio_dop_DSD64_to_DSD128", Backend::Asio, DsdOutput::Dop, 1, 0, {DsdUpsampling::Set, 2, 128, false}, 7, 352800},
+    {"wasapi_dop_44k_to_DSD128", Backend::Wasapi, DsdOutput::Dop, 0, 44100, {DsdUpsampling::Set, 2, 128, true}, 7, 352800},
+    {"wasapi_dop_DSD64_to_DSD256", Backend::Wasapi, DsdOutput::Dop, 1, 0, {DsdUpsampling::Set, 2, 256, false}, 7, 705600},
+    {"ks_dop_48k_to_DSD128", Backend::Ks, DsdOutput::Dop, 0, 48000, {DsdUpsampling::Set, 2, 128, true}, 7, 352800},
+};
+
+} // namespace
+
+class ModulatedDsdHardware : public ::testing::TestWithParam<ModulatedCase> {};
+
+TEST_P(ModulatedDsdHardware, DISABLED_PlaysInRealTime) {
+    const auto& c = GetParam();
+    Settings settings;
+    ASSERT_TRUE(selectChord(settings, c.backend));
+    settings.convertWhenUnsupported = false; // DSD upsampling alone permits the conversion
+    settings.asio.dsdOutput = settings.ks.dsdOutput = c.output;
+    settings.wasapi.dsdUpsampling = settings.asio.dsdUpsampling = settings.ks.dsdUpsampling = c.upsampling;
+    settings.wasapi.filter.modulatorOrder = settings.asio.filter.modulatorOrder = settings.ks.filter.modulatorOrder = c.order;
+    if (c.expectRate == 352800 && c.output == DsdOutput::Native) settings.asio.maxDsdRate = 64; // DSD64 has no set rate
+    const auto file =
+        c.sourceMultiple ? toneFile(c.sourceMultiple) : testutil::generatedFile({c.name, c.pcmRate, 24, 2, 4.0, true, -40});
+    RecordProperty("case", c.name);
+    PlaybackEngine engine(settings);
+    engine.openAndPlay(file);
+    engine.waitIdle();
+    auto snap = engine.snapshot();
+    ASSERT_FALSE(snap.error) << snap.errorDetail;
+    ASSERT_TRUE(snap.plan && snap.output);
+    EXPECT_EQ(snap.plan->dsd, c.output == DsdOutput::Native ? DsdPath::Native : DsdPath::Dop);
+    EXPECT_EQ(snap.plan->modulatorOrder, c.order);
+    EXPECT_EQ(snap.output->sampleRate, c.expectRate);
+    EXPECT_EQ(snap.plan->state, PipelineState::Processed);
+    const auto position = snap.position;
+    std::this_thread::sleep_for(2s);
+    snap = engine.snapshot();
+    EXPECT_FALSE(snap.error) << snap.errorDetail;
+    EXPECT_GT(snap.position, position);
+    EXPECT_EQ(snap.underruns, 0u);
+    RecordProperty("result", describe(*snap.output) + " via " + snap.outputStatus.mode);
+    engine.stop();
+    engine.waitIdle();
+}
+
+INSTANTIATE_TEST_SUITE_P(M2, ModulatedDsdHardware, ::testing::ValuesIn(kModulatedCases),
+                         [](const ::testing::TestParamInfo<ModulatedCase>& info) { return std::string(info.param.name); });
