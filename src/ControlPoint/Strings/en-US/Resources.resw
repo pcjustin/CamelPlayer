@@ -81,6 +81,18 @@
   <data name="Passband_Standard" xml:space="preserve"><value>Standard</value></data>
   <data name="Passband_Steep" xml:space="preserve"><value>Steep</value></data>
   <data name="Passband_Gentle" xml:space="preserve"><value>Gentle</value></data>
+  <data name="Settings_Modulator.Header" xml:space="preserve"><value>DSD modulator</value></data>
+  <data name="Modulator_Order5" xml:space="preserve"><value>5th order</value></data>
+  <data name="Modulator_Order7" xml:space="preserve"><value>7th order</value></data>
+  <data name="Settings_DsdUpsampling.Header" xml:space="preserve"><value>DSD upsampling</value></data>
+  <data name="DsdUpsampling_Off" xml:space="preserve"><value>Off</value></data>
+  <data name="DsdUpsampling_Highest" xml:space="preserve"><value>To the highest</value></data>
+  <data name="DsdUpsampling_Multiple" xml:space="preserve"><value>By a multiple</value></data>
+  <data name="Settings_DsdUpsamplingMultiple.Header" xml:space="preserve"><value>DSD multiple</value></data>
+  <data name="Settings_PcmAsDsd.Header" xml:space="preserve"><value>PCM sources</value></data>
+  <data name="Settings_PcmAsDsd.OnContent" xml:space="preserve"><value>Send PCM as DSD too</value></data>
+  <data name="Settings_PcmAsDsd.OffContent" xml:space="preserve"><value>Send PCM as DSD too</value></data>
+  <data name="Settings_PcmDsdRate.Header" xml:space="preserve"><value>DSD rate for PCM</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>Polling buffer (ms)</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS task</value></data>
   <data name="Mmcss_Disabled" xml:space="preserve"><value>Disabled</value></data>
@@ -129,6 +141,7 @@
   <data name="Error_DeviceLost" xml:space="preserve"><value>The device was disconnected; press play when it is back</value></data>
   <data name="Error_AccessDenied" xml:space="preserve"><value>The device refuses this computer</value></data>
   <data name="Error_DeviceChanged" xml:space="preserve"><value>The device changed; choose an output again</value></data>
+  <data name="Error_TooSlow" xml:space="preserve"><value>This computer cannot keep up with this DSD rate; choose a lower DSD rate</value></data>
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>The device cannot play this format bit-perfectly; skipped</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>Driver error</value></data>
   <data name="Library_GoToPlaying.AutomationProperties.Name" xml:space="preserve"><value>Go to playing (Ctrl+L)</value></data>
@@ -759,6 +772,8 @@ Details: {0}</value></data>
   <data name="Settings_MaxDsdRate.Description" xml:space="preserve"><value>Higher DSD is remodulated to it (shown as processed).</value></data>
   <data name="Limit_FollowDevice" xml:space="preserve"><value>Follow the device</value></data>
   <data name="SignalPath_DsdRemodulate" xml:space="preserve"><value>DSD remodulation</value></data>
+  <data name="SignalPath_Modulator" xml:space="preserve"><value>Sigma-delta modulator</value></data>
+  <data name="SignalPath_ModulatorDetail" xml:space="preserve"><value>order {0} · {1}</value></data>
   <data name="Settings_NetworkBits.Header" xml:space="preserve"><value>Highest bit depth</value></data>
   <data name="Limit_FollowPlayer" xml:space="preserve"><value>Follow the player</value></data>
   <data name="Dsd_Dsf" xml:space="preserve"><value>DSF, when the player declares DSD</value></data>

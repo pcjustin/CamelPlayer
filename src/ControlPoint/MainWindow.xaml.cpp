@@ -19,6 +19,7 @@
 #include <propvarutil.h>
 
 #pragma comment(lib, "propsys.lib")
+#include <span>
 #include <thread>
 #include <utility>
 #include <winrt/Microsoft.UI.Interop.h>
@@ -264,11 +265,25 @@ uint32_t maxDsdAt(int index) {
     return index > 0 && size_t(index) <= std::size(kMaxDsdRates) ? kMaxDsdRates[size_t(index) - 1] : 0;
 }
 
-// An output's sample-rate choice and conversion filter (docs/Plan.md §6), as WASAPI exclusive, ASIO, KS and network
-// players have them. The choice lists follow the file, the three upsampling modes, then the set rates.
+// An output's sample-rate choice, conversion filter and DSD upsampling (docs/Plan.md §6), as WASAPI exclusive, ASIO, KS
+// and network players have them. The choice lists follow the file, the three upsampling modes, then the set rates; DSD
+// upsampling lists off, its two modes, then the set DSD rates.
 struct RateControls {
-    ComboBox rate, multiple, quality, phase, passband, dsdRate;
+    ComboBox rate, multiple, quality, phase, passband, dsdRate, modulator, dsdUpsampling, dsdMultiple;
+    ToggleSwitch pcmAsDsd;
+    ComboBox pcmDsdRate;
 };
+
+constexpr int kDsdUpsamplingModes = 3;
+
+int indexIn(std::span<const uint32_t> values, uint32_t value) {
+    const auto at = std::ranges::find(values, value);
+    return at == values.end() ? 0 : int(at - values.begin());
+}
+
+uint32_t valueIn(std::span<const uint32_t> values, int index) {
+    return values[size_t(std::clamp(index, 0, int(values.size()) - 1))];
+}
 
 constexpr int kUpsamplingModes = 3;
 
@@ -284,6 +299,19 @@ template <class T> void showRateControls(const RateControls& c, const T& t) {
     fill(c.quality, {tr(L"Quality_Quick"), tr(L"Quality_High"), tr(L"Quality_VeryHigh")}, int(t.filter.quality));
     fill(c.phase, {tr(L"Phase_Linear"), tr(L"Phase_Intermediate"), tr(L"Phase_Minimum")}, int(t.filter.phase));
     fill(c.passband, {tr(L"Passband_Standard"), tr(L"Passband_Steep"), tr(L"Passband_Gentle")}, int(t.filter.passband));
+    fill(c.modulator, {tr(L"Modulator_Order5"), tr(L"Modulator_Order7")}, indexIn(kModulatorOrders, t.filter.modulatorOrder));
+    std::vector<hstring> dsdRates;
+    for (const uint32_t rate : kDsdSetRates) dsdRates.emplace_back(L"DSD" + to_hstring(rate));
+    std::vector<hstring> modes{tr(L"DsdUpsampling_Off"), tr(L"DsdUpsampling_Highest"), tr(L"DsdUpsampling_Multiple")};
+    modes.insert(modes.end(), dsdRates.begin(), dsdRates.end());
+    const auto& d = t.dsdUpsampling;
+    fill(c.dsdUpsampling, modes,
+         d.mode == DsdUpsampling::Set ? kDsdUpsamplingModes + indexIn(kDsdSetRates, d.rate) : int(d.mode));
+    std::vector<hstring> dsdMultiples;
+    for (const uint32_t m : kDsdUpsamplingMultiples) dsdMultiples.push_back(to_hstring(m) + L"×");
+    fill(c.dsdMultiple, dsdMultiples, indexIn(kDsdUpsamplingMultiples, d.multiple));
+    c.pcmAsDsd.IsOn(d.pcm);
+    fill(c.pcmDsdRate, dsdRates, indexIn(kDsdSetRates, d.rate));
 }
 
 template <class T> void readRateControls(const RateControls& c, T& t) {
@@ -295,36 +323,64 @@ template <class T> void readRateControls(const RateControls& c, T& t) {
     t.filter.quality = ResampleQuality(std::clamp(c.quality.SelectedIndex(), 0, 2));
     t.filter.phase = FilterPhase(std::clamp(c.phase.SelectedIndex(), 0, 2));
     t.filter.passband = FilterPassband(std::clamp(c.passband.SelectedIndex(), 0, 2));
+    t.filter.modulatorOrder = valueIn(kModulatorOrders, c.modulator.SelectedIndex());
+    auto& d = t.dsdUpsampling;
+    const int mode = std::max(0, c.dsdUpsampling.SelectedIndex());
+    d.mode = mode < kDsdUpsamplingModes ? DsdUpsampling(mode) : DsdUpsampling::Set;
+    // The set rate is the one rate both lists show: the mode's, else PCM's.
+    d.rate = valueIn(kDsdSetRates, mode >= kDsdUpsamplingModes ? mode - kDsdUpsamplingModes : c.pcmDsdRate.SelectedIndex());
+    d.multiple = valueIn(kDsdUpsamplingMultiples, c.dsdMultiple.SelectedIndex());
+    d.pcm = c.pcmAsDsd.IsOn();
 }
 
 // The multiple only for upsampling by one, phase and passband not for soxr's quick cubic interpolator, and DSD to PCM's
-// own rate only while the choice follows the file, as DSD converted to PCM otherwise follows the choice.
+// own rate only while the choice follows the file, as DSD converted to PCM otherwise follows the choice. DSD upsampling
+// only while DSD is sent as DSD, the modulator and PCM as DSD only while it is on, its multiple only by a multiple, and
+// PCM's DSD rate only while PCM goes as DSD by a multiple, showing the set rate otherwise, as both lists hold the one
+// rate; PCM sent as DSD takes no PCM rate.
 template <class T> void enableRateControls(const RateControls& c, const T& t, bool enabled) {
-    c.rate.IsEnabled(enabled);
-    c.multiple.IsEnabled(enabled && !t.fixedRate && t.upsampling == Upsampling::IntegerMultiple);
+    const auto& d = t.dsdUpsampling;
+    const bool dsd = enabled && t.dsdOutput != DsdOutput::Pcm;
+    const bool upsampling = dsd && d.mode != DsdUpsampling::Off;
+    const bool pcmRate = enabled && !(upsampling && d.pcm);
+    c.rate.IsEnabled(pcmRate);
+    c.multiple.IsEnabled(pcmRate && !t.fixedRate && t.upsampling == Upsampling::IntegerMultiple);
     c.quality.IsEnabled(enabled);
     c.phase.IsEnabled(enabled && t.filter.quality != ResampleQuality::Quick);
     c.passband.IsEnabled(enabled && t.filter.quality != ResampleQuality::Quick);
     c.dsdRate.IsEnabled(!enabled || (!t.fixedRate && t.upsampling == Upsampling::Off));
+    c.modulator.IsEnabled(upsampling);
+    c.dsdUpsampling.IsEnabled(dsd);
+    c.dsdMultiple.IsEnabled(upsampling && d.mode == DsdUpsampling::Multiple);
+    c.pcmAsDsd.IsEnabled(upsampling);
+    c.pcmDsdRate.Visibility(d.pcm ? Visibility::Visible : Visibility::Collapsed);
+    if (const int rate = indexIn(kDsdSetRates, d.rate); d.mode == DsdUpsampling::Set && c.pcmDsdRate.SelectedIndex() != rate)
+        c.pcmDsdRate.SelectedIndex(rate);
+    c.pcmDsdRate.IsEnabled(upsampling && d.pcm && d.mode == DsdUpsampling::Multiple);
 }
 
 RateControls wasapiRateControls(MainWindow& w) {
-    return {w.WasapiRateCombo(),  w.WasapiMultipleCombo(), w.WasapiQualityCombo(),
-            w.WasapiPhaseCombo(), w.WasapiPassbandCombo(), w.WasapiDsdRateCombo()};
+    return {w.WasapiRateCombo(),        w.WasapiMultipleCombo(),  w.WasapiQualityCombo(),   w.WasapiPhaseCombo(),
+            w.WasapiPassbandCombo(),    w.WasapiDsdRateCombo(),   w.WasapiModulatorCombo(), w.WasapiDsdUpsamplingCombo(),
+            w.WasapiDsdMultipleCombo(), w.WasapiPcmAsDsdSwitch(), w.WasapiPcmDsdRateCombo()};
 }
 
 RateControls asioRateControls(MainWindow& w) {
-    return {w.AsioRateCombo(),  w.AsioMultipleCombo(), w.AsioQualityCombo(),
-            w.AsioPhaseCombo(), w.AsioPassbandCombo(), w.AsioDsdRateCombo()};
+    return {w.AsioRateCombo(),        w.AsioMultipleCombo(),  w.AsioQualityCombo(),   w.AsioPhaseCombo(),
+            w.AsioPassbandCombo(),    w.AsioDsdRateCombo(),   w.AsioModulatorCombo(), w.AsioDsdUpsamplingCombo(),
+            w.AsioDsdMultipleCombo(), w.AsioPcmAsDsdSwitch(), w.AsioPcmDsdRateCombo()};
 }
 
 RateControls ksRateControls(MainWindow& w) {
-    return {w.KsRateCombo(), w.KsMultipleCombo(), w.KsQualityCombo(), w.KsPhaseCombo(), w.KsPassbandCombo(), w.KsDsdRateCombo()};
+    return {w.KsRateCombo(),        w.KsMultipleCombo(),  w.KsQualityCombo(),   w.KsPhaseCombo(),
+            w.KsPassbandCombo(),    w.KsDsdRateCombo(),   w.KsModulatorCombo(), w.KsDsdUpsamplingCombo(),
+            w.KsDsdMultipleCombo(), w.KsPcmAsDsdSwitch(), w.KsPcmDsdRateCombo()};
 }
 
 RateControls networkRateControls(MainWindow& w) {
-    return {w.NetworkSampleRateCombo(), w.NetworkMultipleCombo(), w.NetworkQualityCombo(),
-            w.NetworkPhaseCombo(),      w.NetworkPassbandCombo(), w.NetworkDsdRateCombo()};
+    return {w.NetworkSampleRateCombo(),  w.NetworkMultipleCombo(),  w.NetworkQualityCombo(),   w.NetworkPhaseCombo(),
+            w.NetworkPassbandCombo(),    w.NetworkDsdRateCombo(),   w.NetworkModulatorCombo(), w.NetworkDsdUpsamplingCombo(),
+            w.NetworkDsdMultipleCombo(), w.NetworkPcmAsDsdSwitch(), w.NetworkPcmDsdRateCombo()};
 }
 
 void showTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, const PlaybackTiming& t) {
@@ -1492,6 +1548,10 @@ void MainWindow::OnNetworkGaplessToggled(Windows::Foundation::IInspectable const
     settingsChanged();
 }
 
+void MainWindow::OnSettingToggled(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    settingsChanged();
+}
+
 void MainWindow::OnQueueAutoplayClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     AutoplaySwitch().IsOn(QueueAutoplayItem().IsChecked());
 }
@@ -1790,8 +1850,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         }
         // Source lossiness is its own field; a processed lossy file shows both (docs/Plan.md §5.2).
         SourceBadge().Visibility(lossy && plan.state != PipelineState::LossySource ? Visibility::Visible : Visibility::Collapsed);
-        BypassBadge().Visibility(plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native ? Visibility::Visible
-                                                                                         : Visibility::Collapsed);
+        // DSD the modulator makes has passed the DSP chain.
+        const bool raw = (plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native) && !plan.modulatorOrder;
+        BypassBadge().Visibility(raw ? Visibility::Visible : Visibility::Collapsed);
         BypassText().Text((plan.dsd == DsdPath::Dop ? hstring(L"DoP") : hstring(L"DSD")) + L" · " +
                           tr(L"SignalPath_DspBypassed"));
         setBadgeTip(BypassBadge(), BypassText().Text(), tr(bypassTip(plan)));
@@ -1825,20 +1886,22 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         stage = PathStage::Processing;
         if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);
         if (plan.downmix) add(tr(L"SignalPath_Downmix"), to_hstring(s.source->channels) + L"→2 ch", PathState::Processed);
-        if (plan.dsd == DsdPath::Pcm) add(tr(L"SignalPath_DsdToPcm"), L"352.8 kHz", PathState::Processed);
+        const bool decimated = plan.dsd == DsdPath::Pcm || (plan.modulatorOrder && bits == 1);
+        if (decimated) add(tr(L"SignalPath_DsdToPcm"), L"352.8 kHz", PathState::Processed);
         if (plan.remodulate) {
             const uint32_t outBytes = plan.dsd == DsdPath::Dop ? s.output->sampleRate * 2 : s.output->sampleRate;
             swprintf_s(text, L"DSD%u → DSD%u", s.source->sampleRate * 8 / 44100, outBytes * 8 / 44100);
             add(tr(L"SignalPath_DsdRemodulate"), text, PathState::Processed);
         }
-        if (plan.resample) {
-            // The decimator always produces 352.8 kHz; soxr then takes it to the output rate.
-            const double from = plan.dsd == DsdPath::Pcm ? 352.8 : s.source->sampleRate / 1000.0;
-            swprintf_s(text, L"%.1f→%.1f kHz", from, s.output->sampleRate / 1000.0);
+        // The decimator always produces 352.8 kHz; soxr then takes it to the output rate, or to the 352.8 kHz the
+        // modulator starts from.
+        const double from = decimated ? 352.8 : s.source->sampleRate / 1000.0;
+        const double to = plan.modulatorOrder ? 352.8 : s.output->sampleRate / 1000.0;
+        if (plan.resample && from != to) {
+            swprintf_s(text, L"%.1f→%.1f kHz", from, to);
             add(tr(L"SignalPath_Resample"), text, PathState::Processed);
         }
         // The track's ReplayGain, the chain's nodes in order, then the volume; raw DSD bypasses them all.
-        const bool raw = plan.dsd == DsdPath::Dop || plan.dsd == DsdPath::Native;
         if (!raw) {
             if (plan.gainDb != 0.0) {
                 swprintf_s(text, L"%+.1f dB", plan.gainDb);
@@ -1866,11 +1929,19 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const hstring deviceDepth = to_hstring(std::min(validBits(s.output->type), 24u)) + L"-bit";
         const uint32_t container = bytesPerSample(s.output->type) * 8;
         stage = PathStage::Output;
-        const PathState rawState = plan.remodulate ? PathState::Processed : PathState::BitPerfect;
+        const PathState rawState = plan.remodulate || plan.modulatorOrder ? PathState::Processed : PathState::BitPerfect;
+        if (plan.modulatorOrder) {
+            const uint32_t outBytes = plan.dsd == DsdPath::Dop ? s.output->sampleRate * 2 : s.output->sampleRate;
+            add(tr(L"SignalPath_Modulator"),
+                ui::format(L"SignalPath_ModulatorDetail",
+                           {std::to_wstring(plan.modulatorOrder), L"DSD" + std::to_wstring(outBytes * 8 / 44100)}),
+                PathState::Processed);
+        }
+        const hstring rawDetail = plan.modulatorOrder ? hstring{} : tr(L"SignalPath_DspBypassed");
         if (plan.dsd == DsdPath::Dop)
-            add(L"DoP", tr(L"SignalPath_DspBypassed"), rawState);
+            add(L"DoP", rawDetail, rawState);
         else if (plan.dsd == DsdPath::Native)
-            add(tr(L"SignalPath_NativeDsd"), tr(L"SignalPath_DspBypassed"), rawState);
+            add(tr(L"SignalPath_NativeDsd"), rawDetail, rawState);
         else if (plan.widen)
             add(tr(L"SignalPath_Float"), L"float32",
                 processed || plan.dsd == DsdPath::Pcm ? PathState::Processed : PathState::Lossless);

@@ -431,6 +431,26 @@ ResampleFilter resampleFilter(const Settings& s) {
     return {};
 }
 
+DsdUpsamplingSettings dsdUpsampling(const Settings& s) {
+    const auto chosen = [](DsdOutput output, const DsdUpsamplingSettings& d) {
+        return output == DsdOutput::Pcm ? DsdUpsamplingSettings{} : d;
+    };
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return s.wasapi.shared ? DsdUpsamplingSettings{} : chosen(s.wasapi.dsdOutput, s.wasapi.dsdUpsampling);
+    case Backend::Asio:
+        return chosen(s.asio.dsdOutput, s.asio.dsdUpsampling);
+    case Backend::Ks:
+        return chosen(s.ks.dsdOutput, s.ks.dsdUpsampling);
+    case Backend::Network:
+        return chosen(s.network.dsdOutput, s.network.dsdUpsampling);
+    case Backend::AirPlay:
+    case Backend::HQPlayer:
+        return {};
+    }
+    return {};
+}
+
 uint32_t maxSampleRate(const Settings& s) {
     switch (s.backend) {
     case Backend::Wasapi:
@@ -495,6 +515,7 @@ static bool boolean(const json& o, const char* k, bool def) {
 static constexpr const char* kUpsamplingIds[] = {"off", "integerHighest", "integerMultiple", "anyHighest"};
 static constexpr const char* kPhaseIds[] = {"linear", "intermediate", "minimum"};
 static constexpr const char* kPassbandIds[] = {"standard", "steep", "gentle"};
+static constexpr const char* kDsdUpsamplingIds[] = {"off", "highest", "multiple", "set"};
 
 template <class T, size_t N> static T fromIds(const json& o, const char* k, const char* const (&ids)[N]) {
     const auto found = std::ranges::find(ids, str(o, k, ids[0]));
@@ -509,7 +530,18 @@ template <class T> static json rateJson(const T& t) {
             {"filter",
              {{"quality", resampleQualityId(t.filter.quality)},
               {"phase", kPhaseIds[int(t.filter.phase)]},
-              {"passband", kPassbandIds[int(t.filter.passband)]}}}};
+              {"passband", kPassbandIds[int(t.filter.passband)]},
+              {"modulatorOrder", t.filter.modulatorOrder}}},
+            {"dsdUpsampling",
+             {{"mode", kDsdUpsamplingIds[int(t.dsdUpsampling.mode)]},
+              {"multiple", t.dsdUpsampling.multiple},
+              {"rate", t.dsdUpsampling.rate},
+              {"pcm", t.dsdUpsampling.pcm}}}};
+}
+
+// `value` when `choices` has it, else the first choice.
+template <size_t N> static uint32_t oneOf(int value, const uint32_t (&choices)[N]) {
+    return std::ranges::find(choices, uint32_t(value)) != std::end(choices) ? uint32_t(value) : choices[0];
 }
 
 // An output saved before it had a filter of its own starts from `quality`, the one every output resampled with.
@@ -522,6 +554,12 @@ template <class T> static void readRate(const json& o, T& t, ResampleQuality qua
     t.filter.quality = filter.contains("quality") ? resampleQualityFromId(str(filter, "quality", "high")) : quality;
     t.filter.phase = fromIds<FilterPhase>(filter, "phase", kPhaseIds);
     t.filter.passband = fromIds<FilterPassband>(filter, "passband", kPassbandIds);
+    t.filter.modulatorOrder = integer(filter, "modulatorOrder", 7, 5, 7) == 5 ? 5 : 7;
+    const json& dsd = o.contains("dsdUpsampling") && o["dsdUpsampling"].is_object() ? o["dsdUpsampling"] : json::object();
+    t.dsdUpsampling.mode = fromIds<DsdUpsampling>(dsd, "mode", kDsdUpsamplingIds);
+    t.dsdUpsampling.multiple = oneOf(integer(dsd, "multiple", 2, 2, 4), kDsdUpsamplingMultiples);
+    t.dsdUpsampling.rate = oneOf(integer(dsd, "rate", 128, 128, 256), kDsdSetRates);
+    t.dsdUpsampling.pcm = boolean(dsd, "pcm", false);
 }
 
 static void readTiming(const json& o, PlaybackTiming& t) {

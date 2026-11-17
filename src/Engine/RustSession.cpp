@@ -121,7 +121,7 @@ RustSession::RustSession(const std::filesystem::path& path, DecoderKind decoder,
                                                                           : 0u);
     const CamelEngineConfigV1 config{sizeof(CamelEngineConfigV1),   CAMEL_ENGINE_ABI_VERSION,   CAMEL_ENGINE_MAX_RENDER_UNITS,
                                      abiFormat(format, dsd),        conversion.allow ? 1u : 0u, quality,
-                                     conversion.allowDsd ? 1u : 0u, predecodeSeconds * 1000};
+                                     conversion.allowDsd ? 1u : 0u, predecodeSeconds * 1000,    conversion.modulation};
     if (const auto status = camel_engine_create_v1(&config, &engine_); status != CAMEL_ENGINE_OK)
         throw engineError("create", status);
     const auto utf8 = toUtf8(path.wstring());
@@ -200,9 +200,10 @@ RustSession::Rendered RustSession::render(uint8_t* destination, size_t frames, s
         done += chunk;
         if (status == CAMEL_ENGINE_END)
             rendered.ended = true;
-        else if (status == CAMEL_ENGINE_UNDERRUN)
+        else if (status == CAMEL_ENGINE_UNDERRUN) {
             rendered.underrun = true;
-        else if (status < 0 || result.state != CAMEL_RENDER_STATE_ACTIVE || got < chunk)
+            rendered.behind = rendered.behind || result.state == CAMEL_RENDER_STATE_BEHIND;
+        } else if (status < 0 || result.state != CAMEL_RENDER_STATE_ACTIVE || got < chunk)
             rendered.fault = rendered.fault || result.state == CAMEL_RENDER_STATE_FAULT;
         else
             continue;

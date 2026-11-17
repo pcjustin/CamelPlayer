@@ -170,6 +170,62 @@ std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::
     }
 }
 
+std::vector<uint32_t> dsdUpsamplingRates(const DsdUpsamplingSettings& d, uint32_t sourceByteRate, uint32_t maxByteRate) {
+    constexpr uint32_t highest = 4 * kDsd64ByteRate;
+    std::vector<uint32_t> rates;
+    const auto downFrom = [&](uint32_t rate) {
+        for (; rate >= kDsd64ByteRate; rate /= 2) rates.push_back(rate);
+    };
+    switch (d.mode) {
+    case DsdUpsampling::Off:
+        return rates;
+    case DsdUpsampling::Highest:
+        downFrom(highest);
+        break;
+    case DsdUpsampling::Multiple:
+        if (!sourceByteRate) {
+            downFrom(dsdByteRate(d.rate));
+            break;
+        }
+        for (uint32_t m = d.multiple; m >= 1; m /= 2) rates.push_back(sourceByteRate * m);
+        break;
+    case DsdUpsampling::Set:
+        downFrom(dsdByteRate(d.rate));
+        break;
+    }
+    std::erase_if(rates, [&](uint32_t rate) {
+        return rate > highest || rate < kDsd64ByteRate || rate % kDsd64ByteRate || (maxByteRate && rate > maxByteRate);
+    });
+    return rates;
+}
+
+std::optional<OutputPlan> negotiateModulated(const SourceInfo& src, const std::vector<uint32_t>& rates, uint32_t order,
+                                             bool native, std::optional<SampleType> fixedType,
+                                             const std::function<bool(const DeviceFormat&)>& deviceSupports) {
+    if (!src.sampleRate || !src.channels || src.channels > 8 || !src.bitsPerSample || src.bitsPerSample > 32) return std::nullopt;
+    for (const uint32_t rate : rates) {
+        OutputPlan plan;
+        plan.duplicate = src.channels == 1;
+        plan.downmix = src.channels > 2;
+        plan.resample = true;
+        plan.modulatorOrder = order;
+        plan.state = PipelineState::Processed;
+        if (native && deviceSupports({rate, 2, SampleType::Dsd8})) {
+            plan.format = {rate, 2, SampleType::Dsd8};
+            plan.dsd = DsdPath::Native;
+            return plan;
+        }
+        for (SampleType t : {SampleType::Int24, SampleType::Int24In32, SampleType::Int32}) {
+            const DeviceFormat f{dopCarrierRate(rate), 2, t};
+            if ((fixedType && t != *fixedType) || !deviceSupports(f)) continue;
+            plan.format = f;
+            plan.dsd = DsdPath::Dop;
+            return plan;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<OutputPlan> negotiateDsdToPcm(const SourceInfo& src, uint32_t rate, std::optional<SampleType> fixedType,
                                             bool convert, const std::function<bool(const DeviceFormat&)>& deviceSupports,
                                             uint32_t maxRate, bool onlyRate) {

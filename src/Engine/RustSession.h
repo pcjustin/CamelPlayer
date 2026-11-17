@@ -34,7 +34,8 @@ public:
     struct Conversion {
         bool allow = false;
         ResampleFilter filter;
-        bool allowDsd = false; // DSD to PCM, or to a lower DSD rate
+        bool allowDsd = false;   // DSD to PCM, or to a lower DSD rate
+        uint32_t modulation = 0; // 5 or 7: every source modulated to the DSD stream by that order
     };
 
     // Loads `path` with `decoder` for output `format`, positioned at `startFrame`. `dsd` makes the stream native DSD or
@@ -65,7 +66,8 @@ public:
         size_t frames = 0;
         bool ended = false; // end of stream reached and fully drained
         bool underrun = false;
-        bool fault = false; // the engine stopped after a decode failure
+        bool behind = false; // short while decoded audio waited: the DSP stage did not keep up
+        bool fault = false;  // the engine stopped after a decode failure
     };
     // Output callback only; never blocks or allocates. A raw DSD stream fills all `frames` (silence after the audio).
     Rendered render(uint8_t* destination, size_t frames, size_t bytesPerFrame) noexcept;

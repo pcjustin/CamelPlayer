@@ -109,4 +109,7 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// Tests only: a wait after each pass of the DSP stage, so that it falls behind as a too slow computer would.
+void setDspStageDelayForTest(std::chrono::milliseconds delay);
+
 } // namespace camel::audio

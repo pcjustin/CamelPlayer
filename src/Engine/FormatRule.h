@@ -34,7 +34,10 @@ struct OutputPlan {
     bool widen = false;  // integers to float32
     bool reduce = false; // fewer bits than the source, with dither
     DsdPath dsd = DsdPath::None;
-    bool remodulate = false;  // raw DSD at a lower rate than the source's, modulated again
+    bool remodulate = false; // raw DSD at a lower rate than the source's, modulated again
+    // Any source through 352.8 kHz PCM and the DSP chain, modulated to the DSD rate by a modulator of this order (5 or
+    // 7); 0 does not.
+    uint32_t modulatorOrder = 0;
     bool shared = false;      // through the WASAPI shared-mode mixer
     std::vector<DspNode> dsp; // the DSP nodes that change the signal, in order (docs/Plan.md §5.9)
     double gainDb = 0.0;      // the track's ReplayGain
@@ -82,6 +85,19 @@ std::vector<uint32_t> upsamplingRates(Upsampling mode, uint32_t multiple, uint32
 std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::optional<SampleType> fixedType,
                                        const std::function<bool(const DeviceFormat&)>& deviceSupports, uint32_t maxByteRate = 0,
                                        uint32_t maxPcmRate = 0);
+
+// The DSD rates, as byte frame rates, that DSD upsampling `d` tries for a source of `sourceByteRate` (0 for PCM), best
+// first; none while it is off. Highest: DSD256 down to DSD64. Multiple: the source times the multiple, then the smaller
+// multiples down to the source itself; for PCM, as Set. Set: the set rate down to DSD64. Every rate lies within DSD64
+// to DSD256 and at or below a nonzero `maxByteRate` (the output's highest DSD rate).
+std::vector<uint32_t> dsdUpsamplingRates(const DsdUpsamplingSettings& d, uint32_t sourceByteRate, uint32_t maxByteRate);
+
+// Any source modulated to DSD at the first of `rates` (byte frame rates) the device takes: native DSD when `native` is
+// requested and the device takes it, else DoP in a carrier `fixedType` allows. Mono is duplicated and more channels
+// downmixed; always Processed, modulated by an NTF of `order`. nullopt when no rate fits.
+std::optional<OutputPlan> negotiateModulated(const SourceInfo& src, const std::vector<uint32_t>& rates, uint32_t order,
+                                             bool native, std::optional<SampleType> fixedType,
+                                             const std::function<bool(const DeviceFormat&)>& deviceSupports);
 
 // DSD converted to PCM: decimated to 352.8 kHz, then delivered like a 24-bit source at `rate` (the setting), with
 // `convert` governing other rates, downmix and depth exactly as for PCM, and `maxRate` as for negotiateOutput; with

@@ -109,7 +109,25 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
         if (const uint32_t rate = limitedRate(fixedRate(s), maxRate)) return std::vector<uint32_t>{rate};
         return upsamplingRates(upsampling(s), upsamplingMultiple(s), source, maxRate);
     };
+    // DSD upsampling: every source modulated to the first DSD rate the device takes, else the paths below.
+    const DsdUpsamplingSettings dsd = dsdUpsampling(s);
+    const bool native = (s.backend == Backend::Asio || s.backend == Backend::Network || s.backend == Backend::HQPlayer) &&
+                        dsdOutput(s) == DsdOutput::Native;
+    const auto modulated = [&](uint32_t sourceByteRate) {
+        const auto rates = dsdUpsamplingRates(dsd, sourceByteRate, maxDsdByteRate(s));
+        auto plan = negotiateModulated(src, rates, resampleFilter(s).modulatorOrder, native, fixedSampleType(s), supports);
+        const auto dsdName = [](uint32_t byteRate) { return "DSD" + std::to_string(byteRate / 352800 * 64); };
+        if (plan && adjustment) {
+            const uint32_t chosen = plan->dsd == DsdPath::Dop ? plan->format.sampleRate * 2 : plan->format.sampleRate;
+            if (chosen != rates.front())
+                *adjustment =
+                    requestedVsActive("DSD upsampling", dsdName(rates.front()), dsdName(chosen) + " (the device refused it)");
+        }
+        return plan;
+    };
     if (src.bitsPerSample != 1) {
+        if (dsd.pcm)
+            if (auto plan = modulated(0)) return plan;
         const auto rates = chosenRates(src.sampleRate);
         for (const uint32_t rate : rates)
             if (auto plan = negotiateOutput(src, lossy, fixedSampleType(s), s.convertWhenUnsupported, supports, rate))
@@ -121,13 +139,10 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
                                   std::to_string(plan->format.sampleRate) + " Hz (the device refused it)");
         return plan;
     }
+    if (auto plan = modulated(src.sampleRate)) return plan;
     const DsdOutput mode = dsdOutput(s);
     std::optional<OutputPlan> plan;
-    if (mode != DsdOutput::Pcm)
-        plan = negotiateDsd(src,
-                            (s.backend == Backend::Asio || s.backend == Backend::Network || s.backend == Backend::HQPlayer) &&
-                                mode == DsdOutput::Native,
-                            fixedSampleType(s), supports, maxDsdByteRate(s), maxRate);
+    if (mode != DsdOutput::Pcm) plan = negotiateDsd(src, native, fixedSampleType(s), supports, maxDsdByteRate(s), maxRate);
     if (plan || (mode != DsdOutput::Pcm && !s.convertDsdWhenUnsupported)) return plan;
     for (const uint32_t rate : chosenRates(44100))
         if (auto converted = negotiateDsdToPcm(src, rate, fixedSampleType(s), s.convertWhenUnsupported, supports, maxRate, true))
@@ -162,8 +177,8 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
 
 bool samePlayerPath(const NetworkSettings& a, const NetworkSettings& b) {
     return a.fixedRate == b.fixedRate && a.upsampling == b.upsampling && a.upsamplingMultiple == b.upsamplingMultiple &&
-           a.filter == b.filter && a.maxSampleRate == b.maxSampleRate && a.maxDsdRate == b.maxDsdRate && a.maxBits == b.maxBits &&
-           a.dsdOutput == b.dsdOutput && a.dsdPcmRate == b.dsdPcmRate;
+           a.filter == b.filter && a.dsdUpsampling == b.dsdUpsampling && a.maxSampleRate == b.maxSampleRate &&
+           a.maxDsdRate == b.maxDsdRate && a.maxBits == b.maxBits && a.dsdOutput == b.dsdOutput && a.dsdPcmRate == b.dsdPcmRate;
 }
 
 // The file's own decoder, else the per-format setting; an unsupported pairing fails instead of substituting.
@@ -179,6 +194,13 @@ DecoderKind chooseDecoder(AudioFormat format, std::optional<DecoderKind> request
     if (!supports(format, decoder))
         throw Error(ErrorCode::UnsupportedStream, std::string(decoderName(decoder)) + " cannot decode " + formatName(format));
     return decoder;
+}
+
+std::atomic<int> dspStageDelayMs{0};
+
+// After each pass of the DSP stage, which decoding runs too.
+void delayDspStageForTest() {
+    if (const int delay = dspStageDelayMs.load(std::memory_order_relaxed)) Sleep(DWORD(delay));
 }
 
 // The length the player shows: the exact one, or an estimate while the decoder still measures it. The snapshot's
@@ -291,6 +313,7 @@ public:
             } else if (playing_.load(std::memory_order_relaxed) && !leadDone_.load(std::memory_order_acquire) &&
                        !pulled_.load(std::memory_order_relaxed)) {
                 underruns_.fetch_add(1, std::memory_order_relaxed);
+                if (rendered.behind) behind_.fetch_add(1, std::memory_order_relaxed);
             }
         }
         return n;
@@ -447,14 +470,18 @@ public:
         }
     }
 
+    // The rate the DSP chain runs at: the device's, or the 352.8 kHz a modulated DSD stream is made from.
+    static uint32_t dspRate(const OutputPlan& plan) { return plan.modulatorOrder ? 352800 : plan.format.sampleRate; }
+
     // The DSP chain for `plan`'s output, with the impulse response at its rate; nothing for raw DSD, which bypasses it.
     // A response that cannot be used leaves convolution off.
     DspChain chainFor(const OutputPlan& plan) const {
-        if (plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop) return dspChain(Settings{}, nullptr);
+        if ((plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop) && !plan.modulatorOrder)
+            return dspChain(Settings{}, nullptr);
         Impulse impulse;
         if (settings_.convolution.enabled && !settings_.convolution.file.empty()) {
             try {
-                impulse = loadImpulse(toWide(settings_.convolution.file), plan.format.sampleRate).impulse;
+                impulse = loadImpulse(toWide(settings_.convolution.file), dspRate(plan)).impulse;
             } catch (const ImpulseError& e) {
                 log::warn("impulse response: %s", e.what());
             }
@@ -463,15 +490,16 @@ public:
     }
 
     // `plan` as the track's ReplayGain and the DSP chain leave it: processed while either changes the signal. Raw DSD
-    // bypasses both, and crossfades.
+    // bypasses both, and crossfades; modulated DSD takes both, but no crossfade.
     OutputPlan withDsp(OutputPlan plan) const {
-        const bool raw = plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop;
-        plan.dsp = actingNodes(chainFor(plan), plan.format.sampleRate, plan.format.channels);
+        const bool dsdStream = plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop;
+        const bool raw = dsdStream && !plan.modulatorOrder;
+        plan.dsp = actingNodes(chainFor(plan), dspRate(plan), plan.format.channels);
         plan.gainDb = raw ? 0.0 : gainDb_;
         plan.muted = !raw && settings_.volume.mode == VolumeMode::Software && settings_.volume.muted;
         plan.volumeDb = raw || plan.muted ? 0.0 : volumeDb(settings_.volume);
-        plan.crossfadeSeconds = settings_.crossfade.enabled && !raw ? settings_.crossfade.seconds : 0.0;
-        plan.fadeSkip = settings_.crossfade.enabled && raw ? FadeSkip::RawDsd : fadeSkip_;
+        plan.crossfadeSeconds = settings_.crossfade.enabled && !dsdStream ? settings_.crossfade.seconds : 0.0;
+        plan.fadeSkip = settings_.crossfade.enabled && dsdStream ? FadeSkip::RawDsd : fadeSkip_;
         if (!plan.dsp.empty() || plan.gainDb != 0.0 || plan.volumeDb != 0.0 || plan.muted) plan.state = PipelineState::Processed;
         return plan;
     }
@@ -749,6 +777,7 @@ private:
         if (active_) {
             logFirstAudio();
             logUnderruns();
+            if (!active_ || !keepsUp()) return;
             reportAudible();
             refreshNextSlot();
             refreshMd5();
@@ -793,6 +822,19 @@ private:
             snap_.total = total;
         }
         publish();
+    }
+
+    // A modulated DSD stream the DSP stage falls behind on plays in gaps: playback stops, for a lower rate to be chosen.
+    bool keepsUp() {
+        if (!plan_.modulatorOrder || behind_.load(std::memory_order_relaxed) < kBehindLimit) return true;
+        const uint32_t byteRate = plan_.dsd == DsdPath::Dop ? plan_.format.sampleRate * 2 : plan_.format.sampleRate;
+        const uint64_t at = currentPosition();
+        teardown();
+        position_ = at;
+        fail(Error(ErrorCode::TooSlow, "this computer cannot modulate to DSD" + std::to_string(byteRate / 352800 * 64) +
+                                           " in real time; choose a lower DSD rate"),
+             PlayState::Stopped);
+        return false;
     }
 
     // Dropouts are otherwise only a counter in the status page, which a new track resets.
@@ -900,6 +942,7 @@ private:
 
     RustSession::Conversion conversion() const {
         if (plan_.shared) return {true, resampleFilter(settings_), plan_.dsd == DsdPath::Pcm};
+        if (plan_.modulatorOrder) return {true, resampleFilter(settings_), true, plan_.modulatorOrder};
         // A fixed rate is the permission to resample to it, a highest rate to resample above it and to modulate DSD
         // again below it (docs/Plan.md §6).
         const bool chosenResample =
@@ -1226,6 +1269,7 @@ private:
         prefilled_ = 0;
         fullAt_ = 0;
         underruns_ = 0;
+        behind_ = 0;
         decodeDone_ = false;
         ended_ = false;
         stopDecode_ = false;
@@ -1347,6 +1391,7 @@ private:
                 }
                 uint64_t frames = 0;
                 const auto result = rust_->prefill(frames);
+                delayDspStageForTest();
                 if (result == RustSession::Prefill::End) {
                     // Keep polling: a file queued while the tail still plays continues the stream gaplessly.
                     decodeDone_.store(true, std::memory_order_release);
@@ -1372,8 +1417,10 @@ private:
     void dspMain() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         try {
-            while (!stopDecode_)
+            while (!stopDecode_) {
                 if (rust_->process() == 0) Sleep(2);
+                delayDspStageForTest();
+            }
         } catch (const Error& e) {
             log::error("engine: DSP error: %s", e.what());
             std::lock_guard lock(decodeErrMutex_);
@@ -1680,6 +1727,8 @@ private:
     // shared with the decode / output threads
     size_t bpf_ = 8;
     std::atomic<uint64_t> base_{0}, consumed_{0}, prefilled_{0}, underruns_{0};
+    std::atomic<uint64_t> behind_{0}; // underruns while decoded audio waited
+    static constexpr uint64_t kBehindLimit = 3;
     std::atomic<bool> pulled_{false}; // a network player takes what is ready, so nothing short is an underrun
     std::atomic<uint64_t> held_{0};   // frames rendered that the device has not played
     std::atomic<uint64_t> heard_{0};  // frames a network player has played since the session started
@@ -1798,6 +1847,10 @@ void PlaybackEngine::waitIdle() {
 }
 bool PlaybackEngine::waitForState(PlayState s, std::chrono::milliseconds t) {
     return impl_->waitForState(s, t);
+}
+
+void setDspStageDelayForTest(std::chrono::milliseconds delay) {
+    dspStageDelayMs.store(int(delay.count()), std::memory_order_relaxed);
 }
 
 } // namespace camel::audio

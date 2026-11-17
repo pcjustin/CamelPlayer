@@ -69,6 +69,7 @@ typedef int32_t CamelEngineStatus;
 #define CAMEL_RENDER_STATE_FAULT 3u
 #define CAMEL_RENDER_STATE_UNDERRUN 4u
 #define CAMEL_RENDER_STATE_PAUSED 5u
+#define CAMEL_RENDER_STATE_BEHIND 6u // short while decoded audio waited: the DSP stage did not keep up
 
 #define CAMEL_PLAYBACK_EMPTY 0u
 #define CAMEL_PLAYBACK_READY 1u
@@ -124,6 +125,8 @@ typedef struct CamelEngineConfigV1 {
     uint32_t allow_dsd_to_pcm; // nonzero permits DSD to PCM and to a lower DSD rate; otherwise DSD plays only as native
                                // DSD or DoP at its own rate
     uint32_t prebuffer_ms;     // predecoded audio the ring holds; 0 = 10 s; capped at 64 MiB
+    uint32_t dsd_modulation;   // 5 or 7: every source modulated to a DSD or DoP format by a sigma-delta modulator of that
+                               // order, through 352.8 kHz PCM and the DSP chain; 0 = DSD sources sent as they are
 } CamelEngineConfigV1;
 
 typedef struct CamelCommandStampV1 {

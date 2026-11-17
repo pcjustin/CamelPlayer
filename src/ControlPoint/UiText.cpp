@@ -61,6 +61,8 @@ winrt::hstring errorTitle(camel::audio::ErrorCode code) {
         return tr(L"Error_AccessDenied");
     case ErrorCode::DeviceChanged:
         return tr(L"Error_DeviceChanged");
+    case ErrorCode::TooSlow:
+        return tr(L"Error_TooSlow");
     case ErrorCode::Other:
         break;
     }

@@ -46,15 +46,32 @@ const char* dsdOutputId(DsdOutput d);
 enum class ResampleQuality : uint8_t { Quick, High, VeryHigh };
 const char* resampleQualityId(ResampleQuality q);
 
-// An output's conversion filter (docs/Plan.md §6): soxr's quality, phase and passband. Soxr's quick recipe is a cubic
-// interpolator, which no phase or passband changes.
+// An output's conversion filter (docs/Plan.md §6): soxr's quality, phase and passband, and the order of the modulator
+// DSD upsampling modulates with. Soxr's quick recipe is a cubic interpolator, which no phase or passband changes.
 enum class FilterPhase : uint8_t { Linear, Intermediate, Minimum };
 enum class FilterPassband : uint8_t { Standard, Steep, Gentle };
+constexpr uint32_t kModulatorOrders[] = {5, 7};
 struct ResampleFilter {
     ResampleQuality quality = ResampleQuality::High;
     FilterPhase phase = FilterPhase::Linear;
     FilterPassband passband = FilterPassband::Standard;
+    uint32_t modulatorOrder = 7;
     bool operator==(const ResampleFilter&) const = default;
+};
+
+// An output's DSD upsampling (docs/Plan.md §6): off, the highest DSD rate it takes, the source's rate times a multiple,
+// or a set rate (DSD128 or DSD256, as a multiple of 44.1 kHz). With `pcm`, PCM sources are sent as DSD too, at the
+// highest or the set rate, and by a multiple at the set rate. Every source is then decimated to PCM where it is DSD,
+// processed, resampled to 352.8 kHz and modulated again.
+enum class DsdUpsampling : uint8_t { Off, Highest, Multiple, Set };
+constexpr uint32_t kDsdUpsamplingMultiples[] = {2, 4};
+constexpr uint32_t kDsdSetRates[] = {128, 256};
+struct DsdUpsamplingSettings {
+    DsdUpsampling mode = DsdUpsampling::Off;
+    uint32_t multiple = 2;
+    uint32_t rate = 128;
+    bool pcm = false;
+    bool operator==(const DsdUpsamplingSettings&) const = default;
 };
 
 // An output's sample-rate choice besides following the file and its set rate (docs/Plan.md §6): the highest rate of
@@ -102,6 +119,7 @@ struct WasapiSettings {
     Upsampling upsampling = Upsampling::Off;
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
+    DsdUpsamplingSettings dsdUpsampling; // exclusive mode only
     // The highest PCM rate (from kFixedRates) and DSD rate (from kMaxDsdRates) to send, 0 following the device;
     // exclusive mode only. Choosing one is the permission to convert above it (docs/Plan.md §6).
     uint32_t maxSampleRate = 0;
@@ -123,6 +141,7 @@ struct AsioSettings {
     Upsampling upsampling = Upsampling::Off;
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
+    DsdUpsamplingSettings dsdUpsampling;
     uint32_t maxSampleRate = 0;
     uint32_t maxDsdRate = 0;
     PlaybackTiming timing;
@@ -145,6 +164,7 @@ struct KsSettings {
     Upsampling upsampling = Upsampling::Off;
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
+    DsdUpsamplingSettings dsdUpsampling;
     uint32_t maxSampleRate = 0;
     uint32_t maxDsdRate = 0;
     MmcssTask mmcssTask = MmcssTask::ProAudio;
@@ -160,6 +180,7 @@ struct NetworkSettings {
     Upsampling upsampling = Upsampling::Off;
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
+    DsdUpsamplingSettings dsdUpsampling;     // sent as DSF
     uint32_t maxSampleRate = 0;              // as for WASAPI
     uint32_t maxDsdRate = 0;                 // as for WASAPI
     uint32_t maxBits = 0;                    // 0 follows the player, else 16
@@ -471,6 +492,9 @@ Upsampling upsampling(const Settings& s);
 uint32_t upsamplingMultiple(const Settings& s);
 // The filter the selected backend resamples with: its own, the shared mode's quality, or AirPlay's global quality.
 ResampleFilter resampleFilter(const Settings& s);
+// The selected backend's DSD upsampling; off for an output that sends no DSD (WASAPI shared mode, AirPlay, HQPlayer)
+// or converts it to PCM.
+DsdUpsamplingSettings dsdUpsampling(const Settings& s);
 // The selected backend's highest PCM rate in Hz and highest DSD rate as a DSD byte frame rate; 0 has no limit, as for
 // WASAPI shared mode and AirPlay.
 uint32_t maxSampleRate(const Settings& s);

@@ -167,6 +167,8 @@ pub const RENDER_STATE_ACTIVE: u32 = 1;
 pub const RENDER_STATE_END_OF_STREAM: u32 = 2;
 pub const RENDER_STATE_FAULT: u32 = 3;
 pub const RENDER_STATE_UNDERRUN: u32 = 4;
+/// Short while decoded audio waited: the DSP stage, a modulator above all, did not keep up.
+pub const RENDER_STATE_BEHIND: u32 = 6;
 pub const RENDER_STATE_PAUSED: u32 = 5;
 
 pub const PLAYBACK_EMPTY: u32 = 0;
@@ -245,6 +247,9 @@ pub struct CamelEngineConfigV1 {
     pub allow_dsd_to_pcm: u32,
     /// Predecoded audio the ring holds, in milliseconds; 0 means 10 s. Capped at 64 MiB.
     pub prebuffer_ms: u32,
+    /// 5 or 7 modulates every source to a DSD or DoP format by a sigma-delta modulator of that order, through 352.8 kHz
+    /// PCM and the DSP chain; 0 sends DSD sources as they are.
+    pub dsd_modulation: u32,
 }
 
 #[repr(C)]
@@ -555,6 +560,7 @@ pub struct CamelEngine {
     allow_conversion: bool,
     allow_dsd_to_pcm: bool,
     resample_quality: u32,
+    dsd_modulation: u32,
     max_render_units: u64,
     // Decoded source samples, up to the prebuffer (docs/Plan.md §5.2). Prefill writes them; the DSP stage converts
     // them into `ring`, which holds only about DSP_LEAD_MS of device bytes so DSP changes are heard quickly.
@@ -1496,6 +1502,7 @@ impl CamelEngine {
             self.allow_conversion || source.convert,
             self.allow_dsd_to_pcm || source.convert,
             self.resample_quality,
+            self.dsd_modulation,
         )
         .map(|converter| converter.with_gain(source.gain))
     }
@@ -1525,6 +1532,9 @@ fn validate_config(config: &CamelEngineConfigV1) -> Result<(AudioFormat, u64), E
     if config.max_render_units == 0 || config.max_render_units > MAX_RENDER_UNITS {
         return Err(EngineStatus::LimitExceeded);
     }
+    if !matches!(config.dsd_modulation, 0 | 5 | 7) {
+        return Err(EngineStatus::InvalidArgument);
+    }
     Ok((
         AudioFormat::from_abi(&config.format)?,
         config.max_render_units,
@@ -1543,13 +1553,24 @@ fn whole_units(format: &AudioFormat, units: u64) -> u64 {
 // as 32-bit sample words for PCM and as bytes for raw DSD, at least one prefill of the widest source and at most
 // MAX_RING_BYTES, or MAX_BUFFERING_RING_BYTES when more than the default is asked for. A source with more channels or a
 // higher rate than the device fits fewer milliseconds.
-fn source_ring_capacity(format: &AudioFormat, rate_hz: u32, prebuffer_ms: u32) -> Option<usize> {
+// A modulated stream's sources are PCM up to 352.8 kHz on its channels.
+fn source_ring_capacity(
+    format: &AudioFormat,
+    rate_hz: u32,
+    prebuffer_ms: u32,
+    modulated: bool,
+) -> Option<usize> {
     let milliseconds = match u64::from(prebuffer_ms) {
         0 => DEFAULT_PREBUFFER_MS,
         ms => ms,
     };
+    let rate_hz = if modulated {
+        dsd2pcm::PCM_RATE
+    } else {
+        rate_hz
+    };
     let units = u64::from(rate_hz).saturating_mul(milliseconds) / 1000;
-    let prebuffer = if format.stream_kind == AUDIO_PCM {
+    let prebuffer = if format.stream_kind == AUDIO_PCM || modulated {
         units.saturating_mul(u64::from(format.channel_count) * 4)
     } else {
         // A raw DSD source byte never takes more room than the device bytes carrying it.
@@ -1596,13 +1617,15 @@ pub unsafe extern "C" fn camel_engine_create_v1(
         match validate_config(&*config) {
             Ok((format, max_render_units)) => {
                 let rate_hz = (*config).format.rate_hz;
-                let rings = source_ring_capacity(&format, rate_hz, (*config).prebuffer_ms)
-                    .zip(device_ring_capacity(&format, rate_hz))
-                    .and_then(|(source, device)| {
-                        SpscByteRing::new(source)
-                            .ok()
-                            .zip(SpscByteRing::new(device).ok())
-                    });
+                let modulated = (*config).dsd_modulation != 0 && format.stream_kind != AUDIO_PCM;
+                let rings =
+                    source_ring_capacity(&format, rate_hz, (*config).prebuffer_ms, modulated)
+                        .zip(device_ring_capacity(&format, rate_hz))
+                        .and_then(|(source, device)| {
+                            SpscByteRing::new(source)
+                                .ok()
+                                .zip(SpscByteRing::new(device).ok())
+                        });
                 let Some((source_ring, ring)) = rings else {
                     return ENGINE_E_LIMIT_EXCEEDED;
                 };
@@ -1612,13 +1635,21 @@ pub unsafe extern "C" fn camel_engine_create_v1(
                     allow_conversion: (*config).allow_conversion != 0,
                     allow_dsd_to_pcm: (*config).allow_dsd_to_pcm != 0,
                     resample_quality: (*config).resample_quality,
+                    dsd_modulation: (*config).dsd_modulation,
                     max_render_units,
                     source_ring,
                     ring,
                     stage: Mutex::new(Stage {
                         segments: std::collections::VecDeque::new(),
                         stream_ended: false,
-                        dsp: dsp::Dsp::new(rate_hz, format.channel_count as usize),
+                        dsp: dsp::Dsp::new(
+                            if modulated {
+                                dsd2pcm::PCM_RATE
+                            } else {
+                                rate_hz
+                            },
+                            format.channel_count as usize,
+                        ),
                         tail_left: None,
                         fade: None,
                         buffers: StageBuffers::new(format.channel_count as usize),
@@ -2876,7 +2907,11 @@ pub unsafe extern "C" fn camel_engine_render_v1(
                 return ENGINE_END;
             }
         } else if (rendered_frames as u64) < request_frames {
-            result.state = RENDER_STATE_UNDERRUN;
+            result.state = if engine.source_ring.readable() > 0 {
+                RENDER_STATE_BEHIND
+            } else {
+                RENDER_STATE_UNDERRUN
+            };
             return ENGINE_UNDERRUN;
         } else {
             result.state = RENDER_STATE_ACTIVE;
@@ -3400,6 +3435,7 @@ mod tests {
             resample_quality: QUALITY_HIGH,
             allow_dsd_to_pcm: 0,
             prebuffer_ms: 0,
+            dsd_modulation: 0,
         }
     }
 
@@ -5061,7 +5097,7 @@ mod tests {
     fn abi_layout_matches_the_c_header_contract() {
         assert_eq!(camel_engine_abi_version(), ABI_VERSION);
         assert_eq!(std::mem::size_of::<CamelAudioFormatV1>(), 40);
-        assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 72);
+        assert_eq!(std::mem::size_of::<CamelEngineConfigV1>(), 80);
         assert_eq!(std::mem::size_of::<CamelCommandStampV1>(), 32);
         assert_eq!(std::mem::size_of::<CamelTrackSourceV1>(), 64);
         assert_eq!(std::mem::size_of::<CamelSourceInfoV1>(), 56);
@@ -5835,28 +5871,40 @@ mod tests {
     fn decoded_ring_holds_the_prebuffer_within_the_memory_limit() {
         let pcm = AudioFormat::from_abi(&format(AUDIO_PCM, SAMPLE_S24_LE, 24, 24)).unwrap();
         // Two channels of 32-bit sample words per frame.
-        assert_eq!(source_ring_capacity(&pcm, 96_000, 0), Some(96_000 * 10 * 8));
         assert_eq!(
-            source_ring_capacity(&pcm, 96_000, 30_000),
+            source_ring_capacity(&pcm, 96_000, 0, false),
+            Some(96_000 * 10 * 8)
+        );
+        assert_eq!(
+            source_ring_capacity(&pcm, 96_000, 30_000, false),
             Some(96_000 * 30 * 8)
         );
-        assert_eq!(source_ring_capacity(&pcm, 96_000, 1_000), Some(96_000 * 8));
         assert_eq!(
-            source_ring_capacity(&pcm, 768_000 * 4, 0),
+            source_ring_capacity(&pcm, 96_000, 1_000, false),
+            Some(96_000 * 8)
+        );
+        assert_eq!(
+            source_ring_capacity(&pcm, 768_000 * 4, 0, false),
             Some(MAX_RING_BYTES as usize)
         );
         // Buffering ahead of a slow source: past 64 MiB, up to 1 GiB.
         assert_eq!(
-            source_ring_capacity(&pcm, 176_400, 120_000),
+            source_ring_capacity(&pcm, 176_400, 120_000, false),
             Some(176_400 * 120 * 8)
         );
         assert_eq!(
-            source_ring_capacity(&pcm, 768_000 * 4, 600_000),
+            source_ring_capacity(&pcm, 768_000 * 4, 600_000, false),
             Some(MAX_BUFFERING_RING_BYTES as usize)
         );
         assert_eq!(
-            source_ring_capacity(&pcm, 1, 0),
+            source_ring_capacity(&pcm, 1, 0, false),
             Some((MAX_PREFILL_FRAMES * MAX_SOURCE_FRAME_BYTES) as usize)
+        );
+        // A modulated DSD stream holds its PCM sources at up to 352.8 kHz.
+        let dsd = AudioFormat::from_abi(&format(AUDIO_DSD, SAMPLE_DSD_U8, 1, 8)).unwrap();
+        assert_eq!(
+            source_ring_capacity(&dsd, 2_822_400, 0, true),
+            Some(352_800 * 10 * 8)
         );
     }
 

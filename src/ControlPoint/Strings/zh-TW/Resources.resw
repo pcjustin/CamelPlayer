@@ -81,6 +81,18 @@
   <data name="Passband_Standard" xml:space="preserve"><value>標準</value></data>
   <data name="Passband_Steep" xml:space="preserve"><value>陡峭</value></data>
   <data name="Passband_Gentle" xml:space="preserve"><value>平緩</value></data>
+  <data name="Settings_Modulator.Header" xml:space="preserve"><value>DSD 調變器</value></data>
+  <data name="Modulator_Order5" xml:space="preserve"><value>5 階</value></data>
+  <data name="Modulator_Order7" xml:space="preserve"><value>7 階</value></data>
+  <data name="Settings_DsdUpsampling.Header" xml:space="preserve"><value>DSD 升頻</value></data>
+  <data name="DsdUpsampling_Off" xml:space="preserve"><value>關閉</value></data>
+  <data name="DsdUpsampling_Highest" xml:space="preserve"><value>到最高</value></data>
+  <data name="DsdUpsampling_Multiple" xml:space="preserve"><value>依倍數</value></data>
+  <data name="Settings_DsdUpsamplingMultiple.Header" xml:space="preserve"><value>DSD 倍數</value></data>
+  <data name="Settings_PcmAsDsd.Header" xml:space="preserve"><value>PCM 來源</value></data>
+  <data name="Settings_PcmAsDsd.OnContent" xml:space="preserve"><value>PCM 也以 DSD 送出</value></data>
+  <data name="Settings_PcmAsDsd.OffContent" xml:space="preserve"><value>PCM 也以 DSD 送出</value></data>
+  <data name="Settings_PcmDsdRate.Header" xml:space="preserve"><value>PCM 的 DSD 取樣率</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>輪詢緩衝長度（ms）</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS 任務</value></data>
   <data name="Mmcss_Disabled" xml:space="preserve"><value>停用</value></data>
@@ -129,6 +141,7 @@
   <data name="Error_DeviceLost" xml:space="preserve"><value>裝置已中斷，接回後按播放</value></data>
   <data name="Error_AccessDenied" xml:space="preserve"><value>裝置拒絕這台電腦</value></data>
   <data name="Error_DeviceChanged" xml:space="preserve"><value>裝置已變更，請重新選擇輸出</value></data>
+  <data name="Error_TooSlow" xml:space="preserve"><value>這台電腦跟不上這個 DSD 取樣率，請選擇較低的 DSD 取樣率</value></data>
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>裝置無法以 bit-perfect 播放這個格式，已跳過</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>驅動程式錯誤</value></data>
   <data name="Library_GoToPlaying.AutomationProperties.Name" xml:space="preserve"><value>跳到正在播放 (Ctrl+L)</value></data>
@@ -759,6 +772,8 @@
   <data name="Settings_MaxDsdRate.Description" xml:space="preserve"><value>超過時重新調變成這個取樣率（顯示為已處理）。</value></data>
   <data name="Limit_FollowDevice" xml:space="preserve"><value>跟隨設備</value></data>
   <data name="SignalPath_DsdRemodulate" xml:space="preserve"><value>DSD 重新調變</value></data>
+  <data name="SignalPath_Modulator" xml:space="preserve"><value>Σ-Δ 調變器</value></data>
+  <data name="SignalPath_ModulatorDetail" xml:space="preserve"><value>{0} 階 · {1}</value></data>
   <data name="Settings_NetworkBits.Header" xml:space="preserve"><value>最高位元深度</value></data>
   <data name="Limit_FollowPlayer" xml:space="preserve"><value>跟隨播放器</value></data>
   <data name="Dsd_Dsf" xml:space="preserve"><value>DSF（播放器宣告支援 DSD 時）</value></data>

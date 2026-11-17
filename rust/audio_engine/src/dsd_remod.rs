@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! DSD to a lower DSD rate (docs/Plan.md §5.8): decimated to 352.8 kHz by the DSD to PCM stages, interpolated to the
-//! new DSD rate and modulated again to one bit.
+//! new DSD rate and modulated again to one bit. PCM at 352.8 kHz takes the same interpolation and modulator to DSD.
 //!
 //! Interpolation: 2x to 705.6 kHz through a lowpass that also removes what the decimator leaves above 80 kHz of the
 //! source's own shaped noise, 2x to 1411.2 kHz, then linear steps to the DSD rate. The modulator is an error-feedback
-//! loop that passes the signal unchanged and shapes the noise by a 7th-order NTF: zeros optimized over the band up to
+//! loop that passes the signal unchanged and shapes the noise by a 7th-order NTF (5th on request): zeros optimized over the band up to
 //! rate / 128 (22.05 kHz at DSD64), Butterworth highpass poles for an out-of-band gain of 1.5, run as second-order
 //! sections. The error fed back is limited, so the loop's state stays bounded at any input, full modulation included;
 //! a loop held at that limit is reset.
@@ -132,11 +132,27 @@ pub(crate) fn design(order: usize, osr: f64, max_gain: f64) -> Vec<Section> {
 
 pub(crate) const SECTIONS: usize = ORDER.div_ceil(2);
 
+/// The NTF of `order`, 5 or 7, its unused sections passing the error unchanged.
+pub(crate) fn ntf(order: usize) -> Option<[Section; SECTIONS]> {
+    if order != 5 && order != ORDER {
+        return None;
+    }
+    let mut sections = [Section {
+        b1: 0.0,
+        b2: 0.0,
+        a1: 0.0,
+        a2: 0.0,
+    }; SECTIONS];
+    for (to, from) in sections.iter_mut().zip(design(order, OSR, MAX_GAIN)) {
+        *to = from;
+    }
+    Some(sections)
+}
+
 /// The shipped NTF.
+#[cfg(test)]
 pub(crate) fn shipped() -> [Section; SECTIONS] {
-    design(ORDER, OSR, MAX_GAIN)
-        .try_into()
-        .expect("ORDER makes SECTIONS sections")
+    ntf(ORDER).expect("ORDER is a supported order")
 }
 
 /// Two channels' 1-bit modulators, stepped together so each operation serves both: the output bit for each input in
@@ -255,9 +271,9 @@ const MAX_CHANNELS: usize = 2;
 // Output bits per channel for each 352.8 kHz frame at DSD256.
 const MAX_BITS: usize = 32;
 
-pub(crate) struct DsdRemodulator {
+/// PCM at 352.8 kHz to DSD from DSD64 to DSD256: interpolated and modulated to one bit.
+pub(crate) struct DsdModulator {
     channels: usize,
-    decimator: DsdDecimator,
     sections: [Section; SECTIONS],
     first: Phases,
     second: Phases,
@@ -267,21 +283,18 @@ pub(crate) struct DsdRemodulator {
     bytes_per_frame: usize,
     lanes: Vec<Lane>,
     modulator: Modulator,
-    pcm: Vec<f64>,
 }
 
-impl DsdRemodulator {
-    /// From DSD at `in_rate` byte frames per second to `out_rate`, a lower DSD rate from DSD64 to DSD256; mono or
-    /// stereo.
-    pub(crate) fn new(in_rate: u32, out_rate: u32, channels: usize) -> Option<Self> {
+impl DsdModulator {
+    /// To `out_rate` byte frames per second, DSD64 to DSD256, mono or stereo, by an NTF of `order` (5 or 7).
+    pub(crate) fn new(out_rate: u32, channels: usize, order: usize) -> Option<Self> {
         let bytes_per_frame = match out_rate / PCM_RATE {
             n @ (1 | 2 | 4) if out_rate.is_multiple_of(PCM_RATE) => n as usize,
             _ => return None,
         };
-        if in_rate <= out_rate || !in_rate.is_multiple_of(out_rate) || channels > MAX_CHANNELS {
+        if channels == 0 || channels > MAX_CHANNELS {
             return None;
         }
-        let decimator = DsdDecimator::new(in_rate, channels)?;
         let rate = f64::from(PCM_RATE);
         // An even length splits into two equal phases.
         let first = Phases::new(&kaiser_lowpass(
@@ -307,16 +320,19 @@ impl DsdRemodulator {
             .collect();
         Some(Self {
             channels,
-            decimator,
-            sections: shipped(),
+            sections: ntf(order)?,
             first,
             second,
             steps: 2 * bytes_per_frame,
             bytes_per_frame,
             lanes,
             modulator: Modulator::new(),
-            pcm: Vec::new(),
         })
+    }
+
+    /// Output byte frames for each 352.8 kHz frame.
+    pub(crate) fn bytes_per_frame(&self) -> usize {
+        self.bytes_per_frame
     }
 
     #[cfg(test)]
@@ -324,24 +340,16 @@ impl DsdRemodulator {
         self.modulator.resets
     }
 
-    /// The working buffer for `frames` input byte frames at once, so processing needs no heap.
-    pub(crate) fn reserve(&mut self, frames: usize) {
-        self.pcm.reserve_exact(frames * self.channels);
-    }
-
-    /// Takes `frames` byte frames (`input` interleaved, one byte in the low bits of each value) and appends the byte
-    /// frames they complete at the output rate to `output` in the same layout.
-    pub(crate) fn process(&mut self, input: &[i32], frames: usize, output: &mut Vec<i32>) {
-        let mut pcm = std::mem::take(&mut self.pcm);
-        pcm.clear();
-        self.decimator.process(input, frames, &mut pcm);
+    /// Takes 352.8 kHz frames (`pcm` interleaved, scaled by `level`) and appends the byte frames they make to
+    /// `output`, one byte in the low bits of each value, in the same layout.
+    pub(crate) fn process(&mut self, pcm: &[f64], level: f64, output: &mut Vec<i32>) {
         let bits = 8 * self.bytes_per_frame;
         let step = 1.0 / self.steps as f64;
         for frame in pcm.chunks_exact(self.channels) {
             let mut inputs = [[0.0f64; MAX_BITS]; MAX_CHANNELS];
             for ((lane, &x), values) in self.lanes.iter_mut().zip(frame).zip(&mut inputs) {
                 let mut i = 0;
-                for a in self.first.interpolate(&mut lane.first, x) {
+                for a in self.first.interpolate(&mut lane.first, x * level) {
                     for b in self.second.interpolate(&mut lane.second, a) {
                         let delta = (b - lane.last) * step;
                         for j in 1..=self.steps {
@@ -366,6 +374,49 @@ impl DsdRemodulator {
                 output.extend(bytes[..self.channels].iter().map(|b| i32::from(b[j])));
             }
         }
+    }
+}
+
+pub(crate) struct DsdRemodulator {
+    channels: usize,
+    decimator: DsdDecimator,
+    modulator: DsdModulator,
+    pcm: Vec<f64>,
+}
+
+impl DsdRemodulator {
+    /// From DSD at `in_rate` byte frames per second to `out_rate`, a lower DSD rate from DSD64 to DSD256; mono or
+    /// stereo.
+    pub(crate) fn new(in_rate: u32, out_rate: u32, channels: usize) -> Option<Self> {
+        if in_rate <= out_rate || !in_rate.is_multiple_of(out_rate) {
+            return None;
+        }
+        let modulator = DsdModulator::new(out_rate, channels, ORDER)?;
+        Some(Self {
+            channels,
+            decimator: DsdDecimator::new(in_rate, channels)?,
+            modulator,
+            pcm: Vec::new(),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resets(&self) -> u64 {
+        self.modulator.resets()
+    }
+
+    /// The working buffer for `frames` input byte frames at once, so processing needs no heap.
+    pub(crate) fn reserve(&mut self, frames: usize) {
+        self.pcm.reserve_exact(frames * self.channels);
+    }
+
+    /// Takes `frames` byte frames (`input` interleaved, one byte in the low bits of each value) and appends the byte
+    /// frames they complete at the output rate to `output` in the same layout.
+    pub(crate) fn process(&mut self, input: &[i32], frames: usize, output: &mut Vec<i32>) {
+        let mut pcm = std::mem::take(&mut self.pcm);
+        pcm.clear();
+        self.decimator.process(input, frames, &mut pcm);
+        self.modulator.process(&pcm, 1.0, output);
         self.pcm = pcm;
     }
 }
@@ -413,7 +464,12 @@ pub(crate) mod tests {
 
     // `bytes` decoded to 352.8 kHz and kept below 21 kHz (160 dB from 30 kHz), so the ultrasonic noise cannot leak into
     // the band: level of bin `k` against `amplitude` in dB, SNR and THD (harmonics 2 to 5) to 20 kHz in dB.
-    fn measure(bytes: &[i32], byte_rate: u32, k: usize, amplitude: f64) -> (f64, f64, f64) {
+    pub(crate) fn measure(
+        bytes: &[i32],
+        byte_rate: u32,
+        k: usize,
+        amplitude: f64,
+    ) -> (f64, f64, f64) {
         let mut d = DsdDecimator::new(byte_rate, 1).unwrap();
         let mut pcm = Vec::new();
         d.process(bytes, bytes.len(), &mut pcm);
@@ -525,6 +581,121 @@ pub(crate) mod tests {
                 assert!(snr > 105.0, "{path}: SNR {snr:.1} dB");
                 assert!(thd < -120.0, "{path}: THD {thd:.1} dB");
                 assert_eq!(resets, 0, "{path}");
+            }
+        }
+    }
+
+    fn modulate_pcm(order: usize, dsd: u32, k: usize, amplitude: f64) -> (Vec<i32>, u64) {
+        let mut m = DsdModulator::new(dsd * PCM_RATE, 1, order).unwrap();
+        let pcm: Vec<f64> = (0..WARM + N + 64)
+            .map(|n| {
+                amplitude * (2.0 * PI * bin_frequency(k) * n as f64 / f64::from(PCM_RATE)).sin()
+            })
+            .collect();
+        let mut out = Vec::new();
+        for chunk in pcm.chunks(4096) {
+            m.process(chunk, 1.0, &mut out);
+        }
+        (out, m.resets())
+    }
+
+    #[test]
+    fn only_the_5th_and_7th_orders_and_dsd64_to_dsd256_are_modulated() {
+        assert!(ntf(5).is_some() && ntf(7).is_some());
+        assert!(ntf(3).is_none() && ntf(6).is_none());
+        assert!(DsdModulator::new(PCM_RATE, 2, 5).is_some());
+        assert!(DsdModulator::new(4 * PCM_RATE, 1, 7).is_some());
+        assert!(DsdModulator::new(8 * PCM_RATE, 2, 7).is_none());
+        assert!(DsdModulator::new(44_100, 2, 7).is_none());
+        assert!(DsdModulator::new(PCM_RATE, 3, 7).is_none());
+    }
+
+    // Both orders: the NTF's gain stays at MAX_GAIN out of band, and the loop stays bounded at full scale and is silent
+    // after it.
+    #[test]
+    fn both_orders_stay_stable_at_full_scale_and_silent_input() {
+        for order in [5, 7] {
+            let sections = ntf(order).unwrap();
+            assert!(
+                (peak_gain(&sections) - MAX_GAIN).abs() < 1e-3,
+                "order {order}"
+            );
+            let mut m = Modulator::new();
+            for n in 0..200_000 {
+                let x = (2.0 * PI * 1000.0 * f64::from(n) / 2_822_400.0).sin();
+                m.step(&sections, [x, -1.0]);
+                assert!(m.state.iter().flatten().flatten().all(|s| s.abs() < 1e3));
+            }
+            assert_eq!(m.resets, 0, "order {order}");
+            let mut sum = 0.0f64;
+            for n in 0..100_000 {
+                let bit = m.step(&sections, [0.0; 2]);
+                if n >= 50_000 {
+                    sum += if bit[0] { 1.0 } else { -1.0 } + if bit[1] { 1.0 } else { -1.0 };
+                }
+            }
+            assert!((sum / 100_000.0).abs() < 1e-3, "order {order}: {sum}");
+        }
+    }
+
+    // PCM modulated to DSD and decoded back: its level kept, and in-band noise to 20 kHz below the bounds measured for
+    // each order (docs/reports/DSD-upsampling-2026-11-17.md).
+    #[test]
+    fn modulated_pcm_decodes_back_with_in_band_noise_below_its_bound() {
+        for (order, bound) in [(5usize, 100.0), (7, 110.0)] {
+            for dsd in [1u32, 2, 4] {
+                for k in [186usize, 1858] {
+                    let (out, resets) = modulate_pcm(order, dsd, k, 0.5);
+                    assert_eq!(out.len(), (WARM + N + 64) * dsd as usize);
+                    let (level, snr, thd) = measure(&out, dsd * PCM_RATE, k, 0.5);
+                    let path = format!("order {order}, DSD{}, bin {k}", 64 * dsd);
+                    assert!(level.abs() < 0.01, "{path}: level {level:.4} dB");
+                    assert!(snr > bound, "{path}: SNR {snr:.1} dB");
+                    assert!(thd < -110.0, "{path}: THD {thd:.1} dB");
+                    assert_eq!(resets, 0, "{path}");
+                }
+            }
+        }
+    }
+
+    // cargo test --release -p camel_audio_engine measure_pcm_modulation -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn measure_pcm_modulation() {
+        println!("PCM to DSD decoded back, SNR and THD to 20 kHz in dB:");
+        for order in [5usize, 7] {
+            for dsd in [1u32, 2, 4] {
+                for amplitude in [0.001, 0.1, 0.5, 0.7] {
+                    let (out, resets) = modulate_pcm(order, dsd, 186, amplitude);
+                    let (level, snr, thd) = measure(&out, dsd * PCM_RATE, 186, amplitude);
+                    println!(
+                        "  order {order} DSD{:<3} amplitude {amplitude:<5} level {level:>8.4} SNR {snr:>6.1} THD {thd:>7.1} resets {resets}",
+                        64 * dsd
+                    );
+                }
+            }
+        }
+        println!("Speed, stereo, 10 s at 352.8 kHz, this machine:");
+        for order in [5usize, 7] {
+            for dsd in [1u32, 2, 4] {
+                let mut m = DsdModulator::new(dsd * PCM_RATE, 2, order).unwrap();
+                let pcm: Vec<f64> = (0..PCM_RATE as usize * 10)
+                    .flat_map(|n| {
+                        let x = 0.3 * (2.0 * PI * 1000.0 * n as f64 / f64::from(PCM_RATE)).sin();
+                        [x, x]
+                    })
+                    .collect();
+                let mut out = Vec::with_capacity(pcm.len() * dsd as usize);
+                let start = std::time::Instant::now();
+                for chunk in pcm.chunks(8192) {
+                    m.process(chunk, 1.0, &mut out);
+                }
+                let took = start.elapsed().as_secs_f64();
+                println!(
+                    "  order {order} DSD{:<3} {:>5.1}x real time",
+                    64 * dsd,
+                    10.0 / took
+                );
             }
         }
     }

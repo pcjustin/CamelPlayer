@@ -9,14 +9,16 @@
 //! bits). Everything else — resampling, ITU-R BS.775 downmix, bit reduction and the decoded output of lossy sources —
 //! is processed in 64-bit float and quantized once at the end with TPDF dither. Raw DSD reaches a native DSD or DoP
 //! stream bit for bit (mono duplicated), or with the same permission as DSD to PCM at a lower DSD rate, modulated
-//! again (crate::dsd_remod). DSD becomes PCM only with explicit permission: it is decimated to
+//! again (crate::dsd_remod). With DSD modulation every source goes to the DSD stream as PCM: decoded (DSD decimated),
+//! resampled to 352.8 kHz, through the DSP chain and modulated to the stream's DSD rate, PCM at -6 dB so that its full
+//! scale is the SACD reference level. DSD becomes PCM only with explicit permission: it is decimated to
 //! 352.8 kHz, mixed and resampled in float like any processed source, and quantized once. While the DSP chain changes
 //! the signal, every PCM path runs in float through it and is quantized once at the device depth; raw DSD bypasses it.
 
 use crate::decoder_host::{CamelSourceInfoV1, SAMPLE_ENCODING_DSD, SAMPLE_ENCODING_FLOAT32};
 use crate::dsd::{put_dop_sample, DOP_MARKERS, DSD_SILENCE};
 use crate::dsd2pcm::{DsdDecimator, PCM_RATE};
-use crate::dsd_remod::DsdRemodulator;
+use crate::dsd_remod::{DsdModulator, DsdRemodulator};
 use crate::dsp::Dsp;
 use crate::packing::pack_pcm;
 use crate::resample::Resampler;
@@ -63,6 +65,9 @@ pub(crate) struct Converter {
     decimator: Option<DsdDecimator>,
     /// Raw DSD to a lower DSD rate.
     remodulator: Option<DsdRemodulator>,
+    /// Every source modulated to the DSD stream from 352.8 kHz, at `level`.
+    modulator: Option<DsdModulator>,
+    level: f64,
     in_rate: u32,
     out_rate: u32,
     scratch: Scratch,
@@ -160,6 +165,7 @@ impl Tpdf {
 impl Converter {
     /// `allow` is the "convert when unsupported" setting; a lossy source may still be quantized to its configured
     /// depth without it. `allow_dsd` permits DSD to PCM and DSD to a lower DSD rate; downmixing DSD also needs `allow`.
+    /// `modulation`, 5 or 7, modulates every source to a DSD or DoP device by an NTF of that order; 0 does not.
     pub(crate) fn new(
         info: &CamelSourceInfoV1,
         out: &AudioFormat,
@@ -167,10 +173,84 @@ impl Converter {
         allow: bool,
         allow_dsd: bool,
         quality: u32,
+        modulation: u32,
     ) -> Result<Self, i32> {
-        let mut converter = Self::build(info, out, out_rate, allow, allow_dsd, quality)?;
+        let mut converter = if modulation != 0 && out.stream_kind != AUDIO_PCM {
+            Self::modulating(info, out, out_rate, quality, modulation)?
+        } else {
+            Self::build(info, out, out_rate, allow, allow_dsd, quality)?
+        };
         converter.reserve();
         Ok(converter)
+    }
+
+    // Any source to a DSD or DoP device through 352.8 kHz PCM, the DSP chain and the modulator. Choosing modulation
+    // permits every conversion it needs.
+    fn modulating(
+        info: &CamelSourceInfoV1,
+        out: &AudioFormat,
+        out_rate: u32,
+        quality: u32,
+        order: u32,
+    ) -> Result<Self, i32> {
+        let in_channels = info.channel_count as usize;
+        let out_channels = out.channel_count as usize;
+        let out_byte_rate = match out.stream_kind {
+            AUDIO_DSD if out_rate.is_multiple_of(8) => out_rate / 8,
+            AUDIO_DOP => out_rate.saturating_mul(2),
+            _ => 0,
+        };
+        let modulator = DsdModulator::new(out_byte_rate, out_channels, order as usize)
+            .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?;
+        let in_dsd = info.sample_encoding == SAMPLE_ENCODING_DSD;
+        if !in_dsd && (info.valid_bits == 0 || info.valid_bits > 32) {
+            return Err(ENGINE_E_UNSUPPORTED_FORMAT);
+        }
+        let (mode, decimator, rate) = if in_dsd {
+            let decimator = DsdDecimator::new(info.sample_rate, in_channels)
+                .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?;
+            (Mode::DsdPcm, Some(decimator), PCM_RATE)
+        } else {
+            (Mode::Process, None, info.sample_rate)
+        };
+        let resampler = if rate == PCM_RATE {
+            None
+        } else {
+            Some(
+                Resampler::new(rate, PCM_RATE, out_channels, quality)
+                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+            )
+        };
+        Ok(Self {
+            mode,
+            in_channels,
+            in_bits: info.valid_bits,
+            in_float: info.sample_encoding == SAMPLE_ENCODING_FLOAT32,
+            out: *out,
+            out_channels,
+            quantize_bits: 0,
+            gain: 1.0,
+            dsp_bits: 0,
+            matrix: Some(
+                downmix_matrix(in_channels, info.channel_mask)
+                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+            ),
+            resampler,
+            dither: Tpdf(0),
+            pending: Vec::new(),
+            pending_frames: 0,
+            finished: false,
+            bytes_per_frame: crate::packing::bytes_per_frame(out)
+                .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
+            carry: Vec::new(),
+            decimator,
+            remodulator: None,
+            modulator: Some(modulator),
+            level: if in_dsd { 1.0 } else { 0.5 },
+            in_rate: info.sample_rate,
+            out_rate,
+            scratch: Scratch::default(),
+        })
     }
 
     fn build(
@@ -222,6 +302,8 @@ impl Converter {
                 carry: Vec::new(),
                 decimator: Some(decimator),
                 remodulator: None,
+                modulator: None,
+                level: 1.0,
                 in_rate: info.sample_rate,
                 out_rate,
                 scratch: Scratch::default(),
@@ -274,6 +356,8 @@ impl Converter {
                 carry: Vec::new(),
                 decimator: None,
                 remodulator,
+                modulator: None,
+                level: 1.0,
                 in_rate: info.sample_rate,
                 out_rate,
                 scratch: Scratch::default(),
@@ -351,6 +435,8 @@ impl Converter {
             carry: Vec::new(),
             decimator: None,
             remodulator: None,
+            modulator: None,
+            level: 1.0,
             in_rate: info.sample_rate,
             out_rate,
             scratch: Scratch::default(),
@@ -359,6 +445,22 @@ impl Converter {
 
     /// Source frames to decode for about `output_frames` of output; any excess waits in the pending output.
     pub(crate) fn input_frames_for(&self, output_frames: u64) -> u64 {
+        if self.modulator.is_some() {
+            let device_rate = if self.out.stream_kind == AUDIO_DSD {
+                self.out_rate / 8
+            } else {
+                self.out_rate
+            };
+            let pcm = u128::from(output_frames) * u128::from(PCM_RATE) / u128::from(device_rate);
+            let frames = match &self.resampler {
+                Some(r) => (pcm as f64 / r.ratio()) as u128,
+                None if self.mode == Mode::DsdPcm => {
+                    pcm * u128::from(self.in_rate) / u128::from(PCM_RATE)
+                }
+                None => pcm,
+            };
+            return (frames as u64).max(1);
+        }
         if self.mode == Mode::DsdPcm {
             let frames =
                 u128::from(output_frames) * u128::from(self.in_rate) / u128::from(self.out_rate);
@@ -424,13 +526,13 @@ impl Converter {
             }
             Mode::Dsd | Mode::Dop => {
                 let Some(remodulator) = self.remodulator.as_mut() else {
-                    self.push_raw(input);
+                    self.push_raw(input, self.in_channels);
                     return Ok(());
                 };
                 let mut words = std::mem::take(&mut self.scratch.words);
                 words.clear();
                 remodulator.process(input, frames, &mut words);
-                self.push_raw(&words);
+                self.push_raw(&words, self.in_channels);
                 self.scratch.words = words;
                 Ok(())
             }
@@ -504,20 +606,20 @@ impl Converter {
             return Ok(());
         }
         self.finished = true;
-        if self.mode == Mode::Dop && !self.carry.is_empty() {
+        let mut result = Ok(());
+        if let Some(resampler) = self.resampler.as_mut() {
+            let mut tail = std::mem::take(&mut self.scratch.output);
+            tail.clear();
+            result = resampler
+                .flush(&mut tail)
+                .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)
+                .and_then(|()| self.emit(&mut tail, dsp));
+            self.scratch.output = tail;
+        }
+        if self.out.stream_kind == AUDIO_DOP && !self.carry.is_empty() {
             // An odd final byte frame is completed with idle pattern; the stream stays whole DoP frames.
             self.push_dop(&[DSD_SILENCE; MAX_DSD_CHANNELS][..self.out_channels]);
         }
-        let Some(resampler) = self.resampler.as_mut() else {
-            return Ok(());
-        };
-        let mut tail = std::mem::take(&mut self.scratch.output);
-        tail.clear();
-        let result = resampler
-            .flush(&mut tail)
-            .map_err(|()| ENGINE_E_UNSUPPORTED_FORMAT)
-            .and_then(|()| self.emit(&mut tail, dsp));
-        self.scratch.output = tail;
         result
     }
 
@@ -655,6 +757,10 @@ impl Converter {
             // A downmix, a resampler's overshoot or a gain can pass full scale too.
             dsp.count_clipped(floats);
         }
+        if self.modulator.is_some() {
+            self.modulate(floats);
+            return Ok(());
+        }
         if self.out.sample_format == SAMPLE_F32_LE {
             // As in the integer path, what is not a number is silence.
             for &v in floats.iter() {
@@ -688,14 +794,29 @@ impl Converter {
         result
     }
 
-    // DSD byte frames of the source's channels to the pending native DSD or DoP output.
-    fn push_raw(&mut self, input: &[i32]) {
-        for frame in input.chunks_exact(self.in_channels) {
+    // 352.8 kHz device-channel frames modulated to the pending DSD or DoP output; what is not a number is silence.
+    fn modulate(&mut self, floats: &mut [f64]) {
+        for v in floats.iter_mut().filter(|v| v.is_nan()) {
+            *v = 0.0;
+        }
+        let mut bytes = std::mem::take(&mut self.scratch.words);
+        bytes.clear();
+        self.modulator
+            .as_mut()
+            .expect("checked by the caller")
+            .process(floats, self.level, &mut bytes);
+        self.push_raw(&bytes, self.out_channels);
+        self.scratch.words = bytes;
+    }
+
+    // DSD byte frames of `channels` channels to the pending native DSD or DoP output.
+    fn push_raw(&mut self, input: &[i32], channels: usize) {
+        for frame in input.chunks_exact(channels) {
             let mut bytes = [0u8; MAX_DSD_CHANNELS];
             for (c, byte) in bytes[..self.out_channels].iter_mut().enumerate() {
-                *byte = frame[c.min(self.in_channels - 1)] as u8;
+                *byte = frame[c.min(channels - 1)] as u8;
             }
-            if self.mode == Mode::Dsd {
+            if self.out.stream_kind == AUDIO_DSD {
                 self.pending.extend_from_slice(&bytes[..self.out_channels]);
                 self.pending_frames += 1;
             } else if self.carry.is_empty() {
@@ -742,6 +863,12 @@ impl Converter {
             .map_or(block, |r| r.output_capacity(block) + RESAMPLER_FLUSH_FRAMES)
             + 3 * block;
         let out_channels = self.out_channels.max(2);
+        // A modulator makes up to 4 DSD byte frames of each 352.8 kHz frame.
+        let output = output
+            * self
+                .modulator
+                .as_ref()
+                .map_or(1, DsdModulator::bytes_per_frame);
         self.pending.reserve_exact(output * self.bytes_per_frame);
         self.carry.reserve_exact(out_channels);
         if let Some(remodulator) = self.remodulator.as_mut() {
@@ -827,7 +954,7 @@ pub(crate) mod tests {
     }
 
     fn converter(info: CamelSourceInfoV1, out: u32, rate: u32, allow: bool) -> Converter {
-        Converter::new(&info, &device(out), rate, allow, false, QUALITY_HIGH).unwrap()
+        Converter::new(&info, &device(out), rate, allow, false, QUALITY_HIGH, 0).unwrap()
     }
 
     #[test]
@@ -864,7 +991,7 @@ pub(crate) mod tests {
             valid_bits: 1,
             container_bits: 8,
         };
-        let mut c = Converter::new(&info, &out, 2_822_400, false, false, QUALITY_HIGH).unwrap();
+        let mut c = Converter::new(&info, &out, 2_822_400, false, false, QUALITY_HIGH, 0).unwrap();
         assert_eq!(c.mode, Mode::Dsd);
         let mut dsp = Dsp::new(352_800, 2);
         dsp.set(crate::dsp::Settings {
@@ -1025,7 +1152,7 @@ pub(crate) mod tests {
     #[test]
     fn conversion_needs_permission_except_for_a_lossy_decode() {
         let refused = |info: CamelSourceInfoV1, out: u32, rate: u32| {
-            Converter::new(&info, &device(out), rate, false, false, QUALITY_HIGH).err()
+            Converter::new(&info, &device(out), rate, false, false, QUALITY_HIGH, 0).err()
         };
         let unsupported = Some(ENGINE_E_UNSUPPORTED_FORMAT);
         assert_eq!(
@@ -1058,7 +1185,8 @@ pub(crate) mod tests {
             48_000,
             true,
             false,
-            QUALITY_HIGH
+            QUALITY_HIGH,
+            0
         )
         .is_err());
     }
@@ -1196,6 +1324,7 @@ pub(crate) mod tests {
             false,
             true,
             QUALITY_HIGH,
+            0,
         )
         .unwrap();
         assert_eq!(c.mode, Mode::DsdPcm);
@@ -1247,6 +1376,7 @@ pub(crate) mod tests {
             true,
             false,
             QUALITY_HIGH,
+            0,
         );
         assert_eq!(refused.err(), Some(ENGINE_E_UNSUPPORTED_FORMAT));
         let mut surround = dsd_source(352_800);
@@ -1258,6 +1388,7 @@ pub(crate) mod tests {
             false,
             true,
             QUALITY_HIGH,
+            0,
         );
         assert_eq!(no_downmix.err(), Some(ENGINE_E_UNSUPPORTED_FORMAT));
 
@@ -1268,6 +1399,7 @@ pub(crate) mod tests {
             false,
             true,
             QUALITY_HIGH,
+            0,
         )
         .unwrap();
         s32.convert(&vec![0xFF; 2000], 2000, &mut flat()).unwrap();
@@ -1339,5 +1471,197 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    fn dsd_device(kind: u32, container_bits: u32) -> AudioFormat {
+        let dsd = kind == crate::AUDIO_DSD;
+        AudioFormat {
+            stream_kind: kind,
+            sample_format: if dsd {
+                crate::SAMPLE_DSD_U8
+            } else if container_bits == 24 {
+                crate::SAMPLE_DOP_S24_LE
+            } else {
+                crate::SAMPLE_DOP_S24_IN_32_LE
+            },
+            channel_count: 2,
+            valid_bits: if dsd { 1 } else { 24 },
+            container_bits,
+        }
+    }
+
+    // The left channel's DSD bytes of a native DSD or DoP stream, in time order.
+    fn left_bytes(out: &AudioFormat, bytes: &[u8]) -> Vec<i32> {
+        if out.stream_kind == crate::AUDIO_DSD {
+            return bytes.iter().step_by(2).map(|&b| i32::from(b)).collect();
+        }
+        let sample = (out.container_bits / 8) as usize;
+        bytes
+            .chunks_exact(2 * sample)
+            .flat_map(|frame| [i32::from(frame[sample - 2]), i32::from(frame[sample - 3])])
+            .collect()
+    }
+
+    // `seconds` of a sine at bin 186 of the 352.8 kHz measurement, as 24-bit stereo at `rate`.
+    fn sine(rate: u32, amplitude: f64, seconds: f64) -> Vec<i32> {
+        let f = 186.0 * 352_800.0 / 65_536.0;
+        (0..(f64::from(rate) * seconds) as usize)
+            .flat_map(|n| {
+                let x =
+                    amplitude * (2.0 * std::f64::consts::PI * f * n as f64 / f64::from(rate)).sin();
+                let v = (x * 8_388_608.0).round() as i32;
+                [v, v]
+            })
+            .collect()
+    }
+
+    fn modulated(
+        info: &CamelSourceInfoV1,
+        out: &AudioFormat,
+        out_rate: u32,
+        order: u32,
+        samples: &[i32],
+        dsp: &mut Dsp,
+    ) -> Vec<i32> {
+        let mut c = Converter::new(info, out, out_rate, false, false, QUALITY_HIGH, order).unwrap();
+        let channels = info.channel_count as usize;
+        for chunk in samples.chunks(4096 * channels) {
+            c.convert(chunk, chunk.len() / channels, dsp).unwrap();
+        }
+        c.finish(dsp).unwrap();
+        left_bytes(out, c.pending())
+    }
+
+    // PCM at 44.1 and 96 kHz reaches DSD64, DSD128 and DSD256, native and as DoP in both containers, at -6 dB (the
+    // SACD reference level for full scale), with its in-band noise low.
+    #[test]
+    fn pcm_is_modulated_at_minus_6_db_to_native_dsd_and_dop_at_each_rate() {
+        for rate in [44_100u32, 96_000] {
+            let samples = sine(rate, 0.5, 0.4);
+            for dsd in [1u32, 2, 4] {
+                for (out, out_rate) in [
+                    (dsd_device(crate::AUDIO_DSD, 8), 8 * dsd * 352_800),
+                    (dsd_device(crate::AUDIO_DOP, 24), dsd * 176_400),
+                    (dsd_device(crate::AUDIO_DOP, 32), dsd * 176_400),
+                ] {
+                    let path = format!("{rate} Hz to DSD{} as kind {}", 64 * dsd, out.stream_kind);
+                    let left = modulated(
+                        &source(rate, 2, 24, false),
+                        &out,
+                        out_rate,
+                        7,
+                        &samples,
+                        &mut Dsp::new(352_800, 2),
+                    );
+                    let expected =
+                        (samples.len() / 2) as u64 * u64::from(dsd * 352_800) / u64::from(rate);
+                    assert!(
+                        (left.len() as u64).abs_diff(expected) < expected / 100,
+                        "{path}: {} bytes",
+                        left.len()
+                    );
+                    let (level, snr, _) =
+                        crate::dsd_remod::tests::measure(&left, dsd * 352_800, 186, 0.25);
+                    assert!(level.abs() < 0.01, "{path}: level {level:.4} dB");
+                    assert!(snr > 100.0, "{path}: SNR {snr:.1} dB");
+                }
+            }
+        }
+    }
+
+    // The 5th-order modulator too, and a DSD source taken up a rate at its own level.
+    #[test]
+    fn the_5th_order_and_a_dsd_source_are_modulated_as_well() {
+        let out = dsd_device(crate::AUDIO_DSD, 8);
+        let left = modulated(
+            &source(44_100, 2, 24, false),
+            &out,
+            8 * 705_600,
+            5,
+            &sine(44_100, 0.5, 0.4),
+            &mut Dsp::new(352_800, 2),
+        );
+        let (level, snr, _) = crate::dsd_remod::tests::measure(&left, 705_600, 186, 0.25);
+        assert!(
+            level.abs() < 0.01 && snr > 95.0,
+            "{level:.4} dB, SNR {snr:.1} dB"
+        );
+
+        let bytes = (8192 + 65_536 + 64) * 2;
+        let mono = crate::dsd_remod::tests::modulate(8 * 352_800, bytes, |t| {
+            0.5 * (2.0 * std::f64::consts::PI * 186.0 * 352_800.0 / 65_536.0 * t).sin()
+        });
+        let stereo: Vec<i32> = mono.iter().flat_map(|&b| [b, b]).collect();
+        let mut info = dsd_source(352_800);
+        info.channel_count = 2;
+        let left = modulated(
+            &info,
+            &out,
+            8 * 1_411_200,
+            7,
+            &stereo,
+            &mut Dsp::new(352_800, 2),
+        );
+        assert_eq!(left.len(), bytes * 4);
+        let (level, snr, _) = crate::dsd_remod::tests::measure(&left, 1_411_200, 186, 0.5);
+        assert!(
+            level.abs() < 0.01 && snr > 100.0,
+            "{level:.4} dB, SNR {snr:.1} dB"
+        );
+    }
+
+    // The DSP chain, the software volume included, acts on the path at 352.8 kHz; muted, only silence is modulated.
+    #[test]
+    fn the_dsp_chain_and_the_volume_reach_modulated_dsd() {
+        let out = dsd_device(crate::AUDIO_DOP, 32);
+        let samples = sine(96_000, 0.5, 0.4);
+        for (volume_db, amplitude) in [(-20.0 * 2f64.log10(), 0.125), (f64::NEG_INFINITY, 0.25)] {
+            let mut dsp = Dsp::new(352_800, 2);
+            dsp.set(crate::dsp::Settings {
+                order: crate::dsp::DEFAULT_ORDER,
+                volume_db,
+                ..crate::dsp::Settings::default()
+            });
+            assert!(dsp.active());
+            let left = modulated(
+                &source(96_000, 2, 24, false),
+                &out,
+                352_800,
+                7,
+                &samples,
+                &mut dsp,
+            );
+            let (level, _, _) = crate::dsd_remod::tests::measure(&left, 705_600, 186, amplitude);
+            if volume_db.is_finite() {
+                assert!(level.abs() < 0.01, "at {volume_db:.2} dB: {level:.4} dB");
+            } else {
+                assert!(level < -120.0, "muted: {level:.1} dB");
+            }
+        }
+    }
+
+    // Source frames for one second of the device: the source's rate, through the modulator's rate.
+    #[test]
+    fn a_modulated_stream_asks_for_its_source_frames_by_the_rates() {
+        let native = dsd_device(crate::AUDIO_DSD, 8);
+        let dop = dsd_device(crate::AUDIO_DOP, 24);
+        let pcm = source(44_100, 2, 24, false);
+        let mut dsd = dsd_source(352_800);
+        dsd.channel_count = 2;
+        for (info, out, out_rate, frames, expected) in [
+            (&pcm, &native, 8 * 352_800, 352_800, 44_100),
+            (&pcm, &dop, 176_400, 176_400, 44_100),
+            (&pcm, &dop, 705_600, 705_600, 44_100),
+            (&dsd, &native, 8 * 705_600, 705_600, 352_800),
+        ] {
+            let c = Converter::new(info, out, out_rate, false, false, QUALITY_HIGH, 7).unwrap();
+            assert!(
+                c.input_frames_for(frames).abs_diff(expected) <= 1,
+                "{out_rate}"
+            );
+        }
+        assert!(
+            Converter::new(&pcm, &native, 8 * 2_822_400, false, false, QUALITY_HIGH, 7).is_err()
+        );
     }
 }

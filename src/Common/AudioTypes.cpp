@@ -63,6 +63,8 @@ const char* errorCodeName(ErrorCode c) {
         return "AccessDenied";
     case ErrorCode::DeviceChanged:
         return "DeviceChanged";
+    case ErrorCode::TooSlow:
+        return "TooSlow";
     case ErrorCode::Other:
         return "Other";
     }

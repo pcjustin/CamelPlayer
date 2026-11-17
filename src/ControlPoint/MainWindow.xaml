@@ -249,6 +249,11 @@
                                     <ComboBox x:Name="WasapiQualityCombo" x:Uid="Settings_FilterQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiPhaseCombo" x:Uid="Settings_FilterPhase" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiPassbandCombo" x:Uid="Settings_FilterPassband" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiModulatorCombo" x:Uid="Settings_Modulator" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiDsdUpsamplingCombo" x:Uid="Settings_DsdUpsampling" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="WasapiDsdMultipleCombo" x:Uid="Settings_DsdUpsamplingMultiple" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ToggleSwitch x:Name="WasapiPcmAsDsdSwitch" x:Uid="Settings_PcmAsDsd" Toggled="OnSettingToggled" />
+                                    <ComboBox x:Name="WasapiPcmDsdRateCombo" x:Uid="Settings_PcmDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="WasapiMaxRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
@@ -286,6 +291,11 @@
                                     <ComboBox x:Name="AsioQualityCombo" x:Uid="Settings_FilterQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioPhaseCombo" x:Uid="Settings_FilterPhase" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioPassbandCombo" x:Uid="Settings_FilterPassband" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioModulatorCombo" x:Uid="Settings_Modulator" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioDsdUpsamplingCombo" x:Uid="Settings_DsdUpsampling" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="AsioDsdMultipleCombo" x:Uid="Settings_DsdUpsamplingMultiple" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ToggleSwitch x:Name="AsioPcmAsDsdSwitch" x:Uid="Settings_PcmAsDsd" Toggled="OnSettingToggled" />
+                                    <ComboBox x:Name="AsioPcmDsdRateCombo" x:Uid="Settings_PcmDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="AsioMaxRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
@@ -313,6 +323,11 @@
                                     <ComboBox x:Name="KsQualityCombo" x:Uid="Settings_FilterQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsPhaseCombo" x:Uid="Settings_FilterPhase" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsPassbandCombo" x:Uid="Settings_FilterPassband" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsModulatorCombo" x:Uid="Settings_Modulator" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsDsdUpsamplingCombo" x:Uid="Settings_DsdUpsampling" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="KsDsdMultipleCombo" x:Uid="Settings_DsdUpsamplingMultiple" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ToggleSwitch x:Name="KsPcmAsDsdSwitch" x:Uid="Settings_PcmAsDsd" Toggled="OnSettingToggled" />
+                                    <ComboBox x:Name="KsPcmDsdRateCombo" x:Uid="Settings_PcmDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsDsdRateCombo" x:Uid="Settings_DsdPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="KsMaxRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
@@ -347,6 +362,11 @@
                                     <ComboBox x:Name="NetworkQualityCombo" x:Uid="Settings_FilterQuality" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkPhaseCombo" x:Uid="Settings_FilterPhase" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkPassbandCombo" x:Uid="Settings_FilterPassband" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkModulatorCombo" x:Uid="Settings_Modulator" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkDsdUpsamplingCombo" x:Uid="Settings_DsdUpsampling" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ComboBox x:Name="NetworkDsdMultipleCombo" x:Uid="Settings_DsdUpsamplingMultiple" Width="360" SelectionChanged="OnSettingChanged" />
+                                    <ToggleSwitch x:Name="NetworkPcmAsDsdSwitch" x:Uid="Settings_PcmAsDsd" Toggled="OnSettingToggled" />
+                                    <ComboBox x:Name="NetworkPcmDsdRateCombo" x:Uid="Settings_PcmDsdRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkRateCombo" x:Uid="Settings_MaxPcmRate" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkBitsCombo" x:Uid="Settings_NetworkBits" Width="360" SelectionChanged="OnSettingChanged" />
                                     <ComboBox x:Name="NetworkDsdCombo" x:Uid="Settings_DsdOutput" Width="360" SelectionChanged="OnSettingChanged" />

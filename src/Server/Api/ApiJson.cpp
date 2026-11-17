@@ -115,7 +115,7 @@ constexpr Names<PlaybackState, 3> kPlaybackStates = {
     {PlaybackState::Stopped, "stopped"}, {PlaybackState::Playing, "playing"}, {PlaybackState::Paused, "paused"}};
 constexpr Names<EventKind, 2> kEventKinds = {{EventKind::StateChanged, "stateChanged"},
                                              {EventKind::CommandCompleted, "commandCompleted"}};
-constexpr Names<ErrorCode, 12> kErrorCodes = {{ErrorCode::FileOpen, "fileOpen"},
+constexpr Names<ErrorCode, 13> kErrorCodes = {{ErrorCode::FileOpen, "fileOpen"},
                                               {ErrorCode::UnsupportedStream, "unsupportedStream"},
                                               {ErrorCode::DecodeFailed, "decodeFailed"},
                                               {ErrorCode::SeekFailed, "seekFailed"},
@@ -126,6 +126,7 @@ constexpr Names<ErrorCode, 12> kErrorCodes = {{ErrorCode::FileOpen, "fileOpen"},
                                               {ErrorCode::DriverError, "driverError"},
                                               {ErrorCode::AccessDenied, "accessDenied"},
                                               {ErrorCode::DeviceChanged, "deviceChanged"},
+                                              {ErrorCode::TooSlow, "tooSlow"},
                                               {ErrorCode::Other, "other"}};
 constexpr Names<SampleType, 6> kSampleTypes = {{SampleType::Int16, "16"},         {SampleType::Int24, "24"},
                                                {SampleType::Int24In32, "24in32"}, {SampleType::Int32, "32"},
@@ -256,6 +257,7 @@ json toJson(const OutputPlan& p) {
             {"reduce", p.reduce},
             {"dsd", nameOf(p.dsd, kDsdPaths)},
             {"remodulate", p.remodulate},
+            {"modulatorOrder", p.modulatorOrder},
             {"shared", p.shared},
             {"dsp", dspJson(p.dsp)},
             {"gainDb", p.gainDb},
@@ -276,6 +278,7 @@ OutputPlan planFrom(const json& j) {
     p.reduce = value<bool>(j, "reduce");
     p.dsd = enumFrom(field(j, "dsd"), kDsdPaths, "DSD path");
     p.remodulate = value<bool>(j, "remodulate");
+    p.modulatorOrder = value<uint32_t>(j, "modulatorOrder");
     p.shared = value<bool>(j, "shared");
     for (const auto& node : array(j, "dsp")) p.dsp.push_back(enumFrom(node, kDspNodes, "DSP node"));
     p.gainDb = value<double>(j, "gainDb");

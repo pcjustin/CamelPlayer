@@ -136,6 +136,7 @@ struct MainWindow : MainWindowT<MainWindow> {
                                Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
     void OnPlayerMuteClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnNetworkGaplessToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnSettingToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeSettingsClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnStatusAreaSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnReplayGainChanged(Windows::Foundation::IInspectable const&,
