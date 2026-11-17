@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 #include "Common/AudioFormat.h"
 #include "Common/AudioTypes.h"
@@ -32,6 +33,14 @@ bool lossyLengthDeclared(const std::filesystem::path& path);
 // a frame.
 uint64_t vbriSamples(const std::filesystem::path& path);
 
+// Where an MP3's sound ends: before an ID3v1 tag and an APEv2 tag at the end of the file, which can hold a cover.
+uint64_t mpegSoundEnd(const std::filesystem::path& path);
+
+// The samples of an MP3 with no header, estimated from its sound alone (to mpegSoundEnd): by the frame size where its
+// first frames share one bitrate, else from the frames of windows read across it, as a first frame's bitrate, which
+// mpg123 estimates from, can be a minute off on a stream whose bitrate varies. 0 for anything that is not MPEG audio.
+uint64_t headerlessSamples(const std::filesystem::path& path);
+
 // Where an MP3's sound starts: at its first frame, past its tags and any other bytes before it, or at the frame after a
 // VBRI frame, which holds no sound.
 uint64_t mpegSoundStart(const std::filesystem::path& path);
@@ -48,6 +57,15 @@ struct XingToc {
     double byteShare(double share) const;
 };
 std::optional<XingToc> xingToc(const std::filesystem::path& path);
+
+// Where an MP3's sound frames start by its VBRI (Fraunhofer) table, which counts bytes from the VBRI frame for each run
+// of `step` frames, the VBRI frame the first: `offsets[i]` is where sound frame i * step starts in the file, the frame
+// after the run's first. nullopt without a table; it ends where a run does not start at a frame.
+struct VbriIndex {
+    uint64_t step = 0;
+    std::vector<uint64_t> offsets;
+};
+std::optional<VbriIndex> vbriIndex(const std::filesystem::path& path);
 
 // numSampleFrames of an AIFF/AIFC COMM chunk; nullopt when the file has none.
 std::optional<uint64_t> aiffSampleFrames(const std::filesystem::path& path);

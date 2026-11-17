@@ -181,6 +181,39 @@ std::filesystem::path taggedVbrMp3() {
     return writeFile("tagged-vbr.mp3", id3(300000) + readFile(vbrMp3(true)));
 }
 
+std::string be16(uint32_t v) {
+    return {char(v >> 8), char(v)};
+}
+
+// LAME's VBR file behind a VBRI frame whose table, as a Fraunhofer encoder writes it, counts the bytes of every run of
+// 32 frames from the VBRI frame on, that frame the first; checked against the owner's VBRI files.
+std::filesystem::path vbriMp3() {
+    const auto plain = readFile(vbrMp3(false));
+    std::vector<size_t> starts; // where each frame of `plain` starts
+    for (size_t at = 0; at + 4 <= plain.size();) {
+        const auto* h = reinterpret_cast<const uint8_t*>(plain.data() + at);
+        if (h[0] != 0xFF || (h[1] & 0xE0) != 0xE0) break;
+        static constexpr size_t kKbps[] = {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320};
+        starts.push_back(at);
+        at += 144000 * kKbps[h[2] >> 4] / 44100 + ((h[2] >> 1) & 1);
+    }
+    constexpr size_t kVbriFrame = 1044, kRun = 32; // 320 kbit/s without padding
+    const size_t frames = starts.size() + 1;
+    const auto where = [&](size_t frame) {
+        return frame == 0 ? 0 : frame < frames ? kVbriFrame + starts[frame - 1] : kVbriFrame + plain.size();
+    };
+    std::string table;
+    const size_t entries = (frames + kRun - 1) / kRun;
+    for (size_t e = 0; e < entries; e++) table += be16(uint32_t(where(std::min((e + 1) * kRun, frames)) - where(e * kRun)));
+    std::string vbri = plain.substr(0, 4) + std::string(kVbriFrame - 4, '\0');
+    vbri[2] = char((vbri[2] & 0x0D) | 0xE0); // 320 kbit/s, no padding
+    const std::string header = "VBRI" + be16(1) + be16(0) + be16(75) + be32(uint32_t(kVbriFrame + plain.size())) +
+                               be32(uint32_t(frames)) + be16(uint32_t(entries)) + be16(1) + be16(2) + be16(kRun) + table;
+    EXPECT_LE(36 + header.size(), kVbriFrame);
+    vbri.replace(36, header.size(), header);
+    return writeFile("vbri-table.mp3", vbri + plain);
+}
+
 // Where the movie box of FFmpeg's M4A starts; it follows the media data, so growing it moves no chunk offset.
 size_t movieBox(const std::string& m4a) {
     const size_t type = m4a.rfind("moov");
@@ -590,6 +623,58 @@ TEST(LossyDecoderPolicy, Mpg123SeeksAVbrMp3AtOnceNearTheTarget) {
         ASSERT_TRUE(lag) << by << ": not within a second of the target";
         std::printf("VBR seek by its %s: %lld frames off\n", by, static_cast<long long>(*lag));
     }
+}
+
+// A VBRI file's seek the scan has not reached lands exactly, by the VBRI table: no decoder reads that table, and an
+// estimate in proportion to the length landed 0.25 to 2.4 s early on the owner's VBRI files.
+TEST(LossyDecoderPolicy, Mpg123SeeksAVbriMp3ByItsTable) {
+    const auto file = vbriMp3();
+    const auto all = decodeAll(*openDecoder(DecoderKind::Mpg123, file));
+    const uint64_t total = all.size() / kChannels;
+    for (const uint64_t target : {total / 3 + 1234, total * 9 / 10}) {
+        auto decoder = openDecoder(DecoderKind::Mpg123, file);
+        decoder->seek(target);
+        const auto rest = decodeAll(*decoder);
+        // Past the frames that warm the decoder up, the audio is the linear decode's at the target.
+        constexpr size_t kSkip = 4096;
+        ASSERT_GT(rest.size(), (kSkip + 1024) * kChannels);
+        EXPECT_TRUE(std::equal(rest.begin() + std::ptrdiff_t(kSkip * kChannels), rest.end(),
+                               all.begin() + std::ptrdiff_t((target + kSkip) * kChannels)))
+            << target;
+        EXPECT_EQ(rest.size(), all.size() - target * kChannels) << target;
+    }
+}
+
+// A VBR stream without a header declares no length: the estimate before the scan comes from frames read across the
+// file, not the first frame's bitrate, which is seconds off where the bitrate varies.
+TEST(LossyDecoderPolicy, Mpg123EstimatesAHeaderlessVbrLengthAcrossTheFile) {
+    const auto file = vbrMp3(false);
+    const uint64_t total = decodeAll(*openDecoder(DecoderKind::Mpg123, file)).size() / kChannels;
+    const auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    ASSERT_EQ(decoder->info().totalFrames, 0u); // the scan has not ended yet
+    const auto off = std::abs(double(decoder->estimatedFrames()) - double(total)) / kRate;
+    std::printf("headerless VBR estimate: %.2f s off of %.1f s\n", off, double(total) / kRate);
+    EXPECT_LT(off, 1.0);
+}
+
+// A cover kept in an APEv2 tag at the end, before an ID3v1 tag, is no sound: a CBR stream without a header is estimated
+// from its sound alone, where mpg123 counted 400 KB of tag as 10 s more on the owner's files.
+TEST(LossyDecoderPolicy, Mpg123LeavesAnApeTagOutOfItsEstimate) {
+    reference();
+    const auto plain = readFile(path(kFixtures[3]));
+    const uint64_t total = decodeAll(*openDecoder(DecoderKind::Mpg123, path(kFixtures[3]))).size() / kChannels;
+    const auto le32 = [](uint32_t v) { return std::string{char(v), char(v >> 8), char(v >> 16), char(v >> 24)}; };
+    const std::string items(400000, 'c');
+    const auto ape = [&](uint32_t flags) {
+        return "APETAGEX" + le32(2000) + le32(uint32_t(items.size() + 32)) + le32(1) + le32(flags) + std::string(8, '\0');
+    };
+    const auto file =
+        writeFile("ape-tag.mp3", plain + ape(0xA0000000) + items + ape(0x80000000) + "TAG" + std::string(125, '\0'));
+    const auto decoder = openDecoder(DecoderKind::Mpg123, file);
+    const auto off = std::abs(double(decoder->estimatedFrames()) - double(total)) / kRate;
+    std::printf("CBR behind an APE tag: %.2f s off\n", off);
+    EXPECT_LT(off, 0.1);
+    EXPECT_EQ(decodeAll(*openDecoder(DecoderKind::Mpg123, file)).size() / kChannels, total);
 }
 
 // Where the library knows the exact length, a file played through is read once: the scan, a second reading of the

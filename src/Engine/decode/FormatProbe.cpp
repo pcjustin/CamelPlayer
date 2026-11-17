@@ -472,6 +472,104 @@ double XingToc::byteShare(double share) const {
     return (from + (to - from) * (percent - double(entry))) / 256.0;
 }
 
+std::optional<VbriIndex> vbriIndex(const std::filesystem::path& path) {
+    const File f(path);
+    const uint64_t start = mpegStart(f);
+    // After "VBRI": version, delay, quality, bytes, frames, then the table's entries, their scale, size and frames each.
+    uint8_t head[36 + 26] = {};
+    if (!f.readAt(start, head, sizeof head) || !frameSync(head) || !tagIs(head + 36, "VBRI")) return std::nullopt;
+    const auto be16 = [](const uint8_t* p) { return uint32_t(p[0]) << 8 | p[1]; };
+    const uint32_t entries = be16(head + 54), scale = be16(head + 56), size = be16(head + 58), step = be16(head + 60);
+    if (!entries || !scale || !size || size > 4 || !step) return std::nullopt;
+    std::vector<uint8_t> table(size_t(entries) * size);
+    if (!f.readAt(start + sizeof head, table.data(), table.size())) return std::nullopt;
+    VbriIndex index{step, {}};
+    uint64_t run = start; // where run e's first frame starts
+    for (uint32_t e = 0; e <= entries; e++) {
+        uint8_t header[4] = {};
+        const uint32_t length = f.readAt(run, header, sizeof header) ? mpegFrameLength(header) : 0;
+        if (!length) break;
+        index.offsets.push_back(run + length);
+        if (e == entries) break;
+        uint64_t bytes = 0;
+        for (uint32_t b = 0; b < size; b++) bytes = bytes << 8 | table[size_t(e) * size + b];
+        run += bytes * scale;
+    }
+    if (index.offsets.size() < 2) return std::nullopt;
+    return index;
+}
+
+namespace {
+uint64_t soundEnd(const File& f) {
+    uint64_t end = f.size();
+    uint8_t tag[32] = {};
+    if (end >= 128 && f.readAt(end - 128, tag, 3) && tagIs(tag, "TAG")) end -= 128;
+    // An APEv2 footer: its size counts the items and the footer, and a flag tells of a header before them.
+    if (end >= 32 && f.readAt(end - 32, tag, sizeof tag) && std::memcmp(tag, "APETAGEX", 8) == 0) {
+        const auto le32 = [](const uint8_t* p) {
+            return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
+        };
+        const uint64_t size = uint64_t(le32(tag + 12)) + ((le32(tag + 20) & 0x80000000u) ? 32 : 0);
+        if (size <= end) end -= size;
+    }
+    return end;
+}
+} // namespace
+
+uint64_t mpegSoundEnd(const std::filesystem::path& path) {
+    return soundEnd(File(path));
+}
+
+uint64_t headerlessSamples(const std::filesystem::path& path) {
+    const File f(path);
+    const uint64_t start = mpegStart(f), end = soundEnd(f);
+    if (end <= start) return 0;
+    struct Walk {
+        uint64_t frames = 0, bytes = 0;
+        uint32_t samples = 0; // a frame's
+        bool varies = false;
+    };
+    // The frames of `length` bytes at `at`, from the first one the next frame's header confirms.
+    const auto walk = [&](uint64_t at, size_t length) {
+        Walk w;
+        std::vector<uint8_t> window(size_t(std::min<uint64_t>(length, end - at)));
+        if (window.size() < 8 || !f.readAt(at, window.data(), window.size())) return w;
+        size_t i = 0;
+        for (; i + 8 <= window.size(); i++) {
+            const uint32_t n = mpegFrameLength(window.data() + i);
+            if (n && i + n + 4 <= window.size() && mpegFrameLength(window.data() + i + n)) break;
+        }
+        int first = -1;
+        while (i + 4 <= window.size()) {
+            const uint8_t* h = window.data() + i;
+            const uint32_t n = mpegFrameLength(h);
+            if (!n || i + n > window.size()) break;
+            const int bitrate = h[2] >> 4;
+            if (first < 0) first = bitrate;
+            w.varies = w.varies || bitrate != first;
+            const unsigned version = (h[1] >> 3) & 3, layer = 4 - ((h[1] >> 1) & 3);
+            w.samples = layer == 1 ? 384 : layer == 3 && version != 3 ? 576 : 1152;
+            w.frames++;
+            w.bytes += n;
+            i += n;
+        }
+        return w;
+    };
+    if (const auto head = walk(start, size_t(32) * 1024); !head.varies)
+        return head.frames ? uint64_t(double(end - start) * double(head.frames) / double(head.bytes) * head.samples) : 0;
+    constexpr int kWindows = 8;
+    constexpr size_t kWindow = size_t(16) * 1024;
+    Walk all;
+    for (int k = 0; k < kWindows; k++) {
+        const auto w = walk(start + (end - start) * uint64_t(k) / kWindows, kWindow);
+        all.frames += w.frames;
+        all.bytes += w.bytes;
+        if (w.samples) all.samples = w.samples;
+    }
+    if (!all.frames || !all.bytes) return 0;
+    return uint64_t(double(end - start) * double(all.frames) / double(all.bytes) * all.samples);
+}
+
 uint64_t mpegSoundStart(const std::filesystem::path& path) {
     const File f(path);
     const uint64_t start = mpegStart(f);

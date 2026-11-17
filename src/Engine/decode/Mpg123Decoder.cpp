@@ -70,14 +70,8 @@ public:
         if (_wfopen_s(&file, longPath(path).c_str(), L"rb") != 0 || !file)
             throw Error(ErrorCode::FileOpen, "mpg123: cannot open file");
         file_.reset(file);
-        if (_fseeki64(file, 0, SEEK_END) == 0) {
-            const int64_t size = _ftelli64(file);
-            char tag[3] = {};
-            const bool id3v1 = size >= 128 && _fseeki64(file, size - 128, SEEK_SET) == 0 && std::fread(tag, 1, 3, file) == 3 &&
-                               std::memcmp(tag, "TAG", 3) == 0;
-            const int64_t end = size - (id3v1 ? 128 : 0);
-            audioEnd_ = std::cmp_greater(end, start_) ? uint64_t(end - int64_t(start_)) : 0;
-        }
+        const uint64_t end = mpegSoundEnd(path);
+        audioEnd_ = end > start_ ? end - start_ : 0;
         if (_fseeki64(file, int64_t(start_), SEEK_SET) != 0) throw Error(ErrorCode::FileOpen, "mpg123: cannot seek");
         int error = MPG123_OK;
         handle_.reset(mpg123_new(nullptr, &error));
@@ -166,10 +160,12 @@ public:
         info_.bitsPerSample = lossyBits;
         // mpg123 reads a Xing/Info header but not VBRI, whose VBR stream it would estimate from the first bitrate; the
         // library's length knows better than either.
+        // A stream without any header whose bitrate varies is estimated from frames read across it.
         const int64_t length = mpg123_length64(stream_->mh());
         const uint64_t vbri = vbriSamples(path);
         vbri_ = vbri != 0;
-        estimate_ = library_ ? library_->frames : vbri ? vbri : length > 0 ? uint64_t(length) : 0;
+        const uint64_t sampled = library_ || vbri_ || lossyLengthDeclared(path) ? 0 : headerlessSamples(path);
+        estimate_ = library_ ? library_->frames : vbri ? vbri : sampled ? sampled : length > 0 ? uint64_t(length) : 0;
         deferScan_ = measure && library_ && !library_->estimated;
         if (!measure)
             info_.totalFrames = estimate_;
@@ -321,12 +317,19 @@ private:
                mpg123_set_index64(stream_->mh(), offsets.data(), step, offsets.size()) == MPG123_OK;
     }
 
-    // Gives the playing stream an index of where its frames are estimated to start: from the frame size where it holds
-    // for every frame, from a Xing table, or else in proportion to the length. `exact` for a CBR stream, as its Info
-    // frame or its measured length shows; a length the library estimated shows nothing. False when the stream gives
-    // nothing to estimate from.
+    // Gives the playing stream an index of where its frames start: from a VBRI table, which tells where every run of
+    // frames starts; else estimated from the frame size where it holds for every frame, from a Xing table, or in
+    // proportion to the length. `exact` for a VBRI table and for a CBR stream, as its Info frame or its measured length
+    // shows; a length the library estimated shows nothing. False when the stream gives nothing to estimate from.
     bool estimateIndex(bool& exact) {
         mpg123_handle* mh = stream_->mh();
+        if (vbri_ && !vbriIndex_) vbriIndex_ = vbriIndex(path_).value_or(VbriIndex{});
+        if (vbri_ && vbriIndex_->offsets.size() > 1) {
+            std::vector<int64_t> offsets;
+            for (const uint64_t at : vbriIndex_->offsets) offsets.push_back(int64_t(at - start_));
+            exact = true;
+            return mpg123_set_index64(mh, offsets.data(), int64_t(vbriIndex_->step), offsets.size()) == MPG123_OK;
+        }
         int64_t* own = nullptr;
         int64_t ownStep = 0;
         size_t ownFill = 0;
@@ -398,7 +401,8 @@ private:
     std::optional<LibraryLength> library_;
     std::optional<XingToc> toc_; // read at the first seek that needs it
     bool vbri_ = false;
-    bool deferScan_ = false; // the library knows the exact length, so the scan waits for a seek
+    std::optional<VbriIndex> vbriIndex_; // read at the first seek the scan has not reached
+    bool deferScan_ = false;             // the library knows the exact length, so the scan waits for a seek
     bool scanStarted_ = false;
     bool estimated_ = false;          // positions since the last seek are estimates
     std::unique_ptr<Stream> scanned_; // written by the scan thread before scanDone_; read after joining it
