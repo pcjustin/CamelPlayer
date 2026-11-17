@@ -50,6 +50,9 @@ public:
     std::atomic<bool> outputFails = false; // as with its DAC off: Play is OK, a moment of playing, then stopped
     // No Status pushed for this long after Play, as HQPlayer starting DSD (about 4 s on 2026-11-16).
     std::chrono::milliseconds quietAfterPlay{0};
+    // PlaylistAdd answered only once the probe read this many bytes of the stream, as HQPlayer on macOS did with DSF
+    // on 2026-11-17.
+    std::atomic<size_t> readBeforeAddReply = 0;
 
     FakeHQPlayer() {
         WSADATA wsa;
@@ -230,6 +233,8 @@ private:
                     }
                 }
                 if (dropped) continue;
+                if (element.name == "PlaylistAdd" && plays && readBeforeAddReply)
+                    probe(element.attributes.at("uri"), readBeforeAddReply);
                 if (!answeredOnce && firstReplyDelay.count()) std::this_thread::sleep_for(firstReplyDelay);
                 answeredOnce = true;
                 std::string pushed;
@@ -256,7 +261,7 @@ private:
             playlist_.push_back(uri);
             added_.push_back(uri);
             ++state_.transportSerial;
-            probes_.push_back(uri);
+            if (!readBeforeAddReply) probes_.push_back(uri);
         } else if (element.name == "PlaylistClear") {
             playlist_.clear();
             current_ = 0;
@@ -358,7 +363,7 @@ private:
     }
 
     // HEAD, then a GET read for its first bytes and broken off, as HQPlayer probes a URL it is given.
-    void probe(const std::string& uri) {
+    void probe(const std::string& uri, size_t want = 128 * 1024) {
         try {
             camel::server::http::send("HEAD", uri, "", "", 3000, 1 << 16);
         } catch (const std::exception&) {
@@ -372,13 +377,15 @@ private:
         address.sin_family = AF_INET;
         address.sin_port = htons(port);
         inet_pton(AF_INET, host.c_str(), &address.sin_addr);
+        const DWORD patience = 5000;
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&patience), sizeof(patience));
         if (connect(s, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0) {
             const std::string request = "GET " + uri.substr(slash) + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n";
             send(s, request.data(), int(request.size()), 0);
             char chunk[8192];
             std::string head;
             size_t read = 0;
-            while (read < 128 * 1024) {
+            while (read < want) {
                 const int n = recv(s, chunk, sizeof(chunk), 0);
                 if (n <= 0) break;
                 if (head.size() < 4096) head.append(chunk, size_t(n));

@@ -268,7 +268,12 @@ public:
                 didl = bodies_.front().didl;
             }
         }
-        if (!uri.empty() && !link_->load(uri, didl)) throw Error(ErrorCode::FormatNotSupported, "the player refused the stream");
+        if (!uri.empty()) {
+            setLoading(true);
+            const bool loaded = link_->load(uri, didl);
+            setLoading(false);
+            if (!loaded) throw Error(ErrorCode::FormatNotSupported, "the player refused the stream");
+        }
         {
             std::scoped_lock lock(mutex_);
             started_ = true;
@@ -313,14 +318,17 @@ public:
         for (auto& connection : connections_) connection.join();
         connections_.clear();
         std::unique_ptr<PlayerControl> ended;
+        bool stop = false;
         {
             std::scoped_lock lock(mutex_);
             source_ = nullptr;
             served_.clear();
-            if (link_ && started_ && !released_) link_->stop();
+            stop = link_ && started_ && !released_;
             started_ = false;
             ended = std::move(link_);
         }
+        // Unlocked: while the player is slow to answer, what it reports meanwhile reaches onPlayer, which takes the lock.
+        if (stop) ended->stop();
         // Its thread may be reporting to onPlayer, which takes the lock, until it ends.
         ended.reset();
     }
@@ -352,7 +360,7 @@ private:
     void release(const Error& error) {
         {
             std::scoped_lock lock(mutex_);
-            if (released_) return;
+            if (released_ || closing_) return; // what the player does while CamelPlayer stops it is no error
             released_ = true;
         }
         raiseError(error);
@@ -788,8 +796,15 @@ private:
         }
     }
 
+    void setLoading(bool loading) {
+        std::scoped_lock lock(mutex_);
+        loading_ = loading;
+    }
+
+    // While the player takes its first track, the start of it is there to read: HQPlayer on macOS answers the add of a
+    // DSF only once it has read some of its samples.
     _Requires_lock_held_(mutex_) bool mayRender() {
-        if (!source_ || !started_ || !playing_) return false;
+        if (!source_ || ((!started_ || !playing_) && !loading_)) return false;
         const auto now = Clock::now();
         const uint64_t played = allPlayed();
         // A player whose position stands still may want more in its buffer before it goes on (a Linkplay module does).
@@ -954,6 +969,7 @@ private:
     _Guarded_by_(mutex_) uint64_t framesFinished_ = 0;
     _Guarded_by_(mutex_) bool started_ = false;
     _Guarded_by_(mutex_) bool playing_ = false;
+    _Guarded_by_(mutex_) bool loading_ = false;
     _Guarded_by_(mutex_) bool closing_ = false;
     _Guarded_by_(mutex_) bool released_ = false;
     _Guarded_by_(mutex_) Clock::time_point playingSince_;

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <mutex>
 #include <thread>
 
@@ -396,4 +397,34 @@ TEST(HQPlayerOutputTest, AReplyMissingWhileATrackLoadsIsNoLoss) {
     ASSERT_TRUE(eventually([&] { return fake.state().position > 0.5; }));
     EXPECT_EQ(output.error(), kNoError);
     EXPECT_EQ(fake.accepted(), 2U);
+}
+
+// HQPlayer on macOS answers the add of a DSF only once it has read some of its samples, before Play is sent.
+TEST(HQPlayerOutputTest, ATrackIsAddedWhenHQPlayerReadsSamplesBeforeAnswering) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    fake.readBeforeAddReply = size_t{4} * 4096;
+    const DeviceFormat dsd{352800, 2, SampleType::Dsd8};
+    CountingSource source(2, 352800ULL * 10);
+    OutputRun output(fake, source, dsd);
+    EXPECT_NO_THROW(output->start());
+    EXPECT_TRUE(eventually([&] { return fake.state().position > 0.5; }));
+    EXPECT_EQ(output.error(), kNoError);
+    EXPECT_EQ(fake.accepted(), 1U);
+}
+
+// HQPlayer on macOS took over 15 s to answer Stop while it stopped DSD, and moved its track meanwhile (2026-11-17).
+TEST(HQPlayerOutputTest, ClosingWhileHQPlayerIsSlowToStopEndsWithoutAnError) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(fake, source, k16);
+    output->start();
+    ASSERT_TRUE(eventually([&] { return fake.state().position > 0.5; }));
+    fake.dropNext("Stop");
+    auto closing = std::async(std::launch::async, [&] { output->close(); });
+    std::this_thread::sleep_for(1000ms);
+    fake.change([](testutil::FakeHQPlayer::State& s) { ++s.trackSerial; });
+    EXPECT_EQ(closing.wait_for(10s), std::future_status::ready);
+    EXPECT_EQ(output.error(), kNoError);
 }
