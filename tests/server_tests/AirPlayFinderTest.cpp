@@ -173,7 +173,8 @@ TEST(AirPlayTest, TheSessionDescriptionCarriesNoKeys) {
     EXPECT_EQ(description.find("aesiv"), std::string::npos);
 }
 
-TEST(AirPlayTest, OnlyApplesReceiversAreListed) {
+// Every maker's receivers are listed, whatever model they announce, as the owner's DMP-A6, KECES and Chord Poly.
+TEST(AirPlayTest, EveryMakersReceiversAreListed) {
     const auto modelled = [](const char* model) { return TxtRecord{{"am", model}, {"et", "0"}, {"cn", "1"}}; };
     const auto receivers = receiversFrom({{"A", "HomePod", "192.168.0.1", 7000, modelled("AudioAccessory5,1"), {}},
                                           {"B", "Mac", "192.168.0.2", 7000, modelled("Mac14,2"), {}},
@@ -181,10 +182,23 @@ TEST(AirPlayTest, OnlyApplesReceiversAreListed) {
                                           {"D", "DMP-A6", "192.168.0.4", 5500, modelled("eversolo,1"), {}},
                                           {"E", "Bravo", "192.168.0.5", 7000, modelled("MUZO Cobblestone"), {}},
                                           {"F", "Unknown", "192.168.0.6", 7000, {{"et", "0"}, {"cn", "1"}}, {}}});
-    ASSERT_EQ(receivers.size(), 3U);
-    EXPECT_EQ(receivers[0].name, "Apple TV");
-    EXPECT_EQ(receivers[1].name, "HomePod");
-    EXPECT_EQ(receivers[2].name, "Mac");
+    ASSERT_EQ(receivers.size(), 6U);
+    std::vector<std::string> names(receivers.size());
+    std::ranges::transform(receivers, names.begin(), &Receiver::name);
+    EXPECT_EQ(names, (std::vector<std::string>{"Apple TV", "Bravo", "DMP-A6", "HomePod", "Mac", "Unknown"}));
+    for (const auto& receiver : receivers) EXPECT_EQ(receiver.support, Support::Supported) << receiver.name;
+}
+
+// Another maker's stereo pair is one receiver, as Apple's is.
+TEST(AirPlayTest, AnotherMakersStereoPairIsOneReceiver) {
+    const TxtRecord raop = {{"am", "Some Maker Speaker"}, {"et", "0"}, {"cn", "1"}};
+    const auto receivers =
+        receiversFrom({{"AA", "Left", "192.168.0.10", 7000, raop, {{"tsid", "PAIR"}, {"gpn", "Pair"}, {"igl", "1"}}},
+                       {"BB", "Right", "192.168.0.11", 7000, raop, {{"tsid", "PAIR"}, {"gpn", "Pair"}, {"igl", "0"}}}});
+    ASSERT_EQ(receivers.size(), 1U);
+    EXPECT_EQ(receivers[0].name, "Pair");
+    EXPECT_EQ(receivers[0].address, "192.168.0.10");
+    ASSERT_EQ(receivers[0].others.size(), 1U);
 }
 
 // The Home app's "Only People Sharing This Home" announces acl=1, "Anyone On the Same Network" and "Everyone" acl=0, as

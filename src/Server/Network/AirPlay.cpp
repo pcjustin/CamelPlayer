@@ -259,16 +259,9 @@ Support supportFrom(const TxtRecord& raop) {
     return Support::Supported;
 }
 
-bool isApple(const TxtRecord& raop) {
-    const std::string model = textOf(raop, "am");
-    return std::ranges::any_of(std::array<std::string_view, 5>{"AudioAccessory", "AppleTV", "AirPort", "Mac", "iMac"},
-                               [&](std::string_view family) { return model.starts_with(family); });
-}
-
 std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
     std::map<std::string, const Announced*> leads;
     for (const auto& member : announced) {
-        if (!isApple(member.raop)) continue;
         const std::string group = textOf(member.airplay, "tsid");
         const auto [lead, added] = leads.try_emplace(group.empty() ? member.deviceId : group, &member);
         if (!added && textOf(lead->second->airplay, "igl") != "1" &&

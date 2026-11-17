@@ -1234,3 +1234,56 @@ TEST_F(AirPlayGroupStreamingTest, ChoosingAReceiverOfTheLastGroupPlaysToThemAll)
         << server->snapshot().playback.errorDetail;
     server->shutdown();
 }
+
+// Another maker's receiver found on this network and played over AirPlay: the owner's Eversolo DMP-A6, a quiet tone at
+// its own default level. Opt in with --gtest_also_run_disabled_tests --gtest_filter=AirPlayHardware.*
+TEST(AirPlayHardware, DISABLED_PlaysToTheDmpA6) {
+    const auto file = testutil::generatedFile({"airplay-hardware-tone", 44100, 16, 2, 6.0, true, -30});
+    auto server = std::make_unique<LocalServer>(Settings{});
+    std::string id;
+    ASSERT_TRUE(waitFor(
+        [&] {
+            Command refresh;
+            refresh.kind = CommandKind::RefreshDevices;
+            server->submit(std::move(refresh));
+            server->waitIdle();
+            for (const auto& device : server->snapshot().devices.airplay)
+                if (device.name.find("DMP-A6") != std::string::npos) id = device.id;
+            return !id.empty();
+        },
+        20s));
+    auto chosen = nativeSettings(server->snapshot().settings);
+    selectOutput(chosen, Backend::AirPlay, id, server->snapshot().devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(chosen);
+    server->submit(std::move(apply));
+    server->waitIdle();
+    // The finder looks again once the output changes; the receiver plays once it is found again.
+    const bool played = waitFor(
+        [&] {
+            if (server->snapshot().playback.state != PlaybackState::Playing) {
+                Command play;
+                play.kind = CommandKind::OpenAndPlay;
+                play.source.emplace(toUtf8(file.wstring()));
+                server->submit(std::move(play));
+                server->waitIdle();
+            }
+            return server->snapshot().playback.position > 44100;
+        },
+        20s);
+    const auto seen = server->snapshot();
+    ASSERT_TRUE(played) << "state " << int(seen.playback.state) << ", position " << seen.playback.position << ", error "
+                        << (seen.playback.error ? int(*seen.playback.error) : -1) << " " << seen.playback.errorDetail << ", "
+                        << (seen.commandError ? seen.commandError->detail : std::string()) << ", output "
+                        << seen.playback.outputMode;
+    const auto s = server->snapshot();
+    EXPECT_FALSE(s.playback.error) << s.playback.errorDetail;
+    EXPECT_EQ(s.playback.backend, Backend::AirPlay);
+    std::printf("DMP-A6 over AirPlay: %s, state %d, %.1f s played\n", s.playback.outputMode.c_str(), int(s.playback.state),
+                double(s.playback.position) / 44100);
+    Command stop;
+    stop.kind = CommandKind::Stop;
+    server->submit(std::move(stop));
+    server->waitIdle();
+}

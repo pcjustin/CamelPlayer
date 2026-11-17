@@ -73,8 +73,6 @@ struct Receiver {
     bool operator==(const Receiver&) const = default;
 };
 
-bool isApple(const TxtRecord& raop); // by the model it announces: only Apple's own receivers are offered
-
 // One receiver for each Apple device or stereo pair, by name. A pair is asked through the member that leads it.
 std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced);
 
