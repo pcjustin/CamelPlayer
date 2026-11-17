@@ -120,6 +120,9 @@ struct WasapiSettings {
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
     DsdUpsamplingSettings dsdUpsampling; // exclusive mode only
+    // DSD sources through the DSP chain, ReplayGain and the software volume while any of them changes the signal,
+    // modulated again at their own rate; off sends raw DSD untouched. On anyway with DSD upsampling.
+    bool dspOnDsd = false;
     // The highest PCM rate (from kFixedRates) and DSD rate (from kMaxDsdRates) to send, 0 following the device;
     // exclusive mode only. Choosing one is the permission to convert above it (docs/Plan.md §6).
     uint32_t maxSampleRate = 0;
@@ -142,6 +145,7 @@ struct AsioSettings {
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
     DsdUpsamplingSettings dsdUpsampling;
+    bool dspOnDsd = false; // as for WASAPI
     uint32_t maxSampleRate = 0;
     uint32_t maxDsdRate = 0;
     PlaybackTiming timing;
@@ -165,6 +169,7 @@ struct KsSettings {
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
     DsdUpsamplingSettings dsdUpsampling;
+    bool dspOnDsd = false; // as for WASAPI
     uint32_t maxSampleRate = 0;
     uint32_t maxDsdRate = 0;
     MmcssTask mmcssTask = MmcssTask::ProAudio;
@@ -181,6 +186,7 @@ struct NetworkSettings {
     uint32_t upsamplingMultiple = 2;
     ResampleFilter filter;
     DsdUpsamplingSettings dsdUpsampling;     // sent as DSF
+    bool dspOnDsd = false;                   // as for WASAPI, sent as DSF
     uint32_t maxSampleRate = 0;              // as for WASAPI
     uint32_t maxDsdRate = 0;                 // as for WASAPI
     uint32_t maxBits = 0;                    // 0 follows the player, else 16
@@ -495,6 +501,9 @@ ResampleFilter resampleFilter(const Settings& s);
 // The selected backend's DSD upsampling; off for an output that sends no DSD (WASAPI shared mode, AirPlay, HQPlayer)
 // or converts it to PCM.
 DsdUpsamplingSettings dsdUpsampling(const Settings& s);
+// Whether the selected backend sends DSD sources through the DSP while it acts; false where dsdUpsampling is off for
+// the output's sake.
+bool dspOnDsd(const Settings& s);
 // The selected backend's highest PCM rate in Hz and highest DSD rate as a DSD byte frame rate; 0 has no limit, as for
 // WASAPI shared mode and AirPlay.
 uint32_t maxSampleRate(const Settings& s);

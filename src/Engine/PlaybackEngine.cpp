@@ -83,9 +83,11 @@ bool withinLimit(const Settings& s, const DeviceFormat& f) {
 // How `src` reaches a device that takes what `supports` accepts under settings `s` (docs/Plan.md §5.3). DSD: the
 // configured raw path (ASIO native, else DoP; WASAPI and KS have no native DSD), PCM only when
 // chosen or allowed as a fallback. A fixed rate the device refuses falls back to the file's rate, noted in `adjustment`.
+// `dspOnDsd`: the DSP acts on DSD sources, which are then modulated again at their own rate, within the output's highest
+// DSD rate.
 std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool lossy,
                                   const std::function<bool(const DeviceFormat&)>& deviceSupports,
-                                  std::string* adjustment = nullptr) {
+                                  std::string* adjustment = nullptr, bool dspOnDsd = false) {
     const std::function<bool(const DeviceFormat&)> supports = [&](const DeviceFormat& f) {
         return withinLimit(s, f) && deviceSupports(f);
     };
@@ -140,6 +142,13 @@ std::optional<OutputPlan> planFor(const Settings& s, const SourceInfo& src, bool
         return plan;
     }
     if (auto plan = modulated(src.sampleRate)) return plan;
+    if (dspOnDsd && dsd.mode == DsdUpsampling::Off) {
+        std::vector<uint32_t> rates;
+        for (uint32_t rate = src.sampleRate; rate >= 352800; rate /= 2)
+            if (rate <= 4 * 352800 && (!maxDsdByteRate(s) || rate <= maxDsdByteRate(s))) rates.push_back(rate);
+        if (auto plan = negotiateModulated(src, rates, resampleFilter(s).modulatorOrder, native, fixedSampleType(s), supports))
+            return plan;
+    }
     const DsdOutput mode = dsdOutput(s);
     std::optional<OutputPlan> plan;
     if (mode != DsdOutput::Pcm) plan = negotiateDsd(src, native, fixedSampleType(s), supports, maxDsdByteRate(s), maxRate);
@@ -177,8 +186,9 @@ bool sameBackendConfig(const Settings& a, const Settings& b) {
 
 bool samePlayerPath(const NetworkSettings& a, const NetworkSettings& b) {
     return a.fixedRate == b.fixedRate && a.upsampling == b.upsampling && a.upsamplingMultiple == b.upsamplingMultiple &&
-           a.filter == b.filter && a.dsdUpsampling == b.dsdUpsampling && a.maxSampleRate == b.maxSampleRate &&
-           a.maxDsdRate == b.maxDsdRate && a.maxBits == b.maxBits && a.dsdOutput == b.dsdOutput && a.dsdPcmRate == b.dsdPcmRate;
+           a.filter == b.filter && a.dsdUpsampling == b.dsdUpsampling && a.dspOnDsd == b.dspOnDsd &&
+           a.maxSampleRate == b.maxSampleRate && a.maxDsdRate == b.maxDsdRate && a.maxBits == b.maxBits &&
+           a.dsdOutput == b.dsdOutput && a.dsdPcmRate == b.dsdPcmRate;
 }
 
 // The file's own decoder, else the per-format setting; an unsupported pairing fails instead of substituting.
@@ -354,7 +364,7 @@ public:
         const bool fades = settings_.crossfade.enabled && active_ && state_ == PlayState::Playing && !rawDsd_ &&
                            settings_.backend != Backend::Network && settings_.backend != Backend::HQPlayer &&
                            !leadSilence_.load(std::memory_order_acquire);
-        const auto next = fades ? prepareNext(file, requested) : std::nullopt;
+        const auto next = fades ? prepareNext(file, requested, gainDb) : std::nullopt;
         if (!next || !rust_->crossfadeTo(file, next->decoder, gainDb, {crossfadeMs(), next->convert})) {
             if (fades)
                 log::info("engine: %s opens without a crossfade: %s", toUtf8(file.wstring()).c_str(),
@@ -475,18 +485,31 @@ public:
 
     // The DSP chain for `plan`'s output, with the impulse response at its rate; nothing for raw DSD, which bypasses it.
     // A response that cannot be used leaves convolution off.
-    DspChain chainFor(const OutputPlan& plan) const {
+    DspChain chainFor(const OutputPlan& plan) const { return chainFor(plan, settings_); }
+
+    DspChain chainFor(const OutputPlan& plan, const Settings& settings) const {
         if ((plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop) && !plan.modulatorOrder)
             return dspChain(Settings{}, nullptr);
         Impulse impulse;
-        if (settings_.convolution.enabled && !settings_.convolution.file.empty()) {
+        if (settings.convolution.enabled && !settings.convolution.file.empty()) {
             try {
-                impulse = loadImpulse(toWide(settings_.convolution.file), dspRate(plan)).impulse;
+                impulse = loadImpulse(toWide(settings.convolution.file), dspRate(plan)).impulse;
             } catch (const ImpulseError& e) {
                 log::warn("impulse response: %s", e.what());
             }
         }
-        return dspChain(settings_, std::move(impulse));
+        return dspChain(settings, std::move(impulse));
+    }
+
+    // Whether settings `s` send a DSD source with ReplayGain `gainDb` through the DSP: the output's switch is on and the
+    // chain, the gain or the software volume changes the signal.
+    bool dspActsOnDsd(const Settings& s, double gainDb) const {
+        if (!dspOnDsd(s)) return false;
+        OutputPlan modulated;
+        modulated.format = {352800, 2, SampleType::Dsd8};
+        modulated.dsd = DsdPath::Native;
+        modulated.modulatorOrder = 7;
+        return gainDb != 0.0 || volumeDb(s.volume) != 0.0 || !actingNodes(chainFor(modulated, s), 352800, 2).empty();
     }
 
     // `plan` as the track's ReplayGain and the DSP chain leave it: processed while either changes the signal. Raw DSD
@@ -523,17 +546,19 @@ public:
 
     void applySettings(const Settings& s) {
         const bool outputChanged = !sameBackendConfig(settings_, s);
-        // A conversion setting reopens the stream only when the path it would choose differs.
+        const bool chainChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
+                                  settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder;
+        const bool dspChanged = chainChanged || volumeDb(settings_.volume) != volumeDb(s.volume);
+        // A conversion setting reopens the stream only when the path it would choose differs; so does the DSP where it
+        // takes a DSD source from raw DSD to modulated DSD or back.
         const bool conversionChanged =
-            (settings_.convertWhenUnsupported != s.convertWhenUnsupported || settings_.resampleQuality != s.resampleQuality ||
+            (dspChanged || settings_.convertWhenUnsupported != s.convertWhenUnsupported ||
+             settings_.resampleQuality != s.resampleQuality ||
              settings_.convertDsdWhenUnsupported != s.convertDsdWhenUnsupported ||
              !samePlayerPath(settings_.network, s.network) || settings_.hqplayer.dsdOutput != s.hqplayer.dsdOutput ||
              settings_.hqplayer.dsdPcmRate != s.hqplayer.dsdPcmRate) &&
             active_ && !outputChanged && conversionPathChanges(s);
         const bool decoderChanged = displayedDecoder(settings_) != displayedDecoder(s) || conversionChanged;
-        const bool chainChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
-                                  settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder;
-        const bool dspChanged = chainChanged || volumeDb(settings_.volume) != volumeDb(s.volume);
         const bool crossfadeChanged = settings_.crossfade != s.crossfade;
         const bool wasActive = active_;
         const bool wasPlaying = playsOn();
@@ -564,7 +589,7 @@ public:
 
     bool queueNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb, uint32_t fadeMs) {
         if (!active_ || rust_->transitions().nextQueued || !output_->gapless() || streamsSlowSource()) return false;
-        const auto next = prepareNext(file, requested);
+        const auto next = prepareNext(file, requested, gainDb);
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
         queued_.push_back(
             {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, next->lossy, gainDb});
@@ -588,7 +613,7 @@ public:
 
     // `file` as it would follow in the open stream: in the same output format, or with crossfade on converted to it
     // (docs/Plan.md §5.4). Nullopt when it cannot be opened or take that format; a format is remembered for the path.
-    std::optional<Prepared> prepareNext(const std::filesystem::path& file, std::optional<DecoderKind> requested) {
+    std::optional<Prepared> prepareNext(const std::filesystem::path& file, std::optional<DecoderKind> requested, double gainDb) {
         Prepared next;
         bool& lossy = next.lossy;
         try {
@@ -603,11 +628,12 @@ public:
         }
         std::optional<OutputPlan> plan;
         try {
-            plan = negotiate(next.source, lossy);
+            plan = negotiate(next.source, lossy, gainDb);
         } catch (const Error&) {
             return std::nullopt; // the device question fails again when the file is opened normally
         }
-        if (!plan || plan->format != fmt_) {
+        // The open stream modulates every track or none.
+        if (!plan || plan->format != fmt_ || plan->modulatorOrder != negotiated_.modulatorOrder) {
             plan = settings_.crossfade.enabled ? intoOpenFormat(next.source, lossy) : std::nullopt;
             if (!plan) {
                 refusedFile_ = file.wstring();
@@ -936,8 +962,10 @@ private:
         return in == out || !in ? sourceFrames : (sourceFrames * out + in / 2) / in;
     }
 
-    std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy, std::string* adjustment = nullptr) {
-        return planFor(settings_, src, lossy, [&](const DeviceFormat& f) { return output_->supports(f); }, adjustment);
+    std::optional<OutputPlan> negotiate(const SourceInfo& src, bool lossy, double gainDb, std::string* adjustment = nullptr) {
+        return planFor(
+            settings_, src, lossy, [&](const DeviceFormat& f) { return output_->supports(f); }, adjustment,
+            src.bitsPerSample == 1 && dspActsOnDsd(settings_, gainDb));
     }
 
     RustSession::Conversion conversion() const {
@@ -1188,14 +1216,14 @@ private:
         planAdjustment_.clear();
         try {
             ensureOutput();
-            plan = negotiate(src, lossy, &planAdjustment_);
+            plan = negotiate(src, lossy, gainDb_, &planAdjustment_);
             // The open device plays on only in the PCM format it plays; any other choice is made with it closed, as a
             // running device may refuse formats it would take.
             if (switching_ && (!plan || !lastOpened_ || plan->dsd == DsdPath::Native || plan->dsd == DsdPath::Dop ||
                                withDsp(*plan).format != lastOpened_->format)) {
                 closeOutput();
                 planAdjustment_.clear();
-                plan = negotiate(src, lossy, &planAdjustment_);
+                plan = negotiate(src, lossy, gainDb_, &planAdjustment_);
             }
             stages_[2] = measure::now();
         } catch (const Error& e) {
@@ -1668,7 +1696,9 @@ private:
         const auto source = snapshot().source;
         if (!source) return false;
         // As the stream negotiated it, before the DSP chain, ReplayGain, volume and crossfade decorate it.
-        const auto plan = planFor(s, *source, negotiatedLossy_, [&](const DeviceFormat& f) { return output_->supports(f); });
+        const auto plan = planFor(
+            s, *source, negotiatedLossy_, [&](const DeviceFormat& f) { return output_->supports(f); }, nullptr,
+            source->bitsPerSample == 1 && dspActsOnDsd(s, gainDb_));
         return plan != negotiated_;
     }
 

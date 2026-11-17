@@ -272,6 +272,7 @@ struct RateControls {
     ComboBox rate, multiple, quality, phase, passband, dsdRate, modulator, dsdUpsampling, dsdMultiple;
     ToggleSwitch pcmAsDsd;
     ComboBox pcmDsdRate;
+    ToggleSwitch dspOnDsd;
 };
 
 constexpr int kDsdUpsamplingModes = 3;
@@ -312,6 +313,7 @@ template <class T> void showRateControls(const RateControls& c, const T& t) {
     fill(c.dsdMultiple, dsdMultiples, indexIn(kDsdUpsamplingMultiples, d.multiple));
     c.pcmAsDsd.IsOn(d.pcm);
     fill(c.pcmDsdRate, dsdRates, indexIn(kDsdSetRates, d.rate));
+    c.dspOnDsd.IsOn(t.dspOnDsd || d.mode != DsdUpsampling::Off);
 }
 
 template <class T> void readRateControls(const RateControls& c, T& t) {
@@ -331,6 +333,8 @@ template <class T> void readRateControls(const RateControls& c, T& t) {
     d.rate = valueIn(kDsdSetRates, mode >= kDsdUpsamplingModes ? mode - kDsdUpsamplingModes : c.pcmDsdRate.SelectedIndex());
     d.multiple = valueIn(kDsdUpsamplingMultiples, c.dsdMultiple.SelectedIndex());
     d.pcm = c.pcmAsDsd.IsOn();
+    // Greyed, as with DSD upsampling or DSD to PCM, the switch shows what it means, not the output's own choice.
+    if (c.dspOnDsd.IsEnabled()) t.dspOnDsd = c.dspOnDsd.IsOn();
 }
 
 // The multiple only for upsampling by one, phase and passband not for soxr's quick cubic interpolator, and DSD to PCM's
@@ -356,31 +360,35 @@ template <class T> void enableRateControls(const RateControls& c, const T& t, bo
     c.pcmDsdRate.Visibility(d.pcm ? Visibility::Visible : Visibility::Collapsed);
     if (const int rate = indexIn(kDsdSetRates, d.rate); d.mode == DsdUpsampling::Set && c.pcmDsdRate.SelectedIndex() != rate)
         c.pcmDsdRate.SelectedIndex(rate);
+    // DSD upsampling always takes DSD sources through the DSP. Greyed first, so that showing it on is not read back as
+    // the output's own choice.
+    c.dspOnDsd.IsEnabled(dsd && !upsampling);
+    if (const bool on = t.dspOnDsd || d.mode != DsdUpsampling::Off; c.dspOnDsd.IsOn() != on) c.dspOnDsd.IsOn(on);
     c.pcmDsdRate.IsEnabled(upsampling && d.pcm && d.mode == DsdUpsampling::Multiple);
 }
 
 RateControls wasapiRateControls(MainWindow& w) {
-    return {w.WasapiRateCombo(),        w.WasapiMultipleCombo(),  w.WasapiQualityCombo(),   w.WasapiPhaseCombo(),
-            w.WasapiPassbandCombo(),    w.WasapiDsdRateCombo(),   w.WasapiModulatorCombo(), w.WasapiDsdUpsamplingCombo(),
-            w.WasapiDsdMultipleCombo(), w.WasapiPcmAsDsdSwitch(), w.WasapiPcmDsdRateCombo()};
+    return {w.WasapiRateCombo(),        w.WasapiMultipleCombo(),  w.WasapiQualityCombo(),    w.WasapiPhaseCombo(),
+            w.WasapiPassbandCombo(),    w.WasapiDsdRateCombo(),   w.WasapiModulatorCombo(),  w.WasapiDsdUpsamplingCombo(),
+            w.WasapiDsdMultipleCombo(), w.WasapiPcmAsDsdSwitch(), w.WasapiPcmDsdRateCombo(), w.WasapiDspOnDsdSwitch()};
 }
 
 RateControls asioRateControls(MainWindow& w) {
-    return {w.AsioRateCombo(),        w.AsioMultipleCombo(),  w.AsioQualityCombo(),   w.AsioPhaseCombo(),
-            w.AsioPassbandCombo(),    w.AsioDsdRateCombo(),   w.AsioModulatorCombo(), w.AsioDsdUpsamplingCombo(),
-            w.AsioDsdMultipleCombo(), w.AsioPcmAsDsdSwitch(), w.AsioPcmDsdRateCombo()};
+    return {w.AsioRateCombo(),        w.AsioMultipleCombo(),  w.AsioQualityCombo(),    w.AsioPhaseCombo(),
+            w.AsioPassbandCombo(),    w.AsioDsdRateCombo(),   w.AsioModulatorCombo(),  w.AsioDsdUpsamplingCombo(),
+            w.AsioDsdMultipleCombo(), w.AsioPcmAsDsdSwitch(), w.AsioPcmDsdRateCombo(), w.AsioDspOnDsdSwitch()};
 }
 
 RateControls ksRateControls(MainWindow& w) {
-    return {w.KsRateCombo(),        w.KsMultipleCombo(),  w.KsQualityCombo(),   w.KsPhaseCombo(),
-            w.KsPassbandCombo(),    w.KsDsdRateCombo(),   w.KsModulatorCombo(), w.KsDsdUpsamplingCombo(),
-            w.KsDsdMultipleCombo(), w.KsPcmAsDsdSwitch(), w.KsPcmDsdRateCombo()};
+    return {w.KsRateCombo(),        w.KsMultipleCombo(),  w.KsQualityCombo(),    w.KsPhaseCombo(),
+            w.KsPassbandCombo(),    w.KsDsdRateCombo(),   w.KsModulatorCombo(),  w.KsDsdUpsamplingCombo(),
+            w.KsDsdMultipleCombo(), w.KsPcmAsDsdSwitch(), w.KsPcmDsdRateCombo(), w.KsDspOnDsdSwitch()};
 }
 
 RateControls networkRateControls(MainWindow& w) {
-    return {w.NetworkSampleRateCombo(),  w.NetworkMultipleCombo(),  w.NetworkQualityCombo(),   w.NetworkPhaseCombo(),
-            w.NetworkPassbandCombo(),    w.NetworkDsdRateCombo(),   w.NetworkModulatorCombo(), w.NetworkDsdUpsamplingCombo(),
-            w.NetworkDsdMultipleCombo(), w.NetworkPcmAsDsdSwitch(), w.NetworkPcmDsdRateCombo()};
+    return {w.NetworkSampleRateCombo(),  w.NetworkMultipleCombo(),  w.NetworkQualityCombo(),    w.NetworkPhaseCombo(),
+            w.NetworkPassbandCombo(),    w.NetworkDsdRateCombo(),   w.NetworkModulatorCombo(),  w.NetworkDsdUpsamplingCombo(),
+            w.NetworkDsdMultipleCombo(), w.NetworkPcmAsDsdSwitch(), w.NetworkPcmDsdRateCombo(), w.NetworkDspOnDsdSwitch()};
 }
 
 void showTiming(NumberBox const& predecode, NumberBox const& silence, NumberBox const& release, const PlaybackTiming& t) {

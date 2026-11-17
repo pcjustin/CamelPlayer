@@ -280,3 +280,61 @@ TEST_P(ModulatedDsdHardware, DISABLED_PlaysInRealTime) {
 
 INSTANTIATE_TEST_SUITE_P(M2, ModulatedDsdHardware, ::testing::ValuesIn(kModulatedCases),
                          [](const ::testing::TestParamInfo<ModulatedCase>& info) { return std::string(info.param.name); });
+
+namespace {
+
+// DSP on DSD sources on Chord/DAVE (docs/Plan.md §6, US-R03): a DSD source taken through the DSP and modulated again at
+// its own rate, natively on ASIO and as DoP on WASAPI and KS, in real time without an underrun.
+struct DspOnDsdCase {
+    const char* name;
+    Backend backend;
+    DsdOutput output;
+    uint32_t multiple; // of DSD64
+    bool volume;       // the software volume, else crossfeed
+};
+
+const DspOnDsdCase kDspOnDsdCases[] = {
+    {"asio_native_DSD64_volume", Backend::Asio, DsdOutput::Native, 1, true},
+    {"asio_native_DSD256_crossfeed", Backend::Asio, DsdOutput::Native, 4, false},
+    {"wasapi_dop_DSD64_crossfeed", Backend::Wasapi, DsdOutput::Dop, 1, false},
+    {"ks_dop_DSD128_volume", Backend::Ks, DsdOutput::Dop, 2, true},
+};
+
+} // namespace
+
+class DspOnDsdHardware : public ::testing::TestWithParam<DspOnDsdCase> {};
+
+TEST_P(DspOnDsdHardware, DISABLED_PlaysAtItsOwnRateInRealTime) {
+    const auto& c = GetParam();
+    Settings settings;
+    ASSERT_TRUE(selectChord(settings, c.backend));
+    settings.asio.dsdOutput = settings.ks.dsdOutput = c.output;
+    settings.wasapi.dspOnDsd = settings.asio.dspOnDsd = settings.ks.dspOnDsd = true;
+    if (c.volume)
+        settings.volume = {.mode = VolumeMode::Software, .db = -6.0};
+    else
+        settings.crossfeed.enabled = true;
+    RecordProperty("case", c.name);
+    PlaybackEngine engine(settings);
+    engine.openAndPlay(toneFile(c.multiple));
+    engine.waitIdle();
+    auto snap = engine.snapshot();
+    ASSERT_FALSE(snap.error) << snap.errorDetail;
+    ASSERT_TRUE(snap.plan && snap.output);
+    EXPECT_EQ(snap.plan->dsd, c.output == DsdOutput::Native ? DsdPath::Native : DsdPath::Dop);
+    EXPECT_EQ(snap.plan->modulatorOrder, 7u);
+    const uint32_t byteRate = dsdfixture::kDsd64 * c.multiple / 8;
+    EXPECT_EQ(snap.output->sampleRate, c.output == DsdOutput::Native ? byteRate : byteRate / 2);
+    const auto position = snap.position;
+    std::this_thread::sleep_for(2s);
+    snap = engine.snapshot();
+    EXPECT_FALSE(snap.error) << snap.errorDetail;
+    EXPECT_GT(snap.position, position);
+    EXPECT_EQ(snap.underruns, 0u);
+    RecordProperty("result", describe(*snap.output) + " via " + snap.outputStatus.mode);
+    engine.stop();
+    engine.waitIdle();
+}
+
+INSTANTIATE_TEST_SUITE_P(M2, DspOnDsdHardware, ::testing::ValuesIn(kDspOnDsdCases),
+                         [](const ::testing::TestParamInfo<DspOnDsdCase>& info) { return std::string(info.param.name); });

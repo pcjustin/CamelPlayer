@@ -93,6 +93,9 @@
   <data name="Settings_PcmAsDsd.OnContent" xml:space="preserve"><value>Send PCM as DSD too</value></data>
   <data name="Settings_PcmAsDsd.OffContent" xml:space="preserve"><value>Send PCM as DSD too</value></data>
   <data name="Settings_PcmDsdRate.Header" xml:space="preserve"><value>DSD rate for PCM</value></data>
+  <data name="Settings_DspOnDsd.Header" xml:space="preserve"><value>DSD sources</value></data>
+  <data name="Settings_DspOnDsd.OnContent" xml:space="preserve"><value>DSP on DSD sources</value></data>
+  <data name="Settings_DspOnDsd.OffContent" xml:space="preserve"><value>DSP on DSD sources</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>Polling buffer (ms)</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS task</value></data>
   <data name="Mmcss_Disabled" xml:space="preserve"><value>Disabled</value></data>

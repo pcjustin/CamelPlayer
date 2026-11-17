@@ -451,6 +451,24 @@ DsdUpsamplingSettings dsdUpsampling(const Settings& s) {
     return {};
 }
 
+bool dspOnDsd(const Settings& s) {
+    const auto chosen = [](DsdOutput output, bool on) { return output != DsdOutput::Pcm && on; };
+    switch (s.backend) {
+    case Backend::Wasapi:
+        return !s.wasapi.shared && chosen(s.wasapi.dsdOutput, s.wasapi.dspOnDsd);
+    case Backend::Asio:
+        return chosen(s.asio.dsdOutput, s.asio.dspOnDsd);
+    case Backend::Ks:
+        return chosen(s.ks.dsdOutput, s.ks.dspOnDsd);
+    case Backend::Network:
+        return chosen(s.network.dsdOutput, s.network.dspOnDsd);
+    case Backend::AirPlay:
+    case Backend::HQPlayer:
+        return false;
+    }
+    return false;
+}
+
 uint32_t maxSampleRate(const Settings& s) {
     switch (s.backend) {
     case Backend::Wasapi:
@@ -536,7 +554,8 @@ template <class T> static json rateJson(const T& t) {
              {{"mode", kDsdUpsamplingIds[int(t.dsdUpsampling.mode)]},
               {"multiple", t.dsdUpsampling.multiple},
               {"rate", t.dsdUpsampling.rate},
-              {"pcm", t.dsdUpsampling.pcm}}}};
+              {"pcm", t.dsdUpsampling.pcm}}},
+            {"dspOnDsd", t.dspOnDsd}};
 }
 
 // `value` when `choices` has it, else the first choice.
@@ -560,6 +579,7 @@ template <class T> static void readRate(const json& o, T& t, ResampleQuality qua
     t.dsdUpsampling.multiple = oneOf(integer(dsd, "multiple", 2, 2, 4), kDsdUpsamplingMultiples);
     t.dsdUpsampling.rate = oneOf(integer(dsd, "rate", 128, 128, 256), kDsdSetRates);
     t.dsdUpsampling.pcm = boolean(dsd, "pcm", false);
+    t.dspOnDsd = boolean(o, "dspOnDsd", false);
 }
 
 static void readTiming(const json& o, PlaybackTiming& t) {

@@ -93,6 +93,9 @@
   <data name="Settings_PcmAsDsd.OnContent" xml:space="preserve"><value>PCM 也以 DSD 送出</value></data>
   <data name="Settings_PcmAsDsd.OffContent" xml:space="preserve"><value>PCM 也以 DSD 送出</value></data>
   <data name="Settings_PcmDsdRate.Header" xml:space="preserve"><value>PCM 的 DSD 取樣率</value></data>
+  <data name="Settings_DspOnDsd.Header" xml:space="preserve"><value>DSD 來源</value></data>
+  <data name="Settings_DspOnDsd.OnContent" xml:space="preserve"><value>DSD 來源也套用 DSP</value></data>
+  <data name="Settings_DspOnDsd.OffContent" xml:space="preserve"><value>DSD 來源也套用 DSP</value></data>
   <data name="Settings_PollBuffer.Header" xml:space="preserve"><value>輪詢緩衝長度（ms）</value></data>
   <data name="Settings_MmcssTask.Header" xml:space="preserve"><value>MMCSS 任務</value></data>
   <data name="Mmcss_Disabled" xml:space="preserve"><value>停用</value></data>
