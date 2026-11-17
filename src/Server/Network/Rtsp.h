@@ -10,9 +10,12 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+
+#include "Server/Network/Pairing.h"
 
 namespace camel::server::airplay {
 
@@ -47,10 +50,15 @@ public:
     RtspReply request(std::string_view method, std::string_view url, std::string_view contentType = {},
                       std::string_view body = {}, std::string_view headers = {});
 
+    // Transient pair-setup with the code every such receiver takes; once it succeeds the connection is encrypted.
+    // False when the receiver does not pair so.
+    bool pairTransiently();
+
 private:
     SOCKET socket_ = INVALID_SOCKET;
     std::string localAddress_, session_, instance_, sessionHeader_;
     int sequence_ = 0;
+    std::optional<SecureChannel> channel_;
 };
 
 } // namespace camel::server::airplay

@@ -14,11 +14,14 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <chrono>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include "Server/Network/Pairing.h"
 
 namespace testutil {
 
@@ -170,6 +173,17 @@ public:
     void stopAnswering() { silent_ = true; }
     // Answers SETUP only once the sender has answered a timing request, as a HomePod does.
     void timeBeforeSetup() { timeBeforeSetup_ = true; }
+    // Refuses every request until the sender has paired with `pin`; from then on the connection is encrypted.
+    void demandPairing(std::string pin = "3939") {
+        std::scoped_lock lock(mutex_);
+        pin_ = std::move(pin);
+        demandPairing_ = true;
+    }
+    // The requests that arrived encrypted.
+    int encryptedRequests() const {
+        std::scoped_lock lock(mutex_);
+        return encryptedRequests_;
+    }
 
 private:
     static sockaddr_in loopback() {
@@ -230,11 +244,19 @@ private:
             const SOCKET client = accept(listener_, nullptr, nullptr);
             if (client == INVALID_SOCKET) return;
             client_ = client;
-            std::string received;
+            std::string received, sealed;
+            channel_.reset();
             for (;;) {
                 const int got = recv(client, buffer.data(), int(buffer.size()), 0);
                 if (got <= 0) break;
-                received.append(buffer.data(), size_t(got));
+                if (channel_) {
+                    sealed.append(buffer.data(), size_t(got));
+                    const auto opened = channel_->open(sealed);
+                    if (!opened) break;
+                    received += *opened;
+                } else {
+                    received.append(buffer.data(), size_t(got));
+                }
                 while (answerOne(client, received)) {
                 }
             }
@@ -266,23 +288,69 @@ private:
         received.erase(0, total);
         const std::string method = request.substr(0, request.find(' '));
         int status = 200;
+        bool demanded = false;
         {
             std::scoped_lock lock(mutex_);
             requests_.push_back(request);
+            if (channel_) ++encryptedRequests_;
             if (const auto chosen = statuses_.find(method); chosen != statuses_.end()) status = chosen->second;
+            demanded = demandPairing_;
         }
         if (silent_ || (method == "SETUP" && timeBeforeSetup_ && !timedSender())) return true;
         const size_t sequence = request.find("CSeq: ");
         std::string reply = "RTSP/1.0 " + std::to_string(status) +
                             " Reason\r\nCSeq: " + request.substr(sequence + 6, request.find("\r\n", sequence) - sequence - 6) +
                             "\r\nServer: Fake\r\n";
+        if (request.starts_with("POST /pair-setup ")) {
+            pairSetup(client, reply, request.substr(headEnd + 4));
+            return true;
+        }
+        if (demanded && !channel_) {
+            reply.replace(9, 3, "403");
+            reply += "\r\n";
+            sendOut(client, reply);
+            return true;
+        }
         if (method == "SETUP")
             reply += "Session: 1\r\nTransport: RTP/AVP/UDP;unicast;mode=record;server_port=" + std::to_string(audioPort_) +
                      ";control_port=" + std::to_string(controlPort_) + ";timing_port=" + std::to_string(timingPort_) + "\r\n";
         if (method == "RECORD") reply += "Audio-Latency: 11025\r\n";
         reply += "\r\n";
-        send(client, reply.data(), int(reply.size()), 0);
+        sendOut(client, reply);
         return true;
+    }
+
+    void sendOut(SOCKET client, const std::string& reply) {
+        const std::string out = channel_ ? channel_->seal(reply) : reply;
+        send(client, out.data(), int(out.size()), 0);
+    }
+
+    // The receiver's side of transient pair-setup, with the code it was given.
+    void pairSetup(SOCKET client, std::string reply, const std::string& body) {
+        namespace ap = camel::server::airplay;
+        auto items = ap::parseTlv(body);
+        std::string answer;
+        std::string key;
+        std::string pin;
+        {
+            std::scoped_lock lock(mutex_);
+            pin = pin_;
+        }
+        if (items[6] == "\x01") {
+            salt_ = ap::randomBytes(16);
+            secret_ = ap::randomBytes(32);
+            server_ = ap::srpServer("Pair-Setup", pin, salt_, secret_);
+            answer = ap::tlv({{6, "\x02"}, {2, salt_}, {3, server_.publicKey}});
+        } else if (const auto checked = ap::srpServerCheck(server_, "Pair-Setup", salt_, items[3], items[4], secret_)) {
+            answer = ap::tlv({{6, "\x04"}, {4, checked->second}});
+            key = checked->first;
+        } else {
+            answer = ap::tlv({{6, "\x04"}, {7, "\x02"}});
+        }
+        reply +=
+            "Content-Type: application/octet-stream\r\nContent-Length: " + std::to_string(answer.size()) + "\r\n\r\n" + answer;
+        sendOut(client, reply);
+        if (!key.empty()) channel_ = ap::SecureChannel::forReceiver(key);
     }
 
     SOCKET listener_ = INVALID_SOCKET;
@@ -295,6 +363,13 @@ private:
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;
     std::vector<std::string> requests_;
+    std::string pin_;
+    bool demandPairing_ = false;
+    int encryptedRequests_ = 0;
+    // Only the serving thread.
+    std::optional<camel::server::airplay::SecureChannel> channel_;
+    std::string salt_, secret_;
+    camel::server::airplay::SrpServer server_;
     std::vector<FakeRtp> packets_;
     std::vector<std::string> controlPackets_, timingReplies_;
     std::thread thread_, audioThread_, controlThread_, timingThread_;

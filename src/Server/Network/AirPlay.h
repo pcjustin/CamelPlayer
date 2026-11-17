@@ -70,6 +70,7 @@ struct Receiver {
     Support support = Support::Supported;
     std::vector<Speaker> others;       // the rest of a stereo pair, which does not pass the stream on
     std::vector<std::string> speakers; // a stereo pair's members by device ID, sorted; empty for one receiver
+    bool transient = false;            // takes a session only after transient pairing
     bool operator==(const Receiver&) const = default;
 };
 

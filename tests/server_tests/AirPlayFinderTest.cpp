@@ -49,7 +49,12 @@ AirPlayFinderOptions optionsFor(const FakeMdns& mdns) {
 
 class AirPlayFinderTest : public ::testing::Test {
 protected:
-    void start() { finder_ = std::make_unique<AirPlayFinder>(optionsFor(mdns_), nullptr); }
+    // Pairing keeps the finder from reading answers for a moment, longer than the usual interval lets them go stale.
+    void start(std::chrono::milliseconds interval = 100ms) {
+        auto options = optionsFor(mdns_);
+        options.searchInterval = interval;
+        finder_ = std::make_unique<AirPlayFinder>(options, nullptr);
+    }
     std::vector<Receiver> receivers() const { return finder_->receivers(); }
     bool found(size_t count) {
         return waitFor([&] { return receivers().size() == count; });
@@ -327,6 +332,35 @@ TEST_F(AirPlayFinderTest, AReceiverThatRefusesOptionsIsNotSupportedThoughItDecla
     start();
     ASSERT_TRUE(found(1));
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Refused; }));
+}
+
+// One that refuses every request until paired, with the code transient pairing uses, is played paired.
+TEST_F(AirPlayFinderTest, AReceiverThatRefusesUntilPairedIsSupportedPaired) {
+    rtsp_.demandPairing();
+    mdns_.add(record(rtsp_));
+    start(1s);
+    ASSERT_TRUE(found(1));
+    const auto pairedNow = [&] {
+        const auto list = receivers();
+        return !list.empty() && list.front().transient;
+    };
+    EXPECT_TRUE(waitFor([&] { return pairedNow(); }));
+    EXPECT_EQ(supportOf(), Support::Supported);
+    finder_->check("800A805D016B");
+    EXPECT_TRUE(waitFor([&] { return std::ranges::count(rtsp_.methods(), "TEARDOWN") == 1; }));
+    EXPECT_EQ(supportOf(), Support::Supported);
+    EXPECT_TRUE(waitFor(pairedNow));
+}
+
+// A Mac refuses every plain request and transient pairing too.
+TEST_F(AirPlayFinderTest, AReceiverThatRefusesAndDoesNotPairIsRefused) {
+    rtsp_.demandPairing("1234");
+    mdns_.add(record(rtsp_));
+    start(1s);
+    ASSERT_TRUE(found(1));
+    EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Refused; }));
+    EXPECT_FALSE(receivers().at(0).transient);
+    EXPECT_EQ(rtsp_.count("ANNOUNCE"), 0);
 }
 
 TEST_F(AirPlayFinderTest, AnEnabledReceiverIsAskedForASessionThatItRefuses) {

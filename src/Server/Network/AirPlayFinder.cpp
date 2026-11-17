@@ -64,15 +64,36 @@ std::optional<Support> verdictOf(int status) {
     return std::nullopt;
 }
 
-std::optional<Support> ask(const Receiver& receiver, bool session, int timeoutMs) {
+struct Answer {
+    Support support = Support::Supported;
+    bool transient = false;
+};
+
+// What OPTIONS says and, for a session, what ANNOUNCE says after it.
+std::optional<Support> askOn(RtspClient& client, const Receiver& receiver, bool session, bool& optionsRefused) {
+    const auto options = verdictOf(client.request("OPTIONS", "*").status);
+    optionsRefused = options == Support::Refused;
+    if (!session || options != Support::Supported) return options;
+    const auto description = sessionDescription(client.localAddress(), receiver.address, client.session());
+    const auto announced = verdictOf(client.request("ANNOUNCE", client.url(), "application/sdp", description).status);
+    if (announced == Support::Supported) client.request("TEARDOWN", client.url());
+    return announced;
+}
+
+std::optional<Answer> ask(const Receiver& receiver, bool session, int timeoutMs) {
     try {
-        RtspClient client(receiver.address, receiver.port, timeoutMs);
-        const auto options = verdictOf(client.request("OPTIONS", "*").status);
-        if (!session || options != Support::Supported) return options;
-        const auto description = sessionDescription(client.localAddress(), receiver.address, client.session());
-        const auto announced = verdictOf(client.request("ANNOUNCE", client.url(), "application/sdp", description).status);
-        if (announced == Support::Supported) client.request("TEARDOWN", client.url());
-        return announced;
+        bool optionsRefused = false;
+        {
+            RtspClient client(receiver.address, receiver.port, timeoutMs);
+            const auto plain = askOn(client, receiver, session, optionsRefused);
+            if (!optionsRefused) return plain ? std::optional(Answer{*plain}) : std::nullopt;
+        }
+        // One that refuses even OPTIONS may take a session once paired.
+        RtspClient paired(receiver.address, receiver.port, timeoutMs);
+        if (!paired.pairTransiently()) return Answer{Support::Refused};
+        const auto after = askOn(paired, receiver, session, optionsRefused);
+        if (!after) return std::nullopt;
+        return Answer{*after, *after == Support::Supported};
     } catch (const std::exception& e) {
         log::info("AirPlay receiver at %s: %s", receiver.address.c_str(), e.what());
     }
@@ -96,6 +117,7 @@ struct AirPlayFinder::Impl {
     struct Verdict {
         std::string asked; // the address and version it holds for
         Support support = Support::Supported;
+        bool transient = false;
     };
 
     AirPlayFinderOptions options;
@@ -265,8 +287,11 @@ struct AirPlayFinder::Impl {
         auto receivers = receiversFrom(announced());
         for (auto& receiver : receivers) {
             const auto verdict = verdicts.find(receiver.id);
-            if (verdict != verdicts.end() && verdict->second.asked == askedAt(receiver) && receiver.support == Support::Supported)
+            if (verdict != verdicts.end() && verdict->second.asked == askedAt(receiver) &&
+                receiver.support == Support::Supported) {
                 receiver.support = verdict->second.support;
+                receiver.transient = verdict->second.transient;
+            }
         }
         {
             std::scoped_lock lock(mutex);
@@ -279,10 +304,10 @@ struct AirPlayFinder::Impl {
     void judge(const Receiver& receiver, bool session) {
         const auto verdict = ask(receiver, session, options.sessionTimeoutMs);
         if (!verdict) return;
-        if (*verdict == Support::Supported)
+        if (verdict->support == Support::Supported && !verdict->transient)
             verdicts.erase(receiver.id);
         else
-            verdicts[receiver.id] = {askedAt(receiver), *verdict};
+            verdicts[receiver.id] = {askedAt(receiver), verdict->support, verdict->transient};
         update();
     }
 

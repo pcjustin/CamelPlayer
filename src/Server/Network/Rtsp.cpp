@@ -23,6 +23,21 @@ constexpr size_t kMaxReplyBytes = 65536;
 constexpr std::string_view kEndOfHeaders = "\r\n\r\n";
 constexpr std::string_view kUserAgent = "AirPlay/999.0.0 CamelPlayer"; // HomePods on OS 27 refuse any other form tried
 constexpr std::string_view kEndOfLine = "\r\n";
+constexpr std::string_view kPairingHeaders = "X-Apple-HKP: 4\r\n";
+constexpr std::string_view kPairingType = "application/octet-stream";
+constexpr std::string_view kPairingUser = "Pair-Setup";
+constexpr std::string_view kTransientPin = "3939";
+constexpr size_t kSecretBytes = 32;
+constexpr int kStatusOk = 200;
+enum PairingTag : uint8_t {
+    TagMethod = 0,
+    TagSalt = 2,
+    TagPublicKey = 3,
+    TagProof = 4,
+    TagState = 6,
+    TagError = 7,
+    TagFlags = 19
+};
 
 int numberIn(std::string_view text) {
     int value = 0;
@@ -133,9 +148,10 @@ RtspReply RtspClient::request(std::string_view method, std::string_view url, std
     if (!body.empty()) message += std::format("Content-Type: {}\r\nContent-Length: {}\r\n", contentType, body.size());
     message += kEndOfLine;
     message += body;
+    if (channel_) message = channel_->seal(message);
     if (send(socket_, message.data(), int(message.size()), 0) != int(message.size())) throw RtspClosed();
 
-    std::string received;
+    std::string received, sealed;
     while (received.size() <= kMaxReplyBytes) {
         const size_t headEnd = received.find(kEndOfHeaders);
         if (headEnd != std::string::npos) {
@@ -153,9 +169,33 @@ RtspReply RtspClient::request(std::string_view method, std::string_view url, std
         if (got == 0) throw RtspClosed();
         if (got < 0)
             throw std::runtime_error(WSAGetLastError() == WSAETIMEDOUT ? "the receiver does not answer" : "connection lost");
-        received.append(buffer, size_t(got));
+        if (!channel_) {
+            received.append(buffer, size_t(got));
+            continue;
+        }
+        sealed.append(buffer, size_t(got));
+        const auto opened = channel_->open(sealed);
+        if (!opened) throw std::runtime_error("a damaged reply");
+        received += *opened;
     }
     throw std::runtime_error("a reply without an end");
+}
+
+bool RtspClient::pairTransiently() {
+    const auto start = request("POST", "/pair-setup", kPairingType,
+                               tlv({{TagMethod, std::string(1, '\0')}, {TagState, "\x01"}, {TagFlags, "\x10"}}), kPairingHeaders);
+    auto items = parseTlv(start.body);
+    if (start.status != kStatusOk || items.contains(TagError) || !items.contains(TagSalt) || !items.contains(TagPublicKey))
+        return false;
+    const auto proof = srpClient(kPairingUser, kTransientPin, items[TagSalt], items[TagPublicKey], randomBytes(kSecretBytes));
+    if (proof.proof.empty()) return false;
+    const auto finish =
+        request("POST", "/pair-setup", kPairingType,
+                tlv({{TagState, "\x03"}, {TagPublicKey, proof.publicKey}, {TagProof, proof.proof}}), kPairingHeaders);
+    items = parseTlv(finish.body);
+    if (finish.status != kStatusOk || items.contains(TagError) || items[TagProof] != proof.expected) return false;
+    channel_ = SecureChannel::forSender(proof.sessionKey);
+    return true;
 }
 
 } // namespace camel::server::airplay

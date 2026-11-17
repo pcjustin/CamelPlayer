@@ -60,6 +60,7 @@ constexpr auto kInUse = "the receiver is in use by another source";
 constexpr auto kHomeOnly = "the receiver allows only people sharing its home";
 constexpr auto kChanged = "the receiver is no longer found as it was: paired or separated";
 constexpr auto kNotConnected = "the AirPlay receiver is not connected";
+constexpr auto kRefused = "the receiver refuses this connection";
 
 struct Packet {
     uint64_t number = 0; // from the start of the stream
@@ -149,8 +150,7 @@ uint16_t portIn(std::string_view transport, std::string_view name) {
 void check(const RtspReply& reply, std::string_view step) {
     if (reply.status == kStatusOk) return;
     if (reply.status == kStatusBusy) throw Error(ErrorCode::DeviceInUse, kInUse);
-    if (reply.status == kStatusForbidden || reply.status == kStatusUnauthorized)
-        throw Error(ErrorCode::AccessDenied, "the receiver refuses this connection");
+    if (reply.status == kStatusForbidden || reply.status == kStatusUnauthorized) throw Error(ErrorCode::AccessDenied, kRefused);
     throw Error(ErrorCode::DriverError, std::format("the receiver answered {} to {}", reply.status, step));
 }
 
@@ -293,7 +293,7 @@ private:
         std::vector<Speaker> speakers{{receiver.address, receiver.port}};
         speakers.insert(speakers.end(), receiver.others.begin(), receiver.others.end());
         for (const auto& speaker : speakers) {
-            auto connected = connectToSpeaker(speaker, receiver.name);
+            auto connected = connectToSpeaker(speaker, receiver.name, receiver.transient);
             member.sessions.push_back(std::move(connected.client));
             member.destinations.push_back(connected.destination);
             member.latency = std::max(member.latency, connected.latency);
@@ -331,9 +331,10 @@ private:
         if (options_.memberLeft) options_.memberLeft(id, why);
     }
 
-    Connected connectToSpeaker(const Speaker& speaker, const std::string& name) {
+    Connected connectToSpeaker(const Speaker& speaker, const std::string& name, bool transient) {
         try {
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
+            if (transient && !client->pairTransiently()) throw Error(ErrorCode::AccessDenied, kRefused);
             check(client->request("OPTIONS", "*"), "OPTIONS");
             check(client->request("ANNOUNCE", client->url(), "application/sdp",
                                   sessionDescription(client->localAddress(), speaker.address, client->session())),

@@ -6,17 +6,21 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <chrono>
+#include <cstdio>
 #include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <numbers>
 #include <thread>
 
 #include "Common/util/Text.h"
 #include "FakeAirPlayReceiver.h"
 #include "Server/Network/AirPlayFinder.h"
 #include "Server/Network/AirPlayOutput.h"
+#include "Server/Network/Rtsp.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Playback/Outputs.h"
 #include "TestUtil.h"
@@ -83,7 +87,9 @@ TrackDetails sampleDetails(const std::wstring& file) {
 class AirPlayOutputTest : public ::testing::Test {
 protected:
     airplay::Receiver receiver() const {
-        return {"800A805D016B", "DMP-A6", "127.0.0.1", rtsp_.port(), "105.1", airplay::Support::Supported, others_};
+        airplay::Receiver r{"800A805D016B", "DMP-A6", "127.0.0.1", rtsp_.port(), "105.1", airplay::Support::Supported, others_};
+        r.transient = transient_;
+        return r;
     }
 
     std::unique_ptr<audio::IOutput> output(std::function<std::optional<double>()> volume = {}) {
@@ -105,6 +111,7 @@ protected:
 
     FakeRtsp rtsp_;
     std::vector<airplay::Speaker> others_;
+    bool transient_ = false;
     std::atomic<int> error_ = 0;
 };
 
@@ -512,6 +519,44 @@ TEST_F(AirPlayOutputTest, ARefusalIsTheReceiverRefusingThisComputer) {
     }
 }
 
+// A receiver that takes a session only once paired: the session runs encrypted and the stream is the same as ever.
+TEST_F(AirPlayOutputTest, AReceiverThatNeedsPairingIsPairedAndPlayedBitForBit) {
+    rtsp_.demandPairing();
+    transient_ = true;
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(40));
+    out->close();
+
+    const auto methods = rtsp_.methods();
+    ASSERT_GE(methods.size(), 6U);
+    EXPECT_EQ(std::vector(methods.begin(), methods.begin() + 6),
+              (std::vector<std::string>{"POST", "POST", "OPTIONS", "ANNOUNCE", "SETUP", "RECORD"}));
+    EXPECT_EQ(rtsp_.encryptedRequests(), int(methods.size()) - 2);
+    const auto packets = rtsp_.packets();
+    for (size_t i = 0; i < packets.size(); ++i) {
+        const std::string pcm = pcmOfAlac(packets[i].alac);
+        ASSERT_EQ(pcm.size(), 1408U);
+        for (size_t b = 0; b < pcm.size(); ++b) ASSERT_EQ(uint8_t(pcm[b]), CountingSource::byteAt(i * 1408 + b)) << i << " " << b;
+    }
+}
+
+TEST_F(AirPlayOutputTest, AReceiverThatDoesNotPairRefusesThisComputer) {
+    rtsp_.demandPairing("1234");
+    transient_ = true;
+    CountingSource source(44100);
+    auto out = output();
+    try {
+        out->open(kCd, &source);
+        FAIL() << "opened";
+    } catch (const audio::Error& e) {
+        EXPECT_EQ(e.code(), audio::ErrorCode::AccessDenied);
+    }
+    EXPECT_EQ(rtsp_.count("ANNOUNCE"), 0);
+}
+
 TEST_F(AirPlayOutputTest, ABusyReceiverIsInUse) {
     rtsp_.answer("SETUP", 453);
     CountingSource source(44100);
@@ -869,6 +914,23 @@ TEST_F(AirPlayGroupOutputTest, AReceiverAddedWhilePlayingJoinsTheSameStream) {
     EXPECT_TRUE(sameStream(a_, b_));
     ASSERT_FALSE(b_.controlPackets().empty());
     EXPECT_EQ(uint8_t(b_.controlPackets().front()[0]), 0x90);
+    EXPECT_EQ(error_, 0);
+    out->close();
+}
+
+TEST_F(AirPlayGroupOutputTest, APairedReceiverAndAnUnpairedOnePlayTheSameStream) {
+    a_.demandPairing();
+    auto paired = member(a_, "A");
+    paired.receiver->transient = true;
+    want({paired, member(b_, "B")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 40 && b_.packetCount() >= 40; }));
+    EXPECT_GT(a_.encryptedRequests(), 0);
+    EXPECT_EQ(b_.encryptedRequests(), 0);
+    EXPECT_TRUE(sameStream(a_, b_));
     EXPECT_EQ(error_, 0);
     out->close();
 }
@@ -1285,4 +1347,92 @@ TEST(AirPlayHardware, DISABLED_PlaysToTheDmpA6) {
     stop.kind = CommandKind::Stop;
     server->submit(std::move(stop));
     server->waitIdle();
+}
+
+namespace {
+
+// A 440 Hz tone at -30 dBFS, for a receiver heard in the room.
+class ToneSource final : public audio::IRenderSource {
+public:
+    size_t render(uint8_t* destination, size_t frames) noexcept override {
+        constexpr double kLevel = 0.0316 * 32767;
+        for (size_t i = 0; i < frames; ++i, ++at_) {
+            const auto sample = int16_t(kLevel * std::sin(2 * std::numbers::pi * 440 * double(at_) / 44100));
+            for (size_t channel = 0; channel < 2; ++channel) {
+                destination[4 * i + 2 * channel] = uint8_t(sample & 0xFF);
+                destination[4 * i + 2 * channel + 1] = uint8_t(uint16_t(sample) >> 8);
+            }
+        }
+        return frames;
+    }
+    size_t boundaryInLastRender() const noexcept override { return kNoBoundary; }
+    bool renderEnded() const noexcept override { return false; }
+    audio::StreamTrack streamTrack() const override { return {L"tone.flac", kSecond * 60, 0, 1}; }
+    std::optional<audio::StreamTrack> nextStreamTrack() const override { return std::nullopt; }
+    uint64_t rendered() const { return at_.load(); }
+
+private:
+    std::atomic<uint64_t> at_ = 0;
+};
+
+} // namespace
+
+// The HomePod pair and the KECES take transient pairing (AP2-R08): each is paired and played alone, then both paired
+// with the DMP-A6 unpaired in one group.
+TEST(AirPlayHardware, DISABLED_PairsAndPlaysTheReceiversThatTakeIt) {
+    std::mutex mutex;
+    std::vector<airplay::Receiver> found;
+    AirPlayFinder finder({}, nullptr);
+    const auto byName = [&](const std::string& part) -> std::optional<airplay::Receiver> {
+        for (const auto& r : finder.receivers())
+            if (r.name.find(part) != std::string::npos) return r;
+        return std::nullopt;
+    };
+    const std::vector<std::string> wanted{"\xE4\xB8\xBB\xE8\x87\xA5", "Essential Bravo", "DMP-A6"};
+    ASSERT_TRUE(waitFor([&] { return std::ranges::all_of(wanted, [&](const auto& n) { return byName(n).has_value(); }); }, 20s));
+
+    const auto play = [&](std::vector<AirPlayMember> members, std::chrono::seconds length) {
+        std::vector<std::pair<std::string, audio::ErrorCode>> left;
+        std::atomic<int> error = 0;
+        AirPlayOutputOptions options;
+        options.details = sampleDetails;
+        options.members = [&] {
+            std::scoped_lock lock(mutex);
+            return members;
+        };
+        options.memberLeft = [&](const std::string& id, const audio::Error& e) {
+            std::scoped_lock lock(mutex);
+            left.emplace_back(id, e.code());
+        };
+        auto out = createAirPlayGroupOutput(options);
+        out->setErrorHandler([&](const audio::Error& e) { error = int(e.code()) + 1; });
+        ToneSource source;
+        const auto started = std::chrono::steady_clock::now();
+        out->open(kCd, &source);
+        const auto opened = std::chrono::steady_clock::now();
+        out->start();
+        std::this_thread::sleep_for(length);
+        out->close();
+        std::string names;
+        for (const auto& m : members) names += m.receiver->name + (m.receiver->transient ? " (paired) " : " ");
+        std::printf("%s: opened in %lld ms, %.1f s rendered, error %d, %zu left\n", names.c_str(),
+                    (long long)std::chrono::duration_cast<std::chrono::milliseconds>(opened - started).count(),
+                    double(source.rendered()) / 44100, error.load(), left.size());
+        EXPECT_EQ(error, 0);
+        EXPECT_TRUE(left.empty());
+        EXPECT_GT(source.rendered(), kSecond * (length.count() - 1));
+    };
+    const auto member = [&](const std::string& name, bool paired) {
+        auto r = *byName(name);
+        r.transient = paired;
+        return AirPlayMember{r.id, r, AirPlayChannels::Stereo, -30.0};
+    };
+    for (const auto& name : {wanted[0], wanted[1]}) {
+        auto r = *byName(name);
+        airplay::RtspClient client(r.address, r.port, 3000);
+        ASSERT_TRUE(client.pairTransiently()) << r.name;
+        EXPECT_EQ(client.request("OPTIONS", "*").status, 200) << r.name;
+        play({member(name, true)}, 5s);
+    }
+    play({member(wanted[0], true), member(wanted[1], true), member(wanted[2], false)}, 8s);
 }
