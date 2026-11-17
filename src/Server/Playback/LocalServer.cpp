@@ -1624,6 +1624,8 @@ private:
             if (state_.command.generation != issued_.generation || state_.command.queueRevision != issued_.queueRevision) return;
             state_.revision = published_.revision + 1;
             published_ = state_;
+            // A receiver CamelPlayer cannot play is not offered; the Server still knows it, to take it out of use.
+            std::erase_if(published_.devices.airplay, [](const DeviceInfo& d) { return !d.unsupported.empty(); });
             event = {completed ? EventKind::CommandCompleted : EventKind::StateChanged, published_};
             listener = listener_;
         }
@@ -1711,8 +1713,16 @@ private:
                 devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
             });
         }
-        for (const auto& receiver : airplayFinder_->receivers())
-            catalog.airplay.push_back({receiver.id, receiver.name, airplay::supportId(receiver.support), receiver.speakers});
+        for (const auto& receiver : airplayFinder_->receivers()) {
+            const std::string why = airplay::supportId(receiver.support);
+            if (auto& logged = airplaySupportLogged_[receiver.id]; logged != why) {
+                if (!why.empty())
+                    log::info("AirPlay receiver %s (%s) cannot be played and is not shown: %s", receiver.name.c_str(),
+                              receiver.id.c_str(), why.c_str());
+                logged = why;
+            }
+            catalog.airplay.push_back({receiver.id, receiver.name, why, receiver.speakers});
+        }
     }
 
     void checkEnabledReceivers(const std::vector<SavedOutput>& before) {
@@ -2225,7 +2235,8 @@ private:
     HQPlayerVolumeOptions hqplayerVolumeOptions_;
     _Guarded_by_(finderMutex_) std::unique_ptr<hqplayer::Finder> hqplayerFinder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
-    std::mutex groupMutex_; // the AirPlay group, as the output reads it
+    std::map<std::string, std::string> airplaySupportLogged_; // by receiver: what the log last said of it
+    std::mutex groupMutex_;                                   // the AirPlay group, as the output reads it
     _Guarded_by_(groupMutex_) std::vector<AirPlayMember> airplayMembers_;
     _Guarded_by_(groupMutex_) std::vector<ReceiverState> airplayStates_;
     _Guarded_by_(groupMutex_) bool airplayRefused_ = false;

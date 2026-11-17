@@ -627,16 +627,61 @@ TEST(AirPlayServerTest, EnablingAReceiverAsksItAndARefusalTakesItBackOff) {
     server.submit(std::move(apply));
     server.waitIdle();
 
+    // Refused, it is not offered any more; its saved output stays, off and not connected.
     EXPECT_TRUE(waitFor([&] {
         refresh();
-        return !server.snapshot().devices.airplay.front().unsupported.empty();
+        return server.snapshot().devices.airplay.empty();
     }));
     const auto snapshot = server.snapshot();
     const auto rows = outputRows(nativeSettings(snapshot.settings), snapshot.devices);
     const auto row =
         *std::ranges::find_if(rows, [](const OutputRow& r) { return r.backend == Backend::AirPlay && r.id == "800A805D016B"; });
-    EXPECT_EQ(row.unsupported, "refused");
+    EXPECT_FALSE(row.connected);
     EXPECT_FALSE(row.enabled);
+}
+
+// A receiver CamelPlayer cannot play, here one that takes only encrypted sessions, is not in the catalog the Control
+// point gets; one that becomes playable appears, and a saved one that becomes unplayable shows as not connected.
+TEST(AirPlayServerTest, OnlyReceiversThatCanBePlayedAreOffered) {
+    FakeRtsp rtsp;
+    FakeMdns mdns;
+    mdns.add(record(rtsp, "800A805D016B", "DMP-A6"));
+    auto encrypted = record(rtsp, "C0FFEE000002", "Encrypted");
+    encrypted.raopTxt = {"am=Other", "cn=1", "et=1,3,5"};
+    mdns.add(encrypted);
+    Settings settings;
+    settings.adoptOutputSets = false;
+    settings.autoplay = false;
+    LocalServer server(settings);
+    server.setAirPlayFinderOptions(optionsFor(mdns));
+    const auto offered = [&] {
+        Command command;
+        command.kind = CommandKind::RefreshDevices;
+        server.submit(std::move(command));
+        server.waitIdle();
+        std::vector<std::string> names;
+        for (const auto& device : server.snapshot().devices.airplay) names.push_back(device.name);
+        return names;
+    };
+    ASSERT_TRUE(waitFor([&] { return offered() == std::vector<std::string>{"DMP-A6"}; }));
+
+    mdns.setRaop("C0FFEE000002", {"am=Other", "cn=0,1", "et=0,1", "pw=false", "vs=105.1"});
+    ASSERT_TRUE(waitFor([&] { return offered() == (std::vector<std::string>{"DMP-A6", "Encrypted"}); }));
+
+    auto chosen = nativeSettings(server.snapshot().settings);
+    setOutputEnabled(chosen, Backend::AirPlay, "C0FFEE000002", true, server.snapshot().devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(chosen);
+    server.submit(std::move(apply));
+    server.waitIdle();
+    mdns.setRaop("C0FFEE000002", {"am=Other", "cn=1", "et=1,3,5"});
+    ASSERT_TRUE(waitFor([&] { return offered() == std::vector<std::string>{"DMP-A6"}; }));
+    const auto snapshot = server.snapshot();
+    const auto rows = outputRows(nativeSettings(snapshot.settings), snapshot.devices);
+    const auto row = std::ranges::find_if(rows, [](const OutputRow& r) { return r.id == "C0FFEE000002"; });
+    ASSERT_NE(row, rows.end());
+    EXPECT_FALSE(row->connected);
 }
 
 // The receivers of this network as the finder lists them, the Chord Poly among them, which answers only the group:

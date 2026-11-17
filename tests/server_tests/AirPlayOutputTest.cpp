@@ -601,8 +601,7 @@ TEST_F(AirPlayStreamingTest, AReceiverLetInAgainPlaysAtThePlayItsRefusalAsksFor)
     ASSERT_TRUE(waitFor([&] {
         server->submit(refresh);
         server->waitIdle();
-        const auto& found = server->snapshot().devices.airplay;
-        return !found.empty() && found.front().unsupported == "home";
+        return server->snapshot().devices.airplay.empty(); // its access setting keeps it from this computer
     }));
     server->submit(queue({file}));
     ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.error.has_value(); }));

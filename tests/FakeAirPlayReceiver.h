@@ -372,6 +372,11 @@ public:
         for (auto& record : records_)
             if (record.deviceId == deviceId) record.airplayTxt = airplayTxt;
     }
+    void setRaop(const std::string& deviceId, std::vector<std::string> raopTxt) {
+        std::scoped_lock lock(mutex_);
+        for (auto& record : records_)
+            if (record.deviceId == deviceId) record.raopTxt = std::move(raopTxt);
+    }
     void rename(const std::string& deviceId, const std::string& name) {
         std::scoped_lock lock(mutex_);
         for (auto& record : records_)
