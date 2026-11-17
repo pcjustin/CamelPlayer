@@ -487,6 +487,13 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
             db.exec("CREATE INDEX albums_cover ON albums(cover_id);"
                     "CREATE INDEX covers_file ON covers(file_id);");
         },
+        // The listings join every visible track to its file and root: from the rows, whose paths make the table several
+        // times larger than this, each view read most of a 184 MB library at every start. The credits' artist names were
+        // read row by row through the sort index.
+        [](sqlite::Database& db) {
+            db.exec("CREATE INDEX files_visible ON files(id,root_id) WHERE available=1;"
+                    "CREATE INDEX track_values_value ON track_values(field,value);");
+        },
     };
     return migrations;
 }
