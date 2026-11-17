@@ -347,6 +347,11 @@ pub(crate) struct Dsp {
 }
 
 impl Dsp {
+    /// The rate the chain runs at.
+    pub(crate) fn rate(&self) -> u32 {
+        self.rate
+    }
+
     pub(crate) fn new(rate: u32, channels: usize) -> Self {
         let fade = ((f64::from(rate) * FADE_MS / 1000.0).round() as usize).max(1);
         Dsp {

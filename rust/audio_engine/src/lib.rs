@@ -3066,10 +3066,12 @@ pub unsafe extern "C" fn camel_engine_set_dsp_v1(
             Err(status) => return status,
         };
         let engine = &*engine;
-        if !settings.valid(engine.output_format.rate_hz) {
+        // The chain's own rate: the device's, or 352.8 kHz on a modulated DSD stream.
+        let mut stage = engine.stage.lock().unwrap();
+        if !settings.valid(stage.dsp.rate()) {
             return ENGINE_E_INVALID_ARGUMENT;
         }
-        engine.stage.lock().unwrap().dsp.set(settings);
+        stage.dsp.set(settings);
         ENGINE_OK
     })) {
         Ok(status) => status,
@@ -5864,6 +5866,32 @@ mod tests {
         assert_eq!(current.has_source, 1);
         assert_eq!(current.total_frames, 4);
         drop(source);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+    }
+
+    // A modulated DSD stream runs its chain at 352.8 kHz: a response at that rate is taken, one at the device's is not.
+    #[test]
+    fn a_modulated_dsd_stream_takes_a_response_at_its_chains_rate() {
+        let mut cfg = config(format(AUDIO_DSD, SAMPLE_DSD_U8, 1, 8));
+        cfg.format.rate_hz = 2_822_400;
+        cfg.dsd_modulation = 7;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let chain = impulse(&[0.5, 0.25], 1, 352_800);
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], None, chain)) },
+            ENGINE_OK
+        );
+        let device = impulse(&[0.5, 0.25], 1, 2_822_400);
+        assert_eq!(
+            unsafe { camel_engine_set_dsp_v1(engine, &dsp_setting(&[], None, device)) },
+            ENGINE_E_INVALID_ARGUMENT
+        );
+        assert_eq!(unsafe { camel_impulse_destroy_v1(chain) }, ENGINE_OK);
+        assert_eq!(unsafe { camel_impulse_destroy_v1(device) }, ENGINE_OK);
         assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
