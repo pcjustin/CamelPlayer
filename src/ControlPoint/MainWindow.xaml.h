@@ -216,6 +216,7 @@ private:
     winrt::fire_and_forget askAddHQPlayer();
     winrt::fire_and_forget askRenameOutput(camel::Backend backend, std::string id, std::string alias, hstring label);
     winrt::fire_and_forget askDeleteOutput(camel::Backend backend, std::string id, hstring label);
+    winrt::fire_and_forget askAirPlayPairing(camel::server::OutputRow row, hstring label, std::function<void()> then);
     winrt::fire_and_forget askFirewallRule();
     winrt::fire_and_forget addFirewallRule();
     winrt::fire_and_forget readFirewallRule();
@@ -333,6 +334,12 @@ private:
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;
     uint64_t shownCommandId_ = 0;
+    // The pairing an AirPlay pairing dialog waits for: its command, and what it does with the command's error.
+    struct PendingPairing {
+        uint64_t command = 0;
+        std::function<void(const std::optional<camel::server::Failure>&)> done;
+    };
+    std::optional<PendingPairing> pairing_;
     uint64_t shownQueueRevision_ = UINT64_MAX;
     uint64_t shownQueueMarks_ = UINT64_MAX;
     camel::server::RepeatMode shownRepeat_ = camel::server::RepeatMode::Off;

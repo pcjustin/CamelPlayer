@@ -80,9 +80,21 @@ std::optional<Support> askOn(RtspClient& client, const Receiver& receiver, bool 
     return announced;
 }
 
-std::optional<Answer> ask(const Receiver& receiver, bool session, int timeoutMs) {
+// What a receiver that does not take an unpaired sender needs from the user.
+Support pairingWanted(const Receiver& receiver) {
+    return receiver.asksPassword ? Support::Password : receiver.asksCode ? Support::Code : Support::Refused;
+}
+
+std::optional<Answer> ask(const Receiver& receiver, bool session, int timeoutMs, AirPlayPairings* pairings) {
     try {
         bool optionsRefused = false;
+        if (pairings && pairings->find(receiver.id)) {
+            RtspClient client(receiver.address, receiver.port, timeoutMs);
+            // One that no longer takes what it was paired with asks for it again.
+            if (!pairFor(client, receiver, pairings)) return Answer{pairingWanted(receiver)};
+            const auto verdict = askOn(client, receiver, session, optionsRefused);
+            return verdict ? std::optional(Answer{*verdict}) : std::nullopt;
+        }
         {
             RtspClient client(receiver.address, receiver.port, timeoutMs);
             const auto plain = askOn(client, receiver, session, optionsRefused);
@@ -90,7 +102,7 @@ std::optional<Answer> ask(const Receiver& receiver, bool session, int timeoutMs)
         }
         // One that refuses even OPTIONS may take a session once paired.
         RtspClient paired(receiver.address, receiver.port, timeoutMs);
-        if (!paired.pairTransiently()) return Answer{Support::Refused};
+        if (paired.pairTransiently() != PairOutcome::Paired) return Answer{pairingWanted(receiver)};
         const auto after = askOn(paired, receiver, session, optionsRefused);
         if (!after) return std::nullopt;
         return Answer{*after, *after == Support::Supported};
@@ -134,6 +146,7 @@ struct AirPlayFinder::Impl {
     mutable std::mutex mutex;
     std::vector<Receiver> known;
     std::set<std::string> toCheck;
+    std::set<std::string> pairedNow;
     std::atomic<bool> stopping = false, searchWanted = false;
     std::thread thread;
 
@@ -288,7 +301,7 @@ struct AirPlayFinder::Impl {
         for (auto& receiver : receivers) {
             const auto verdict = verdicts.find(receiver.id);
             if (verdict != verdicts.end() && verdict->second.asked == askedAt(receiver) &&
-                receiver.support == Support::Supported) {
+                (receiver.support == Support::Supported || receiver.support == Support::Password)) {
                 receiver.support = verdict->second.support;
                 receiver.transient = verdict->second.transient;
             }
@@ -302,28 +315,30 @@ struct AirPlayFinder::Impl {
     }
 
     void judge(const Receiver& receiver, bool session) {
-        const auto verdict = ask(receiver, session, options.sessionTimeoutMs);
+        const auto verdict = ask(receiver, session, options.sessionTimeoutMs, options.pairings.get());
         if (!verdict) return;
-        if (verdict->support == Support::Supported && !verdict->transient)
-            verdicts.erase(receiver.id);
-        else
-            verdicts[receiver.id] = {askedAt(receiver), verdict->support, verdict->transient};
+        verdicts[receiver.id] = {askedAt(receiver), verdict->support, verdict->transient};
         update();
     }
 
     void askReceivers() {
         std::vector<Receiver> receivers;
-        std::set<std::string> wanted;
+        std::set<std::string> wanted, paired;
         {
             std::scoped_lock lock(mutex);
             receivers = known;
             wanted.swap(toCheck);
+            paired.swap(pairedNow);
         }
+        for (const auto& receiver : receivers)
+            if (paired.contains(receiver.id)) verdicts[receiver.id] = {askedAt(receiver), Support::Supported, receiver.transient};
+        if (!paired.empty()) update();
         for (const auto& receiver : receivers) {
             if (stopping) return;
             const bool session = wanted.contains(receiver.id);
             // What it answered before is asked again when the user asks, as its own setting may have changed since.
-            if (receiver.support != Support::Supported && !(session && verdicts.contains(receiver.id))) continue;
+            const bool paired = options.pairings && options.pairings->find(receiver.id);
+            if (receiver.support != Support::Supported && !paired && !(session && verdicts.contains(receiver.id))) continue;
             std::string& last = lastAsked[receiver.id];
             if (!session && last == askedAt(receiver)) continue;
             last = askedAt(receiver);
@@ -379,6 +394,12 @@ void AirPlayFinder::search() {
 
 void AirPlayFinder::check(const std::string& id) {
     std::scoped_lock lock(impl_->mutex);
+    impl_->toCheck.insert(id);
+}
+
+void AirPlayFinder::paired(const std::string& id) {
+    std::scoped_lock lock(impl_->mutex);
+    impl_->pairedNow.insert(id);
     impl_->toCheck.insert(id);
 }
 

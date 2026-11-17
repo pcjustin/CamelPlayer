@@ -50,13 +50,24 @@ public:
     RtspReply request(std::string_view method, std::string_view url, std::string_view contentType = {},
                       std::string_view body = {}, std::string_view headers = {});
 
-    // Transient pair-setup with the code every such receiver takes; once it succeeds the connection is encrypted.
-    // False when the receiver does not pair so.
-    bool pairTransiently();
+    // Transient pair-setup, with the code every such receiver takes or the password a receiver asks for; once it
+    // succeeds the connection is encrypted.
+    PairOutcome pairTransiently(std::string_view pin = kTransientPin);
+    // Makes a receiver that pairs with a code show it.
+    bool showPin();
+    // Pair-setup with a code, which leaves the receiver's long-term key in `receiver`; a session still needs pair-verify.
+    PairOutcome pairSetup(std::string_view pin, const PairingIdentity& me, PairedReceiver& receiver);
+    // With a receiver paired before; once it succeeds the connection is encrypted. False when it no longer knows this
+    // computer.
+    bool pairVerify(const PairingIdentity& me, const PairedReceiver& receiver);
 
 private:
     SOCKET socket_ = INVALID_SOCKET;
     std::string localAddress_, session_, instance_, sessionHeader_;
+    std::map<uint8_t, std::string> pairingStep(std::string_view path, std::string_view headers, const TlvItems& items,
+                                               bool& answered);
+    std::optional<SrpProof> exchangeProofs(std::string_view pin, bool transient, PairOutcome& failure);
+
     int sequence_ = 0;
     std::optional<SecureChannel> channel_;
 };

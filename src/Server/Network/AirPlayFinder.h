@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Server/Network/AirPlay.h"
+#include "Server/Network/AirPlayPairings.h"
 
 namespace camel::server {
 
@@ -29,6 +30,7 @@ struct AirPlayFinderOptions {
     std::chrono::milliseconds searchInterval{60000};
     std::chrono::milliseconds retryInterval{1000}; // between the queries of a search, as answers get lost
     int sessionTimeoutMs = 3000;
+    std::shared_ptr<AirPlayPairings> pairings; // what a receiver that asks for a password or a code was paired with
 };
 
 class AirPlayFinder {
@@ -42,6 +44,8 @@ public:
     std::vector<airplay::Receiver> receivers() const;
     void search();                     // now, rather than at the next interval
     void check(const std::string& id); // asks the receiver for a session, which is closed at once and carries no audio
+    // A receiver just paired is listed as playable at once, then asked for a session as `check` does.
+    void paired(const std::string& id);
 
 private:
     struct Impl;

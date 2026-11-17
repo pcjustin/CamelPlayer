@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// The vectors not from RFC 8439 come from Python's `cryptography` package and a separate SRP-6a written in Python.
+// The vectors not from an RFC come from Python's `cryptography` package and a separate SRP-6a written in Python.
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <map>
 #include <string>
 
 #include "FakeAirPlayReceiver.h"
@@ -151,7 +153,7 @@ TEST(PairingRtspTest, AReceiverThatDemandsPairingIsPairedAndTheConnectionEncrypt
         EXPECT_EQ(plain.request("OPTIONS", "*").status, 403);
     }
     RtspClient client("127.0.0.1", rtsp.port(), 1000);
-    ASSERT_TRUE(client.pairTransiently());
+    ASSERT_EQ(client.pairTransiently(), PairOutcome::Paired);
     EXPECT_EQ(client.request("OPTIONS", "*").status, 200);
     EXPECT_EQ(client.request("ANNOUNCE", client.url(), "application/sdp", std::string(3000, 'v')).status, 200);
     EXPECT_EQ(rtsp.encryptedRequests(), 2);
@@ -163,7 +165,121 @@ TEST(PairingRtspTest, AReceiverWithAnotherCodeDoesNotPair) {
     testutil::FakeRtsp rtsp;
     rtsp.demandPairing("1234");
     RtspClient client("127.0.0.1", rtsp.port(), 1000);
-    EXPECT_FALSE(client.pairTransiently());
+    EXPECT_EQ(client.pairTransiently(), PairOutcome::WrongCode);
     EXPECT_EQ(client.request("OPTIONS", "*").status, 403);
     EXPECT_EQ(rtsp.encryptedRequests(), 0);
+}
+
+TEST(PairingCryptoTest, Ed25519MatchesRfc8032) {
+    const auto seed = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+    const auto publicKey = ed25519PublicKey(seed);
+    EXPECT_EQ(hexOf(publicKey), "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+    const auto signature = ed25519Sign(seed, "");
+    EXPECT_EQ(hexOf(signature), "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b4"
+                                "6bd25bf5f0595bbe24655141438e7a100b");
+    EXPECT_TRUE(ed25519Verify(publicKey, "", signature));
+
+    const auto second = bytes("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
+    EXPECT_EQ(hexOf(ed25519PublicKey(second)), "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
+    EXPECT_EQ(hexOf(ed25519Sign(second, "\x72")), "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e"
+                                                  "15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00");
+}
+
+TEST(PairingCryptoTest, Ed25519RefusesWhatWasNotSigned) {
+    const auto seed = range(7, 32);
+    const auto publicKey = ed25519PublicKey(seed);
+    const auto signature = ed25519Sign(seed, "message");
+    EXPECT_TRUE(ed25519Verify(publicKey, "message", signature));
+    EXPECT_FALSE(ed25519Verify(publicKey, "massage", signature));
+    auto damaged = signature;
+    damaged[40] = char(damaged[40] ^ 4);
+    EXPECT_FALSE(ed25519Verify(publicKey, "message", damaged));
+    EXPECT_FALSE(ed25519Verify(ed25519PublicKey(range(8, 32)), "message", signature));
+    EXPECT_FALSE(ed25519Verify(publicKey, "message", signature.substr(0, 63)));
+    auto tooLarge = signature;
+    std::fill(tooLarge.begin() + 32, tooLarge.end(), '\xFF');
+    EXPECT_FALSE(ed25519Verify(publicKey, "message", tooLarge));
+}
+
+TEST(PairingCryptoTest, X25519MatchesRfc7748) {
+    const auto alice = bytes("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    const auto bob = bytes("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+    EXPECT_EQ(hexOf(x25519Base(alice)), "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+    EXPECT_EQ(hexOf(x25519Base(bob)), "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+    EXPECT_EQ(hexOf(x25519(alice, x25519Base(bob))), "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
+    EXPECT_EQ(x25519(bob, x25519Base(alice)), x25519(alice, x25519Base(bob)));
+}
+
+namespace {
+
+PairingIdentity identity() {
+    return {"CamelPlayer-test", range(40, 32)};
+}
+
+} // namespace
+
+// A receiver that shows a code: pair-setup with it leaves keys, and a later connection pairs with them alone.
+TEST(PairingRtspTest, ACodeLeavesKeysThatALaterConnectionVerifies) {
+    testutil::FakeRtsp rtsp;
+    rtsp.demandPairing("482016");
+    rtsp.pairOnlyWithKeys();
+    PairedReceiver receiver;
+    {
+        RtspClient client("127.0.0.1", rtsp.port(), 3000);
+        EXPECT_TRUE(client.showPin());
+        EXPECT_EQ(client.pairTransiently("482016"), PairOutcome::WrongCode);
+    }
+    {
+        RtspClient client("127.0.0.1", rtsp.port(), 3000);
+        ASSERT_EQ(client.pairSetup("482016", identity(), receiver), PairOutcome::Paired);
+    }
+    EXPECT_EQ(rtsp.pinsShown(), 1);
+    EXPECT_EQ(receiver.id, "FA:KE:00:00:00:01");
+    EXPECT_EQ(receiver.publicKey.size(), 32U);
+    EXPECT_EQ(rtsp.controllers(), (std::map<std::string, std::string>{{"CamelPlayer-test", ed25519PublicKey(range(40, 32))}}));
+
+    RtspClient client("127.0.0.1", rtsp.port(), 3000);
+    ASSERT_TRUE(client.pairVerify(identity(), receiver));
+    EXPECT_EQ(client.request("OPTIONS", "*").status, 200);
+    EXPECT_EQ(rtsp.encryptedRequests(), 1);
+}
+
+TEST(PairingRtspTest, AWrongCodeLeavesNoPairing) {
+    testutil::FakeRtsp rtsp;
+    rtsp.demandPairing("482016");
+    PairedReceiver receiver;
+    RtspClient client("127.0.0.1", rtsp.port(), 3000);
+    EXPECT_EQ(client.pairSetup("111111", identity(), receiver), PairOutcome::WrongCode);
+    EXPECT_TRUE(rtsp.controllers().empty());
+    EXPECT_TRUE(receiver.id.empty());
+}
+
+TEST(PairingRtspTest, AReceiverThatForgotThePairingIsNotVerified) {
+    testutil::FakeRtsp rtsp;
+    rtsp.demandPairing("482016");
+    PairedReceiver receiver;
+    {
+        RtspClient client("127.0.0.1", rtsp.port(), 3000);
+        ASSERT_EQ(client.pairSetup("482016", identity(), receiver), PairOutcome::Paired);
+    }
+    rtsp.forgetPairings();
+    {
+        RtspClient client("127.0.0.1", rtsp.port(), 3000);
+        EXPECT_FALSE(client.pairVerify(identity(), receiver));
+    }
+    RtspClient client("127.0.0.1", rtsp.port(), 3000);
+    EXPECT_EQ(client.request("OPTIONS", "*").status, 403);
+}
+
+TEST(PairingRtspTest, AnotherReceiverWithTheSameAddressIsNotVerified) {
+    testutil::FakeRtsp rtsp;
+    rtsp.demandPairing("482016");
+    PairedReceiver receiver;
+    {
+        RtspClient client("127.0.0.1", rtsp.port(), 3000);
+        ASSERT_EQ(client.pairSetup("482016", identity(), receiver), PairOutcome::Paired);
+    }
+    receiver.publicKey = ed25519PublicKey(range(90, 32));
+    RtspClient client("127.0.0.1", rtsp.port(), 3000);
+    EXPECT_FALSE(client.pairVerify(identity(), receiver));
 }

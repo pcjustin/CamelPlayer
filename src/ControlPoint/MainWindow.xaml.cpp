@@ -908,9 +908,15 @@ hstring outputMenuLabel(const camel::server::OutputRow& row) {
     return label + L" (" + ui::utf8(camel::backendName(row.backend)) + L")";
 }
 
+// A receiver that asks for a password or a code, which the user can give it.
+bool pairable(const camel::server::OutputRow& row) {
+    return row.unsupported == "password" || row.unsupported == "code";
+}
+
 const wchar_t* unsupportedReason(const std::string& reason) {
     if (reason == "encrypted") return L"Output_AirPlayEncrypted";
     if (reason == "password") return L"Output_AirPlayPassword";
+    if (reason == "code") return L"Output_AirPlayCode";
     if (reason == "format") return L"Output_AirPlayFormat";
     if (reason == "home") return L"Output_AirPlayHomeOnly";
     return L"Output_AirPlayRefused";
@@ -919,6 +925,7 @@ const wchar_t* unsupportedReason(const std::string& reason) {
 // What a row of the output menu says: a receiver not connected, or one that refuses this computer, says so.
 hstring outputMenuText(const camel::server::OutputRow& row) {
     if (!row.connected) return ui::format(L"Output_Offline", {std::wstring(outputMenuLabel(row))});
+    if (pairable(row)) return ui::format(L"Output_MenuPairing", {std::wstring(outputMenuLabel(row))});
     if (!row.unsupported.empty()) return ui::format(L"Output_Unsupported", {std::wstring(outputMenuLabel(row))});
     return outputMenuLabel(row);
 }
@@ -1030,6 +1037,19 @@ void MainWindow::populateOutputs() {
         rename.Text(tr(L"Output_Rename"));
         rename.Click([this, row, label](auto&&, auto&&) { askRenameOutput(row.backend, row.id, row.alias, label); });
         actions.Items().Append(rename);
+        if (pairable(row)) {
+            MenuFlyoutItem pair;
+            pair.Text(tr(L"Output_Pair"));
+            pair.Click([this, row, label](auto&&, auto&&) {
+                askAirPlayPairing(row, label, [this, row] {
+                    if (row.selected) return;
+                    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                        camel::server::setOutputEnabled(s, row.backend, row.id, true, devices);
+                    });
+                });
+            });
+            actions.Items().Append(pair);
+        }
         if (row.saved) {
             MenuFlyoutItem remove;
             remove.Text(tr(L"Output_Delete"));
@@ -1065,7 +1085,7 @@ void MainWindow::populateOutputs() {
 
         ToggleSwitch enabled;
         enabled.IsOn(row.enabled);
-        enabled.IsEnabled(!row.selected && row.unsupported.empty()); // the output in use stays in the menu
+        enabled.IsEnabled(!row.selected && (row.unsupported.empty() || pairable(row))); // the output in use stays in the menu
         enabled.OnContent(box_value(L""));
         enabled.OffContent(box_value(L""));
         enabled.MinWidth(0);
@@ -1073,8 +1093,16 @@ void MainWindow::populateOutputs() {
         ToolTipService::SetToolTip(enabled, box_value(tr(L"Output_Enabled")));
         Automation::AutomationProperties::SetName(
             enabled, ui::format(L"Output_ButtonOn", {std::wstring(tr(L"Output_Enabled")), std::wstring(label)}));
-        enabled.Toggled([this, row](Windows::Foundation::IInspectable const& sender, auto&&) {
+        enabled.Toggled([this, row, label](Windows::Foundation::IInspectable const& sender, auto&&) {
             const bool on = sender.as<ToggleSwitch>().IsOn(); // not the switch itself, which the handler would keep
+            if (on && pairable(row)) {
+                askAirPlayPairing(row, label, [this, row] {
+                    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                        camel::server::setOutputEnabled(s, row.backend, row.id, true, devices);
+                    });
+                });
+                return;
+            }
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::setOutputEnabled(s, row.backend, row.id, on, devices);
             });
@@ -1342,6 +1370,96 @@ winrt::fire_and_forget MainWindow::askAddHQPlayer() {
     populateOutputs();
 }
 
+// What the user types is sent to the receiver by the Server, which keeps it protected for this Windows account; the
+// dialog stays open until the receiver has answered. `then` runs once it is paired.
+winrt::fire_and_forget MainWindow::askAirPlayPairing(camel::server::OutputRow row, hstring label, std::function<void()> then) {
+    auto strong = get_strong();
+    const bool code = row.unsupported == "code";
+    if (code) {
+        Command show;
+        show.kind = CommandKind::ShowAirPlayCode;
+        show.receiver = row.id;
+        submitCommand(std::move(show));
+    }
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"AirPlay_PairTitle", {std::wstring(label)})));
+    StackPanel content;
+    content.Spacing(8);
+    TextBlock note;
+    note.Text(ui::format(code ? L"AirPlay_PairCode" : L"AirPlay_PairPassword", {std::wstring(label)}));
+    note.TextWrapping(TextWrapping::Wrap);
+    content.Children().Append(note);
+    PasswordBox secret;
+    Automation::AutomationProperties::SetName(secret, tr(code ? L"AirPlay_PairCodeName" : L"AirPlay_PairPasswordName"));
+    content.Children().Append(secret);
+    TextBlock problem;
+    problem.TextWrapping(TextWrapping::Wrap);
+    problem.Foreground(themeBrush(L"SystemFillColorCriticalBrush"));
+    problem.Visibility(Visibility::Collapsed);
+    content.Children().Append(problem);
+    ProgressBar progress;
+    progress.IsIndeterminate(true);
+    progress.Visibility(Visibility::Collapsed);
+    content.Children().Append(progress);
+    TextBlock kept;
+    kept.Text(tr(L"AirPlay_PairKept"));
+    kept.TextWrapping(TextWrapping::Wrap);
+    kept.Style(
+        unbox_value<Microsoft::UI::Xaml::Style>(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle"))));
+    content.Children().Append(kept);
+    dialog.Content(content);
+    dialog.PrimaryButtonText(tr(L"AirPlay_PairButton"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    const auto paired = std::make_shared<bool>(false);
+    const winrt::weak_ref<ContentDialog> weakDialog = dialog;
+    const winrt::weak_ref<PasswordBox> weakSecret = secret;
+    const winrt::weak_ref<TextBlock> weakProblem = problem;
+    const winrt::weak_ref<ProgressBar> weakProgress = progress;
+    dialog.PrimaryButtonClick([this, row, label, paired, weakDialog, weakSecret, weakProblem,
+                               weakProgress](ContentDialog const&, ContentDialogButtonClickEventArgs const& args) {
+        args.Cancel(true);
+        const auto shown = weakDialog.get();
+        const auto typed = weakSecret.get();
+        if (!shown || !typed || typed.Password().empty() || pairing_ || !server_) return;
+        shown.IsPrimaryButtonEnabled(false);
+        if (const auto bar = weakProgress.get()) bar.Visibility(Visibility::Visible);
+        if (const auto text = weakProblem.get()) text.Visibility(Visibility::Collapsed);
+        Command pair;
+        pair.kind = CommandKind::PairAirPlay;
+        pair.receiver = row.id;
+        pair.code = toUtf8(std::wstring(typed.Password()));
+        const auto stamp = server_->submit(std::move(pair));
+        cursor_.expect(stamp);
+        pairing_ = PendingPairing{
+            stamp.id,
+            [label, paired, weakDialog, weakProblem, weakProgress](const std::optional<camel::server::Failure>& failure) {
+                const auto open = weakDialog.get();
+                if (!open) return;
+                open.IsPrimaryButtonEnabled(true);
+                if (const auto bar = weakProgress.get()) bar.Visibility(Visibility::Collapsed);
+                if (!failure) {
+                    *paired = true;
+                    open.Hide();
+                    return;
+                }
+                if (const auto text = weakProblem.get()) {
+                    text.Text(failure->code == ErrorCode::AccessDenied
+                                  ? tr(L"AirPlay_PairWrong")
+                                  : ui::format(L"AirPlay_PairFailed", {std::wstring(label), ui::utf8(failure->detail).c_str()}));
+                    text.Visibility(Visibility::Visible);
+                }
+            }};
+    });
+    co_await ui::showDialog(dialog);
+    pairing_.reset();
+    if (*paired && then)
+        then();
+    else
+        populateOutputs(); // a switch turned on goes back off
+}
+
 winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string id, hstring label) {
     auto strong = get_strong();
     ContentDialog dialog;
@@ -1395,10 +1513,16 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
             item.IsChecked(row.grouped);
             item.IsEnabled(row.connected && (!row.grouped || grouped >= 2));
             add(item, [this, row] {
-                changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
-                    camel::server::setInAirPlayGroup(s, row.id, !row.grouped, devices);
-                });
-                populateSettings();
+                const auto join = [this, row] {
+                    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                        camel::server::setInAirPlayGroup(s, row.id, !row.grouped, devices);
+                    });
+                    populateSettings();
+                };
+                if (pairable(row) && !row.grouped)
+                    askAirPlayPairing(row, outputLabel(row), join);
+                else
+                    join();
             });
             continue;
         }
@@ -1408,11 +1532,17 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
         item.IsChecked(row.selected);
         item.IsEnabled(row.connected);
         add(item, [this, row] {
-            if (row.selected) return;
-            changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
-                camel::server::selectOutput(s, row.backend, row.id, devices);
-            });
-            populateSettings();
+            const auto select = [this, row] {
+                if (row.selected) return;
+                changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                    camel::server::selectOutput(s, row.backend, row.id, devices);
+                });
+                populateSettings();
+            };
+            if (pairable(row))
+                askAirPlayPairing(row, outputLabel(row), select);
+            else
+                select();
         });
     }
     menu.Items().Append(MenuFlyoutSeparator());
@@ -2049,8 +2179,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
 
     if (snapshot.command.id != shownCommandId_) {
         shownCommandId_ = snapshot.command.id;
-        if (snapshot.commandError)
+        if (pairing_ && snapshot.command.id >= pairing_->command) { // its dialog says how the pairing went
+            const auto done = std::move(pairing_->done);
+            pairing_.reset();
+            done(snapshot.commandError);
+        } else if (snapshot.commandError) {
             showError(snapshot.commandError->code, snapshot.commandError->detail, snapshot.settings.backend);
+        }
     }
 
     // Status area on the settings page (docs/Plan.md §6)

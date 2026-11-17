@@ -20,6 +20,7 @@
 #include "Common/settings/Settings.h"
 #include "OutputBridge/IOutput.h"
 #include "Server/Network/AirPlay.h"
+#include "Server/Network/AirPlayPairings.h"
 #include "Server/Network/NetworkOutput.h"
 
 namespace camel::server {
@@ -42,6 +43,7 @@ struct AirPlayOutputOptions {
     std::function<void(const std::string& id, const audio::Error& why)> memberLeft;
     // Asks the receivers' announcements again, as one whose access setting changed closes its connection only then.
     std::function<void()> lookAgain;
+    std::shared_ptr<AirPlayPairings> pairings; // what a receiver that asks for a password or a code was paired with
     int requestTimeoutMs = 3000;
     std::chrono::milliseconds heartbeat{5000};
     std::chrono::milliseconds closeSessionAfter{5000};

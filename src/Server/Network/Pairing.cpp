@@ -194,6 +194,141 @@ const Montgomery& srpGroup() {
     return group;
 }
 
+// Curve25519's field, 2^255 - 19, for X25519 (RFC 7748) and Ed25519 (RFC 8032). Not constant time.
+const Montgomery& field() {
+    static const Montgomery prime(subtract(Limbs{0, 0, 0, 0, 0, 0, 0, 0x80000000}, {19}));
+    return prime;
+}
+
+const Limbs& fieldPrime() {
+    return field().modulus();
+}
+
+Limbs fieldAdd(const Limbs& a, const Limbs& b) {
+    Limbs sum = add(a, b);
+    if (compare(sum, fieldPrime()) >= 0) sum = subtract(sum, fieldPrime());
+    return sum;
+}
+
+Limbs fieldSubtract(const Limbs& a, const Limbs& b) {
+    return compare(a, b) >= 0 ? subtract(a, b) : subtract(add(a, fieldPrime()), b);
+}
+
+Limbs fieldMultiply(const Limbs& a, const Limbs& b) {
+    return field().product(a, b);
+}
+
+Limbs fieldPower(const Limbs& a, const Limbs& exponent) {
+    return field().power(a, toBigEndian(exponent));
+}
+
+Limbs fieldInverse(const Limbs& a) {
+    static const Limbs exponent = subtract(fieldPrime(), {2});
+    return fieldPower(a, exponent);
+}
+
+Limbs fromLittleEndian(std::string_view bytes) {
+    return fromBigEndian(std::string(bytes.rbegin(), bytes.rend()));
+}
+
+std::string toLittleEndian(const Limbs& number, size_t size) {
+    const std::string big = toBigEndian(number, size);
+    return {big.rbegin(), big.rend()};
+}
+
+bool bitOf(const Limbs& number, size_t bit) {
+    return bit / kLimbBits < number.size() && ((number[bit / kLimbBits] >> (bit % kLimbBits)) & 1);
+}
+
+std::string clamped(std::string_view scalar) {
+    std::string k(scalar.substr(0, 32));
+    k[0] = char(uint8_t(k[0]) & 248);
+    k[31] = char((uint8_t(k[31]) & 127) | 64);
+    return k;
+}
+
+// A point in extended coordinates: x = X/Z, y = Y/Z, xy = T/Z.
+struct Point {
+    Limbs x, y, z, t;
+};
+
+const Limbs& curveD() {
+    static const Limbs d = fieldMultiply(fieldSubtract({}, {121665}), fieldInverse({121666}));
+    return d;
+}
+
+const Limbs& groupOrder() {
+    static const Limbs order = fromBigEndian(std::string_view(
+        "\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x14\xde\xf9\xde\xa2\xf7\x9c\xd6\x58\x12\x63\x1a\x5c"
+        "\xf5\xd3\xed",
+        32));
+    return order;
+}
+
+Point pointAdd(const Point& p, const Point& q) {
+    static const Limbs twiceD = fieldAdd(curveD(), curveD());
+    const Limbs a = fieldMultiply(fieldSubtract(p.y, p.x), fieldSubtract(q.y, q.x));
+    const Limbs b = fieldMultiply(fieldAdd(p.y, p.x), fieldAdd(q.y, q.x));
+    const Limbs c = fieldMultiply(fieldMultiply(p.t, twiceD), q.t);
+    const Limbs d = fieldMultiply(fieldAdd(p.z, p.z), q.z);
+    const Limbs e = fieldSubtract(b, a);
+    const Limbs f = fieldSubtract(d, c);
+    const Limbs g = fieldAdd(d, c);
+    const Limbs h = fieldAdd(b, a);
+    return {fieldMultiply(e, f), fieldMultiply(g, h), fieldMultiply(f, g), fieldMultiply(e, h)};
+}
+
+Point pointMultiply(const Point& p, const Limbs& scalar) {
+    Point result{{}, {1}, {1}, {}};
+    for (size_t bit = 256; bit-- > 0;) {
+        result = pointAdd(result, result);
+        if (bitOf(scalar, bit)) result = pointAdd(result, p);
+    }
+    return result;
+}
+
+std::string encodePoint(const Point& p) {
+    const Limbs inverse = fieldInverse(p.z);
+    const Limbs x = fieldMultiply(p.x, inverse);
+    std::string out = toLittleEndian(fieldMultiply(p.y, inverse), 32);
+    if (bitOf(x, 0)) out[31] = char(uint8_t(out[31]) | 0x80);
+    return out;
+}
+
+std::optional<Point> decodePoint(std::string_view bytes) {
+    if (bytes.size() != 32) return std::nullopt;
+    std::string yBytes(bytes);
+    const bool sign = (uint8_t(yBytes[31]) & 0x80) != 0;
+    yBytes[31] = char(uint8_t(yBytes[31]) & 0x7F);
+    const Limbs y = fromLittleEndian(yBytes);
+    if (compare(y, fieldPrime()) >= 0) return std::nullopt;
+    const Limbs yy = fieldMultiply(y, y);
+    const Limbs u = fieldSubtract(yy, {1});
+    const Limbs v = fieldAdd(fieldMultiply(curveD(), yy), {1});
+    static const Limbs rootExponent = subtract(Limbs{0, 0, 0, 0, 0, 0, 0, 0x10000000}, {3}); // (p - 5) / 8
+    static const Limbs rootOfMinusOne = fieldPower({2}, subtract(Limbs{0, 0, 0, 0, 0, 0, 0, 0x20000000}, {5}));
+    const Limbs v3 = fieldMultiply(fieldMultiply(v, v), v);
+    const Limbs v7 = fieldMultiply(fieldMultiply(v3, v3), v);
+    Limbs x = fieldMultiply(fieldMultiply(u, v3), fieldPower(fieldMultiply(u, v7), rootExponent));
+    const Limbs vxx = fieldMultiply(v, fieldMultiply(x, x));
+    if (compare(vxx, u) != 0) {
+        if (compare(vxx, fieldSubtract({}, u)) != 0) return std::nullopt;
+        x = fieldMultiply(x, rootOfMinusOne);
+    }
+    if (compare(x, {}) == 0 && sign) return std::nullopt;
+    if (bitOf(x, 0) != sign) x = fieldSubtract({}, x);
+    return Point{x, y, {1}, fieldMultiply(x, y)};
+}
+
+const Point& basePoint() {
+    static const Point base = *decodePoint(std::string(1, '\x58') + std::string(31, '\x66'));
+    return base;
+}
+
+Limbs scalarOf(std::string_view hash) {
+    return reduce(fromLittleEndian(hash), groupOrder());
+}
+
 std::string padded(std::string_view number) {
     return std::string(kPrimeBytes - std::min(number.size(), kPrimeBytes), '\0') + std::string(number);
 }
@@ -445,6 +580,72 @@ std::optional<std::pair<std::string, std::string>> srpServerCheck(const SrpServe
     const std::string aBytes = toBigEndian(a);
     if (proofOf(user, salt, aBytes, server.publicKey, key) != proof) return std::nullopt;
     return std::pair(key, sha512(aBytes + std::string(proof) + key));
+}
+
+std::string x25519(std::string_view scalar, std::string_view point) {
+    const std::string k = clamped(scalar);
+    std::string u(point.substr(0, 32));
+    u[31] = char(uint8_t(u[31]) & 0x7F);
+    const Limbs x1 = reduce(fromLittleEndian(u), fieldPrime());
+    const Limbs a24{121665};
+    Limbs x2{1}, z2, x3 = x1, z3{1};
+    bool swapped = false;
+    for (size_t bit = 255; bit-- > 0;) {
+        const bool set = (uint8_t(k[bit / 8]) >> (bit % 8)) & 1;
+        if (swapped != set) {
+            std::swap(x2, x3);
+            std::swap(z2, z3);
+        }
+        swapped = set;
+        const Limbs a = fieldAdd(x2, z2);
+        const Limbs aa = fieldMultiply(a, a);
+        const Limbs b = fieldSubtract(x2, z2);
+        const Limbs bb = fieldMultiply(b, b);
+        const Limbs e = fieldSubtract(aa, bb);
+        const Limbs da = fieldMultiply(fieldSubtract(x3, z3), a);
+        const Limbs cb = fieldMultiply(fieldAdd(x3, z3), b);
+        const Limbs sum = fieldAdd(da, cb);
+        const Limbs difference = fieldSubtract(da, cb);
+        x3 = fieldMultiply(sum, sum);
+        z3 = fieldMultiply(x1, fieldMultiply(difference, difference));
+        x2 = fieldMultiply(aa, bb);
+        z2 = fieldMultiply(e, fieldAdd(aa, fieldMultiply(a24, e)));
+    }
+    if (swapped) {
+        std::swap(x2, x3);
+        std::swap(z2, z3);
+    }
+    return toLittleEndian(fieldMultiply(x2, fieldInverse(z2)), 32);
+}
+
+std::string x25519Base(std::string_view scalar) {
+    return x25519(scalar, std::string(1, '\x09') + std::string(31, '\0'));
+}
+
+std::string ed25519PublicKey(std::string_view seed) {
+    const std::string h = sha512(seed);
+    return encodePoint(pointMultiply(basePoint(), fromLittleEndian(clamped(h))));
+}
+
+std::string ed25519Sign(std::string_view seed, std::string_view message) {
+    const std::string h = sha512(seed);
+    const Limbs a = fromLittleEndian(clamped(h));
+    const std::string publicKey = encodePoint(pointMultiply(basePoint(), a));
+    const Limbs r = scalarOf(sha512(h.substr(32) + std::string(message)));
+    const std::string rPoint = encodePoint(pointMultiply(basePoint(), r));
+    const Limbs k = scalarOf(sha512(rPoint + publicKey + std::string(message)));
+    return rPoint + toLittleEndian(reduce(add(r, multiply(k, a)), groupOrder()), 32);
+}
+
+bool ed25519Verify(std::string_view publicKey, std::string_view message, std::string_view signature) {
+    if (signature.size() != 64) return false;
+    const Limbs s = fromLittleEndian(signature.substr(32));
+    if (compare(s, groupOrder()) >= 0) return false;
+    const auto a = decodePoint(publicKey);
+    const auto r = decodePoint(signature.substr(0, 32));
+    if (!a || !r) return false;
+    const Limbs k = scalarOf(sha512(std::string(signature.substr(0, 32)) + std::string(publicKey) + std::string(message)));
+    return encodePoint(pointMultiply(basePoint(), s)) == encodePoint(pointAdd(*r, pointMultiply(*a, k)));
 }
 
 SecureChannel SecureChannel::forSender(std::string_view sessionKey) {

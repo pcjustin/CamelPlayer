@@ -9,6 +9,8 @@
 #include <fstream>
 
 #include "Server/Network/AirPlayOutput.h"
+#include "Server/Network/AirPlayPairings.h"
+#include "Server/Network/Rtsp.h"
 #include "Server/Network/Firewall.h"
 #include "Server/Network/HQPlayer.h"
 #include "Server/Network/HQPlayerOutput.h"
@@ -93,7 +95,7 @@ bool trackLocal(audio::ErrorCode code) {
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::SetReceiverVolume)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::PairAirPlay)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -106,7 +108,10 @@ void validate(const Command& c) {
         c.shuffle.has_value() != (c.kind == CommandKind::SetShuffle) ||
         c.repeat.has_value() != (c.kind == CommandKind::SetRepeat) || (c.repeat && *c.repeat > RepeatMode::All) ||
         c.playerVolume.has_value() != (c.kind == CommandKind::SetPlayerVolume || c.kind == CommandKind::SetReceiverVolume) ||
-        (c.playerVolume && *c.playerVolume > 100) || c.receiver.empty() == (c.kind == CommandKind::SetReceiverVolume) ||
+        (c.playerVolume && *c.playerVolume > 100) ||
+        c.receiver.empty() == (c.kind == CommandKind::SetReceiverVolume || c.kind == CommandKind::ShowAirPlayCode ||
+                               c.kind == CommandKind::PairAirPlay) ||
+        c.code.empty() == (c.kind == CommandKind::PairAirPlay) ||
         c.playerMute.has_value() != (c.kind == CommandKind::SetPlayerMute) ||
         (c.kind == CommandKind::RemoveLibraryRoot ? c.rootId <= 0 : c.rootId != 0) || c.tracks.empty() == trackKeys ||
         c.path.empty() == (c.kind == CommandKind::AddLibraryRoot) ||
@@ -210,7 +215,9 @@ public:
                      : s.backend == Backend::HQPlayer ? hqplayerOutput(s)
                                                       : given(s);
           }),
-          engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)) {
+          engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)),
+          airplayPairings_(std::make_shared<AirPlayPairings>(
+              settingsFile_.empty() ? std::filesystem::path() : settingsFile_.parent_path() / L"airplay-pairings.dat")) {
         published_.settings = settingsDto(settings_);
         published_.playback = playback(engine_->snapshot());
         const auto directory =
@@ -942,6 +949,7 @@ private:
                     settings_.lastFile = lastFile;
                     settings_.adoptOutputSets = adoptOutputSets;
                     syncOutputs(settings_, state_.devices);
+                    forgetDeletedReceivers(outputs);
                     checkEnabledReceivers(outputs);
                     followAirPlayGroup();
                     engine_->applySettings(settings_);
@@ -961,6 +969,12 @@ private:
             }
             case CommandKind::RefreshDevices:
                 refreshDevices();
+                break;
+            case CommandKind::ShowAirPlayCode:
+                showAirPlayCode(c.receiver);
+                break;
+            case CommandKind::PairAirPlay:
+                pairAirPlay(c.receiver, c.code);
                 break;
             case CommandKind::ShowControlPanel:
                 try {
@@ -1624,8 +1638,11 @@ private:
             if (state_.command.generation != issued_.generation || state_.command.queueRevision != issued_.queueRevision) return;
             state_.revision = published_.revision + 1;
             published_ = state_;
-            // A receiver CamelPlayer cannot play is not offered; the Server still knows it, to take it out of use.
-            std::erase_if(published_.devices.airplay, [](const DeviceInfo& d) { return !d.unsupported.empty(); });
+            // A receiver CamelPlayer cannot play is not offered; the Server still knows it, to take it out of use. One that
+            // asks for a password or a code is, to be paired.
+            std::erase_if(published_.devices.airplay, [](const DeviceInfo& d) {
+                return !d.unsupported.empty() && d.unsupported != "password" && d.unsupported != "code";
+            });
             event = {completed ? EventKind::CommandCompleted : EventKind::StateChanged, published_};
             listener = listener_;
         }
@@ -1709,7 +1726,9 @@ private:
             airplayFinder_->search();
         } else {
             std::scoped_lock lock(finderMutex_);
-            airplayFinder_ = std::make_unique<AirPlayFinder>(airplayFinderOptions_, [this] {
+            auto options = airplayFinderOptions_;
+            options.pairings = airplayPairings_;
+            airplayFinder_ = std::make_unique<AirPlayFinder>(std::move(options), [this] {
                 devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
             });
         }
@@ -1717,12 +1736,93 @@ private:
             const std::string why = airplay::supportId(receiver.support);
             if (auto& logged = airplaySupportLogged_[receiver.id]; logged != why) {
                 if (!why.empty())
-                    log::info("AirPlay receiver %s (%s) cannot be played and is not shown: %s", receiver.name.c_str(),
-                              receiver.id.c_str(), why.c_str());
+                    log::info("AirPlay receiver %s (%s) cannot be played now: %s", receiver.name.c_str(), receiver.id.c_str(),
+                              why.c_str());
                 logged = why;
             }
             catalog.airplay.push_back({receiver.id, receiver.name, why, receiver.speakers});
         }
+    }
+
+    // A receiver deleted in Settings is no longer paired: added again, it asks for its password or code again.
+    void forgetDeletedReceivers(const std::vector<SavedOutput>& before) {
+        for (const auto& output : before) {
+            const auto same = [&](const SavedOutput& o) { return o.backend == output.backend && o.id == output.id; };
+            if (output.backend != Backend::AirPlay || std::ranges::any_of(settings_.outputs, same) ||
+                !airplayPairings_->find(output.id))
+                continue;
+            airplayPairings_->forget(output.id);
+            log::info("AirPlay receiver %s deleted: its pairing is forgotten", output.id.c_str());
+            if (airplayFinder_) airplayFinder_->check(output.id);
+        }
+    }
+
+    std::optional<airplay::Receiver> airplayReceiver(const std::string& id) {
+        std::scoped_lock lock(finderMutex_);
+        if (!airplayFinder_) return std::nullopt;
+        const auto found = airplayFinder_->receivers();
+        const auto receiver = std::ranges::find(found, id, &airplay::Receiver::id);
+        return receiver == found.end() ? std::nullopt : std::optional(*receiver);
+    }
+
+    void showAirPlayCode(const std::string& id) {
+        const auto receiver = airplayReceiver(id);
+        if (!receiver) throw audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
+        try {
+            auto client = std::make_unique<airplay::RtspClient>(receiver->address, receiver->port, kPairingTimeoutMs);
+            if (!client->showPin()) throw audio::Error(audio::ErrorCode::DriverError, "the receiver shows no code");
+            codeShown_ = {id, std::move(client)};
+        } catch (const audio::Error&) {
+            throw;
+        } catch (const std::exception& e) {
+            throw audio::Error(audio::ErrorCode::DeviceNotFound, e.what());
+        }
+    }
+
+    // Pairs with what the user typed: a password is tried as transient pairing's code, then as pair-setup's; a code
+    // shown on the receiver as pair-setup's, on the connection that asked for it while it is open.
+    void pairAirPlay(const std::string& id, const std::string& code) {
+        const auto receiver = airplayReceiver(id);
+        if (!receiver) throw audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
+        AirPlayCredentials credentials;
+        auto outcome = airplay::PairOutcome::Refused;
+        try {
+            if (receiver->support == airplay::Support::Password) {
+                airplay::RtspClient client(receiver->address, receiver->port, kPairingTimeoutMs);
+                outcome = client.pairTransiently(code);
+                if (outcome == airplay::PairOutcome::Paired) credentials.password = code;
+            }
+            if (receiver->support != airplay::Support::Password || outcome == airplay::PairOutcome::WrongCode) {
+                auto client = codeShown_.first == id && codeShown_.second && !codeShown_.second->closed()
+                                  ? std::move(codeShown_.second)
+                                  : std::make_unique<airplay::RtspClient>(receiver->address, receiver->port, kPairingTimeoutMs);
+                codeShown_ = {};
+                airplay::PairedReceiver keys;
+                outcome = client->pairSetup(code, airplayPairings_->identity(), keys);
+                if (outcome == airplay::PairOutcome::Paired) credentials.keys = keys;
+            }
+        } catch (const std::exception& e) {
+            throw audio::Error(audio::ErrorCode::DeviceNotFound, e.what());
+        }
+        if (outcome == airplay::PairOutcome::WrongCode)
+            throw audio::Error(audio::ErrorCode::AccessDenied, "the password or code is not the receiver's");
+        if (outcome != airplay::PairOutcome::Paired)
+            throw audio::Error(audio::ErrorCode::DriverError, "the receiver did not pair");
+        airplayPairings_->save(id, credentials);
+        log::info("AirPlay receiver %s (%s) paired %s", receiver->name.c_str(), id.c_str(),
+                  credentials.keys ? "with keys" : "with its password");
+        {
+            std::scoped_lock lock(finderMutex_);
+            airplayFinder_->paired(id);
+        }
+        // The catalog this command publishes lists it as playable, so the user can turn it on at once.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (std::chrono::steady_clock::now() < deadline) {
+            const auto now = airplayReceiver(id);
+            if (now && now->support == airplay::Support::Supported) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        refreshDevices();
     }
 
     void checkEnabledReceivers(const std::vector<SavedOutput>& before) {
@@ -1784,6 +1884,7 @@ private:
                                       : audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
         }
         AirPlayOutputOptions options;
+        options.pairings = airplayPairings_;
         options.details = [this](const std::wstring& file) { return trackDetails(file); };
         options.lookAgain = [this] {
             std::scoped_lock lock(finderMutex_);
@@ -2236,7 +2337,9 @@ private:
     _Guarded_by_(finderMutex_) std::unique_ptr<hqplayer::Finder> hqplayerFinder_; // from the first device scan
     AirPlayFinderOptions airplayFinderOptions_;
     std::map<std::string, std::string> airplaySupportLogged_; // by receiver: what the log last said of it
-    std::mutex groupMutex_;                                   // the AirPlay group, as the output reads it
+    static constexpr int kPairingTimeoutMs = 5000;
+    std::pair<std::string, std::unique_ptr<airplay::RtspClient>> codeShown_; // the receiver showing a code, by ID
+    std::mutex groupMutex_;                                                  // the AirPlay group, as the output reads it
     _Guarded_by_(groupMutex_) std::vector<AirPlayMember> airplayMembers_;
     _Guarded_by_(groupMutex_) std::vector<ReceiverState> airplayStates_;
     _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
@@ -2254,6 +2357,7 @@ private:
     static constexpr auto kGroupDragSettles = std::chrono::seconds(3);
     std::optional<GroupBaseline> groupBaseline_;   // the levels a moving group slider scales from
     std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan
+    std::shared_ptr<AirPlayPairings> airplayPairings_;
     std::unique_ptr<OwnVolume> playerVolume_;
     std::string volumeHQPlayer_; // the address whose volume `playerVolume_` follows
     std::optional<upnp::PlayerDescription> volumePlayer_;

@@ -45,7 +45,8 @@ std::optional<std::pair<std::string, std::string>> parseRaopName(std::string_vie
 std::string deviceIdFrom(std::string_view text); // upper case, without separators
 
 // HomeOnly: its access setting allows only people sharing its home (`acl=1` in _airplay._tcp), which this computer is not.
-enum class Support { Supported, EncryptedOnly, Password, Format, Refused, HomeOnly };
+// Password and Code: it takes a session once paired with the password set on it or the code it shows.
+enum class Support { Supported, EncryptedOnly, Password, Format, Refused, HomeOnly, Code };
 const char* supportId(Support support);     // empty for Supported
 Support supportFrom(const TxtRecord& raop); // what the receiver declares; only a session shows whether it holds
 
@@ -71,6 +72,8 @@ struct Receiver {
     std::vector<Speaker> others;       // the rest of a stereo pair, which does not pass the stream on
     std::vector<std::string> speakers; // a stereo pair's members by device ID, sorted; empty for one receiver
     bool transient = false;            // takes a session only after transient pairing
+    bool asksPassword = false;         // its flags say a password is set on it
+    bool asksCode = false;             // its flags say it pairs once with a code it shows
     bool operator==(const Receiver&) const = default;
 };
 

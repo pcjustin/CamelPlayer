@@ -6,12 +6,17 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <thread>
 
 #include "FakeAirPlayReceiver.h"
 #include "Server/Network/AirPlayFinder.h"
+#include "Server/Network/AirPlayPairings.h"
 #include "Server/Network/Rtsp.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Playback/Outputs.h"
@@ -329,7 +334,7 @@ TEST_F(AirPlayFinderTest, EncryptionOnlyIsNotSupported) {
 TEST_F(AirPlayFinderTest, AReceiverThatRefusesOptionsIsNotSupportedThoughItDeclaresEtZero) {
     rtsp_.answer("OPTIONS", 403);
     mdns_.add(record(rtsp_));
-    start();
+    start(1s);
     ASSERT_TRUE(found(1));
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Refused; }));
 }
@@ -728,4 +733,169 @@ TEST(AirPlayFinderHardware, DISABLED_ListsTheReceiversOnThisNetwork) {
         std::printf("%s at %s:%u, version %s, support %s\n", receiver.name.c_str(), receiver.address.c_str(),
                     unsigned(receiver.port), receiver.version.c_str(), supportId(receiver.support));
     EXPECT_FALSE(found.empty());
+}
+
+namespace {
+
+// A Server finding the receivers `mdns` announces, with the device catalog asked for again on each call.
+class PairingServer {
+public:
+    explicit PairingServer(const FakeMdns& mdns) : server_(serverSettings()) {
+        auto options = optionsFor(mdns);
+        options.searchInterval = 1s;
+        server_.setAirPlayFinderOptions(options);
+    }
+
+    std::string supportOf(const std::string& id) {
+        Command command;
+        command.kind = CommandKind::RefreshDevices;
+        server_.submit(std::move(command));
+        server_.waitIdle();
+        for (const auto& device : server_.snapshot().devices.airplay)
+            if (device.id == id) return device.unsupported;
+        return "absent";
+    }
+
+    std::optional<Failure> run(Command command) {
+        server_.submit(std::move(command));
+        server_.waitIdle();
+        return server_.snapshot().commandError;
+    }
+
+    std::optional<Failure> pair(const std::string& id, const std::string& code) {
+        Command command;
+        command.kind = CommandKind::PairAirPlay;
+        command.receiver = id;
+        command.code = code;
+        return run(std::move(command));
+    }
+
+    LocalServer& server() { return server_; }
+
+private:
+    static Settings serverSettings() {
+        Settings settings;
+        settings.adoptOutputSets = false;
+        settings.autoplay = false;
+        return settings;
+    }
+
+    LocalServer server_;
+};
+
+} // namespace
+
+// A Mac with a password set says so in its flags; the password typed pairs it, a wrong one says so.
+TEST(AirPlayPairingServerTest, AReceiverThatAsksForAPasswordIsPairedWithIt) {
+    FakeRtsp rtsp;
+    rtsp.demandPairing("hunter2");
+    FakeMdns mdns;
+    auto mac = record(rtsp, "C0FFEE000003", "MacBook Air");
+    mac.raopTxt = {"am=Mac14,2", "cn=0,1", "et=0,3,5", "sf=0x284", "vs=1005.13.5"};
+    mac.airplayTxt = {"deviceid=C0:FF:EE:00:00:03", "flags=0x284", "acl=0"};
+    mdns.add(mac);
+    PairingServer server(mdns);
+    ASSERT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000003") == "password"; }));
+    EXPECT_EQ(rtsp.count("OPTIONS"), 0) << "a receiver that asks for a password is not asked before it has one";
+
+    const auto wrong = server.pair("C0FFEE000003", "hunter3");
+    ASSERT_TRUE(wrong);
+    EXPECT_EQ(wrong->code, audio::ErrorCode::AccessDenied);
+    EXPECT_EQ(server.supportOf("C0FFEE000003"), "password");
+
+    EXPECT_FALSE(server.pair("C0FFEE000003", "hunter2"));
+    EXPECT_EQ(server.supportOf("C0FFEE000003"), "");
+    EXPECT_TRUE(waitFor([&] { return rtsp.count("TEARDOWN") == 1; })) << "the session it was asked for";
+    EXPECT_GT(rtsp.encryptedRequests(), 0);
+}
+
+// A receiver that shows a code: asked to show it, then paired with it, it keeps keys that later sessions verify alone.
+TEST(AirPlayPairingServerTest, AReceiverThatShowsACodeIsPairedWithItAndVerifiedAfter) {
+    FakeRtsp rtsp;
+    rtsp.demandPairing("4821");
+    rtsp.pairOnlyWithKeys();
+    FakeMdns mdns;
+    auto tv = record(rtsp, "C0FFEE000004", "TV");
+    tv.airplayTxt = {"deviceid=C0:FF:EE:00:00:04", "flags=0x8", "acl=0"};
+    mdns.add(tv);
+    PairingServer server(mdns);
+    ASSERT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000004") == "code"; }));
+
+    Command show;
+    show.kind = CommandKind::ShowAirPlayCode;
+    show.receiver = "C0FFEE000004";
+    EXPECT_FALSE(server.run(std::move(show)));
+    EXPECT_EQ(rtsp.pinsShown(), 1);
+    const auto wrong = server.pair("C0FFEE000004", "1111");
+    ASSERT_TRUE(wrong);
+    EXPECT_EQ(wrong->code, audio::ErrorCode::AccessDenied);
+    EXPECT_FALSE(server.pair("C0FFEE000004", "4821"));
+    EXPECT_EQ(rtsp.controllers().size(), 1U);
+    EXPECT_EQ(server.supportOf("C0FFEE000004"), "");
+
+    // Turned on, it is asked for a session, which pair-verify opens.
+    auto chosen = nativeSettings(server.server().snapshot().settings);
+    setOutputEnabled(chosen, Backend::AirPlay, "C0FFEE000004", true, server.server().snapshot().devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(chosen);
+    EXPECT_FALSE(server.run(std::move(apply)));
+    EXPECT_TRUE(waitFor([&] { return rtsp.count("TEARDOWN") >= 1; }));
+    EXPECT_TRUE(std::ranges::any_of(rtsp.requests(), [](const std::string& r) { return r.starts_with("POST /pair-verify "); }));
+    EXPECT_EQ(server.supportOf("C0FFEE000004"), "");
+
+    // Deleted in Settings, it is no longer paired and asks for its code again.
+    chosen = nativeSettings(server.server().snapshot().settings);
+    deleteOutput(chosen, Backend::AirPlay, "C0FFEE000004", server.server().snapshot().devices);
+    Command remove;
+    remove.kind = CommandKind::ApplySettings;
+    remove.settings = settingsDto(chosen);
+    EXPECT_FALSE(server.run(std::move(remove)));
+    EXPECT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000004") == "code"; }));
+}
+
+// A receiver reset forgets this computer: it asks for its code again rather than being refused for good.
+TEST(AirPlayPairingServerTest, AReceiverThatForgotThePairingAsksForItsCodeAgain) {
+    FakeRtsp rtsp;
+    rtsp.demandPairing("4821");
+    rtsp.pairOnlyWithKeys();
+    FakeMdns mdns;
+    auto tv = record(rtsp, "C0FFEE000004", "TV");
+    tv.airplayTxt = {"deviceid=C0:FF:EE:00:00:04", "flags=0x8", "acl=0"};
+    mdns.add(tv);
+    PairingServer server(mdns);
+    ASSERT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000004") == "code"; }));
+    EXPECT_FALSE(server.pair("C0FFEE000004", "4821"));
+    EXPECT_EQ(server.supportOf("C0FFEE000004"), "");
+    rtsp.forgetPairings();
+    auto chosen = nativeSettings(server.server().snapshot().settings);
+    setOutputEnabled(chosen, Backend::AirPlay, "C0FFEE000004", true, server.server().snapshot().devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(chosen);
+    server.run(std::move(apply));
+    EXPECT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000004") == "code"; }));
+}
+
+TEST(AirPlayPairingsTest, PairingsSurviveInTheirProtectedFile) {
+    const auto file = testutil::tempDir() / L"airplay-pairings.dat";
+    std::filesystem::remove(file);
+    airplay::PairingIdentity identity;
+    {
+        AirPlayPairings pairings(file);
+        identity = pairings.identity();
+        pairings.save("C0FFEE000003", {"hunter2", std::nullopt});
+        pairings.save("C0FFEE000004", {{}, airplay::PairedReceiver{"FA:KE", std::string(32, '\x7f')}});
+    }
+    std::ifstream in(file, std::ios::binary);
+    const std::string stored{std::istreambuf_iterator<char>(in), {}};
+    in.close();
+    EXPECT_EQ(stored.find("hunter2"), std::string::npos) << "kept in the clear";
+    AirPlayPairings read(file);
+    EXPECT_EQ(read.identity(), identity);
+    EXPECT_EQ(read.find("C0FFEE000003"), (AirPlayCredentials{"hunter2", std::nullopt}));
+    EXPECT_EQ(read.find("C0FFEE000004")->keys->publicKey, std::string(32, '\x7f'));
+    read.forget("C0FFEE000003");
+    EXPECT_FALSE(AirPlayPairings(file).find("C0FFEE000003"));
+    std::filesystem::remove(file);
 }

@@ -17,6 +17,22 @@
 
 namespace camel::server::airplay {
 
+constexpr std::string_view kTransientPin = "3939";
+
+enum class PairOutcome : uint8_t { Paired, WrongCode, Refused };
+
+// This computer as a paired sender, the same to every receiver: its pairing ID and its Ed25519 key's seed.
+struct PairingIdentity {
+    std::string id, seed;
+    bool operator==(const PairingIdentity&) const = default;
+};
+
+// What a receiver paired with a code gave: its pairing ID and Ed25519 public key.
+struct PairedReceiver {
+    std::string id, publicKey;
+    bool operator==(const PairedReceiver&) const = default;
+};
+
 std::string randomBytes(size_t size);
 std::string sha512(std::string_view data);
 std::string hmacSha512(std::string_view key, std::string_view data);
@@ -56,6 +72,13 @@ SrpServer srpServer(std::string_view user, std::string_view pin, std::string_vie
 std::optional<std::pair<std::string, std::string>> srpServerCheck(const SrpServer& server, std::string_view user,
                                                                   std::string_view salt, std::string_view senderKey,
                                                                   std::string_view proof, std::string_view secret);
+
+// Keys of 32 bytes and signatures of 64, little-endian as the RFCs give them.
+std::string x25519(std::string_view scalar, std::string_view point);
+std::string x25519Base(std::string_view scalar);
+std::string ed25519PublicKey(std::string_view seed);
+std::string ed25519Sign(std::string_view seed, std::string_view message);
+bool ed25519Verify(std::string_view publicKey, std::string_view message, std::string_view signature);
 
 // The RTSP connection once paired: 1024-byte blocks, each led by its length, sealed with the block count as nonce.
 class SecureChannel {

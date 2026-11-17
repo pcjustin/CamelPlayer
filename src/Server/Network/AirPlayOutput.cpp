@@ -293,7 +293,7 @@ private:
         std::vector<Speaker> speakers{{receiver.address, receiver.port}};
         speakers.insert(speakers.end(), receiver.others.begin(), receiver.others.end());
         for (const auto& speaker : speakers) {
-            auto connected = connectToSpeaker(speaker, receiver.name, receiver.transient);
+            auto connected = connectToSpeaker(speaker, receiver);
             member.sessions.push_back(std::move(connected.client));
             member.destinations.push_back(connected.destination);
             member.latency = std::max(member.latency, connected.latency);
@@ -331,10 +331,10 @@ private:
         if (options_.memberLeft) options_.memberLeft(id, why);
     }
 
-    Connected connectToSpeaker(const Speaker& speaker, const std::string& name, bool transient) {
+    Connected connectToSpeaker(const Speaker& speaker, const Receiver& receiver) {
         try {
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
-            if (transient && !client->pairTransiently()) throw Error(ErrorCode::AccessDenied, kRefused);
+            if (!pairFor(*client, receiver, options_.pairings.get())) throw Error(ErrorCode::AccessDenied, kRefused);
             check(client->request("OPTIONS", "*"), "OPTIONS");
             check(client->request("ANNOUNCE", client->url(), "application/sdp",
                                   sessionDescription(client->localAddress(), speaker.address, client->session())),
@@ -356,7 +356,7 @@ private:
         } catch (const Error&) {
             throw;
         } catch (const std::exception& e) {
-            log::info("AirPlay receiver %s: %s", name.c_str(), e.what());
+            log::info("AirPlay receiver %s: %s", receiver.name.c_str(), e.what());
             throw Error(ErrorCode::DeviceNotFound, kNotConnected);
         }
     }

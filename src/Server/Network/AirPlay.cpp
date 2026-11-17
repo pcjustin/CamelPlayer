@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <format>
 #include <stdexcept>
 
@@ -23,6 +24,9 @@ constexpr uint16_t kFlagResponse = 0x8000;
 constexpr int kMaxNameJumps = 32;
 constexpr size_t kHeaderBytes = 12;
 constexpr size_t kMaxLabelBytes = 63;
+constexpr uint64_t kPinRequired = 0x8;
+constexpr uint64_t kPasswordRequired = 0x80;
+constexpr uint64_t kOneTimePairingRequired = 0x200;
 
 std::string lower(std::string_view text) {
     std::string out(text);
@@ -169,6 +173,16 @@ std::optional<DnsRecord> readRecord(Reader& reader) {
     return known ? std::optional(std::move(record)) : std::nullopt;
 }
 
+// The status flags, `flags` in _airplay._tcp or `sf` in _raop._tcp.
+uint64_t statusFlags(const Announced& announced) {
+    std::string text = textOf(announced.airplay, "flags");
+    if (text.empty()) text = textOf(announced.raop, "sf");
+    uint64_t flags = 0;
+    const bool hex = text.starts_with("0x") || text.starts_with("0X");
+    std::from_chars(text.data() + (hex ? 2 : 0), text.data() + text.size(), flags, hex ? 16 : 10);
+    return flags;
+}
+
 } // namespace
 
 DnsName serviceName(std::string_view service) {
@@ -247,6 +261,8 @@ const char* supportId(Support support) {
         return "refused";
     case Support::HomeOnly:
         return "home";
+    case Support::Code:
+        return "code";
     }
     return "";
 }
@@ -281,9 +297,21 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
         if (others.empty()) speakers.clear();
         std::ranges::sort(speakers);
         auto support = supportFrom(lead->raop);
+        const uint64_t flags = statusFlags(*lead);
+        const bool asksPassword = support == Support::Password || (flags & kPasswordRequired) != 0;
+        if (support == Support::Supported && asksPassword) support = Support::Password;
         if (support == Support::Supported && textOf(lead->airplay, "acl") == "1") support = Support::HomeOnly;
-        receivers.push_back({id, group.empty() ? lead->name : group, lead->address, lead->port, textOf(lead->raop, "vs"), support,
-                             std::move(others), std::move(speakers)});
+        Receiver receiver{id,
+                          group.empty() ? lead->name : group,
+                          lead->address,
+                          lead->port,
+                          textOf(lead->raop, "vs"),
+                          support,
+                          std::move(others),
+                          std::move(speakers)};
+        receiver.asksPassword = asksPassword;
+        receiver.asksCode = !asksPassword && (flags & (kPinRequired | kOneTimePairingRequired)) != 0;
+        receivers.push_back(std::move(receiver));
     }
     std::ranges::sort(receivers, {}, [](const Receiver& r) { return std::pair(r.name, r.id); });
     return receivers;

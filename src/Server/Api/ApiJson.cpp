@@ -75,7 +75,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 31> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 33> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -105,7 +105,9 @@ constexpr Names<CommandKind, 31> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::SetArtistFavorite, "setArtistFavorite"},
                                                   {CommandKind::SetPlayerVolume, "setPlayerVolume"},
                                                   {CommandKind::SetPlayerMute, "setPlayerMute"},
-                                                  {CommandKind::SetReceiverVolume, "setReceiverVolume"}};
+                                                  {CommandKind::SetReceiverVolume, "setReceiverVolume"},
+                                                  {CommandKind::ShowAirPlayCode, "showAirPlayCode"},
+                                                  {CommandKind::PairAirPlay, "pairAirPlay"}};
 constexpr Names<AirPlayChannels, 3> kAirPlayChannels = {
     {AirPlayChannels::Stereo, "stereo"}, {AirPlayChannels::Left, "left"}, {AirPlayChannels::Right, "right"}};
 constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},
@@ -495,7 +497,8 @@ json toJson(const Command& c) {
             {"artists", artists},
             {"playerVolume", c.playerVolume ? json(*c.playerVolume) : json(nullptr)},
             {"playerMute", c.playerMute ? json(*c.playerMute) : json(nullptr)},
-            {"receiver", c.receiver}};
+            {"receiver", c.receiver},
+            {"code", c.code}};
 }
 
 Command commandFromJson(const json& j) {
@@ -534,6 +537,7 @@ Command commandFromJson(const json& j) {
         return v.get<bool>();
     });
     if (j.contains("receiver") || c.kind == CommandKind::SetReceiverVolume) c.receiver = value<std::string>(j, "receiver");
+    if (j.contains("code") || c.kind == CommandKind::PairAirPlay) c.code = value<std::string>(j, "code");
     return c;
 }
 

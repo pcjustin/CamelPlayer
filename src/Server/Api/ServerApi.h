@@ -127,7 +127,9 @@ enum class CommandKind : uint8_t {
     SetArtistFavorite, // artists + favorite: artists and composers by name
     SetPlayerVolume,   // playerVolume: the network player's own level, 0-100; an AirPlay group's loudest receiver
     SetPlayerMute,     // playerMute: the network player's own mute; every receiver of an AirPlay group
-    SetReceiverVolume  // receiver + playerVolume: one receiver of the AirPlay group in use
+    SetReceiverVolume, // receiver + playerVolume: one receiver of the AirPlay group in use
+    ShowAirPlayCode,   // receiver: one that pairs with a code shows it
+    PairAirPlay        // receiver + code: pairs with the password or code the user typed
 };
 
 struct Command {
@@ -151,6 +153,7 @@ struct Command {
     std::optional<uint32_t> playerVolume;
     std::optional<bool> playerMute;
     std::string receiver; // an AirPlay receiver's device ID
+    std::string code;     // a password or code an AirPlay receiver asks for
     bool operator==(const Command&) const = default;
 };
 

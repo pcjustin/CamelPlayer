@@ -179,10 +179,30 @@ public:
         pin_ = std::move(pin);
         demandPairing_ = true;
     }
+    // Takes only pair-setup with a code, which leaves keys for pair-verify, as a receiver that shows a code does; transient
+    // pair-setup fails as with a wrong code.
+    void pairOnlyWithKeys() {
+        std::scoped_lock lock(mutex_);
+        keysOnly_ = true;
+    }
+    // Forgets every sender paired with it, as a receiver reset does.
+    void forgetPairings() {
+        std::scoped_lock lock(mutex_);
+        controllers_.clear();
+    }
     // The requests that arrived encrypted.
     int encryptedRequests() const {
         std::scoped_lock lock(mutex_);
         return encryptedRequests_;
+    }
+    // The senders paired with keys, by pairing ID, with their public keys.
+    std::map<std::string, std::string> controllers() const {
+        std::scoped_lock lock(mutex_);
+        return controllers_;
+    }
+    int pinsShown() const {
+        std::scoped_lock lock(mutex_);
+        return pinsShown_;
     }
 
 private:
@@ -305,6 +325,18 @@ private:
             pairSetup(client, reply, request.substr(headEnd + 4));
             return true;
         }
+        if (request.starts_with("POST /pair-verify ")) {
+            pairVerify(client, reply, request.substr(headEnd + 4));
+            return true;
+        }
+        if (request.starts_with("POST /pair-pin-start ")) {
+            {
+                std::scoped_lock lock(mutex_);
+                ++pinsShown_;
+            }
+            sendOut(client, reply + "\r\n");
+            return true;
+        }
         if (demanded && !channel_) {
             reply.replace(9, 3, "403");
             reply += "\r\n";
@@ -325,33 +357,100 @@ private:
         send(client, out.data(), int(out.size()), 0);
     }
 
-    // The receiver's side of transient pair-setup, with the code it was given.
-    void pairSetup(SOCKET client, std::string reply, const std::string& body) {
-        namespace ap = camel::server::airplay;
-        auto items = ap::parseTlv(body);
-        std::string answer;
-        std::string key;
-        std::string pin;
-        {
-            std::scoped_lock lock(mutex_);
-            pin = pin_;
-        }
-        if (items[6] == "\x01") {
-            salt_ = ap::randomBytes(16);
-            secret_ = ap::randomBytes(32);
-            server_ = ap::srpServer("Pair-Setup", pin, salt_, secret_);
-            answer = ap::tlv({{6, "\x02"}, {2, salt_}, {3, server_.publicKey}});
-        } else if (const auto checked = ap::srpServerCheck(server_, "Pair-Setup", salt_, items[3], items[4], secret_)) {
-            answer = ap::tlv({{6, "\x04"}, {4, checked->second}});
-            key = checked->first;
-        } else {
-            answer = ap::tlv({{6, "\x04"}, {7, "\x02"}});
-        }
+    void sendTlv(SOCKET client, std::string reply, const std::string& answer) {
         reply +=
             "Content-Type: application/octet-stream\r\nContent-Length: " + std::to_string(answer.size()) + "\r\n\r\n" + answer;
         sendOut(client, reply);
-        if (!key.empty()) channel_ = ap::SecureChannel::forReceiver(key);
     }
+
+    static std::string nonceOf(const char* name) { return std::string(4, '\0') + name; }
+
+    // The receiver's side of pair-setup, transient or with a code, with the code it was given.
+    void pairSetup(SOCKET client, const std::string& reply, const std::string& body) {
+        namespace ap = camel::server::airplay;
+        auto items = ap::parseTlv(body);
+        std::string pin;
+        bool keysOnly = false;
+        {
+            std::scoped_lock lock(mutex_);
+            pin = pin_;
+            keysOnly = keysOnly_;
+        }
+        if (items[6] == "\x01") {
+            transient_ = items.contains(19);
+            salt_ = ap::randomBytes(16);
+            secret_ = ap::randomBytes(32);
+            server_ = ap::srpServer("Pair-Setup", pin, salt_, secret_);
+            sendTlv(client, reply, ap::tlv({{6, "\x02"}, {2, salt_}, {3, server_.publicKey}}));
+            return;
+        }
+        if (items[6] == "\x03") {
+            const auto checked = ap::srpServerCheck(server_, "Pair-Setup", salt_, items[3], items[4], secret_);
+            if (!checked || (transient_ && keysOnly)) {
+                sendTlv(client, reply, ap::tlv({{6, "\x04"}, {7, "\x02"}}));
+                return;
+            }
+            sendTlv(client, reply, ap::tlv({{6, "\x04"}, {4, checked->second}}));
+            if (transient_)
+                channel_ = ap::SecureChannel::forReceiver(checked->first);
+            else
+                setupKey_ = checked->first;
+            return;
+        }
+        const std::string key = ap::hkdfSha512(setupKey_, "Pair-Setup-Encrypt-Salt", "Pair-Setup-Encrypt-Info", 32);
+        const auto opened = ap::open(key, nonceOf("PS-Msg05"), {}, items[5]);
+        auto theirs = ap::parseTlv(opened.value_or(""));
+        const std::string signedInfo =
+            ap::hkdfSha512(setupKey_, "Pair-Setup-Controller-Sign-Salt", "Pair-Setup-Controller-Sign-Info", 32) + theirs[1] +
+            theirs[3];
+        if (!opened || !ap::ed25519Verify(theirs[3], signedInfo, theirs[10])) {
+            sendTlv(client, reply, ap::tlv({{6, "\x06"}, {7, "\x02"}}));
+            return;
+        }
+        {
+            std::scoped_lock lock(mutex_);
+            controllers_[theirs[1]] = theirs[3];
+        }
+        const std::string publicKey = ap::ed25519PublicKey(accessorySeed_);
+        const std::string mine =
+            ap::hkdfSha512(setupKey_, "Pair-Setup-Accessory-Sign-Salt", "Pair-Setup-Accessory-Sign-Info", 32) + kAccessoryId +
+            publicKey;
+        const std::string sub = ap::tlv({{1, kAccessoryId}, {3, publicKey}, {10, ap::ed25519Sign(accessorySeed_, mine)}});
+        sendTlv(client, reply, ap::tlv({{6, "\x06"}, {5, ap::seal(key, nonceOf("PS-Msg06"), {}, sub)}}));
+    }
+
+    // The receiver's side of pair-verify, for a sender paired with keys.
+    void pairVerify(SOCKET client, const std::string& reply, const std::string& body) {
+        namespace ap = camel::server::airplay;
+        auto items = ap::parseTlv(body);
+        if (items[6] == "\x01") {
+            const std::string secret = ap::randomBytes(32);
+            verifyMine_ = ap::x25519Base(secret);
+            verifyTheirs_ = items[3];
+            verifyShared_ = ap::x25519(secret, verifyTheirs_);
+            const std::string key = ap::hkdfSha512(verifyShared_, "Pair-Verify-Encrypt-Salt", "Pair-Verify-Encrypt-Info", 32);
+            const std::string sub =
+                ap::tlv({{1, kAccessoryId}, {10, ap::ed25519Sign(accessorySeed_, verifyMine_ + kAccessoryId + verifyTheirs_)}});
+            sendTlv(client, reply, ap::tlv({{6, "\x02"}, {3, verifyMine_}, {5, ap::seal(key, nonceOf("PV-Msg02"), {}, sub)}}));
+            return;
+        }
+        const std::string key = ap::hkdfSha512(verifyShared_, "Pair-Verify-Encrypt-Salt", "Pair-Verify-Encrypt-Info", 32);
+        const auto opened = ap::open(key, nonceOf("PV-Msg03"), {}, items[5]);
+        auto theirs = ap::parseTlv(opened.value_or(""));
+        std::string known;
+        {
+            std::scoped_lock lock(mutex_);
+            if (const auto found = controllers_.find(theirs[1]); found != controllers_.end()) known = found->second;
+        }
+        if (!opened || known.empty() || !ap::ed25519Verify(known, verifyTheirs_ + theirs[1] + verifyMine_, theirs[10])) {
+            sendTlv(client, reply, ap::tlv({{6, "\x04"}, {7, "\x02"}}));
+            return;
+        }
+        sendTlv(client, reply, ap::tlv({{6, "\x04"}}));
+        channel_ = ap::SecureChannel::forReceiver(verifyShared_);
+    }
+
+    static constexpr const char* kAccessoryId = "FA:KE:00:00:00:01";
 
     SOCKET listener_ = INVALID_SOCKET;
     SOCKET audio_ = INVALID_SOCKET;
@@ -364,12 +463,15 @@ private:
     std::map<std::string, int> statuses_;
     std::vector<std::string> requests_;
     std::string pin_;
-    bool demandPairing_ = false;
-    int encryptedRequests_ = 0;
+    bool demandPairing_ = false, keysOnly_ = false;
+    int encryptedRequests_ = 0, pinsShown_ = 0;
+    std::map<std::string, std::string> controllers_;
     // Only the serving thread.
     std::optional<camel::server::airplay::SecureChannel> channel_;
-    std::string salt_, secret_;
+    std::string salt_, secret_, setupKey_, verifyMine_, verifyTheirs_, verifyShared_;
+    bool transient_ = false;
     camel::server::airplay::SrpServer server_;
+    std::string accessorySeed_ = camel::server::airplay::randomBytes(32);
     std::vector<FakeRtp> packets_;
     std::vector<std::string> controlPackets_, timingReplies_;
     std::thread thread_, audioThread_, controlThread_, timingThread_;

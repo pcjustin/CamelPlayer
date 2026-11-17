@@ -23,21 +23,30 @@ constexpr size_t kMaxReplyBytes = 65536;
 constexpr std::string_view kEndOfHeaders = "\r\n\r\n";
 constexpr std::string_view kUserAgent = "AirPlay/999.0.0 CamelPlayer"; // HomePods on OS 27 refuse any other form tried
 constexpr std::string_view kEndOfLine = "\r\n";
-constexpr std::string_view kPairingHeaders = "X-Apple-HKP: 4\r\n";
+constexpr std::string_view kTransientHeaders = "X-Apple-HKP: 4\r\n";
+constexpr std::string_view kPairingHeaders = "X-Apple-HKP: 3\r\n";
 constexpr std::string_view kPairingType = "application/octet-stream";
 constexpr std::string_view kPairingUser = "Pair-Setup";
-constexpr std::string_view kTransientPin = "3939";
 constexpr size_t kSecretBytes = 32;
+constexpr size_t kKeyBytes = 32;
 constexpr int kStatusOk = 200;
 enum PairingTag : uint8_t {
     TagMethod = 0,
+    TagIdentifier = 1,
     TagSalt = 2,
     TagPublicKey = 3,
     TagProof = 4,
+    TagEncryptedData = 5,
     TagState = 6,
     TagError = 7,
+    TagSignature = 10,
     TagFlags = 19
 };
+constexpr char kErrorAuthentication = 2;
+
+std::string messageNonce(std::string_view name) {
+    return std::string(4, '\0') + std::string(name);
+}
 
 int numberIn(std::string_view text) {
     int value = 0;
@@ -181,20 +190,93 @@ RtspReply RtspClient::request(std::string_view method, std::string_view url, std
     throw std::runtime_error("a reply without an end");
 }
 
-bool RtspClient::pairTransiently() {
-    const auto start = request("POST", "/pair-setup", kPairingType,
-                               tlv({{TagMethod, std::string(1, '\0')}, {TagState, "\x01"}, {TagFlags, "\x10"}}), kPairingHeaders);
-    auto items = parseTlv(start.body);
-    if (start.status != kStatusOk || items.contains(TagError) || !items.contains(TagSalt) || !items.contains(TagPublicKey))
+std::map<uint8_t, std::string> RtspClient::pairingStep(std::string_view path, std::string_view headers, const TlvItems& items,
+                                                       bool& answered) {
+    const auto reply = request("POST", path, kPairingType, tlv(items), headers);
+    answered = reply.status == kStatusOk;
+    return parseTlv(reply.body);
+}
+
+std::optional<SrpProof> RtspClient::exchangeProofs(std::string_view pin, bool transient, PairOutcome& failure) {
+    failure = PairOutcome::Refused;
+    const auto headers = transient ? kTransientHeaders : kPairingHeaders;
+    TlvItems first{{TagMethod, std::string(1, '\0')}, {TagState, "\x01"}};
+    if (transient) first.emplace_back(TagFlags, "\x10");
+    bool answered = false;
+    auto items = pairingStep("/pair-setup", headers, first, answered);
+    if (!answered || items.contains(TagError) || !items.contains(TagSalt) || !items.contains(TagPublicKey)) return std::nullopt;
+    auto proof = srpClient(kPairingUser, pin, items[TagSalt], items[TagPublicKey], randomBytes(kSecretBytes));
+    if (proof.proof.empty()) return std::nullopt;
+    items = pairingStep("/pair-setup", headers, {{TagState, "\x03"}, {TagPublicKey, proof.publicKey}, {TagProof, proof.proof}},
+                        answered);
+    const auto error = items.find(TagError);
+    if (answered && error != items.end() && error->second == std::string(1, kErrorAuthentication))
+        failure = PairOutcome::WrongCode;
+    if (!answered || error != items.end() || items[TagProof] != proof.expected) return std::nullopt;
+    return proof;
+}
+
+PairOutcome RtspClient::pairTransiently(std::string_view pin) {
+    PairOutcome failure = PairOutcome::Refused;
+    const auto proof = exchangeProofs(pin, true, failure);
+    if (!proof) return failure;
+    channel_ = SecureChannel::forSender(proof->sessionKey);
+    return PairOutcome::Paired;
+}
+
+bool RtspClient::showPin() {
+    return request("POST", "/pair-pin-start", kPairingType, {}, kPairingHeaders).status == kStatusOk;
+}
+
+PairOutcome RtspClient::pairSetup(std::string_view pin, const PairingIdentity& me, PairedReceiver& receiver) {
+    PairOutcome failure = PairOutcome::Refused;
+    const auto proof = exchangeProofs(pin, false, failure);
+    if (!proof) return failure;
+    const std::string& shared = proof->sessionKey;
+    const std::string key = hkdfSha512(shared, "Pair-Setup-Encrypt-Salt", "Pair-Setup-Encrypt-Info", kKeyBytes);
+    const std::string publicKey = ed25519PublicKey(me.seed);
+    const std::string signedInfo =
+        hkdfSha512(shared, "Pair-Setup-Controller-Sign-Salt", "Pair-Setup-Controller-Sign-Info", kKeyBytes) + me.id + publicKey;
+    const std::string mine =
+        tlv({{TagIdentifier, me.id}, {TagPublicKey, publicKey}, {TagSignature, ed25519Sign(me.seed, signedInfo)}});
+    bool answered = false;
+    auto items =
+        pairingStep("/pair-setup", kPairingHeaders,
+                    {{TagState, "\x05"}, {TagEncryptedData, airplay::seal(key, messageNonce("PS-Msg05"), {}, mine)}}, answered);
+    if (!answered || items.contains(TagError)) return PairOutcome::Refused;
+    const auto opened = airplay::open(key, messageNonce("PS-Msg06"), {}, items[TagEncryptedData]);
+    if (!opened) return PairOutcome::Refused;
+    auto theirs = parseTlv(*opened);
+    const std::string accessory =
+        hkdfSha512(shared, "Pair-Setup-Accessory-Sign-Salt", "Pair-Setup-Accessory-Sign-Info", kKeyBytes) +
+        theirs[TagIdentifier] + theirs[TagPublicKey];
+    if (theirs[TagIdentifier].empty() || !ed25519Verify(theirs[TagPublicKey], accessory, theirs[TagSignature]))
+        return PairOutcome::Refused;
+    receiver = {theirs[TagIdentifier], theirs[TagPublicKey]};
+    return PairOutcome::Paired;
+}
+
+bool RtspClient::pairVerify(const PairingIdentity& me, const PairedReceiver& receiver) {
+    const std::string secret = randomBytes(kKeyBytes);
+    const std::string mine = x25519Base(secret);
+    bool answered = false;
+    auto items = pairingStep("/pair-verify", kPairingHeaders, {{TagState, "\x01"}, {TagPublicKey, mine}}, answered);
+    if (!answered || items.contains(TagError) || items[TagPublicKey].size() != kKeyBytes) return false;
+    const std::string theirs = items[TagPublicKey];
+    const std::string shared = x25519(secret, theirs);
+    const std::string key = hkdfSha512(shared, "Pair-Verify-Encrypt-Salt", "Pair-Verify-Encrypt-Info", kKeyBytes);
+    const auto opened = airplay::open(key, messageNonce("PV-Msg02"), {}, items[TagEncryptedData]);
+    if (!opened) return false;
+    auto proof = parseTlv(*opened);
+    if (proof[TagIdentifier] != receiver.id ||
+        !ed25519Verify(receiver.publicKey, theirs + receiver.id + mine, proof[TagSignature]))
         return false;
-    const auto proof = srpClient(kPairingUser, kTransientPin, items[TagSalt], items[TagPublicKey], randomBytes(kSecretBytes));
-    if (proof.proof.empty()) return false;
-    const auto finish =
-        request("POST", "/pair-setup", kPairingType,
-                tlv({{TagState, "\x03"}, {TagPublicKey, proof.publicKey}, {TagProof, proof.proof}}), kPairingHeaders);
-    items = parseTlv(finish.body);
-    if (finish.status != kStatusOk || items.contains(TagError) || items[TagProof] != proof.expected) return false;
-    channel_ = SecureChannel::forSender(proof.sessionKey);
+    const std::string answer = tlv({{TagIdentifier, me.id}, {TagSignature, ed25519Sign(me.seed, mine + me.id + theirs)}});
+    items =
+        pairingStep("/pair-verify", kPairingHeaders,
+                    {{TagState, "\x03"}, {TagEncryptedData, airplay::seal(key, messageNonce("PV-Msg03"), {}, answer)}}, answered);
+    if (!answered || items.contains(TagError)) return false;
+    channel_ = SecureChannel::forSender(shared);
     return true;
 }
 

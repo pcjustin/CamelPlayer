@@ -20,6 +20,7 @@
 #include "FakeAirPlayReceiver.h"
 #include "Server/Network/AirPlayFinder.h"
 #include "Server/Network/AirPlayOutput.h"
+#include "Server/Network/AirPlayPairings.h"
 #include "Server/Network/Rtsp.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Playback/Outputs.h"
@@ -100,6 +101,7 @@ protected:
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
         options.closedVerdictAfter = 300ms;
+        options.pairings = pairings_;
         auto created = createAirPlayOutput(receiver(), options);
         created->setErrorHandler([this](const audio::Error& e) { error_ = int(e.code()) + 1; });
         return created;
@@ -112,6 +114,7 @@ protected:
     FakeRtsp rtsp_;
     std::vector<airplay::Speaker> others_;
     bool transient_ = false;
+    std::shared_ptr<AirPlayPairings> pairings_ = std::make_shared<AirPlayPairings>();
     std::atomic<int> error_ = 0;
 };
 
@@ -535,6 +538,35 @@ TEST_F(AirPlayOutputTest, AReceiverThatNeedsPairingIsPairedAndPlayedBitForBit) {
     EXPECT_EQ(std::vector(methods.begin(), methods.begin() + 6),
               (std::vector<std::string>{"POST", "POST", "OPTIONS", "ANNOUNCE", "SETUP", "RECORD"}));
     EXPECT_EQ(rtsp_.encryptedRequests(), int(methods.size()) - 2);
+    const auto packets = rtsp_.packets();
+    for (size_t i = 0; i < packets.size(); ++i) {
+        const std::string pcm = pcmOfAlac(packets[i].alac);
+        ASSERT_EQ(pcm.size(), 1408U);
+        for (size_t b = 0; b < pcm.size(); ++b) ASSERT_EQ(uint8_t(pcm[b]), CountingSource::byteAt(i * 1408 + b)) << i << " " << b;
+    }
+}
+
+// One paired with a code before opens each session with pair-verify alone.
+TEST_F(AirPlayOutputTest, AReceiverPairedWithACodePlaysAfterPairVerifyBitForBit) {
+    rtsp_.demandPairing("4821");
+    rtsp_.pairOnlyWithKeys();
+    {
+        airplay::RtspClient client("127.0.0.1", rtsp_.port(), 1000);
+        airplay::PairedReceiver keys;
+        ASSERT_EQ(client.pairSetup("4821", pairings_->identity(), keys), airplay::PairOutcome::Paired);
+        pairings_->save("800A805D016B", {{}, keys});
+    }
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(40));
+    out->close();
+    const auto methods = rtsp_.methods();
+    ASSERT_GE(methods.size(), 8U); // pair-setup took M1, M3 and M5
+    EXPECT_EQ(std::vector(methods.begin() + 3, methods.begin() + 8),
+              (std::vector<std::string>{"POST", "POST", "OPTIONS", "ANNOUNCE", "SETUP"}));
+    EXPECT_TRUE(rtsp_.requests()[3].starts_with("POST /pair-verify "));
     const auto packets = rtsp_.packets();
     for (size_t i = 0; i < packets.size(); ++i) {
         const std::string pcm = pcmOfAlac(packets[i].alac);
@@ -1430,7 +1462,7 @@ TEST(AirPlayHardware, DISABLED_PairsAndPlaysTheReceiversThatTakeIt) {
     for (const auto& name : {wanted[0], wanted[1]}) {
         auto r = *byName(name);
         airplay::RtspClient client(r.address, r.port, 3000);
-        ASSERT_TRUE(client.pairTransiently()) << r.name;
+        ASSERT_EQ(client.pairTransiently(), airplay::PairOutcome::Paired) << r.name;
         EXPECT_EQ(client.request("OPTIONS", "*").status, 200) << r.name;
         play({member(name, true)}, 5s);
     }
