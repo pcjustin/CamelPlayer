@@ -44,6 +44,8 @@ public:
     virtual std::string mode() const = 0; // OutputStatus::mode, e.g. "UPnP · Living room"
     // OutputStatus::detail: what the player reports of its own processing, if anything.
     virtual std::string detail() const { return {}; }
+    // Reports its position from the start of a track, so that a position standing at 0 is not yet played.
+    virtual bool reportsPosition() const { return false; }
     // The formats it takes and whether it follows one track with the next; `known` false while it cannot tell yet.
     virtual upnp::PlayerFormats formats(bool& known) = 0;
     virtual bool gapless(bool& known) = 0;

@@ -338,6 +338,7 @@ public:
 
     std::string name() const override { return address_; }
     std::string mode() const override { return "HQPlayer · " + address_; }
+    bool reportsPosition() const override { return true; }
     upnp::PlayerFormats formats(bool& known) override {
         known = true;
         return {.wav = true, .dsf = true};

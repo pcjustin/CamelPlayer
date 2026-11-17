@@ -10,9 +10,11 @@
 #include <cmath>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "DsdFixture.h"
 #include "Engine/FormatRule.h"
@@ -189,6 +191,45 @@ TEST(DsdPlayback, NativeDsdIsTheRawStreamFollowedByIdlePattern) {
     ASSERT_GE(played.bytes.size(), raw.size());
     EXPECT_TRUE(std::equal(raw.begin(), raw.end(), reinterpret_cast<const uint8_t*>(played.bytes.data())));
     EXPECT_TRUE(std::all_of(played.bytes.begin() + ptrdiff_t(raw.size()), played.bytes.end(), [](char b) { return b == 0x69; }));
+}
+
+// A stream another device fetches takes only what was rendered: idle pattern filling a paused or not yet resumed Engine
+// would be played as silence in the middle of the track, and counted by the player but not by the Engine (heard as a
+// jump back of the position on HQPlayer, 2026-11-17).
+TEST(DsdPlayback, AStreamedOutputGetsNoIdlePatternWhilePaused) {
+    struct Probe {
+        IRenderSource* source = nullptr;
+        DeviceFormat format;
+    } probe;
+    class StreamOutput final : public IOutput {
+    public:
+        explicit StreamOutput(Probe& p) : probe_(p) {}
+        bool supports(const DeviceFormat& f) override { return f.type == SampleType::Dsd8; }
+        void open(const DeviceFormat& f, IRenderSource* source) override {
+            probe_.format = f;
+            probe_.source = source;
+        }
+        void start() override {}
+        void pause() override {}
+        void close() override { probe_.source = nullptr; }
+        OutputStatus status() const override { return {"stream", 0, ""}; }
+
+    private:
+        Probe& probe_;
+    };
+    Settings settings;
+    settings.backend = Backend::HQPlayer;
+    PlaybackEngine engine(settings, [&](const Settings&) { return std::make_unique<StreamOutput>(probe); });
+    engine.openAndPlay(dsfFile("streamed", rawDsd(size_t(kDsd64Frames) * 3, 2, 24)));
+    engine.waitIdle();
+    ASSERT_TRUE(probe.source);
+    ASSERT_EQ(probe.format.type, SampleType::Dsd8);
+    engine.pause();
+    engine.waitIdle();
+    std::vector<uint8_t> buffer(size_t(4096) * probe.format.bytesPerFrame());
+    for (int i = 0; i < 20; ++i) EXPECT_EQ(probe.source->render(buffer.data(), 4096), 0U) << "render " << i;
+    engine.stop();
+    engine.waitIdle();
 }
 
 TEST(DsdPlayback, NativeRequestFallsBackToDopNeverToPcm) {

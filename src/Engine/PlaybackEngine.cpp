@@ -296,7 +296,10 @@ public:
         return n;
     }
 
-    bool writesSilence() const noexcept override { return rawDsd_.load(std::memory_order_acquire); }
+    // Not into a stream another device fetches, which takes only what was rendered.
+    bool writesSilence() const noexcept override {
+        return rawDsd_.load(std::memory_order_acquire) && !pulled_.load(std::memory_order_relaxed);
+    }
     size_t boundaryInLastRender() const noexcept override { return boundary_.load(std::memory_order_relaxed); }
     bool renderEnded() const noexcept override { return ended_.load(); }
 

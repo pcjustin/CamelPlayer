@@ -428,6 +428,22 @@ TEST(HQPlayerOutputTest, ATrackIsAddedWhenHQPlayerReadsSamplesBeforeAnswering) {
 }
 
 // HQPlayer on macOS took over 15 s to answer Stop while it stopped DSD, and moved its track meanwhile (2026-11-17).
+// HQPlayer reports its position from the start: while it stays at 0 starting DSD, nothing counts as played, rather than
+// the time since Play as for a player that never reports one.
+TEST(HQPlayerOutputTest, NothingCountsAsPlayedWhileHQPlayerStaysAtItsStart) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    fake.positionHeldFor = 7000ms;
+    const uint64_t frames = 44100ULL * 10;
+    CountingSource source(k16.bytesPerFrame(), frames);
+    OutputRun output(fake, source, k16);
+    output->start();
+    ASSERT_TRUE(eventually([&] { return output->status().heldFrames == frames; }));
+    std::this_thread::sleep_for(5000ms);
+    EXPECT_EQ(fake.state().position, 0.0);
+    EXPECT_EQ(output->status().heldFrames, frames);
+}
+
 TEST(HQPlayerOutputTest, ClosingWhileHQPlayerIsSlowToStopEndsWithoutAnError) {
     testutil::FakeHQPlayer fake;
     fake.plays = true;

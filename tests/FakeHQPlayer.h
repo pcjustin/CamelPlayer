@@ -52,6 +52,8 @@ public:
     std::chrono::milliseconds outputFailsAfter{300};
     // No Status pushed for this long after Play, as HQPlayer starting DSD (about 4 s on 2026-11-16).
     std::chrono::milliseconds quietAfterPlay{0};
+    // Playing at position 0 for this long after Play, as HQPlayer on macOS starting DSD (about 7 s on 2026-11-17).
+    std::chrono::milliseconds positionHeldFor{0};
     // PlaylistAdd answered only once the probe read this many bytes of the stream, as HQPlayer on macOS did with DSF
     // on 2026-11-17.
     std::atomic<size_t> readBeforeAddReply = 0;
@@ -337,8 +339,10 @@ private:
             {
                 std::scoped_lock lock(mutex_);
                 if (state_.state == 2 && wantPlay_) {
-                    state_.position = playedBefore_ + 0.1 +
-                                      std::chrono::duration<double>(std::chrono::steady_clock::now() - playStarted_).count();
+                    const auto since = std::chrono::steady_clock::now() - playStarted_;
+                    state_.position = since < positionHeldFor
+                                          ? playedBefore_
+                                          : playedBefore_ + 0.1 + std::chrono::duration<double>(since - positionHeldFor).count();
                     if (current_ < playlist_.size())
                         if (const auto known = lengths_.find(playlist_[current_]); known != lengths_.end())
                             state_.length = known->second;

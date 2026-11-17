@@ -457,7 +457,7 @@ private:
         if (positionMs) reportsPosition_ = true;
         // A player that never reports a position is taken to play in real time from a start it may take seconds to reach (the
         // DMP-A6 does); 0 is also a track's start.
-        if (!reportsPosition_ && playingSince_ != Clock::time_point{}) {
+        if (!reportsPosition_ && !player_->reportsPosition() && playingSince_ != Clock::time_point{}) {
             // Time paused is not played.
             const auto until = pausedAt_ != Clock::time_point{} ? pausedAt_ : Clock::now();
             const auto elapsed = std::chrono::duration_cast<milliseconds>(until - playingSince_ - pausedFor_).count();
