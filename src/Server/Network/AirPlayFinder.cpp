@@ -155,6 +155,7 @@ struct AirPlayFinder::Impl {
     mutable std::mutex mutex;
     std::vector<Receiver> known;
     std::set<std::string> toCheck;
+    std::set<std::string> checking; // asked for a session now, or about to be
     std::set<std::string> pairedNow;
     std::atomic<bool> stopping = false, searchWanted = false;
     std::thread thread;
@@ -361,9 +362,15 @@ struct AirPlayFinder::Impl {
             std::string& last = lastAsked[receiver.id];
             const bool unchanged = last == askedAt(receiver);
             last = askedAt(receiver);
-            if (!askable || (!session && unchanged)) continue;
-            judge(receiver, session);
+            if (askable && (session || !unchanged)) judge(receiver, session);
+            if (session) {
+                std::scoped_lock lock(mutex);
+                checking.erase(receiver.id);
+            }
         }
+        std::scoped_lock lock(mutex);
+        for (const auto& id : wanted)
+            if (!toCheck.contains(id)) checking.erase(id); // not found, so not asked
     }
 
     void run() {
@@ -415,12 +422,19 @@ void AirPlayFinder::search() {
 void AirPlayFinder::check(const std::string& id) {
     std::scoped_lock lock(impl_->mutex);
     impl_->toCheck.insert(id);
+    impl_->checking.insert(id);
 }
 
 void AirPlayFinder::paired(const std::string& id) {
     std::scoped_lock lock(impl_->mutex);
     impl_->pairedNow.insert(id);
     impl_->toCheck.insert(id);
+    impl_->checking.insert(id);
+}
+
+bool AirPlayFinder::checking(const std::string& id) const {
+    std::scoped_lock lock(impl_->mutex);
+    return impl_->checking.contains(id);
 }
 
 } // namespace camel::server

@@ -1836,6 +1836,7 @@ private:
 
     // The receivers of the group in use as the output asks for them, from any thread (AirPlayOutput.h).
     std::unique_ptr<audio::IOutput> airplayOutput(const Settings&) {
+        waitForChecks();
         // A group refused, by its access setting or by its answer, is asked again at the Play its message asks for: the
         // user may just have let this computer in, which the finder learns only when it asks.
         std::vector<std::string> refused;
@@ -1900,6 +1901,27 @@ private:
         };
         options.commanded = [this](const std::string& id, const airplay::ReceiverEvent& event) { followReceiver(id, event); };
         return createAirPlayGroupOutput(std::move(options));
+    }
+
+    // A receiver just chosen or turned on is asked for a session by the finder. The owner's DMP-A6 closed the stream's
+    // connection while it served that check, and a Play right after choosing it failed with "not connected", so the stream
+    // waits for the group's checks; a Mac's waits for its user's answer, up to 15 s.
+    void waitForChecks() {
+        std::vector<std::string> ids;
+        {
+            std::scoped_lock lock(groupMutex_);
+            for (const auto& member : airplayMembers_) ids.push_back(member.id);
+        }
+        const auto deadline = std::chrono::steady_clock::now() + kChecksWait;
+        while (std::chrono::steady_clock::now() < deadline) {
+            {
+                std::scoped_lock lock(finderMutex_);
+                if (!airplayFinder_ ||
+                    std::ranges::none_of(ids, [&](const std::string& id) { return airplayFinder_->checking(id); }))
+                    return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
     }
 
     // An AirPlay 2 receiver's own buttons act as the same buttons in CamelPlayer; its volume is taken on the Server's thread.
@@ -2369,6 +2391,7 @@ private:
     AirPlayFinderOptions airplayFinderOptions_;
     std::map<std::string, std::string> airplaySupportLogged_; // by receiver: what the log last said of it
     static constexpr int kPairingTimeoutMs = 5000;
+    static constexpr auto kChecksWait = std::chrono::seconds(25);
     std::pair<std::string, std::unique_ptr<airplay::RtspClient>> codeShown_; // the receiver showing a code, by ID
     std::mutex groupMutex_;                                                  // the AirPlay group, as the output reads it
     _Guarded_by_(groupMutex_) std::vector<AirPlayMember> airplayMembers_;

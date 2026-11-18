@@ -931,6 +931,21 @@ TEST_F(AirPlayStreamingTest, AReceiverLetInAgainPlaysAtThePlayItsRefusalAsksFor)
     server->shutdown();
 }
 
+// A receiver just chosen is asked for a session by the finder while the Play that follows opens one. The DMP-A6 closed the
+// Play's connection as it served the check, and the Play failed with "not connected" (2026-11-17 and -18).
+TEST_F(AirPlayStreamingTest, PlayRightAfterChoosingAReceiverPlays) {
+    rtsp_.dropOtherConnections();
+    rtsp_.askUser(500ms); // the check holds the receiver while the Play's connection arrives
+    const auto file = testutil::generatedFile({"airplay-right-after", 44100, 16, 2, 0.5});
+    auto server = serverFor();
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("ANNOUNCE") == 1; })) << "the check of the receiver just chosen";
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.packetCount() > 10 || server->snapshot().playback.error.has_value(); }, 20s));
+    EXPECT_FALSE(server->snapshot().playback.error.has_value()) << server->snapshot().playback.errorDetail;
+    EXPECT_GT(rtsp_.packetCount(), 10U);
+    server->shutdown();
+}
+
 // A Mac or TV, over AirPlay 2: its remote's pause and being turned off act as CamelPlayer's own pause, and its volume
 // becomes the level CamelPlayer shows for it.
 TEST_F(AirPlayStreamingTest, AnAirPlay2ReceiversPauseAndVolumeAreFollowed) {
@@ -1629,19 +1644,15 @@ TEST(AirPlayHardware, DISABLED_PlaysToTheDmpA6) {
     apply.settings = settingsDto(chosen);
     server->submit(std::move(apply));
     server->waitIdle();
-    // The finder looks again once the output changes; the receiver plays once it is found again.
-    const bool played = waitFor(
-        [&] {
-            if (server->snapshot().playback.state != PlaybackState::Playing) {
-                Command play;
-                play.kind = CommandKind::OpenAndPlay;
-                play.source.emplace(toUtf8(file.wstring()));
-                server->submit(std::move(play));
-                server->waitIdle();
-            }
-            return server->snapshot().playback.position > 44100;
-        },
-        20s);
+    // One Play at once: the finder's check of the receiver just chosen no longer makes it fail (OP-R31).
+    Command play;
+    play.kind = CommandKind::OpenAndPlay;
+    play.source.emplace(toUtf8(file.wstring()));
+    server->submit(std::move(play));
+    const bool played =
+        waitFor([&] { return server->snapshot().playback.position > 44100 || server->snapshot().playback.error.has_value(); },
+                20s) &&
+        !server->snapshot().playback.error;
     const auto seen = server->snapshot();
     ASSERT_TRUE(played) << "state " << int(seen.playback.state) << ", position " << seen.playback.position << ", error "
                         << (seen.playback.error ? int(*seen.playback.error) : -1) << " " << seen.playback.errorDetail << ", "

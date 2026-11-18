@@ -47,6 +47,9 @@ public:
     void check(const std::string& id); // asks the receiver for a session, which is closed at once and carries no audio
     // A receiver just paired is listed as playable at once, then asked for a session as `check` does.
     void paired(const std::string& id);
+    // Whether that session is being asked for or is about to be: a receiver that serves one connection at a time closes
+    // another session's meanwhile.
+    bool checking(const std::string& id) const;
 
 private:
     struct Impl;

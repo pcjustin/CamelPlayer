@@ -236,6 +236,10 @@ public:
         }
     }
     void stopAnswering() { silent_ = true; }
+    // Closes a connection made while it serves another, as the owner's DMP-A6 closed a session's while it served the
+    // finder's check (2026-11-18).
+    void dropOtherConnections() { dropOthers_ = true; }
+    int droppedConnections() const { return dropped_; }
     // Holds the answer to ANNOUNCE, AirPlay 2's session SETUP and the request to show a code for `wait`, as a Mac does
     // until its user accepts the sender in a notification.
     void askUser(std::chrono::milliseconds wait) { askUserMs_ = int(wait.count()); }
@@ -388,6 +392,19 @@ private:
         }
     }
 
+    // Closes a connection that waits while another is served, as the DMP-A6 does with a second session.
+    void dropWaiting() {
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(listener_, &readable);
+        const timeval now{0, 0};
+        if (select(0, &readable, nullptr, nullptr, &now) <= 0) return;
+        const SOCKET other = accept(listener_, nullptr, nullptr);
+        if (other == INVALID_SOCKET) return;
+        ++dropped_;
+        closesocket(other);
+    }
+
     void serve() {
         std::vector<char> buffer(65536);
         for (;;) {
@@ -397,6 +414,7 @@ private:
             std::string received, sealed;
             channel_.reset();
             for (;;) {
+                if (dropOthers_) dropWaiting();
                 const int got = recv(client, buffer.data(), int(buffer.size()), 0);
                 if (got <= 0) break;
                 if (channel_) {
@@ -600,8 +618,8 @@ private:
     SOCKET control_ = INVALID_SOCKET;
     SOCKET timing_ = INVALID_SOCKET;
     std::atomic<SOCKET> client_ = INVALID_SOCKET;
-    std::atomic<bool> silent_ = false, timeBeforeSetup_ = false;
-    std::atomic<int> askUserMs_ = 0;
+    std::atomic<bool> silent_ = false, timeBeforeSetup_ = false, dropOthers_ = false;
+    std::atomic<int> askUserMs_ = 0, dropped_ = 0;
     std::vector<camel::server::airplay::Plist> setups_;
     std::string shk_;
     int sealed_ = 0, unopened_ = 0;
