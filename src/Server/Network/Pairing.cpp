@@ -359,10 +359,6 @@ std::string littleEndian(uint64_t value, size_t bytes) {
     return out;
 }
 
-std::string reversed(std::string_view bytes) {
-    return {bytes.rbegin(), bytes.rend()};
-}
-
 uint32_t word(std::string_view bytes, size_t at) {
     return uint32_t(uint8_t(bytes[at])) | uint32_t(uint8_t(bytes[at + 1])) << 8 | uint32_t(uint8_t(bytes[at + 2])) << 16 |
            uint32_t(uint8_t(bytes[at + 3])) << 24;
@@ -459,21 +455,88 @@ std::string chacha20(std::string_view key, uint32_t counter, std::string_view no
     return out;
 }
 
+// RFC 8439 §2.5 in five 26-bit limbs, so that a product of two fits 64 bits: every AirPlay 2 packet is sealed with it, 125
+// times a second for each receiver.
 std::string poly1305(std::string_view key, std::string_view message) {
-    static const Montgomery prime(subtract(Limbs{0, 0, 0, 0, 4}, {5}));
-    std::string clamped(key.substr(0, 16));
-    for (const size_t i : {3, 7, 11, 15}) clamped[i] = char(uint8_t(clamped[i]) & 0x0F);
-    for (const size_t i : {4, 8, 12}) clamped[i] = char(uint8_t(clamped[i]) & 0xFC);
-    const Limbs r = fromBigEndian(reversed(clamped));
-    Limbs accumulator;
+    constexpr uint32_t kLimb = 0x3FFFFFF;
+    const uint32_t r0 = word(key, 0) & 0x3FFFFFF;
+    const uint32_t r1 = (word(key, 3) >> 2) & 0x3FFFF03;
+    const uint32_t r2 = (word(key, 6) >> 4) & 0x3FFC0FF;
+    const uint32_t r3 = (word(key, 9) >> 6) & 0x3F03FFF;
+    const uint32_t r4 = (word(key, 12) >> 8) & 0x00FFFFF;
+    const uint32_t s1 = r1 * 5, s2 = r2 * 5, s3 = r3 * 5, s4 = r4 * 5;
+    uint32_t h0 = 0, h1 = 0, h2 = 0, h3 = 0, h4 = 0;
     for (size_t at = 0; at < message.size(); at += 16) {
-        const Limbs n = fromBigEndian(reversed(std::string(message.substr(at, 16)) + '\x01'));
-        accumulator = prime.product(reduce(add(accumulator, n), prime.modulus()), r);
+        std::string block(message.substr(at, 16));
+        uint32_t high = 1U << 24; // the 2^128 every full block carries
+        if (block.size() < 16) {
+            block += '\x01';
+            block.resize(16, '\0');
+            high = 0;
+        }
+        h0 += word(block, 0) & kLimb;
+        h1 += (word(block, 3) >> 2) & kLimb;
+        h2 += (word(block, 6) >> 4) & kLimb;
+        h3 += (word(block, 9) >> 6) & kLimb;
+        h4 += (word(block, 12) >> 8) | high;
+        const auto m = [](uint32_t a, uint32_t b) { return uint64_t(a) * b; };
+        uint64_t d0 = m(h0, r0) + m(h1, s4) + m(h2, s3) + m(h3, s2) + m(h4, s1);
+        uint64_t d1 = m(h0, r1) + m(h1, r0) + m(h2, s4) + m(h3, s3) + m(h4, s2);
+        uint64_t d2 = m(h0, r2) + m(h1, r1) + m(h2, r0) + m(h3, s4) + m(h4, s3);
+        uint64_t d3 = m(h0, r3) + m(h1, r2) + m(h2, r1) + m(h3, r0) + m(h4, s4);
+        uint64_t d4 = m(h0, r4) + m(h1, r3) + m(h2, r2) + m(h3, r1) + m(h4, r0);
+        d1 += d0 >> 26;
+        h0 = uint32_t(d0) & kLimb;
+        d2 += d1 >> 26;
+        h1 = uint32_t(d1) & kLimb;
+        d3 += d2 >> 26;
+        h2 = uint32_t(d2) & kLimb;
+        d4 += d3 >> 26;
+        h3 = uint32_t(d3) & kLimb;
+        h0 += uint32_t(d4 >> 26) * 5;
+        h4 = uint32_t(d4) & kLimb;
+        h1 += h0 >> 26;
+        h0 &= kLimb;
     }
-    accumulator = add(accumulator, fromBigEndian(reversed(key.substr(16, 16))));
-    accumulator.resize(4, 0);
-    std::string tag;
-    for (const uint32_t limb : accumulator) tag += littleEndian(limb, 4);
+    // Fully carried, then less p where that leaves it positive.
+    h2 += h1 >> 26;
+    h1 &= kLimb;
+    h3 += h2 >> 26;
+    h2 &= kLimb;
+    h4 += h3 >> 26;
+    h3 &= kLimb;
+    h0 += (h4 >> 26) * 5;
+    h4 &= kLimb;
+    h1 += h0 >> 26;
+    h0 &= kLimb;
+    uint32_t g0 = h0 + 5;
+    uint32_t g1 = h1 + (g0 >> 26);
+    g0 &= kLimb;
+    uint32_t g2 = h2 + (g1 >> 26);
+    g1 &= kLimb;
+    uint32_t g3 = h3 + (g2 >> 26);
+    g2 &= kLimb;
+    const uint32_t g4 = h4 + (g3 >> 26) - (1U << 26);
+    g3 &= kLimb;
+    const uint32_t useG = (g4 >> 31) - 1; // all ones when h is at least p
+    h0 = (h0 & ~useG) | (g0 & useG);
+    h1 = (h1 & ~useG) | (g1 & useG);
+    h2 = (h2 & ~useG) | (g2 & useG);
+    h3 = (h3 & ~useG) | (g3 & useG);
+    h4 = (h4 & ~useG) | (g4 & useG);
+    // Modulo 2^128, plus s.
+    const uint32_t w0 = h0 | h1 << 26;
+    const uint32_t w1 = h1 >> 6 | h2 << 20;
+    const uint32_t w2 = h2 >> 12 | h3 << 14;
+    const uint32_t w3 = h3 >> 18 | h4 << 8;
+    uint64_t f = uint64_t(w0) + word(key, 16);
+    std::string tag = littleEndian(uint32_t(f), 4);
+    f = uint64_t(w1) + word(key, 20) + (f >> 32);
+    tag += littleEndian(uint32_t(f), 4);
+    f = uint64_t(w2) + word(key, 24) + (f >> 32);
+    tag += littleEndian(uint32_t(f), 4);
+    f = uint64_t(w3) + word(key, 28) + (f >> 32);
+    tag += littleEndian(uint32_t(f), 4);
     return tag;
 }
 
