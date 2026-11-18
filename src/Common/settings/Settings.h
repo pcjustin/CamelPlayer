@@ -240,8 +240,8 @@ audio::DecoderKind decoderFor(const DecoderByFormat& choices, audio::AudioFormat
 
 // What closing the main window does (docs/Plan.md §8.4).
 enum class CloseAction : uint8_t { Tray, Exit };
-// The window's colours: the Windows app mode, or always light or dark.
-enum class Theme : uint8_t { System, Light, Dark };
+// The window's colours: the Windows app mode, or always light or dark; black is dark with every surface pure black.
+enum class Theme : uint8_t { System, Light, Dark, Black };
 // A lookup on the internet the user is asked about once, where it is first needed.
 enum class OnlineLookup : uint8_t { Ask, Allowed, Refused };
 

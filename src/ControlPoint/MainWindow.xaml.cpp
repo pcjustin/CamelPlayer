@@ -624,7 +624,8 @@ void MainWindow::InitializeComponent() {
             }
         });
     };
-    tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit}, std::wstring(tr(L"Tray_Open")),
+    const auto dark = [this] { return Content().as<FrameworkElement>().ActualTheme() == ElementTheme::Dark; };
+    tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit, dark}, std::wstring(tr(L"Tray_Open")),
                                            std::wstring(tr(L"Tray_Exit")));
     // The window carries the app's AUMID too: the media session takes its app from the window it was created for.
     if (winrt::com_ptr<IPropertyStore> properties; SUCCEEDED(SHGetPropertyStoreForWindow(
@@ -883,7 +884,7 @@ void MainWindow::populateSettings() {
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
     fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
     showStartWithWindows();
-    fill(ThemeCombo(), {tr(L"Theme_System"), tr(L"Theme_Light"), tr(L"Theme_Dark")}, int(settings_.theme));
+    fill(ThemeCombo(), {tr(L"Theme_System"), tr(L"Theme_Light"), tr(L"Theme_Dark"), tr(L"Theme_Black")}, int(settings_.theme));
     populateOutputs();
     populating_ = false;
     updateBackendGroups();
@@ -1669,7 +1670,7 @@ void MainWindow::readSettingsFromUi() {
 
     readOutputParameters(settings_);
     settings_.closeAction = idx(CloseActionCombo()) == 1 ? CloseAction::Exit : CloseAction::Tray;
-    settings_.theme = Theme(std::clamp(idx(ThemeCombo()), 0, 2));
+    settings_.theme = Theme(std::clamp(idx(ThemeCombo()), 0, 3));
 }
 
 void MainWindow::OnAutoplayToggled(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -2732,13 +2733,22 @@ void MainWindow::OnRepeatClick(Windows::Foundation::IInspectable const&, RoutedE
     submitCommand(std::move(command));
 }
 
-// Takes effect at once; the window content carries the theme, and the backdrop and caption buttons follow it.
+// Takes effect at once; the window content carries the theme, and the backdrop and caption buttons follow it. Black is
+// the dark theme on black surfaces without Mica.
 void MainWindow::applyTheme() {
-    const auto theme = settings_.theme == Theme::Light  ? ElementTheme::Light
-                       : settings_.theme == Theme::Dark ? ElementTheme::Dark
-                                                        : ElementTheme::Default;
+    const bool black = settings_.theme == Theme::Black;
+    const auto theme = settings_.theme == Theme::Light    ? ElementTheme::Light
+                       : settings_.theme == Theme::System ? ElementTheme::Default
+                                                          : ElementTheme::Dark;
     const auto content = Content().as<FrameworkElement>();
+    if (black != ui::blackSurfacesShown()) {
+        ui::showBlackSurfaces(black);
+        const bool mica = !black && Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported();
+        SystemBackdrop(mica ? Media::SystemBackdrop(Media::MicaBackdrop()) : nullptr);
+        ThemeBackground().Visibility(mica ? Visibility::Collapsed : Visibility::Visible);
+    }
     if (content.RequestedTheme() != theme) content.RequestedTheme(theme);
+    fileDetails_.setTheme(content.ActualTheme());
 }
 
 Media::Brush MainWindow::themeBrush(const wchar_t* key) const {

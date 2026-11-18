@@ -147,8 +147,26 @@ void FileDetailsWindow::show(HWND owner, hstring const& title, ElementTheme them
     }).detach();
 }
 
+// The black theme takes Mica away.
 void FileDetailsWindow::setTheme(ElementTheme theme) {
-    if (root_ && root_.RequestedTheme() != theme) root_.RequestedTheme(theme);
+    if (!root_) return;
+    if (black_ != blackSurfacesShown()) {
+        black_ = !black_;
+        showBackdrop();
+    }
+    if (root_.RequestedTheme() != theme) root_.RequestedTheme(theme);
+}
+
+bool FileDetailsWindow::mica() const {
+    return !black_ && Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported();
+}
+
+void FileDetailsWindow::showBackdrop() {
+    window_.SystemBackdrop(mica() ? Media::SystemBackdrop(Media::MicaBackdrop()) : nullptr);
+    if (mica())
+        root_.ClearValue(Panel::BackgroundProperty());
+    else
+        root_.Background(themeBrush(root_, L"SolidBackgroundFillColorBaseBrush"));
 }
 
 void FileDetailsWindow::close() {
@@ -177,11 +195,8 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
     root_.Children().Append(scroller);
     window_.Content(root_);
     window_.SetTitleBar(bar);
-    const bool mica = Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported();
-    if (mica)
-        window_.SystemBackdrop(Media::MicaBackdrop());
-    else
-        root_.Background(themeBrush(theme, L"SolidBackgroundFillColorBaseBrush"));
+    black_ = blackSurfacesShown();
+    showBackdrop();
 
     const auto app = window_.AppWindow();
     app.TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
@@ -206,8 +221,8 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
     app.MoveAndResize({x, y, width, height});
 
     colorCaptionButtons();
-    root_.ActualThemeChanged([this, mica](auto&&, auto&&) {
-        if (!mica) root_.Background(themeBrush(root_, L"SolidBackgroundFillColorBaseBrush"));
+    root_.ActualThemeChanged([this](auto&&, auto&&) {
+        if (!mica()) root_.Background(themeBrush(root_, L"SolidBackgroundFillColorBaseBrush"));
         colorCaptionButtons();
         render();
     });

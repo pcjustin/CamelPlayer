@@ -18,6 +18,21 @@ constexpr UINT kIconId = 1;
 constexpr UINT kCallbackMessage = WM_APP + 1;
 constexpr UINT kOpenCommand = 1, kExitCommand = 2;
 
+// Windows draws a process's popup menus light unless the process asks for dark ones, which uxtheme exports only by
+// ordinal: SetPreferredAppMode (135) and FlushMenuThemes (136), since Windows 10 1903.
+void drawMenusDark(bool dark) {
+    enum class AppMode : int { Default, AllowDark, ForceDark, ForceLight };
+    using SetPreferredAppMode = AppMode(WINAPI*)(AppMode);
+    using FlushMenuThemes = void(WINAPI*)();
+    static const HMODULE uxtheme = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!uxtheme) return;
+    const auto setMode = reinterpret_cast<SetPreferredAppMode>(GetProcAddress(uxtheme, MAKEINTRESOURCEA(135)));
+    const auto flush = reinterpret_cast<FlushMenuThemes>(GetProcAddress(uxtheme, MAKEINTRESOURCEA(136)));
+    if (!setMode || !flush) return;
+    setMode(dark ? AppMode::ForceDark : AppMode::ForceLight);
+    flush();
+}
+
 } // namespace
 
 TrayIcon::TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitText)
@@ -78,6 +93,7 @@ void TrayIcon::showMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kExitCommand, exitText_.c_str());
     SetMenuDefaultItem(menu, kOpenCommand, FALSE);
+    drawMenusDark(handlers_.dark && handlers_.dark());
     POINT point{};
     GetCursorPos(&point);
     SetForegroundWindow(window_); // otherwise the menu stays open after clicking elsewhere

@@ -14,4 +14,8 @@ winrt::Microsoft::UI::Xaml::Media::Brush themeBrush(winrt::Microsoft::UI::Xaml::
 winrt::Microsoft::UI::Xaml::Media::Brush themeBrush(winrt::Microsoft::UI::Xaml::FrameworkElement const& element,
                                                     const wchar_t* key);
 
+// The black theme: the dark theme's surface brushes recoloured pure black, and back.
+void showBlackSurfaces(bool black);
+bool blackSurfacesShown();
+
 } // namespace ui

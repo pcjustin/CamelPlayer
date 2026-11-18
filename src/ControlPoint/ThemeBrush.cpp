@@ -8,6 +8,9 @@
 
 #include <winrt/Windows.UI.ViewManagement.h>
 
+#include <algorithm>
+#include <vector>
+
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
 
@@ -25,7 +28,90 @@ Windows::Foundation::IInspectable themed(ResourceDictionary const& dictionary, h
     return nullptr;
 }
 
+// The dark theme's surface brushes. WinUI's dictionary keeps one brush per key, which its controls' own keys alias, so
+// recolouring these turns every surface that uses them black at once.
+constexpr const wchar_t* kSurfaces[] = {
+    L"ApplicationPageBackgroundThemeBrush",
+    L"SolidBackgroundFillColorBaseBrush",
+    L"SolidBackgroundFillColorBaseAltBrush",
+    L"SolidBackgroundFillColorSecondaryBrush",
+    L"SolidBackgroundFillColorTertiaryBrush",
+    L"SolidBackgroundFillColorQuarternaryBrush",
+    L"LayerFillColorDefaultBrush",
+    L"LayerFillColorAltBrush",
+    L"CardBackgroundFillColorDefaultBrush",
+    L"CardBackgroundFillColorSecondaryBrush",
+    L"AcrylicBackgroundFillColorDefaultBrush",
+    L"AcrylicBackgroundFillColorBaseBrush",
+    L"AcrylicInAppFillColorDefaultBrush",
+    L"AcrylicInAppFillColorBaseBrush",
+    L"DesktopAcrylicTransparentBrush",
+};
+
+// The dark theme's strokes that darken what is under them, which black hides: they lighten it instead.
+constexpr const wchar_t* kStrokes[] = {
+    L"CardStrokeColorDefaultBrush",
+    L"SurfaceStrokeColorFlyoutBrush",
+};
+
+// A brush as the dark theme had it: a solid brush's colour, an acrylic one's fallback.
+struct Kept {
+    Media::Brush brush;
+    Windows::UI::Color color;
+    bool alwaysFallback = false;
+};
+
+struct BlackSurfaces {
+    bool shown = false;
+    std::vector<Kept> kept;
+};
+
+BlackSurfaces& blackSurfaces() {
+    static BlackSurfaces surfaces;
+    return surfaces;
+}
+
 } // namespace
+
+void showBlackSurfaces(bool black) {
+    auto& surfaces = blackSurfaces();
+    if (black == surfaces.shown) return;
+    surfaces.shown = black;
+    const Windows::UI::Color pureBlack = Microsoft::UI::Colors::Black();
+    if (!black) {
+        for (const auto& kept : surfaces.kept) {
+            if (const auto solid = kept.brush.try_as<Media::SolidColorBrush>()) solid.Color(kept.color);
+            if (const auto acrylic = kept.brush.try_as<Media::AcrylicBrush>()) {
+                acrylic.FallbackColor(kept.color);
+                acrylic.AlwaysUseFallback(kept.alwaysFallback);
+            }
+        }
+        surfaces.kept.clear();
+        return;
+    }
+    const auto resources = Application::Current().Resources();
+    const auto recolour = [&](const wchar_t* key, Windows::UI::Color color) {
+        const auto name = box_value(key);
+        auto found = themed(resources, L"Dark", name);
+        if (!found) found = themed(resources, L"Default", name);
+        const auto brush = found.try_as<Media::Brush>();
+        if (!brush || std::ranges::any_of(surfaces.kept, [&](const Kept& kept) { return kept.brush == brush; })) return;
+        if (const auto solid = brush.try_as<Media::SolidColorBrush>()) {
+            surfaces.kept.push_back({brush, solid.Color()});
+            solid.Color(color);
+        } else if (const auto acrylic = brush.try_as<Media::AcrylicBrush>()) {
+            surfaces.kept.push_back({brush, acrylic.FallbackColor(), acrylic.AlwaysUseFallback()});
+            acrylic.FallbackColor(color);
+            acrylic.AlwaysUseFallback(true);
+        }
+    };
+    for (const wchar_t* key : kSurfaces) recolour(key, pureBlack);
+    for (const wchar_t* key : kStrokes) recolour(key, Windows::UI::Color{0x29, 0xFF, 0xFF, 0xFF});
+}
+
+bool blackSurfacesShown() {
+    return blackSurfaces().shown;
+}
 
 Media::Brush themeBrush(ElementTheme theme, const wchar_t* key) {
     static const Windows::UI::ViewManagement::AccessibilitySettings accessibility;

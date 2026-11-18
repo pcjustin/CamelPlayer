@@ -244,6 +244,7 @@
   <data name="Theme_System" xml:space="preserve"><value>依 Windows 設定</value></data>
   <data name="Theme_Light" xml:space="preserve"><value>淺色</value></data>
   <data name="Theme_Dark" xml:space="preserve"><value>深色</value></data>
+  <data name="Theme_Black" xml:space="preserve"><value>黑色</value></data>
   <data name="Close_Tray" xml:space="preserve"><value>縮到系統列</value></data>
   <data name="Close_Exit" xml:space="preserve"><value>結束 CamelPlayer</value></data>
   <data name="Search_Box.PlaceholderText" xml:space="preserve"><value>搜尋媒體庫</value></data>

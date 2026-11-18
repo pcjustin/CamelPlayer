@@ -37,6 +37,8 @@ private:
     };
 
     void create(HWND owner, winrt::Microsoft::UI::Xaml::ElementTheme theme);
+    bool mica() const;
+    void showBackdrop();
     void colorCaptionButtons();
     void render();
     winrt::Microsoft::UI::Xaml::Controls::TextBlock text(winrt::hstring const& value);
@@ -49,6 +51,7 @@ private:
     std::shared_ptr<uint64_t> generation_ = std::make_shared<uint64_t>(0);
     winrt::hstring title_;
     std::optional<camel::server::FileDetails> details_;
+    bool black_ = false;
 };
 
 // Opens the details of the track at `pathUtf8`, titled `title`; the main window sets what opens them.

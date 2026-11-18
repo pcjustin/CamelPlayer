@@ -244,6 +244,7 @@
   <data name="Theme_System" xml:space="preserve"><value>Use the Windows setting</value></data>
   <data name="Theme_Light" xml:space="preserve"><value>Light</value></data>
   <data name="Theme_Dark" xml:space="preserve"><value>Dark</value></data>
+  <data name="Theme_Black" xml:space="preserve"><value>Black</value></data>
   <data name="Close_Tray" xml:space="preserve"><value>Minimize to the notification area</value></data>
   <data name="Close_Exit" xml:space="preserve"><value>Exit CamelPlayer</value></data>
   <data name="Search_Box.PlaceholderText" xml:space="preserve"><value>Search the library</value></data>

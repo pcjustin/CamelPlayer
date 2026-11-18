@@ -659,6 +659,14 @@ TEST(SettingsBoundary, TheThemeFollowsWindowsUntilSetAndResetsWithTheInterface) 
     EXPECT_EQ(resetInterface(settings).theme, Theme::System);
 }
 
+TEST(SettingsBoundary, TheBlackThemeIsSavedAsBlack) {
+    Settings settings;
+    settings.theme = Theme::Black;
+    EXPECT_EQ(nlohmann::json::parse(toJson(settings))["theme"], "black");
+    EXPECT_EQ(fromJson(R"({"theme":"black"})").theme, Theme::Black);
+    EXPECT_EQ(fromJson(R"({"theme":"dark"})").theme, Theme::Dark);
+}
+
 TEST(SettingsBoundary, AllFieldsAndModesSurvivePersistence) {
     const auto file = caseFile(".json");
     for (auto mode : {KsMode::Auto, KsMode::WaveRtEvent, KsMode::WaveRtPoll, KsMode::Standard}) {

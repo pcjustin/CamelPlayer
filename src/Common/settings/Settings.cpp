@@ -808,7 +808,10 @@ std::string toJson(const Settings& s) {
     j["convertDsdWhenUnsupported"] = s.convertDsdWhenUnsupported;
     j["language"] = s.language;
     j["closeAction"] = s.closeAction == CloseAction::Exit ? "exit" : "tray";
-    j["theme"] = s.theme == Theme::Light ? "light" : s.theme == Theme::Dark ? "dark" : "system";
+    j["theme"] = s.theme == Theme::Light   ? "light"
+                 : s.theme == Theme::Dark  ? "dark"
+                 : s.theme == Theme::Black ? "black"
+                                           : "system";
     j["trayNoticeShown"] = s.trayNoticeShown;
     j["firstRunDone"] = s.firstRunDone;
     j["autoplay"] = s.autoplay;
@@ -889,7 +892,7 @@ Settings fromJson(const std::string& text) {
     s.language = str(j, "language", "");
     s.closeAction = str(j, "closeAction", "tray") == "exit" ? CloseAction::Exit : CloseAction::Tray;
     const auto theme = str(j, "theme", "system");
-    s.theme = theme == "light" ? Theme::Light : theme == "dark" ? Theme::Dark : Theme::System;
+    s.theme = theme == "light" ? Theme::Light : theme == "dark" ? Theme::Dark : theme == "black" ? Theme::Black : Theme::System;
     s.trayNoticeShown = boolean(j, "trayNoticeShown", false);
     s.firstRunDone = boolean(j, "firstRunDone", false);
     s.autoplay = boolean(j, "autoplay", true);

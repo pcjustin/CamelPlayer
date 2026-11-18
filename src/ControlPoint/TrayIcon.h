@@ -19,6 +19,7 @@ public:
 
     struct Handlers {
         std::function<void()> open, exit;
+        std::function<bool()> dark; // whether the menu is drawn dark, as the window is
     };
     TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitText);
     ~TrayIcon();
