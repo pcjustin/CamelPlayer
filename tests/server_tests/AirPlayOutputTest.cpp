@@ -339,7 +339,12 @@ TEST_F(AirPlayOutputTest, AnAirPlay2ReceiverGetsTheStreamSealedBitForBit) {
     ASSERT_TRUE(packets(40));
     out->close();
 
-    const auto methods = rtsp_.methods();
+    auto methods = rtsp_.methods();
+    ASSERT_GE(methods.size(), 2U);
+    EXPECT_EQ(std::vector<std::string>(methods.begin(), methods.begin() + 2), (std::vector<std::string>{"POST", "POST"}))
+        << "transient pairing first";
+    EXPECT_GT(rtsp_.encryptedRequests(), 0);
+    std::erase(methods, "POST");
     ASSERT_GE(methods.size(), 4U);
     EXPECT_EQ(std::vector<std::string>(methods.begin(), methods.begin() + 4),
               (std::vector<std::string>{"SETUP", "RECORD", "SETUP", "FLUSH"}));
@@ -370,18 +375,57 @@ TEST_F(AirPlayOutputTest, AnAirPlay2ReceiverGetsTheStreamSealedBitForBit) {
     }
 }
 
+// A Mac with no password takes an AirPlay 1 session unpaired, but answers 400 at once to an AirPlay 2 SETUP that does not
+// come over a paired connection (2026-11-18): it is paired transiently first.
+TEST_F(AirPlayOutputTest, AnAirPlay2ReceiverIsPairedThoughAirPlay1NeedsNoPairing) {
+    airplay2_ = true;
+    rtsp_.demandPairing();
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    EXPECT_GT(rtsp_.encryptedRequests(), 0);
+    EXPECT_EQ(rtsp_.setups().size(), 2U);
+    out->close();
+}
+
+// A Mac asks its user before it answers the session's SETUP and answers 400 to a refusal; a 400 at once is the request's.
+TEST_F(AirPlayOutputTest, AnAirPlay2RefusalSaysWhetherTheReceiversUserRefused) {
+    airplay2_ = true;
+    rtsp_.answer("SETUP", 400);
+    CountingSource source(44100);
+    const auto codeOf = [&](std::string& what) {
+        auto out = output();
+        try {
+            out->open(kCd, &source);
+        } catch (const audio::Error& e) {
+            what = e.what();
+            return e.code();
+        }
+        return audio::ErrorCode::Other;
+    };
+    std::string what;
+    EXPECT_EQ(codeOf(what), audio::ErrorCode::DriverError);
+    EXPECT_NE(std::string_view(what), airplay::kNotAllowedOnReceiver);
+    rtsp_.askUser(1200ms);
+    EXPECT_EQ(codeOf(what), audio::ErrorCode::AccessDenied);
+    EXPECT_EQ(std::string_view(what), airplay::kNotAllowedOnReceiver);
+}
+
 TEST_F(AirPlayOutputTest, AnAirPlay2SessionBeatsWithFeedbackAndEndsWithAnEmptyPlist) {
     airplay2_ = true;
     CountingSource source(44100);
+    const auto beats = [&] {
+        return std::ranges::count_if(rtsp_.requestsOf("POST"),
+                                     [](const std::string& r) { return r.starts_with("POST /feedback "); });
+    };
     {
         auto out = output();
         out->open(kCd, &source);
         out->start();
-        ASSERT_TRUE(waitFor([&] { return rtsp_.count("POST") >= 1; }));
+        ASSERT_TRUE(waitFor([&] { return beats() >= 1; }));
         out->close();
     }
     EXPECT_EQ(rtsp_.count("OPTIONS"), 0);
-    EXPECT_TRUE(rtsp_.requestsOf("POST").front().starts_with("POST /feedback "));
     const auto teardowns = rtsp_.requestsOf("TEARDOWN");
     ASSERT_EQ(teardowns.size(), 1U);
     EXPECT_NE(teardowns.front().find("Content-Type: application/x-apple-binary-plist\r\n"), std::string::npos);

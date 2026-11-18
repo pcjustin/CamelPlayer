@@ -195,8 +195,8 @@ public:
         }
     }
     void stopAnswering() { silent_ = true; }
-    // Holds the answer to ANNOUNCE and to the request to show a code for `wait`, as a Mac does until its user accepts the
-    // sender in a notification.
+    // Holds the answer to ANNOUNCE, AirPlay 2's session SETUP and the request to show a code for `wait`, as a Mac does
+    // until its user accepts the sender in a notification.
     void askUser(std::chrono::milliseconds wait) { askUserMs_ = int(wait.count()); }
     // Answers SETUP only once the sender has answered a timing request, as a HomePod does.
     void timeBeforeSetup() { timeBeforeSetup_ = true; }
@@ -406,7 +406,9 @@ private:
             demanded = demandPairing_;
         }
         if (silent_ || (method == "SETUP" && timeBeforeSetup_ && !timedSender())) return true;
-        if ((method == "ANNOUNCE" || request.starts_with("POST /pair-pin-start ")) && askUserMs_ > 0)
+        const bool plist = request.find("Content-Type: application/x-apple-binary-plist\r\n") < headEnd;
+        const bool sessionSetup = method == "SETUP" && plist && request.find("streams", headEnd) == std::string::npos;
+        if ((method == "ANNOUNCE" || sessionSetup || request.starts_with("POST /pair-pin-start ")) && askUserMs_ > 0)
             std::this_thread::sleep_for(std::chrono::milliseconds(askUserMs_.load()));
         const size_t sequence = request.find("CSeq: ");
         std::string reply = "RTSP/1.0 " + std::to_string(status) +
@@ -434,7 +436,7 @@ private:
             sendOut(client, reply);
             return true;
         }
-        if (method == "SETUP" && request.find("Content-Type: application/x-apple-binary-plist\r\n") < headEnd) {
+        if (method == "SETUP" && plist) {
             const std::string answer = answerSetup(request.substr(headEnd + 4));
             sendOut(client, reply + "Content-Type: application/x-apple-binary-plist\r\nContent-Length: " +
                                 std::to_string(answer.size()) + "\r\n\r\n" + answer);
@@ -568,7 +570,7 @@ private:
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;
     std::vector<std::string> requests_;
-    std::string pin_;
+    std::string pin_ = "3939"; // the code transient pairing uses, which a receiver takes though it does not demand it
     bool demandPairing_ = false, keysOnly_ = false;
     int encryptedRequests_ = 0, pinsShown_ = 0;
     std::map<std::string, std::string> controllers_;

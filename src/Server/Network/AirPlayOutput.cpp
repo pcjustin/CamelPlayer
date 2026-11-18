@@ -52,6 +52,7 @@ constexpr size_t kHistoryPackets = uint64_t{4} * kSampleRate / kFramesPerPacket;
 constexpr auto kSyncEvery = seconds(1);
 constexpr auto kPollSockets = milliseconds(20);
 constexpr auto kWaitForFrames = milliseconds(5);
+constexpr auto kUserAnswered = seconds(1); // no one answers a receiver's notification sooner
 constexpr uint64_t kUnixToNtpSeconds = 2208988800ULL;
 constexpr int kStatusOk = 200;
 constexpr int kStatusBadRequest = 400;
@@ -382,11 +383,18 @@ private:
         try {
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
             if (!pairFor(*client, receiver, options_.pairings.get())) throw Error(ErrorCode::AccessDenied, kRefused);
+            // A Mac that takes AirPlay 1 unpaired answers 400 at once to an AirPlay 2 SETUP over a connection not paired.
+            if (!client->encrypted() && client->pairTransiently() != PairOutcome::Paired)
+                throw Error(ErrorCode::AccessDenied, kRefused);
             client->setTimeout(options_.userTimeoutMs);
+            const auto asked = Clock::now();
             const auto session =
                 client->request("SETUP", client->url(), kPlistType, toBinaryPlist(sessionSetup(timingPort_, groupUuid_)));
             client->setTimeout(options_.requestTimeoutMs);
-            if (session.status == kStatusBadRequest) throw Error(ErrorCode::AccessDenied, std::string(kNotAllowedOnReceiver));
+            // The 400 that answers its user's refusal comes once they answer or the notification goes; one at once is the
+            // request's.
+            if (session.status == kStatusBadRequest && Clock::now() - asked >= kUserAnswered)
+                throw Error(ErrorCode::AccessDenied, std::string(kNotAllowedOnReceiver));
             check(session, "SETUP");
             const auto sessionAnswer = parseBinaryPlist(session.body);
             const auto eventPort = sessionAnswer ? eventPortFrom(*sessionAnswer) : std::nullopt;
