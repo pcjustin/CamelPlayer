@@ -174,6 +174,59 @@ TEST_F(AirPlayOutputTest, RequestsCarryTheUserAgentHomePodsAccept) {
     out->close();
 }
 
+// A Mac names the sender in the notification that asks its user to accept it; the same ID on every connection lets it
+// know CamelPlayer again.
+TEST_F(AirPlayOutputTest, RequestsNameCamelPlayerToTheReceiver) {
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    out->close();
+    out.reset();
+    {
+        airplay::RtspClient other("127.0.0.1", rtsp_.port(), 500);
+        other.request("OPTIONS", "*");
+    }
+    const auto idOf = [](const std::string& request) {
+        const std::string name = "X-Apple-Device-ID: ";
+        const size_t at = request.find(name);
+        return at == std::string::npos ? std::string()
+                                       : request.substr(at + name.size(), request.find("\r\n", at) - at - name.size());
+    };
+    const auto requests = rtsp_.requests();
+    ASSERT_GT(requests.size(), 4U);
+    const std::string id = idOf(requests.front());
+    ASSERT_EQ(id.size(), 14U) << id;
+    EXPECT_TRUE(id.starts_with("0x")) << id;
+    for (const auto& request : requests) {
+        EXPECT_NE(request.find("X-Apple-Client-Name: CamelPlayer\r\n"), std::string::npos) << request;
+        EXPECT_EQ(idOf(request), id) << request;
+    }
+}
+
+// A Mac holds ANNOUNCE until its user accepts CamelPlayer, for up to 15 s.
+TEST_F(AirPlayOutputTest, AReceiverThatAsksItsUserIsWaitedFor) {
+    rtsp_.askUser(800ms); // past the fixture's 500 ms for a request
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    EXPECT_EQ(rtsp_.count("RECORD"), 1);
+    out->close();
+}
+
+// A Mac answers 400 when its user declines CamelPlayer or does not answer.
+TEST_F(AirPlayOutputTest, AReceiverWhoseUserDidNotAllowCamelPlayerSaysSo) {
+    rtsp_.answer("ANNOUNCE", 400);
+    CountingSource source(44100);
+    auto out = output();
+    try {
+        out->open(kCd, &source);
+        FAIL() << "opened";
+    } catch (const audio::Error& e) {
+        EXPECT_EQ(e.code(), audio::ErrorCode::AccessDenied);
+        EXPECT_EQ(std::string_view(e.what()), airplay::kNotAllowedOnReceiver);
+    }
+}
+
 TEST_F(AirPlayOutputTest, EachSpeakerOfAPairGetsTheSameStream) {
     FakeRtsp second;
     others_ = {{"127.0.0.1", second.port()}};

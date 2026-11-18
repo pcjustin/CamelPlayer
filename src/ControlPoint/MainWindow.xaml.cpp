@@ -1823,7 +1823,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
     if (const auto& left = snapshot.playback.receiverLeft; left && left->serial != shownReceiverLeft_) {
         shownReceiverLeft_ = left->serial;
-        const hstring why = ui::playerErrorTitle(left->code);
+        const hstring why = ui::playerErrorTitle(left->code, left->detail);
         ReceiverBar().Title(ui::format(L"Output_ReceiverLeft", {std::wstring(ui::utf8(left->name))}));
         ReceiverBar().Message(why.empty() ? ui::errorTitle(left->code) : why);
         ReceiverBar().IsOpen(true);
@@ -2233,7 +2233,7 @@ winrt::fire_and_forget MainWindow::readPlayingFolders(int64_t file) {
 // A network player's reason is said whole in its title; the engine's English detail stays in the log.
 void MainWindow::showError(ErrorCode code, const std::string& detail, Backend backend) {
     const hstring player = backend == Backend::HQPlayer ? ui::hqplayerErrorTitle(code)
-                           : isNetworkPlayer(backend)   ? ui::playerErrorTitle(code)
+                           : isNetworkPlayer(backend)   ? ui::playerErrorTitle(code, detail)
                                                         : hstring{};
     ErrorBar().Severity(InfoBarSeverity::Warning);
     ErrorBar().IsClosable(true);

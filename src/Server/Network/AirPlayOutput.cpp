@@ -53,6 +53,7 @@ constexpr auto kPollSockets = milliseconds(20);
 constexpr auto kWaitForFrames = milliseconds(5);
 constexpr uint64_t kUnixToNtpSeconds = 2208988800ULL;
 constexpr int kStatusOk = 200;
+constexpr int kStatusBadRequest = 400;
 constexpr int kStatusUnauthorized = 401;
 constexpr int kStatusForbidden = 403;
 constexpr int kStatusBusy = 453;
@@ -336,9 +337,14 @@ private:
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
             if (!pairFor(*client, receiver, options_.pairings.get())) throw Error(ErrorCode::AccessDenied, kRefused);
             check(client->request("OPTIONS", "*"), "OPTIONS");
-            check(client->request("ANNOUNCE", client->url(), "application/sdp",
-                                  sessionDescription(client->localAddress(), speaker.address, client->session())),
-                  "ANNOUNCE");
+            // A Mac answers ANNOUNCE once its user accepts CamelPlayer, or with 400 when they decline or let it be.
+            client->setTimeout(options_.userTimeoutMs);
+            const auto announced =
+                client->request("ANNOUNCE", client->url(), "application/sdp",
+                                sessionDescription(client->localAddress(), speaker.address, client->session()));
+            client->setTimeout(options_.requestTimeoutMs);
+            if (announced.status == kStatusBadRequest) throw Error(ErrorCode::AccessDenied, std::string(kNotAllowedOnReceiver));
+            check(announced, "ANNOUNCE");
             const auto transport =
                 std::format("Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port={};timing_port={}\r\n",
                             controlPort_, timingPort_);

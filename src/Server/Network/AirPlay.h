@@ -50,6 +50,9 @@ enum class Support { Supported, EncryptedOnly, Password, Format, Refused, HomeOn
 const char* supportId(Support support);     // empty for Supported
 Support supportFrom(const TxtRecord& raop); // what the receiver declares; only a session shows whether it holds
 
+// Why a session failed when the receiver's user declined CamelPlayer or did not answer; the Control point tells it apart.
+inline constexpr std::string_view kNotAllowedOnReceiver = "the receiver's user did not allow CamelPlayer";
+
 struct Announced {
     std::string deviceId, name, address;
     uint16_t port = 0;

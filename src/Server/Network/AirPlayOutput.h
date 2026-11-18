@@ -45,6 +45,7 @@ struct AirPlayOutputOptions {
     std::function<void()> lookAgain;
     std::shared_ptr<AirPlayPairings> pairings; // what a receiver that asks for a password or a code was paired with
     int requestTimeoutMs = 3000;
+    int userTimeoutMs = 20000; // for ANNOUNCE: a Mac waits 15 s for its user to accept CamelPlayer
     std::chrono::milliseconds heartbeat{5000};
     std::chrono::milliseconds closeSessionAfter{5000};
     // How long a connection the receiver closed waits for its announcement to tell that its access setting changed.

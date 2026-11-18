@@ -69,13 +69,19 @@ struct Answer {
     bool transient = false;
 };
 
+struct Waits {
+    int request = 0, user = 0; // for ANNOUNCE, which a Mac answers once its user accepts CamelPlayer
+};
+
 // What OPTIONS says and, for a session, what ANNOUNCE says after it.
-std::optional<Support> askOn(RtspClient& client, const Receiver& receiver, bool session, bool& optionsRefused) {
+std::optional<Support> askOn(RtspClient& client, const Receiver& receiver, bool session, Waits waits, bool& optionsRefused) {
     const auto options = verdictOf(client.request("OPTIONS", "*").status);
     optionsRefused = options == Support::Refused;
     if (!session || options != Support::Supported) return options;
     const auto description = sessionDescription(client.localAddress(), receiver.address, client.session());
+    client.setTimeout(waits.user);
     const auto announced = verdictOf(client.request("ANNOUNCE", client.url(), "application/sdp", description).status);
+    client.setTimeout(waits.request);
     if (announced == Support::Supported) client.request("TEARDOWN", client.url());
     return announced;
 }
@@ -85,25 +91,25 @@ Support pairingWanted(const Receiver& receiver) {
     return receiver.asksPassword ? Support::Password : receiver.asksCode ? Support::Code : Support::Refused;
 }
 
-std::optional<Answer> ask(const Receiver& receiver, bool session, int timeoutMs, AirPlayPairings* pairings) {
+std::optional<Answer> ask(const Receiver& receiver, bool session, Waits waits, AirPlayPairings* pairings) {
     try {
         bool optionsRefused = false;
         if (pairings && pairings->find(receiver.id)) {
-            RtspClient client(receiver.address, receiver.port, timeoutMs);
+            RtspClient client(receiver.address, receiver.port, waits.request);
             // One that no longer takes what it was paired with asks for it again.
             if (!pairFor(client, receiver, pairings)) return Answer{pairingWanted(receiver)};
-            const auto verdict = askOn(client, receiver, session, optionsRefused);
+            const auto verdict = askOn(client, receiver, session, waits, optionsRefused);
             return verdict ? std::optional(Answer{*verdict}) : std::nullopt;
         }
         {
-            RtspClient client(receiver.address, receiver.port, timeoutMs);
-            const auto plain = askOn(client, receiver, session, optionsRefused);
+            RtspClient client(receiver.address, receiver.port, waits.request);
+            const auto plain = askOn(client, receiver, session, waits, optionsRefused);
             if (!optionsRefused) return plain ? std::optional(Answer{*plain}) : std::nullopt;
         }
         // One that refuses even OPTIONS may take a session once paired.
-        RtspClient paired(receiver.address, receiver.port, timeoutMs);
+        RtspClient paired(receiver.address, receiver.port, waits.request);
         if (paired.pairTransiently() != PairOutcome::Paired) return Answer{pairingWanted(receiver)};
-        const auto after = askOn(paired, receiver, session, optionsRefused);
+        const auto after = askOn(paired, receiver, session, waits, optionsRefused);
         if (!after) return std::nullopt;
         return Answer{*after, *after == Support::Supported};
     } catch (const std::exception& e) {
@@ -317,7 +323,7 @@ struct AirPlayFinder::Impl {
     }
 
     void judge(const Receiver& receiver, bool session) {
-        const auto verdict = ask(receiver, session, options.sessionTimeoutMs, options.pairings.get());
+        const auto verdict = ask(receiver, session, {options.sessionTimeoutMs, options.userTimeoutMs}, options.pairings.get());
         if (!verdict) return;
         verdicts[receiver.id] = {askedAt(receiver), verdict->support, verdict->transient};
         update();

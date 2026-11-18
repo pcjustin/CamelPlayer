@@ -22,6 +22,7 @@ namespace {
 constexpr size_t kMaxReplyBytes = 65536;
 constexpr std::string_view kEndOfHeaders = "\r\n\r\n";
 constexpr std::string_view kUserAgent = "AirPlay/999.0.0 CamelPlayer"; // HomePods on OS 27 refuse any other form tried
+constexpr std::string_view kClientName = "CamelPlayer";
 constexpr std::string_view kEndOfLine = "\r\n";
 constexpr std::string_view kTransientHeaders = "X-Apple-HKP: 4\r\n";
 constexpr std::string_view kPairingHeaders = "X-Apple-HKP: 3\r\n";
@@ -46,6 +47,20 @@ constexpr char kErrorAuthentication = 2;
 
 std::string messageNonce(std::string_view name) {
     return std::string(4, '\0') + std::string(name);
+}
+
+// The same on every connection from this computer, so a receiver that remembers whom its user allowed knows it again: six
+// bytes of a hash of the computer's name, marked as a locally administered address.
+const std::string& senderDeviceId() {
+    static const std::string id = [] {
+        char host[256] = {};
+        gethostname(host, int(sizeof(host)) - 1);
+        const std::string digest = sha512(std::string("CamelPlayer ") + host);
+        std::string text = std::format("0x{:02x}", (uint8_t(digest[0]) & 0xFC) | 0x02);
+        for (size_t i = 1; i < 6; ++i) text += std::format("{:02x}", uint8_t(digest[i]));
+        return text;
+    }();
+    return id;
 }
 
 int numberIn(std::string_view text) {
@@ -113,9 +128,7 @@ RtspClient::RtspClient(const std::string& address, uint16_t port, int timeoutMs)
     }
     u_long blocking = 0;
     ioctlsocket(socket_, FIONBIO, &blocking);
-    const auto timeout = DWORD(timeoutMs);
-    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-    setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setTimeout(timeoutMs);
 
     sockaddr_in local{};
     int length = sizeof(local);
@@ -138,6 +151,12 @@ std::string RtspClient::url() const {
     return std::format("rtsp://{}/{}", localAddress_, session_);
 }
 
+void RtspClient::setTimeout(int timeoutMs) {
+    const auto timeout = DWORD(timeoutMs);
+    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+}
+
 bool RtspClient::closed() const {
     fd_set readable;
     FD_ZERO(&readable);
@@ -150,8 +169,10 @@ bool RtspClient::closed() const {
 
 RtspReply RtspClient::request(std::string_view method, std::string_view url, std::string_view contentType, std::string_view body,
                               std::string_view headers) {
-    std::string message = std::format("{} {} RTSP/1.0\r\nCSeq: {}\r\nUser-Agent: {}\r\nClient-Instance: {}\r\n", method, url,
-                                      ++sequence_, kUserAgent, instance_);
+    // A Mac names the sender from X-Apple-Client-Name when it asks its user to accept it.
+    std::string message = std::format("{} {} RTSP/1.0\r\nCSeq: {}\r\nUser-Agent: {}\r\nClient-Instance: "
+                                      "{}\r\nX-Apple-Client-Name: {}\r\nX-Apple-Device-ID: {}\r\n",
+                                      method, url, ++sequence_, kUserAgent, instance_, kClientName, senderDeviceId());
     if (!sessionHeader_.empty()) message += std::format("Session: {}\r\n", sessionHeader_);
     message += headers;
     if (!body.empty()) message += std::format("Content-Type: {}\r\nContent-Length: {}\r\n", contentType, body.size());

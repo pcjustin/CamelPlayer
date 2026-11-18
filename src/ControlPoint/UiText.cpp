@@ -6,6 +6,7 @@
 
 #include "UiText.h"
 
+#include "Server/Network/AirPlay.h"
 #include "Substitute.h"
 
 namespace ui {
@@ -69,8 +70,10 @@ winrt::hstring errorTitle(camel::audio::ErrorCode code) {
     return tr(L"Error_Other");
 }
 
-winrt::hstring playerErrorTitle(camel::audio::ErrorCode code) {
+winrt::hstring playerErrorTitle(camel::audio::ErrorCode code, std::string_view detail) {
     using camel::audio::ErrorCode;
+    if (code == ErrorCode::AccessDenied && detail == camel::server::airplay::kNotAllowedOnReceiver)
+        return tr(L"Error_ReceiverNotAllowed");
     switch (code) {
     case ErrorCode::DeviceInUse:
         return tr(L"Error_PlayerInUse");

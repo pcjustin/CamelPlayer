@@ -5,6 +5,7 @@
 // Localized strings from Strings\<lang>\Resources.resw (docs/Plan.md §8.5).
 #pragma once
 #include <string>
+#include <string_view>
 
 #include "Common/AudioTypes.h"
 
@@ -16,7 +17,7 @@ void reloadText(); // after the language changes
 winrt::hstring format(const wchar_t* key, std::initializer_list<std::wstring> values);
 winrt::hstring errorTitle(camel::audio::ErrorCode code);
 // A network player's reason for the error in full, or empty where errorTitle and the detail say it.
-winrt::hstring playerErrorTitle(camel::audio::ErrorCode code);
+winrt::hstring playerErrorTitle(camel::audio::ErrorCode code, std::string_view detail = {});
 winrt::hstring hqplayerErrorTitle(camel::audio::ErrorCode code);
 winrt::hstring utf8(const std::string& s);
 std::wstring formatTime(double seconds); // m:ss or h:mm:ss

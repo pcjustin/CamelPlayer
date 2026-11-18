@@ -44,7 +44,8 @@ public:
     const std::string& session() const { return session_; }
     std::string url() const; // of this session
     void setSession(std::string session) { sessionHeader_ = std::move(session); }
-    bool closed() const; // whether the receiver has closed the connection, without waiting
+    void setTimeout(int timeoutMs); // for each request from now on
+    bool closed() const;            // whether the receiver has closed the connection, without waiting
 
     // `headers` are complete lines.
     RtspReply request(std::string_view method, std::string_view url, std::string_view contentType = {},

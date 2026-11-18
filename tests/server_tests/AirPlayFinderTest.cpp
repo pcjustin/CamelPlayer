@@ -349,6 +349,18 @@ TEST_F(AirPlayFinderTest, AReceiverThatTurnsItsPasswordOnAsksForItAndIsAskedAgai
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Supported; }));
 }
 
+// A Mac holds ANNOUNCE until its user accepts the sender, for up to 15 s, past the time a request waits.
+TEST_F(AirPlayFinderTest, AReceiverThatAsksItsUserIsWaitedForWhenTurnedOn) {
+    rtsp_.askUser(1500ms);
+    mdns_.add(record(rtsp_));
+    start(1s);
+    ASSERT_TRUE(found(1));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 1; }));
+    finder_->check("800A805D016B");
+    EXPECT_TRUE(waitFor([&] { return rtsp_.count("TEARDOWN") == 1; }));
+    EXPECT_EQ(supportOf(), Support::Supported);
+}
+
 TEST_F(AirPlayFinderTest, EncryptionOnlyIsNotSupported) {
     auto encrypted = record(rtsp_);
     encrypted.raopTxt = {"am=AudioAccessory5,1", "cn=1", "et=1,3,5"};

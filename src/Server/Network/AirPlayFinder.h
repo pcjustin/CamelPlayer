@@ -30,6 +30,7 @@ struct AirPlayFinderOptions {
     std::chrono::milliseconds searchInterval{60000};
     std::chrono::milliseconds retryInterval{1000}; // between the queries of a search, as answers get lost
     int sessionTimeoutMs = 3000;
+    int userTimeoutMs = 20000;                 // for ANNOUNCE: a Mac waits 15 s for its user to accept CamelPlayer
     std::shared_ptr<AirPlayPairings> pairings; // what a receiver that asks for a password or a code was paired with
 };
 

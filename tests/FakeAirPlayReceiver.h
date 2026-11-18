@@ -171,6 +171,8 @@ public:
         }
     }
     void stopAnswering() { silent_ = true; }
+    // Holds ANNOUNCE's answer for `wait`, as a Mac does until its user accepts the sender in a notification.
+    void askUser(std::chrono::milliseconds wait) { askUserMs_ = int(wait.count()); }
     // Answers SETUP only once the sender has answered a timing request, as a HomePod does.
     void timeBeforeSetup() { timeBeforeSetup_ = true; }
     // Refuses every request until the sender has paired with `pin`; from then on the connection is encrypted.
@@ -317,6 +319,7 @@ private:
             demanded = demandPairing_;
         }
         if (silent_ || (method == "SETUP" && timeBeforeSetup_ && !timedSender())) return true;
+        if (method == "ANNOUNCE" && askUserMs_ > 0) std::this_thread::sleep_for(std::chrono::milliseconds(askUserMs_.load()));
         const size_t sequence = request.find("CSeq: ");
         std::string reply = "RTSP/1.0 " + std::to_string(status) +
                             " Reason\r\nCSeq: " + request.substr(sequence + 6, request.find("\r\n", sequence) - sequence - 6) +
@@ -458,6 +461,7 @@ private:
     SOCKET timing_ = INVALID_SOCKET;
     std::atomic<SOCKET> client_ = INVALID_SOCKET;
     std::atomic<bool> silent_ = false, timeBeforeSetup_ = false;
+    std::atomic<int> askUserMs_ = 0;
     uint16_t port_ = 0, audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;
