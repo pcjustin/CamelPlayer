@@ -45,6 +45,7 @@ struct ScanReport {
     bool online = true;
     uint32_t rootError = 0; // Win32 error distinguishes access denial from a missing/offline root
     size_t seen = 0, updated = 0, moved = 0;
+    size_t edited = 0;  // files already listed whose size or time changed
     size_t deleted = 0; // files missing for 30 days, deleted with what hangs on them
     std::vector<std::string> diagnostics;
 };
@@ -100,6 +101,9 @@ public:
     struct Options {
         std::chrono::milliseconds pollInterval{std::chrono::minutes(30)};     // local roots; zero disables polling
         std::chrono::milliseconds networkPollInterval{std::chrono::hours(6)}; // shares; zero disables polling
+        // A storage whose scan found an edit that no change notification named, as a NAS sends none for a write that keeps a
+        // file's size; kept in the library, so after a restart too.
+        std::chrono::milliseconds missedEditsPollInterval{std::chrono::minutes(30)};
         std::chrono::milliseconds offlineInterval{std::chrono::seconds(60)};
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
         std::function<bool()> coversShown;
@@ -107,6 +111,8 @@ public:
         bool watchChanges = true; // off in tests, standing for a share whose change notifications are missed
         // On in tests, standing for storage that refuses change notifications (some NAS and SMB servers, rclone, WebDAV).
         bool refuseNotifications = false;
+        // On in tests, standing for such a NAS: notifications of a file's contents or times changing are dropped.
+        bool ignoreModified = false;
     };
     explicit LibraryMonitor(LibraryStore& store);
     LibraryMonitor(LibraryStore& store, const Options& options);

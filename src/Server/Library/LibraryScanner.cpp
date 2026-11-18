@@ -1197,8 +1197,9 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .run();
                     file = db.lastInsertId();
                 } else {
-                    if (library::storedVersion(old, 1) != entry.version)
-                        db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
+                    const auto stored = library::storedVersion(old, 1);
+                    if (stored != entry.version) db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
+                    if (stored.size != entry.version.size || stored.mtime != entry.version.mtime) report.edited++;
                     db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
                                "volume_serial=?,file_index=?,created=?,volume_key=?,name=? WHERE id=?")
                         .bind(1, entry.version.size)
@@ -1610,6 +1611,9 @@ private:
         bool pending = false;
         std::set<Path> deferred;  // folders to scan again once nothing plays from this storage
         bool unwatchable = false; // its storage gives no change notifications, so it is only polled
+        bool ignoreModified = false;
+        bool watched = false;     // a whole scan has run since it was armed: what a later one finds changed was not named
+        bool missesEdits = false; // a scan found an edit no notification named: polled at missedEditsPollInterval
         std::function<BackgroundPace()> pace;
         Path root;
         // Folders the notifications named since the last scan; a full scan when they cannot say (overflow, failure,
@@ -1622,6 +1626,11 @@ private:
         void collect(DWORD bytes) {
             for (size_t offset = 0; offset < bytes;) {
                 const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buffer.data() + offset);
+                if (ignoreModified && info->Action == FILE_ACTION_MODIFIED) {
+                    if (!info->NextEntryOffset) break;
+                    offset += info->NextEntryOffset;
+                    continue;
+                }
                 const Path item = root / std::wstring(info->FileName, info->FileNameLength / sizeof(wchar_t));
                 const DWORD attributes = info->Action == FILE_ACTION_REMOVED || info->Action == FILE_ACTION_RENAMED_OLD_NAME
                                              ? INVALID_FILE_ATTRIBUTES
@@ -1671,6 +1680,24 @@ private:
 
     bool arm(Watch& watch) const { return !options_.refuseNotifications && watch.arm(); }
 
+    static std::string missedEditsKey(int64_t root) { return "library_missed_edits:" + std::to_string(root); }
+
+    // An edit a whole scan finds while the storage was watched since the last one is one no notification named.
+    void learnMissedEdits(int64_t root, Watch& watch, const ScanReport& report) {
+        const bool missed = watch.watched && report.edited && !watch.unwatchable && !watch.missesEdits;
+        watch.watched = !watch.unwatchable;
+        if (!missed) return;
+        watch.missesEdits = true;
+        store_
+            .write([&](sqlite::Database& db) {
+                db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)").bind(1, missedEditsKey(root)).run();
+            })
+            .get();
+        log::info("library: %s gave no notification of %zu edited file(s); it is scanned every %lld minutes",
+                  key(watch.root).c_str(), report.edited,
+                  (long long)std::chrono::duration_cast<std::chrono::minutes>(options_.missedEditsPollInterval).count());
+    }
+
     void run(const std::stop_token& stop) {
         SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
         std::map<int64_t, std::unique_ptr<Watch>> watches;
@@ -1715,6 +1742,9 @@ private:
                             watch->directory =
                                 openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
                             watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+                            watch->ignoreModified = options_.ignoreModified;
+                            watch->missesEdits =
+                                db.prepare("SELECT 1 FROM app_state WHERE key=?").bind(1, missedEditsKey(id)).step();
                             if (options_.watchChanges) watch->unwatchable = !(watch->directory && watch->event && arm(*watch));
                             watch->root = path;
                             watch->due = time;
@@ -1724,7 +1754,10 @@ private:
                         auto& watch = *watches.at(id);
                         // A share's change notifications are unreliable, so it is also walked periodically, like Roon's
                         // rescan interval (4 hours by default there).
-                        const auto interval = isNetworkPath(path) ? options_.networkPollInterval : options_.pollInterval;
+                        auto interval = isNetworkPath(path) ? options_.networkPollInterval : options_.pollInterval;
+                        if (watch.missesEdits && options_.missedEditsPollInterval.count() &&
+                            (!interval.count() || options_.missedEditsPollInterval < interval))
+                            interval = options_.missedEditsPollInterval;
                         if (interval.count() && time - watch.lastPoll >= interval) {
                             watch.due = time;
                             watch.full = true;
@@ -1772,11 +1805,14 @@ private:
                         const bool ok = bool(GetOverlappedResult(watch.directory.get(), &watch.io, &bytes, FALSE));
                         const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
                         watch.pending = false;
+                        const bool wasFull = watch.full;
                         // Empty/overflowed buffers and failed notifications both require a full incremental scan.
                         if (ok && bytes)
                             watch.collect(bytes);
                         else
                             watch.full = true;
+                        // A whole scan that notifications start finds what they named, not what they missed.
+                        if (watch.full && !wasFull) watch.watched = false;
                         // A change to nothing the library reads leaves the watch with no folder to scan, and so no scan.
                         if ((watch.full || !watch.changed.empty()) && (watch.due == Clock::time_point{} || (ok && bytes)))
                             watch.due = Clock::now() + options_.coalesce;
@@ -1830,6 +1866,7 @@ private:
                             auto& deferred = watch->second->deferred;
                             if (folders.empty()) deferred.clear();
                             deferred.insert(report.deferred.begin(), report.deferred.end());
+                            if (folders.empty() && report.complete) learnMissedEdits(id, *watch->second, report);
                         }
                         if (!report.complete) again();
                         for (const auto& diagnostic : report.diagnostics) log::warn("library: %s", diagnostic.c_str());

@@ -1076,6 +1076,47 @@ TEST_F(LibraryScannerTest, PeriodicScanRunsWithoutANotification) {
     ASSERT_TRUE(waitFor([&] { return count(store, "SELECT online FROM roots WHERE removed IS NULL") == 1; }));
 }
 
+// The owner's NAS sends no change notification for a write that keeps a file's size, as a tagger writing into a tag's
+// padding makes (2026-11-18). A scan that finds such an edit after the storage was watched has it scanned every half hour
+// from then on, after a restart too, instead of every six hours.
+TEST_F(LibraryScannerTest, AStorageThatMissedAnEditIsScannedSooner) {
+    audio("one.flac");
+    audio("two.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::hours(6);
+    options.missedEditsPollInterval = std::chrono::milliseconds(300);
+    options.offlineInterval = std::chrono::milliseconds(50);
+    options.coalesce = std::chrono::milliseconds(50);
+    options.ignoreModified = true;
+    const auto edit = [&](const char* name) {
+        const auto file = dir / "music" / "album" / name;
+        fs::last_write_time(file, fs::last_write_time(file) + std::chrono::seconds(10));
+    };
+    const auto storedTime = [&](const char* name) {
+        return count(store, (std::string("SELECT mtime FROM files WHERE name='") + name + "'").c_str());
+    };
+    {
+        LibraryMonitor monitor(store, options);
+        ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM roots WHERE last_scan IS NOT NULL") == 1; }));
+        const auto one = storedTime("one.flac");
+        edit("one.flac");
+        monitor.scanAll(); // nothing names the edit, and the next scan is hours away
+        ASSERT_TRUE(waitFor([&] { return storedTime("one.flac") != one; }));
+        const auto two = storedTime("two.flac");
+        edit("two.flac");
+        EXPECT_TRUE(waitFor([&] { return storedTime("two.flac") != two; }));
+    }
+    store.write([](sqlite::Database& db) { db.exec("UPDATE roots SET last_scan=0"); }).get();
+    LibraryMonitor restarted(store, options);
+    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT last_scan FROM roots") > 0; })); // its start's scan
+    const auto two = storedTime("two.flac");
+    edit("two.flac");
+    EXPECT_TRUE(waitFor([&] { return storedTime("two.flac") != two; }));
+}
+
 TEST_F(LibraryScannerTest, AReachableRootIsOnlineBeforeItsScanFinishes) {
     using namespace camel::audio;
     openDecoder(DecoderKind::Sndfile, testutil::testFile("16-44.1k"));

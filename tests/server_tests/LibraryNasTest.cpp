@@ -800,6 +800,57 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
         << Json{{"cases", results}, {"passed", !::testing::Test::HasFailure()}, {"nas_fixture_removed", true}}.dump(2);
 }
 
+// The owner's NAS sends no change notification for a write that keeps a file's size (2026-11-18): a tag edited in its
+// padding is not seen until a scan; once one has found such an edit, the NAS is scanned at the shorter interval. Writes
+// only inside the share's _camelplayer-test folder, which the owner allowed.
+TEST(LibraryNas, DISABLED_AnEditInPlaceIsFollowedOnceTheNasMissedOne) {
+    const auto root = nasRoot() / L"_camelplayer-test" /
+                      (L"missed-edits-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    ASSERT_FALSE(fs::exists(root));
+    fs::create_directories(root);
+    auto cleanup = wil::scope_exit([&] {
+        std::error_code error;
+        fs::remove_all(root, error);
+    });
+    const auto file = root / "one.flac";
+    fs::copy_file(testutil::testFile("16-44.1k"), file);
+    {
+        TagLib::FLAC::File tags(file.c_str()); // saved once, the tag has padding to be edited in
+        tags.tag()->setTitle("Before");
+        ASSERT_TRUE(tags.save());
+    }
+    const auto local = localRun("missed-edits");
+    LibraryStore store(local);
+    LibraryScanner scanner(store);
+    scanner.addRoot(root);
+    LibraryMonitor::Options options;
+    options.offlineInterval = std::chrono::milliseconds(200);
+    options.missedEditsPollInterval = std::chrono::seconds(3);
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
+    const auto retitle = [&](const char* title) {
+        const auto size = fs::file_size(file);
+        TagLib::FLAC::File tags(file.c_str());
+        tags.tag()->setTitle(title);
+        ASSERT_TRUE(tags.save());
+        ASSERT_EQ(fs::file_size(file), size) << "the tag no longer fits its padding";
+    };
+    const auto titled = [&](const char* title) {
+        return count(store, (std::string("SELECT COUNT(*) FROM tracks WHERE title='") + title + "'").c_str()) == 1;
+    };
+    retitle("Edited in place A");
+    std::this_thread::sleep_for(std::chrono::seconds(15));
+    EXPECT_FALSE(titled("Edited in place A")) << "the NAS named the edit after all";
+    monitor.scanAll();
+    ASSERT_TRUE(waitFor([&] { return titled("Edited in place A"); }));
+    const auto edited = Clock::now();
+    retitle("Edited in place B");
+    ASSERT_TRUE(waitFor([&] { return titled("Edited in place B"); }));
+    std::cout << "an edit in place followed in "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - edited).count() << " ms\n"
+              << std::flush;
+}
+
 TEST(LibraryNas, DISABLED_IsolatedChangesOverflowAndReconnection) {
     const auto share = nasRoot();
     const auto name =

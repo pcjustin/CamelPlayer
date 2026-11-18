@@ -225,7 +225,7 @@ A Release run on a real SMB share on 2026-10-23 and 2026-10-24 passed:
 
 - An update from 0.4.1 runs 0.4.1's updater, which deletes every file and folder beside CamelPlayer; from 0.4.2 on, updates touch only the program's own files.
 - Symphonia does not open a FLAC whose every frame is two CONSTANT subframes of silence, as the 4 GB stream check's file; dr_flac and libsndfile decode it.
-- In that NAS environment, tag edits did not reach the index through change notifications within 120 seconds; a test-only 2-second polling interval recovered them. Network shares are polled every 6 hours and local folders every 30 minutes, so a change that notifications miss can stay stale until the next poll.
+- The owner's NAS sends no change notification at all for a write that keeps a file's size, as a tag edited in its padding (a write that renames or resizes a file is notified). Once a scan finds such an edit, CamelPlayer scans that share every 30 minutes instead of every 6 hours and keeps doing so after a restart, so an edit in place is read within about half an hour; Scan now and Scan this folder read it at once (2026-11-18).
 - A physical network interruption during a scan remains untested.
 - A slow link to the NAS holds DSD256 back: it needs 2.82 MB/s, and over this computer's Wi-Fi the NAS once gave 0.7–2.3 MB/s, so a DSD256 file is buffered before it plays (2.4 GHz Wi-Fi later gave 7.7–9.1 MB/s). Over a 100 Mbps wire the NAS gives 11.0 MB/s, and DSD256 from it plays natively on the DAVE with no underrun and no wait (2026-11-18).
 - While the DMP-A6 plays, the log records "network player volume: HTTP request failed (12152)" now and then.
