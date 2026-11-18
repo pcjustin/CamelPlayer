@@ -156,6 +156,7 @@
   <data name="Error_PlayerLost" xml:space="preserve"><value>The player is not connected; press play when it is back</value></data>
   <data name="Error_ReceiverRefuses" xml:space="preserve"><value>The receiver refuses this computer: in the Home app, set Home Settings › Speakers &amp; TV › Allow Speaker &amp; TV Access to Anyone On the Same Network, then press play</value></data>
   <data name="Error_ReceiverNotAllowed" xml:space="preserve"><value>The receiver did not allow CamelPlayer: accept CamelPlayer in the notification on the receiver within 15 seconds, then press play</value></data>
+  <data name="Error_MacRefuses" xml:space="preserve"><value>The Mac allows AirPlay only for its own user: on the Mac, in System Settings › General › AirDrop &amp; Handoff, set Allow AirPlay for to Anyone on the Same Network or Everyone, then press play</value></data>
   <data name="Error_ReceiverRegrouped" xml:space="preserve"><value>The receiver changed, as when speakers are paired or separated in the Home app: choose it again in the output menu; a pair just made plays on by itself</value></data>
   <data name="Error_PlayerDidNotPlay" xml:space="preserve"><value>The player did not start playing; check that it is on and not in standby, then press play</value></data>
   <data name="Library_Empty.Text" xml:space="preserve"><value>No music yet. Add a folder under Settings › Library; it is indexed in the background.</value></data>

@@ -219,6 +219,10 @@ TEST(AirPlayTest, ReceiversWithoutRaopAndMacsTakeAirPlay2) {
     EXPECT_EQ(receivers[2].support, Support::Supported);
     EXPECT_EQ(receivers[2].version, "377.40.00");
     EXPECT_TRUE(receivers[2].asksCode);
+    // A Mac's refusal names its own setting.
+    EXPECT_TRUE(receivers[0].mac);
+    EXPECT_FALSE(receivers[1].mac);
+    EXPECT_FALSE(receivers[2].mac);
 }
 
 // Another maker's stereo pair is one receiver, as Apple's is.

@@ -98,7 +98,7 @@ std::optional<Answer> ask(const Receiver& receiver, bool session, Waits waits, A
         if (pairings && pairings->find(receiver.id)) {
             RtspClient client(receiver.address, receiver.port, waits.request);
             // One that no longer takes what it was paired with asks for it again.
-            if (!pairFor(client, receiver, pairings)) return Answer{pairingWanted(receiver)};
+            if (pairFor(client, receiver, pairings) != PairOutcome::Paired) return Answer{pairingWanted(receiver)};
             const auto verdict = askOn(client, receiver, session, waits, optionsRefused);
             return verdict ? std::optional(Answer{*verdict}) : std::nullopt;
         }

@@ -138,13 +138,15 @@ void AirPlayPairings::forget(const std::string& receiver) {
     if (receivers_.erase(receiver)) store();
 }
 
-bool pairFor(airplay::RtspClient& client, const airplay::Receiver& receiver, AirPlayPairings* pairings) {
+airplay::PairOutcome pairFor(airplay::RtspClient& client, const airplay::Receiver& receiver, AirPlayPairings* pairings) {
+    using airplay::PairOutcome;
     if (const auto credentials = pairings ? pairings->find(receiver.id) : std::nullopt) {
-        if (credentials->keys) return client.pairVerify(pairings->identity(), *credentials->keys);
-        return client.pairTransiently(credentials->password) == airplay::PairOutcome::Paired;
+        if (credentials->keys)
+            return client.pairVerify(pairings->identity(), *credentials->keys) ? PairOutcome::Paired : PairOutcome::WrongCode;
+        return client.pairTransiently(credentials->password);
     }
-    if (receiver.transient) return client.pairTransiently() == airplay::PairOutcome::Paired;
-    return true;
+    if (receiver.transient) return client.pairTransiently();
+    return PairOutcome::Paired;
 }
 
 } // namespace camel::server

@@ -91,6 +91,7 @@ protected:
         airplay::Receiver r{"800A805D016B", "DMP-A6", "127.0.0.1", rtsp_.port(), "105.1", airplay::Support::Supported, others_};
         r.transient = transient_;
         r.airplay2 = airplay2_;
+        r.mac = mac_;
         return r;
     }
 
@@ -124,6 +125,7 @@ protected:
     std::vector<airplay::Speaker> others_;
     bool transient_ = false;
     bool airplay2_ = false;
+    bool mac_ = false;
     std::mutex toldMutex_;
     std::vector<airplay::ReceiverEvent> told_; // what the receiver asked, as the output told it
     std::vector<airplay::ReceiverEvent> told() {
@@ -428,6 +430,32 @@ TEST_F(AirPlayOutputTest, AnAirPlay2RefusalSaysWhetherTheReceiversUserRefused) {
     rtsp_.askUser(1200ms);
     EXPECT_EQ(codeOf(what), audio::ErrorCode::AccessDenied);
     EXPECT_EQ(std::string_view(what), airplay::kNotAllowedOnReceiver);
+}
+
+// A Mac set to allow AirPlay only for its current user answers OPTIONS and transient pair-setup with 403 (the owner's
+// Mac, 2026-11-18): its refusal names the Mac's own setting, which another receiver's does not.
+TEST_F(AirPlayOutputTest, AMacThatAllowsOnlyItsCurrentUserSaysSo) {
+    airplay2_ = true;
+    rtsp_.answer("OPTIONS", 403);
+    rtsp_.answer("POST", 403);
+    CountingSource source(44100);
+    const auto refusal = [&] {
+        auto out = output();
+        try {
+            out->open(kCd, &source);
+        } catch (const audio::Error& e) {
+            return std::pair(e.code(), std::string(e.what()));
+        }
+        return std::pair(audio::ErrorCode::Other, std::string());
+    };
+    mac_ = true;
+    EXPECT_EQ(refusal(), std::pair(audio::ErrorCode::AccessDenied, std::string(airplay::kMacRefused)));
+    transient_ = true; // as one that took a session only once paired, when its setting let CamelPlayer in
+    EXPECT_EQ(refusal(), std::pair(audio::ErrorCode::AccessDenied, std::string(airplay::kMacRefused)));
+    mac_ = false;
+    const auto tv = refusal();
+    EXPECT_EQ(tv.first, audio::ErrorCode::AccessDenied);
+    EXPECT_NE(tv.second, airplay::kMacRefused);
 }
 
 // A Mac holds AirPlay 2's session SETUP, and AirPlay 1's ANNOUNCE, until its user answers: the output says it waits.
@@ -956,6 +984,31 @@ TEST_F(AirPlayStreamingTest, AReceiverLetInAgainPlaysAtThePlayItsRefusalAsksFor)
     play.kind = CommandKind::Play;
     server->submit(play);
     EXPECT_TRUE(waitFor([&] { return rtsp_.packetCount() > 20; }, 8s)) << server->snapshot().playback.errorDetail;
+    server->shutdown();
+}
+
+// The owner's Mac set to allow AirPlay only for its current user refuses OPTIONS and transient pair-setup, so the finder
+// takes it for refused before the Play connects: the Play's refusal names the Mac's own setting (2026-11-18).
+TEST_F(AirPlayStreamingTest, PlayToAMacThatRefusesThisComputerNamesItsSetting) {
+    raopTxt_ = {"am=Mac14,2", "cn=0,1", "et=0,3,5", "vs=1005.13.5"};
+    rtsp_.answer("OPTIONS", 403);
+    rtsp_.answer("POST", 403);
+    const auto file = testutil::generatedFile({"airplay-mac-refuses", 44100, 16, 2, 2.0});
+    auto server = serverFor();
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("POST") > 0; })) << "the finder's transient pairing";
+    std::this_thread::sleep_for(500ms); // its verdict, which the Server then follows
+    Command refresh;
+    refresh.kind = CommandKind::RefreshDevices;
+    server->submit(refresh);
+    server->waitIdle();
+    ASSERT_TRUE(server->snapshot().devices.airplay.empty()) << "a receiver that refuses this computer is not offered";
+    const int pairings = rtsp_.count("POST");
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.error.has_value(); }, 20s));
+    EXPECT_EQ(server->snapshot().playback.error, audio::ErrorCode::AccessDenied);
+    EXPECT_EQ(server->snapshot().playback.errorDetail, airplay::kMacRefused);
+    EXPECT_GT(rtsp_.count("POST"), pairings) << "asked again at the Play";
+    EXPECT_EQ(rtsp_.count("SETUP"), 0);
     server->shutdown();
 }
 

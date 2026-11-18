@@ -1877,7 +1877,7 @@ private:
         std::vector<std::string> refused;
         {
             std::scoped_lock lock(groupMutex_);
-            if (airplayRefused_ &&
+            if (!airplayRefusal_.empty() &&
                 std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); }))
                 for (const auto& member : airplayMembers_) refused.push_back(member.id);
         }
@@ -1906,7 +1906,7 @@ private:
                         if (receiver->support == airplay::Support::Supported) member.receiver = *receiver;
                     }
                     if (std::ranges::any_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); })) {
-                        airplayRefused_ = false;
+                        airplayRefusal_.clear();
                         break;
                     }
                 }
@@ -1916,8 +1916,9 @@ private:
         {
             std::scoped_lock lock(groupMutex_);
             if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); }))
-                throw airplayRefused_ ? audio::Error(audio::ErrorCode::AccessDenied, "the receiver refuses this connection")
-                                      : audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
+                throw !airplayRefusal_.empty()
+                    ? audio::Error(audio::ErrorCode::AccessDenied, airplayRefusal_)
+                    : audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
         }
         AirPlayOutputOptions options;
         options.pairings = airplayPairings_;
@@ -2102,7 +2103,7 @@ private:
         }
         std::vector<AirPlayMember> members;
         std::vector<ReceiverState> states;
-        bool refused = false;
+        std::string refusal; // the first member's that keeps this computer out
         const bool player = receiverVolumeWanted();
         for (const auto& id : airplayGroup()) {
             AirPlayMember member{id};
@@ -2111,8 +2112,10 @@ private:
                 member.support = receiver->support;
                 if (receiver->support == airplay::Support::Supported)
                     member.receiver = *receiver;
-                else
-                    refused = true;
+                else if (refusal.empty())
+                    refusal = receiver->mac && receiver->support == airplay::Support::Refused
+                                  ? std::string(airplay::kMacRefused)
+                                  : "the receiver refuses this connection";
             }
             member.channels = airplayChannels(settings_, id);
             const AirPlayLevel level = levelOf(id);
@@ -2123,7 +2126,7 @@ private:
         std::scoped_lock lock(groupMutex_);
         airplayMembers_ = std::move(members);
         airplayStates_ = std::move(states);
-        airplayRefused_ = refused;
+        airplayRefusal_ = std::move(refusal);
     }
 
     std::unique_ptr<audio::IOutput> networkOutput(const Settings& settings) {
@@ -2442,7 +2445,7 @@ private:
     std::mutex groupMutex_;                                                  // the AirPlay group, as the output reads it
     _Guarded_by_(groupMutex_) std::vector<AirPlayMember> airplayMembers_;
     _Guarded_by_(groupMutex_) std::vector<ReceiverState> airplayStates_;
-    _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
+    _Guarded_by_(groupMutex_) std::string airplayRefusal_; // why the group keeps this computer out; empty while it does not
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, audio::Error>> airplayLeft_;
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, airplay::ReceiverEvent>> receiverVolumes_;
     // The receiver a request waits on for its user to allow CamelPlayer, since when.

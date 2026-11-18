@@ -52,6 +52,8 @@ Support supportFrom(const TxtRecord& raop); // what the receiver declares; only 
 
 // Why a session failed when the receiver's user declined CamelPlayer or did not answer; the Control point tells it apart.
 inline constexpr std::string_view kNotAllowedOnReceiver = "the receiver's user did not allow CamelPlayer";
+// Why a Mac refused even transient pairing: it allows AirPlay only for its current user, which its own settings change.
+inline constexpr std::string_view kMacRefused = "the Mac allows AirPlay only for its current user";
 
 struct Announced {
     std::string deviceId, name, address;
@@ -79,6 +81,7 @@ struct Receiver {
     bool asksCode = false;             // its flags say it pairs once with a code it shows
     // Played over AirPlay 2: it has no RAOP service, or it is a Mac, which takes an AirPlay 1 session and never plays it.
     bool airplay2 = false;
+    bool mac = false;
     bool operator==(const Receiver&) const = default;
 };
 

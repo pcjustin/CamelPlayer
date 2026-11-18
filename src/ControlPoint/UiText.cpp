@@ -74,6 +74,7 @@ winrt::hstring playerErrorTitle(camel::audio::ErrorCode code, std::string_view d
     using camel::audio::ErrorCode;
     if (code == ErrorCode::AccessDenied && detail == camel::server::airplay::kNotAllowedOnReceiver)
         return tr(L"Error_ReceiverNotAllowed");
+    if (code == ErrorCode::AccessDenied && detail == camel::server::airplay::kMacRefused) return tr(L"Error_MacRefuses");
     switch (code) {
     case ErrorCode::DeviceInUse:
         return tr(L"Error_PlayerInUse");

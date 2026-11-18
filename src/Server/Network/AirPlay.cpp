@@ -314,7 +314,8 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
         receiver.asksPassword = asksPassword;
         receiver.asksCode = !asksPassword && (flags & (kPinRequired | kOneTimePairingRequired)) != 0;
         const std::string model = raop ? textOf(lead->raop, "am") : textOf(lead->airplay, "model");
-        receiver.airplay2 = !raop || model.starts_with("Mac") || model.starts_with("iMac"); // Mac14,2, MacBookPro18,1, iMac21,1
+        receiver.mac = model.starts_with("Mac") || model.starts_with("iMac"); // Mac14,2, MacBookPro18,1, iMac21,1
+        receiver.airplay2 = !raop || receiver.mac;
         receivers.push_back(std::move(receiver));
     }
     std::ranges::sort(receivers, {}, [](const Receiver& r) { return std::pair(r.name, r.id); });

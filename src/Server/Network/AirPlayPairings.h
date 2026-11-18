@@ -45,7 +45,7 @@ private:
 };
 
 // Pairs `client` as the receiver needs before a session: with its keys or its password when kept, transiently when it
-// takes that, else not at all. False when the receiver refuses that pairing now.
-bool pairFor(airplay::RtspClient& client, const airplay::Receiver& receiver, AirPlayPairings* pairings);
+// takes that, else not at all. Keys it no longer takes count as a wrong code.
+airplay::PairOutcome pairFor(airplay::RtspClient& client, const airplay::Receiver& receiver, AirPlayPairings* pairings);
 
 } // namespace camel::server

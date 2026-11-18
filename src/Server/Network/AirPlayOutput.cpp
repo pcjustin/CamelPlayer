@@ -366,7 +366,8 @@ private:
     Connected connectToSpeaker(const Speaker& speaker, const Receiver& receiver) {
         try {
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
-            if (!pairFor(*client, receiver, options_.pairings.get())) throw Error(ErrorCode::AccessDenied, kRefused);
+            if (pairFor(*client, receiver, options_.pairings.get()) != PairOutcome::Paired)
+                throw Error(ErrorCode::AccessDenied, kRefused);
             check(client->request("OPTIONS", "*"), "OPTIONS");
             // A Mac answers ANNOUNCE once its user accepts CamelPlayer, or with 400 when they decline or let it be.
             client->setTimeout(options_.userTimeoutMs);
@@ -405,10 +406,11 @@ private:
     Connected connectAirPlay2(const Speaker& speaker, const Receiver& receiver) {
         try {
             auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
-            if (!pairFor(*client, receiver, options_.pairings.get())) throw Error(ErrorCode::AccessDenied, kRefused);
             // A Mac that takes AirPlay 1 unpaired answers 400 at once to an AirPlay 2 SETUP over a connection not paired.
-            if (!client->encrypted() && client->pairTransiently() != PairOutcome::Paired)
-                throw Error(ErrorCode::AccessDenied, kRefused);
+            auto paired = pairFor(*client, receiver, options_.pairings.get());
+            if (paired == PairOutcome::Paired && !client->encrypted()) paired = client->pairTransiently();
+            if (paired == PairOutcome::Refused && receiver.mac) throw Error(ErrorCode::AccessDenied, std::string(kMacRefused));
+            if (paired != PairOutcome::Paired) throw Error(ErrorCode::AccessDenied, kRefused);
             client->setTimeout(options_.userTimeoutMs);
             const auto asked = Clock::now();
             const auto session = [&] {
