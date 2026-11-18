@@ -144,6 +144,47 @@ public:
         return unopened_;
     }
     bool eventChannelOpened() const { return eventsAccepted_ > 0; }
+    // Asks the sender on the event channel, as a receiver's remote does: `POST /command` with `sendMediaRemoteCommand` and
+    // `value`, and `volume` and `isMuted` when `volume` is given. False before the sender has connected.
+    bool sendCommand(const std::string& value, std::optional<double> volume = {}, bool muted = false) {
+        using camel::server::airplay::Plist;
+        Plist command = Plist::dict();
+        command.set("type", Plist::of("sendMediaRemoteCommand")).set("value", Plist::of(std::string_view(value)));
+        if (volume) command.set("volume", Plist::of(*volume)).set("isMuted", Plist::of(muted));
+        const std::string body = camel::server::airplay::toBinaryPlist(command);
+        std::scoped_lock lock(mutex_);
+        if (eventClients_.empty() || sessionKey_.empty()) return false;
+        if (!events_channel_)
+            events_channel_.emplace(
+                camel::server::airplay::hkdfSha512(sessionKey_, "Events-Salt", "Events-Write-Encryption-Key", 32),
+                camel::server::airplay::hkdfSha512(sessionKey_, "Events-Salt", "Events-Read-Encryption-Key", 32));
+        const std::string request =
+            "POST /command RTSP/1.0\r\nCSeq: " + std::to_string(++eventSequence_) +
+            "\r\nContent-Type: application/x-apple-binary-plist\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" +
+            body;
+        const std::string sealed = events_channel_->seal(request);
+        return send(eventClients_.back(), sealed.data(), int(sealed.size()), 0) == int(sealed.size());
+    }
+    // The sender's answers on the event channel that said 200.
+    int eventAnswers() {
+        std::scoped_lock lock(mutex_);
+        if (eventClients_.empty() || !events_channel_) return 0;
+        for (;;) {
+            fd_set readable;
+            FD_ZERO(&readable);
+            FD_SET(eventClients_.back(), &readable);
+            const timeval now{0, 0};
+            if (select(0, &readable, nullptr, nullptr, &now) <= 0) break;
+            char buffer[2048];
+            const int got = recv(eventClients_.back(), buffer, sizeof(buffer), 0);
+            if (got <= 0) break;
+            eventsSealed_.append(buffer, size_t(got));
+            if (const auto opened = events_channel_->open(eventsSealed_)) eventsPlain_ += *opened;
+        }
+        int answers = 0;
+        for (size_t at = 0; (at = eventsPlain_.find("RTSP/1.0 200 OK", at)) != std::string::npos; at += 15) ++answers;
+        return answers;
+    }
     // A sealed packet's payload, as a resend carries one; empty when it does not open.
     std::string openSealed(std::string_view packet) {
         std::scoped_lock lock(mutex_);
@@ -331,6 +372,7 @@ private:
             const SOCKET accepted = accept(events_, nullptr, nullptr);
             if (accepted != INVALID_SOCKET) {
                 ++eventsAccepted_;
+                std::scoped_lock lock(mutex_);
                 eventClients_.push_back(accepted);
             }
         }
@@ -490,9 +532,10 @@ private:
                 return;
             }
             sendTlv(client, reply, ap::tlv({{6, "\x04"}, {4, checked->second}}));
-            if (transient_)
+            if (transient_) {
                 channel_ = ap::SecureChannel::forReceiver(checked->first);
-            else
+                sessionKey_ = checked->first;
+            } else
                 setupKey_ = checked->first;
             return;
         }
@@ -547,6 +590,7 @@ private:
         }
         sendTlv(client, reply, ap::tlv({{6, "\x04"}}));
         channel_ = ap::SecureChannel::forReceiver(verifyShared_);
+        sessionKey_ = verifyShared_;
     }
 
     static constexpr const char* kAccessoryId = "FA:KE:00:00:00:01";
@@ -566,6 +610,10 @@ private:
     uint16_t eventsPort_ = 0;
     std::atomic<int> eventsAccepted_ = 0;
     std::vector<SOCKET> eventClients_;
+    std::string sessionKey_; // the pairing's, which the event channel's keys derive from
+    std::optional<camel::server::airplay::SecureChannel> events_channel_;
+    std::string eventsSealed_, eventsPlain_;
+    int eventSequence_ = 0;
     uint16_t port_ = 0, audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;

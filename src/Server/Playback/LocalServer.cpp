@@ -1898,7 +1898,28 @@ private:
             std::scoped_lock lock(groupMutex_);
             airplayLeft_.emplace_back(id, why);
         };
+        options.commanded = [this](const std::string& id, const airplay::ReceiverEvent& event) { followReceiver(id, event); };
         return createAirPlayGroupOutput(std::move(options));
+    }
+
+    // An AirPlay 2 receiver's own buttons act as the same buttons in CamelPlayer; its volume is taken on the Server's thread.
+    void followReceiver(const std::string& id, const airplay::ReceiverEvent& event) {
+        using airplay::ReceiverCommand;
+        if (event.command == ReceiverCommand::Volume) {
+            std::scoped_lock lock(groupMutex_);
+            receiverVolumes_.emplace_back(id, event);
+            return;
+        }
+        Command command;
+        command.kind = event.command == ReceiverCommand::TogglePause ? CommandKind::TogglePause
+                       : event.command == ReceiverCommand::Next      ? CommandKind::Next
+                       : event.command == ReceiverCommand::Previous  ? CommandKind::Previous
+                                                                     : CommandKind::Pause;
+        try {
+            enqueue(std::move(command));
+        } catch (const std::exception& e) {
+            log::info("AirPlay receiver %s: %s", id.c_str(), e.what()); // the Server is closing
+        }
     }
 
     bool receiverVolumeWanted() const {
@@ -1982,9 +2003,19 @@ private:
 
     void followAirPlayGroup() {
         std::vector<std::pair<std::string, audio::Error>> left;
+        std::vector<std::pair<std::string, airplay::ReceiverEvent>> volumes;
         {
             std::scoped_lock lock(groupMutex_);
             left.swap(airplayLeft_);
+            volumes.swap(receiverVolumes_);
+        }
+        // A receiver's own volume becomes the level CamelPlayer shows and keeps for it.
+        for (const auto& [id, event] : volumes) {
+            if (!receiverVolumeWanted() || std::ranges::find(settings_.airplayGroup, id) == settings_.airplayGroup.end())
+                continue;
+            settings_.airplayLevels[id] = {uint32_t(std::lround(event.volume * 100)), event.muted};
+            groupBaseline_.reset();
+            persist();
         }
         std::vector<airplay::Receiver> found;
         {
@@ -2344,6 +2375,7 @@ private:
     _Guarded_by_(groupMutex_) std::vector<ReceiverState> airplayStates_;
     _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, audio::Error>> airplayLeft_;
+    _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, airplay::ReceiverEvent>> receiverVolumes_;
     std::optional<ReceiverLeft> receiverLeft_;
     std::optional<std::chrono::steady_clock::time_point> pairedAt_; // when the receiver in use went into a pair
     mutable std::mutex lyricsMutex_;

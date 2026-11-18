@@ -54,6 +54,7 @@ public:
     void setTimeout(int timeoutMs);                         // for each request from now on
     bool closed() const;                                    // whether the receiver has closed the connection, without waiting
     bool encrypted() const { return channel_.has_value(); } // paired
+    const std::string& sessionKey() const { return sessionKey_; } // the pairing's, which AirPlay 2's other channels derive from
 
     // `headers` are complete lines.
     RtspReply request(std::string_view method, std::string_view url, std::string_view contentType = {},
@@ -72,7 +73,7 @@ public:
 
 private:
     SOCKET socket_ = INVALID_SOCKET;
-    std::string localAddress_, session_, instance_, sessionHeader_;
+    std::string localAddress_, session_, instance_, sessionHeader_, sessionKey_;
     std::map<uint8_t, std::string> pairingStep(std::string_view path, std::string_view headers, const TlvItems& items,
                                                bool& answered);
     std::optional<SrpProof> exchangeProofs(std::string_view pin, bool transient, PairOutcome& failure);

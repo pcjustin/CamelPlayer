@@ -20,6 +20,7 @@
 #include "Common/settings/Settings.h"
 #include "OutputBridge/IOutput.h"
 #include "Server/Network/AirPlay.h"
+#include "Server/Network/AirPlay2.h"
 #include "Server/Network/AirPlayPairings.h"
 #include "Server/Network/NetworkOutput.h"
 
@@ -44,6 +45,8 @@ struct AirPlayOutputOptions {
     // Asks the receivers' announcements again, as one whose access setting changed closes its connection only then.
     std::function<void()> lookAgain;
     std::shared_ptr<AirPlayPairings> pairings; // what a receiver that asks for a password or a code was paired with
+    // What an AirPlay 2 receiver asks on its event channel: its remote's buttons, a pause when it is turned off, its volume.
+    std::function<void(const std::string& id, const airplay::ReceiverEvent& event)> commanded;
     int requestTimeoutMs = 3000;
     int userTimeoutMs = airplay::kUserAnswerTimeoutMs; // for ANNOUNCE, which a Mac holds until its user accepts CamelPlayer
     std::chrono::milliseconds heartbeat{5000};

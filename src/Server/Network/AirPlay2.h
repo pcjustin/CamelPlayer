@@ -12,7 +12,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "Server/Network/Pairing.h"
 #include "Server/Network/Plist.h"
 
 namespace camel::server::airplay {
@@ -37,5 +39,34 @@ std::optional<uint16_t> eventPortFrom(const Plist& answer);      // from its ans
 
 // The RTP packet `rtp` with its payload sealed: the header's timestamp and SSRC as AAD, and the 8-byte nonce after the tag.
 std::string sealedRtpPacket(std::string_view rtp, std::string_view key, uint64_t nonce);
+
+// What a receiver asks of the sender on its event channel (`POST /command`, `sendMediaRemoteCommand`), as the owner's TV
+// and Mac sent them (2026-11-18): its remote's play/pause (`plps`), next (`nitm`) and previous (`pitm`), a pause when it is
+// turned off (`pbpr`, `pbal`), and its own volume (`dvlc`).
+enum class ReceiverCommand : uint8_t { TogglePause, Pause, Next, Previous, Volume };
+struct ReceiverEvent {
+    ReceiverCommand command = ReceiverCommand::Pause;
+    double volume = 0; // 0 to 1 over AirPlay's -30 to 0 dB, for Volume
+    bool muted = false;
+    bool operator==(const ReceiverEvent&) const = default;
+};
+std::optional<ReceiverEvent> receiverEventFrom(const Plist& command); // nothing for one CamelPlayer does not follow
+
+// A session's event channel, sealed as its RTSP connection with keys of its own: the receiver's requests, read without
+// waiting, each answered 200.
+class EventChannel {
+public:
+    EventChannel(const std::string& address, uint16_t port, std::string_view sessionKey, int timeoutMs);
+    ~EventChannel();
+    EventChannel(const EventChannel&) = delete;
+    EventChannel& operator=(const EventChannel&) = delete;
+
+    std::vector<ReceiverEvent> read();
+
+private:
+    uintptr_t socket_ = 0; // a SOCKET
+    SecureChannel channel_;
+    std::string sealed_, plain_;
+};
 
 } // namespace camel::server::airplay

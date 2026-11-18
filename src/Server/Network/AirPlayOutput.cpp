@@ -105,7 +105,7 @@ struct Connected {
     std::unique_ptr<RtspClient> client;
     Destination destination;
     uint32_t latency = kDefaultAudioLatency;
-    std::unique_ptr<RtspClient> events; // AirPlay 2's event channel, held open: the receiver goes on only while it is
+    std::unique_ptr<EventChannel> events; // AirPlay 2's: the receiver goes on only while it is open
 };
 
 // A receiver of the group: one session for it, or one for each speaker of a stereo pair.
@@ -114,7 +114,10 @@ struct Member {
     AirPlayChannels channels = AirPlayChannels::Stereo;
     bool airplay2 = false;
     std::vector<std::unique_ptr<RtspClient>> sessions;
-    std::vector<std::unique_ptr<RtspClient>> events;
+    std::vector<std::unique_ptr<EventChannel>> events;
+    // The start at which it asked for a pause: its volume is not taken until playing starts again, as a TV turned off
+    // says it is muted.
+    std::optional<uint64_t> pausedAtStart;
     std::vector<Destination> destinations;
     uint32_t latency = kDefaultAudioLatency;
     std::optional<double> volumeSent;
@@ -229,6 +232,7 @@ public:
         runRtp_ = rtpNext_;
         for (auto& target : targets_) target.firstSync = target.firstPacket = true;
         running_ = true;
+        ++starts_;
         moved_.notify_all();
     }
 
@@ -399,7 +403,8 @@ private:
             const auto sessionAnswer = parseBinaryPlist(session.body);
             const auto eventPort = sessionAnswer ? eventPortFrom(*sessionAnswer) : std::nullopt;
             if (!eventPort) throw Error(ErrorCode::DriverError, "the receiver gave no event port");
-            auto events = std::make_unique<RtspClient>(speaker.address, *eventPort, options_.requestTimeoutMs);
+            auto events =
+                std::make_unique<EventChannel>(speaker.address, *eventPort, client->sessionKey(), options_.requestTimeoutMs);
             check(client->request("RECORD", client->url(), {}, {}, "Range: npt=0-\r\n"), "RECORD");
             std::string key = randomBytes(kStreamKeyBytes);
             const auto stream = client->request("SETUP", client->url(), kPlistType,
@@ -571,6 +576,7 @@ private:
         std::vector<std::pair<std::string, ErrorCode>> lost;
         for (auto& member : members_) {
             const auto w = std::ranges::find_if(wanted, [&](const AirPlayMember& m) { return m.id == member.id; });
+            followReceiver(member);
             try {
                 for (const auto& client : member.sessions)
                     if (client->closed()) throw RtspClosed();
@@ -605,6 +611,17 @@ private:
                  : code == ErrorCode::DeviceChanged ? kChanged
                                                     : kNotConnected);
         if (!members_.empty() && now >= closeAt_.load()) endSession();
+    }
+
+    // What an AirPlay 2 receiver asked on its event channel goes to the Server; its volume, unless it asked to pause since
+    // playing last started.
+    void followReceiver(Member& member) {
+        for (const auto& channel : member.events)
+            for (const auto& event : channel->read()) {
+                if (event.command == ReceiverCommand::Pause) member.pausedAtStart = starts_.load();
+                if (event.command == ReceiverCommand::Volume && member.pausedAtStart == starts_.load()) continue;
+                if (options_.commanded) options_.commanded(member.id, event);
+            }
     }
 
     std::optional<TrackNotice> nextNotice() {
@@ -813,6 +830,7 @@ private:
     Clock::time_point steadyStart_;
     std::thread service_, session_, sender_;
     std::atomic<bool> stopping_ = false, opened_ = false, sentSinceFlush_ = false;
+    std::atomic<uint64_t> starts_ = 0; // each time the stream starts playing
 
     std::mutex rtspMutex_; // taken before `mutex_`
     _Guarded_by_(rtspMutex_) std::vector<Member> members_;

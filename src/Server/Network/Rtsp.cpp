@@ -242,6 +242,7 @@ PairOutcome RtspClient::pairTransiently(std::string_view pin) {
     const auto proof = exchangeProofs(pin, true, failure);
     if (!proof) return failure;
     channel_ = SecureChannel::forSender(proof->sessionKey);
+    sessionKey_ = proof->sessionKey;
     return PairOutcome::Paired;
 }
 
@@ -302,6 +303,7 @@ bool RtspClient::pairVerify(const PairingIdentity& me, const PairedReceiver& rec
                     {{TagState, "\x03"}, {TagEncryptedData, airplay::seal(key, messageNonce("PV-Msg03"), {}, answer)}}, answered);
     if (!answered || items.contains(TagError)) return false;
     channel_ = SecureChannel::forSender(shared);
+    sessionKey_ = shared;
     return true;
 }
 

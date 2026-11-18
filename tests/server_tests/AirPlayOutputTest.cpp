@@ -103,6 +103,10 @@ protected:
         options.closeSessionAfter = 300ms;
         options.closedVerdictAfter = 300ms;
         options.pairings = pairings_;
+        options.commanded = [this](const std::string&, const airplay::ReceiverEvent& event) {
+            std::scoped_lock lock(toldMutex_);
+            told_.push_back(event);
+        };
         auto created = createAirPlayOutput(receiver(), options);
         created->setErrorHandler([this](const audio::Error& e) { error_ = int(e.code()) + 1; });
         return created;
@@ -116,6 +120,12 @@ protected:
     std::vector<airplay::Speaker> others_;
     bool transient_ = false;
     bool airplay2_ = false;
+    std::mutex toldMutex_;
+    std::vector<airplay::ReceiverEvent> told_; // what the receiver asked, as the output told it
+    std::vector<airplay::ReceiverEvent> told() {
+        std::scoped_lock lock(toldMutex_);
+        return told_;
+    }
     std::shared_ptr<AirPlayPairings> pairings_ = std::make_shared<AirPlayPairings>();
     std::atomic<int> error_ = 0;
 };
@@ -409,6 +419,56 @@ TEST_F(AirPlayOutputTest, AnAirPlay2RefusalSaysWhetherTheReceiversUserRefused) {
     rtsp_.askUser(1200ms);
     EXPECT_EQ(codeOf(what), audio::ErrorCode::AccessDenied);
     EXPECT_EQ(std::string_view(what), airplay::kNotAllowedOnReceiver);
+}
+
+// The owner's TV and Mac (2026-11-18): play/pause, next and previous from the remote, a pause when turned off; each request
+// is answered.
+TEST_F(AirPlayOutputTest, AnAirPlay2ReceiversButtonsAreTold) {
+    using airplay::ReceiverCommand;
+    airplay2_ = true;
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(10));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.sendCommand("plps"); }));
+    ASSERT_TRUE(rtsp_.sendCommand("nitm"));
+    ASSERT_TRUE(rtsp_.sendCommand("pitm"));
+    ASSERT_TRUE(rtsp_.sendCommand("xxxx")); // one CamelPlayer does not follow
+    ASSERT_TRUE(rtsp_.sendCommand("pbpr"));
+    ASSERT_TRUE(waitFor([&] { return told().size() >= 4; }));
+    std::vector<ReceiverCommand> commands;
+    for (const auto& event : told()) commands.push_back(event.command);
+    EXPECT_EQ(commands, (std::vector<ReceiverCommand>{ReceiverCommand::TogglePause, ReceiverCommand::Next,
+                                                      ReceiverCommand::Previous, ReceiverCommand::Pause}));
+    EXPECT_TRUE(waitFor([&] { return rtsp_.eventAnswers() == 5; }));
+    out->close();
+}
+
+// Its own volume is told, except after it asked for a pause until playing starts again: a TV turned off says it is muted.
+TEST_F(AirPlayOutputTest, AnAirPlay2ReceiversVolumeIsToldExceptAfterItsPause) {
+    using airplay::ReceiverCommand;
+    airplay2_ = true;
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(10));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.sendCommand("dvlc", 0.21); }));
+    ASSERT_TRUE(waitFor([&] { return told().size() == 1; }));
+    EXPECT_EQ(told()[0], (airplay::ReceiverEvent{ReceiverCommand::Volume, 0.21, false}));
+    ASSERT_TRUE(rtsp_.sendCommand("pbal"));
+    ASSERT_TRUE(rtsp_.sendCommand("dvlc", 0.04, true));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.eventAnswers() == 3; }));
+    std::this_thread::sleep_for(100ms);
+    ASSERT_EQ(told().size(), 2U);
+    EXPECT_EQ(told()[1].command, ReceiverCommand::Pause);
+    out->pause();
+    out->start();
+    ASSERT_TRUE(rtsp_.sendCommand("dvlc", 0.3, true));
+    ASSERT_TRUE(waitFor([&] { return told().size() == 3; }));
+    EXPECT_EQ(told()[2], (airplay::ReceiverEvent{ReceiverCommand::Volume, 0.3, true}));
+    out->close();
 }
 
 TEST_F(AirPlayOutputTest, AnAirPlay2SessionBeatsWithFeedbackAndEndsWithAnEmptyPlist) {
@@ -797,6 +857,7 @@ protected:
         record.name = "DMP-A6";
         record.host = "dmp";
         record.port = rtsp_.port();
+        if (!raopTxt_.empty()) record.raopTxt = raopTxt_;
         mdns_.add(record);
         settings.autoplay = false;
         auto server = std::make_unique<LocalServer>(settings);
@@ -838,6 +899,7 @@ protected:
         return pcm;
     }
 
+    std::vector<std::string> raopTxt_; // the record's, when the test gives one
     FakeRtsp rtsp_;
     FakeMdns mdns_;
 };
@@ -866,6 +928,25 @@ TEST_F(AirPlayStreamingTest, AReceiverLetInAgainPlaysAtThePlayItsRefusalAsksFor)
     play.kind = CommandKind::Play;
     server->submit(play);
     EXPECT_TRUE(waitFor([&] { return rtsp_.packetCount() > 20; }, 8s)) << server->snapshot().playback.errorDetail;
+    server->shutdown();
+}
+
+// A Mac or TV, over AirPlay 2: its remote's pause and being turned off act as CamelPlayer's own pause, and its volume
+// becomes the level CamelPlayer shows for it.
+TEST_F(AirPlayStreamingTest, AnAirPlay2ReceiversPauseAndVolumeAreFollowed) {
+    raopTxt_ = {"am=Mac14,2", "cn=0,1", "et=0,3,5", "vs=1005.13.5"};
+    const auto file = testutil::generatedFile({"airplay2-commands", 44100, 16, 2, 10.0});
+    auto server = serverFor();
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.packetCount() > 20; })) << server->snapshot().playback.errorDetail;
+    EXPECT_GT(rtsp_.sealedPackets(), 0);
+    ASSERT_TRUE(waitFor([&] { return rtsp_.sendCommand("dvlc", 0.37); }));
+    EXPECT_TRUE(waitFor([&] {
+        const auto receivers = server->snapshot().playback.receivers;
+        return !receivers.empty() && receivers.front().level == 37;
+    }));
+    ASSERT_TRUE(rtsp_.sendCommand("pbpr"));
+    EXPECT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Paused; }));
     server->shutdown();
 }
 
