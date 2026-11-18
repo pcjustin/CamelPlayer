@@ -7,15 +7,19 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <taglib/flacfile.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <regex>
 
 #include "Common/util/Text.h"
 #include "Server/Artwork/ArtworkCache.h"
 #include "Server/Library/ArtistPictures.h"
+#include "Server/Library/LibraryScanner.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -41,7 +45,7 @@ std::vector<uint8_t> bitmap(int width, int height, uint32_t top, uint32_t bottom
     put(28, 24, 2);
     put(34, pixels, 4);
     for (int y = 0; y < height; ++y) // bottom-up rows
-        for (int x = 0; x < width; ++x) put(54 + size_t(y) * stride + x * 3, y < height / 2 ? bottom : top, 3);
+        for (int x = 0; x < width; ++x) put(54 + size_t(y) * stride + size_t(x) * 3, y < height / 2 ? bottom : top, 3);
     return out;
 }
 
@@ -147,6 +151,41 @@ TEST(ArtistPictureParsing, MatchesExactNamesAndAliasesOnly) {
     EXPECT_TRUE(online::matchingArtists(R"({"artists":[]})", "Nobody").empty());
 }
 
+// 23 MusicBrainz artists are named John Williams (OP-R17): the one MusicBrainz credits with the library's album comes
+// first, then those whose years and genres fit the library's tracks; each says what tells it apart.
+TEST(ArtistPictureParsing, RanksTheArtistsOfANameByWhatTheLibraryKnows) {
+    const auto json = R"({"artists":[
+        {"id":"guitarist","name":"John Williams","score":100,"type":"Person","disambiguation":"classical guitarist",
+         "area":{"name":"Australia"},"life-span":{"begin":"1941-04-24"},"tags":[{"name":"classical"}]},
+        {"id":"rapper","name":"John Williams","score":95,"type":"Person","life-span":{"begin":"2004"}},
+        {"id":"composer","name":"John Williams","score":90,"type":"Person","disambiguation":"film composer",
+         "area":{"name":"United States"},"life-span":{"begin":"1932-02-08"},"tags":[{"name":"soundtrack"},{"name":"film score"}]},
+        {"id":"singer","name":"John Williams","score":80,"type":"Person","life-span":{"begin":"1930","end":"1990","ended":true}}]})";
+    online::ArtistClues clues{{"Harry Potter and the Chamber of Secrets"}, 2002, 2002, {"Soundtrack"}};
+    auto ranked = online::rankedArtists(json, "John Williams", clues, {{"composer", 1}});
+    ASSERT_EQ(ranked.size(), 4u);
+    EXPECT_EQ(ranked[0], (ArtistCandidate{"composer", "John Williams", "film composer · Person · United States · 1932", 1}));
+    EXPECT_EQ(ranked[3].mbid, "rapper"); // born after the album
+    EXPECT_EQ(ranked[2].description, "Person · 1930–1990");
+    // Without the album's credit, the genre still tells.
+    ranked = online::rankedArtists(json, "John Williams", clues, {});
+    EXPECT_EQ(ranked[0].mbid, "composer");
+    EXPECT_EQ(ranked[0].albums, 0);
+    // With nothing known, MusicBrainz's own order stands.
+    ranked = online::rankedArtists(json, "John Williams", {}, {});
+    EXPECT_EQ(ranked[0].mbid, "guitarist");
+    EXPECT_EQ(ranked[1].mbid, "rapper");
+}
+
+TEST(ArtistPictureParsing, ReadsTheArtistsCreditedOnReleaseGroups) {
+    const auto credited = online::creditedArtists(R"({"release-groups":[
+        {"title":"Harry Potter","artist-credit":[{"name":"John Williams","artist":{"id":"composer"}},
+                                                 {"name":"London Symphony Orchestra","artist":{"id":"lso"}}]},
+        {"title":"Harry Potter","artist-credit":[{"artist":{"id":"composer"}}]},
+        {"title":"Other"}]})");
+    EXPECT_EQ(credited, (std::vector<std::string>{"composer", "lso"}));
+}
+
 TEST(ArtistPictureParsing, ReadsWikidataPicturesAndCommonsAttribution) {
     EXPECT_EQ(online::wikidataItem(R"({"relations":[{"type":"discogs","url":{"resource":"https://www.discogs.com/artist/1"}},
         {"type":"wikidata","url":{"resource":"https://www.wikidata.org/wiki/Q42"}}]})"),
@@ -238,6 +277,72 @@ TEST_F(ArtistPicturesTest, LeavesSeveralArtistsOfANameForTheUserToChoose) {
     EXPECT_EQ(picture.mbid, kMbid);
 }
 
+// The library's album by the name is looked up on MusicBrainz to tell which artist it is; the order and the albums are
+// kept with the candidates.
+TEST_F(ArtistPicturesTest, OrdersSeveralArtistsOfANameByTheLibrarysAlbums) {
+    search(R"({"id":")" + std::string(kOther) + R"(","name":"John Williams","disambiguation":"guitarist"},)" + R"({"id":")" +
+           std::string(kMbid) + R"(","name":"John Williams","disambiguation":"film composer"})");
+    web.route("/ws/2/release-group?query=",
+              R"({"release-groups":[{"artist-credit":[{"artist":{"id":")" + std::string(kMbid) + R"("}}]}]})");
+    const auto music = dir / "music";
+    std::filesystem::create_directories(music);
+    const auto file = music / "one.flac";
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        tags.tag()->setArtist("John Williams");
+        tags.tag()->setAlbum("Harry Potter and the Chamber of Secrets");
+        tags.tag()->setGenre("Soundtrack");
+        tags.tag()->setYear(2002);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryScanner scanner(*store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(music)).complete);
+    const auto picture = lookUpArtistPicture(*store, "John Williams", true, services, {});
+    ASSERT_EQ(picture.candidates.size(), 2u);
+    EXPECT_EQ(picture.candidates[0].mbid, kMbid);
+    EXPECT_EQ(picture.candidates[0].albums, 1);
+    const auto requests = web.requests();
+    ASSERT_EQ(requests.size(), 2u);
+    EXPECT_NE(requests[1].find("Chamber%20of%20Secrets"), std::string::npos) << requests[1];
+    EXPECT_EQ(artistPicture(*store, "John Williams").candidates, picture.candidates);
+}
+
+// A name's artists kept unordered by an earlier version are searched again at the next visit, not after thirty days.
+TEST_F(ArtistPicturesTest, ArtistsKeptBeforeTheyWereOrderedAreSearchedAgain) {
+    search(R"({"id":")" + std::string(kOther) + R"(","name":"John Williams","disambiguation":"guitarist"},)" + R"({"id":")" +
+           std::string(kMbid) + R"(","name":"John Williams","disambiguation":"film composer"})");
+    store
+        ->write([](sqlite::Database& db) {
+            db.prepare("INSERT INTO artist_pictures(name,outcome,online,checked,candidates) VALUES(?,'ambiguous',1,?,?)")
+                .bind(1, std::string("John Williams"))
+                .bind(2,
+                      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                          .count())
+                .bind(3, std::string(R"([{"mbid":"a","name":"John Williams","description":"x"},)"
+                                     R"({"mbid":"b","name":"John Williams","description":"y"}])"))
+                .run();
+        })
+        .get();
+    const auto picture = lookUpArtistPicture(*store, "John Williams", true, services, {});
+    EXPECT_EQ(web.requests().size(), 1u);
+    ASSERT_EQ(picture.candidates.size(), 2u);
+    EXPECT_EQ(picture.candidates[0].mbid, kOther);
+    // Once ordered, they are kept as before.
+    lookUpArtistPicture(*store, "John Williams", true, services, {});
+    EXPECT_EQ(web.requests().size(), 1u);
+}
+
+// On the real MusicBrainz, with what the owner's library knows of John Williams (OP-R17, 2026-11-18).
+TEST(ArtistPicturesOnline, DISABLED_OrdersJohnWilliamsByTheLibrarysAlbum) {
+    const online::ArtistClues clues{{"Harry Potter and the Chamber of Secrets"}, 2002, 2002, {"Soundtrack"}};
+    const auto found = online::findArtistPicture("John Williams", clues, {}, {});
+    ASSERT_GT(found.candidates.size(), 1u);
+    for (const auto& candidate : found.candidates)
+        std::cout << candidate.albums << "  " << candidate.mbid << "  " << candidate.description << "\n";
+    EXPECT_EQ(found.candidates.front().albums, 1);
+}
+
 TEST_F(ArtistPicturesTest, RetriesFailuresAtTheNextVisitAndNothingFoundAfterThirtyDays) {
     web.route("/ws/2/artist?query=", "busy", 503);
     auto picture = lookUpArtistPicture(*store, "Amy", true, services, {});
@@ -245,7 +350,7 @@ TEST_F(ArtistPicturesTest, RetriesFailuresAtTheNextVisitAndNothingFoundAfterThir
     EXPECT_EQ(web.requests().size(), 3u); // tried twice more after HTTP 503
     lookUpArtistPicture(*store, "Amy", true, services, {});
     EXPECT_EQ(web.requests().size(), 3u); // not within a minute
-    age("Amy", 2 * 60'000);
+    age("Amy", int64_t{2} * 60'000);
     search("");
     picture = lookUpArtistPicture(*store, "Amy", true, services, {});
     EXPECT_FALSE(picture.found);

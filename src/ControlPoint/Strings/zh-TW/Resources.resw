@@ -480,6 +480,7 @@
   <data name="Library_RefusePictures.Content" xml:space="preserve"><value>先不要</value></data>
   <data name="Library_PictureError.Title" xml:space="preserve"><value>沒有變更照片</value></data>
   <data name="Library_PictureUnreadable" xml:space="preserve"><value>CamelPlayer 無法把這個檔案讀成圖片。</value></data>
+  <data name="Library_CandidateAlbums" xml:space="preserve"><value>你的 {0} 張專輯</value></data>
   <data name="Library_PictureLookupFailed" xml:space="preserve"><value>查不到這張照片，請稍後再試。</value></data>
   <data name="Settings_ArtistPictures.Header" xml:space="preserve"><value>演出者照片</value></data>
   <data name="Settings_ArtistPictures.OnContent" xml:space="preserve"><value>從 Wikimedia Commons 查演出者照片</value></data>

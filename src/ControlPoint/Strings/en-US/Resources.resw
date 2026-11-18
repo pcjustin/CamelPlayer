@@ -480,6 +480,7 @@ Details: {0}</value></data>
   <data name="Library_RefusePictures.Content" xml:space="preserve"><value>Not now</value></data>
   <data name="Library_PictureError.Title" xml:space="preserve"><value>Picture not changed</value></data>
   <data name="Library_PictureUnreadable" xml:space="preserve"><value>CamelPlayer can't read this file as a picture.</value></data>
+  <data name="Library_CandidateAlbums" xml:space="preserve"><value>{0} of your albums</value></data>
   <data name="Library_PictureLookupFailed" xml:space="preserve"><value>The picture couldn't be looked up. Try again later.</value></data>
   <data name="Settings_ArtistPictures.Header" xml:space="preserve"><value>Artist pictures</value></data>
   <data name="Settings_ArtistPictures.OnContent" xml:space="preserve"><value>Look up artist pictures on Wikimedia Commons</value></data>

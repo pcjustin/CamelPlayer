@@ -35,6 +35,7 @@ struct Row {
     std::optional<std::string> outcome; // none before the first lookup
     bool online = false;
     int64_t checked = 0;
+    bool ranked = true; // candidates kept before they were ordered by the library's albums are looked up again
 };
 
 Row readRow(const LibraryStore& store, const std::string& name) {
@@ -52,8 +53,10 @@ Row readRow(const LibraryStore& store, const std::string& name) {
     row.checked = query.integer(5);
     p.mbid = query.text(6);
     if (!query.isNull(7))
-        for (const auto& c : json::parse(query.text(7)))
-            p.candidates.push_back({c.value("mbid", ""), c.value("name", ""), c.value("description", "")});
+        for (const auto& c : json::parse(query.text(7))) {
+            p.candidates.push_back({c.value("mbid", ""), c.value("name", ""), c.value("description", ""), c.value("albums", 0)});
+            row.ranked = row.ranked && c.contains("albums");
+        }
     p.author = query.text(8);
     p.license = query.text(9);
     p.licenseUrl = query.text(10);
@@ -66,7 +69,7 @@ bool due(const Row& row, bool online, int64_t at) {
     if (!row.outcome) return true;
     const auto age = at - row.checked;
     if (*row.outcome == "failed") return age >= kMinute;
-    if (*row.outcome == "ambiguous") return online && age >= kRetryAfter;
+    if (*row.outcome == "ambiguous") return online && (age >= kRetryAfter || !row.ranked);
     return (online && !row.online) || age >= kRetryAfter;
 }
 
@@ -98,7 +101,7 @@ void record(LibraryStore& store, const std::string& name, const Record& r) {
             } else {
                 auto list = json::array();
                 for (const auto& c : r.candidates)
-                    list.push_back({{"mbid", c.mbid}, {"name", c.name}, {"description", c.description}});
+                    list.push_back({{"mbid", c.mbid}, {"name", c.name}, {"description", c.description}, {"albums", c.albums}});
                 update.bind(6, list.dump());
             }
             update.run();
@@ -163,6 +166,27 @@ struct Local {
     std::vector<uint8_t> bytes;
     std::string source;
 };
+
+// The library's albums, years and genres of the tracks credited to `name`.
+online::ArtistClues cluesOf(const LibraryStore& store, const std::string& name) {
+    online::ArtistClues clues;
+    auto db = store.openReader();
+    const char* credited = "FROM track_values v JOIN tracks t ON t.id=v.track_id WHERE v.field='artist' AND v.value=?1";
+    auto albums = db.prepare(std::string("SELECT t.album ") + credited +
+                             " AND COALESCE(t.album,'')<>'' GROUP BY t.album ORDER BY COUNT(*) DESC, t.album LIMIT 3");
+    albums.bind(1, name);
+    while (albums.step()) clues.albums.push_back(albums.text(0));
+    auto years = db.prepare(std::string("SELECT MIN(t.year),MAX(t.year) ") + credited + " AND t.year>0");
+    if (years.bind(1, name).step() && !years.isNull(0)) {
+        clues.firstYear = int(years.integer(0));
+        clues.lastYear = int(years.integer(1));
+    }
+    auto genres = db.prepare("SELECT DISTINCT g.value FROM track_values v JOIN track_values g ON g.track_id=v.track_id AND "
+                             "g.field='genre' WHERE v.field='artist' AND v.value=?1 LIMIT 10");
+    genres.bind(1, name);
+    while (genres.step()) clues.genres.push_back(genres.text(0));
+    return clues;
+}
 
 std::optional<Local> localPicture(const LibraryStore& store, const std::string& name, const CancellationToken& token) {
     std::vector<std::filesystem::path> images, tracks;
@@ -233,7 +257,7 @@ ArtistPicture lookUpArtistPicture(LibraryStore& store, const std::string& name, 
             r.outcome = "none";
         } else {
             try {
-                auto found = r.mbid.empty() ? online::findArtistPicture(name, services, token)
+                auto found = r.mbid.empty() ? online::findArtistPicture(name, cluesOf(store, name), services, token)
                                             : online::pictureOf(r.mbid, services, token);
                 take(r, found);
             } catch (const std::exception&) {

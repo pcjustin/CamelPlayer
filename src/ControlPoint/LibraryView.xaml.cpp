@@ -1497,7 +1497,9 @@ void LibraryView::showArtistPicture(const ArtistPicture& picture) {
     candidates.Items().Clear();
     for (const auto& candidate : picture.candidates) {
         RadioMenuFlyoutItem item;
-        item.Text(ui::utf8(candidate.description.empty() ? candidate.name : candidate.name + " — " + candidate.description));
+        hstring text = ui::utf8(candidate.description.empty() ? candidate.name : candidate.name + " — " + candidate.description);
+        if (candidate.albums) text = text + L" · " + ui::format(L"Library_CandidateAlbums", {std::to_wstring(candidate.albums)});
+        item.Text(text);
         item.IsChecked(candidate.mbid == picture.mbid);
         item.Click([this, name, mbid = candidate.mbid](auto&&, auto&&) {
             changeArtistPicture(

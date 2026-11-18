@@ -6,7 +6,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
+#include <functional>
 #include <mutex>
 #include <regex>
 #include <stdexcept>
@@ -61,35 +64,119 @@ std::string fetch(const std::string& url, bool musicbrainz, const Services& serv
     }
 }
 
+// The year a MusicBrainz date begins with; 0 when it has none.
+int yearOf(const json& life, const char* key) {
+    const auto date = text(life, key);
+    if (date.size() < 4 || !std::all_of(date.begin(), date.begin() + 4, [](unsigned char c) { return std::isdigit(c); }))
+        return 0;
+    return std::stoi(date.substr(0, 4));
+}
+
+std::string years(const json& artist) {
+    const auto life = artist.find("life-span");
+    if (life == artist.end() || !life->is_object()) return {};
+    const auto begin = text(*life, "begin").substr(0, 4), end = text(*life, "end").substr(0, 4);
+    return end.empty() ? begin : begin + "–" + end;
+}
+
+// What tells the artists of a name apart: MusicBrainz's disambiguation, the type, the area and the years.
 std::string describe(const json& artist) {
-    if (auto description = text(artist, "disambiguation"); !description.empty()) return description;
     std::string out;
     const auto add = [&](const std::string& part) {
         if (part.empty()) return;
         if (!out.empty()) out += " · ";
         out += part;
     };
+    add(text(artist, "disambiguation"));
     add(text(artist, "type"));
     if (const auto area = artist.find("area"); area != artist.end() && area->is_object()) add(text(*area, "name"));
-    if (const auto life = artist.find("life-span"); life != artist.end() && life->is_object())
-        add(text(*life, "begin").substr(0, 4));
+    add(years(artist));
     return out;
+}
+
+std::optional<ArtistCandidate> candidateOf(const json& artist, const std::string& name) {
+    if (!artist.is_object()) return std::nullopt;
+    bool named = text(artist, "name") == name;
+    if (const auto aliases = artist.find("aliases"); !named && aliases != artist.end() && aliases->is_array())
+        for (const auto& alias : *aliases) named = named || (alias.is_object() && text(alias, "name") == name);
+    const auto mbid = text(artist, "id");
+    if (!named || mbid.empty()) return std::nullopt;
+    return ArtistCandidate{mbid, text(artist, "name"), describe(artist)};
+}
+
+std::string lower(std::string text) {
+    std::ranges::transform(text, text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    return text;
+}
+
+// A name or title as a phrase of a MusicBrainz search.
+std::string phraseOf(const std::string& text) {
+    std::string phrase;
+    for (const char c : text) {
+        if (c == '"' || c == '\\') phrase += '\\';
+        phrase += c;
+    }
+    return phrase;
 }
 
 } // namespace
 
 std::vector<ArtistCandidate> matchingArtists(const std::string& searchJson, const std::string& name) {
+    return rankedArtists(searchJson, name, {}, {});
+}
+
+std::vector<ArtistCandidate> rankedArtists(const std::string& searchJson, const std::string& name, const ArtistClues& clues,
+                                           const std::map<std::string, int>& credits) {
     const auto j = json::parse(searchJson);
-    std::vector<ArtistCandidate> out;
+    struct Ranked {
+        ArtistCandidate candidate;
+        int score = 0;
+    };
+    std::vector<Ranked> ranked;
     const auto artists = j.find("artists");
-    if (artists == j.end() || !artists->is_array()) return out;
+    if (artists == j.end() || !artists->is_array()) return {};
     for (const auto& artist : *artists) {
-        if (!artist.is_object()) continue;
-        bool named = text(artist, "name") == name;
-        if (const auto aliases = artist.find("aliases"); !named && aliases != artist.end() && aliases->is_array())
-            for (const auto& alias : *aliases) named = named || (alias.is_object() && text(alias, "name") == name);
-        const auto mbid = text(artist, "id");
-        if (named && !mbid.empty()) out.push_back({mbid, text(artist, "name"), describe(artist)});
+        auto candidate = candidateOf(artist, name);
+        if (!candidate) continue;
+        int score = 0;
+        if (const auto credited = credits.find(candidate->mbid); credited != credits.end()) {
+            candidate->albums = credited->second;
+            score += 1000 * credited->second;
+        }
+        // One born or formed after the library's first dated track is not its artist; posthumous releases come later.
+        if (const auto life = artist.find("life-span"); clues.firstYear && life != artist.end() && life->is_object())
+            if (const int begin = yearOf(*life, "begin")) score += clues.firstYear < begin ? -200 : 100;
+        std::string known = lower(text(artist, "disambiguation"));
+        if (const auto tags = artist.find("tags"); tags != artist.end() && tags->is_array())
+            for (const auto& tag : *tags)
+                if (tag.is_object()) known += " " + lower(text(tag, "name"));
+        for (const auto& genre : clues.genres)
+            if (!genre.empty() && known.find(lower(genre)) != std::string::npos) score += 50;
+        ranked.push_back({std::move(*candidate), score});
+    }
+    std::ranges::stable_sort(ranked, std::greater<>{}, &Ranked::score);
+    std::vector<ArtistCandidate> out;
+    out.reserve(ranked.size());
+    for (auto& r : ranked) out.push_back(std::move(r.candidate));
+    return out;
+}
+
+std::vector<std::string> creditedArtists(const std::string& releaseGroupJson) {
+    const auto j = json::parse(releaseGroupJson);
+    std::vector<std::string> out;
+    const auto groups = j.find("release-groups");
+    if (groups == j.end() || !groups->is_array()) return out;
+    for (const auto& group : *groups) {
+        if (!group.is_object()) continue;
+        const auto credit = group.find("artist-credit");
+        if (credit == group.end() || !credit->is_array()) continue;
+        for (const auto& part : *credit) {
+            if (!part.is_object()) continue;
+            const auto artist = part.find("artist");
+            if (artist == part.end() || !artist->is_object()) continue;
+            const auto id = text(*artist, "id");
+            if (!id.empty() && std::ranges::find(out, id) == out.end()) out.push_back(id);
+        }
     }
     return out;
 }
@@ -244,18 +331,32 @@ Found pictureOf(const std::string& mbid, const Services& services, const Cancell
     return found;
 }
 
-Found findArtistPicture(const std::string& name, const Services& services, const CancellationToken& token) {
-    std::string phrase;
-    for (const char c : name) {
-        if (c == '"' || c == '\\') phrase += '\\';
-        phrase += c;
-    }
+Found findArtistPicture(const std::string& name, const ArtistClues& clues, const Services& services,
+                        const CancellationToken& token) {
+    const auto phrase = phraseOf(name);
     const auto query = "artist:\"" + phrase + "\" OR alias:\"" + phrase + "\"";
-    auto candidates = matchingArtists(
-        fetch(services.musicbrainz + "/ws/2/artist?query=" + http::encode(query) + "&limit=25&fmt=json", true, services, token),
-        name);
+    const auto search =
+        fetch(services.musicbrainz + "/ws/2/artist?query=" + http::encode(query) + "&limit=25&fmt=json", true, services, token);
+    auto candidates = matchingArtists(search, name);
     if (candidates.size() != 1) {
         Found found;
+        if (candidates.size() > 1) {
+            // Which of them MusicBrainz credits with the library's albums, each asked once; an album without an answer is
+            // left out.
+            std::map<std::string, int> credits;
+            for (const auto& album : clues.albums) {
+                const auto albumQuery = "releasegroup:\"" + phraseOf(album) + "\" AND artist:\"" + phrase + "\"";
+                try {
+                    for (const auto& id : creditedArtists(fetch(services.musicbrainz + "/ws/2/release-group?query=" +
+                                                                    http::encode(albumQuery) + "&limit=10&fmt=json",
+                                                                true, services, token)))
+                        ++credits[id];
+                } catch (const std::exception&) {
+                    if (token.cancelled()) throw;
+                }
+            }
+            candidates = rankedArtists(search, name, clues, credits);
+        }
         found.candidates = std::move(candidates);
         return found;
     }

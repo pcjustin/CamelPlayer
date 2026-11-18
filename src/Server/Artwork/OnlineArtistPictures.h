@@ -7,6 +7,7 @@
 #pragma once
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -18,7 +19,8 @@ namespace camel::server {
 
 struct ArtistCandidate {
     std::string mbid, name;
-    std::string description; // MusicBrainz's disambiguation, or the artist's type, area and year of birth
+    std::string description; // MusicBrainz's disambiguation, the artist's type and area, and its years
+    int albums = 0;          // of the library's albums by the name, those MusicBrainz credits to this artist
     bool operator==(const ArtistCandidate&) const = default;
 };
 
@@ -40,6 +42,13 @@ struct CommonsImage {
     std::string author, license, licenseUrl;
 };
 
+// What the library knows of the artist of a name, to tell which of the MusicBrainz artists of the name it is.
+struct ArtistClues {
+    std::vector<std::string> albums; // those with the most tracks by the name, up to three
+    int firstYear = 0, lastYear = 0; // of its dated tracks
+    std::vector<std::string> genres;
+};
+
 struct Found {
     std::vector<ArtistCandidate> candidates; // every MusicBrainz artist named exactly so; a picture needs just one
     std::string mbid;                        // the artist the picture belongs to
@@ -48,13 +57,21 @@ struct Found {
 };
 
 // Searches MusicBrainz for `name` (an artist's name or alias, matched exactly) and, when one artist has it, fetches
-// that artist's picture. Throws std::runtime_error on network failures, other HTTP errors and cancellation.
-Found findArtistPicture(const std::string& name, const Services& services, const CancellationToken& token);
+// that artist's picture; several are ordered by `clues`, MusicBrainz asked which of them its albums are credited to.
+// Throws std::runtime_error on network failures, other HTTP errors and cancellation.
+Found findArtistPicture(const std::string& name, const ArtistClues& clues, const Services& services,
+                        const CancellationToken& token);
 // The picture of a known MusicBrainz artist.
 Found pictureOf(const std::string& mbid, const Services& services, const CancellationToken& token);
 
 // The steps' readers, for tests. Malformed JSON throws.
 std::vector<ArtistCandidate> matchingArtists(const std::string& searchJson, const std::string& name);
+// The same, the likeliest first: credited with the library's albums (`credits`: how many of them, by artist), in being
+// by the library's years, sharing its genres, then in MusicBrainz's order.
+std::vector<ArtistCandidate> rankedArtists(const std::string& searchJson, const std::string& name, const ArtistClues& clues,
+                                           const std::map<std::string, int>& credits);
+// The artists credited on a release-group search's results, each once.
+std::vector<std::string> creditedArtists(const std::string& releaseGroupJson);
 std::optional<std::string> wikidataItem(const std::string& artistJson);
 std::optional<std::string> pictureFile(const std::string& claimsJson);
 std::optional<CommonsImage> commonsImage(const std::string& queryJson);
