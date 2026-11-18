@@ -227,6 +227,6 @@ A Release run on a real SMB share on 2026-10-23 and 2026-10-24 passed:
 - Symphonia does not open a FLAC whose every frame is two CONSTANT subframes of silence, as the 4 GB stream check's file; dr_flac and libsndfile decode it.
 - In that NAS environment, tag edits did not reach the index through change notifications within 120 seconds; a test-only 2-second polling interval recovered them. Network shares are polled every 6 hours and local folders every 30 minutes, so a change that notifications miss can stay stale until the next poll.
 - A physical network interruption during a scan remains untested.
-- On this computer's Wi-Fi the NAS gives 0.7–2.3 MB/s, and DSD256 needs 2.82 MB/s, so DSD256 from the NAS breaks up on any output, as DoP or converted to PCM; DSD128 fits.
+- A slow link to the NAS holds DSD256 back: it needs 2.82 MB/s, and over this computer's Wi-Fi the NAS once gave 0.7–2.3 MB/s, so a DSD256 file is buffered before it plays (2.4 GHz Wi-Fi later gave 7.7–9.1 MB/s). Over a 100 Mbps wire the NAS gives 11.0 MB/s, and DSD256 from it plays natively on the DAVE with no underrun and no wait (2026-11-18).
 - While the DMP-A6 plays, the log records "network player volume: HTTP request failed (12152)" now and then.
 - In English, the playback bar has no room for the state badge beside "Processed".
