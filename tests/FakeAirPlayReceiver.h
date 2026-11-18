@@ -171,7 +171,8 @@ public:
         }
     }
     void stopAnswering() { silent_ = true; }
-    // Holds ANNOUNCE's answer for `wait`, as a Mac does until its user accepts the sender in a notification.
+    // Holds the answer to ANNOUNCE and to the request to show a code for `wait`, as a Mac does until its user accepts the
+    // sender in a notification.
     void askUser(std::chrono::milliseconds wait) { askUserMs_ = int(wait.count()); }
     // Answers SETUP only once the sender has answered a timing request, as a HomePod does.
     void timeBeforeSetup() { timeBeforeSetup_ = true; }
@@ -319,7 +320,8 @@ private:
             demanded = demandPairing_;
         }
         if (silent_ || (method == "SETUP" && timeBeforeSetup_ && !timedSender())) return true;
-        if (method == "ANNOUNCE" && askUserMs_ > 0) std::this_thread::sleep_for(std::chrono::milliseconds(askUserMs_.load()));
+        if ((method == "ANNOUNCE" || request.starts_with("POST /pair-pin-start ")) && askUserMs_ > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(askUserMs_.load()));
         const size_t sequence = request.find("CSeq: ");
         std::string reply = "RTSP/1.0 " + std::to_string(status) +
                             " Reason\r\nCSeq: " + request.substr(sequence + 6, request.find("\r\n", sequence) - sequence - 6) +

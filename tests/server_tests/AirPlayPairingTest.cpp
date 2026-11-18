@@ -218,6 +218,17 @@ PairingIdentity identity() {
 
 } // namespace
 
+// A Mac shows its code only once its user accepts CamelPlayer, and holds the request until then.
+TEST(PairingRtspTest, AReceiverThatAsksItsUserBeforeShowingItsCodeIsWaitedFor) {
+    testutil::FakeRtsp rtsp;
+    rtsp.demandPairing("4821");
+    rtsp.pairOnlyWithKeys();
+    rtsp.askUser(std::chrono::milliseconds(800));
+    RtspClient client("127.0.0.1", rtsp.port(), 500);
+    EXPECT_TRUE(client.showPin());
+    EXPECT_EQ(rtsp.pinsShown(), 1);
+}
+
 // A receiver that shows a code: pair-setup with it leaves keys, and a later connection pairs with them alone.
 TEST(PairingRtspTest, ACodeLeavesKeysThatALaterConnectionVerifies) {
     testutil::FakeRtsp rtsp;

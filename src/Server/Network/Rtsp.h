@@ -27,6 +27,9 @@ struct RtspReply {
 
 RtspReply parseRtspHead(std::string_view head); // a reply's status line and headers
 
+// How long a request waits that a Mac answers only once its user accepts CamelPlayer: it waits 15 s for the answer.
+inline constexpr int kUserAnswerTimeoutMs = 20000;
+
 // The receiver closed the connection, as opposed to not answering.
 class RtspClosed : public std::runtime_error {
 public:
@@ -54,8 +57,8 @@ public:
     // Transient pair-setup, with the code every such receiver takes or the password a receiver asks for; once it
     // succeeds the connection is encrypted.
     PairOutcome pairTransiently(std::string_view pin = kTransientPin);
-    // Makes a receiver that pairs with a code show it.
-    bool showPin();
+    // Makes a receiver that pairs with a code show it, once its user accepts CamelPlayer if it asks.
+    bool showPin(int userTimeoutMs = kUserAnswerTimeoutMs);
     // Pair-setup with a code, which leaves the receiver's long-term key in `receiver`; a session still needs pair-verify.
     PairOutcome pairSetup(std::string_view pin, const PairingIdentity& me, PairedReceiver& receiver);
     // With a receiver paired before; once it succeeds the connection is encrypted. False when it no longer knows this
@@ -70,6 +73,7 @@ private:
     std::optional<SrpProof> exchangeProofs(std::string_view pin, bool transient, PairOutcome& failure);
 
     int sequence_ = 0;
+    int timeoutMs_ = 0;
     std::optional<SecureChannel> channel_;
 };
 

@@ -152,6 +152,7 @@ std::string RtspClient::url() const {
 }
 
 void RtspClient::setTimeout(int timeoutMs) {
+    timeoutMs_ = timeoutMs;
     const auto timeout = DWORD(timeoutMs);
     setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
@@ -245,8 +246,12 @@ PairOutcome RtspClient::pairTransiently(std::string_view pin) {
     return PairOutcome::Paired;
 }
 
-bool RtspClient::showPin() {
-    return request("POST", "/pair-pin-start", kPairingType, {}, kPairingHeaders).status == kStatusOk;
+bool RtspClient::showPin(int userTimeoutMs) {
+    const int usual = timeoutMs_;
+    setTimeout(userTimeoutMs);
+    const bool shown = request("POST", "/pair-pin-start", kPairingType, {}, kPairingHeaders).status == kStatusOk;
+    setTimeout(usual);
+    return shown;
 }
 
 PairOutcome RtspClient::pairSetup(std::string_view pin, const PairingIdentity& me, PairedReceiver& receiver) {
