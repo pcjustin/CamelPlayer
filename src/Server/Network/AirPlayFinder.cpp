@@ -112,8 +112,10 @@ std::optional<Answer> ask(const Receiver& receiver, bool session, int timeoutMs,
     return std::nullopt;
 }
 
+// What a verdict holds for: a receiver that turns its password or code on or off is asked again.
 std::string askedAt(const Receiver& receiver) {
-    return std::format("{}:{} {}", receiver.address, receiver.port, receiver.version);
+    return std::format("{}:{} {} password={} code={}", receiver.address, receiver.port, receiver.version, receiver.asksPassword,
+                       receiver.asksCode);
 }
 
 } // namespace
@@ -336,12 +338,15 @@ struct AirPlayFinder::Impl {
         for (const auto& receiver : receivers) {
             if (stopping) return;
             const bool session = wanted.contains(receiver.id);
-            // What it answered before is asked again when the user asks, as its own setting may have changed since.
-            const bool paired = options.pairings && options.pairings->find(receiver.id);
-            if (receiver.support != Support::Supported && !paired && !(session && verdicts.contains(receiver.id))) continue;
+            // What it answered before is asked again when the user asks, as its own setting may have changed since, and
+            // once it announces another setting, even one it went back to.
+            const bool keptPairing = options.pairings && options.pairings->find(receiver.id);
+            const bool askable =
+                receiver.support == Support::Supported || keptPairing || (session && verdicts.contains(receiver.id));
             std::string& last = lastAsked[receiver.id];
-            if (!session && last == askedAt(receiver)) continue;
+            const bool unchanged = last == askedAt(receiver);
             last = askedAt(receiver);
+            if (!askable || (!session && unchanged)) continue;
             judge(receiver, session);
         }
     }

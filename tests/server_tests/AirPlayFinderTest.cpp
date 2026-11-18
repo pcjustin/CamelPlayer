@@ -322,6 +322,33 @@ TEST_F(AirPlayFinderTest, APasswordIsNotSupportedAndNothingAsksIt) {
     EXPECT_TRUE(rtsp_.requests().empty());
 }
 
+// The owner's Mac, judged with its password off, went on being offered as playable once it was turned on. A flag about
+// something else, as the one a Mac sets while it plays, is no reason to ask again.
+TEST_F(AirPlayFinderTest, AReceiverThatTurnsItsPasswordOnAsksForItAndIsAskedAgainOnceItIsOff) {
+    const auto announce = [&](const std::string& flags) {
+        mdns_.setRaop("C0FFEE000003", {"am=Mac14,2", "cn=0,1", "et=0,3,5", "sf=" + flags, "vs=1005.13.5"});
+        mdns_.announce("C0FFEE000003", {"deviceid=C0:FF:EE:00:00:03", "flags=" + flags, "acl=0"});
+    };
+    mdns_.add(record(rtsp_, "C0FFEE000003", "MacBook Air"));
+    announce("0x4");
+    start();
+    ASSERT_TRUE(found(1));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 1; }));
+    EXPECT_EQ(supportOf(), Support::Supported);
+
+    announce("0x20004");
+    std::this_thread::sleep_for(400ms);
+    EXPECT_EQ(rtsp_.count("OPTIONS"), 1);
+    EXPECT_EQ(supportOf(), Support::Supported);
+
+    announce("0x284");
+    EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Password; }));
+
+    announce("0x4");
+    EXPECT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 2; }));
+    EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Supported; }));
+}
+
 TEST_F(AirPlayFinderTest, EncryptionOnlyIsNotSupported) {
     auto encrypted = record(rtsp_);
     encrypted.raopTxt = {"am=AudioAccessory5,1", "cn=1", "et=1,3,5"};
