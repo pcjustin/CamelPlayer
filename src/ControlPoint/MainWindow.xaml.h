@@ -333,6 +333,7 @@ private:
     bool navCompacted_ = false;
     double pendingSeek_ = 0;
     uint64_t shownRevision_ = 0;
+    std::string shownAsking_;
     uint64_t shownCommandId_ = 0;
     // The pairing an AirPlay pairing dialog waits for: its command, and what it does with the command's error.
     struct PendingPairing {
@@ -411,6 +412,7 @@ private:
     // Switching backend keeps the same hardware; false when the new backend lists no matching device.
     void showStatusNotices(const camel::server::PlaybackSnapshot& s);
     void showError(camel::audio::ErrorCode code, const std::string& detail, camel::Backend backend);
+    void showReceiverAsking();
     void showNowPlaying(const ui::NowPlaying& was);
     winrt::fire_and_forget readPlayingFolders(int64_t file);
 

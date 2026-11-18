@@ -1810,6 +1810,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         playerMuted_ = snapshot.playback.playerMuted;
         showVolume();
     }
+    // The receiver waits while it opens for the command just sent, whose snapshot the cursor waits for.
+    if (snapshot.playback.receiverAsking != shownAsking_) {
+        shownAsking_ = snapshot.playback.receiverAsking;
+        if (!shownAsking_.empty())
+            showReceiverAsking();
+        else if (ErrorBar().Severity() == InfoBarSeverity::Informational)
+            ErrorBar().IsOpen(false);
+    }
     if (!server_ || !cursor_.accept(snapshot)) return;
     shown_ = snapshot;
     if (snapshot.devices.revision != shownDevicesRevision_ || snapshot.settings.airplayGroup != settings_.airplayGroup ||
@@ -2165,11 +2173,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         if (s.error) {
             showError(*s.error, s.errorDetail, snapshot.settings.backend);
         } else if (!s.receiverAsking.empty()) {
-            ErrorBar().Severity(InfoBarSeverity::Informational);
-            ErrorBar().Title(ui::format(L"State_ReceiverAsking", {std::wstring(ui::utf8(s.receiverAsking))}));
-            ErrorBar().Message(tr(L"State_ReceiverAskingDetail"));
-            ErrorBar().IsClosable(false);
-            ErrorBar().IsOpen(true);
+            showReceiverAsking();
         } else if (buffering) {
             // Pause ends the wait, and with it the bar.
             ErrorBar().Severity(InfoBarSeverity::Warning);
@@ -2234,6 +2238,14 @@ winrt::fire_and_forget MainWindow::readPlayingFolders(int64_t file) {
         playing.folders = std::move(*folders);
         if (const auto was = ui::setNowPlaying(std::move(playing))) self->showNowPlaying(*was);
     });
+}
+
+void MainWindow::showReceiverAsking() {
+    ErrorBar().Severity(InfoBarSeverity::Informational);
+    ErrorBar().Title(ui::format(L"State_ReceiverAsking", {std::wstring(ui::utf8(shownAsking_))}));
+    ErrorBar().Message(tr(L"State_ReceiverAskingDetail"));
+    ErrorBar().IsClosable(false);
+    ErrorBar().IsOpen(true);
 }
 
 // A network player's reason is said whole in its title; the engine's English detail stays in the log.

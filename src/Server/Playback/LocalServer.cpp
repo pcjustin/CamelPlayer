@@ -1939,8 +1939,12 @@ private:
             std::scoped_lock lock(groupMutex_);
             if (asking)
                 receiverAsking_.emplace(id, std::chrono::steady_clock::now());
-            else if (receiverAsking_ && receiverAsking_->first == id)
+            else if (receiverAsking_ && receiverAsking_->first == id) {
+                const std::chrono::duration<double> waited = std::chrono::steady_clock::now() - receiverAsking_->second;
+                if (waited >= kAskingShownAfter)
+                    log::info("AirPlay receiver %s answered after %.1f s", id.c_str(), waited.count());
                 receiverAsking_.reset();
+            }
         };
         return createAirPlayGroupOutput(std::move(options));
     }
