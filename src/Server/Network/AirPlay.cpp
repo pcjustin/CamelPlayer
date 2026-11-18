@@ -296,7 +296,9 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
             }
         if (others.empty()) speakers.clear();
         std::ranges::sort(speakers);
-        auto support = supportFrom(lead->raop);
+        // One with _airplay._tcp alone declares nothing an AirPlay 2 session of ALAC 16/44.1 stereo depends on.
+        const bool raop = !lead->raop.empty();
+        auto support = raop ? supportFrom(lead->raop) : Support::Supported;
         const uint64_t flags = statusFlags(*lead);
         const bool asksPassword = support == Support::Password || (flags & kPasswordRequired) != 0;
         if (support == Support::Supported && asksPassword) support = Support::Password;
@@ -305,12 +307,14 @@ std::vector<Receiver> receiversFrom(const std::vector<Announced>& announced) {
                           group.empty() ? lead->name : group,
                           lead->address,
                           lead->port,
-                          textOf(lead->raop, "vs"),
+                          raop ? textOf(lead->raop, "vs") : textOf(lead->airplay, "srcvers"),
                           support,
                           std::move(others),
                           std::move(speakers)};
         receiver.asksPassword = asksPassword;
         receiver.asksCode = !asksPassword && (flags & (kPinRequired | kOneTimePairingRequired)) != 0;
+        const std::string model = raop ? textOf(lead->raop, "am") : textOf(lead->airplay, "model");
+        receiver.airplay2 = !raop || model.starts_with("Mac") || model.starts_with("iMac"); // Mac14,2, MacBookPro18,1, iMac21,1
         receivers.push_back(std::move(receiver));
     }
     std::ranges::sort(receivers, {}, [](const Receiver& r) { return std::pair(r.name, r.id); });

@@ -77,7 +77,8 @@ struct Waits {
 std::optional<Support> askOn(RtspClient& client, const Receiver& receiver, bool session, Waits waits, bool& optionsRefused) {
     const auto options = verdictOf(client.request("OPTIONS", "*").status);
     optionsRefused = options == Support::Refused;
-    if (!session || options != Support::Supported) return options;
+    // ANNOUNCE is AirPlay 1's: one played over AirPlay 2 is asked for a session when it plays.
+    if (!session || options != Support::Supported || receiver.airplay2) return options;
     const auto description = sessionDescription(client.localAddress(), receiver.address, client.session());
     client.setTimeout(waits.user);
     const auto announced = verdictOf(client.request("ANNOUNCE", client.url(), "application/sdp", description).status);
@@ -282,21 +283,29 @@ struct AirPlayFinder::Impl {
         }
     }
 
+    // Each receiver by its RAOP service, with its _airplay._tcp record, and those that announce _airplay._tcp alone.
     std::vector<Announced> announced() const {
-        std::map<std::string, const TxtRecord*> airplayRecords;
+        std::map<std::string, const Service*> airplayServices;
         for (const auto& [key, service] : services)
             if (const auto id = service.txt.find("deviceid"); under(service.name, airplayService) && id != service.txt.end())
-                airplayRecords[deviceIdFrom(id->second)] = &service.txt;
+                airplayServices[deviceIdFrom(id->second)] = &service;
         std::vector<Announced> found;
+        std::set<std::string> withRaop;
         for (const auto& [key, service] : services) {
             const auto address = addresses.find(service.host);
             const auto name = parseRaopName(service.name.front());
             if (!under(service.name, raopService) || !name || !service.port || service.txt.empty() || address == addresses.end())
                 continue;
             Announced receiver{name->first, name->second, address->second, service.port, service.txt, {}};
-            if (const auto record = airplayRecords.find(name->first); record != airplayRecords.end())
-                receiver.airplay = *record->second;
+            if (const auto airplay = airplayServices.find(name->first); airplay != airplayServices.end())
+                receiver.airplay = airplay->second->txt;
+            withRaop.insert(name->first);
             found.push_back(std::move(receiver));
+        }
+        for (const auto& [id, service] : airplayServices) {
+            const auto address = addresses.find(service->host);
+            if (withRaop.contains(id) || !service->port || address == addresses.end()) continue;
+            found.push_back({id, service->name.front(), address->second, service->port, {}, service->txt});
         }
         return found;
     }

@@ -199,6 +199,28 @@ TEST(AirPlayTest, EveryMakersReceiversAreListed) {
     for (const auto& receiver : receivers) EXPECT_EQ(receiver.support, Support::Supported) << receiver.name;
 }
 
+// The owner's Sony TV announces _airplay._tcp alone, and a Mac takes an AirPlay 1 session it never plays (2026-11-18):
+// both play over AirPlay 2. Every other receiver stays on AirPlay 1.
+TEST(AirPlayTest, ReceiversWithoutRaopAndMacsTakeAirPlay2) {
+    const TxtRecord tv = {{"deviceid", "AA:BB:CC:DD:EE:01"}, {"model", "Y-50S30"}, {"flags", "0x204"}, {"srcvers", "377.40.00"}};
+    const TxtRecord macRaop = {{"am", "Mac14,2"}, {"et", "0,3,5"}, {"cn", "0,1,2,3"}, {"vs", "1005.13.5"}, {"sf", "0x4"}};
+    const TxtRecord homePod = {{"am", "AudioAccessory5,1"}, {"et", "0,3,5"}, {"cn", "0,1,2,3"}, {"vs", "1005.13.2"}};
+    const auto receivers = receiversFrom({{"AABBCCDDEE01", "客廳的電視", "192.168.0.18", 7000, {}, tv},
+                                          {"B2C58E1E713E", "MacBook Air", "192.168.0.23", 7000, macRaop, {{"model", "Mac14,2"}}},
+                                          {"32FBAAAB399D", "主臥", "192.168.0.220", 7000, homePod, {}}});
+    ASSERT_EQ(receivers.size(), 3U);
+    EXPECT_EQ(receivers[0].name, "MacBook Air");
+    EXPECT_TRUE(receivers[0].airplay2);
+    EXPECT_EQ(receivers[0].support, Support::Supported);
+    EXPECT_EQ(receivers[1].name, "主臥");
+    EXPECT_FALSE(receivers[1].airplay2);
+    EXPECT_EQ(receivers[2].name, "客廳的電視");
+    EXPECT_TRUE(receivers[2].airplay2);
+    EXPECT_EQ(receivers[2].support, Support::Supported);
+    EXPECT_EQ(receivers[2].version, "377.40.00");
+    EXPECT_TRUE(receivers[2].asksCode);
+}
+
 // Another maker's stereo pair is one receiver, as Apple's is.
 TEST(AirPlayTest, AnotherMakersStereoPairIsOneReceiver) {
     const TxtRecord raop = {{"am", "Some Maker Speaker"}, {"et", "0"}, {"cn", "1"}};
@@ -347,6 +369,22 @@ TEST_F(AirPlayFinderTest, AReceiverThatTurnsItsPasswordOnAsksForItAndIsAskedAgai
     announce("0x4");
     EXPECT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 2; }));
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Supported; }));
+}
+
+TEST_F(AirPlayFinderTest, AReceiverWithAirPlayAloneIsFound) {
+    auto tv = record(rtsp_, "AABBCCDDEE01", "Living Room TV");
+    tv.raop = false;
+    tv.airplayTxt = {"deviceid=AA:BB:CC:DD:EE:01", "model=Y-50S30", "flags=0x4", "srcvers=377.40.00", "acl=0"};
+    mdns_.add(tv);
+    start();
+    ASSERT_TRUE(found(1));
+    const auto receiver = receivers().front();
+    EXPECT_EQ(receiver.id, "AABBCCDDEE01");
+    EXPECT_EQ(receiver.name, "Living Room TV");
+    EXPECT_EQ(receiver.port, rtsp_.port());
+    EXPECT_TRUE(receiver.airplay2);
+    EXPECT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 1; }));
+    EXPECT_EQ(supportOf(), Support::Supported);
 }
 
 // A Mac holds ANNOUNCE until its user accepts the sender, for up to 15 s, past the time a request waits.

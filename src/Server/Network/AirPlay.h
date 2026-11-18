@@ -77,6 +77,8 @@ struct Receiver {
     bool transient = false;            // takes a session only after transient pairing
     bool asksPassword = false;         // its flags say a password is set on it
     bool asksCode = false;             // its flags say it pairs once with a code it shows
+    // Played over AirPlay 2: it has no RAOP service, or it is a Mac, which takes an AirPlay 1 session and never plays it.
+    bool airplay2 = false;
     bool operator==(const Receiver&) const = default;
 };
 
