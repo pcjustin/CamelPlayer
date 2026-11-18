@@ -882,8 +882,9 @@ TEST(AirPlayPairingServerTest, AReceiverThatAsksForAPasswordIsPairedWithIt) {
 
     EXPECT_FALSE(server.pair("C0FFEE000003", "hunter2"));
     EXPECT_EQ(server.supportOf("C0FFEE000003"), "");
-    EXPECT_TRUE(waitFor([&] { return rtsp.count("TEARDOWN") == 1; })) << "the session it was asked for";
-    EXPECT_GT(rtsp.encryptedRequests(), 0);
+    // Asked again over the paired connection; a Mac, played over AirPlay 2, is asked for a session only when it plays.
+    EXPECT_TRUE(waitFor([&] { return rtsp.encryptedRequests() > 0 && rtsp.count("OPTIONS") >= 1; }));
+    EXPECT_EQ(rtsp.count("ANNOUNCE"), 0);
 }
 
 // A receiver that shows a code: asked to show it, then paired with it, it keeps keys that later sessions verify alone.

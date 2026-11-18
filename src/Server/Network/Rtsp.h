@@ -30,6 +30,10 @@ RtspReply parseRtspHead(std::string_view head); // a reply's status line and hea
 // How long a request waits that a Mac answers only once its user accepts CamelPlayer: it waits 15 s for the answer.
 inline constexpr int kUserAnswerTimeoutMs = 20000;
 
+// "0x" and twelve hex digits, the same on every connection from this computer, so that a receiver that remembers whom its
+// user allowed knows CamelPlayer again.
+const std::string& senderDeviceId();
+
 // The receiver closed the connection, as opposed to not answering.
 class RtspClosed : public std::runtime_error {
 public:

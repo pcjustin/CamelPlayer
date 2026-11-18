@@ -49,20 +49,6 @@ std::string messageNonce(std::string_view name) {
     return std::string(4, '\0') + std::string(name);
 }
 
-// The same on every connection from this computer, so a receiver that remembers whom its user allowed knows it again: six
-// bytes of a hash of the computer's name, marked as a locally administered address.
-const std::string& senderDeviceId() {
-    static const std::string id = [] {
-        char host[256] = {};
-        gethostname(host, int(sizeof(host)) - 1);
-        const std::string digest = sha512(std::string("CamelPlayer ") + host);
-        std::string text = std::format("0x{:02x}", (uint8_t(digest[0]) & 0xFC) | 0x02);
-        for (size_t i = 1; i < 6; ++i) text += std::format("{:02x}", uint8_t(digest[i]));
-        return text;
-    }();
-    return id;
-}
-
 int numberIn(std::string_view text) {
     int value = 0;
     std::from_chars(text.data(), text.data() + text.size(), value);
@@ -82,6 +68,19 @@ void waitForConnection(SOCKET socket, int timeoutMs) {
 }
 
 } // namespace
+
+// Six bytes of a hash of the computer's name, marked as a locally administered address.
+const std::string& senderDeviceId() {
+    static const std::string id = [] {
+        char host[256] = {};
+        gethostname(host, int(sizeof(host)) - 1);
+        const std::string digest = sha512(std::string("CamelPlayer ") + host);
+        std::string text = std::format("0x{:02x}", (uint8_t(digest[0]) & 0xFC) | 0x02);
+        for (size_t i = 1; i < 6; ++i) text += std::format("{:02x}", uint8_t(digest[i]));
+        return text;
+    }();
+    return id;
+}
 
 RtspReply parseRtspHead(std::string_view head) {
     RtspReply reply;

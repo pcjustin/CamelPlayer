@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "Common/util/Log.h"
+#include "Server/Network/AirPlay2.h"
 #include "Server/Network/Rtsp.h"
 #include "Server/Network/SocketWait.h"
 
@@ -96,19 +97,23 @@ struct TrackNotice {
 // Where a speaker takes its packets.
 struct Destination {
     sockaddr_in audio{}, control{};
+    std::string key; // an AirPlay 2 stream's, under which its packets are sealed; empty for AirPlay 1
 };
 
 struct Connected {
     std::unique_ptr<RtspClient> client;
     Destination destination;
     uint32_t latency = kDefaultAudioLatency;
+    std::unique_ptr<RtspClient> events; // AirPlay 2's event channel, held open: the receiver goes on only while it is
 };
 
 // A receiver of the group: one session for it, or one for each speaker of a stereo pair.
 struct Member {
     std::string id, name;
     AirPlayChannels channels = AirPlayChannels::Stereo;
+    bool airplay2 = false;
     std::vector<std::unique_ptr<RtspClient>> sessions;
+    std::vector<std::unique_ptr<RtspClient>> events;
     std::vector<Destination> destinations;
     uint32_t latency = kDefaultAudioLatency;
     std::optional<double> volumeSent;
@@ -121,6 +126,7 @@ struct Target {
     Destination destination;
     AirPlayChannels channels = AirPlayChannels::Stereo;
     bool firstSync = true, firstPacket = true; // since its RECORD or the last start
+    uint64_t sealed = 0;                       // the packets sealed for it, each sealed with the next nonce
 };
 
 bool sameAddress(const sockaddr_in& a, const sockaddr_in& b) {
@@ -167,6 +173,7 @@ public:
         sequence_ = uint16_t(random());
         rtpNext_ = random();
         ssrc_ = random();
+        connections_ = uint64_t(random()) << 32 | random();
         systemStart_ = std::chrono::system_clock::now();
         steadyStart_ = Clock::now();
         service_ = std::thread([this] { serviceLoop(); });
@@ -290,12 +297,14 @@ private:
 
     Member connectMember(const AirPlayMember& wanted) {
         const Receiver& receiver = *wanted.receiver;
-        Member member{wanted.id, receiver.name, receiver.others.empty() ? wanted.channels : AirPlayChannels::Stereo};
+        Member member{wanted.id, receiver.name, receiver.others.empty() ? wanted.channels : AirPlayChannels::Stereo,
+                      receiver.airplay2};
         std::vector<Speaker> speakers{{receiver.address, receiver.port}};
         speakers.insert(speakers.end(), receiver.others.begin(), receiver.others.end());
         for (const auto& speaker : speakers) {
-            auto connected = connectToSpeaker(speaker, receiver);
+            auto connected = receiver.airplay2 ? connectAirPlay2(speaker, receiver) : connectToSpeaker(speaker, receiver);
             member.sessions.push_back(std::move(connected.client));
+            if (connected.events) member.events.push_back(std::move(connected.events));
             member.destinations.push_back(connected.destination);
             member.latency = std::max(member.latency, connected.latency);
         }
@@ -367,6 +376,55 @@ private:
         }
     }
 
+    // AirPlay 2: the session's SETUP, its event channel, RECORD, then the stream's SETUP and a FLUSH that says where the
+    // stream starts. A Mac asks its user to accept CamelPlayer before it answers the first SETUP.
+    Connected connectAirPlay2(const Speaker& speaker, const Receiver& receiver) {
+        try {
+            auto client = std::make_unique<RtspClient>(speaker.address, speaker.port, options_.requestTimeoutMs);
+            if (!pairFor(*client, receiver, options_.pairings.get())) throw Error(ErrorCode::AccessDenied, kRefused);
+            client->setTimeout(options_.userTimeoutMs);
+            const auto session =
+                client->request("SETUP", client->url(), kPlistType, toBinaryPlist(sessionSetup(timingPort_, groupUuid_)));
+            client->setTimeout(options_.requestTimeoutMs);
+            if (session.status == kStatusBadRequest) throw Error(ErrorCode::AccessDenied, std::string(kNotAllowedOnReceiver));
+            check(session, "SETUP");
+            const auto sessionAnswer = parseBinaryPlist(session.body);
+            const auto eventPort = sessionAnswer ? eventPortFrom(*sessionAnswer) : std::nullopt;
+            if (!eventPort) throw Error(ErrorCode::DriverError, "the receiver gave no event port");
+            auto events = std::make_unique<RtspClient>(speaker.address, *eventPort, options_.requestTimeoutMs);
+            check(client->request("RECORD", client->url(), {}, {}, "Range: npt=0-\r\n"), "RECORD");
+            std::string key = randomBytes(kStreamKeyBytes);
+            const auto stream = client->request("SETUP", client->url(), kPlistType,
+                                                toBinaryPlist(streamSetup(key, controlPort_, nextConnectionId())));
+            check(stream, "SETUP");
+            const auto streamAnswer = parseBinaryPlist(stream.body);
+            const auto ports = streamAnswer ? streamPortsFrom(*streamAnswer) : std::nullopt;
+            if (!ports) throw Error(ErrorCode::DriverError, "the receiver gave no ports");
+            check(client->request("FLUSH", client->url(), {}, {}, rtpInfo()), "FLUSH");
+            Destination destination{addressOf(speaker.address, ports->data), addressOf(speaker.address, ports->control),
+                                    std::move(key)};
+            return {std::move(client), std::move(destination), kDefaultAudioLatency, std::move(events)};
+        } catch (const Error&) {
+            throw;
+        } catch (const std::exception& e) {
+            log::info("AirPlay receiver %s: %s", receiver.name.c_str(), e.what());
+            throw Error(ErrorCode::DeviceNotFound, kNotConnected);
+        }
+    }
+
+    static sockaddr_in addressOf(const std::string& speaker, uint16_t port) {
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        inet_pton(AF_INET, speaker.c_str(), &address.sin_addr);
+        address.sin_port = htons(port);
+        return address;
+    }
+
+    int64_t nextConnectionId() {
+        std::scoped_lock lock(mutex_);
+        return int64_t(++connections_ & 0x7FFFFFFFFFFFFFFF);
+    }
+
     static Destination destinationFrom(const RtspReply& setup, const std::string& speaker) {
         const auto transport = setup.headers.find("transport");
         if (transport == setup.headers.end()) throw Error(ErrorCode::DriverError, "the receiver gave no ports");
@@ -403,7 +461,10 @@ private:
     static void teardown(const Member& member) {
         for (const auto& client : member.sessions) {
             try {
-                client->request("TEARDOWN", client->url());
+                if (member.airplay2)
+                    client->request("TEARDOWN", client->url(), kPlistType, toBinaryPlist(Plist::dict())); // ends the session
+                else
+                    client->request("TEARDOWN", client->url());
             } catch (const std::exception& e) {
                 log::info("AirPlay receiver %s: %s", member.name.c_str(), e.what());
             }
@@ -508,7 +569,12 @@ private:
                 if (w != wanted.end()) tellVolume(member, w->volumeDb);
                 if (notice) tellTrack(member, *notice, details);
                 if (heartbeat)
-                    for (const auto& client : member.sessions) client->request("OPTIONS", "*");
+                    for (const auto& client : member.sessions) {
+                        if (member.airplay2)
+                            client->request("POST", "/feedback");
+                        else
+                            client->request("OPTIONS", "*");
+                    }
             } catch (const RtspClosed&) {
                 if (w != wanted.end() && w->support == airplay::Support::HomeOnly)
                     lost.emplace_back(member.id, ErrorCode::AccessDenied);
@@ -585,8 +651,9 @@ private:
             const size_t count = std::min<size_t>(request->count, history_.size());
             for (auto& packet : history_)
                 if (packet.number < nextPacket_ && uint16_t(packet.sequence - request->first) < count)
-                    answers.push_back(resendPacket(packet.sequence, rtpPacket(packet.sequence, packet.rtpTime, ssrc_, false,
-                                                                              packet.frame(asking->channels))));
+                    answers.push_back(
+                        resendPacket(packet.sequence, packetFor(*asking, rtpPacket(packet.sequence, packet.rtpTime, ssrc_, false,
+                                                                                   packet.frame(asking->channels)))));
         }
         for (const auto& packet : answers)
             sendto(control_, packet.data(), int(packet.size()), 0, reinterpret_cast<const sockaddr*>(&from), sizeof(from));
@@ -627,6 +694,12 @@ private:
         const uint64_t due = framesDue(now);
         const uint64_t latency = kSyncLatency + audioLatency_;
         return std::min(runPacket_ * kFramesPerPacket + (due > latency ? due - latency : 0), rendered_);
+    }
+
+    // As the speaker takes it: sealed under its key for AirPlay 2.
+    static std::string packetFor(Target& target, std::string rtp) {
+        if (target.destination.key.empty()) return rtp;
+        return sealedRtpPacket(rtp, target.destination.key, target.sealed++);
     }
 
     void sendTo(const sockaddr_in& target, const std::string& packet) const {
@@ -695,8 +768,9 @@ private:
         packet.rtpTime = rtpNext_;
         rtpNext_ += kFramesPerPacket;
         for (auto& target : targets_)
-            sendTo(target.destination.audio, rtpPacket(packet.sequence, packet.rtpTime, ssrc_,
-                                                       std::exchange(target.firstPacket, false), packet.frame(target.channels)));
+            sendTo(target.destination.audio,
+                   packetFor(target, rtpPacket(packet.sequence, packet.rtpTime, ssrc_, std::exchange(target.firstPacket, false),
+                                               packet.frame(target.channels))));
         sentSinceFlush_ = true;
         ++nextPacket_;
         return true;
@@ -726,6 +800,7 @@ private:
     SOCKET control_ = INVALID_SOCKET;
     SOCKET timing_ = INVALID_SOCKET;
     uint16_t audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
+    const std::string groupUuid_ = randomUuid(); // the AirPlay 2 receivers this output plays to, as one group
     std::chrono::system_clock::time_point systemStart_;
     Clock::time_point steadyStart_;
     std::thread service_, session_, sender_;
@@ -750,6 +825,7 @@ private:
     _Guarded_by_(mutex_) uint16_t sequence_ = 0;
     _Guarded_by_(mutex_) uint32_t rtpNext_ = 0;
     _Guarded_by_(mutex_) uint32_t ssrc_ = 0;
+    _Guarded_by_(mutex_) uint64_t connections_ = 0; // numbers each AirPlay 2 stream
     _Guarded_by_(mutex_) uint32_t runRtp_ = 0;
     _Guarded_by_(mutex_) uint64_t rendered_ = 0;
     _Guarded_by_(mutex_) uint64_t stoppedAt_ = 0;

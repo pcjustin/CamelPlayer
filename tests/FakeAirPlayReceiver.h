@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "Server/Network/Pairing.h"
+#include "Server/Network/Plist.h"
 
 namespace testutil {
 
@@ -82,6 +83,8 @@ public:
         audioThread_.join();
         controlThread_.join();
         timingThread_.join();
+        if (events_ != INVALID_SOCKET) closesocket(events_);
+        for (const SOCKET client : eventClients_) closesocket(client);
         WSACleanup();
     }
     FakeRtsp(const FakeRtsp&) = delete;
@@ -126,16 +129,37 @@ public:
         return timingReplies_;
     }
 
+    // The plists of the AirPlay 2 SETUPs it was sent, the session's and the stream's.
+    std::vector<camel::server::airplay::Plist> setups() const {
+        std::scoped_lock lock(mutex_);
+        return setups_;
+    }
+    // AirPlay 2 packets opened with the stream's key, and those that did not open.
+    int sealedPackets() const {
+        std::scoped_lock lock(mutex_);
+        return sealed_;
+    }
+    int unopenedPackets() const {
+        std::scoped_lock lock(mutex_);
+        return unopened_;
+    }
+    bool eventChannelOpened() const { return eventsAccepted_ > 0; }
+    // A sealed packet's payload, as a resend carries one; empty when it does not open.
+    std::string openSealed(std::string_view packet) {
+        std::scoped_lock lock(mutex_);
+        return opened(packet);
+    }
+
     void askTiming(const std::string& request) const {
         sockaddr_in target = loopback();
-        target.sin_port = htons(portAfter("timing_port="));
+        target.sin_port = htons(senderTiming_ ? senderTiming_.load() : portAfter("timing_port="));
         sendto(timing_, request.data(), int(request.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
     }
     void askResend(uint16_t sequence, uint16_t count) const {
         std::string request("\x80\xD5\x00\x01", 4);
         request += {char(sequence >> 8), char(sequence & 0xFF), char(count >> 8), char(count & 0xFF)};
         sockaddr_in target = loopback();
-        target.sin_port = htons(portAfter("control_port="));
+        target.sin_port = htons(senderControl_ ? senderControl_.load() : portAfter("control_port="));
         sendto(control_, request.data(), int(request.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
     }
 
@@ -247,7 +271,68 @@ private:
             packet.alac.assign(buffer + 12, size_t(got) - 12);
             packet.arrived = std::chrono::steady_clock::now();
             std::scoped_lock lock(mutex_);
+            if (!shk_.empty()) packet.alac = opened(std::string_view(buffer, size_t(got)));
             packets_.push_back(std::move(packet));
+        }
+    }
+
+    // An AirPlay 2 packet's payload, opened with the stream's key: the header's timestamp and SSRC as AAD, the nonce last.
+    std::string opened(std::string_view packet) {
+        if (packet.size() < 12 + 16 + 8) {
+            ++unopened_;
+            return {};
+        }
+        const auto nonce = std::string(4, '\0') + std::string(packet.substr(packet.size() - 8));
+        const auto plain = camel::server::airplay::open(shk_, nonce, packet.substr(4, 8), packet.substr(12, packet.size() - 20));
+        ++(plain ? sealed_ : unopened_);
+        return plain.value_or(std::string());
+    }
+
+    // The session's SETUP opens the event channel; the stream's gives the ports and keeps its key.
+    std::string answerSetup(const std::string& body) {
+        using camel::server::airplay::Plist;
+        const auto setup = camel::server::airplay::parseBinaryPlist(body);
+        Plist answer = Plist::dict();
+        if (!setup) return {};
+        std::scoped_lock lock(mutex_);
+        setups_.push_back(*setup);
+        if (const Plist* streams = setup->find("streams"); streams && !streams->items.empty()) {
+            const Plist& stream = streams->items.front();
+            if (const Plist* key = stream.find("shk")) shk_ = key->text;
+            if (const Plist* port = stream.find("controlPort")) senderControl_ = uint16_t(port->integer);
+            Plist ports = Plist::dict();
+            ports.set("type", Plist::of(96)).set("dataPort", Plist::of(int64_t{audioPort_}));
+            ports.set("controlPort", Plist::of(int64_t{controlPort_}));
+            answer.set("streams", Plist::array({ports}));
+        } else {
+            if (const Plist* port = setup->find("timingPort")) senderTiming_ = uint16_t(port->integer);
+            if (events_ == INVALID_SOCKET) {
+                events_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                sockaddr_in address = loopback();
+                ::bind(events_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+                listen(events_, 4);
+                int length = sizeof(address);
+                getsockname(events_, reinterpret_cast<sockaddr*>(&address), &length);
+                eventsPort_ = ntohs(address.sin_port);
+            }
+            answer.set("eventPort", Plist::of(int64_t{eventsPort_})).set("timingPort", Plist::of(0));
+        }
+        return camel::server::airplay::toBinaryPlist(answer);
+    }
+
+    // Whether the sender connected to the event channel, without taking the connection.
+    void watchEvents() {
+        if (events_ == INVALID_SOCKET) return;
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(events_, &readable);
+        const timeval now{0, 0};
+        if (select(0, &readable, nullptr, nullptr, &now) > 0) {
+            const SOCKET accepted = accept(events_, nullptr, nullptr);
+            if (accepted != INVALID_SOCKET) {
+                ++eventsAccepted_;
+                eventClients_.push_back(accepted);
+            }
         }
     }
 
@@ -310,6 +395,7 @@ private:
         const std::string request = received.substr(0, total);
         received.erase(0, total);
         const std::string method = request.substr(0, request.find(' '));
+        watchEvents();
         int status = 200;
         bool demanded = false;
         {
@@ -346,6 +432,12 @@ private:
             reply.replace(9, 3, "403");
             reply += "\r\n";
             sendOut(client, reply);
+            return true;
+        }
+        if (method == "SETUP" && request.find("Content-Type: application/x-apple-binary-plist\r\n") < headEnd) {
+            const std::string answer = answerSetup(request.substr(headEnd + 4));
+            sendOut(client, reply + "Content-Type: application/x-apple-binary-plist\r\nContent-Length: " +
+                                std::to_string(answer.size()) + "\r\n\r\n" + answer);
             return true;
         }
         if (method == "SETUP")
@@ -464,6 +556,14 @@ private:
     std::atomic<SOCKET> client_ = INVALID_SOCKET;
     std::atomic<bool> silent_ = false, timeBeforeSetup_ = false;
     std::atomic<int> askUserMs_ = 0;
+    std::vector<camel::server::airplay::Plist> setups_;
+    std::string shk_;
+    int sealed_ = 0, unopened_ = 0;
+    std::atomic<uint16_t> senderControl_ = 0, senderTiming_ = 0;
+    SOCKET events_ = INVALID_SOCKET;
+    uint16_t eventsPort_ = 0;
+    std::atomic<int> eventsAccepted_ = 0;
+    std::vector<SOCKET> eventClients_;
     uint16_t port_ = 0, audioPort_ = 0, controlPort_ = 0, timingPort_ = 0;
     mutable std::mutex mutex_;
     std::map<std::string, int> statuses_;

@@ -90,6 +90,7 @@ protected:
     airplay::Receiver receiver() const {
         airplay::Receiver r{"800A805D016B", "DMP-A6", "127.0.0.1", rtsp_.port(), "105.1", airplay::Support::Supported, others_};
         r.transient = transient_;
+        r.airplay2 = airplay2_;
         return r;
     }
 
@@ -114,6 +115,7 @@ protected:
     FakeRtsp rtsp_;
     std::vector<airplay::Speaker> others_;
     bool transient_ = false;
+    bool airplay2_ = false;
     std::shared_ptr<AirPlayPairings> pairings_ = std::make_shared<AirPlayPairings>();
     std::atomic<int> error_ = 0;
 };
@@ -323,6 +325,84 @@ TEST_F(AirPlayOutputTest, TimingRequestsAreAnswered) {
     ASSERT_EQ(reply.size(), 32U);
     EXPECT_EQ(uint8_t(reply[1]), 0xD3);
     EXPECT_EQ(reply.substr(8, 8), "ABCDEFGH");
+    out->close();
+}
+
+// The owner's Mac and Sony TV play only over AirPlay 2 (2026-11-18): the session's SETUP with NTP timing, its event
+// channel, RECORD, the stream's SETUP and a FLUSH, then packets sealed under the stream's key.
+TEST_F(AirPlayOutputTest, AnAirPlay2ReceiverGetsTheStreamSealedBitForBit) {
+    airplay2_ = true;
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(40));
+    out->close();
+
+    const auto methods = rtsp_.methods();
+    ASSERT_GE(methods.size(), 4U);
+    EXPECT_EQ(std::vector<std::string>(methods.begin(), methods.begin() + 4),
+              (std::vector<std::string>{"SETUP", "RECORD", "SETUP", "FLUSH"}));
+    EXPECT_NE(rtsp_.requestsOf("FLUSH").front().find("RTP-Info: seq="), std::string::npos);
+    EXPECT_TRUE(rtsp_.eventChannelOpened());
+    const auto setups = rtsp_.setups();
+    ASSERT_EQ(setups.size(), 2U);
+    EXPECT_EQ(setups[0].find("timingProtocol")->text, "NTP");
+    EXPECT_GT(setups[0].find("timingPort")->integer, 0);
+    EXPECT_EQ(setups[0].find("name")->text, "CamelPlayer");
+    const auto& stream = setups[1].find("streams")->items.at(0);
+    EXPECT_EQ(stream.find("type")->integer, 96);
+    EXPECT_EQ(stream.find("ct")->integer, 2);
+    EXPECT_EQ(stream.find("audioFormat")->integer, 0x40000);
+    EXPECT_EQ(stream.find("spf")->integer, 352);
+    EXPECT_EQ(stream.find("sr")->integer, 44100);
+    EXPECT_EQ(stream.find("shk")->text.size(), 32U);
+    EXPECT_FALSE(stream.find("supportsDynamicStreamID")->boolean);
+    EXPECT_NE(stream.find("streamConnectionID"), nullptr);
+
+    EXPECT_EQ(rtsp_.unopenedPackets(), 0);
+    const auto packets = rtsp_.packets();
+    EXPECT_EQ(rtsp_.sealedPackets(), int(packets.size()));
+    for (size_t i = 0; i < packets.size(); ++i) {
+        const std::string pcm = pcmOfAlac(packets[i].alac);
+        ASSERT_EQ(pcm.size(), 1408U) << i;
+        for (size_t b = 0; b < pcm.size(); ++b) ASSERT_EQ(uint8_t(pcm[b]), CountingSource::byteAt(i * 1408 + b)) << i << " " << b;
+    }
+}
+
+TEST_F(AirPlayOutputTest, AnAirPlay2SessionBeatsWithFeedbackAndEndsWithAnEmptyPlist) {
+    airplay2_ = true;
+    CountingSource source(44100);
+    {
+        auto out = output();
+        out->open(kCd, &source);
+        out->start();
+        ASSERT_TRUE(waitFor([&] { return rtsp_.count("POST") >= 1; }));
+        out->close();
+    }
+    EXPECT_EQ(rtsp_.count("OPTIONS"), 0);
+    EXPECT_TRUE(rtsp_.requestsOf("POST").front().starts_with("POST /feedback "));
+    const auto teardowns = rtsp_.requestsOf("TEARDOWN");
+    ASSERT_EQ(teardowns.size(), 1U);
+    EXPECT_NE(teardowns.front().find("Content-Type: application/x-apple-binary-plist\r\n"), std::string::npos);
+}
+
+TEST_F(AirPlayOutputTest, AResendToAnAirPlay2ReceiverIsSealedAsTheStreamIs) {
+    airplay2_ = true;
+    CountingSource source(44100);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(10));
+    const auto wanted = rtsp_.packets()[5];
+    rtsp_.askResend(wanted.sequence, 1);
+    std::string found;
+    ASSERT_TRUE(waitFor([&] {
+        for (const auto& packet : rtsp_.controlPackets())
+            if (uint8_t(packet[1]) == 0xD6) found = packet;
+        return !found.empty();
+    }));
+    EXPECT_EQ(rtsp_.openSealed(found.substr(4)), wanted.alac);
     out->close();
 }
 
@@ -975,6 +1055,25 @@ bool oneChannel(const testutil::FakeRtp& p) {
 }
 
 } // namespace
+
+// The owner's TV, over AirPlay 2, with an AirPlay 1 receiver: the same frames at the same times, sealed only for the TV.
+TEST_F(AirPlayGroupOutputTest, AnAirPlay2ReceiverPlaysInStepWithAnAirPlay1One) {
+    auto tv = member(b_, "TV");
+    tv.receiver->airplay2 = true;
+    want({member(a_, "A"), tv});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 40 && b_.packetCount() >= 40; }));
+    EXPECT_TRUE(sameStream(a_, b_));
+    EXPECT_EQ(a_.sealedPackets(), 0);
+    EXPECT_GE(b_.sealedPackets(), 40);
+    EXPECT_EQ(b_.unopenedPackets(), 0);
+    EXPECT_EQ(a_.count("ANNOUNCE"), 1);
+    EXPECT_EQ(b_.count("ANNOUNCE"), 0);
+    out->close();
+}
 
 TEST_F(AirPlayGroupOutputTest, AReceiverAddedWhilePlayingJoinsTheSameStream) {
     want({member(a_, "A")});
