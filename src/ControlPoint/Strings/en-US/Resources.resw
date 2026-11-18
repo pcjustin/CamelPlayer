@@ -216,6 +216,8 @@
   <data name="Queue_CountWindowed" xml:space="preserve"><value>{0} tracks; the {1} around the current track are listed</value></data>
   <data name="State_Buffering" xml:space="preserve"><value>Buffering, about {0} s</value></data>
   <data name="State_BufferingDetail" xml:space="preserve"><value>The file reads slower than it plays, so it is buffered first to avoid breaks.</value></data>
+  <data name="State_ReceiverAsking" xml:space="preserve"><value>Allow CamelPlayer on {0}</value></data>
+  <data name="State_ReceiverAskingDetail" xml:space="preserve"><value>Accept CamelPlayer in the notification on the receiver; it waits up to 15 seconds.</value></data>
   <data name="Lamp_BitPerfectToHQPlayer" xml:space="preserve"><value>Bit-perfect to HQPlayer</value></data>
   <data name="Lamp_BitPerfect" xml:space="preserve"><value>Bit-perfect</value></data>
   <data name="Badge_Lossy.Text" xml:space="preserve"><value>Lossy source</value></data>
@@ -749,7 +751,7 @@ Details: {0}</value></data>
   <data name="AirPlay_PairButton" xml:space="preserve"><value>Pair</value></data>
   <data name="AirPlay_PairCodeName" xml:space="preserve"><value>Code</value></data>
   <data name="AirPlay_PairPasswordName" xml:space="preserve"><value>Password</value></data>
-  <data name="AirPlay_PairCode" xml:space="preserve"><value>Enter the code {0} shows.</value></data>
+  <data name="AirPlay_PairCode" xml:space="preserve"><value>Enter the code {0} shows. If it first asks whether to allow CamelPlayer, accept it there, and the code appears.</value></data>
   <data name="AirPlay_PairPassword" xml:space="preserve"><value>Enter the password set for AirPlay on {0}.</value></data>
   <data name="AirPlay_PairTitle" xml:space="preserve"><value>Pair with {0}</value></data>
   <data name="Output_Pair" xml:space="preserve"><value>Enter password or code…</value></data>

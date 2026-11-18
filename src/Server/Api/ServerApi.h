@@ -256,6 +256,7 @@ struct PlaybackSnapshot {
     bool playerMuted = false;
     std::vector<ReceiverState> receivers;     // the AirPlay group in use, the one in use first; empty otherwise
     std::optional<ReceiverLeft> receiverLeft; // the last receiver that left the group
+    std::string receiverAsking; // an AirPlay receiver's name while it has waited a second for its user to allow CamelPlayer
     std::optional<audio::ErrorCode> error;
     std::string errorDetail;
     uint64_t revision = 0;

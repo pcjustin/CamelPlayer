@@ -101,6 +101,8 @@ public:
 
     // Blocks until every command posted so far has run.
     void waitIdle();
+    // The same, calling `meanwhile` every `period` until then.
+    void waitIdle(std::chrono::milliseconds period, const std::function<void()>& meanwhile);
     // Blocks until the state equals `s` or the timeout passes.
     bool waitForState(PlayState s, std::chrono::milliseconds timeout);
 

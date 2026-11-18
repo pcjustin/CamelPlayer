@@ -1875,6 +1875,12 @@ void PlaybackEngine::setListener(std::function<void()> l) {
 void PlaybackEngine::waitIdle() {
     impl_->call<void>([] {});
 }
+void PlaybackEngine::waitIdle(std::chrono::milliseconds period, const std::function<void()>& meanwhile) {
+    auto idle = std::make_shared<std::promise<void>>();
+    const auto done = idle->get_future();
+    impl_->post([idle] { idle->set_value(); });
+    while (done.wait_for(period) != std::future_status::ready) meanwhile();
+}
 bool PlaybackEngine::waitForState(PlayState s, std::chrono::milliseconds t) {
     return impl_->waitForState(s, t);
 }

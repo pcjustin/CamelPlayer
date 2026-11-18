@@ -988,7 +988,7 @@ private:
                 break;
             }
         }
-        engine_->waitIdle();
+        waitForEngine();
     }
 
     std::vector<uint64_t> replaceQueue(const std::vector<TrackSource>& sources, size_t selected = 0) {
@@ -1266,7 +1266,7 @@ private:
             engine_->openAndPlay(path, source.decoder(), gainFor(position.entryId), afterEnd);
         else
             engine_->load(path, source.decoder(), gainFor(position.entryId));
-        engine_->waitIdle(); // the next snapshot pairs this entry with its own playback state
+        waitForEngine(); // the next snapshot pairs this entry with its own playback state
         persist();
     }
 
@@ -1598,6 +1598,7 @@ private:
         if (settings_.backend == Backend::AirPlay) {
             std::scoped_lock lock(groupMutex_);
             p.receivers = airplayStates_;
+            p.receiverAsking = askingName();
         }
         p.receiverLeft = receiverLeft_;
         if (receiverVolumeWanted()) {
@@ -1621,7 +1622,7 @@ private:
             p.underruns == state_.playback.underruns && p.playerVolume == state_.playback.playerVolume &&
             p.playerVolumeDb == state_.playback.playerVolumeDb && p.playerMuted == state_.playback.playerMuted &&
             p.receivers == state_.playback.receivers && p.receiverLeft == state_.playback.receiverLeft &&
-            state_.devices.revision == published_.devices.revision)
+            p.receiverAsking == state_.playback.receiverAsking && state_.devices.revision == published_.devices.revision)
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
@@ -1646,14 +1647,48 @@ private:
             event = {completed ? EventKind::CommandCompleted : EventKind::StateChanged, published_};
             listener = listener_;
         }
-        if (listener) {
-            try {
-                listener(event);
-            } catch (...) {
-                log::warn("Server listener failed");
-            }
-        }
+        tell(listener, event);
         if (discord_) discord_->observe(event.snapshot);
+    }
+
+    static void tell(const std::function<void(const Event&)>& listener, const Event& event) {
+        if (!listener) return;
+        try {
+            listener(event);
+        } catch (...) {
+            log::warn("Server listener failed");
+        }
+    }
+
+    // Said once a request has waited a second: most receivers answer at once, a Mac once its user does.
+    _Requires_lock_held_(groupMutex_) std::string askingName() const {
+        if (!receiverAsking_ || std::chrono::steady_clock::now() - receiverAsking_->second < kAskingShownAfter) return {};
+        const auto named = std::ranges::find(airplayStates_, receiverAsking_->first, &ReceiverState::id);
+        return named == airplayStates_.end() ? receiverAsking_->first : named->name;
+    }
+
+    // An output opening waits on a receiver that asks its user, and this thread on the output: meanwhile only that
+    // changes in what was published.
+    void waitForEngine() {
+        engine_->waitIdle(std::chrono::milliseconds(50), [this] {
+            if (settings_.backend != Backend::AirPlay) return;
+            std::string asking;
+            {
+                std::scoped_lock lock(groupMutex_);
+                asking = askingName();
+            }
+            Event event;
+            std::function<void(const Event&)> listener;
+            {
+                std::lock_guard lock(mutex_);
+                if (published_.playback.receiverAsking == asking) return;
+                published_.playback.receiverAsking = asking;
+                ++published_.revision;
+                event = {EventKind::StateChanged, published_};
+                listener = listener_;
+            }
+            tell(listener, event);
+        });
     }
 
     void refreshDevices() {
@@ -1900,6 +1935,13 @@ private:
             airplayLeft_.emplace_back(id, why);
         };
         options.commanded = [this](const std::string& id, const airplay::ReceiverEvent& event) { followReceiver(id, event); };
+        options.askingUser = [this](const std::string& id, bool asking) {
+            std::scoped_lock lock(groupMutex_);
+            if (asking)
+                receiverAsking_.emplace(id, std::chrono::steady_clock::now());
+            else if (receiverAsking_ && receiverAsking_->first == id)
+                receiverAsking_.reset();
+        };
         return createAirPlayGroupOutput(std::move(options));
     }
 
@@ -2399,6 +2441,9 @@ private:
     _Guarded_by_(groupMutex_) bool airplayRefused_ = false;
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, audio::Error>> airplayLeft_;
     _Guarded_by_(groupMutex_) std::vector<std::pair<std::string, airplay::ReceiverEvent>> receiverVolumes_;
+    // The receiver a request waits on for its user to allow CamelPlayer, since when.
+    _Guarded_by_(groupMutex_) std::optional<std::pair<std::string, std::chrono::steady_clock::time_point>> receiverAsking_;
+    static constexpr auto kAskingShownAfter = std::chrono::seconds(1);
     std::optional<ReceiverLeft> receiverLeft_;
     std::optional<std::chrono::steady_clock::time_point> pairedAt_; // when the receiver in use went into a pair
     mutable std::mutex lyricsMutex_;

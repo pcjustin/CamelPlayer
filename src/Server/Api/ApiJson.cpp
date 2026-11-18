@@ -333,6 +333,7 @@ json toJson(const PlaybackSnapshot& p) {
             {"playerMuted", p.playerMuted},
             {"receivers", receivers},
             {"receiverLeft", left},
+            {"receiverAsking", p.receiverAsking},
             {"error", p.error ? json(nameOf(*p.error, kErrorCodes)) : json(nullptr)},
             {"errorDetail", p.errorDetail},
             {"revision", p.revision}};
@@ -375,6 +376,7 @@ PlaybackSnapshot playbackFrom(const json& j) {
         return ReceiverLeft{value<uint64_t>(v, "serial"), value<std::string>(v, "name"),
                             enumFrom(field(v, "code"), kErrorCodes, "error code"), value<std::string>(v, "detail")};
     });
+    if (j.contains("receiverAsking")) p.receiverAsking = value<std::string>(j, "receiverAsking");
     p.error = optional<ErrorCode>(j, "error", [](const json& v) { return enumFrom(v, kErrorCodes, "error code"); });
     p.errorDetail = value<std::string>(j, "errorDetail");
     p.revision = value<uint64_t>(j, "revision");

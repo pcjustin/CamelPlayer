@@ -107,6 +107,10 @@ protected:
             std::scoped_lock lock(toldMutex_);
             told_.push_back(event);
         };
+        options.askingUser = [this](const std::string& id, bool asking) {
+            std::scoped_lock lock(toldMutex_);
+            asked_.emplace_back(id, asking);
+        };
         auto created = createAirPlayOutput(receiver(), options);
         created->setErrorHandler([this](const audio::Error& e) { error_ = int(e.code()) + 1; });
         return created;
@@ -125,6 +129,11 @@ protected:
     std::vector<airplay::ReceiverEvent> told() {
         std::scoped_lock lock(toldMutex_);
         return told_;
+    }
+    std::vector<std::pair<std::string, bool>> asked_; // while a request waited for the receiver's user, and after
+    std::vector<std::pair<std::string, bool>> asked() {
+        std::scoped_lock lock(toldMutex_);
+        return asked_;
     }
     std::shared_ptr<AirPlayPairings> pairings_ = std::make_shared<AirPlayPairings>();
     std::atomic<int> error_ = 0;
@@ -419,6 +428,25 @@ TEST_F(AirPlayOutputTest, AnAirPlay2RefusalSaysWhetherTheReceiversUserRefused) {
     rtsp_.askUser(1200ms);
     EXPECT_EQ(codeOf(what), audio::ErrorCode::AccessDenied);
     EXPECT_EQ(std::string_view(what), airplay::kNotAllowedOnReceiver);
+}
+
+// A Mac holds AirPlay 2's session SETUP, and AirPlay 1's ANNOUNCE, until its user answers: the output says it waits.
+TEST_F(AirPlayOutputTest, ARequestWaitingForTheReceiversUserIsSaid) {
+    const std::vector<std::pair<std::string, bool>> waited{{"800A805D016B", true}, {"800A805D016B", false}};
+    rtsp_.askUser(300ms);
+    CountingSource source(44100);
+    {
+        auto out = output();
+        out->open(kCd, &source);
+        EXPECT_EQ(asked(), waited) << "AirPlay 1";
+        out->close();
+    }
+    asked_.clear();
+    airplay2_ = true;
+    auto out = output();
+    out->open(kCd, &source);
+    EXPECT_EQ(asked(), waited) << "AirPlay 2";
+    out->close();
 }
 
 // The owner's TV and Mac (2026-11-18): play/pause, next and previous from the remote, a pause when turned off; each request
@@ -943,6 +971,20 @@ TEST_F(AirPlayStreamingTest, PlayRightAfterChoosingAReceiverPlays) {
     ASSERT_TRUE(waitFor([&] { return rtsp_.packetCount() > 10 || server->snapshot().playback.error.has_value(); }, 20s));
     EXPECT_FALSE(server->snapshot().playback.error.has_value()) << server->snapshot().playback.errorDetail;
     EXPECT_GT(rtsp_.packetCount(), 10U);
+    server->shutdown();
+}
+
+// While a Mac waits for its user to allow CamelPlayer, the snapshot names it, so that the Control point can say where to
+// accept; once it plays, it does not.
+TEST_F(AirPlayStreamingTest, TheSnapshotNamesAReceiverWhileItWaitsForItsUser) {
+    raopTxt_ = {"am=Mac14,2", "cn=0,1", "et=0,3,5", "vs=1005.13.5"};
+    rtsp_.askUser(2500ms);
+    const auto file = testutil::generatedFile({"airplay-asking", 44100, 16, 2, 4.0});
+    auto server = serverFor();
+    server->submit(queue({file}));
+    EXPECT_TRUE(waitFor([&] { return server->snapshot().playback.receiverAsking == "DMP-A6"; }));
+    EXPECT_TRUE(waitFor([&] { return rtsp_.packetCount() > 10 && server->snapshot().playback.receiverAsking.empty(); }))
+        << server->snapshot().playback.errorDetail;
     server->shutdown();
 }
 

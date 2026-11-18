@@ -2164,6 +2164,12 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownRevision_ = s.revision;
         if (s.error) {
             showError(*s.error, s.errorDetail, snapshot.settings.backend);
+        } else if (!s.receiverAsking.empty()) {
+            ErrorBar().Severity(InfoBarSeverity::Informational);
+            ErrorBar().Title(ui::format(L"State_ReceiverAsking", {std::wstring(ui::utf8(s.receiverAsking))}));
+            ErrorBar().Message(tr(L"State_ReceiverAskingDetail"));
+            ErrorBar().IsClosable(false);
+            ErrorBar().IsOpen(true);
         } else if (buffering) {
             // Pause ends the wait, and with it the bar.
             ErrorBar().Severity(InfoBarSeverity::Warning);

@@ -158,6 +158,23 @@ uint16_t portIn(std::string_view transport, std::string_view name) {
     return port;
 }
 
+// Says that a request waits for the receiver's user to allow CamelPlayer, then that it has been answered.
+class UserAsked {
+public:
+    UserAsked(const std::function<void(const std::string&, bool)>& tell, std::string id) : tell_(tell), id_(std::move(id)) {
+        if (tell_) tell_(id_, true);
+    }
+    ~UserAsked() {
+        if (tell_) tell_(id_, false);
+    }
+    UserAsked(const UserAsked&) = delete;
+    UserAsked& operator=(const UserAsked&) = delete;
+
+private:
+    const std::function<void(const std::string&, bool)>& tell_;
+    std::string id_;
+};
+
 void check(const RtspReply& reply, std::string_view step) {
     if (reply.status == kStatusOk) return;
     if (reply.status == kStatusBusy) throw Error(ErrorCode::DeviceInUse, kInUse);
@@ -353,9 +370,11 @@ private:
             check(client->request("OPTIONS", "*"), "OPTIONS");
             // A Mac answers ANNOUNCE once its user accepts CamelPlayer, or with 400 when they decline or let it be.
             client->setTimeout(options_.userTimeoutMs);
-            const auto announced =
-                client->request("ANNOUNCE", client->url(), "application/sdp",
-                                sessionDescription(client->localAddress(), speaker.address, client->session()));
+            const auto announced = [&] {
+                const UserAsked asking(options_.askingUser, receiver.id);
+                return client->request("ANNOUNCE", client->url(), "application/sdp",
+                                       sessionDescription(client->localAddress(), speaker.address, client->session()));
+            }();
             client->setTimeout(options_.requestTimeoutMs);
             if (announced.status == kStatusBadRequest) throw Error(ErrorCode::AccessDenied, std::string(kNotAllowedOnReceiver));
             check(announced, "ANNOUNCE");
@@ -392,8 +411,10 @@ private:
                 throw Error(ErrorCode::AccessDenied, kRefused);
             client->setTimeout(options_.userTimeoutMs);
             const auto asked = Clock::now();
-            const auto session =
-                client->request("SETUP", client->url(), kPlistType, toBinaryPlist(sessionSetup(timingPort_, groupUuid_)));
+            const auto session = [&] {
+                const UserAsked asking(options_.askingUser, receiver.id);
+                return client->request("SETUP", client->url(), kPlistType, toBinaryPlist(sessionSetup(timingPort_, groupUuid_)));
+            }();
             client->setTimeout(options_.requestTimeoutMs);
             // The 400 that answers its user's refusal comes once they answer or the notification goes; one at once is the
             // request's.

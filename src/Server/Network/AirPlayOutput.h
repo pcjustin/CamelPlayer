@@ -45,6 +45,8 @@ struct AirPlayOutputOptions {
     // Asks the receivers' announcements again, as one whose access setting changed closes its connection only then.
     std::function<void()> lookAgain;
     std::shared_ptr<AirPlayPairings> pairings; // what a receiver that asks for a password or a code was paired with
+    // While a request waits for the receiver's user to allow CamelPlayer (`asking` true), and once it is answered (false).
+    std::function<void(const std::string& id, bool asking)> askingUser;
     // What an AirPlay 2 receiver asks on its event channel: its remote's buttons, a pause when it is turned off, its volume.
     std::function<void(const std::string& id, const airplay::ReceiverEvent& event)> commanded;
     int requestTimeoutMs = 3000;
