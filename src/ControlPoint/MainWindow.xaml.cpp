@@ -199,6 +199,29 @@ void foldNote(TextBlock const& note) {
     link.Click([show, open = false](auto&&, auto&&) mutable { show(open = !open); });
 }
 
+// WinUI shows a box's text note on one line, cut off at the box's edge; as a text block of its own it wraps.
+void wrapNotes(UIElement const& element) {
+    const auto wrap = [](IInspectable const& description) -> IInspectable {
+        const hstring text = unbox_value_or<hstring>(description, {});
+        if (text.empty()) return description;
+        TextBlock note;
+        note.Text(text);
+        note.TextWrapping(TextWrapping::Wrap);
+        return note;
+    };
+    if (const auto box = element.try_as<ComboBox>())
+        box.Description(wrap(box.Description()));
+    else if (const auto number = element.try_as<NumberBox>())
+        number.Description(wrap(number.Description()));
+    else if (const auto panel = element.try_as<Panel>())
+        for (const auto& child : panel.Children()) wrapNotes(child);
+    else if (const auto border = element.try_as<Border>()) {
+        if (border.Child()) wrapNotes(border.Child());
+    } else if (const auto content = element.try_as<ContentControl>()) {
+        if (const auto inner = content.Content().try_as<UIElement>()) wrapNotes(inner);
+    }
+}
+
 constexpr auto kPlayerVolumeSettles = std::chrono::milliseconds(2000);
 
 hstring decibels(double db) {
@@ -537,6 +560,7 @@ void MainWindow::InitializeComponent() {
     for (const TextBlock& note :
          {VolumeNote(), ReplayGainNote(), CrossfadeNote(), DspOrderNote(), EqNote(), CrossfeedNote(), ConvolutionNote()})
         foldNote(note);
+    wrapNotes(SettingsScroller().Content().as<UIElement>());
 
     populateSettings();
     const ui::PlaylistMenu playlistMenu = [this](MenuFlyout const& menu, const std::function<ui::SourceFetch()>& selection) {
