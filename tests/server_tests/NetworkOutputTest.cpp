@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <future>
@@ -137,6 +138,12 @@ uint32_t le32(const std::string& bytes, size_t at) {
     return *reinterpret_cast<const uint32_t*>(bytes.data() + at);
 }
 
+uint64_t le64(const std::string& bytes, size_t at) {
+    uint64_t value = 0;
+    std::memcpy(&value, bytes.data() + at, sizeof value);
+    return value;
+}
+
 } // namespace
 
 TEST(NetworkOutputTest, TellsWhatThePlayerCanTake) {
@@ -245,12 +252,12 @@ TEST(NetworkOutputTest, SendsRawDsdAsDsfBlocks) {
     const uint64_t metadataAt = 92 + 2 * 4096U * 2; // the samples, then their metadata, as in a DSF file
     ASSERT_GT(body.size(), metadataAt);
     EXPECT_EQ(body.substr(0, 4), "DSD ");
-    EXPECT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 12), body.size());
-    EXPECT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 20), metadataAt);
+    EXPECT_EQ(le64(body, 12), body.size());
+    EXPECT_EQ(le64(body, 20), metadataAt);
     EXPECT_EQ(body.substr(size_t(metadataAt), 3), "ID3");
     EXPECT_EQ(body.substr(28, 4), "fmt ");
     EXPECT_EQ(le32(body, 56), 352800U * 8);
-    EXPECT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 64), frames * 8);
+    EXPECT_EQ(le64(body, 64), frames * 8);
     EXPECT_EQ(le32(body, 72), 4096U);
     EXPECT_EQ(body.substr(80, 4), "data");
     const auto reversed = [](uint8_t value) {
@@ -323,7 +330,7 @@ TEST(NetworkOutputTest, ADsdTrackEndingShortIsFilledWithDsdSilence) {
     ASSERT_TRUE(waitFor([&] { return !renderer.received().empty(); }));
     const std::string body = renderer.received().begin()->second;
     ASSERT_GT(body.size(), dataAt + 3 * block * 2);
-    ASSERT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 20), dataAt + 3 * block * 2);
+    ASSERT_EQ(le64(body, 20), dataAt + 3 * block * 2);
     constexpr auto kSilence = uint8_t(0x96); // 0x69, the DSD idle pattern, least significant bit first as DSF has it
     size_t notSilent = 0;
     for (uint64_t frame = rendered; frame < told; ++frame)
