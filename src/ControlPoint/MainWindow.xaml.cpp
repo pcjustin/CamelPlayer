@@ -988,6 +988,8 @@ void MainWindow::populateOutputs() {
         const hstring forOutput = ui::format(L"Dsp_ForOutput", {std::wstring(dspOutputLabel_)});
         DspOutputText().Text(forOutput);
         VolumeOutputText().Text(forOutput);
+        const hstring dspName = ui::format(L"Dsp_ButtonForOutput", {std::wstring(dspOutputLabel_)});
+        setBadgeTip(DspButton(), dspName, dspName);
     }
     auto list = OutputList().Children();
     list.Clear();
@@ -5009,9 +5011,11 @@ void MainWindow::OnConvolutionRemoveClick(Windows::Foundation::IInspectable cons
 void MainWindow::OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
     auto items = DspMenu().Items();
     items.Clear();
+    // Not a command, so not enabled, but read as text: the disabled colour is about 3:1.
     MenuFlyoutItem forOutput;
     forOutput.Text(ui::format(L"Dsp_MenuForOutput", {std::wstring(dspOutputLabel_)}));
     forOutput.IsEnabled(false);
+    forOutput.Resources().Insert(box_value(L"MenuFlyoutItemForegroundDisabled"), themeBrush(L"TextFillColorSecondaryBrush"));
     items.Append(forOutput);
     items.Append(MenuFlyoutSeparator());
     const auto toggle = [&](camel::audio::DspNode node, bool on, bool available, auto flip) {
