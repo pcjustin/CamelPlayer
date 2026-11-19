@@ -1919,10 +1919,10 @@ private:
         }
         {
             std::scoped_lock lock(groupMutex_);
-            if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); }))
-                throw !airplayRefusal_.empty()
-                    ? audio::Error(audio::ErrorCode::AccessDenied, airplayRefusal_)
-                    : audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
+            if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); })) {
+                if (!airplayRefusal_.empty()) throw audio::Error(audio::ErrorCode::AccessDenied, airplayRefusal_);
+                throw audio::Error(audio::ErrorCode::DeviceNotFound, "the AirPlay receiver is not connected");
+            }
         }
         AirPlayOutputOptions options;
         options.pairings = airplayPairings_;
