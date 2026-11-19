@@ -316,6 +316,7 @@ TEST_F(FileDetailsTest, EveryPlayableFormatIsRead) {
 
 TEST_F(FileDetailsTest, TechnicalDataComesFromTheStreamAndTheFile) {
     const auto file = flac();
+    fs::last_write_time(file, fs::file_time_type::clock::now()); // a copy keeps the time its source was made in this run
     const auto details = read(file);
     EXPECT_EQ(details.format, "FLAC");
     EXPECT_EQ(details.sampleRate, 44100U);
