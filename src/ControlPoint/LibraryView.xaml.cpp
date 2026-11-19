@@ -1118,8 +1118,13 @@ void LibraryView::loadFolder() {
             if (listing->trail.empty()) return;
             folderTrail_ = ui::folderTrail(listing->trail, winrt::to_string(tr(L"Nav_Folders/Content")));
             auto names = single_threaded_vector<Windows::Foundation::IInspectable>();
-            for (const auto& step : folderTrail_) names.Append(box_value(ui::utf8(step.name)));
+            std::wstring path;
+            for (const auto& step : folderTrail_) {
+                names.Append(box_value(ui::utf8(step.name)));
+                path += (path.empty() ? L"" : L" › ") + std::wstring(ui::utf8(step.name));
+            }
             FolderTrail().ItemsSource(names);
+            Automation::AutomationProperties::SetName(FolderTrail(), ui::format(L"Library_FolderPath", {path}));
             HeaderTitle().Text(ui::utf8(folderTrail_.back().name));
         });
     });
