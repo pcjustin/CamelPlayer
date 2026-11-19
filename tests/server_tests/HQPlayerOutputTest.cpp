@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -118,11 +119,15 @@ private:
 };
 
 uint32_t le32(const std::string& bytes, size_t at) {
-    return *reinterpret_cast<const uint32_t*>(bytes.data() + at);
+    uint32_t value = 0;
+    std::memcpy(&value, bytes.data() + at, sizeof value);
+    return value;
 }
 
 uint64_t le64(const std::string& bytes, size_t at) {
-    return *reinterpret_cast<const uint64_t*>(bytes.data() + at);
+    uint64_t value = 0;
+    std::memcpy(&value, bytes.data() + at, sizeof value);
+    return value;
 }
 
 size_t count(const std::vector<std::string>& all, const std::string& one) {
