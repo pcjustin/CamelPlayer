@@ -756,6 +756,7 @@
   <data name="AirPlay_PairKept" xml:space="preserve"><value>CamelPlayer 會將它保存在這台電腦上，並以你的 Windows 帳戶保護；接收器不再接受時會再次詢問。</value></data>
   <data name="AirPlay_PairFailed" xml:space="preserve"><value>{0} 未能配對：{1}</value></data>
   <data name="AirPlay_PairWrong" xml:space="preserve"><value>密碼或代碼不正確，請再試一次。</value></data>
+  <data name="AirPlay_PairWaiting" xml:space="preserve"><value>正在等候「{0}」回應</value></data>
   <data name="AirPlay_PairButton" xml:space="preserve"><value>配對</value></data>
   <data name="AirPlay_PairCodeName" xml:space="preserve"><value>代碼</value></data>
   <data name="AirPlay_PairPasswordName" xml:space="preserve"><value>密碼</value></data>

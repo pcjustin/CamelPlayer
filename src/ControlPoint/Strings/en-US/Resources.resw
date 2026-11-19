@@ -756,6 +756,7 @@ Details: {0}</value></data>
   <data name="AirPlay_PairKept" xml:space="preserve"><value>CamelPlayer keeps it on this computer, protected for your Windows account, and asks again if the receiver no longer takes it.</value></data>
   <data name="AirPlay_PairFailed" xml:space="preserve"><value>{0} did not pair: {1}</value></data>
   <data name="AirPlay_PairWrong" xml:space="preserve"><value>That is not its password or code. Try again.</value></data>
+  <data name="AirPlay_PairWaiting" xml:space="preserve"><value>Waiting for {0} to answer</value></data>
   <data name="AirPlay_PairButton" xml:space="preserve"><value>Pair</value></data>
   <data name="AirPlay_PairCodeName" xml:space="preserve"><value>Code</value></data>
   <data name="AirPlay_PairPasswordName" xml:space="preserve"><value>Password</value></data>

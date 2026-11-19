@@ -1446,14 +1446,17 @@ winrt::fire_and_forget MainWindow::askAirPlayPairing(camel::server::OutputRow ro
     PasswordBox secret;
     Automation::AutomationProperties::SetName(secret, tr(code ? L"AirPlay_PairCodeName" : L"AirPlay_PairPasswordName"));
     content.Children().Append(secret);
+    // Told to screen readers as it appears: what the receiver answered, and that it is being waited for.
     TextBlock problem;
     problem.TextWrapping(TextWrapping::Wrap);
     problem.Foreground(themeBrush(L"SystemFillColorCriticalBrush"));
     problem.Visibility(Visibility::Collapsed);
+    Automation::AutomationProperties::SetLiveSetting(problem, Automation::Peers::AutomationLiveSetting::Assertive);
     content.Children().Append(problem);
     ProgressBar progress;
     progress.IsIndeterminate(true);
     progress.Visibility(Visibility::Collapsed);
+    Automation::AutomationProperties::SetName(progress, ui::format(L"AirPlay_PairWaiting", {std::wstring(label)}));
     content.Children().Append(progress);
     TextBlock kept;
     kept.Text(tr(L"AirPlay_PairKept"));
@@ -1478,32 +1481,36 @@ winrt::fire_and_forget MainWindow::askAirPlayPairing(camel::server::OutputRow ro
         if (!shown || !typed || typed.Password().empty() || pairing_ || !server_) return;
         shown.IsPrimaryButtonEnabled(false);
         if (const auto bar = weakProgress.get()) bar.Visibility(Visibility::Visible);
-        if (const auto text = weakProblem.get()) text.Visibility(Visibility::Collapsed);
+        if (const auto text = weakProblem.get()) {
+            text.Visibility(Visibility::Collapsed);
+            text.Text({}); // the same answer again is told again
+        }
         Command pair;
         pair.kind = CommandKind::PairAirPlay;
         pair.receiver = row.id;
         pair.code = toUtf8(std::wstring(typed.Password()));
         const auto stamp = server_->submit(std::move(pair));
         cursor_.expect(stamp);
-        pairing_ = PendingPairing{
-            stamp.id,
-            [label, paired, weakDialog, weakProblem, weakProgress](const std::optional<camel::server::Failure>& failure) {
-                const auto open = weakDialog.get();
-                if (!open) return;
-                open.IsPrimaryButtonEnabled(true);
-                if (const auto bar = weakProgress.get()) bar.Visibility(Visibility::Collapsed);
-                if (!failure) {
-                    *paired = true;
-                    open.Hide();
-                    return;
-                }
-                if (const auto text = weakProblem.get()) {
-                    text.Text(failure->code == ErrorCode::AccessDenied
-                                  ? tr(L"AirPlay_PairWrong")
-                                  : ui::format(L"AirPlay_PairFailed", {std::wstring(label), ui::utf8(failure->detail).c_str()}));
-                    text.Visibility(Visibility::Visible);
-                }
-            }};
+        pairing_ =
+            PendingPairing{stamp.id, [label, paired, weakDialog, weakProblem,
+                                      weakProgress](const std::optional<camel::server::Failure>& failure) {
+                               const auto open = weakDialog.get();
+                               if (!open) return;
+                               open.IsPrimaryButtonEnabled(true);
+                               if (const auto bar = weakProgress.get()) bar.Visibility(Visibility::Collapsed);
+                               if (!failure) {
+                                   *paired = true;
+                                   open.Hide();
+                                   return;
+                               }
+                               if (const auto text = weakProblem.get()) {
+                                   text.Visibility(Visibility::Visible);
+                                   setAnnounced(text, failure->code == ErrorCode::AccessDenied
+                                                          ? tr(L"AirPlay_PairWrong")
+                                                          : ui::format(L"AirPlay_PairFailed",
+                                                                       {std::wstring(label), ui::utf8(failure->detail).c_str()}));
+                               }
+                           }};
     });
     co_await ui::showDialog(dialog);
     pairing_.reset();
