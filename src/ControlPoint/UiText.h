@@ -19,6 +19,8 @@ winrt::hstring errorTitle(camel::audio::ErrorCode code);
 // A network player's reason for the error in full, or empty where errorTitle and the detail say it.
 winrt::hstring playerErrorTitle(camel::audio::ErrorCode code, std::string_view detail = {});
 winrt::hstring hqplayerErrorTitle(camel::audio::ErrorCode code);
+// The same for a device on this computer.
+winrt::hstring deviceErrorTitle(camel::audio::ErrorCode code, std::string_view detail);
 winrt::hstring utf8(const std::string& s);
 std::wstring formatTime(double seconds); // m:ss or h:mm:ss
 std::wstring count(int64_t n);           // 70,715

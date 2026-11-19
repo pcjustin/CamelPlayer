@@ -26,6 +26,7 @@
 #include "Common/util/Text.h"
 #include "OutputBridge/Mmcss.h"
 #include "OutputBridge/OutputChoices.h"
+#include "OutputBridge/PaceCheck.h"
 
 namespace camel::audio {
 namespace {
@@ -251,8 +252,9 @@ private:
             status_.adjustments.push_back(mmcss.adjustment());
         }
         const UINT32 bpf = fmt_.bytesPerFrame();
-        bool started = false, primed = false;
+        bool started = false, primed = false, runsFast = false;
         int timeouts = 0, tooLarge = 0;
+        PaceCheck pace(fmt_.sampleRate, std::chrono::milliseconds(1000 + uint64_t(bufferFrames) * 1000 / fmt_.sampleRate));
         auto fill = [&](UINT32 frames) -> HRESULT {
             BYTE* p = nullptr;
             HRESULT hr = render->GetBuffer(frames, &p);
@@ -261,14 +263,17 @@ private:
             got += source_->render(p + got * bpf, frames - got);
             if (got < frames) memset(p + got * bpf, 0, size_t(frames - got) * bpf);
             kept_.wrote(p, frames);
-            return render->ReleaseBuffer(frames, 0);
+            hr = render->ReleaseBuffer(frames, 0);
+            if (SUCCEEDED(hr) && pace.took(frames, PaceCheck::Clock::now())) runsFast = true;
+            return hr;
         };
         HRESULT err = S_OK;
-        while (!quit_) {
+        while (!quit_ && !runsFast) {
             bool want = running_;
             if (want != started) {
                 if (want) {
                     if (!primed) { // exclusive mode requires a full buffer before Start
+                        pace.restart(PaceCheck::Clock::now());
                         err = fill(bufferFrames);
                         primed = true;
                     }
@@ -326,7 +331,11 @@ private:
             }
         }
         if (started) client->Stop();
-        if (FAILED(err)) {
+        if (runsFast && !quit_) {
+            log::warn("wasapi: %s", kDeviceRunsFast);
+            applied_.notify(running_);
+            raiseError(Error(ErrorCode::DriverError, kDeviceRunsFast));
+        } else if (FAILED(err)) {
             log::error("wasapi: stream failed 0x%08lX", (unsigned long)err);
             applied_.notify(running_);
             raiseError(hrError("WASAPI stream", err));

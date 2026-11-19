@@ -147,6 +147,7 @@
   <data name="Error_TooSlow" xml:space="preserve"><value>This computer cannot keep up with this DSD rate; choose a lower DSD rate</value></data>
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>The device cannot play this format bit-perfectly; skipped</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>Driver error</value></data>
+  <data name="Error_DeviceRunsFast" xml:space="preserve"><value>The device takes audio far faster than it plays; it may be asleep or not connected. Press play when it is ready</value></data>
   <data name="Library_GoToPlaying.AutomationProperties.Name" xml:space="preserve"><value>Go to playing (Ctrl+L)</value></data>
   <data name="Library_GoToPlaying.ToolTipService.ToolTip" xml:space="preserve"><value>Go to playing (Ctrl+L)</value></data>
   <data name="Library_PlayingMark" xml:space="preserve"><value>playing</value></data>

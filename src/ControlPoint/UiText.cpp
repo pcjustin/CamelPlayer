@@ -6,6 +6,7 @@
 
 #include "UiText.h"
 
+#include "OutputBridge/PaceCheck.h"
 #include "Server/Network/AirPlay.h"
 #include "Substitute.h"
 
@@ -105,6 +106,12 @@ winrt::hstring hqplayerErrorTitle(camel::audio::ErrorCode code) {
     default:
         return {};
     }
+}
+
+winrt::hstring deviceErrorTitle(camel::audio::ErrorCode code, std::string_view detail) {
+    if (code == camel::audio::ErrorCode::DriverError && detail == camel::audio::kDeviceRunsFast)
+        return tr(L"Error_DeviceRunsFast");
+    return {};
 }
 
 winrt::hstring utf8(const std::string& s) {

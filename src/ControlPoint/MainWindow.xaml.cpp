@@ -2319,15 +2319,16 @@ void MainWindow::showReceiverAsking() {
     ErrorBar().IsOpen(true);
 }
 
-// A network player's reason is said whole in its title; the engine's English detail stays in the log.
+// A network player's reason, or a known one of a device, is said whole in its title; the engine's English detail stays
+// in the log.
 void MainWindow::showError(ErrorCode code, const std::string& detail, Backend backend) {
-    const hstring player = backend == Backend::HQPlayer ? ui::hqplayerErrorTitle(code)
+    const hstring reason = backend == Backend::HQPlayer ? ui::hqplayerErrorTitle(code)
                            : isNetworkPlayer(backend)   ? ui::playerErrorTitle(code, detail)
-                                                        : hstring{};
+                                                        : ui::deviceErrorTitle(code, detail);
     ErrorBar().Severity(InfoBarSeverity::Warning);
     ErrorBar().IsClosable(true);
-    ErrorBar().Title(player.empty() ? ui::errorTitle(code) : player);
-    ErrorBar().Message(player.empty() ? ui::utf8(detail) : hstring{});
+    ErrorBar().Title(reason.empty() ? ui::errorTitle(code) : reason);
+    ErrorBar().Message(reason.empty() ? ui::utf8(detail) : hstring{});
     ErrorBar().IsOpen(true);
 }
 
