@@ -198,10 +198,11 @@ Reply send(const std::string& method, const std::string& url, const std::string&
                        SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
         WinHttpSetOption(request.get(), WINHTTP_OPTION_SECURITY_FLAGS, &accept, sizeof(accept));
     }
-    const std::wstring wideHeaders = toWide(headers);
-    if (!WinHttpSendRequest(request.get(), wideHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : wideHeaders.c_str(),
-                            DWORD(wideHeaders.size()), const_cast<char*>(body.data()), DWORD(body.size()), DWORD(body.size()),
-                            0) ||
+    // One request a connection: WinHTTP hands a connection the server keeps to the next request to it, even another
+    // session's, and a player that answers once per connection, as the DMP-A6, closes it on that request unanswered.
+    const std::wstring wideHeaders = toWide(headers.empty() ? "Connection: close" : headers + "\r\nConnection: close");
+    if (!WinHttpSendRequest(request.get(), wideHeaders.c_str(), DWORD(wideHeaders.size()), const_cast<char*>(body.data()),
+                            DWORD(body.size()), DWORD(body.size()), 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr))
         fail("HTTP request");
     Reply reply;

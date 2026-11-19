@@ -165,6 +165,64 @@ TEST(UpnpMessages, AnHttpsControlAddressIsSpokenToOverTls) {
     EXPECT_EQ(uint8_t(first), 0x16) << "the request began with '" << first << "', not a TLS handshake";
 }
 
+// The DMP-A6's server answers one request on a connection and keeps it open without saying it will close. WinHTTP kept
+// such a connection for the next request to the player, even one from another session, and the player closed it unanswered
+// (WinHTTP's 12152): GetMute right after GetVolume failed every few seconds.
+TEST(UpnpMessages, APlayerThatAnswersOneRequestPerConnectionAnswersRequestsInARow) {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ASSERT_EQ(listen(listener, 8), 0);
+    int size = sizeof(address);
+    getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size);
+    std::thread server([listener] {
+        constexpr auto kClosed = INVALID_SOCKET;
+        std::vector<std::thread> connections;
+        for (SOCKET client; (client = accept(listener, nullptr, nullptr)) != kClosed;)
+            connections.emplace_back([client] {
+                const DWORD timeout = 3000; // a connection the client keeps is let go
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+                std::string data;
+                bool answered = false;
+                char buffer[4096];
+                for (int read; (read = recv(client, buffer, sizeof(buffer), 0)) > 0;) {
+                    data.append(buffer, size_t(read));
+                    const auto end = data.find("\r\n\r\n");
+                    if (end == std::string::npos) continue;
+                    std::string head = data.substr(0, end);
+                    std::ranges::transform(head, head.begin(), [](unsigned char c) { return char(tolower(c)); });
+                    const auto length = head.find("content-length:");
+                    const size_t body = length == std::string::npos ? 0 : std::stoul(head.substr(length + 15));
+                    if (data.size() < end + 4 + body) continue;
+                    if (std::exchange(answered, true)) break; // a second request on the connection is closed unanswered
+                    const std::string reply = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+                    send(client, reply.data(), int(reply.size()), 0);
+                    data.erase(0, end + 4 + body);
+                    if (head.find("connection: close") != std::string::npos) break;
+                }
+                closesocket(client);
+            });
+        for (auto& connection : connections) connection.join();
+    });
+    const std::string url = "http://127.0.0.1:" + std::to_string(ntohs(address.sin_port)) + "/ctl";
+    for (int request = 0; request < 3; ++request) {
+        std::string answer;
+        try {
+            answer = http::send("POST", url, "SOAPACTION: \"x\"", "body", 2000, 4096).body;
+        } catch (const std::exception& e) {
+            answer = e.what();
+        }
+        EXPECT_EQ(answer, "ok") << "request " << request + 1;
+    }
+    closesocket(listener);
+    server.join();
+    WSACleanup();
+}
+
 TEST(UpnpMessages, ReadsSearchAnswersAndAnnouncements) {
     const auto answer = parseSsdp("HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: "
                                   "uuid:a::urn:x\r\nLocation: http://192.168.1.5/d.xml\r\n\r\n");
