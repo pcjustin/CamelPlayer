@@ -769,6 +769,8 @@
   <data name="Output_AddHQPlayer" xml:space="preserve"><value>加入 HQPlayer</value></data>
   <data name="Output_HQPlayerHost" xml:space="preserve"><value>主機名稱或位址（本機為 localhost）</value></data>
   <data name="Output_HQPlayerPort" xml:space="preserve"><value>連接埠</value></data>
+  <data name="Output_HQPlayerBadPort" xml:space="preserve"><value>連接埠是 1 到 65535 的整數。</value></data>
+  <data name="Output_HQPlayerBadHost" xml:space="preserve"><value>這不是主機名稱或位址。</value></data>
   <data name="Output_HQPlayerAdd" xml:space="preserve"><value>加入</value></data>
   <data name="Output_HQPlayerNote" xml:space="preserve"><value>本機的 HQPlayer 會自動列出。另一台電腦上的 HQPlayer 需在 HQPlayer 開啟「Allow control from network」，開啟後也會自動被找到，找不到時才需在這裡加入。</value></data>
   <data name="Error_HQPlayerInUse" xml:space="preserve"><value>HQPlayer 正被其他來源使用</value></data>

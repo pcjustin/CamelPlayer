@@ -769,6 +769,8 @@ Details: {0}</value></data>
   <data name="Output_AddHQPlayer" xml:space="preserve"><value>Add HQPlayer</value></data>
   <data name="Output_HQPlayerHost" xml:space="preserve"><value>Host name or address (localhost for this computer)</value></data>
   <data name="Output_HQPlayerPort" xml:space="preserve"><value>Port</value></data>
+  <data name="Output_HQPlayerBadPort" xml:space="preserve"><value>The port is a whole number from 1 to 65535.</value></data>
+  <data name="Output_HQPlayerBadHost" xml:space="preserve"><value>This is not a host name or address.</value></data>
   <data name="Output_HQPlayerAdd" xml:space="preserve"><value>Add</value></data>
   <data name="Output_HQPlayerNote" xml:space="preserve"><value>HQPlayer on this computer is listed by itself. One on another computer needs “Allow control from network” turned on in HQPlayer and is then found by itself too, so add it here only when it is not found.</value></data>
   <data name="Error_HQPlayerInUse" xml:space="preserve"><value>HQPlayer is in use by another source</value></data>

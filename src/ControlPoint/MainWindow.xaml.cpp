@@ -1357,6 +1357,12 @@ std::optional<std::pair<std::string, std::string>> hqplayerAddress(std::wstring 
     return std::pair(camel::server::hqplayer::addressOf(parsedHost, parsedPort), parsedHost);
 }
 
+bool hqplayerPort(const std::wstring& port) {
+    std::string host;
+    uint16_t parsed = 0;
+    return camel::server::hqplayer::splitAddress("localhost:" + toUtf8(port), host, parsed);
+}
+
 winrt::fire_and_forget MainWindow::askAddHQPlayer() {
     auto strong = get_strong();
     ContentDialog dialog;
@@ -1382,8 +1388,26 @@ winrt::fire_and_forget MainWindow::askAddHQPlayer() {
     dialog.PrimaryButtonText(tr(L"Output_HQPlayerAdd"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Primary);
-    const auto check = [dialog, host, port](auto&&, auto&&) {
-        dialog.IsPrimaryButtonEnabled(hqplayerAddress(std::wstring(host.Text()), std::wstring(port.Text())).has_value());
+    // What is wrong shows under its field, and a screen reader reads it with the field.
+    const auto problem = [critical = themeBrush(L"SystemFillColorCriticalBrush")](TextBox const& field, hstring const& text) {
+        Automation::AutomationProperties::SetHelpText(field, text);
+        if (text.empty()) {
+            field.Description(nullptr);
+            return;
+        }
+        TextBlock said;
+        said.Text(text);
+        said.TextWrapping(TextWrapping::Wrap);
+        said.Foreground(critical);
+        field.Description(said);
+    };
+    const auto check = [dialog, host, port, problem](auto&&, auto&&) {
+        const std::wstring typedPort(port.Text());
+        const bool portOk = hqplayerPort(typedPort);
+        const bool ok = hqplayerAddress(std::wstring(host.Text()), typedPort).has_value();
+        problem(port, portOk ? hstring{} : tr(L"Output_HQPlayerBadPort"));
+        problem(host, portOk && !ok ? tr(L"Output_HQPlayerBadHost") : hstring{});
+        dialog.IsPrimaryButtonEnabled(ok);
     };
     host.TextChanged(check);
     port.TextChanged(check);
