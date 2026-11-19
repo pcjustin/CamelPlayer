@@ -5536,8 +5536,11 @@ winrt::fire_and_forget MainWindow::showUpdateResult() {
             showRepairResult(L"Repair_DoneTitle", L"Repair_DoneText", InfoBarSeverity::Success);
             co_return;
         }
-        std::ifstream in(programDirectory() / L"CHANGELOG.md", std::ios::binary);
-        const std::string changelog{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        // Closed before the dialog, which would otherwise hold the installed file open while it is shown.
+        const std::string changelog = [] {
+            std::ifstream in(programDirectory() / L"CHANGELOG.md", std::ios::binary);
+            return std::string{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        }();
         co_await ui::showDialog(textDialog(ContentLayout().XamlRoot(), ui::format(L"Update_InstalledTitle", {version}),
                                            ui::utf8(update::changelogSince(changelog, result->previous, result->version))));
         co_return;
