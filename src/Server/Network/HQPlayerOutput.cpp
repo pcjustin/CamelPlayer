@@ -200,6 +200,7 @@ private:
     void own(std::optional<int> state) {
         std::scoped_lock lock(mutex_);
         if (state) {
+            if (*state != wantedState_) earlierWanted_ = wantedState_;
             wantedState_ = *state;
             stopReported_ = false;
         }
@@ -245,13 +246,17 @@ private:
                     // At its end with nothing after it, the playlist ran out: HQPlayer moves on and stops, which the
                     // state below reports.
                 }
+                if (s.state == wantedState_) earlierWanted_.reset();
                 if (!taken_ && s.state != wantedState_ && !ours) {
                     // Compared with what CamelPlayer last asked for, not with the last Status, so that a change made
-                    // just after one of its own commands is seen once that command's time is over.
-                    if (s.state != 0) {
+                    // just after one of its own commands is seen once that command's time is over. What it asked for
+                    // before that is its own too until the last shows: HQPlayer starting DSD shows a Play seconds late,
+                    // after a Pause sent meanwhile.
+                    const bool earlier = earlierWanted_ == s.state && now - ownedAt_ < kOwnShowsWithin;
+                    if (s.state != 0 && !earlier) {
                         taken_ = true;
                         why = "the state is not the one asked for";
-                    } else if (!stopReported_) {
+                    } else if (s.state == 0 && !stopReported_) {
                         stopReported_ = true;
                         events.push_back({PlayerEventKind::Stopped, 0}); // its end, or a stop: the stream tells which
                     }
@@ -314,6 +319,7 @@ private:
     Clock::time_point ownUntil_, ownedAt_, askedToPlay_;
     double positionAtPlay_ = 0.0;
     int wantedState_ = 0;
+    std::optional<int> earlierWanted_; // asked for before wantedState_, until a Status shows that
     bool nextQueued_ = false, playedSinceLoad_ = false, playAgainSent_ = false, taken_ = false, stopping_ = false;
     bool stopReported_ = false;
     bool loadedSincePlay_ = false;

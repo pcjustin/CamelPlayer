@@ -281,6 +281,22 @@ TEST(HQPlayerOutputTest, APauseFromHQPlayersOwnWindowIsAnotherSource) {
     EXPECT_EQ(output.detail(), "HQPlayer is in use by another source");
 }
 
+// HQPlayer starting DSD showed CamelPlayer's Play about 4 s late, after a Pause sent meanwhile (2026-11-19).
+TEST(HQPlayerOutputTest, APauseWhileHQPlayerStartsIsNotTakenForAnotherSource) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    fake.startTakes = 1500ms;
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(fake, source, k16);
+    output->start();
+    ASSERT_TRUE(eventually([&] { return count(fake.commands(), "Play") == 1; }));
+    std::this_thread::sleep_for(700ms);
+    output->pause();
+    ASSERT_TRUE(eventually([&] { return fake.state().state == 1; }));
+    std::this_thread::sleep_for(1000ms);
+    EXPECT_EQ(output.error(), kNoError) << output.detail();
+}
+
 TEST(HQPlayerOutputTest, OurOwnPauseAndPlayAreNotAnotherSource) {
     testutil::FakeHQPlayer fake;
     fake.plays = true;

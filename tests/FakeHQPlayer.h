@@ -16,6 +16,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -52,6 +53,9 @@ public:
     std::chrono::milliseconds outputFailsAfter{300};
     // No Status pushed for this long after Play, as HQPlayer starting DSD (about 4 s on 2026-11-16).
     std::chrono::milliseconds quietAfterPlay{0};
+    // Play taking effect this long after it is answered, with no Status meanwhile, and Pause or Stop sent meanwhile only
+    // after it, as HQPlayer starting DSD did on 2026-11-19 (about 4 s).
+    std::chrono::milliseconds startTakes{0};
     // Playing at position 0 for this long after Play, as HQPlayer on macOS starting DSD (about 7 s on 2026-11-17).
     std::chrono::milliseconds positionHeldFor{0};
     // PlaylistAdd answered only once the probe read this many bytes of the stream, as HQPlayer on macOS did with DSF
@@ -147,6 +151,7 @@ public:
         {
             std::scoped_lock lock(mutex_);
             if (quietAfterPlay.count() && std::chrono::steady_clock::now() - playStarted_ < quietAfterPlay) return;
+            if (starting_) return;
             targets.assign(subscribed_.begin(), subscribed_.end());
             status = statusDocument();
         }
@@ -275,17 +280,47 @@ private:
             current_ = 0;
             ++state_.transportSerial;
             ++state_.trackSerial; // as HQPlayer did on 2026-11-16
-        } else if (element.name == "Play") {
+        } else if (starting_ && (element.name == "Play" || element.name == "Pause" || element.name == "Stop")) {
+            afterStart_.push_back(element.name);
+        } else if (element.name == "Play" && startTakes.count() && state_.state != 2) {
+            starting_ = std::chrono::steady_clock::now() + startTakes;
+        } else {
+            transport(element.name);
+        }
+    }
+
+    void transport(const std::string& command) {
+        if (command == "Play") {
             if (state_.state != 1) playedBefore_ = state_.position;
             state_.state = 2;
             playStarted_ = std::chrono::steady_clock::now();
             wantPlay_ = true;
-        } else if (element.name == "Pause") {
+        } else if (command == "Pause") {
             state_.state = 1;
             playedBefore_ = state_.position;
-        } else if (element.name == "Stop") {
+        } else if (command == "Stop") {
             state_.state = 0;
             state_.position = 0;
+        }
+    }
+
+    // Play taking effect once HQPlayer has started, then what was sent meanwhile, each with its own Status.
+    void finishStarting() {
+        std::vector<std::string> after;
+        {
+            std::scoped_lock lock(mutex_);
+            if (!starting_ || std::chrono::steady_clock::now() < *starting_) return;
+            starting_.reset();
+            transport("Play");
+            after.swap(afterStart_);
+        }
+        pushStatus();
+        for (const auto& command : after) {
+            {
+                std::scoped_lock lock(mutex_);
+                transport(command);
+            }
+            pushStatus();
         }
     }
 
@@ -310,6 +345,7 @@ private:
     // position moves on, and lasts as long as its samples.
     void play() {
         while (!stopping_) {
+            finishStarting();
             std::vector<std::string> probes;
             std::string fetch;
             bool failNow = false;
@@ -458,6 +494,8 @@ private:
     bool wantPlay_ = false;
     double playedBefore_ = 0;
     std::chrono::steady_clock::time_point playStarted_;
+    std::optional<std::chrono::steady_clock::time_point> starting_;
+    std::vector<std::string> afterStart_;
     std::map<std::string, std::string> received_;
     std::set<std::string> fetching_;
     std::map<std::string, double> lengths_;
