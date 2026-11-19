@@ -33,7 +33,7 @@ using testutil::FakeRtsp;
 namespace {
 
 bool waitFor(const std::function<bool()>& check, std::chrono::milliseconds limit = 5s) {
-    const auto deadline = std::chrono::steady_clock::now() + limit;
+    const auto deadline = std::chrono::steady_clock::now() + limit * testutil::kPairingSlowdown;
     while (std::chrono::steady_clock::now() < deadline) {
         if (check()) return true;
         std::this_thread::sleep_for(10ms);
@@ -48,7 +48,7 @@ AirPlayFinderOptions optionsFor(const FakeMdns& mdns) {
     options.groupPort = 0;
     options.searchInterval = 100ms;
     options.retryInterval = 50ms;
-    options.sessionTimeoutMs = 1000;
+    options.sessionTimeoutMs = 1000 * testutil::kPairingSlowdown;
     return options;
 }
 
@@ -415,7 +415,7 @@ TEST_F(AirPlayFinderTest, EncryptionOnlyIsNotSupported) {
 TEST_F(AirPlayFinderTest, AReceiverThatRefusesOptionsIsNotSupportedThoughItDeclaresEtZero) {
     rtsp_.answer("OPTIONS", 403);
     mdns_.add(record(rtsp_));
-    start(1s);
+    start(1s * testutil::kPairingSlowdown);
     ASSERT_TRUE(found(1));
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Refused; }));
 }
@@ -424,7 +424,7 @@ TEST_F(AirPlayFinderTest, AReceiverThatRefusesOptionsIsNotSupportedThoughItDecla
 TEST_F(AirPlayFinderTest, AReceiverThatRefusesUntilPairedIsSupportedPaired) {
     rtsp_.demandPairing();
     mdns_.add(record(rtsp_));
-    start(1s);
+    start(1s * testutil::kPairingSlowdown);
     ASSERT_TRUE(found(1));
     const auto pairedNow = [&] {
         const auto list = receivers();
@@ -442,7 +442,7 @@ TEST_F(AirPlayFinderTest, AReceiverThatRefusesUntilPairedIsSupportedPaired) {
 TEST_F(AirPlayFinderTest, AReceiverThatRefusesAndDoesNotPairIsRefused) {
     rtsp_.demandPairing("1234");
     mdns_.add(record(rtsp_));
-    start(1s);
+    start(1s * testutil::kPairingSlowdown);
     ASSERT_TRUE(found(1));
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Refused; }));
     EXPECT_FALSE(receivers().at(0).transient);
@@ -823,7 +823,7 @@ class PairingServer {
 public:
     explicit PairingServer(const FakeMdns& mdns) : server_(serverSettings()) {
         auto options = optionsFor(mdns);
-        options.searchInterval = 1s;
+        options.searchInterval = 1s * testutil::kPairingSlowdown;
         server_.setAirPlayFinderOptions(options);
     }
 

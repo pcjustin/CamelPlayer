@@ -20,10 +20,14 @@ namespace testutil {
 
 // How many times longer an AddressSanitizer build takes, for time limits that stand for an algorithm's cost: a quadratic
 // step still misses them by far.
+// AirPlay's pairing, whose big-number arithmetic it slows about 25 times, has its own: for the waits a fake receiver's
+// pairing has to fit in.
 #if defined(__SANITIZE_ADDRESS__)
 inline constexpr int kSlowdown = 4;
+inline constexpr int kPairingSlowdown = 25;
 #else
 inline constexpr int kSlowdown = 1;
+inline constexpr int kPairingSlowdown = 1;
 #endif
 
 // build\testtmp (next to build\<Configuration>\tests\tests.exe); avoids %TEMP%, which Storage Sense may wipe.

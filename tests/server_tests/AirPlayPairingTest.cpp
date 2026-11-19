@@ -13,6 +13,7 @@
 #include "FakeAirPlayReceiver.h"
 #include "Server/Network/Pairing.h"
 #include "Server/Network/Rtsp.h"
+#include "TestUtil.h"
 
 using namespace camel::server::airplay;
 
@@ -149,10 +150,10 @@ TEST(PairingRtspTest, AReceiverThatDemandsPairingIsPairedAndTheConnectionEncrypt
     testutil::FakeRtsp rtsp;
     rtsp.demandPairing();
     {
-        RtspClient plain("127.0.0.1", rtsp.port(), 1000);
+        RtspClient plain("127.0.0.1", rtsp.port(), 1000 * testutil::kPairingSlowdown);
         EXPECT_EQ(plain.request("OPTIONS", "*").status, 403);
     }
-    RtspClient client("127.0.0.1", rtsp.port(), 1000);
+    RtspClient client("127.0.0.1", rtsp.port(), 1000 * testutil::kPairingSlowdown);
     ASSERT_EQ(client.pairTransiently(), PairOutcome::Paired);
     EXPECT_EQ(client.request("OPTIONS", "*").status, 200);
     EXPECT_EQ(client.request("ANNOUNCE", client.url(), "application/sdp", std::string(3000, 'v')).status, 200);
@@ -164,7 +165,7 @@ TEST(PairingRtspTest, AReceiverThatDemandsPairingIsPairedAndTheConnectionEncrypt
 TEST(PairingRtspTest, AReceiverWithAnotherCodeDoesNotPair) {
     testutil::FakeRtsp rtsp;
     rtsp.demandPairing("1234");
-    RtspClient client("127.0.0.1", rtsp.port(), 1000);
+    RtspClient client("127.0.0.1", rtsp.port(), 1000 * testutil::kPairingSlowdown);
     EXPECT_EQ(client.pairTransiently(), PairOutcome::WrongCode);
     EXPECT_EQ(client.request("OPTIONS", "*").status, 403);
     EXPECT_EQ(rtsp.encryptedRequests(), 0);

@@ -43,7 +43,7 @@ constexpr DeviceFormat kCd{44100, 2, SampleType::Int16};
 constexpr uint64_t kSecond = 44100;
 
 bool waitFor(const std::function<bool()>& check, std::chrono::milliseconds limit = 10s) {
-    const auto deadline = std::chrono::steady_clock::now() + limit;
+    const auto deadline = std::chrono::steady_clock::now() + limit * testutil::kPairingSlowdown;
     while (std::chrono::steady_clock::now() < deadline) {
         if (check()) return true;
         std::this_thread::sleep_for(5ms);
@@ -99,7 +99,7 @@ protected:
         AirPlayOutputOptions options;
         options.details = sampleDetails;
         options.volumeDb = std::move(volume);
-        options.requestTimeoutMs = 500;
+        options.requestTimeoutMs = 500 * testutil::kPairingSlowdown;
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
         options.closedVerdictAfter = 300ms;
@@ -844,7 +844,7 @@ TEST_F(AirPlayOutputTest, AReceiverPairedWithACodePlaysAfterPairVerifyBitForBit)
     rtsp_.demandPairing("4821");
     rtsp_.pairOnlyWithKeys();
     {
-        airplay::RtspClient client("127.0.0.1", rtsp_.port(), 1000);
+        airplay::RtspClient client("127.0.0.1", rtsp_.port(), 1000 * testutil::kPairingSlowdown);
         airplay::PairedReceiver keys;
         ASSERT_EQ(client.pairSetup("4821", pairings_->identity(), keys), airplay::PairOutcome::Paired);
         pairings_->save("800A805D016B", {{}, keys});
@@ -994,14 +994,16 @@ TEST_F(AirPlayStreamingTest, PlayToAMacThatRefusesThisComputerNamesItsSetting) {
     rtsp_.answer("OPTIONS", 403);
     rtsp_.answer("POST", 403);
     const auto file = testutil::generatedFile({"airplay-mac-refuses", 44100, 16, 2, 2.0});
-    auto server = serverFor();
+    auto server = serverFor({}, 100ms * testutil::kPairingSlowdown); // listed still while the finder pairs
     ASSERT_TRUE(waitFor([&] { return rtsp_.count("POST") > 0; })) << "the finder's transient pairing";
-    std::this_thread::sleep_for(500ms); // its verdict, which the Server then follows
-    Command refresh;
-    refresh.kind = CommandKind::RefreshDevices;
-    server->submit(refresh);
-    server->waitIdle();
-    ASSERT_TRUE(server->snapshot().devices.airplay.empty()) << "a receiver that refuses this computer is not offered";
+    // Its verdict, which the Server then follows.
+    ASSERT_TRUE(waitFor([&] {
+        Command refresh;
+        refresh.kind = CommandKind::RefreshDevices;
+        server->submit(refresh);
+        server->waitIdle();
+        return server->snapshot().devices.airplay.empty();
+    })) << "a receiver that refuses this computer is not offered";
     const int pairings = rtsp_.count("POST");
     server->submit(queue({file}));
     ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.error.has_value(); }, 20s));
@@ -1244,7 +1246,7 @@ protected:
             std::scoped_lock lock(mutex_);
             left_.emplace_back(id, e.code());
         };
-        options.requestTimeoutMs = 500;
+        options.requestTimeoutMs = 500 * testutil::kPairingSlowdown;
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
         options.closedVerdictAfter = 300ms;
