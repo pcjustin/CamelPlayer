@@ -203,6 +203,8 @@ On 2026-11-15, for 0.4.2, the release build played from the NAS on the Chord DAV
 
 The FLAC track kept about one core busy for its first 70 s, in WinUI's composition thread, and then 1–5%; played again, and another FLAC played for the first time, it took 48% for 10 s and about 1% after, so the 70 s were not seen again.
 
+On 2026-11-19 the cause was found on the same copy of the library, over the 100 Mbps wire: the waveform's fade-in, a XAML OpacityTransition, kept the composition thread drawing every frame for 5–65 s after 8 of 10 track starts, a whole core each time, and for none with the waveform turned off or the fade taken out. The fade now runs as a storyboard: after 10 track starts no thread stayed above half a core past the first 5 s, and three FLAC tracks from the NAS took 3.1–4.6% of one core over 90 s each, reading 38–43 MB.
+
 On 2026-11-09, for 0.4.0, the release candidate played from the NAS on the Chord DAVE over ASIO, on a copy of the owner's library and settings with the library still at schema 20, so that the start upgraded it. The first startup scan of the 86,565 files took 593 s, as the first complete scan of a new version reads every MP3 and every file an earlier version refused again; the next start's scan took 113 s, at the Low scan speed. No underrun was logged, and the FLAC played bit-perfect with its waveform shown. Measured on the process, with the CPU as a share of one core:
 
 | Span | Seconds | Read (MB) | Network (MB) | CPU |

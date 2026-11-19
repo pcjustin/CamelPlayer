@@ -41,7 +41,15 @@ void forTrack(DependencyObject const& element, const std::function<void(Framewor
 WaveformBar::WaveformBar(Grid layer, Slider slider) : layer_(std::move(layer)), slider_(std::move(slider)) {
     layer_.IsHitTestVisible(false);
     layer_.Opacity(0.0);
-    layer_.OpacityTransition(ScalarTransition());
+    // A storyboard ends with its fade. An OpacityTransition here kept the compositor drawing every frame for up to a
+    // minute after most track changes, a whole core on a slow computer.
+    Animation::DoubleAnimation fade;
+    fade.From(0.0);
+    fade.To(1.0);
+    fade.Duration(DurationHelper::FromTimeSpan(std::chrono::milliseconds(300)));
+    Animation::Storyboard::SetTarget(fade, layer_);
+    Animation::Storyboard::SetTargetProperty(fade, L"Opacity");
+    fadeIn_.Children().Append(fade);
     rest_ = Path();
     played_ = Path();
     clip_ = RectangleGeometry();
@@ -55,12 +63,12 @@ void WaveformBar::show(std::vector<uint8_t> peaks) {
     peaks_ = std::move(peaks);
     draw();
     showTrack(false);
-    layer_.Opacity(1.0);
+    fadeIn_.Begin();
 }
 
 void WaveformBar::clear() {
     peaks_.clear();
-    layer_.Opacity(0.0);
+    fadeIn_.Stop(); // back to the layer's own opacity, 0
     showTrack(true);
 }
 

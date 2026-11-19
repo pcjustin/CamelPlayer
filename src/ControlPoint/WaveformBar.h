@@ -10,6 +10,8 @@
 #include <functional>
 #include <vector>
 
+#include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
+
 namespace ui {
 
 class WaveformBar {
@@ -31,6 +33,7 @@ private:
     winrt::Microsoft::UI::Xaml::Controls::Slider slider_;
     winrt::Microsoft::UI::Xaml::Shapes::Path rest_{nullptr}, played_{nullptr};
     winrt::Microsoft::UI::Xaml::Media::RectangleGeometry clip_{nullptr};
+    winrt::Microsoft::UI::Xaml::Media::Animation::Storyboard fadeIn_;
     std::vector<uint8_t> peaks_;
     double playedFraction_ = 0.0;
 };
