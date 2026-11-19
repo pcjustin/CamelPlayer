@@ -16,6 +16,7 @@
 #include "Engine/PlaybackEngine.h"
 #include "Engine/decode/IDecoder.h"
 #include "Common/DecoderRegistry.h"
+#include "Common/util/Log.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -974,6 +975,63 @@ TEST_F(EngineStateTest, LostSourcePausesWithoutEndingTheTrackAndRetriesAtTheSave
     EXPECT_FALSE(engine->snapshot().error);
     engine->stop();
     engine->waitIdle();
+}
+
+// A share that stops answering holds reads rather than failing them; the device then underruns on every render until
+// it answers again, a minute on the owner's NAS (OP-R21), which logged a line every 60 ms.
+TEST_F(EngineStateTest, AStalledSourceLogsItsUnderrunsAtMostOnceASecond) {
+    const auto directory = testutil::tempDir() / "underrun-log";
+    std::filesystem::remove_all(directory);
+    log::init(directory, L"underruns");
+    auto restoreLog = wil::scope_exit([] { log::init(testutil::tempDir() / "log-after-tests", L"test"); });
+    const auto file = testutil::testFile("16-44.1k");
+    const auto info = openDecoder(DecoderKind::Sndfile, file)->info();
+    const auto original = decoderRegistry().find("sndfile")->open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    auto stalled = std::make_shared<std::atomic<bool>>(false);
+    auto release = wil::scope_exit([&] {
+        stalled->store(false);
+        engine.reset();
+    });
+    class Source final : public IDecoder {
+    public:
+        Source(SourceInfo info, std::shared_ptr<std::atomic<bool>> stalled) : info_(info), stalled_(std::move(stalled)) {
+            info_.totalFrames = uint64_t(44100) * 600;
+        }
+        const SourceInfo& info() const override { return info_; }
+        size_t read(int32_t* dst, size_t frames) override {
+            while (stalled_->load()) std::this_thread::sleep_for(5ms);
+            const auto count = size_t(std::min<uint64_t>(frames, info_.totalFrames - position_));
+            std::fill_n(dst, count * info_.channels, 0);
+            position_ += count;
+            return count;
+        }
+        void seek(uint64_t frame) override { position_ = frame; }
+
+    private:
+        SourceInfo info_;
+        std::shared_ptr<std::atomic<bool>> stalled_;
+        uint64_t position_ = 0;
+    };
+    decoderRegistry().setOpener("sndfile", [=](const std::filesystem::path&, std::string_view, uint32_t) {
+        return std::make_unique<Source>(info, stalled);
+    });
+    engine->openAndPlay(file, DecoderKind::Sndfile);
+    engine->waitIdle();
+    ASSERT_EQ(engine->snapshot().state, PlayState::Playing);
+    stalled->store(true);
+    const auto stalledAt = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - stalledAt < 4s) pull(4096);
+    engine->waitIdle();
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - stalledAt);
+    EXPECT_GT(engine->snapshot().underruns, 100u);
+    size_t lines = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        std::ifstream text(entry.path());
+        for (std::string line; std::getline(text, line);) lines += line.find("underrun(s)") != std::string::npos;
+    }
+    EXPECT_GE(lines, 1u);
+    EXPECT_LE(lines, size_t(seconds.count()) + 1);
 }
 
 TEST_F(EngineStateTest, DiscardPreloadsWithdrawsAnAlreadyDecodedSuccessor) {

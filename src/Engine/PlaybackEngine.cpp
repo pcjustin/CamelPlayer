@@ -863,10 +863,13 @@ private:
         return false;
     }
 
-    // Dropouts are otherwise only a counter in the status page, which a new track resets.
+    // Dropouts are otherwise only a counter in the status page, which a new track resets. A source that stalls underruns
+    // on every render, so they are told at most once a second.
     void logUnderruns() {
         const uint64_t count = underruns_.load(std::memory_order_relaxed);
-        if (count <= loggedUnderruns_) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (count <= loggedUnderruns_ || now - underrunsLoggedAt_ < std::chrono::seconds(1)) return;
+        underrunsLoggedAt_ = now;
         log::info("engine: %llu underrun(s) at %.1f s of %s", (unsigned long long)(count - loggedUnderruns_),
                   framesToSeconds(currentPosition(), sourceRate_.load(std::memory_order_relaxed)), toUtf8(file_).c_str());
         loggedUnderruns_ = count;
@@ -1733,6 +1736,7 @@ private:
     std::array<int64_t, 7> stages_{};
     bool firstAudioLogged_ = true;
     uint64_t loggedUnderruns_ = 0;
+    std::chrono::steady_clock::time_point underrunsLoggedAt_;
     uint64_t loggedLateCallbacks_ = 0;
     std::chrono::steady_clock::time_point lateCallbacksLoggedAt_;
     std::atomic<bool> active_{false};
