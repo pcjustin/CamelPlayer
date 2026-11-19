@@ -38,9 +38,14 @@ constexpr const wchar_t* kSurfaces[] = {
     L"SolidBackgroundFillColorTertiaryBrush",
     L"SolidBackgroundFillColorQuarternaryBrush",
     L"LayerFillColorDefaultBrush",
-    L"LayerFillColorAltBrush",
     L"CardBackgroundFillColorDefaultBrush",
     L"CardBackgroundFillColorSecondaryBrush",
+};
+
+// What stands above the page: menus, flyouts, drop-downs, tooltips and a dialog's content. On a black surface of their
+// own they would merge into the page, their shadows unseen; a near-black one sets them apart.
+constexpr const wchar_t* kRaised[] = {
+    L"LayerFillColorAltBrush", // a dialog's content, above its buttons' base
     L"AcrylicBackgroundFillColorDefaultBrush",
     L"AcrylicBackgroundFillColorBaseBrush",
     L"AcrylicInAppFillColorDefaultBrush",
@@ -106,6 +111,7 @@ void showBlackSurfaces(bool black) {
         }
     };
     for (const wchar_t* key : kSurfaces) recolour(key, pureBlack);
+    for (const wchar_t* key : kRaised) recolour(key, Windows::UI::Color{0xFF, 0x1C, 0x1C, 0x1C});
     for (const wchar_t* key : kStrokes) recolour(key, Windows::UI::Color{0x29, 0xFF, 0xFF, 0xFF});
 }
 
