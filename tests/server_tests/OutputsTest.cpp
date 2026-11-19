@@ -353,6 +353,84 @@ TEST(OutputsTest, NetworkPlayersAreListedKeptAndFoundAgainByUdn) {
     EXPECT_EQ(read.network.timing.formatChangeSilenceMs, 500U);
 }
 
+// The DMP-A6 came back on 2026-11-19 under a new UDN, and was listed twice, the saved one not connected for ever. A player
+// gone that answers again under a new UDN with the same name and model is taken for it (the owner, 2026-11-19): what was
+// saved for it, its use included, goes to the new UDN.
+TEST(OutputsTest, APlayerBackUnderANewUdnKeepsWhatWasSavedForIt) {
+    auto devices = catalog();
+    devices.network = {{"uuid:old", "DMP-A6"}};
+    devices.network[0].model = "EVERSOLO AV Renderer Device";
+    Settings s = fresh();
+    selectOutput(s, Backend::Network, "uuid:old", devices);
+    s.network.timing.formatChangeSilenceMs = 500;
+    renameOutput(s, Backend::Network, "uuid:old", "Living room", devices);
+    const Settings read = fromJson(toJson(s));
+    const SavedOutput* kept = saved(read, Backend::Network, "uuid:old");
+    ASSERT_NE(kept, nullptr);
+    EXPECT_EQ(kept->model, "EVERSOLO AV Renderer Device");
+
+    auto renewed = devices;
+    renewed.revision = 2;
+    renewed.network = {{"uuid:new", "DMP-A6"}};
+    renewed.network[0].model = "EVERSOLO AV Renderer Device";
+    syncOutputs(s, renewed);
+    const auto rows = outputRows(s, renewed);
+    EXPECT_EQ(std::ranges::count_if(rows, [](const OutputRow& r) { return r.backend == Backend::Network; }), 1);
+    const auto& player = row(rows, Backend::Network, "uuid:new");
+    EXPECT_TRUE(player.selected);
+    EXPECT_TRUE(player.connected);
+    EXPECT_EQ(player.name, "Living room");
+    EXPECT_EQ(s.network.udn, "uuid:new");
+    EXPECT_EQ(s.network.timing.formatChangeSilenceMs, 500U);
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:old"), nullptr);
+}
+
+// A player of the same name but another model, or two new ones that both fit, are not taken for the saved one.
+TEST(OutputsTest, APlayerOfAnotherModelOrTwoThatFitAreNotTakenForASavedOne) {
+    auto devices = catalog();
+    devices.network = {{"uuid:old", "Speaker"}};
+    devices.network[0].model = "Maker A";
+    Settings s = fresh();
+    setOutputEnabled(s, Backend::Network, "uuid:old", true, devices);
+    auto other = devices;
+    other.revision = 2;
+    other.network = {{"uuid:other", "Speaker"}};
+    other.network[0].model = "Maker B";
+    syncOutputs(s, other);
+    EXPECT_NE(saved(s, Backend::Network, "uuid:old"), nullptr);
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:other"), nullptr);
+    auto two = devices;
+    two.revision = 3;
+    two.network = {{"uuid:x", "Speaker"}, {"uuid:y", "Speaker"}};
+    two.network[0].model = two.network[1].model = "Maker A";
+    syncOutputs(s, two);
+    EXPECT_NE(saved(s, Backend::Network, "uuid:old"), nullptr);
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:x"), nullptr);
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:y"), nullptr);
+}
+
+// One saved before players' models were kept is known by its name alone, as a stereo pair saved before its speakers were.
+TEST(OutputsTest, APlayerSavedBeforeModelsWereKeptIsKnownByItsName) {
+    Settings s = fresh();
+    SavedOutput old;
+    old.backend = Backend::Network;
+    old.id = old.network.udn = "uuid:old";
+    old.name = "DMP-A6";
+    old.enabled = true;
+    old.volumeMode = VolumeMode::Player;
+    s.outputs.push_back(old);
+    auto devices = catalog();
+    devices.network = {{"uuid:new", "DMP-A6"}};
+    devices.network[0].model = "EVERSOLO AV Renderer Device";
+    syncOutputs(s, devices);
+    const SavedOutput* now = saved(s, Backend::Network, "uuid:new");
+    ASSERT_NE(now, nullptr);
+    EXPECT_TRUE(now->enabled);
+    EXPECT_EQ(now->volumeMode, VolumeMode::Player);
+    EXPECT_EQ(now->model, "EVERSOLO AV Renderer Device");
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:old"), nullptr);
+}
+
 TEST(OutputsTest, ANetworkPlayerStartsOnItsOwnVolumeAndKeepsEachPlayersChoices) {
     DeviceCatalog devices;
     devices.revision = 1;

@@ -193,6 +193,22 @@ void mergePairedSpeakers(Settings& s, const DeviceCatalog& devices) {
     }
 }
 
+// A player can answer under a new UDN, as the DMP-A6 did on 2026-11-19. The only one found unsaved with the name and model
+// of a saved player that is gone is taken for it (the owner, 2026-11-19), one saved before models were kept by its name
+// alone; what was saved for the old UDN, its use included, goes to the new one.
+void followRenewedPlayers(Settings& s, const DeviceCatalog& devices) {
+    for (auto& old : s.outputs) {
+        if (old.backend != Backend::Network || old.id.empty() || findDevice(devices, Backend::Network, old.id)) continue;
+        const auto fits = [&](const DeviceInfo& d) {
+            return d.name == old.name && (old.model.empty() || d.model == old.model) && !findOutput(s, Backend::Network, d.id);
+        };
+        if (std::ranges::count_if(devices.network, fits) != 1) continue;
+        const std::string renewed = std::ranges::find_if(devices.network, fits)->id;
+        if (s.backend == Backend::Network && s.network.udn == old.id) s.network.udn = renewed;
+        old.id = old.network.udn = renewed;
+    }
+}
+
 } // namespace
 
 std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& devices) {
@@ -233,6 +249,7 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     adoptSets(s, devices);
     followRepairedPairs(s, devices);
     mergePairedSpeakers(s, devices);
+    followRenewedPlayers(s, devices);
     if (followsDefault(s) && !devices.defaultWasapi.empty() && s.followedDefault != devices.defaultWasapi) {
         keepParameters(s, Backend::Wasapi, s.followedDefault);
         loadParameters(s, Backend::Wasapi, devices.defaultWasapi, {});
@@ -245,6 +262,7 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     for (auto& saved : s.outputs)
         if (const auto* device = findDevice(devices, saved.backend, saved.id)) {
             saved.name = device->name;
+            if (!device->model.empty()) saved.model = device->model;
             if (!device->speakers.empty()) saved.speakers = device->speakers;
             const bool inUse = saved.backend == s.backend && saved.id == selectedId(s);
             if (!device->unsupported.empty() && !inUse) {

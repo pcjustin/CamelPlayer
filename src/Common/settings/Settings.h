@@ -411,6 +411,7 @@ struct SavedOutput {
     Backend backend = Backend::Wasapi;
     std::string id;       // as in the backend's settings; empty on WASAPI is "Windows default device", without parameters
     std::string name;     // as the device last called itself, for when it is not connected
+    std::string model;    // a network player's maker and model as last seen, to know it again under a new UDN
     std::string alias;    // the user's name for it; empty shows `name`
     bool enabled = false; // listed in the output menu
     WasapiSettings wasapi;

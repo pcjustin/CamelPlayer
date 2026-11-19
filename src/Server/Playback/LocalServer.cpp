@@ -1726,8 +1726,12 @@ private:
                 devicesChangedAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_release);
             });
         }
-        for (const auto& player : finder_->players())
-            catalog.network.push_back({player.description.udn, player.description.name});
+        for (const auto& player : finder_->players()) {
+            const auto& d = player.description;
+            DeviceInfo device{d.udn, d.name};
+            device.model = d.manufacturer.empty() ? d.model : d.model.empty() ? d.manufacturer : d.manufacturer + " " + d.model;
+            catalog.network.push_back(std::move(device));
+        }
     }
 
     // Those that answer a search, and those added by address that something listens at.

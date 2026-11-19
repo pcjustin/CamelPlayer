@@ -759,6 +759,7 @@ static json outputJson(const SavedOutput& o) {
                                                        : wasapiJson(o.wasapi);
     j["dsp"] = dspJson(o.dsp);
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
+    if (!o.model.empty()) j["model"] = o.model;
     return j;
 }
 
@@ -768,6 +769,7 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
     if (!o.is_object() || !backendFromId(str(o, "backend", ""), saved.backend)) return std::nullopt;
     saved.id = str(o, "id", "");
     saved.name = str(o, "name", "");
+    saved.model = str(o, "model", "");
     saved.alias = str(o, "alias", "");
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));

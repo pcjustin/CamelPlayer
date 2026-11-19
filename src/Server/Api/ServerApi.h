@@ -269,6 +269,7 @@ struct DeviceInfo {
     std::string id, name;
     std::string unsupported;           // why an AirPlay receiver cannot be used, as airplay::supportId; empty when it can
     std::vector<std::string> speakers; // of an AirPlay stereo pair, as SavedOutput::speakers
+    std::string model;                 // a network player's maker and model, as its description gives them
     bool operator==(const DeviceInfo&) const = default;
 };
 
