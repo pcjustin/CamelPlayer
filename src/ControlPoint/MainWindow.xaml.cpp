@@ -364,23 +364,25 @@ template <class T> void readRateControls(const RateControls& c, T& t) {
 // own rate only while the choice follows the file, as DSD converted to PCM otherwise follows the choice. DSD upsampling
 // only while DSD is sent as DSD, the modulator and PCM as DSD only while it is on, its multiple only by a multiple, and
 // PCM's DSD rate only while PCM goes as DSD by a multiple, showing the set rate otherwise, as both lists hold the one
-// rate; PCM sent as DSD takes no PCM rate.
+// rate; PCM sent as DSD takes no PCM rate. What depends on a choice not made is not shown; what shows a value in effect
+// is greyed.
 template <class T> void enableRateControls(const RateControls& c, const T& t, bool enabled) {
+    const auto shown = [](bool on) { return on ? Visibility::Visible : Visibility::Collapsed; };
     const auto& d = t.dsdUpsampling;
     const bool dsd = enabled && t.dsdOutput != DsdOutput::Pcm;
     const bool upsampling = dsd && d.mode != DsdUpsampling::Off;
     const bool pcmRate = enabled && !(upsampling && d.pcm);
     c.rate.IsEnabled(pcmRate);
-    c.multiple.IsEnabled(pcmRate && !t.fixedRate && t.upsampling == Upsampling::IntegerMultiple);
+    c.multiple.Visibility(shown(pcmRate && !t.fixedRate && t.upsampling == Upsampling::IntegerMultiple));
     c.quality.IsEnabled(enabled);
     c.phase.IsEnabled(enabled && t.filter.quality != ResampleQuality::Quick);
     c.passband.IsEnabled(enabled && t.filter.quality != ResampleQuality::Quick);
     c.dsdRate.IsEnabled(!enabled || (!t.fixedRate && t.upsampling == Upsampling::Off));
-    c.modulator.IsEnabled(upsampling);
+    c.modulator.Visibility(shown(upsampling));
     c.dsdUpsampling.IsEnabled(dsd);
-    c.dsdMultiple.IsEnabled(upsampling && d.mode == DsdUpsampling::Multiple);
-    c.pcmAsDsd.IsEnabled(upsampling);
-    c.pcmDsdRate.Visibility(d.pcm ? Visibility::Visible : Visibility::Collapsed);
+    c.dsdMultiple.Visibility(shown(upsampling && d.mode == DsdUpsampling::Multiple));
+    c.pcmAsDsd.Visibility(shown(upsampling));
+    c.pcmDsdRate.Visibility(shown(upsampling && d.pcm));
     if (const int rate = indexIn(kDsdSetRates, d.rate); d.mode == DsdUpsampling::Set && c.pcmDsdRate.SelectedIndex() != rate)
         c.pcmDsdRate.SelectedIndex(rate);
     // DSD upsampling always takes DSD sources through the DSP. Greyed first, so that showing it on is not read back as
