@@ -1089,6 +1089,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     std::deque<Listing> pending;
     if (!partial) pending.push_back(Listing{path});
     bool complete = true;
+    size_t unreadFiles = 0, unlistedFolders = 0;
     for (const auto& folder : subtrees) {
         const DWORD attributes = GetFileAttributesW(folder.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -1102,6 +1103,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             complete = false;
             report.deferred.push_back(folder);
             report.diagnostics.push_back(key(folder) + ": " + std::to_string(error));
+            ++unlistedFolders;
         }
     }
     std::deque<std::future<Listing>> active;
@@ -1259,7 +1261,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         active.erase(ready);
         complete = complete && listing.complete;
         if (listing.deferred) report.deferred.push_back(listing.path);
-        if (!listing.error.empty()) report.diagnostics.push_back(listing.error);
+        if (!listing.error.empty()) {
+            report.diagnostics.push_back(listing.error);
+            ++unlistedFolders;
+        }
         if (!listing.fileWork) {
             submit([&token, root, folder = key(listing.path),
                     parent = listing.path == path ? std::string{} : key(listing.path.parent_path()),
@@ -1292,7 +1297,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             report.seen++;
             ++checked;
             ++store_.scanChecked_;
-            if (!entry.error.empty()) report.diagnostics.push_back(key(entry.path) + ": " + entry.error);
+            if (!entry.error.empty()) {
+                report.diagnostics.push_back(key(entry.path) + ": " + entry.error);
+                ++unreadFiles;
+            }
             batch.push_back(std::move(entry));
             if (batch.size() == 500) flush();
         }
@@ -1303,7 +1311,10 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     report.online = bool(openPath(path, FILE_LIST_DIRECTORY));
     if (!report.online) {
         report.rootError = GetLastError();
-        report.diagnostics.push_back("root became unavailable (" + std::to_string(report.rootError) + "): " + key(path));
+        // What failed meanwhile failed with it: one line, not one for each file and folder (2,399 in a cut of a NAS).
+        report.diagnostics = {"root became unavailable (" + std::to_string(report.rootError) + "): " + key(path) + "; " +
+                              std::to_string(unreadFiles) + " files and " + std::to_string(unlistedFolders) +
+                              " folders left unread"};
     }
     report.complete = complete && !token.cancelled() && report.online;
     if (!partial) log::info("library: %zu files read in %.1f s%s", report.seen, seconds(), report.complete ? "" : ", incomplete");

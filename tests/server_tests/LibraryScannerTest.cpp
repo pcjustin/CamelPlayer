@@ -502,6 +502,47 @@ TEST_F(LibraryScannerTest, AFileThatCannotBeReadLeavesTheScanComplete) {
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE path LIKE '%held.flac' AND available=1"), 1);
 }
 
+// A share that stops answering fails every file and folder the scan reaches after it, 2,399 of them on the owner's NAS
+// (OP-R21): the report says so once, with how many were left unread, instead of naming each.
+TEST_F(LibraryScannerTest, ARootLostDuringTheScanIsReportedOnceWithWhatWasLeftUnread) {
+    for (int folder = 0; folder < 6; ++folder) {
+        const auto album = dir / "music" / ("album" + std::to_string(folder));
+        fs::create_directories(album);
+        for (int file = 0; file < 20; ++file)
+            fs::copy_file(testutil::testFile("16-44.1k"), album / (std::to_string(file) + ".flac"));
+    }
+    const auto music = dir / "music", away = dir / "music-gone";
+    std::atomic<int> calls = 0;
+    std::atomic<bool> hold = false;
+    std::future<bool> moved;
+    LibraryStore store(dir / "db");
+    // Asked as the scan hands out work and while it reads each file: partway through, the readers are held back with no
+    // file open, as the covers shown hold them, and the root goes.
+    LibraryScanner scanner(store, [&] {
+        if (++calls == 30) {
+            hold = true;
+            moved = std::async(std::launch::async, [&] {
+                const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                while (!MoveFileW(music.c_str(), away.c_str()) && std::chrono::steady_clock::now() < until)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                hold = false;
+                return fs::exists(away);
+            });
+        }
+        return hold.load();
+    });
+    const auto report = scanner.scan(scanner.addRoot(music));
+    ASSERT_TRUE(moved.valid());
+    ASSERT_TRUE(moved.get());
+    EXPECT_FALSE(report.online);
+    EXPECT_FALSE(report.complete);
+    ASSERT_EQ(report.diagnostics.size(), 1u);
+    std::smatch counts;
+    ASSERT_TRUE(std::regex_search(report.diagnostics.front(), counts, std::regex(R"((\d+) files and (\d+) folders left unread)")))
+        << report.diagnostics.front();
+    EXPECT_GT(std::stoul(counts[1]) + std::stoul(counts[2]), 1u) << report.diagnostics.front();
+}
+
 TEST_F(LibraryScannerTest, UnchangedScanKeepsTheBrowseRevisionAndDerivedWorkResumesAfterFailure) {
     const auto path = audio();
     LibraryStore store(dir / "db");
