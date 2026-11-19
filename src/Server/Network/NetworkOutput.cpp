@@ -41,6 +41,7 @@ constexpr size_t kRetainBytes = size_t{16} << 20; // what a player that reconnec
 constexpr uint64_t kUnknownLength = uint64_t{1} << 31;
 constexpr size_t kDsfBlock = 4096;
 constexpr size_t kDsfHeader = 92;
+constexpr size_t kDsfMetadata = 128;
 constexpr uint8_t kDsfSilence = 0x96; // the DSD idle pattern 0x69, least significant bit first
 constexpr size_t kWavHeader = 44;
 constexpr auto kPatience = milliseconds(1500);
@@ -75,13 +76,13 @@ std::string wavHeader(const DeviceFormat& format, uint64_t dataBytes) {
 
 // DSD interleaved a byte per channel, the oldest sample in each byte's top bit, becomes blocks of one channel with the
 // oldest sample in the bottom bit.
-std::string dsfHeader(const DeviceFormat& format, uint64_t frames) {
+std::string dsfHeader(const DeviceFormat& format, uint64_t frames, uint64_t metadataBytes) {
     const uint64_t blocks = (frames + kDsfBlock - 1) / kDsfBlock;
     const uint64_t dataBytes = blocks * kDsfBlock * format.channels;
     std::string header = "DSD ";
     putLe(header, 28, 8);
-    putLe(header, kDsfHeader + dataBytes, 8);
-    putLe(header, 0, 8);
+    putLe(header, kDsfHeader + dataBytes + metadataBytes, 8);
+    putLe(header, metadataBytes ? kDsfHeader + dataBytes : 0, 8);
     header += "fmt ";
     putLe(header, 52, 8);
     putLe(header, 1, 4); // format version
@@ -96,6 +97,15 @@ std::string dsfHeader(const DeviceFormat& format, uint64_t frames) {
     header += "data";
     putLe(header, 12 + dataBytes, 8);
     return header;
+}
+
+// The metadata a DSF's header points to, an ID3v2.3 tag of padding alone. HQPlayer Desktop 6.3.3 on Windows stopped at
+// the end of every DSF whose header pointed to none, and moved on to the next track from those that had it (2026-11-19).
+std::string dsfMetadata() {
+    std::string tag = "ID3";
+    tag += {char(3), char(0), char(0), char(0), char(0), char(0), char(kDsfMetadata - 10)};
+    tag.resize(kDsfMetadata, '\0');
+    return tag;
 }
 
 uint8_t reverseBits(uint8_t value) {
@@ -183,6 +193,7 @@ struct Body {
     StreamTrack track;
     std::string contentType, protocolInfo, extension, uri, didl, coverJpeg;
     uint64_t totalBytes = 0, totalFrames = 0;
+    uint64_t metadataAt = 0; // where a DSF's metadata starts; 0 without any
     bool lengthKnown = false;
     std::vector<uint8_t> retained;
     uint64_t retainedFrom = 0; // offset of retained[0]
@@ -513,8 +524,11 @@ private:
         std::string header;
         if (format_.type == SampleType::Dsd8) {
             const uint64_t frames = body.lengthKnown ? body.totalFrames : kUnknownLength;
-            header = dsfHeader(format_, frames);
+            const uint64_t metadata = body.lengthKnown ? kDsfMetadata : 0;
+            header = dsfHeader(format_, frames, metadata);
             body.totalBytes = kDsfHeader + (frames + kDsfBlock - 1) / kDsfBlock * kDsfBlock * format_.channels;
+            body.metadataAt = metadata ? body.totalBytes : 0;
+            body.totalBytes += metadata;
             body.contentType = "audio/x-dsf";
             body.extension = "dsf";
         } else if (formats_.wav) {
@@ -727,8 +741,11 @@ private:
             lock.unlock();
             return respond(client, "416 Range Not Satisfiable");
         }
+        // A DSF's metadata, which HQPlayer reads from its end before it plays the samples.
+        const uint64_t metadataAt = body->metadataAt;
+        const bool metadata = metadataAt && start >= metadataAt;
         // Further than the stream has got, or before what it keeps: the player seeked, which restarts the stream there.
-        if (start < body->retainedFrom || start > body->produced() + kRetainBytes) {
+        if (!metadata && (start < body->retainedFrom || start > body->produced() + kRetainBytes)) {
             const uint64_t frames = (start > kWavHeader ? start - kWavHeader : 0) / std::max(format_.bytesPerFrame(), 1U);
             const uint64_t positionMs = positionInFile(*body, frames * 1000 / std::max(format_.sampleRate, 1U));
             lock.unlock();
@@ -745,6 +762,11 @@ private:
         reply += "\r\n";
         lock.unlock();
         if (!sendAll(client, reply.data(), reply.size()) || head) return;
+        if (metadata) {
+            const std::string tag = dsfMetadata();
+            sendAll(client, tag.data() + (start - metadataAt), size_t(last - start + 1));
+            return;
+        }
         stream(client, id, start, last + 1);
     }
 
@@ -923,6 +945,10 @@ private:
             }
         }
         flushDsf(body);
+        if (body.metadataAt && body.produced() == body.metadataAt) {
+            const std::string metadata = dsfMetadata();
+            body.retained.insert(body.retained.end(), metadata.begin(), metadata.end());
+        }
         if (body.lengthKnown && body.produced() < body.totalBytes) {
             log::info("network player: %s ended %llu bytes short of its length", toUtf8(body.track.file).c_str(),
                       static_cast<unsigned long long>(body.totalBytes - body.produced()));

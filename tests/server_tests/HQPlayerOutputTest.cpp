@@ -121,6 +121,10 @@ uint32_t le32(const std::string& bytes, size_t at) {
     return *reinterpret_cast<const uint32_t*>(bytes.data() + at);
 }
 
+uint64_t le64(const std::string& bytes, size_t at) {
+    return *reinterpret_cast<const uint64_t*>(bytes.data() + at);
+}
+
 size_t count(const std::vector<std::string>& all, const std::string& one) {
     return size_t(std::ranges::count(all, one));
 }
@@ -165,9 +169,48 @@ TEST(HQPlayerOutputTest, RawDsdGoesAsDsf) {
     output->start();
     ASSERT_TRUE(eventually([&] { return fake.received().size() == 1; }));
     const std::string body = fake.received().begin()->second;
-    ASSERT_EQ(body.size(), 92 + 2 * 4096U * 2);
     EXPECT_EQ(body.substr(0, 4), "DSD ");
     EXPECT_EQ(le32(body, 56), 352800U * 8);
+    // Its metadata after the samples, as in a DSF file: HQPlayer moved on from such a stream to the next one.
+    const uint64_t metadata = 92 + 2 * 4096U * 2;
+    EXPECT_EQ(le64(body, 12), body.size());
+    ASSERT_EQ(le64(body, 20), metadata);
+    ASSERT_GT(body.size(), metadata + 10);
+    EXPECT_EQ(body.substr(size_t(metadata), 3), "ID3");
+}
+
+// HQPlayer Desktop 6.3.3 on Windows stopped at the end of every DSF of CamelPlayer's stream whose header pointed to no
+// metadata, and moved on from DSF files that had theirs (2026-11-19).
+TEST(HQPlayerOutputTest, ADsdTrackIsFollowedByTheNext) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    const DeviceFormat dsd{352800, 2, SampleType::Dsd8};
+    CountingSource source(2, 352800, 176400);
+    OutputRun output(fake, source, dsd);
+    output->start();
+    ASSERT_TRUE(eventually([&] { return fake.received().size() == 2; }));
+    EXPECT_EQ(output.error(), kNoError);
+}
+
+// HQPlayer reads a DSF's metadata, from its end, before it plays the samples.
+TEST(HQPlayerOutputTest, TheMetadataAtTheEndOfADsfIsServedBeforeTheStreamGetsThere) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    const DeviceFormat dsd{352800, 2, SampleType::Dsd8};
+    CountingSource source(2, 352800ULL * 60);
+    OutputRun output(fake, source, dsd);
+    output->start();
+    ASSERT_TRUE(eventually([&] { return !fake.added().empty(); }));
+    const std::string uri = fake.added().front();
+    const auto head = http::send("GET", uri, "Range: bytes=0-91", "", 5000, 4096);
+    ASSERT_EQ(head.status, 206);
+    const uint64_t metadata = le64(head.body, 20);
+    ASSERT_GT(metadata, 352800ULL * 2 * 59);
+    const auto tail = http::send("GET", uri, "Range: bytes=" + std::to_string(metadata) + "-", "", 5000, 1 << 20);
+    EXPECT_EQ(tail.status, 206);
+    EXPECT_EQ(tail.body.substr(0, 3), "ID3");
+    EXPECT_EQ(metadata + tail.body.size(), le64(head.body, 12));
+    EXPECT_EQ(output.error(), kNoError);
 }
 
 // A new playlist starts with Stop and PlaylistClear, since a clear while paused keeps the paused track; Play goes once

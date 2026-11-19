@@ -242,8 +242,12 @@ TEST(NetworkOutputTest, SendsRawDsdAsDsfBlocks) {
     output->start();
     ASSERT_TRUE(waitFor([&] { return !renderer.received().empty(); }));
     const std::string body = renderer.received().begin()->second;
-    ASSERT_EQ(body.size(), 92 + 2 * 4096U * 2);
+    const uint64_t metadataAt = 92 + 2 * 4096U * 2; // the samples, then their metadata, as in a DSF file
+    ASSERT_GT(body.size(), metadataAt);
     EXPECT_EQ(body.substr(0, 4), "DSD ");
+    EXPECT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 12), body.size());
+    EXPECT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 20), metadataAt);
+    EXPECT_EQ(body.substr(size_t(metadataAt), 3), "ID3");
     EXPECT_EQ(body.substr(28, 4), "fmt ");
     EXPECT_EQ(le32(body, 56), 352800U * 8);
     EXPECT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 64), frames * 8);
@@ -318,7 +322,8 @@ TEST(NetworkOutputTest, ADsdTrackEndingShortIsFilledWithDsdSilence) {
     output->start();
     ASSERT_TRUE(waitFor([&] { return !renderer.received().empty(); }));
     const std::string body = renderer.received().begin()->second;
-    ASSERT_EQ(body.size(), dataAt + 3 * block * 2);
+    ASSERT_GT(body.size(), dataAt + 3 * block * 2);
+    ASSERT_EQ(*reinterpret_cast<const uint64_t*>(body.data() + 20), dataAt + 3 * block * 2);
     constexpr auto kSilence = uint8_t(0x96); // 0x69, the DSD idle pattern, least significant bit first as DSF has it
     size_t notSilent = 0;
     for (uint64_t frame = rendered; frame < told; ++frame)

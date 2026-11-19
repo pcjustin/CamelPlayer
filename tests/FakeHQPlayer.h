@@ -289,12 +289,21 @@ private:
         }
     }
 
-    // A WAV body's length in seconds, from its header; 0 for anything else.
+    // A WAV or DSF body's length in seconds, from its header; 0 for anything else.
     static double secondsOf(const std::string& body) {
-        if (body.size() < 44 || body.compare(0, 4, "RIFF") != 0) return 0.0;
         const auto le32 = [&](size_t at) { return *reinterpret_cast<const uint32_t*>(body.data() + at); };
+        if (body.size() >= 92 && body.compare(0, 4, "DSD ") == 0) {
+            const uint32_t rate = le32(56);
+            return rate ? double(*reinterpret_cast<const uint64_t*>(body.data() + 64)) / rate : 0.0;
+        }
+        if (body.size() < 44 || body.compare(0, 4, "RIFF") != 0) return 0.0;
         const uint32_t byteRate = le32(28);
         return byteRate ? double(body.size() - 44) / byteRate : 0.0;
+    }
+
+    // A DSF whose header points to no metadata, which HQPlayer did not follow with the next track.
+    static bool dsfWithoutMetadata(const std::string& body) {
+        return body.size() >= 92 && body.compare(0, 4, "DSD ") == 0 && *reinterpret_cast<const uint64_t*>(body.data() + 20) == 0;
     }
 
     // Probes, fetches and position, as HQPlayer's own playing: a track is fetched on a thread of its own while the
@@ -350,7 +359,12 @@ private:
                     if (got != received_.end()) {
                         state_.length = secondsOf(got->second);
                         if (state_.position >= state_.length) {
-                            if (current_ + 1 < playlist_.size()) {
+                            if (current_ + 1 < playlist_.size() && dsfWithoutMetadata(got->second)) {
+                                // As HQPlayer Desktop 6.3.3 on Windows did on 2026-11-19: it stops where it is.
+                                state_.state = 0;
+                                state_.position = 0;
+                                wantPlay_ = false;
+                            } else if (current_ + 1 < playlist_.size()) {
                                 ++current_;
                                 ++state_.trackSerial;
                                 state_.position = 0;
