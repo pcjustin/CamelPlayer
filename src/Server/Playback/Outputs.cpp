@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "Server/Network/HQPlayer.h"
+
 namespace camel::server {
 
 namespace {
@@ -242,6 +244,13 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
                 add(backend, saved.id, {}, devices.revision == 0, {});
     }
     return rows;
+}
+
+bool needsFirewallRule(const OutputRow& row) {
+    if (row.backend != Backend::HQPlayer) return isNetworkPlayer(row.backend);
+    std::string host;
+    uint16_t port = 0;
+    return !hqplayer::splitAddress(row.id, host, port) || !hqplayer::isLocalHost(host);
 }
 
 void syncOutputs(Settings& s, const DeviceCatalog& devices) {

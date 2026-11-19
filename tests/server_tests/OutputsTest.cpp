@@ -73,6 +73,25 @@ TEST(OutputsTest, ListsEveryDeviceByBackendWithTheDefaultFirst) {
     EXPECT_EQ(rows[4].backend, Backend::Ks);
 }
 
+// A player that fetches the stream from another computer goes through the firewall rule; an HQPlayer on this computer
+// reaches it on the loopback.
+TEST(OutputsTest, PlayersAndAnHQPlayerOnAnotherComputerNeedTheFirewallRule) {
+    const auto output = [](Backend backend, std::string id) {
+        OutputRow r;
+        r.backend = backend;
+        r.id = std::move(id);
+        return r;
+    };
+    EXPECT_TRUE(needsFirewallRule(output(Backend::Network, "uuid:player")));
+    EXPECT_TRUE(needsFirewallRule(output(Backend::AirPlay, "AABBCCDDEEFF")));
+    EXPECT_TRUE(needsFirewallRule(output(Backend::HQPlayer, "192.0.2.10:4321")));
+    EXPECT_TRUE(needsFirewallRule(output(Backend::HQPlayer, "macbook-air.local:4321")));
+    EXPECT_FALSE(needsFirewallRule(output(Backend::HQPlayer, "localhost:4321")));
+    EXPECT_FALSE(needsFirewallRule(output(Backend::HQPlayer, "127.0.0.1:4321")));
+    EXPECT_FALSE(needsFirewallRule(output(Backend::Wasapi, "")));
+    EXPECT_FALSE(needsFirewallRule(output(Backend::Asio, "a-dave")));
+}
+
 TEST(OutputsTest, NewInstallationEnablesAndSelectsTheWindowsDefault) {
     const auto rows = outputRows(fresh(), catalog());
     EXPECT_TRUE(rows[0].enabled);

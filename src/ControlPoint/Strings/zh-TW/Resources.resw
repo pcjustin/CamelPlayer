@@ -784,10 +784,10 @@
   <data name="Error_HQPlayerNetworkControl" xml:space="preserve"><value>HQPlayer 沒有回應這台電腦。請在 HQPlayer 開啟「Allow control from network」。</value></data>
   <data name="Output_NetworkGroup" xml:space="preserve"><value>網路播放器</value></data>
   <data name="Firewall_Title" xml:space="preserve"><value>要讓網路播放器連到 CamelPlayer 嗎？</value></data>
-  <data name="Firewall_Text" xml:space="preserve"><value>網路播放器要從 CamelPlayer 取得音樂，所以 Windows 防火牆必須放行。CamelPlayer 會新增一條規則，只適用於這個程式和私人網路。Windows 會要求系統管理員權限。</value></data>
+  <data name="Firewall_Text" xml:space="preserve"><value>網路播放器和其他電腦上的 HQPlayer 要從 CamelPlayer 取得音樂，所以 Windows 防火牆必須放行。CamelPlayer 會新增一條規則，只適用於這個程式和私人網路。Windows 會要求系統管理員權限。</value></data>
   <data name="Firewall_AddButton.Content" xml:space="preserve"><value>新增規則</value></data>
   <data name="Firewall_Notice.Title" xml:space="preserve"><value>缺少防火牆規則</value></data>
-  <data name="Firewall_Notice.Message" xml:space="preserve"><value>新增私人網路的規則之前，網路播放器無法連到 CamelPlayer。</value></data>
+  <data name="Firewall_Notice.Message" xml:space="preserve"><value>新增私人網路的規則之前，網路播放器和其他電腦上的 HQPlayer 無法連到 CamelPlayer。</value></data>
   <data name="SignalPath_ToHQPlayer" xml:space="preserve"><value>送到 HQPlayer</value></data>
   <data name="SignalPath_HQPlayer" xml:space="preserve"><value>HQPlayer</value></data>
   <data name="SignalPath_HQPlayerProcessed" xml:space="preserve"><value>由 HQPlayer 處理</value></data>

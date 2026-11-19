@@ -1135,7 +1135,7 @@ void MainWindow::populateOutputs() {
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::setOutputEnabled(s, row.backend, row.id, on, devices);
             });
-            if (camel::isNetworkPlayer(row.backend) && on) askFirewallRule();
+            if (camel::server::needsFirewallRule(row) && on) askFirewallRule();
         });
         Grid::SetColumn(enabled, 3);
         line.Children().Append(enabled);
@@ -1147,7 +1147,7 @@ void MainWindow::populateOutputs() {
     addHQPlayer.Click([this](auto&&, auto&&) { askAddHQPlayer(); });
     hqplayerRows.Children().Append(addHQPlayer);
     const bool players = std::ranges::any_of(
-        rows, [](const camel::server::OutputRow& r) { return camel::isNetworkPlayer(r.backend) && r.enabled; });
+        rows, [](const camel::server::OutputRow& r) { return camel::server::needsFirewallRule(r) && r.enabled; });
     if (players && !firewallRule_) readFirewallRule(); // the notice opens once it is known
     FirewallNotice().IsOpen(players && firewallRule_ == false);
 }
@@ -1421,6 +1421,10 @@ winrt::fire_and_forget MainWindow::askAddHQPlayer() {
     refresh.kind = CommandKind::RefreshDevices;
     server_->submit(std::move(refresh));
     populateOutputs();
+    camel::server::OutputRow added;
+    added.backend = Backend::HQPlayer;
+    added.id = chosen->first;
+    if (camel::server::needsFirewallRule(added)) askFirewallRule();
 }
 
 // What the user types is sent to the receiver by the Server, which keeps it protected for this Windows account; the

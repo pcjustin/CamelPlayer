@@ -31,6 +31,9 @@ struct OutputRow {
 // Every device found and every saved one, by backend; "Windows default device" first.
 std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& devices);
 
+// Fetches the stream from another computer, through the Windows Firewall rule.
+bool needsFirewallRule(const OutputRow& row);
+
 // Brings `s` in line with `devices`: gives an earlier version's sets to their devices, moves to the default device's
 // set when the followed default changed, keeps the parameters in use and the devices' names, enables the output in use
 // and disables any other that cannot be used. Does nothing before the first device scan.
