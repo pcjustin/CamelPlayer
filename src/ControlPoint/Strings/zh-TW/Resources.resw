@@ -215,6 +215,9 @@
   <data name="Queue_ClosePanel.ToolTipService.ToolTip" xml:space="preserve"><value>關閉播放佇列</value></data>
   <data name="Queue_Empty.Text" xml:space="preserve"><value>播放佇列是空的。在曲目或資料夾上按右鍵，選擇「接著播放」或「加到佇列尾端」。</value></data>
   <data name="Queue_CountWindowed" xml:space="preserve"><value>{0} 首，列出目前曲目附近的 {1} 首</value></data>
+  <data name="State_Playing" xml:space="preserve"><value>播放中</value></data>
+  <data name="State_Paused" xml:space="preserve"><value>已暫停</value></data>
+  <data name="State_Stopped" xml:space="preserve"><value>已停止</value></data>
   <data name="State_Buffering" xml:space="preserve"><value>緩衝中，約 {0} 秒</value></data>
   <data name="State_BufferingDetail" xml:space="preserve"><value>來源讀取速度比播放慢，先緩衝再播，避免斷斷續續。</value></data>
   <data name="State_ReceiverAsking" xml:space="preserve"><value>請在「{0}」上允許 CamelPlayer</value></data>

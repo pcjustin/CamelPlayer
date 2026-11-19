@@ -1919,7 +1919,14 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownPlayName_ = action;
         shownPlayTip_ = playTip;
         setBadgeTip(PlayPauseButton(), action, playTip);
+        // The tip shows only under the mouse; what it says beyond the action reaches a screen reader with the button.
+        Automation::AutomationProperties::SetHelpText(PlayPauseButton(), playTip == action ? hstring{} : playTip);
     }
+    // What the play button shows, said as it changes, as the state badge did.
+    setAnnounced(PlaybackStateText(), s.error || buffering                ? playTip
+                                      : s.state == PlaybackState::Playing ? tr(L"State_Playing")
+                                      : s.state == PlaybackState::Paused  ? tr(L"State_Paused")
+                                                                          : tr(L"State_Stopped"));
     BufferingRing().IsActive(buffering);
     // The waveform appears once the Server has it: made at once for the playing track, asked for every 2 seconds.
     if (s.pathUtf8 != waveformPath_) {

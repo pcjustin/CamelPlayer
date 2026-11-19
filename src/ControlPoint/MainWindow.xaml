@@ -989,6 +989,9 @@
                              Margin="0,2,2,0" Fill="{ThemeResource SystemFillColorCriticalBrush}"
                              Stroke="{ThemeResource SolidBackgroundFillColorBaseBrush}" StrokeThickness="2"
                              IsHitTestVisible="False" Visibility="Collapsed" />
+                    <!-- Unseen: tells screen readers what the play button shows, playing, paused, the wait or the error. -->
+                    <TextBlock x:Name="PlaybackStateText" Width="1" Height="1" Opacity="0" IsHitTestVisible="False"
+                               HorizontalAlignment="Left" VerticalAlignment="Top" AutomationProperties.LiveSetting="Polite" />
                 </Grid>
                 <Grid Grid.Column="2" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
