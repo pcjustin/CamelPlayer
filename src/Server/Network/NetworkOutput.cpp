@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -170,6 +171,15 @@ public:
         } catch (const std::runtime_error&) {
             throw Error(ErrorCode::DeviceNotFound, "cannot serve the stream");
         }
+    }
+
+    std::vector<std::string> hosts() const override {
+        std::vector<std::string> found;
+        for (const auto& service : player_.services)
+            for (const auto* url : {&service.controlUrl, &service.eventUrl, &service.scpdUrl})
+                if (auto host = upnp::hostOf(*url); !host.empty() && std::ranges::find(found, host) == found.end())
+                    found.push_back(std::move(host));
+        return found;
     }
 
     std::string metadata(const upnp::DidlTrack& track) const override { return upnp::didlLite(track); }
@@ -560,12 +570,29 @@ private:
         const auto listening = player_->listen();
         listener_ = SOCKET(listening.socket);
         base_ = listening.base;
+        hosts_ = player_->hosts();
+    }
+
+    // Another host on the network may have seen a URL; only the player's own addresses fetch, and a seek is its own.
+    bool fromPlayer(const sockaddr_in& peer) {
+        char text[INET_ADDRSTRLEN] = {};
+        if (!inet_ntop(AF_INET, &peer.sin_addr, text, sizeof(text))) return false;
+        if (std::ranges::find(hosts_, text) != hosts_.end()) return true;
+        if (refusedHosts_.insert(text).second)
+            log::warn("network player %s: a request from %s refused", player_->name().c_str(), text);
+        return false;
     }
 
     void acceptLoop() {
         for (;;) {
-            const SOCKET client = accept(listener_, nullptr, nullptr);
+            sockaddr_in peer{};
+            int peerLength = sizeof(peer);
+            const SOCKET client = accept(listener_, reinterpret_cast<sockaddr*>(&peer), &peerLength);
             if (client == kNoSocket) return;
+            if (!fromPlayer(peer)) {
+                closesocket(client);
+                continue;
+            }
             std::vector<std::thread::id> served;
             {
                 std::scoped_lock lock(mutex_);
@@ -686,6 +713,9 @@ private:
     void serve(SOCKET client) {
         const BOOL noDelay = TRUE;
         setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
+        // A connection that sends no request ends, rather than hold its thread.
+        const auto timeout = DWORD(options_.requestTimeout.count());
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
         std::string request;
         char buffer[4096];
         while (request.find("\r\n\r\n") == std::string::npos && request.size() < sizeof(buffer) * 4) {
@@ -977,6 +1007,8 @@ private:
 
     SOCKET listener_ = kNoSocket;
     std::string base_;
+    std::vector<std::string> hosts_;     // the player's, set before the accept loop runs
+    std::set<std::string> refusedHosts_; // told in the log once each; the accept loop's own
     std::thread acceptor_, announcer_;
     std::vector<std::thread> connections_;
     mutable std::mutex mutex_;

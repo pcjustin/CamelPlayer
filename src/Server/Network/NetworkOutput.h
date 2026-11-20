@@ -34,6 +34,7 @@ struct NetworkOutputOptions {
     bool gapless = true; // off, a player that could follow one track with the next is given them one at a time
     // How long a player may take after Play to start, its position moving, before it is taken for one that did not.
     std::chrono::milliseconds startLimit{5000};
+    std::chrono::milliseconds requestTimeout{10000}; // for a request's head to come in, after which the connection ends
 };
 
 // `details` and `follow` run on the output's own threads. `follow` gets what the player did by itself.

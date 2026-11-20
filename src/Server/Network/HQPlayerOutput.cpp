@@ -365,6 +365,12 @@ public:
         }
     }
 
+    std::vector<std::string> hosts() const override {
+        if (hqplayer::isLocalHost(host_)) return {"127.0.0.1"};
+        auto address = hqplayer::ipv4Of(host_);
+        return address.empty() ? std::vector<std::string>{} : std::vector<std::string>{std::move(address)};
+    }
+
     std::string metadata(const upnp::DidlTrack& track) const override {
         std::string attributes = std::format(R"(song="{}" artist="{}" album="{}")", hqplayer::escape(track.title),
                                              hqplayer::escape(track.artist), hqplayer::escape(track.album));

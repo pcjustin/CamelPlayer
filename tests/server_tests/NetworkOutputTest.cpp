@@ -631,6 +631,67 @@ TEST(NetworkOutputTest, ARangePastTheStreamIsThePlayersOwnSeek) {
     EXPECT_EQ(found->positionMs, 1800000U);
 }
 
+struct Exchange {
+    bool closed = false; // by the other side, before `waitMs`
+    std::string reply;
+};
+
+// `request` sent from the local address `from` to `url`'s host and port, and what comes back.
+Exchange exchangeFrom(const char* from, const std::string& url, const std::string& request, DWORD waitMs = 3000) {
+    const size_t hostAt = url.find("//") + 2, portAt = url.find(':', hostAt), pathAt = url.find('/', hostAt);
+    const std::string host = url.substr(hostAt, portAt - hostAt);
+    const auto port = uint16_t(std::stoi(url.substr(portAt + 1, pathAt - portAt - 1)));
+    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in local{};
+    local.sin_family = AF_INET;
+    inet_pton(AF_INET, from, &local.sin_addr);
+    sockaddr_in remote{};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(port);
+    inet_pton(AF_INET, host.c_str(), &remote.sin_addr);
+    Exchange result;
+    if (bind(s, reinterpret_cast<sockaddr*>(&local), sizeof(local)) == 0 &&
+        connect(s, reinterpret_cast<sockaddr*>(&remote), sizeof(remote)) == 0) {
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&waitMs), sizeof(waitMs));
+        if (!request.empty()) send(s, request.data(), int(request.size()), 0);
+        char buffer[4096];
+        int n = 0;
+        while ((n = recv(s, buffer, sizeof(buffer), 0)) > 0) result.reply.append(buffer, size_t(n));
+        result.closed = n == 0 || (n < 0 && WSAGetLastError() == WSAECONNRESET);
+    }
+    closesocket(s);
+    return result;
+}
+
+// The stream is the player's: another host is not answered, so it can neither fetch the audio nor be taken for the
+// player's seek, and a connection that sends no request ends instead of holding a thread.
+TEST(NetworkOutputTest, OnlyThePlayerIsAnswered) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(100000);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 3600);
+    NetworkOutputOptions options;
+    options.requestTimeout = 300ms;
+    OutputRun output(renderer, source, k16, options);
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.currentUri().empty() && source.rendered() > 0; }));
+    const auto url = renderer.currentUri();
+    const uint64_t offset = 44 + uint64_t(k16.bytesPerFrame()) * 44100 * 1800;
+    const std::string seek = "GET " + url.substr(url.find('/', url.find("//") + 2)) +
+                             " HTTP/1.1\r\nHost: player\r\nRange: bytes=" + std::to_string(offset) + "-\r\n\r\n";
+    const auto other = exchangeFrom("127.0.0.2", url, seek);
+    EXPECT_TRUE(other.reply.empty()) << other.reply.substr(0, 100);
+    std::this_thread::sleep_for(300ms);
+    const auto seeked = [&] {
+        return std::ranges::any_of(output.events(), [](const PlayerEvent& e) { return e.kind == PlayerEventKind::Seeked; });
+    };
+    EXPECT_FALSE(seeked()) << "another host's range taken for the player's seek";
+    const auto before = std::chrono::steady_clock::now();
+    EXPECT_TRUE(exchangeFrom("127.0.0.1", url, "").closed);
+    EXPECT_LT(std::chrono::steady_clock::now() - before, 2s);
+    EXPECT_EQ(exchangeFrom("127.0.0.1", url, seek).reply.substr(0, 12), "HTTP/1.1 503") << "the player's own seek";
+    EXPECT_TRUE(waitFor(seeked));
+}
+
 TEST(NetworkOutputTest, ARefusedStreamIsAFormatProblem) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.refuseStreams();

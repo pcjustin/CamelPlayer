@@ -51,6 +51,8 @@ public:
     virtual bool gapless(bool& known) = 0;
     // A socket listening where the player reaches this computer. Throws audio::Error.
     virtual upnp::Listener listen() = 0;
+    // The IPv4 addresses the player fetches the stream from, the only ones answered.
+    virtual std::vector<std::string> hosts() const = 0;
     // The metadata `load` takes for a track.
     virtual std::string metadata(const upnp::DidlTrack& track) const = 0;
     // Throws audio::Error when it cannot be reached.
