@@ -501,6 +501,21 @@ TEST_F(AirPlayOutputTest, AnAirPlay2ReceiversButtonsAreTold) {
     out->close();
 }
 
+// A reply the receiver sends on its event channel is not answered, and the answers to its later requests still open.
+TEST_F(AirPlayOutputTest, AReplyOnTheEventChannelLeavesTheAnswersReadable) {
+    airplay2_ = true;
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(packets(10));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.sendCommand("plps"); }));
+    ASSERT_TRUE(rtsp_.sendEventReply());
+    ASSERT_TRUE(rtsp_.sendCommand("nitm"));
+    EXPECT_TRUE(waitFor([&] { return rtsp_.eventAnswers() == 2; }));
+    out->close();
+}
+
 // Its own volume is told, except after it asked for a pause until playing starts again: a TV turned off says it is muted.
 TEST_F(AirPlayOutputTest, AnAirPlay2ReceiversVolumeIsToldExceptAfterItsPause) {
     using airplay::ReceiverCommand;

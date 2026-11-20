@@ -165,6 +165,13 @@ public:
         const std::string sealed = events_channel_->seal(request);
         return send(eventClients_.back(), sealed.data(), int(sealed.size()), 0) == int(sealed.size());
     }
+    // Sends a reply on the event channel, which the sender does not answer. False before a command opened the channel.
+    bool sendEventReply() {
+        std::scoped_lock lock(mutex_);
+        if (eventClients_.empty() || !events_channel_) return false;
+        const std::string sealed = events_channel_->seal("RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 0\r\n\r\n");
+        return send(eventClients_.back(), sealed.data(), int(sealed.size()), 0) == int(sealed.size());
+    }
     // The sender's answers on the event channel that said 200.
     int eventAnswers() {
         std::scoped_lock lock(mutex_);

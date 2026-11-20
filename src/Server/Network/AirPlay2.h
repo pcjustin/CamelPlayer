@@ -67,6 +67,7 @@ private:
     uintptr_t socket_ = 0; // a SOCKET
     SecureChannel channel_;
     std::string sealed_, plain_;
+    bool damaged_ = false;
 };
 
 } // namespace camel::server::airplay

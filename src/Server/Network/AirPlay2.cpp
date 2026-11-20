@@ -13,6 +13,7 @@
 #include <format>
 #include <stdexcept>
 
+#include "Common/util/Log.h"
 #include "Server/Network/AirPlay.h"
 #include "Server/Network/Pairing.h"
 #include "Server/Network/Rtsp.h"
@@ -141,6 +142,24 @@ std::string headerValue(std::string_view head, std::string_view name) {
     return {};
 }
 
+// The channel's socket does not block: what does not go at once waits until it can.
+bool sendAll(SOCKET s, std::string_view data) {
+    constexpr timeval kWait{1, 0};
+    while (!data.empty()) {
+        const int sent = send(s, data.data(), int(data.size()), 0);
+        if (sent > 0) {
+            data.remove_prefix(size_t(sent));
+            continue;
+        }
+        if (WSAGetLastError() != WSAEWOULDBLOCK) return false;
+        fd_set writable;
+        FD_ZERO(&writable);
+        FD_SET(s, &writable);
+        if (select(0, nullptr, &writable, nullptr, &kWait) <= 0) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 EventChannel::EventChannel(const std::string& address, uint16_t port, std::string_view sessionKey, int timeoutMs)
@@ -192,10 +211,13 @@ std::vector<ReceiverEvent> EventChannel::read() {
         if (got <= 0) break;
         sealed_.append(buffer, size_t(got));
         if (sealed_.size() > kMaxEventBytes) sealed_.clear();
-        if (const auto opened = channel_.open(sealed_))
+        if (const auto opened = channel_.open(sealed_)) {
             plain_ += *opened;
-        else
+        } else {
             sealed_.clear(); // a damaged block: what follows cannot be opened either
+            if (!damaged_) log::warn("AirPlay receiver: its event channel cannot be read, so its remote is followed no more");
+            damaged_ = true;
+        }
     }
     std::vector<ReceiverEvent> events;
     for (;;) {
@@ -213,10 +235,12 @@ std::vector<ReceiverEvent> EventChannel::read() {
             break;
         }
         if (plain_.size() < headEnd + 4 + bodyBytes) break;
-        const std::string answer =
-            std::format("RTSP/1.0 200 OK\r\nCSeq: {}\r\nContent-Length: 0\r\n\r\n", headerValue(head, "CSeq"));
-        const std::string sealedAnswer = channel_.seal(answer);
-        if (!head.starts_with("RTSP/")) send(s, sealedAnswer.data(), int(sealedAnswer.size()), 0);
+        // Only a request is answered, and only what is sent is sealed: each seal takes the next nonce.
+        if (!head.starts_with("RTSP/")) {
+            const std::string answer =
+                std::format("RTSP/1.0 200 OK\r\nCSeq: {}\r\nContent-Length: 0\r\n\r\n", headerValue(head, "CSeq"));
+            if (!sendAll(s, channel_.seal(answer))) log::info("AirPlay receiver: an answer on its event channel was not sent");
+        }
         if (head.starts_with("POST /command ")) {
             const auto command = parseBinaryPlist(std::string_view(plain_).substr(headEnd + 4, bodyBytes));
             if (const auto event = command ? receiverEventFrom(*command) : std::nullopt) events.push_back(*event);
