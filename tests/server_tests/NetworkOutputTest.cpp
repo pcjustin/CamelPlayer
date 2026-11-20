@@ -582,6 +582,21 @@ TEST(NetworkOutputTest, ARangeRequestGetsThatPartOfTheStream) {
     EXPECT_TRUE(headOnly.body.empty());
 }
 
+// The 128 bytes of a DSF's metadata are all it has: a range that ends before its start is refused, not sent from past them.
+TEST(NetworkOutputTest, ARangeEndingBeforeItsStartIsRefused) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.declare("http-get:*:audio/x-dsf:*");
+    CountingSource source(2, 5000);
+    OutputRun output(renderer, source, {352800, 2, SampleType::Dsd8});
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.received().empty(); }));
+    const auto url = renderer.received().begin()->first;
+    const uint64_t metadataAt = 92 + 2 * 4096U * 2;
+    const auto range = "Range: bytes=" + std::to_string(metadataAt + 10) + "-" + std::to_string(metadataAt + 5);
+    EXPECT_EQ(http::send("GET", url, range, "", 2000, 1 << 20).status, 416U);
+    EXPECT_EQ(http::send("GET", url, "Range: bytes=2000-1000", "", 2000, 1 << 20).status, 416U);
+}
+
 TEST(NetworkOutputTest, ShortRequestsDoNotPileUpThreadsDuringTheSession) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     CountingSource source(k16.bytesPerFrame(), 20000);

@@ -737,7 +737,7 @@ private:
         constexpr uint64_t kDeclaredEnd = kWavHeader + 0xFFFFFFFFULL;
         const bool headerEnd =
             body->extension == "wav" && total > kDeclaredEnd && (start == kDeclaredEnd || start == kDeclaredEnd + 1);
-        if ((start >= total && total) || headerEnd) {
+        if ((start >= total && total) || headerEnd || (end && *end < start)) {
             lock.unlock();
             return respond(client, "416 Range Not Satisfiable");
         }
