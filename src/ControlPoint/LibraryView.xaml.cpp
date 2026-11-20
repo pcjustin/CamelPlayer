@@ -1267,12 +1267,8 @@ void LibraryView::queueSelection(bool playNext) {
         std::vector<LibraryTrackRow> tracks;
         for (const auto& row : rows()) {
             if (folders && row.folder) {
-                std::vector<int64_t> pending{row.id};
-                for (size_t i = 0; i < pending.size(); ++i) {
-                    const auto listing = server->browseFolder(pending[i]);
-                    tracks.insert(tracks.end(), listing.tracks.begin(), listing.tracks.end());
-                    for (const auto& child : listing.folders) pending.push_back(child.id);
-                }
+                const auto below = server->folderTracks(row.id);
+                tracks.insert(tracks.end(), below.begin(), below.end());
             } else if (!row.value.empty()) {
                 LibraryTrackRow track;
                 track.path = row.value;
