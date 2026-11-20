@@ -780,7 +780,7 @@ fn retire(retired: &mut Vec<Segment>, segment: Option<Segment>) {
 // final quantization once, in the incoming track's converter. A change during a crossfade renders what that one would
 // still play into `outgoing`, which then fades out as one track.
 struct Fade {
-    // Output frames.
+    // Mixed frames.
     length: u64,
     done: u64,
     tail: Vec<u8>,
@@ -1010,7 +1010,7 @@ impl CamelEngine {
             let hold = if fade_frames > 0 {
                 segment
                     .converter
-                    .input_frames_for(fade_frames)
+                    .input_frames_for(self.device_frames(fade_frames))
                     .min(self.max_hold(segment))
             } else {
                 0
@@ -1030,7 +1030,7 @@ impl CamelEngine {
                     break Ok(());
                 }
                 let length =
-                    fade_frames.min(self.output_frames(available + tail_frames, segment.rate));
+                    fade_frames.min(self.mixed_frames(available + tail_frames, segment.rate));
                 if length == 0 {
                     segments[1].fade_in = 0;
                     continue;
@@ -1207,7 +1207,7 @@ impl CamelEngine {
         Ok(frames)
     }
 
-    // Output frames of the crossfade from the first segment into the track after it: what that track asks for, at most
+    // Mixed frames of the crossfade from the first segment into the track after it: what that track asks for, at most
     // half of either track; 0 when it follows gaplessly, either is raw DSD or nothing follows yet.
     fn fade_after_first(&self, segments: &std::collections::VecDeque<Segment>) -> u64 {
         let Some(first) = segments.front() else {
@@ -1220,7 +1220,7 @@ impl CamelEngine {
             if !next.converter.mixes() {
                 return 0;
             }
-            (next.fade_in, self.output_frames(next.expected, next.rate))
+            (next.fade_in, self.mixed_frames(next.expected, next.rate))
         } else {
             let slot = self.next_source.lock().unwrap();
             let Some(next) = slot.as_ref() else {
@@ -1231,10 +1231,10 @@ impl CamelEngine {
             }
             (
                 self.fade_frames(next.crossfade_ms),
-                self.output_frames(next.remaining_frames(), next.info.sample_rate),
+                self.mixed_frames(next.remaining_frames(), next.info.sample_rate),
             )
         };
-        let frames = requested.min(self.output_frames(first.length(), first.rate) / 2);
+        let frames = requested.min(self.mixed_frames(first.length(), first.rate) / 2);
         if next_length > 0 {
             frames.min(next_length / 2)
         } else {
@@ -1242,8 +1242,33 @@ impl CamelEngine {
         }
     }
 
+    // A fade is counted in the float frames its tracks are mixed in: the device's, or 352.8 kHz where PCM is sent as
+    // DSD, whatever the device's rate.
+    fn mix_rate(&self) -> u64 {
+        if self.dsd_modulation != 0 && self.format.stream_kind != AUDIO_PCM {
+            u64::from(dsd2pcm::PCM_RATE)
+        } else {
+            self.device_frame_rate()
+        }
+    }
+
+    fn device_frame_rate(&self) -> u64 {
+        u64::from(self.output_format.rate_hz) / units_per_frame(&self.format)
+    }
+
     fn fade_frames(&self, milliseconds: u32) -> u64 {
-        u64::from(self.output_format.rate_hz) * u64::from(milliseconds) / 1000
+        self.mix_rate() * u64::from(milliseconds) / 1000
+    }
+
+    // Mixed frames of `frames` source frames.
+    fn mixed_frames(&self, frames: u64, source_rate: u32) -> u64 {
+        (u128::from(frames) * u128::from(self.mix_rate()) / u128::from(source_rate.max(1))) as u64
+    }
+
+    // The output frames that carry `mixed` mixed frames.
+    fn device_frames(&self, mixed: u64) -> u64 {
+        (u128::from(mixed) * u128::from(self.device_frame_rate()) / u128::from(self.mix_rate()))
+            as u64
     }
 
     // The most source frames of `segment` a crossfade may hold back: what its tail has room for, or without one what
@@ -2579,7 +2604,7 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
         let mut stage = engine.stage.lock().unwrap();
         let fade_in = engine.fade_frames(next.crossfade_ms);
         let keep_frames = fade_in + engine.fade_frames(CUT_MARGIN_MS);
-        let next_length = engine.output_frames(next.remaining_frames(), next.info.sample_rate);
+        let next_length = engine.mixed_frames(next.remaining_frames(), next.info.sample_rate);
         let Stage {
             segments,
             stream_ended,
@@ -2646,7 +2671,7 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             let tail_frames = playing.tail_frames();
             let keep = playing
                 .converter
-                .input_frames_for(keep_frames)
+                .input_frames_for(engine.device_frames(keep_frames))
                 .min(playing.frames - playing.read + tail_frames);
             // What is kept becomes the track's tail, out of the source ring the new track decodes into.
             let frame_bytes = playing.frame_bytes();
@@ -4256,6 +4281,78 @@ mod tests {
         }
         assert!(left[start + 4_800..].iter().all(|&v| v == -4000));
         assert_eq!(left.len(), start + 48_000);
+    }
+
+    // PCM sent as DSD is mixed at 352.8 kHz whatever the device's rate, and the fade lasts what was asked for: two
+    // tracks of one second with a quarter of a second of crossfade play for one and three quarters.
+    #[test]
+    fn a_crossfade_on_a_modulated_dsd_stream_lasts_what_was_asked_for() {
+        let mut dsd64 = format(AUDIO_DSD, SAMPLE_DSD_U8, 1, 8);
+        dsd64.rate_hz = 2_822_400;
+        let mut dsd128 = dsd64;
+        dsd128.rate_hz = 5_644_800;
+        for output in [dsd64, dsd128] {
+            let mut cfg = config(output);
+            cfg.allow_conversion = 1;
+            cfg.dsd_modulation = 7;
+            let mut engine = ptr::null_mut();
+            assert_eq!(
+                unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+                ENGINE_OK
+            );
+            let host = tone_host();
+            let source = tone_source("8000:44100:44100", 0, 0);
+            assert_eq!(
+                unsafe {
+                    camel_engine_load_flac_v1(
+                        engine,
+                        &command_stamp(1),
+                        &source,
+                        decoder_host::DECODER_SYMPHONIA,
+                        &host,
+                    )
+                },
+                ENGINE_OK
+            );
+            assert_eq!(
+                queue_tone(engine, 2, "-4000:44100:44100", 250, 0),
+                ENGINE_OK
+            );
+            assert_eq!(
+                unsafe { camel_engine_play_v1(engine, &command_stamp(3)) },
+                ENGINE_OK
+            );
+            let mut rendered = 0;
+            let mut ended = false;
+            for _ in 0..100_000 {
+                loop {
+                    let mut frames = 0;
+                    let status = unsafe { camel_engine_prefill_v1(engine, 4096, &mut frames) };
+                    if status != ENGINE_OK || frames == 0 {
+                        break;
+                    }
+                }
+                let mut processed = 0;
+                unsafe { camel_engine_process_v1(engine, &mut processed) };
+                let mut buffer = vec![0u8; 4096 * 2];
+                let request = render_request(4096 * 8, &mut buffer);
+                let mut result = render_result();
+                let status = unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+                rendered += result.units_rendered;
+                if status == ENGINE_END {
+                    ended = true;
+                    break;
+                }
+            }
+            assert!(ended, "the stream did not end");
+            let seconds = rendered as f64 / f64::from(output.rate_hz);
+            assert!(
+                (seconds - 1.75).abs() < 0.03,
+                "{seconds} s at {} Hz",
+                output.rate_hz
+            );
+            assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        }
     }
 
     #[test]
