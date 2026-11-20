@@ -26,7 +26,8 @@ struct EqImportNotes {
 std::vector<EqBand> parseEqualizerApo(std::string_view text, EqImportNotes* notes = nullptr);
 
 // `bands` as Equalizer APO text with `preampDb` as its preamp. A steeper low- or high-pass than 12 dB/oct has no APO
-// filter and is written as a 12 dB/oct one.
+// filter and is written as its Butterworth second-order sections, 12 dB/oct each; an odd order (18, 30 or 42 dB/oct)
+// loses its first-order section, and 6 dB/oct is written as 12.
 std::string formatEqualizerApo(const std::vector<EqBand>& bands, double preampDb);
 
 } // namespace camel

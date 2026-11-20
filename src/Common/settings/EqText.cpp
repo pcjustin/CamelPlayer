@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <optional>
 #include <sstream>
 
@@ -61,6 +62,19 @@ const char* codeOf(EqKind kind) {
     default:
         return "PK";
     }
+}
+
+// The Q of each line `band` is written as. Equalizer APO has no pass filter steeper than 12 dB/oct, so a steeper
+// Butterworth one is written as its second-order sections, without the first-order section of an odd order.
+std::vector<double> sectionQs(const EqBand& band) {
+    if ((band.kind != EqKind::LowPass && band.kind != EqKind::HighPass) || band.slope <= 12) return {band.q};
+    const uint32_t order = band.slope / 6;
+    std::vector<double> qs;
+    for (uint32_t k = 1; k <= order / 2; ++k) {
+        const double angle = order % 2 == 0 ? std::numbers::pi * (2 * k - 1) / (2 * order) : std::numbers::pi * k / order;
+        qs.push_back(1 / (2 * std::cos(angle)));
+    }
+    return qs;
 }
 
 } // namespace
@@ -144,11 +158,13 @@ std::string formatEqualizerApo(const std::vector<EqBand>& bands, double preampDb
                                                     : "Channel: ALL\r\n";
         }
         const bool gain = band.kind == EqKind::Peaking || band.kind == EqKind::LowShelf || band.kind == EqKind::HighShelf;
-        int length = snprintf(line, sizeof line, "Filter %d: %s %s Fc %g Hz", ++index, band.enabled ? "ON" : "OFF",
-                              codeOf(band.kind), band.frequencyHz);
-        if (gain) length += snprintf(line + length, sizeof line - size_t(length), " Gain %.1f dB", band.gainDb);
-        snprintf(line + length, sizeof line - size_t(length), " Q %.2f\r\n", band.q);
-        text += line;
+        for (const double q : sectionQs(band)) {
+            int length = snprintf(line, sizeof line, "Filter %d: %s %s Fc %g Hz", ++index, band.enabled ? "ON" : "OFF",
+                                  codeOf(band.kind), band.frequencyHz);
+            if (gain) length += snprintf(line + length, sizeof line - size_t(length), " Gain %.1f dB", band.gainDb);
+            snprintf(line + length, sizeof line - size_t(length), " Q %.2f\r\n", q);
+            text += line;
+        }
     }
     return text;
 }

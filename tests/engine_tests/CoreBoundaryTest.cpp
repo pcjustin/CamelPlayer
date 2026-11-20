@@ -631,6 +631,22 @@ TEST(EqText, WritesWhatItReads) {
     EXPECT_EQ(parseEqualizerApo(text), bands);
 }
 
+// Equalizer APO has no pass filter steeper than 12 dB/oct: a steeper Butterworth one is written as its second-order
+// sections, which play its curve there and come back as those sections. An odd order loses its first-order section.
+TEST(EqText, ASteepPassFilterIsWrittenAsItsButterworthSections) {
+    const std::vector<EqBand> bands{{EqKind::LowPass, EqChannels::All, 48, 18000.0, 0.0, 0.71, true},
+                                    {EqKind::HighPass, EqChannels::Left, 24, 20.0, 0.0, 0.71, false},
+                                    {EqKind::LowPass, EqChannels::Right, 18, 9000.0, 0.0, 0.71, true}};
+    const auto back = parseEqualizerApo(formatEqualizerApo(bands, 0.0));
+    const size_t source[] = {0, 0, 0, 0, 1, 1, 2};
+    const double qs[] = {0.51, 0.60, 0.90, 2.56, 0.54, 1.31, 1.00};
+    ASSERT_EQ(back.size(), std::size(qs));
+    for (size_t i = 0; i < back.size(); ++i) {
+        const auto& band = bands[source[i]];
+        EXPECT_EQ(back[i], (EqBand{band.kind, band.channels, 12, band.frequencyHz, 0.0, qs[i], band.enabled})) << i;
+    }
+}
+
 TEST(SettingsBoundary, ClosingTheWindowMinimizesToTheTrayUntilSetToExit) {
     EXPECT_EQ(Settings{}.closeAction, CloseAction::Tray);
     EXPECT_FALSE(Settings{}.trayNoticeShown);
