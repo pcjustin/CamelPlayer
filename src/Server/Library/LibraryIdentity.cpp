@@ -86,7 +86,8 @@ constexpr const char* kMetadata =
     "title,album,album_artist,artist,composer,genre,year,track_number,track_total,disc_number,disc_total,"
     "format,sample_rate,bits_per_sample,channels,total_frames,length_estimated,embedded_cover,lyrics,"
     "rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,"
-    "title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort,title_sort_tag,album_sort_tag,artist_sort_tag";
+    "title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort,title_sort_tag,album_sort_tag,artist_sort_tag,"
+    "album_artist_sort_tag";
 
 void merge(sqlite::Database& db, int64_t prior, int64_t current) {
     db.prepare("DELETE FROM tracks WHERE file_id=? AND NOT EXISTS(SELECT 1 FROM tracks WHERE file_id=?)")

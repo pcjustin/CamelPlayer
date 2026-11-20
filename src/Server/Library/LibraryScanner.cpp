@@ -315,8 +315,8 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
     auto s = db.prepare("INSERT INTO tracks(file_id,title,album,album_artist,artist,composer,genre,year,track_number,track_total,"
                         "disc_number,disc_total,format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
                         "length_estimated,title_sort_tag,album_sort_tag,artist_sort_tag,rg_track_gain,rg_track_peak,"
-                        "rg_album_gain,rg_album_peak,title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                        "rg_album_gain,rg_album_peak,title_norm,album_norm,artist_norm,title_sort,album_sort,artist_sort,"
+                        "album_artist_sort_tag) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?35) "
                         "ON CONFLICT(file_id) DO UPDATE SET "
                         "title=excluded.title,album=excluded.album,album_artist=excluded.album_artist,artist=excluded.artist,"
                         "composer=excluded.composer,genre=excluded.genre,year=excluded.year,track_number=excluded.track_number,"
@@ -329,7 +329,8 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
                         "rg_track_peak=excluded.rg_track_peak,rg_album_gain=excluded.rg_album_gain,"
                         "rg_album_peak=excluded.rg_album_peak,title_norm=excluded.title_norm,album_norm=excluded.album_norm,"
                         "artist_norm=excluded.artist_norm,title_sort=excluded.title_sort,album_sort=excluded.album_sort,"
-                        "artist_sort=excluded.artist_sort,rg_analysis_gain=CASE WHEN ?34 THEN rg_analysis_gain END,"
+                        "artist_sort=excluded.artist_sort,album_artist_sort_tag=excluded.album_artist_sort_tag,"
+                        "rg_analysis_gain=CASE WHEN ?34 THEN rg_analysis_gain END,"
                         "rg_analysis_peak=CASE WHEN ?34 THEN rg_analysis_peak END,"
                         "rg_analysis_album_gain=CASE WHEN ?34 THEN rg_analysis_album_gain END,"
                         "rg_analysis_album_peak=CASE WHEN ?34 THEN rg_analysis_album_peak END");
@@ -364,6 +365,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
         s.bind(i++, librarySortKey(librarySortSource(sortTag, tag(m, field)), locale));
     }
     s.bind(34, int64_t(sameAudio));
+    s.bind(35, tag(m, "ALBUMARTISTSORT"));
     s.run();
     auto row = db.prepare("SELECT id FROM tracks WHERE file_id=?");
     row.bind(1, file).step();

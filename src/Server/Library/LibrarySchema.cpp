@@ -494,6 +494,11 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
             db.exec("CREATE INDEX files_visible ON files(id,root_id) WHERE available=1;"
                     "CREATE INDEX track_values_value ON track_values(field,value);");
         },
+        // Albums by artist sort by the album artist's sort key, taken from ALBUMARTISTSORT where a file has it.
+        [](sqlite::Database& db) {
+            db.exec("ALTER TABLE tracks ADD COLUMN album_artist_sort_tag TEXT;"
+                    "ALTER TABLE albums ADD COLUMN artist_sort_key BLOB;");
+        },
     };
     return migrations;
 }

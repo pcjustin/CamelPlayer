@@ -161,16 +161,20 @@ void updateLibraryAlbumText(sqlite::Database& db, int64_t id, std::wstring_view 
         auto state = db.prepare("SELECT value FROM app_state WHERE key='sort_locale'");
         selected = state.step() ? toWide(state.text(0)) : L"zh-TW";
     }
-    auto album = db.prepare("SELECT title,coalesce(album_artist,''),coalesce((SELECT album_sort_tag FROM tracks WHERE "
-                            "album_id=? ORDER BY id LIMIT 1),'') FROM albums WHERE id=?");
-    album.bind(1, id).bind(2, id);
+    auto album =
+        db.prepare("SELECT title,coalesce(album_artist,''),coalesce(album_sort_tag,''),coalesce(album_artist_sort_tag,'') "
+                   "FROM albums LEFT JOIN (SELECT album_sort_tag,album_artist_sort_tag FROM tracks WHERE album_id=?1 "
+                   "ORDER BY id LIMIT 1) WHERE id=?1");
+    album.bind(1, id);
     if (album.step()) {
         const auto key = librarySortKey(librarySortSource(album.text(2), album.text(0)), selected);
-        db.prepare("UPDATE albums SET title_norm=?,artist_norm=?,sort_key=? WHERE id=?")
+        const auto artistKey = librarySortKey(librarySortSource(album.text(3), album.text(1)), selected);
+        db.prepare("UPDATE albums SET title_norm=?,artist_norm=?,sort_key=?,artist_sort_key=? WHERE id=?")
             .bind(1, normalizeLibrarySearch(album.text(0)))
             .bind(2, normalizeLibrarySearch(album.text(1)))
             .bind(3, key)
-            .bind(4, id)
+            .bind(4, artistKey)
+            .bind(5, id)
             .run();
     }
 }
@@ -228,8 +232,9 @@ void LibraryTextIndex::run(std::stop_token stop) {
         };
         try {
             const auto version = version_(locale);
-            // The "tags3" part rebuilds the keys once for sort tags garbled into question marks.
-            std::string signature = toUtf8(locale) + ":tags3:";
+            // The "tags" part rebuilds the keys once when they gain a source: sort tags garbled into question marks (3),
+            // the album artists' keys (4).
+            std::string signature = toUtf8(locale) + ":tags4:";
             constexpr char hex[] = "0123456789abcdef";
             for (auto byte : version) {
                 signature += hex[byte >> 4];

@@ -1663,3 +1663,29 @@ TEST_F(LibraryScannerTest, ANotifiedFolderIsScannedWithoutTheWholeRoot) {
     ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
     EXPECT_EQ(count(store, "SELECT last_scan FROM roots"), scanned);
 }
+
+// Album artists sort by the sort locale, as the Artists list does, and under ALBUMARTISTSORT where a file has it.
+TEST_F(LibraryScannerTest, AlbumsByArtistFollowTheSortLocaleAndTheAlbumArtistSortTag) {
+    const auto tagged = [&](const char* name, const char* album, const char* artist, const char* sort) {
+        TagLib::FLAC::File tags(audio(name).c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList(TagLib::String(album, TagLib::String::UTF8)));
+        values.insert("ALBUMARTIST", TagLib::StringList(TagLib::String(artist, TagLib::String::UTF8)));
+        if (sort) values.insert("ALBUMARTISTSORT", TagLib::StringList(TagLib::String(sort, TagLib::String::UTF8)));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    };
+    tagged("one.flac", "Third", "Zed", nullptr);
+    tagged("two.flac", "Second", "\xC3\x89mile", nullptr);
+    tagged("three.flac", "First", "The Band", "Band");
+    tagged("four.flac", "Fourth", "Adam", nullptr);
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    std::vector<std::string> titles;
+    for (const auto& album : browseAlbums(store, AlbumSort::Artist, std::nullopt, 0, 50).albums) titles.push_back(album.title);
+    EXPECT_EQ(titles, (std::vector<std::string>{"Fourth", "First", "Second", "Third"}));
+    std::vector<std::string> labels;
+    for (const auto& initial : albumInitials(store, AlbumSort::Artist)) labels.push_back(initial.label);
+    EXPECT_EQ(labels, (std::vector<std::string>{"A", "B", "E", "Z"}));
+}

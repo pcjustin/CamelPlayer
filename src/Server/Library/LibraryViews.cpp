@@ -287,8 +287,7 @@ std::pair<std::string, std::string> rootText(const std::string& key, const std::
 
 namespace {
 
-constexpr const char* kAlbumOrders[] = {"a.sort_key", "lower(coalesce(a.album_artist,'')),a.sort_key",
-                                        "coalesce(a.year,0) DESC,a.sort_key",
+constexpr const char* kAlbumOrders[] = {"a.sort_key", "a.artist_sort_key,a.sort_key", "coalesce(a.year,0) DESC,a.sort_key",
                                         "coalesce(MIN(f.added),a.added) DESC,a.sort_key"}; // an album joined with its first file
 
 std::string albumsFrom(const std::string& condition) {
@@ -484,23 +483,12 @@ std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGrou
 std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort sort, const CancellationToken& token) {
     if (sort != AlbumSort::Title && sort != AlbumSort::Artist) return {};
     Query q(store, std::nullopt, token);
-    const std::string query = std::string("SELECT ") +
-                              (sort == AlbumSort::Title ? "a.sort_key" : "lower(coalesce(a.album_artist,''))") + albumsFrom({}) +
-                              " GROUP BY a.id ORDER BY " + kAlbumOrders[size_t(sort)] + ",a.id";
+    const std::string query = std::string("SELECT ") + (sort == AlbumSort::Title ? "a.sort_key" : "a.artist_sort_key") +
+                              albumsFrom({}) + " GROUP BY a.id ORDER BY " + kAlbumOrders[size_t(sort)] + ",a.id";
     auto rows = q.db.prepare(query);
-    if (sort == AlbumSort::Title) {
-        std::vector<std::vector<uint8_t>> keys;
-        while (rows.step()) keys.push_back(rows.blob(0));
-        return initialsOf(keys, sortKeyStarts(q.db));
-    }
-    // Album artists sort as lowercased UTF-8 bytes: kana begins at U+3040 and what follows Bopomofo (U+3100) is Han.
-    std::vector<std::string> names;
-    while (rows.step()) names.push_back(rows.text(0));
-    std::vector<std::string> starts;
-    for (char c = 'a'; c <= 'z'; ++c) starts.emplace_back(1, c);
-    starts.emplace_back("\xE3\x81\x80");
-    starts.emplace_back("\xE3\x84\x80");
-    return initialsOf(names, starts);
+    std::vector<std::vector<uint8_t>> keys;
+    while (rows.step()) keys.push_back(rows.blob(0));
+    return initialsOf(keys, sortKeyStarts(q.db));
 }
 
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending,
