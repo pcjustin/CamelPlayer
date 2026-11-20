@@ -275,3 +275,62 @@ fn output_stays_within_full_scale() {
         assert!((-1.0..=1.0).contains(&frame));
     }
 }
+
+/// A decoder that has decoded `first`.
+fn after(first: &[u8]) -> Decoder {
+    let mut decoder = Decoder::new();
+    decoder.decode(first).expect("decodes");
+    decoder
+}
+
+/// Frames as `frame` is when damaged past its headers, for those that fail after `first`.
+fn failing_variants(frame: &[u8], first: &[u8], count: usize) -> Vec<Vec<u8>> {
+    let mut state = 0x2545_F491_4F6C_DD1D_u64;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut found = Vec::new();
+    for _ in 0..count {
+        let mut damaged = frame.to_vec();
+        for _ in 0..1 + next() % 8 {
+            let at = 64 + (next() % (damaged.len() as u64 - 64)) as usize;
+            damaged[at] = (next() >> 32) as u8;
+        }
+        if after(first).decode(&damaged).is_err() {
+            found.push(damaged);
+        }
+    }
+    found
+}
+
+/// What `next` decodes to after `first` and each of `failing`: as if `failing` had never been given.
+fn expect_unchanged_by(first: &[u8], failing: &[Vec<u8>], next: &[u8]) {
+    assert!(!failing.is_empty());
+    let expected = after(first).decode(next).expect("decodes");
+    let changed = failing
+        .iter()
+        .filter(|damaged| {
+            let mut decoder = after(first);
+            assert!(decoder.decode(damaged).is_err());
+            decoder.decode(next).expect("decodes") != expected
+        })
+        .count();
+    assert_eq!(changed, 0, "of {} failing frames", failing.len());
+}
+
+#[test]
+fn a_frame_that_fails_leaves_the_filters_as_they_were() {
+    let frames = big_endian(SURROUND);
+    let failing = failing_variants(&frames[1], &frames[0], 400);
+    expect_unchanged_by(&frames[0], &failing, &frames[2]);
+}
+
+#[test]
+fn a_failing_frame_of_another_layout_leaves_the_filters_as_they_were() {
+    let frames = big_endian(SURROUND);
+    let failing = failing_variants(&big_endian(STEREO)[0], &frames[0], 400);
+    expect_unchanged_by(&frames[0], &failing, &frames[1]);
+}

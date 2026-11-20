@@ -253,8 +253,7 @@ impl Decoder {
     ///
     /// # Errors
     ///
-    /// A [`DecodeError`] when the frame gives no audio. What it may have left in the filters carries on to the next
-    /// frame, as a good frame's does, unless [`Decoder::reset`] clears it.
+    /// A [`DecodeError`] when the frame gives no audio; the filters are then as they were before it.
     pub fn decode(&mut self, bytes: &[u8]) -> Result<Decoded, DecodeError> {
         let packing = packing_at_start(bytes)?;
         let length = header_of(bytes, packing)?.frame_size_container_bytes(packing) as usize;
@@ -273,9 +272,11 @@ impl Decoder {
         if coding.n_pchs != order.len() {
             return Err(DecodeError::UnsupportedChannels);
         }
-        let stream = match &mut self.stream {
-            Some(stream) if stream.channel_count() == order.len() => stream,
-            slot => slot.insert(CoreStreamDecoder::new(order.len())),
+        // A frame may fail after its first subframes moved the filters on: it is decoded on a copy, kept once it
+        // gives audio.
+        let mut stream = match &self.stream {
+            Some(stream) if stream.channel_count() == order.len() => stream.clone(),
+            _ => CoreStreamDecoder::new(order.len()),
         };
         let primary = stream.decode_frame(&frame, &header)?;
         let lfe = stream.take_last_lfe_pcm();
@@ -285,6 +286,7 @@ impl Decoder {
         }
         planes.sort_by_key(|(speaker, _)| *speaker);
         let (pcm, samples) = interleaved(&planes)?;
+        self.stream = Some(stream);
         Ok(Decoded {
             pcm,
             speakers: planes.into_iter().map(|(speaker, _)| speaker).collect(),
