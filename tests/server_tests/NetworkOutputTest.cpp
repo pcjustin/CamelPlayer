@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <taglib/flacfile.h>
+#include <taglib/flacpicture.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -1074,9 +1077,9 @@ class StreamingTest : public ::testing::Test {
 protected:
     explicit StreamingTest(RendererKind kind = RendererKind::UpnpAv) : renderer_(kind) {}
 
-    std::unique_ptr<LocalServer> serverFor(Settings settings = {}) {
+    std::unique_ptr<LocalServer> serverFor(Settings settings = {}, const std::filesystem::path& settingsFile = {}) {
         settings.autoplay = false;
-        auto server = std::make_unique<LocalServer>(settings);
+        auto server = std::make_unique<LocalServer>(settings, settingsFile);
         FinderOptions options;
         options.searchHost = "127.0.0.1";
         options.searchPort = renderer_.ssdpPort();
@@ -1114,6 +1117,72 @@ protected:
 };
 
 } // namespace
+
+// A square BMP of `side` pixels.
+std::string squareBitmap(unsigned side) {
+    const unsigned stride = (side * 3 + 3) & ~3u;
+    std::string b(54 + size_t(stride) * side, char(90));
+    std::fill_n(b.begin(), 54, '\0');
+    const auto put = [&](size_t offset, unsigned value) {
+        for (size_t i = 0; i < 4; ++i) b[offset + i] = char(uint8_t(value >> (i * 8)));
+    };
+    b[0] = 'B';
+    b[1] = 'M';
+    put(2, unsigned(b.size()));
+    put(10, 54);
+    put(14, 40);
+    put(18, side);
+    put(22, side);
+    b[26] = 1;
+    b[28] = 24;
+    return b;
+}
+
+// A JPEG's width and height from its frame header; zeros when it has none.
+std::pair<unsigned, unsigned> jpegSize(const std::string& jpeg) {
+    for (size_t at = 2; at + 9 < jpeg.size();) {
+        if (uint8_t(jpeg[at]) != 0xFF) return {};
+        const auto marker = uint8_t(jpeg[at + 1]);
+        const size_t length = size_t(uint8_t(jpeg[at + 2])) << 8 | uint8_t(jpeg[at + 3]);
+        if (marker >= 0xC0 && marker <= 0xC3)
+            return {unsigned(uint8_t(jpeg[at + 7])) << 8 | uint8_t(jpeg[at + 8]),
+                    unsigned(uint8_t(jpeg[at + 5])) << 8 | uint8_t(jpeg[at + 6])};
+        at += 2 + length;
+    }
+    return {};
+}
+
+// A cover larger than the views' thumbnails reaches the player at the size meant for players and receivers.
+TEST_F(StreamingTest, ThePlayerGetsTheCoverAtItsOwnSize) {
+    const auto dir = testutil::tempDir() / "network-cover";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir / "data");
+    const auto file = dir / "covered.flac";
+    std::filesystem::copy_file(testutil::generatedFile({"network-cover", 44100, 16, 2, 2.0}), file);
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::FrontCover);
+        picture->setMimeType("image/bmp");
+        const auto bytes = squareBitmap(1000);
+        picture->setData(TagLib::ByteVector(bytes.data(), unsigned(bytes.size())));
+        tags.addPicture(picture);
+        ASSERT_TRUE(tags.save());
+    }
+    auto server = serverFor({}, dir / "data" / "settings.json");
+    server->submit(queue({file}));
+    ASSERT_TRUE(waitFor([&] { return !renderer_.metadata().empty(); })) << server->snapshot().playback.errorDetail;
+    const auto parsed = upnp::parseXml(renderer_.metadata());
+    ASSERT_TRUE(parsed);
+    const auto* item = parsed->child("item");
+    ASSERT_NE(item, nullptr);
+    const auto cover = item->childText("albumArtURI");
+    ASSERT_FALSE(cover.empty());
+    const auto reply = http::send("GET", cover, "", "", 2000, size_t{1} << 22);
+    EXPECT_EQ(jpegSize(reply.body), (std::pair<unsigned, unsigned>{512, 512}));
+    server->shutdown();
+}
 
 TEST_F(StreamingTest, ATrackReachesThePlayerBitForBit) {
     const auto file = testutil::generatedFile({"network-16", 44100, 16, 2, 1.0});

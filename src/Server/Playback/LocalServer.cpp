@@ -2229,6 +2229,7 @@ private:
                 ArtworkRequest request;
                 request.kind = ArtworkKind::Track;
                 request.path = path;
+                request.pixels = kPlayerCoverPixels;
                 if (const auto cover = artwork(request, {})) {
                     std::ifstream in(cover->path, std::ios::binary);
                     const std::vector<uint8_t> image((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

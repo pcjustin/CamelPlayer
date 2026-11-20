@@ -10,11 +10,14 @@
 
 namespace camel::server {
 enum class ArtworkKind { Album, Folder, Track, Artist };
+// Every view shows covers from one size: at most 160 view pixels (the album details) up to 160 % scaling.
+inline constexpr unsigned kViewArtworkPixels = 256;
 struct ArtworkRequest {
     ArtworkKind kind = ArtworkKind::Album;
     int64_t id = 0;
-    std::string path; // Track only: the current playback source, including files outside the library
-    std::string name; // Artist only: an artist's or composer's name
+    std::string path;                     // Track only: the current playback source, including files outside the library
+    std::string name;                     // Artist only: an artist's or composer's name
+    unsigned pixels = kViewArtworkPixels; // the thumbnail's longest side; network players and receivers take more
 };
 struct ArtworkReference {
     std::string key;
@@ -26,8 +29,7 @@ std::vector<uint8_t> squarePicture(const std::vector<uint8_t>& image, unsigned p
 
 class ArtworkCache {
 public:
-    // Every view shows covers from one size: at most 160 view pixels (the album details) up to 160 % scaling.
-    static constexpr unsigned kPixels = 256;
+    static constexpr unsigned kPixels = kViewArtworkPixels;
 
     explicit ArtworkCache(std::filesystem::path directory, uintmax_t maxBytes = 512ull << 20);
     std::optional<ArtworkReference> get(const LibraryStore* store, const ArtworkRequest& request,
@@ -50,7 +52,7 @@ private:
     std::optional<ArtworkReference> artist(const LibraryStore& store, const std::string& name, const CancellationToken& token);
     // A non-empty `key` names the thumbnail instead of a digest of the source.
     std::optional<ArtworkReference> generate(const ArtworkCandidate& image, const CancellationToken& token,
-                                             const std::string& key = {});
+                                             const std::string& key = {}, unsigned pixels = kPixels);
     void trim();
     std::filesystem::path directory_;
     uintmax_t maxBytes_;
