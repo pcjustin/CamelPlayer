@@ -30,6 +30,7 @@ constexpr int kDescriptionTimeoutMs = 3000;
 constexpr auto kPollSockets = std::chrono::milliseconds(100);
 constexpr int kRetryAfterSearches = 10; // an address that did not answer waits this long, as asking it takes seconds
 constexpr size_t kMaxRefusedAddresses = 256;
+constexpr size_t kKeptLocations = 3; // a silent player is asked at each, which takes seconds when it is gone
 
 std::optional<upnp::PlayerDescription> fetchDescription(const std::string& location, bool loopback) {
     if (!upnp::isLanUrl(location, loopback)) return std::nullopt;
@@ -167,6 +168,7 @@ struct PlayerFinder::Impl {
             if (found == known.end()) found = known.insert(known.end(), Known{});
             found->player = {std::move(*description), message.location};
             found->locations.insert(found->locations.begin(), message.location);
+            if (found->locations.size() > kKeptLocations) found->locations.resize(kKeptLocations);
             found->seen = Clock::now();
         }
         changed();

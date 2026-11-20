@@ -554,6 +554,28 @@ TEST(PlayerFinderTest, APlayerThatComesBackAtANewAddressIsTheSamePlayer) {
     EXPECT_NE(moved.location(), before.location);
 }
 
+// A player that came back at many addresses keeps only its last few: once silent it is asked at those, then forgotten.
+TEST(PlayerFinderTest, OnlyAPlayersLastAddressesAreKept) {
+    std::vector<std::unique_ptr<FakeRenderer>> addresses;
+    for (int i = 0; i < 6; ++i) {
+        addresses.push_back(std::make_unique<FakeRenderer>(RendererKind::UpnpAv, "uuid:moving"));
+        addresses.back()->goQuiet();
+    }
+    PlayerFinder finder(optionsFor(*addresses.front(), 100ms), {});
+    for (const auto& at : addresses) {
+        const auto asked = at->requests().size();
+        at->announce(finder.notifyPort(), "ssdp:alive");
+        ASSERT_TRUE(waitFor([&] { return at->requests().size() > asked; }));
+    }
+    ASSERT_TRUE(waitFor(
+        [&] { return finder.players().size() == 1 && finder.players().front().location == addresses.back()->location(); }));
+    const auto oldestAsked = addresses.front()->requests().size();
+    for (size_t i = 1; i < addresses.size(); ++i) addresses[i]->disappear();
+    // Windows takes some 2 s to give up a connection to a port that is closed.
+    EXPECT_TRUE(waitFor([&] { return finder.players().empty(); }, 15s));
+    EXPECT_EQ(addresses.front()->requests().size(), oldestAsked);
+}
+
 TEST(PlayerFinderTest, ADescriptionWithAnotherUdnIsNotBelieved) {
     FakeRenderer renderer(RendererKind::UpnpAv, "uuid:real");
     renderer.goQuiet();
