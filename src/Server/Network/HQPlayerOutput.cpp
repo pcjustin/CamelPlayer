@@ -137,6 +137,7 @@ public:
             // A track just loaded starts at 0; the last Status may still show where the one before it was.
             positionAtPlay_ = status_ && !std::exchange(loadedSincePlay_, false) ? status_->position : 0.0;
         }
+        wake_.notify_all(); // the worker times the second Play from now
         return command(R"(<Play last="0"/>)");
     }
 
@@ -212,7 +213,6 @@ private:
 
     void onStatus(const hqplayer::Status& s) {
         std::vector<PlayerEvent> events;
-        bool playAgain = false;
         {
             std::scoped_lock lock(mutex_);
             // A Status from a connection this control has not taken up yet shows only what that connection did.
@@ -273,20 +273,8 @@ private:
             }
             // Playing well after CamelPlayer's last change, HQPlayer has shown all of it: what is still expected never came.
             if (s.state == 2 && s.position > 0.0 && now - ownedAt_ > kOwnShowsWithin) ownPlaylist_ = ownTrack_ = false;
-            // Play answered OK yet nothing moves: sent once more, as HQPlayer did not always take the first.
-            if (wantedState_ == 2 && !playAgainSent_ && !playedSinceLoad_ && askedToPlay_ != Clock::time_point{} &&
-                now - askedToPlay_ >= options_.playAgainAfter) {
-                playAgainSent_ = true;
-                playAgain = true;
-                ownUntil_ = now + options_.ownChange;
-            }
         }
         if (processing_) processing_({s.activeRate, s.activeBits, s.activeMode, s.activeFilter, s.activeShaper});
-        if (playAgain) {
-            std::scoped_lock lock(mutex_);
-            queued_.emplace_back(R"(<Play last="0"/>)");
-            wake_.notify_all();
-        }
         for (const auto& event : events)
             if (onEvent_) onEvent_(event);
     }
@@ -298,11 +286,32 @@ private:
         if (onEvent_) onEvent_({PlayerEventKind::Lost, 0});
     }
 
+    // When Play, answered OK while nothing moves, is sent once more, as HQPlayer did not always take the first; none
+    // when it is not to be.
+    _Requires_lock_held_(mutex_) std::optional<Clock::time_point> playAgainAt() const {
+        if (wantedState_ != 2 || playAgainSent_ || playedSinceLoad_ || askedToPlay_ == Clock::time_point{}) return std::nullopt;
+        return askedToPlay_ + options_.playAgainAfter;
+    }
+
+    // The second Play is timed here, not decided on a Status: a stopped HQPlayer pushes none (2026-11-20).
     void work() {
         std::unique_lock lock(mutex_);
         while (true) {
-            wake_.wait(lock, [&] { return stopping_ || !queued_.empty(); });
+            // Each wake works the deadline out again: Play sets it, a Status showing playing ends it.
+            if (!stopping_ && queued_.empty()) {
+                if (const auto at = playAgainAt())
+                    wake_.wait_until(lock, *at);
+                else
+                    wake_.wait(lock);
+            }
             if (stopping_) return;
+            if (queued_.empty()) {
+                const auto at = playAgainAt();
+                if (!at || Clock::now() < *at) continue;
+                playAgainSent_ = true;
+                ownUntil_ = Clock::now() + options_.ownChange;
+                queued_.emplace_back(R"(<Play last="0"/>)");
+            }
             const std::string next = std::move(queued_.front());
             queued_.pop_front();
             lock.unlock();

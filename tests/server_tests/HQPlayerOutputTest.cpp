@@ -330,6 +330,19 @@ TEST(HQPlayerOutputTest, AnOutputThatCannotOpenIsReportedAfterPlayIsSentOnceMore
     EXPECT_EQ(count(fake.commands(), "Play"), 2U);
 }
 
+// A stopped HQPlayer pushes no Status: a Play it answered and did not take is sent once more all the same.
+TEST(HQPlayerOutputTest, APlayIgnoredWhileStoppedIsSentOnceMore) {
+    testutil::FakeHQPlayer fake;
+    fake.plays = true;
+    fake.quietWhileStopped = true;
+    fake.ignorePlays = 1;
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(fake, source, k16);
+    output->start();
+    EXPECT_TRUE(eventually([&] { return count(fake.commands(), "Play") == 2; }, 5000ms));
+    EXPECT_TRUE(eventually([&] { return fake.state().state == 2; }, 5000ms));
+}
+
 // Stopped some seconds after Play without its position ever moving is still an output that did not open.
 TEST(HQPlayerOutputTest, AnOutputThatStopsSecondsAfterPlayWithoutPlayingDidNotOpen) {
     testutil::FakeHQPlayer fake;

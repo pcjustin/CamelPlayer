@@ -62,6 +62,10 @@ public:
     // PlaylistAdd answered only once the probe read this many bytes of the stream, as HQPlayer on macOS did with DSF
     // on 2026-11-17.
     std::atomic<size_t> readBeforeAddReply = 0;
+    // No Status pushed while stopped, as HQPlayer Desktop 6 on Windows did on 2026-11-20: only a request is answered.
+    std::atomic<bool> quietWhileStopped = false;
+    // The next this many Plays are answered OK and do nothing, as HQPlayer did not always take the first.
+    std::atomic<int> ignorePlays = 0;
 
     FakeHQPlayer() {
         WSADATA wsa;
@@ -152,7 +156,7 @@ public:
         {
             std::scoped_lock lock(mutex_);
             if (quietAfterPlay.count() && std::chrono::steady_clock::now() - playStarted_ < quietAfterPlay) return;
-            if (starting_) return;
+            if (starting_ || (quietWhileStopped && state_.state == 0)) return;
             targets.assign(subscribed_.begin(), subscribed_.end());
             status = statusDocument();
         }
@@ -226,7 +230,10 @@ private:
                     if (element.name == "Volume" && state_.volumeEnabled)
                         state_.volume = std::stod(element.attributes.at("value"));
                     if (element.name == "VolumeMute" && state_.volumeEnabled) state_.volume = state_.volumeMin;
-                    if (plays) simulate(element);
+                    if (element.name == "Play" && ignorePlays > 0)
+                        --ignorePlays;
+                    else if (plays)
+                        simulate(element);
                     dropped = drop_.erase(element.name) > 0;
                     if (element.name == "Status") {
                         const auto subscribe = element.attributes.find("subscribe");
