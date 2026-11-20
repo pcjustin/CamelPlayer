@@ -208,6 +208,31 @@ log::LocalTime testClock() {
 }
 } // namespace
 
+// A line that cannot be written, as while another program locks the file, costs that line only: the next goes in.
+TEST(LoggerTest, AFailedWriteLosesOnlyItsLine) {
+    const auto directory = testutil::tempDir() / "log-failed-write";
+    std::filesystem::remove_all(directory);
+    g_testTime = {2026, 11, 20, 12, 0, 0, 0};
+    log::setClockForTest(testClock);
+    log::init(directory, L"failed");
+    log::info("before-the-lock");
+    const auto file = directory / L"failed-20261120.log";
+    const HANDLE locked = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                      OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(locked, INVALID_HANDLE_VALUE);
+    OVERLAPPED whole{};
+    ASSERT_TRUE(LockFileEx(locked, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &whole));
+    log::info("while-locked");
+    CloseHandle(locked);
+    log::info("after-the-lock");
+    log::setClockForTest(nullptr);
+    log::init(testutil::tempDir() / "log-after-tests", L"test");
+    std::ifstream input(file);
+    const std::string text(std::istreambuf_iterator<char>(input), {});
+    EXPECT_NE(text.find("before-the-lock"), std::string::npos);
+    EXPECT_NE(text.find("after-the-lock"), std::string::npos);
+}
+
 // A program left running past midnight writes each day's lines into that day's file, not into the first day's.
 TEST(LoggerTest, EachDayGoesIntoItsOwnFile) {
     const auto directory = testutil::tempDir() / "log-days";

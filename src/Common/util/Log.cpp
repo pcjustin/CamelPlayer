@@ -22,7 +22,8 @@ FILE* g_file = nullptr;
 LocalTime (*g_clock)() = nullptr;
 std::filesystem::path g_directory;
 std::wstring g_prefix;
-unsigned g_day = 0; // the open file's date, as YYYYMMDD
+unsigned g_day = 0;  // the open file's date, as YYYYMMDD
+bool g_lost = false; // the file was closed after a failed write; the next line opens it again
 
 LocalTime now() {
     if (g_clock) return g_clock();
@@ -50,6 +51,7 @@ void openDay(const LocalTime& t) {
     const int nameLength = swprintf(name, 128, L"%s-%04u%02u%02u.log", g_prefix.c_str(), t.year, t.month, t.day);
     if (nameLength < 0 || size_t(nameLength) >= std::size(name)) return;
     g_file = _wfsopen((g_directory / name).c_str(), L"a", _SH_DENYNO);
+    g_lost = !g_file;
 }
 
 void write(const char* level, const char* fmt, va_list ap) {
@@ -63,14 +65,16 @@ void write(const char* level, const char* fmt, va_list ap) {
     if (lineLength < 0) strcpy_s(line, "log line formatting failed\n");
     OutputDebugStringA(line);
     std::lock_guard lock(g_mutex);
-    // A program left running past midnight goes on in the new day's file, and old logs go as they would at a start.
-    if (g_file && dateOf(t) != g_day) openDay(t);
+    // A program left running past midnight goes on in the new day's file, and old logs go as they would at a start; a
+    // file closed after a failed write is opened again.
+    if (g_file ? dateOf(t) != g_day : g_lost) openDay(t);
     if (g_file) {
         const bool writeFailed = fputs(line, g_file) == EOF;
         const bool flushFailed = fflush(g_file) != 0;
         if (writeFailed || flushFailed) {
             FILE* failedFile = std::exchange(g_file, nullptr);
             if (fclose(failedFile) != 0) OutputDebugStringA("log: closing failed log file failed\n");
+            g_lost = true;
         }
     }
 }
