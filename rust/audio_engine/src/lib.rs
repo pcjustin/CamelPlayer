@@ -2281,12 +2281,9 @@ pub unsafe extern "C" fn camel_engine_read_decoded_v1(
                         return ENGINE_E_NOT_READY;
                     }
                     *frames_read = read;
-                    engine
-                        .submitted_position
-                        .store(source.position(), Ordering::Release);
-                    engine
-                        .audible_position
-                        .store(source.position(), Ordering::Release);
+                    let position = engine.output_frames(source.position(), source.info.sample_rate);
+                    engine.submitted_position.store(position, Ordering::Release);
+                    engine.audible_position.store(position, Ordering::Release);
                     if read == 0 {
                         ENGINE_END
                     } else {
@@ -3568,6 +3565,32 @@ mod tests {
         );
         assert_eq!(load_mock_source(engine), ENGINE_OK);
         engine
+    }
+
+    // Every writer keeps the positions in output frames, a read of decoded frames too: a 48 kHz source on a 96 kHz
+    // device.
+    #[test]
+    fn decoded_reads_keep_positions_in_output_frames() {
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S16_LE, 16, 16));
+        cfg.format.rate_hz = 96_000;
+        cfg.allow_conversion = 1;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        assert_eq!(load_mock_source(engine), ENGINE_OK);
+        let mut samples = [0i32; 8];
+        let mut read = 0;
+        assert_eq!(
+            unsafe { camel_engine_read_decoded_v1(engine, samples.as_mut_ptr(), 4, &mut read) },
+            ENGINE_OK
+        );
+        assert_eq!(read, 4);
+        let state = engine_ref(engine);
+        assert_eq!(state.submitted_position.load(Ordering::Acquire), 8);
+        assert_eq!(state.audible_position.load(Ordering::Acquire), 8);
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
     }
 
     fn prefill_until_end(engine: *mut CamelEngine) -> u64 {
