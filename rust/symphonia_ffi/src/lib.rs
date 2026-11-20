@@ -18,10 +18,7 @@ use hidden_tags::HiddenTags;
 use symphonia::core::audio::conv::ConvertibleSample;
 use symphonia::core::audio::sample::i24;
 use symphonia::core::audio::GenericAudioBufferRef;
-use symphonia::core::codecs::audio::well_known::{
-    CODEC_ID_AAC, CODEC_ID_ALAC, CODEC_ID_FLAC, CODEC_ID_PCM_F32BE, CODEC_ID_PCM_F32LE,
-    CODEC_ID_PCM_F64BE, CODEC_ID_PCM_F64LE,
-};
+use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_ALAC, CODEC_ID_FLAC};
 use symphonia::core::codecs::audio::{
     AudioCodecParameters, AudioDecoder, AudioDecoderOptions, VerificationCheck, CODEC_ID_NULL_AUDIO,
 };
@@ -51,7 +48,7 @@ pub struct SymInfo {
     pub total_frames: u64,
     pub has_md5: u32,
     pub md5: [u8; 16],
-    /// Nonzero for lossy codecs and float PCM: sym_read returns float32 bit patterns instead of integers.
+    /// Nonzero for lossy codecs: sym_read returns float32 bit patterns instead of integers.
     pub is_float: u32,
 }
 
@@ -60,7 +57,7 @@ pub struct SymDecoder {
     decoder: Box<dyn AudioDecoder>,
     track_id: u32,
     channels: usize,
-    /// Output depth: the source depth, or the configured depth for float sources.
+    /// Output depth: the source depth, or the configured depth for lossy codecs.
     bits: u32,
     lossy: bool,
     gapless: bool,
@@ -139,7 +136,7 @@ fn samples<S: ConvertibleSample>(buf: &GenericAudioBufferRef) -> Vec<S> {
 
 fn interleave(buf: GenericAudioBufferRef, bits: u32) -> Result<Vec<i32>, i32> {
     // 16- and 24-bit buffers hold right-aligned samples; 32-bit buffers hold left-aligned ones; float buffers (lossy
-    // codecs and float PCM) pass through as float32 bit patterns, quantized once further on.
+    // codecs) pass through as float32 bit patterns, quantized once further on.
     Ok(match buf {
         GenericAudioBufferRef::S16(_) => samples::<i16>(&buf).into_iter().map(i32::from).collect(),
         GenericAudioBufferRef::S24(_) => samples::<i24>(&buf).into_iter().map(i24::inner).collect(),
@@ -383,13 +380,7 @@ unsafe fn open_decoder(
         .or(aac_channels)
         .unwrap_or(0);
     let lossy = params.codec == CODEC_ID_AAC;
-    // Float samples, of a lossy codec or of float PCM, are handed out as float32 and quantized to `lossy_bits`.
-    let float = lossy
-        || matches!(
-            params.codec,
-            CODEC_ID_PCM_F32LE | CODEC_ID_PCM_F32BE | CODEC_ID_PCM_F64LE | CODEC_ID_PCM_F64BE
-        );
-    let bits = if float {
+    let bits = if lossy {
         lossy_bits
     } else {
         cookie
@@ -434,7 +425,7 @@ unsafe fn open_decoder(
         total_frames,
         has_md5,
         md5,
-        is_float: u32::from(float),
+        is_float: u32::from(lossy),
     };
     let dec = Box::new(SymDecoder {
         format,
@@ -611,11 +602,6 @@ mod tests {
         path
     }
 
-    fn float_wav(name: &str, samples: &[f32]) -> PathBuf {
-        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        wav(name, 3, &data)
-    }
-
     fn open(path: &Path) -> (*mut SymDecoder, SymInfo) {
         let name = CString::new(path.to_str().unwrap()).unwrap();
         let mut dec = std::ptr::null_mut();
@@ -631,25 +617,6 @@ mod tests {
         let opened = unsafe { sym_open(name.as_ptr(), 24, &mut dec, &mut info) };
         assert_eq!(opened, SYM_OK, "opening {}", path.display());
         (dec, info)
-    }
-
-    #[test]
-    fn float_pcm_reads_as_float() {
-        let path = float_wav("symphonia-ffi-float.wav", &[0.5, -0.25, 0.0, 1.0]);
-        let (dec, info) = open(&path);
-        assert_eq!(info.is_float, 1);
-        assert_eq!(info.bits_per_sample, 24);
-        let mut out = [0i32; 4];
-        let mut read = 0;
-        assert_eq!(
-            unsafe { sym_read(dec, out.as_mut_ptr(), 4, &mut read) },
-            SYM_OK
-        );
-        assert_eq!(read, 4);
-        assert_eq!(f32::from_bits(out[0] as u32), 0.5);
-        assert_eq!(f32::from_bits(out[1] as u32), -0.25);
-        unsafe { sym_close(dec) };
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]
