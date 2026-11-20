@@ -14,6 +14,8 @@
 #include <limits>
 #include <cstring>
 #include <set>
+#include <string>
+#include <unordered_map>
 #include <array>
 #include <cstddef>
 
@@ -346,21 +348,35 @@ size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added) {
     }
     // A file written anew and renamed over the one at its path, as taggers do, has another ID and other content: it takes
     // over the record its path had, unless that file is still in the library elsewhere, which the moves above follow.
+    // The files no longer there are read once: no index finds one by its path, and a first scan adds every file.
+    struct Gone {
+        int64_t id = 0;
+        std::string kind, root;
+        FileVersion version;
+    };
+    std::unordered_multimap<std::string, Gone> gone;
+    if (!added.empty()) {
+        auto rows = db.prepare("SELECT files.path,files.kind,files.id,roots.path,files.size,files.mtime,volume_serial,"
+                               "file_index,created,volume_key FROM files JOIN roots ON roots.id=files.root_id "
+                               "WHERE files.available=0 AND files.identity_state<>2 AND roots.removed IS NULL");
+        while (rows.step()) gone.emplace(rows.text(0), Gone{rows.integer(2), rows.text(1), rows.text(3), storedVersion(rows, 4)});
+    }
     for (const auto current : added) {
+        if (gone.empty()) break;
         auto next = db.prepare("SELECT path,kind,size,mtime,volume_serial,file_index,created,volume_key "
                                "FROM files WHERE id=? AND available=1");
         if (!next.bind(1, current).step()) continue;
         auto stats = db.prepare("SELECT 1 FROM stats WHERE file_id=? UNION ALL SELECT 1 FROM play_events WHERE file_id=?");
         if (stats.bind(1, current).bind(2, current).step()) continue;
         const auto destination = next.text(0);
-        auto old = db.prepare("SELECT files.id,roots.path,files.size,files.mtime,volume_serial,file_index,created,volume_key "
-                              "FROM files JOIN roots ON roots.id=files.root_id WHERE files.path=? AND files.kind=? "
-                              "AND files.available=0 AND files.identity_state<>2 AND roots.removed IS NULL");
-        if (!old.bind(1, destination).bind(2, next.text(1)).step()) continue;
-        const int64_t prior = old.integer(0);
-        const auto root = old.text(1);
-        const auto priorVersion = storedVersion(old, 2);
-        if (old.step()) continue;
+        const auto kind = next.text(1);
+        const auto [first, last] = gone.equal_range(destination);
+        const auto matching = [&](const auto& entry) { return entry.second.kind == kind; };
+        const auto found = std::find_if(first, last, matching);
+        if (found == last || std::count_if(first, last, matching) > 1) continue;
+        const int64_t prior = found->second.id;
+        const auto root = found->second.root;
+        const auto priorVersion = found->second.version;
         if (!priorVersion.volumeKey.empty()) {
             auto elsewhere = db.prepare("SELECT 1 FROM files WHERE available=1 AND volume_key=? AND file_index=? AND created=?");
             if (elsewhere.bind(1, priorVersion.volumeKey).bind(2, priorVersion.index).bind(3, priorVersion.created).step())
@@ -374,6 +390,7 @@ size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added) {
             continue;
         }
         merge(db, prior, current);
+        gone.erase(found);
         moved++;
     }
     return moved;

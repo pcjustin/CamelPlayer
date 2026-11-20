@@ -520,6 +520,40 @@ TEST_F(LibraryIdentityTest, TheDatabaseShrinksWhenALargeRootIsRemoved) {
     EXPECT_LT(fs::file_size(dir / "db" / "library.db"), before / 4);
 }
 
+// A first scan publishes every file of its root as new, and the scan's last write, which holds the library's writer,
+// looks for moves among them: for a large root that takes seconds, not the half hour 86,541 files once took.
+TEST_F(LibraryIdentityTest, LookingForMovesAmongAFirstScansFilesTakesSeconds) {
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(music);
+    std::vector<int64_t> added;
+    store
+        .write([&](sqlite::Database& db) {
+            auto insert = db.prepare("INSERT INTO files(root_id,path,kind,size,mtime,name,identity_state,content_hash) "
+                                     "VALUES(?,?,'audio',?,1,?,1,?)");
+            for (int i = 0; i < 20000; ++i) {
+                const auto name = std::to_string(i) + ".flac";
+                std::vector<uint8_t> hash(32, 0);
+                for (size_t b = 0; b < sizeof i; ++b) hash[b] = uint8_t(unsigned(i) >> (b * 8));
+                insert.reset();
+                insert.bind(1, root)
+                    .bind(2, "c:\\music\\" + name)
+                    .bind(3, int64_t{1000} + i)
+                    .bind(4, name)
+                    .bind(5, std::span<const uint8_t>(hash))
+                    .run();
+                added.push_back(db.lastInsertId());
+            }
+        })
+        .get();
+    const auto started = std::chrono::steady_clock::now();
+    size_t moved = 1;
+    store.write([&](sqlite::Database& db) { moved = library::reconcileMoves(db, added); }).get();
+    const auto took = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    EXPECT_EQ(moved, 0u);
+    EXPECT_LT(took, 5.0);
+}
+
 TEST_F(LibraryIdentityTest, FoldersAnEarlierVersionRemovedAreDeletedOnce) {
     file("old.lrc");
     LibraryStore store(dir / "db");
