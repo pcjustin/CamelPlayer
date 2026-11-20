@@ -288,7 +288,10 @@ void PlaylistView::send(QueuedEdit queued) {
                 if (reloadAfter) self->load();
             }
             if (renamedOrDeleted && self->handlers_.changed) self->handlers_.changed();
-            if (change.kind == PlaylistEdit::Kind::Delete && self->handlers_.open) self->handlers_.open(0);
+            // Only while the deleted playlist still shows: the window may have gone to another page meanwhile.
+            if (change.kind == PlaylistEdit::Kind::Delete && self->handlers_.open && self->playlist_ == change.playlist &&
+                self->Visibility() == Visibility::Visible)
+                self->handlers_.open(0);
         });
     }).detach();
 }
