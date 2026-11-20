@@ -127,10 +127,13 @@ void PlaylistView::reload(int64_t playlist) {
 
 void PlaylistView::load() {
     if (!server_) return;
+    // Reads run on the thread pool, so an older one can answer after a newer one; only the latest is shown.
+    const auto read = ++loads_;
     if (playlist_ == 0) {
-        background([this, server = server_, tracks = tr(L"Library_Tracks")] {
+        background([this, server = server_, tracks = tr(L"Library_Tracks"), read] {
             auto list = std::make_shared<std::vector<PlaylistSummary>>(server->playlists());
-            return std::function<void()>([this, list, tracks] {
+            return std::function<void()>([this, list, tracks, read] {
+                if (read != loads_) return;
                 playlists_ = *list;
                 auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
                 for (const auto& p : playlists_) {
@@ -153,7 +156,7 @@ void PlaylistView::load() {
         int64_t revision = 0;
         std::vector<ui::BrowseRow> rows;
     };
-    background([this, server = server_, playlist = playlist_] {
+    background([this, server = server_, playlist = playlist_, read] {
         auto loaded = std::make_shared<Loaded>();
         for (const auto& p : server->playlists())
             if (p.id == playlist) loaded->name = ui::utf8(p.name);
@@ -179,7 +182,8 @@ void PlaylistView::load() {
             offset += int64_t(page.items.size());
             if (page.items.empty() || offset >= page.total) break;
         }
-        return std::function<void()>([this, loaded] {
+        return std::function<void()>([this, loaded, read] {
+            if (read != loads_) return;
             name_ = loaded->name;
             edits_.loaded(loaded->revision);
             HeaderTitle().Text(name_);

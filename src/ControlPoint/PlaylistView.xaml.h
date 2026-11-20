@@ -85,6 +85,7 @@ private:
     ui::EditSequence<QueuedEdit> edits_{[this](QueuedEdit queued) { send(std::move(queued)); }};
     hstring name_;
     uint64_t generation_ = 0;
+    uint64_t loads_ = 0; // the latest load()
     std::optional<camel::server::PlaylistSortKey> sortKey_;
     bool sortDescending_ = false;
     winrt::com_ptr<ui::PlaylistCollection> entries_ = winrt::make_self<ui::PlaylistCollection>();
