@@ -375,13 +375,8 @@ std::vector<std::vector<uint8_t>> sortKeyStarts(sqlite::Database& db) {
     return starts;
 }
 
-} // namespace
-
-LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
-                              int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision,
-                              const CancellationToken& token) {
-    checkRange(offset, limit);
-    Query q(store, expectedRevision, token);
+LibraryAlbumPage albumPage(const LibraryStore& store, Query& q, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
+                           int64_t offset, int64_t limit) {
     const auto& orders = kAlbumOrders;
     const std::string condition = filter ? albumCondition(store, q, *filter) : std::string{};
     const std::string from = albumsFrom(condition);
@@ -399,6 +394,16 @@ LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const s
     while (statement.step()) rows.push_back(album(statement));
     page.albums = inOrder(*order, offset, limit, std::move(rows), [](const LibraryAlbum& a) { return a.id; });
     return page;
+}
+
+} // namespace
+
+LibraryAlbumPage browseAlbums(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
+                              int64_t offset, int64_t limit, std::optional<uint64_t> expectedRevision,
+                              const CancellationToken& token) {
+    checkRange(offset, limit);
+    Query q(store, expectedRevision, token);
+    return albumPage(store, q, sort, filter, offset, limit);
 }
 
 LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset, int64_t limit, const CancellationToken& token) {
@@ -534,29 +539,27 @@ LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter
     checkRange(0, songs);
     checkRange(0, albums);
     LibraryArtistPage page;
-    {
-        Query q(store, std::nullopt, token);
-        page.revision = q.revision;
-        const auto tracks = groupTracks(store, q, artist);
-        page.tracks = int64_t(tracks->size());
-        if (!tracks->empty()) {
-            auto rows =
-                q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
-                             "WHERE t.id IN (" + idList(*tracks, 0, page.tracks) +
-                             ") ORDER BY coalesce(s.play_count,0) DESC,coalesce(s.listened_ms,0) DESC,"
-                             "coalesce(t.year,0),t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number,t.id LIMIT ?");
-            rows.bind(1, songs);
-            while (rows.step()) page.songs.push_back(trackRow(rows));
-        }
-        auto mark = q.db.prepare("SELECT 1 FROM favorite_names WHERE field=? AND name=?");
-        mark.bind(1, std::string_view(fieldName(artist.field))).bind(2, artist.value);
-        page.favorite = mark.step();
+    Query q(store, std::nullopt, token);
+    page.revision = q.revision;
+    const auto tracks = groupTracks(store, q, artist);
+    page.tracks = int64_t(tracks->size());
+    if (!tracks->empty()) {
+        auto rows =
+            q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                         "WHERE t.id IN (" + idList(*tracks, 0, page.tracks) +
+                         ") ORDER BY coalesce(s.play_count,0) DESC,coalesce(s.listened_ms,0) DESC,"
+                         "coalesce(t.year,0),t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number,t.id LIMIT ?");
+        rows.bind(1, songs);
+        while (rows.step()) page.songs.push_back(trackRow(rows));
     }
+    auto mark = q.db.prepare("SELECT 1 FROM favorite_names WHERE field=? AND name=?");
+    mark.bind(1, std::string_view(fieldName(artist.field))).bind(2, artist.value);
+    page.favorite = mark.step();
     auto own = artist, guest = artist;
     own.role = LibraryAlbumRole::Own;
     guest.role = LibraryAlbumRole::Guest;
-    page.albums = browseAlbums(store, AlbumSort::Year, own, 0, albums, std::nullopt, token);
-    page.appearances = browseAlbums(store, AlbumSort::Year, guest, 0, albums, std::nullopt, token);
+    page.albums = albumPage(store, q, AlbumSort::Year, own, 0, albums);
+    page.appearances = albumPage(store, q, AlbumSort::Year, guest, 0, albums);
     return page;
 }
 

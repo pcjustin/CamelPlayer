@@ -6,9 +6,11 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <random>
+#include <thread>
 
 #include "ControlPoint/FolderTrail.h"
 #include "ControlPoint/TreeReads.h"
@@ -147,6 +149,22 @@ TEST_F(LibraryViewsTest, AnArtistPageListsTheirSongsTheirAlbumsAndTheirAppearanc
     EXPECT_EQ(bach.albums.total, 0);
     EXPECT_EQ(titles(bach.appearances), (std::vector<std::string>{"Beta"}));
     EXPECT_EQ(ids(browseTrackRows(*store, TrackSort::Title, false, amy, 0, 50)), (std::vector<int64_t>{3, 4}));
+}
+
+// Its songs and both album rows are one state of the library, the one its revision names.
+TEST_F(LibraryViewsTest, AnArtistPageIsReadFromOneStateOfTheLibrary) {
+    std::atomic<bool> done{false};
+    std::thread writer([&] {
+        while (!done) store->write([](sqlite::Database& db) { db.exec("UPDATE library_revision SET value=value+1"); }).get();
+    });
+    int mixed = 0;
+    for (int i = 0; i < 50; ++i) {
+        const auto page = artistPage(*store, LibraryGroupFilter{LibraryGroupField::Artist, "Amy"}, 10, 50);
+        if (page.albums.revision != page.revision || page.appearances.revision != page.revision) ++mixed;
+    }
+    done = true;
+    writer.join();
+    EXPECT_EQ(mixed, 0);
 }
 
 TEST_F(LibraryViewsTest, AlbumArtistsCreditEachOfTheirNames) {
