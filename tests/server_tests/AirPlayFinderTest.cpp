@@ -403,6 +403,20 @@ TEST_F(AirPlayFinderTest, AReceiverThatAsksItsUserIsWaitedForWhenTurnedOn) {
     EXPECT_EQ(supportOf(), Support::Supported);
 }
 
+// A receiver that holds its answer, as a Mac waiting for its user does, holds up only its own check: the search goes on.
+TEST_F(AirPlayFinderTest, AReceiverWaitingForItsUserHoldsUpNoSearch) {
+    rtsp_.askUser(4000ms);
+    mdns_.add(record(rtsp_));
+    start();
+    ASSERT_TRUE(found(1));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 1; }));
+    finder_->check("800A805D016B");
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("ANNOUNCE") == 1; }));
+    FakeRtsp other;
+    mdns_.add(record(other, "0123456789AB", "Other"));
+    EXPECT_TRUE(waitFor([&] { return receivers().size() == 2; }, 2s));
+}
+
 TEST_F(AirPlayFinderTest, EncryptionOnlyIsNotSupported) {
     auto encrypted = record(rtsp_);
     encrypted.raopTxt = {"am=AudioAccessory5,1", "cn=1", "et=1,3,5"};

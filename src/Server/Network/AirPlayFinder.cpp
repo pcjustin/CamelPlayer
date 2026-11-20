@@ -150,15 +150,20 @@ struct AirPlayFinder::Impl {
     // Only the finder's thread.
     std::map<std::string, Service> services;      // by name
     std::map<std::string, std::string> addresses; // by host name
-    std::map<std::string, Verdict> verdicts;      // by receiver
+    // Only the asking thread.
     std::map<std::string, std::string> lastAsked; // by receiver
     mutable std::mutex mutex;
+    std::map<std::string, Verdict> verdicts; // by receiver
+    std::atomic<bool> verdictsChanged = false;
     std::vector<Receiver> known;
     std::set<std::string> toCheck;
     std::set<std::string> checking; // asked for a session now, or about to be
     std::set<std::string> pairedNow;
     std::atomic<bool> stopping = false, searchWanted = false;
     std::thread thread;
+    // Receivers are asked on a thread of their own: a Mac holds its answer for up to 20 s while its user decides, and the
+    // search goes on meanwhile.
+    std::thread asker;
 
     Impl(AirPlayFinderOptions finderOptions, std::function<void()> changed)
         : options(std::move(finderOptions)), onChange(std::move(changed)) {
@@ -172,11 +177,18 @@ struct AirPlayFinder::Impl {
         setsockopt(udp, IPPROTO_IP, IP_MULTICAST_TTL, reinterpret_cast<const char*>(&kMulticastTtl), sizeof(kMulticastTtl));
         if (options.groupPort) joinGroup();
         thread = std::thread([this] { run(); });
+        asker = std::thread([this] {
+            while (!stopping) {
+                askReceivers();
+                std::this_thread::sleep_for(kPollSockets);
+            }
+        });
     }
 
     ~Impl() {
         stopping = true;
         thread.join();
+        asker.join();
         closesocket(udp);
         if (group != kNoSocket) closesocket(group);
         WSACleanup();
@@ -312,20 +324,21 @@ struct AirPlayFinder::Impl {
     }
 
     void update() {
+        verdictsChanged = false;
         std::erase_if(services, [&](const auto& entry) {
             return Clock::now() - entry.second.seen > kSilentSearches * options.searchInterval;
         });
         auto receivers = receiversFrom(announced());
-        for (auto& receiver : receivers) {
-            const auto verdict = verdicts.find(receiver.id);
-            if (verdict != verdicts.end() && verdict->second.asked == askedAt(receiver) &&
-                (receiver.support == Support::Supported || receiver.support == Support::Password)) {
-                receiver.support = verdict->second.support;
-                receiver.transient = verdict->second.transient;
-            }
-        }
         {
             std::scoped_lock lock(mutex);
+            for (auto& receiver : receivers) {
+                const auto verdict = verdicts.find(receiver.id);
+                if (verdict != verdicts.end() && verdict->second.asked == askedAt(receiver) &&
+                    (receiver.support == Support::Supported || receiver.support == Support::Password)) {
+                    receiver.support = verdict->second.support;
+                    receiver.transient = verdict->second.transient;
+                }
+            }
             if (receivers == known) return;
             known = std::move(receivers);
         }
@@ -335,8 +348,9 @@ struct AirPlayFinder::Impl {
     void judge(const Receiver& receiver, bool session) {
         const auto verdict = ask(receiver, session, {options.sessionTimeoutMs, options.userTimeoutMs}, options.pairings.get());
         if (!verdict) return;
+        std::scoped_lock lock(mutex);
         verdicts[receiver.id] = {askedAt(receiver), verdict->support, verdict->transient};
-        update();
+        verdictsChanged = true;
     }
 
     void askReceivers() {
@@ -347,18 +361,22 @@ struct AirPlayFinder::Impl {
             receivers = known;
             wanted.swap(toCheck);
             paired.swap(pairedNow);
+            for (const auto& receiver : receivers)
+                if (paired.contains(receiver.id))
+                    verdicts[receiver.id] = {askedAt(receiver), Support::Supported, receiver.transient};
         }
-        for (const auto& receiver : receivers)
-            if (paired.contains(receiver.id)) verdicts[receiver.id] = {askedAt(receiver), Support::Supported, receiver.transient};
-        if (!paired.empty()) update();
+        if (!paired.empty()) verdictsChanged = true;
         for (const auto& receiver : receivers) {
             if (stopping) return;
             const bool session = wanted.contains(receiver.id);
             // What it answered before is asked again when the user asks, as its own setting may have changed since, and
             // once it announces another setting, even one it went back to.
             const bool keptPairing = options.pairings && options.pairings->find(receiver.id);
-            const bool askable =
-                receiver.support == Support::Supported || keptPairing || (session && verdicts.contains(receiver.id));
+            const bool judged = [&] {
+                std::scoped_lock lock(mutex);
+                return verdicts.contains(receiver.id);
+            }();
+            const bool askable = receiver.support == Support::Supported || keptPairing || (session && judged);
             std::string& last = lastAsked[receiver.id];
             const bool unchanged = last == askedAt(receiver);
             last = askedAt(receiver);
@@ -387,7 +405,7 @@ struct AirPlayFinder::Impl {
                 if (queriesLeft == 0) queriesLeft = kQueriesInASearch;
                 update();
             }
-            askReceivers();
+            if (verdictsChanged) update();
             fd_set readable;
             FD_ZERO(&readable);
             FD_SET(udp, &readable);
