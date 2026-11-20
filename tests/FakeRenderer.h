@@ -177,6 +177,16 @@ public:
         set("volume", std::to_string(level));
         set("mute", muted ? "1" : "0");
     }
+    // Declares its volume's range in its RenderingControl description, as a player whose scale is not 0 to 100 does.
+    void volumeRange(int minimum, int maximum) {
+        std::scoped_lock lock(mutex_);
+        volumeRange_ =
+            "<minimum>" + std::to_string(minimum) + "</minimum><maximum>" + std::to_string(maximum) + "</maximum><step>1</step>";
+    }
+    std::string volume() {
+        std::scoped_lock lock(mutex_);
+        return state_["volume"];
+    }
     void emitVolume(const std::string& variables) {
         emit("RenderingControl", "<e:property><LastChange>" + escaped(lastChange(variables)) + "</LastChange></e:property>");
     }
@@ -381,6 +391,13 @@ private:
                 actions += std::string("<action><name>") + name + "</name></action>";
             if (!noNext_) actions += "<action><name>SetNextAVTransportURI</name></action>";
             return http(200, "<scpd><actionList>" + actions + "</actionList></scpd>");
+        }
+        if (method == "GET" && path == "/RenderingControl.xml") {
+            std::scoped_lock lock(mutex_);
+            if (!volumeRange_.empty())
+                return http(200, "<scpd><serviceStateTable><stateVariable sendEvents=\"no\"><name>Volume</name><dataType>ui2"
+                                 "</dataType><allowedValueRange>" +
+                                     volumeRange_ + "</allowedValueRange></stateVariable></serviceStateTable></scpd>");
         }
         if (method == "POST" && path.starts_with("/ctl/")) return soap(header(head, "soapaction"), body);
         if (method == "SUBSCRIBE" && path.starts_with("/evt/")) return subscribe(path.substr(5), head);
@@ -748,7 +765,7 @@ private:
     std::map<std::string, std::string> state_;
     std::map<std::string, Subscriber> subscribers_;
     std::vector<std::string> actions_, requests_;
-    std::string extraLocation_, grantedTimeout_ = "Second-1800", refusedSubscriptions_;
+    std::string extraLocation_, grantedTimeout_ = "Second-1800", refusedSubscriptions_, volumeRange_;
     int nextSid_ = 0;
 };
 

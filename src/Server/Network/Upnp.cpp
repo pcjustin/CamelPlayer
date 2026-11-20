@@ -349,6 +349,27 @@ std::vector<std::string> parseActions(std::string_view scpd) {
     return actions;
 }
 
+std::optional<std::pair<int64_t, int64_t>> parseVariableRange(std::string_view scpd, std::string_view variable) {
+    const auto root = parseXml(scpd);
+    const auto* table = root ? root->child("serviceStateTable") : nullptr;
+    if (!table) return std::nullopt;
+    const auto number = [](const std::string& text) -> std::optional<int64_t> {
+        int64_t value = 0;
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        return error == std::errc() && end != text.data() ? std::optional(value) : std::nullopt;
+    };
+    for (const auto& state : table->children) {
+        if (state.childText("name") != variable) continue;
+        const auto* range = state.child("allowedValueRange");
+        if (!range) return std::nullopt;
+        const auto minimum = number(range->childText("minimum"));
+        const auto maximum = number(range->childText("maximum"));
+        if (!minimum || !maximum || *maximum <= *minimum) return std::nullopt;
+        return std::pair{*minimum, *maximum};
+    }
+    return std::nullopt;
+}
+
 std::string didlLite(const DidlTrack& track) {
     std::string item =
         R"(<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" )"

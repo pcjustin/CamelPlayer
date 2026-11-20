@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "Common/util/Log.h"
+#include "Server/Support/Http.h"
 
 namespace camel::server {
 
@@ -24,12 +25,6 @@ using std::chrono::milliseconds;
 constexpr auto kTick = milliseconds(25);
 constexpr auto kSubscribeRetry = std::chrono::seconds(30);
 constexpr auto kSettling = milliseconds(1500); // what a player reports this long after a write can be older than the write
-
-uint32_t levelFrom(const std::string& text) {
-    uint32_t level = 0;
-    std::from_chars(text.data(), text.data() + text.size(), level);
-    return std::min(level, 100U);
-}
 
 bool mutedFrom(const std::string& text) {
     return text == "1" || _stricmp(text.c_str(), "true") == 0;
@@ -48,6 +43,9 @@ struct PlayerVolume::Impl {
     std::optional<bool> muteToWrite;
     Clock::time_point settledAt;
     std::unique_ptr<PlayerEvents> events;
+    // The player's own scale of its volume, as its description declares it; read on the worker thread.
+    std::pair<int64_t, int64_t> range{0, 100};
+    bool rangeRead = false;
     std::thread working;
 
     Impl(upnp::PlayerDescription description, LinkOptions linkOptions) : player(std::move(description)), options(linkOptions) {
@@ -75,7 +73,32 @@ struct PlayerVolume::Impl {
         return upnp::call(*service, action, arguments, options.requestTimeoutMs);
     }
 
+    // A description without a range for Volume leaves 0 to 100; one that cannot be fetched is asked for again.
+    void readRange() {
+        if (rangeRead) return;
+        const auto* service = player.service("RenderingControl");
+        if (service && !service->scpdUrl.empty()) {
+            const auto reply = http::send("GET", service->scpdUrl, "", "", options.requestTimeoutMs, upnp::kMaxMessageBytes);
+            if (reply.status == 200)
+                if (const auto declared = upnp::parseVariableRange(reply.body, "Volume")) range = *declared;
+        }
+        rangeRead = true;
+    }
+
+    uint32_t levelFrom(const std::string& text) const {
+        int64_t value = 0;
+        std::from_chars(text.data(), text.data() + text.size(), value);
+        const auto [minimum, maximum] = range;
+        return uint32_t(((std::clamp(value, minimum, maximum) - minimum) * 100 + (maximum - minimum) / 2) / (maximum - minimum));
+    }
+
+    std::string valueOf(uint32_t level) const {
+        const auto [minimum, maximum] = range;
+        return std::to_string(minimum + (int64_t(level) * (maximum - minimum) + 50) / 100);
+    }
+
     bool read() {
+        readRange();
         const auto volume = call("GetVolume", {});
         const auto mute = call("GetMute", {});
         const auto current = volume.values.find("CurrentVolume");
@@ -98,7 +121,7 @@ struct PlayerVolume::Impl {
         }
         if (!newLevel && !newMute) return;
         try {
-            if (newLevel) call("SetVolume", {{"DesiredVolume", std::to_string(*newLevel)}});
+            if (newLevel) call("SetVolume", {{"DesiredVolume", valueOf(*newLevel)}});
             if (newMute) call("SetMute", {{"DesiredMute", *newMute ? "1" : "0"}});
         } catch (const std::exception& e) {
             log::warn("network player volume: %s", e.what());

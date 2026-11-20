@@ -90,6 +90,8 @@ struct PlayerFormats {
 };
 PlayerFormats parseProtocolInfo(std::string_view sink);
 std::vector<std::string> parseActions(std::string_view scpd);
+// The minimum and maximum a service description gives for `variable`, when it gives a range wider than one value.
+std::optional<std::pair<int64_t, int64_t>> parseVariableRange(std::string_view scpd, std::string_view variable);
 
 struct DidlTrack {
     std::string title, artist, album, coverUrl, protocolInfo, url;

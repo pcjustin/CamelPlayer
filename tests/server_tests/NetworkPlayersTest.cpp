@@ -19,6 +19,7 @@
 #include "Server/Network/PlayerEvents.h"
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/PlayerLink.h"
+#include "Server/Network/PlayerVolume.h"
 #include "Server/Support/Http.h"
 
 #include <windows.h>
@@ -885,4 +886,16 @@ TEST(NetworkPlayerHardwareTest, DISABLED_TakesEachPlayersOwnEvents) {
         })) << d.name;
         printf("%s: %zu events, first from %s\n", d.name.c_str(), taken.size(), taken.empty() ? "-" : taken.front().kind.c_str());
     }
+}
+
+// A player whose volume runs over another range than 0 to 100, as its description declares, is read and set on that scale.
+TEST(PlayerVolumeTest, APlayersOwnVolumeRangeIsFollowed) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.volumeRange(0, 50);
+    renderer.setVolume(25, false);
+    PlayerVolume volume(describe(renderer), kQuick);
+    ASSERT_TRUE(waitFor([&] { return volume.current().has_value(); }));
+    EXPECT_EQ(volume.current()->level, 50U);
+    volume.setLevel(100);
+    EXPECT_TRUE(waitFor([&] { return renderer.volume() == "50"; }));
 }
