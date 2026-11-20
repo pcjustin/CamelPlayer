@@ -590,6 +590,12 @@ public:
         std::vector<PlaylistEntry> entries;
         for (const auto& entry : queue.entries) {
             PlaylistEntry item{std::nullopt, entry.source.pathUtf8()};
+            // A library entry carries its file, which asks nothing of a storage that may be away or slow.
+            if (entry.file) {
+                item.track = LibraryTrackKey{entry.file};
+                entries.push_back(std::move(item));
+                continue;
+            }
             try {
                 const auto key = toUtf8(canonicalLibraryPath(std::filesystem::path(toWide(entry.source.pathUtf8()))).wstring());
                 file.reset();

@@ -866,6 +866,21 @@ TEST_F(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLib
     EXPECT_TRUE(server->playlists().empty());
 }
 
+// The queue is saved with the library file each entry carries, without asking the storage: saved while the storage is
+// away, its tracks stay the library's.
+TEST_F(LibraryPlaybackTest, SavingTheQueueWhileItsStorageIsAwayKeepsItsTracksInTheLibrary) {
+    const auto a = testutil::generatedFile({"queue-save-away", 48000, 16, 2, 0.3});
+    const auto music = setUp({a});
+    send(queueReplace({track(a)}));
+    send(command(CommandKind::Stop));
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries[0].file == file(a); }));
+    std::filesystem::rename(music / a.filename(), dir / a.filename());
+    const auto saved = server->saveQueueAsPlaylist("Away");
+    const auto page = server->playlistItems(saved.playlist, 0, 10);
+    ASSERT_EQ(page.items.size(), 1u);
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a)}));
+}
+
 TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningTheFileUntilPlay) {
     const auto a = testutil::generatedFile({"restore-a", 48000, 16, 2, 2.0});
     const auto b = testutil::generatedFile({"restore-b", 48000, 16, 2, 2.0});
