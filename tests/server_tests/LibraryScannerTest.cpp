@@ -1492,6 +1492,28 @@ TEST_F(LibraryScannerTest, AScanOfAFolderThatIsAwayKeepsItsName) {
     EXPECT_EQ(shown(), before);
 }
 
+// A folder this user may not list, as System Volume Information under a drive added whole or a NAS folder without
+// read permission, stays refused at every scan: what it held is kept as it was, and the rest of the root is scanned to
+// the end, deleted files marked missing, rather than every scan of the root ending incomplete.
+TEST_F(LibraryScannerTest, AFolderThatMayNotBeListedLeavesTheRestOfTheScanComplete) {
+    audio("one.flac");
+    const auto two = audio("two.flac");
+    const auto refused = dir / "music" / "private";
+    fs::create_directories(refused);
+    fs::copy_file(testutil::testFile("16-44.1k"), refused / "three.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    ASSERT_EQ(count(store), 3);
+    const Denied listing(refused, FILE_LIST_DIRECTORY);
+    fs::remove(two);
+    const auto report = scanner.scan(root);
+    EXPECT_TRUE(report.complete);
+    EXPECT_EQ(count(store), 2) << "two.flac marked missing, three.flac kept";
+    EXPECT_FALSE(report.diagnostics.empty()) << "the refused folder is told";
+}
+
 // A notified folder whose scan did not complete is scanned again, so what changed in it is not left until the next poll.
 TEST_F(LibraryScannerTest, ANotifiedFolderWhoseScanDidNotCompleteIsScannedAgain) {
     const auto album = dir / "music" / "album";
@@ -1512,9 +1534,12 @@ TEST_F(LibraryScannerTest, ANotifiedFolderWhoseScanDidNotCompleteIsScannedAgain)
         return count(store, "SELECT COUNT(*) FROM files WHERE available=1 AND path LIKE '%gone.flac'") == 0;
     };
     {
-        const Denied listing(album / "locked", FILE_LIST_DIRECTORY);
+        // Held with no sharing, "locked" cannot be listed for the moment, so the scan is not complete.
+        const wil::unique_handle held(CreateFileW((album / "locked").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                                                  FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+        ASSERT_TRUE(held);
         fs::remove(album / "gone.flac");
-        std::this_thread::sleep_for(std::chrono::milliseconds(1500)); // its scan cannot list "locked", so it is not complete
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
         ASSERT_FALSE(gone()) << "an incomplete scan marks nothing missing";
     }
     EXPECT_TRUE(waitFor(gone));

@@ -415,6 +415,7 @@ struct Listing {
     std::vector<Entry> files;
     size_t links = 0; // reparse points passed over
     bool complete = true;
+    bool refused = false; // this user may not list it: what it held stays as it was
     bool deferred = false;
     std::string error;
     bool fileWork = false;
@@ -693,6 +694,11 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
     wil::unique_handle directory;
     try {
         directory = openPath(path, FILE_LIST_DIRECTORY);
+        if (!directory && GetLastError() == ERROR_ACCESS_DENIED) {
+            out.refused = true;
+            out.error = key(path) + ": this user may not list it";
+            return out;
+        }
         if (!directory) throw std::runtime_error("cannot access library path: " + toUtf8(path.wstring()));
         if (finalPath(directory.get()) != Path(lower(path.wstring())))
             throw std::runtime_error("directory now resolves through an alias: " + key(path));
@@ -1097,6 +1103,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     if (!partial) pending.push_back(Listing{path});
     bool complete = true;
     size_t unreadFiles = 0, unlistedFolders = 0;
+    // Folders this user may not list, as System Volume Information under a drive: their files are not marked missing.
+    std::vector<std::string> refused;
     for (const auto& folder : subtrees) {
         const DWORD attributes = GetFileAttributesW(folder.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -1267,6 +1275,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         auto listing = ready->get();
         active.erase(ready);
         complete = complete && listing.complete;
+        if (listing.refused) refused.push_back(key(listing.path) + "\\");
         if (listing.deferred) report.deferred.push_back(listing.path);
         if (!listing.error.empty()) {
             report.diagnostics.push_back(listing.error);
@@ -1344,8 +1353,12 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             if (report.complete) {
                 const auto markMissing = [&](sqlite::Statement& listed) {
                     std::vector<int64_t> missing;
+                    const auto inRefused = [&](const std::string& path) {
+                        return std::ranges::any_of(refused, [&](const std::string& folder) { return path.starts_with(folder); });
+                    };
                     while (listed.step())
-                        if (!present.contains(listed.integer(0))) missing.push_back(listed.integer(0));
+                        if (!present.contains(listed.integer(0)) && !inRefused(listed.text(1)))
+                            missing.push_back(listed.integer(0));
                     auto mark = db.prepare("UPDATE files SET available=0 WHERE id=?");
                     for (const int64_t file : missing) {
                         mark.bind(1, file).run();
@@ -1364,14 +1377,14 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(2, std::string(CAMEL_VERSION_STRING))
                         .run();
                     db.prepare("DELETE FROM app_state WHERE key=?").bind(1, refusedFromKey).run();
-                    auto listed = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1");
+                    auto listed = db.prepare("SELECT id,path FROM files WHERE root_id=? AND available=1");
                     listed.bind(1, root);
                     markMissing(listed);
                 }
                 // A path range over the unique files.path index selects a subtree without a LIKE pattern.
                 for (const auto& folder : subtrees) {
                     const auto below = key(folder);
-                    auto listed = db.prepare("SELECT id FROM files WHERE root_id=? AND available=1 AND path>?||'\\' AND "
+                    auto listed = db.prepare("SELECT id,path FROM files WHERE root_id=? AND available=1 AND path>?||'\\' AND "
                                              "path<?||']'");
                     listed.bind(1, root).bind(2, below).bind(3, below);
                     markMissing(listed);
