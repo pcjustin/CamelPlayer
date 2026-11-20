@@ -3049,17 +3049,9 @@ void MainWindow::OnSearchQuerySubmitted(AutoSuggestBox const& box, AutoSuggestBo
 
 void MainWindow::showSearchResults(hstring const& query) {
     if (std::wstring_view(query).find_first_not_of(L" \t") == std::wstring_view::npos) return;
-    const bool fromLibrary = Library().Visibility() == Visibility::Visible;
-    std::function<void()> leave;
-    if (!fromLibrary) {
-        // Back returns to the page the search started from, such as Settings.
-        leave = [this, tag = shownTag_] { returnToPage(tag); };
-    }
+    // Back returns to the page the search started from, such as Settings.
+    auto leave = openLibraryOverPage();
     Nav().SelectedItem(nullptr);
-    SettingsPanel().Visibility(Visibility::Collapsed);
-    PlaceholderPanel().Visibility(Visibility::Collapsed);
-    Home().Visibility(Visibility::Collapsed);
-    Library().Visibility(Visibility::Visible);
     get_self<LibraryView>(Library())->showSearch(query, std::move(leave));
 }
 
