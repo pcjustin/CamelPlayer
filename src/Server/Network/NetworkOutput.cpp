@@ -271,6 +271,7 @@ public:
             nextId_ = 0;
             queuedNext_ = 0;
             announcedBody_ = 0;
+            followedChange_ = false;
             closing_ = false;
             bodies_.push_back(makeBody(first, details));
         }
@@ -414,9 +415,12 @@ private:
                 bodies_.pop_front();
                 highestMs_ = 0;
                 changedAt_ = Clock::now();
+                followedChange_ = false;
                 moved_.notify_all();
                 return;
             }
+            // The change the position showed first, reported after it: the same change, not the player's Next.
+            if (std::exchange(followedChange_, false) && Clock::now() - changedAt_ < kChangeSettles) return;
         }
         if (event.kind == PlayerEventKind::Seeked) {
             std::scoped_lock lock(mutex_);
@@ -517,6 +521,7 @@ private:
         bodies_.pop_front();
         highestMs_ = 0;
         changedAt_ = Clock::now();
+        followedChange_ = true;
         link_->advance();
         moved_.notify_all();
     }
@@ -1037,6 +1042,7 @@ private:
     _Guarded_by_(mutex_) mutable uint64_t highestMs_ = 0; // of the track playing
     _Guarded_by_(mutex_) mutable bool reportsPosition_ = false;
     _Guarded_by_(mutex_) Clock::time_point changedAt_;
+    _Guarded_by_(mutex_) bool followedChange_ = false; // the last change of track was seen by the position first
     _Guarded_by_(mutex_) mutable uint64_t lastReported_ = 0;
     _Guarded_by_(mutex_) mutable uint64_t clockMs_ = 0;
     _Guarded_by_(mutex_) mutable Clock::time_point clockAt_;

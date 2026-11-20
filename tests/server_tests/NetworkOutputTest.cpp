@@ -146,6 +146,89 @@ uint64_t le64(const std::string& bytes, size_t at) {
 
 } // namespace
 
+namespace {
+
+// A player the test drives: it fetches each track it is given, and reports the positions and events it is given.
+struct Script {
+    std::atomic<uint64_t> positionMs = 0;
+    std::mutex mutex;
+    std::function<void(const PlayerEvent&)> onEvent;
+
+    void report(const PlayerEvent& event) {
+        std::function<void(const PlayerEvent&)> to;
+        {
+            std::scoped_lock lock(mutex);
+            to = onEvent;
+        }
+        to(event);
+    }
+};
+
+class ScriptedControl final : public PlayerControl {
+public:
+    explicit ScriptedControl(std::shared_ptr<Script> script) : script_(std::move(script)) {}
+    ~ScriptedControl() override {
+        for (auto& fetch : fetches_) fetch.join();
+    }
+    ScriptedControl(const ScriptedControl&) = delete;
+    ScriptedControl& operator=(const ScriptedControl&) = delete;
+    bool load(const std::string& uri, const std::string&) override { return fetch(uri); }
+    bool loadNext(const std::string& uri, const std::string&) override { return fetch(uri); }
+    void advance() override {}
+    bool play() override { return true; }
+    bool pause() override { return true; }
+    bool stop() override { return true; }
+    uint64_t positionMs() const override { return script_->positionMs; }
+    bool stopped() const override { return false; }
+    bool playing() const override { return true; }
+    bool idle() const override { return false; }
+    bool played() const override { return true; }
+    bool lost() const override { return false; }
+
+private:
+    bool fetch(const std::string& uri) {
+        fetches_.emplace_back([uri] {
+            try {
+                http::send("GET", uri, "", "", 5000, 1 << 24);
+            } catch (const std::exception&) {
+            }
+        });
+        return true;
+    }
+
+    std::shared_ptr<Script> script_;
+    std::vector<std::thread> fetches_;
+};
+
+class ScriptedPlayer final : public StreamPlayer {
+public:
+    explicit ScriptedPlayer(std::shared_ptr<Script> script) : script_(std::move(script)) {}
+    std::string name() const override { return "Scripted"; }
+    std::string mode() const override { return "Scripted"; }
+    bool reportsPosition() const override { return true; }
+    upnp::PlayerFormats formats(bool& known) override {
+        known = true;
+        return {.wav = true};
+    }
+    bool gapless(bool& known) override {
+        known = true;
+        return true;
+    }
+    upnp::Listener listen() override { return upnp::listenOn("127.0.0.1"); }
+    std::vector<std::string> hosts() const override { return {"127.0.0.1"}; }
+    std::string metadata(const upnp::DidlTrack&) const override { return {}; }
+    std::unique_ptr<PlayerControl> connect(std::function<void(const PlayerEvent&)> onEvent) override {
+        std::scoped_lock lock(script_->mutex);
+        script_->onEvent = std::move(onEvent);
+        return std::make_unique<ScriptedControl>(script_);
+    }
+
+private:
+    std::shared_ptr<Script> script_;
+};
+
+} // namespace
+
 TEST(NetworkOutputTest, TellsWhatThePlayerCanTake) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     auto output = createNetworkOutput(describe(renderer), sampleDetails, {});
@@ -1378,4 +1461,29 @@ TEST_F(StreamingTest, APlayerThatDisappearsPausesAsNotConnected) {
         << server->snapshot().playback.errorDetail;
     EXPECT_EQ(server->snapshot().settings.backend, Backend::Network);
     server->shutdown();
+}
+
+// The player's report of a change of track that the stream has already followed by the position is the same change, not
+// the player's Next: it is not passed on, or the Server would skip a track.
+TEST(NetworkOutputTest, AChangeOfTrackAlreadyFollowedIsNotThePlayersNext) {
+    auto script = std::make_shared<Script>();
+    std::mutex mutex;
+    std::vector<PlayerEvent> followed;
+    auto output = createStreamOutput(std::make_unique<ScriptedPlayer>(script), sampleDetails, [&](const PlayerEvent& event) {
+        std::scoped_lock lock(mutex);
+        followed.push_back(event);
+    });
+    CountingSource source(4, 44100, uint64_t{4} * 44100);
+    source.queueSecond();
+    output->open(k16, &source);
+    output->start();
+    script->positionMs = 900; // near the first track's end
+    std::this_thread::sleep_for(500ms);
+    script->positionMs = 100; // the second track's start, which the stream follows
+    std::this_thread::sleep_for(500ms);
+    script->report({PlayerEventKind::NextTrack});
+    std::this_thread::sleep_for(100ms);
+    output->close();
+    std::scoped_lock lock(mutex);
+    EXPECT_TRUE(std::ranges::none_of(followed, [](const PlayerEvent& e) { return e.kind == PlayerEventKind::NextTrack; }));
 }
