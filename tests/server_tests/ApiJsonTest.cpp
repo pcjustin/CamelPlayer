@@ -141,6 +141,13 @@ TEST(ApiJson, ADevicesSpeakersSurviveTheRoundTrip) {
     EXPECT_EQ(throughText(s, snapshotFromJson).devices.airplay, s.devices.airplay);
 }
 
+// A network player's maker and model come back with it too.
+TEST(ApiJson, ADevicesModelSurvivesTheRoundTrip) {
+    Snapshot s = fullSnapshot();
+    s.devices.network = {{"uuid:player", "Living room", "", {}, "Denon DMP-A6"}};
+    EXPECT_EQ(throughText(s, snapshotFromJson).devices.network, s.devices.network);
+}
+
 TEST(ApiJson, LiveLocalServerSnapshotSurvivesTheRoundTrip) {
     LocalServer server(Settings{}, std::filesystem::path{});
     server.waitIdle();

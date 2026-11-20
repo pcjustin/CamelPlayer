@@ -386,7 +386,8 @@ PlaybackSnapshot playbackFrom(const json& j) {
 json toJson(const std::vector<DeviceInfo>& devices) {
     json out = json::array();
     for (const auto& d : devices)
-        out.push_back({{"id", d.id}, {"name", d.name}, {"unsupported", d.unsupported}, {"speakers", d.speakers}});
+        out.push_back(
+            {{"id", d.id}, {"name", d.name}, {"unsupported", d.unsupported}, {"speakers", d.speakers}, {"model", d.model}});
     return out;
 }
 
@@ -399,7 +400,7 @@ std::vector<DeviceInfo> devicesFrom(const json& j, const char* key) {
             speakers.push_back(speaker.get<std::string>());
         }
         out.push_back({value<std::string>(d, "id"), value<std::string>(d, "name"), value<std::string>(d, "unsupported"),
-                       std::move(speakers)});
+                       std::move(speakers), value<std::string>(d, "model")});
     }
     return out;
 }
