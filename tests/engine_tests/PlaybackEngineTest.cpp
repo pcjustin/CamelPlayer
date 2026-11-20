@@ -1077,6 +1077,30 @@ TEST_F(EngineStateTest, DiscardPreloadsPreservesTheTrackThatJustBecameAudible) {
     EXPECT_EQ(current.transitions, first.transitions + 1);
 }
 
+// The restart that withdrawing a decoded successor takes can fail as any start can: the session ends as after any
+// command that fails, its error shown, rather than the error reaching the caller and the Engine staying half open.
+TEST_F(EngineStateTest, ARestartThatFailsWhileDiscardingPreloadsEndsTheSession) {
+    open();
+    const auto first = engine->snapshot();
+    const auto waitDecoded = [&] {
+        const auto deadline = std::chrono::steady_clock::now() + 3s;
+        while (!engine->snapshot().nextSlotFree && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(1ms);
+        return engine->snapshot().nextSlotFree;
+    };
+    ASSERT_TRUE(engine->queueNext(testutil::generatedFile({"restart-fails-next", 96000, 24, 2, 0.3})));
+    ASSERT_TRUE(waitDecoded());
+    ASSERT_TRUE(engine->queueNext(testutil::generatedFile({"restart-fails-future", 96000, 24, 2, 0.4})));
+    ASSERT_EQ(pull(size_t(first.total)), first.total);
+    ASSERT_TRUE(waitDecoded());
+    probe.startError = ErrorCode::DeviceLost;
+    EXPECT_NO_THROW(engine->discardPreloads());
+    const auto after = engine->snapshot();
+    EXPECT_EQ(after.error, ErrorCode::DeviceLost);
+    EXPECT_EQ(after.state, PlayState::Paused);
+    EXPECT_EQ(after.queuedFiles, 0u);
+    probe.startError.reset();
+}
+
 TEST_F(EngineStateTest, LoadingAnotherTrackClosesOutputAndResetsPosition) {
     open();
     ASSERT_EQ(pull(31), 31u);

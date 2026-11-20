@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 #include "Engine/decode/FormatProbe.h"
@@ -262,6 +263,20 @@ public:
         auto fut = task.get_future();
         post([&task] { task(); });
         return fut.get();
+    }
+
+    // As call(), for work that changes the session: an error ends the session as a posted command's does, and the caller
+    // gets R{}.
+    template <class R> R callGuarded(const std::function<R()>& fn) {
+        return call<R>([this, &fn]() -> R {
+            if constexpr (std::is_void_v<R>) {
+                guarded(fn);
+            } else {
+                R result{};
+                guarded([&] { result = fn(); });
+                return result;
+            }
+        });
     }
 
     // ---- IRenderSource (real-time thread) ----
@@ -1861,14 +1876,14 @@ bool PlaybackEngine::showControlPanel() {
 }
 bool PlaybackEngine::queueNext(const std::filesystem::path& file, std::optional<DecoderKind> decoder, double gainDb,
                                uint32_t crossfadeMs) {
-    return impl_->call<bool>(
+    return impl_->callGuarded<bool>(
         [this, &file, decoder, gainDb, crossfadeMs] { return impl_->queueNext(file, decoder, gainDb, crossfadeMs); });
 }
 bool PlaybackEngine::clearNext() {
-    return impl_->call<bool>([this] { return impl_->clearNext(); });
+    return impl_->callGuarded<bool>([this] { return impl_->clearNext(); });
 }
 void PlaybackEngine::discardPreloads() {
-    impl_->call<void>([this] { impl_->discardPreloads(); });
+    impl_->callGuarded<void>([this] { impl_->discardPreloads(); });
 }
 EngineSnapshot PlaybackEngine::snapshot() const {
     return impl_->snapshot();
