@@ -73,14 +73,17 @@ void add(std::vector<Lyrics>& found, Lyrics lyrics) {
     if (!lyrics.lines.empty()) found.push_back(std::move(lyrics));
 }
 
-// A .lrc in UTF-8 or UTF-16 with a byte order mark, else UTF-8, else the system's code page.
+// A .lrc in UTF-8 or UTF-16 of either order with a byte order mark, else UTF-8, else the system's code page.
 std::string readText(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     std::string bytes{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
     if (bytes.starts_with("\xEF\xBB\xBF")) return bytes.substr(3);
-    if (bytes.size() >= 2 && uint8_t(bytes[0]) == 0xFF && uint8_t(bytes[1]) == 0xFE) {
+    const bool little = bytes.starts_with("\xFF\xFE"), big = bytes.starts_with("\xFE\xFF");
+    if (little || big) {
         std::wstring wide((bytes.size() - 2) / 2, L'\0');
         memcpy(wide.data(), bytes.data() + 2, wide.size() * 2);
+        if (big)
+            for (auto& c : wide) c = wchar_t(((c & 0xFF) << 8) | (c >> 8));
         return toUtf8(wide);
     }
     if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), int(bytes.size()), nullptr, 0) > 0 || bytes.empty())

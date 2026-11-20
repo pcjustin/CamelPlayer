@@ -180,3 +180,19 @@ TEST(LyricsTest, ALrcBesideTheFileWinsOverEmbeddedOfTheSameKind) {
     EXPECT_TRUE(readLyrics(file).lines.empty());
     EXPECT_TRUE(readLyrics(dir / "missing.flac").lines.empty());
 }
+
+TEST(LyricsTest, ALrcInUtf16IsReadInEitherByteOrder) {
+    const auto dir = freshDir("utf16");
+    const auto file = flacIn(dir);
+    const std::u16string text = u"﻿[00:01.00]活在自己的世界裡\n";
+    for (const bool bigEndian : {false, true}) {
+        std::string bytes;
+        for (const char16_t c : text) {
+            const auto high = char(c >> 8), low = char(c & 0xFF);
+            bytes += bigEndian ? high : low;
+            bytes += bigEndian ? low : high;
+        }
+        writeLrc(dir / "track.lrc", bytes);
+        EXPECT_EQ(texts(readLyrics(file)), (std::vector<std::string>{"活在自己的世界裡"})) << "big-endian " << bigEndian;
+    }
+}
