@@ -2688,10 +2688,14 @@ void MainWindow::showHotkeys() {
             settingsChanged();
             applyHotkeys();
         });
-        combination.LostFocus([this, action](auto&&, auto&&) {
+        // Only this box changes back: rebuilding the rows here, while another box is pressed, would take that box away
+        // before its click.
+        combination.LostFocus([this, action](auto&& sender, auto&&) {
             if (capturing_ != action) return;
             capturing_.reset();
-            applyHotkeys();
+            hotkeysTaken_ = hotkeys_->apply(settings_.hotkeys);
+            const auto text = ui::GlobalHotkeys::describe(ui::GlobalHotkeys::of(settings_.hotkeys, action));
+            sender.template as<Button>().Content(box_value(text.empty() ? tr(L"Hotkey_None") : hstring(text)));
         });
         row.Children().Append(combination);
 
