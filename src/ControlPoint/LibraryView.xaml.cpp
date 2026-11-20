@@ -996,6 +996,7 @@ winrt::fire_and_forget LibraryView::appendFolderRest(std::shared_ptr<const std::
     auto weak = get_weak();
     auto queue = DispatcherQueue();
     const auto server = server_;
+    const auto play = ++folderRestPlay_;
     co_await winrt::resume_background();
     auto rest = std::make_shared<std::vector<LibraryTrackRow>>();
     try {
@@ -1023,8 +1024,9 @@ winrt::fire_and_forget LibraryView::appendFolderRest(std::shared_ptr<const std::
         if (check == kChecks) co_return;
         co_await winrt::resume_after(std::chrono::milliseconds(100));
     }
-    queue.TryEnqueue([weak, rest] {
-        if (const auto self = weak.get()) self->queueTracks(*rest, false);
+    // A double click starts two of these for the one queue the window kept, and both see it at once.
+    queue.TryEnqueue([weak, rest, play] {
+        if (const auto self = weak.get(); self && self->folderRestPlay_ == play) self->queueTracks(*rest, false);
     });
 }
 

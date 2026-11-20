@@ -272,6 +272,7 @@ private:
     void playFolderTrack(const std::vector<camel::server::LibraryTrackRow>& folder, int64_t track);
     // Queues the tracks after `own`, the folder tracks a click just queued, to the end of their library folder.
     winrt::fire_and_forget appendFolderRest(std::shared_ptr<const std::vector<camel::server::LibraryTrackRow>> own);
+    uint64_t folderRestPlay_ = 0; // the latest appendFolderRest; only it appends
     Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable> treeItems_{nullptr};
     std::unordered_map<int64_t, std::vector<camel::server::LibraryTrackRow>> treeTracks_; // by folder, as listed
     std::set<int64_t> openFolders_; // kept in the data folder, so the tree opens as it was left
