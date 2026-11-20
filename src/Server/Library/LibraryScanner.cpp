@@ -1622,7 +1622,8 @@ class LibraryMonitor::Impl {
 public:
     Impl(LibraryStore& store, const Options& options)
         : store_(store), scanner_(store, options.coversShown, options.playback), options_(options) {
-        if (options.offlineInterval.count() <= 0 || options.coalesce.count() < 0 || options.pollInterval.count() < 0)
+        if (options.offlineInterval.count() <= 0 || options.coalesce.count() < 0 || options.latestStart.count() < 0 ||
+            options.pollInterval.count() < 0)
             throw std::invalid_argument("invalid library monitor interval");
         worker_ = std::jthread([this](const std::stop_token& stop) { run(stop); });
         fingerprints_ = std::jthread([this](const std::stop_token& stop) {
@@ -1688,6 +1689,7 @@ private:
         OVERLAPPED io{};
         std::array<uint8_t, 32768> buffer{};
         Clock::time_point due, lastPoll;
+        Clock::time_point waitingSince; // the first change the next scan waits for
         bool pending = false;
         std::set<Path> deferred;  // folders to scan again once nothing plays from this storage
         bool unwatchable = false; // its storage gives no change notifications, so it is only polled
@@ -1894,8 +1896,11 @@ private:
                         // A whole scan that notifications start finds what they named, not what they missed.
                         if (watch.full && !wasFull) watch.watched = false;
                         // A change to nothing the library reads leaves the watch with no folder to scan, and so no scan.
-                        if ((watch.full || !watch.changed.empty()) && (watch.due == Clock::time_point{} || (ok && bytes)))
-                            watch.due = Clock::now() + options_.coalesce;
+                        if ((watch.full || !watch.changed.empty()) && (watch.due == Clock::time_point{} || (ok && bytes))) {
+                            const auto now = Clock::now();
+                            if (watch.waitingSince == Clock::time_point{}) watch.waitingSince = now;
+                            watch.due = std::min(now + options_.coalesce, watch.waitingSince + options_.latestStart);
+                        }
                         // One that fails other than for too many changes will fail again: the storage is polled from then on.
                         const bool watching = (ok || error == ERROR_NOTIFY_ENUM_DIR) && arm(watch);
                         watch.unwatchable = !watching;
@@ -1903,6 +1908,7 @@ private:
                     if (watch.due != Clock::time_point{} && Clock::now() >= watch.due && !stop.stop_requested() &&
                         !scans.contains(id)) {
                         watch.due = {};
+                        watch.waitingSince = {};
                         bool user = false;
                         {
                             std::lock_guard lock(userMutex_);

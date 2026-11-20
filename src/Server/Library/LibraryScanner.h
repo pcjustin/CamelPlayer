@@ -107,6 +107,8 @@ public:
         std::chrono::milliseconds missedEditsPollInterval{std::chrono::minutes(30)};
         std::chrono::milliseconds offlineInterval{std::chrono::seconds(60)};
         std::chrono::milliseconds coalesce{std::chrono::seconds(2)};
+        // Changes that go on, as a long copy makes, start their scan at the latest this long after the first of them.
+        std::chrono::milliseconds latestStart{std::chrono::seconds(30)};
         std::function<bool()> coversShown;
         std::function<PlaybackReads()> playback;
         bool watchChanges = true; // off in tests, standing for a share whose change notifications are missed

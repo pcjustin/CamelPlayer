@@ -1710,3 +1710,33 @@ TEST_F(LibraryScannerTest, AFolderGoneFromTheDiskLosesItsRowOnceNothingIsLeftInI
     ASSERT_TRUE(scanner.scan(root).complete);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM folders"), 2);
 }
+
+// A copy that goes on writing does not hold the scan back past its latest start, so the albums it has copied show.
+TEST_F(LibraryScannerTest, ChangesThatGoOnDoNotPostponeTheScanPastItsLatestStart) {
+    audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::milliseconds(0);
+    options.offlineInterval = std::chrono::milliseconds(50);
+    options.coalesce = std::chrono::milliseconds(400);
+    options.latestStart = std::chrono::milliseconds(1000);
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
+    std::atomic<bool> copying = true;
+    std::thread copy([&] {
+        for (int file = 0; copying; ++file) {
+            std::ofstream(dir / "music" / "album" / ("copied" + std::to_string(file) + ".txt")) << "copied";
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+    audio("two.flac");
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (count(store) != 2 && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const bool shown = count(store) == 2;
+    copying = false;
+    copy.join();
+    EXPECT_TRUE(shown);
+}
