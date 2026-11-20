@@ -90,7 +90,9 @@ std::optional<Wav> readWav(const std::string& data, bool withSamples) {
 std::string readFile(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary | std::ios::ate);
     if (!in) throw ImpulseError(ImpulseProblem::Unreadable, "cannot open " + toUtf8(file.wstring()));
-    std::string data(size_t(in.tellg()), '\0');
+    const auto size = uint64_t(in.tellg());
+    if (size > kMaxImpulseSourceBytes) throw ImpulseError(ImpulseProblem::TooLong, std::to_string(size) + " bytes");
+    std::string data(size_t(size), '\0');
     in.seekg(0);
     if (!in.read(data.data(), std::streamsize(data.size())))
         throw ImpulseError(ImpulseProblem::Unreadable, "cannot read " + toUtf8(file.wstring()));
@@ -284,6 +286,9 @@ LoadedImpulse loadImpulse(const std::filesystem::path& file, uint32_t rateHz) {
     } catch (const ImpulseError& e) {
         if (e.problem() == ImpulseProblem::Unreadable) throw;
         entry.refused = e;
+    } catch (const std::bad_alloc&) {
+        // More than this computer can hold leaves convolution off, as a response too long does.
+        entry.refused = ImpulseError(ImpulseProblem::TooLong, "too large to load");
     }
     std::lock_guard lock(mutex);
     recent.push_front(entry);

@@ -21,6 +21,8 @@ using Impulse = std::shared_ptr<CamelImpulse>;
 
 // The longest response the Engine is given, per path at the playing rate: about 23.8 s at 44.1 kHz.
 inline constexpr uint64_t kMaxImpulseTaps = uint64_t(1) << 20;
+// Larger than a zip of a response at eight rates, each at the most taps in four channels of 64-bit samples.
+inline constexpr uint64_t kMaxImpulseSourceBytes = uint64_t(1) << 28;
 
 struct ImpulseInfo {
     uint32_t channels = 0;       // 1 for both outputs, 2 for left and right, 4 for true stereo

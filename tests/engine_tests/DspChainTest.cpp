@@ -265,6 +265,18 @@ TEST(ImpulseResponse, AResponseTooLongIsRefusedFromItsHeaderAndOnlyOnce) {
     EXPECT_LT(again, 16 * kMegabyte) << "the refused file was read again";
 }
 
+// A file far larger than any response is refused by its size before it is read, as too long, and leaves convolution
+// off rather than taking the memory: read whole, an allocation that failed ended the session at every track.
+TEST(ImpulseResponse, AFileFarLargerThanAnyResponseIsRefusedUnread) {
+    DataFolder data;
+    const auto file = write("huge.wav", wav(48000, 1, std::vector<float>(64, 0.001f)));
+    std::filesystem::resize_file(file, kMaxImpulseSourceBytes + 1);
+    constexpr size_t kMegabyte = size_t(1) << 20;
+    const size_t used = peakPrivateGrowth([&] { EXPECT_EQ(problemOf(file, 48000), ImpulseProblem::TooLong); });
+    EXPECT_LT(used, 16 * kMegabyte) << "the file was read";
+    std::filesystem::remove(file);
+}
+
 TEST(DspChain, TheActingNodesFollowTheOrderAndRawDsdHasNone) {
     DataFolder data;
     Settings settings;
