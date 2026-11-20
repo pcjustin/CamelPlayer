@@ -818,6 +818,7 @@ void LibraryView::loadAlbumDetail() {
             showListColumns(!oneArtist, true);
             detailTracks_ = std::move(detail->tracks);
             RowList().ItemsSource(items);
+            restoreOffset();
             selectPendingTrack(RowList());
         });
     });
@@ -936,7 +937,10 @@ void LibraryView::expandTree(CamelPlayer::BrowseItem const& parent) {
                 for (const auto& node : open) expandTree(node);
             }
             // Folders above the playing track still opening would push it out of view.
-            if (--treeOpening_ == 0) selectPendingTrack(FolderTree());
+            if (--treeOpening_ == 0) {
+                restoreOffset();
+                selectPendingTrack(FolderTree());
+            }
         });
     });
 }
