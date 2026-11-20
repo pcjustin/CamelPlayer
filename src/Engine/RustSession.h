@@ -91,6 +91,8 @@ public:
     };
     // Safe on the output callback thread.
     Transitions transitions() const noexcept;
+    // The transition count at which the track being decoded becomes audible; after crossfadeTo, the new track's.
+    uint64_t decodingTrack() const noexcept;
 
     // In source frames of the file being decoded, which is the audible one until the decoder moves on to a queued one.
     struct Buffered {

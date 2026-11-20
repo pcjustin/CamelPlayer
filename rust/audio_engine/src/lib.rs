@@ -2754,6 +2754,29 @@ pub unsafe extern "C" fn camel_engine_get_transitions_v1(
     ENGINE_OK
 }
 
+/// # Safety
+/// `engine` must point to a live handle and `track` must be writable.
+///
+/// The number of the track being decoded, as `camel_engine_get_transitions_v1` counts them: the transition that makes
+/// it audible. After `camel_engine_crossfade_to_v1` it is the new track's, which a queued track whose start is already
+/// on its way to the device precedes.
+#[no_mangle]
+pub unsafe extern "C" fn camel_engine_get_decoding_track_v1(
+    engine: *mut CamelEngine,
+    track: *mut u64,
+) -> i32 {
+    match catch_unwind(AssertUnwindSafe(|| {
+        if engine.is_null() || track.is_null() {
+            return ENGINE_E_INVALID_ARGUMENT;
+        }
+        *track = (*engine).heard.lock().unwrap().decoding;
+        ENGINE_OK
+    })) {
+        Ok(status) => status,
+        Err(_) => ENGINE_E_PANIC,
+    }
+}
+
 fn empty_format() -> CamelAudioFormatV1 {
     CamelAudioFormatV1 {
         struct_size: std::mem::size_of::<CamelAudioFormatV1>() as u32,

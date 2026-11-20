@@ -396,7 +396,8 @@ public:
             nextStream_.clear();
             nextStream_.push_back(streamTrackOf(file, *next));
         }
-        manualTransition_ = rust_->transitions().count + 1;
+        // Not the next transition: a queued track whose start is already on its way to the device is heard before it.
+        manualTransition_ = rust_->decodingTrack();
         heldUntil_.store(manualTransition_, std::memory_order_release);
         fadeSkip_ = FadeSkip::None;
         adopt(

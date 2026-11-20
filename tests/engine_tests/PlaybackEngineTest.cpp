@@ -406,6 +406,34 @@ TEST_F(EngineStateTest, AManualCrossfadeMakesTheFileCurrentAtOnceAndCountsItFrom
     EXPECT_LT(frames, 48000u + 96000u + 96000u / 2);
 }
 
+// A queued track whose start is already on its way to the device is heard before a manual crossfade's file: the
+// chosen file stays at its start until its own seam, not from the queued track's.
+TEST_F(EngineStateTest, AManualCrossfadeAfterAQueuedTrackStartedWaitsForItsOwnSeam) {
+    settings.crossfade = {true, 1.0};
+    engine->applySettings(settings);
+    const auto first = testutil::generatedFile({"crossfade-seam-first", 96000, 24, 2, 0.5});
+    const auto queued = testutil::generatedFile({"crossfade-seam-queued", 96000, 24, 2, 2.0});
+    const auto chosen = testutil::generatedFile({"crossfade-seam-chosen", 96000, 24, 2, 3.0});
+    engine->openAndPlay(first);
+    engine->waitIdle();
+    ASSERT_TRUE(engine->queueNext(queued));
+    engine->waitIdle();
+    // To 50 ms before the first file's end; the Engine then fills its 250 ms device ring again, the first file's last frames
+    // and the queued track's start behind them.
+    ASSERT_EQ(pull(48000 - 4800), 48000u - 4800);
+    std::this_thread::sleep_for(300ms);
+    engine->crossfadeTo(chosen);
+    engine->waitIdle();
+    ASSERT_EQ(engine->snapshot().file, chosen.wstring());
+    // 10 ms at a time until the chosen file's position moves.
+    size_t pulled = 0;
+    while (pulled < 96000 && engine->snapshot().position == 0) {
+        pulled += pull(960);
+        engine->waitIdle();
+    }
+    EXPECT_GT(pulled, 4800u + 9600u) << "the chosen file counted from the queued track's start";
+}
+
 // A stream output, as AirPlay is, learns at each seam which track follows: after a manual crossfade, the one that
 // plays, not the one queued before it, at that seam and at the next.
 TEST_F(EngineStateTest, AManualCrossfadeTellsAStreamOutputTheTrackThatPlays) {

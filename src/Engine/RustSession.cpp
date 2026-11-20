@@ -277,4 +277,10 @@ RustSession::Transitions RustSession::transitions() const noexcept {
     return result;
 }
 
+uint64_t RustSession::decodingTrack() const noexcept {
+    uint64_t track = 0;
+    camel_engine_get_decoding_track_v1(engine_, &track);
+    return track;
+}
+
 } // namespace camel::audio

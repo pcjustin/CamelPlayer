@@ -336,6 +336,9 @@ CamelEngineStatus camel_engine_crossfade_to_v1(CamelEngine* engine, const CamelC
 // slot (one more may be queued only when it does not). Safe on the output callback thread.
 CamelEngineStatus camel_engine_get_transitions_v1(CamelEngine* engine, uint64_t* transitions, uint64_t* track_position,
                                                   uint32_t* next_queued);
+// The number of the track being decoded, as the transitions count them: the transition that makes it audible. After
+// _crossfade_to_v1 it is the new track's, which a queued track whose start is already on its way to the device precedes.
+CamelEngineStatus camel_engine_get_decoding_track_v1(CamelEngine* engine, uint64_t* track);
 CamelEngineStatus camel_engine_play_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_pause_v1(CamelEngine* engine, const CamelCommandStampV1* command);
 CamelEngineStatus camel_engine_stop_v1(CamelEngine* engine, const CamelCommandStampV1* command);
