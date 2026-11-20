@@ -1062,7 +1062,9 @@ TEST_F(LibraryScannerTest, ReparseDirectoriesDoNotEscapeOrLoop) {
     LibraryScanner scanner(store);
     const auto root = scanner.addRoot(dir / "music");
     EXPECT_EQ(scanner.addRoot(dir / "music" / "album" / "cycle"), root);
-    EXPECT_TRUE(scanner.scan(root).complete);
+    const auto report = scanner.scan(root);
+    EXPECT_TRUE(report.complete);
+    EXPECT_EQ(report.linksPassedOver, 2u) << "told, so that a log shows why their files are not in the library";
     EXPECT_EQ(count(store), 1);
     fs::remove(dir / "music" / "escape");
     fs::remove(dir / "music" / "album" / "cycle");

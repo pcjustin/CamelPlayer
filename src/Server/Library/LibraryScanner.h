@@ -45,8 +45,9 @@ struct ScanReport {
     bool online = true;
     uint32_t rootError = 0; // Win32 error distinguishes access denial from a missing/offline root
     size_t seen = 0, updated = 0, moved = 0;
-    size_t edited = 0;  // files already listed whose size or time changed
-    size_t deleted = 0; // files missing for 30 days, deleted with what hangs on them
+    size_t edited = 0;          // files already listed whose size or time changed
+    size_t deleted = 0;         // files missing for 30 days, deleted with what hangs on them
+    size_t linksPassedOver = 0; // reparse points, files and folders alike, which the scan does not follow
     std::vector<std::string> diagnostics;
 };
 

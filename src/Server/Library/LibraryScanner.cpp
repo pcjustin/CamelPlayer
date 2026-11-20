@@ -413,6 +413,7 @@ struct Listing {
     Path path;
     std::vector<Path> children;
     std::vector<Entry> files;
+    size_t links = 0; // reparse points passed over
     bool complete = true;
     bool deferred = false;
     std::string error;
@@ -708,7 +709,10 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
                     break;
                 }
                 if (item.name == L"." || item.name == L"..") continue;
-                if (item.attributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+                if (item.attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                    ++out.links;
+                    continue;
+                }
                 const Path child = path / item.name;
                 if (item.attributes & FILE_ATTRIBUTE_DIRECTORY) {
                     out.children.push_back(child);
@@ -757,7 +761,10 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
             }
             if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
             // Never traverse reparse points: this also prevents cycles and escapes from a registered root.
-            if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                ++out.links;
+                continue;
+            }
             const Path child = path / data.cFileName;
             if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 out.children.push_back(child);
@@ -1266,6 +1273,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             ++unlistedFolders;
         }
         if (!listing.fileWork) {
+            report.linksPassedOver += listing.links;
             submit([&token, root, folder = key(listing.path),
                     parent = listing.path == path ? std::string{} : key(listing.path.parent_path()),
                     name = listing.path == path ? rootName : toUtf8(listing.path.filename().wstring())](sqlite::Database& db) {
@@ -1317,7 +1325,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                               " folders left unread"};
     }
     report.complete = complete && !token.cancelled() && report.online;
-    if (!partial) log::info("library: %zu files read in %.1f s%s", report.seen, seconds(), report.complete ? "" : ", incomplete");
+    const auto links =
+        report.linksPassedOver ? ", " + std::to_string(report.linksPassedOver) + " links passed over" : std::string{};
+    if (!partial)
+        log::info("library: %zu files read in %.1f s%s%s", report.seen, seconds(), report.complete ? "" : ", incomplete",
+                  links.c_str());
     std::lock_guard crossRoot(store_.scanMutex_);
     finishing = true;
     ++store_.scanFinishing_;
