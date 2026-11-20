@@ -655,6 +655,7 @@ struct FakeReceiverRecord {
     std::string deviceId, name, host;
     uint16_t port = 0;
     std::string address = "127.0.0.1";
+    std::vector<std::string> otherAddresses; // answered in turn with `address`, as a host on several networks does
     std::vector<std::string> raopTxt = {"am=AudioAccessory5,1", "cn=0,1", "et=0,1", "pw=false", "vs=105.1"};
     std::vector<std::string> airplayTxt; // empty for a receiver without _airplay._tcp
     bool terse = false;                  // answers a browse with the name alone
@@ -769,7 +770,7 @@ private:
         inet_pton(AF_INET, address.c_str(), &parsed);
         return std::string(reinterpret_cast<const char*>(&parsed), 4);
     }
-    static void details(Records& out, const FakeReceiverRecord& r) {
+    static void details(Records& out, const FakeReceiverRecord& r, size_t turn) {
         const std::string raop = r.deviceId + "@" + r.name;
         if (r.raop) {
             out.push_back(record(instance(raop, "_raop"), 33, srv(r.port, r.host)));
@@ -779,7 +780,8 @@ private:
             out.push_back(record(instance(r.name, "_airplay"), 33, srv(r.port, r.host)));
             out.push_back(record(instance(r.name, "_airplay"), 16, txt(r.airplayTxt)));
         }
-        out.push_back(record(name({r.host, "local"}), 1, addressBytes(r.address)));
+        const size_t which = turn % (1 + r.otherAddresses.size());
+        out.push_back(record(name({r.host, "local"}), 1, addressBytes(which ? r.otherAddresses[which - 1] : r.address)));
     }
 
     void serve() {
@@ -793,11 +795,12 @@ private:
             Records answers;
             {
                 std::scoped_lock lock(mutex_);
+                const size_t turn = replies_++;
                 for (const auto& r : records_) {
                     const std::string raop = r.deviceId + "@" + r.name;
                     if (r.raop) answers.push_back(record(service("_raop"), 12, instance(raop, "_raop")));
                     if (!r.airplayTxt.empty()) answers.push_back(record(service("_airplay"), 12, instance(r.name, "_airplay")));
-                    if (!r.terse || query.find(raop) != std::string::npos) details(answers, r);
+                    if (!r.terse || query.find(raop) != std::string::npos) details(answers, r, turn);
                 }
             }
             std::string reply = u16(0) + u16(0x8400) + u16(0) + u16(int(answers.size())) + u16(0) + u16(0);
@@ -821,6 +824,7 @@ private:
     uint16_t port_ = 0;
     std::mutex mutex_;
     std::vector<FakeReceiverRecord> records_;
+    size_t replies_ = 0;
     std::thread thread_;
 };
 

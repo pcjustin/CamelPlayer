@@ -315,6 +315,24 @@ TEST_F(AirPlayFinderTest, AReceiverComesBackAtANewAddressAsTheSameOne) {
     EXPECT_EQ(receivers().front().id, "800A805D016B");
 }
 
+// A receiver on two networks answers from each with its own address: the one in use stays, rather than following each
+// answer and being asked again each time.
+TEST_F(AirPlayFinderTest, AReceiverWithTwoAddressesKeepsTheOneInUse) {
+    auto twoNetworks = record(rtsp_);
+    twoNetworks.otherAddresses = {"127.0.0.2"};
+    mdns_.add(twoNetworks);
+    start();
+    ASSERT_TRUE(found(1));
+    const auto first = receivers().front().address;
+    bool moved = false;
+    const auto until = std::chrono::steady_clock::now() + 1500ms;
+    while (std::chrono::steady_clock::now() < until) {
+        moved = moved || receivers().front().address != first;
+        std::this_thread::sleep_for(10ms);
+    }
+    EXPECT_FALSE(moved);
+}
+
 TEST_F(AirPlayFinderTest, ARenamedReceiverIsTheSameOneUnderItsNewName) {
     mdns_.add(record(rtsp_));
     start();

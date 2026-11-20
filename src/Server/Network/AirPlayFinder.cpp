@@ -147,9 +147,15 @@ struct AirPlayFinder::Impl {
     SOCKET group = kNoSocket; // on the group's port, shared with Windows' own responder
     DnsName raopService = serviceName(kRaopService);
     DnsName airplayService = serviceName(kAirPlayService);
+    // A host on several networks answers from each with its own address: the one in use stays while the host gave it in
+    // this search or the last one.
+    struct Host {
+        std::string address;
+        std::set<std::string> thisSearch, lastSearch;
+    };
     // Only the finder's thread.
-    std::map<std::string, Service> services;      // by name
-    std::map<std::string, std::string> addresses; // by host name
+    std::map<std::string, Service> services; // by name
+    std::map<std::string, Host> hosts;       // by host name
     // Only the asking thread.
     std::map<std::string, std::string> lastAsked; // by receiver
     mutable std::mutex mutex;
@@ -291,7 +297,10 @@ struct AirPlayFinder::Impl {
             } else if (record.type == DnsType::Txt) {
                 if (auto* service = serviceFor(record.name)) service->txt = record.txt;
             } else if (!record.address.starts_with("169.254.")) {
-                addresses[keyOf(record.name)] = record.address;
+                auto& host = hosts[keyOf(record.name)];
+                host.thisSearch.insert(record.address);
+                if (host.address.empty() || (!host.thisSearch.contains(host.address) && !host.lastSearch.contains(host.address)))
+                    host.address = record.address;
             }
         }
     }
@@ -305,20 +314,20 @@ struct AirPlayFinder::Impl {
         std::vector<Announced> found;
         std::set<std::string> withRaop;
         for (const auto& [key, service] : services) {
-            const auto address = addresses.find(service.host);
+            const auto host = hosts.find(service.host);
             const auto name = parseRaopName(service.name.front());
-            if (!under(service.name, raopService) || !name || !service.port || service.txt.empty() || address == addresses.end())
+            if (!under(service.name, raopService) || !name || !service.port || service.txt.empty() || host == hosts.end())
                 continue;
-            Announced receiver{name->first, name->second, address->second, service.port, service.txt, {}};
+            Announced receiver{name->first, name->second, host->second.address, service.port, service.txt, {}};
             if (const auto airplay = airplayServices.find(name->first); airplay != airplayServices.end())
                 receiver.airplay = airplay->second->txt;
             withRaop.insert(name->first);
             found.push_back(std::move(receiver));
         }
         for (const auto& [id, service] : airplayServices) {
-            const auto address = addresses.find(service->host);
-            if (withRaop.contains(id) || !service->port || address == addresses.end()) continue;
-            found.push_back({id, service->name.front(), address->second, service->port, {}, service->txt});
+            const auto host = hosts.find(service->host);
+            if (withRaop.contains(id) || !service->port || host == hosts.end()) continue;
+            found.push_back({id, service->name.front(), host->second.address, service->port, {}, service->txt});
         }
         return found;
     }
@@ -400,6 +409,8 @@ struct AirPlayFinder::Impl {
                 queriesLeft = kQueriesInASearch;
             }
             if (Clock::now() >= nextQuery) {
+                if (queriesLeft == kQueriesInASearch)
+                    for (auto& [name, host] : hosts) host.lastSearch = std::exchange(host.thisSearch, {});
                 sendQuery();
                 nextQuery = Clock::now() + (--queriesLeft > 0 ? options.retryInterval : options.searchInterval);
                 if (queriesLeft == 0) queriesLeft = kQueriesInASearch;
