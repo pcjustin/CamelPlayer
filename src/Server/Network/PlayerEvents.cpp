@@ -28,6 +28,7 @@ using Clock = std::chrono::steady_clock;
 constexpr int kNotifyTimeoutMs = 2000;
 // Nothing waits for the answer, which a Linkplay module takes 5 s to give; a subscription left behind just expires.
 constexpr int kUnsubscribeTimeoutMs = 300;
+constexpr auto kRenewRetry = std::chrono::seconds(10); // after a renewal the player refused or did not answer
 constexpr SOCKET kNoSocket = INVALID_SOCKET;
 
 uint64_t number(std::string_view text) {
@@ -272,8 +273,15 @@ std::deque<PlayerEvents::Notification> PlayerEvents::take() {
 }
 
 void PlayerEvents::renewDue() {
-    for (auto& subscription : impl_->subscriptions)
-        if (Clock::now() >= subscription.renewAt) impl_->renew(subscription);
+    for (auto& subscription : impl_->subscriptions) {
+        if (Clock::now() < subscription.renewAt) continue;
+        try {
+            impl_->renew(subscription);
+        } catch (...) {
+            subscription.renewAt = Clock::now() + kRenewRetry;
+            throw;
+        }
+    }
 }
 
 } // namespace camel::server

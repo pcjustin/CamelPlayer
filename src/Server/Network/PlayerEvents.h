@@ -37,7 +37,8 @@ public:
     PlayerEvents& operator=(const PlayerEvents&) = delete;
 
     std::deque<Notification> take();
-    void renewDue(); // throws std::runtime_error when the player does not answer or dropped a subscription
+    // Throws std::runtime_error when the player does not answer or dropped a subscription; that one is renewed again later.
+    void renewDue();
 
 private:
     struct Impl;

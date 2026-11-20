@@ -725,6 +725,20 @@ TEST(PlayerLinkTest, RenewsSubscriptionsBeforeTheyRunOut) {
     EXPECT_TRUE(waitFor([&] { return subscribes() >= 2; }, 4s));
 }
 
+// A player that refuses to renew a subscription still plays and answers polls: the link goes on, asking again later.
+TEST(PlayerLinkTest, ARefusedRenewalDoesNotLoseAPlayerThatAnswers) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.grantTimeout("Second-2");
+    auto events = std::make_shared<Events>();
+    PlayerLink link(describe(renderer), into(events), kQuick);
+    renderer.refuseSubscriptions("AVTransport");
+    std::this_thread::sleep_for(3s); // past the renewal, due after 1 s
+    EXPECT_FALSE(events->saw(PlayerEventKind::Lost));
+    EXPECT_FALSE(link.lost());
+    const auto requests = renderer.requests();
+    EXPECT_LE(std::ranges::count(requests, std::string("SUBSCRIBE /evt/AVTransport")), 3);
+}
+
 // A subscription granted without end (UPnP 1.0 allows it), or for longer than an int holds, is renewed as one granted
 // for what was asked, not every second.
 TEST(PlayerLinkTest, ASubscriptionGrantedWithoutEndIsNotRenewedEverySecond) {

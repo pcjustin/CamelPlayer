@@ -312,8 +312,13 @@ struct PlayerLink::Impl {
         auto nextPoll = Clock::now();
         while (!stopping) {
             for (const auto& notification : events.take()) handle(notification);
+            // A renewal refused says nothing of whether the player answers; the polls tell that.
             try {
                 events.renewDue();
+            } catch (const std::exception& e) {
+                log::info("network player %s: %s", player.name.c_str(), e.what());
+            }
+            try {
                 if (Clock::now() >= nextPoll) {
                     nextPoll = Clock::now() + options.pollInterval;
                     poll();
