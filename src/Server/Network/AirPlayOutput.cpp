@@ -561,37 +561,58 @@ private:
         }
         for (const auto& w : wanted) {
             const auto member = std::ranges::find_if(members_, [&](const Member& m) { return m.id == w.id; });
-            if (member != members_.end()) {
-                const auto channels = member->destinations.size() > 1 ? AirPlayChannels::Stereo : w.channels;
-                changed |= std::exchange(member->channels, channels) != channels;
-                continue;
-            }
-            if (!w.receiver || !opened_) continue;
+            if (member == members_.end()) continue;
+            const auto channels = member->destinations.size() > 1 ? AirPlayChannels::Stereo : w.channels;
+            changed |= std::exchange(member->channels, channels) != channels;
+        }
+        if (changed) publishTargets();
+    }
+
+    // Receivers that join are connected without rtspMutex_, which pause and close take: one can take seconds to answer, as a
+    // Mac waits for its user.
+    void joinMembers(const std::vector<AirPlayMember>& wanted) {
+        std::vector<AirPlayMember> joining;
+        {
+            std::scoped_lock lock(rtspMutex_);
+            if (members_.empty() || !opened_) return;
+            for (const auto& w : wanted)
+                if (w.receiver && std::ranges::none_of(members_, [&](const Member& m) { return m.id == w.id; }))
+                    joining.push_back(w);
+        }
+        for (const auto& w : joining) {
+            std::optional<Member> joined;
             try {
-                members_.push_back(connectMember(w));
-                changed = true;
+                joined = connectMember(w);
             } catch (const Error& e) {
                 tellLeft(w.id, e);
                 continue;
             }
+            std::scoped_lock lock(rtspMutex_);
+            // Meanwhile the session may have ended, or begun again with this receiver.
+            if (members_.empty() || std::ranges::any_of(members_, [&](const Member& m) { return m.id == w.id; })) {
+                teardown(*joined);
+                continue;
+            }
+            members_.push_back(std::move(*joined));
             // One that joins mid-track is told the track playing.
             try {
                 if (playing_) tellTrack(members_.back(), playing_->first, playing_->second);
             } catch (const std::exception& e) {
                 log::info("AirPlay receiver %s: %s", members_.back().name.c_str(), e.what());
             }
+            publishTargets();
         }
-        if (changed) publishTargets();
     }
 
     // A connection the receiver closes means another sender took it, unless within a moment its announcement says that
     // its access setting now keeps this computer out, or it is no longer found as it was, as speakers paired or separated
     // in the Home app: a HomePod closes it then too. One that stops answering means it has gone.
     void tendSession(const std::optional<TrackNotice>& notice, const TrackDetails& details) {
+        const auto wanted = options_.members();
+        joinMembers(wanted);
         std::scoped_lock lock(rtspMutex_);
         if (notice) playing_.emplace(*notice, details);
         if (members_.empty()) return;
-        const auto wanted = options_.members();
         followMembers(wanted);
         const auto now = Clock::now();
         const bool heartbeat = now >= nextHeartbeat_;

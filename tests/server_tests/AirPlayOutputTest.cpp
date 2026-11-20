@@ -1557,6 +1557,24 @@ TEST_F(AirPlayGroupOutputTest, OnlyTheLastReceiverLostEndsTheStream) {
     out->close();
 }
 
+// A receiver that joins can take seconds to answer, as a Mac waits for its user: a pause meanwhile does not wait for it.
+TEST_F(AirPlayGroupOutputTest, APauseDoesNotWaitForAReceiverThatIsJoining) {
+    want({member(a_, "A")});
+    CountingSource source(kSecond * 10);
+    auto out = output();
+    out->open(kCd, &source);
+    out->start();
+    ASSERT_TRUE(waitFor([&] { return a_.packetCount() >= 40; }));
+    b_.askUser(3000ms);
+    want({member(a_, "A"), member(b_, "B")});
+    ASSERT_TRUE(waitFor([&] { return b_.count("ANNOUNCE") == 1; }));
+    const auto before = std::chrono::steady_clock::now();
+    out->pause();
+    EXPECT_LT(std::chrono::steady_clock::now() - before, 1000ms);
+    EXPECT_TRUE(waitFor([&] { return a_.count("FLUSH") == 1; }));
+    out->close();
+}
+
 namespace {
 
 // Two receivers found on the network, grouped through the Server.
