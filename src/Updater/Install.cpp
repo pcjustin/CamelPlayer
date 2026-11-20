@@ -51,6 +51,12 @@ std::optional<fs::path> inside(const fs::path& path) {
     return normal;
 }
 
+std::wstring lowered(const fs::path& path) {
+    std::wstring text = path.wstring();
+    CharLowerBuffW(text.data(), DWORD(text.size()));
+    return text;
+}
+
 std::optional<std::string> readAll(const fs::path& file) {
     std::ifstream in(file, std::ios::binary);
     if (!in) return std::nullopt;
@@ -164,7 +170,11 @@ public:
             if (!o_.manifestSha256.empty()) checkList();
             auto owned = listedFiles(o_.app);
             owned.insert(incoming_.begin(), incoming_.end());
-            std::erase_if(owned, [&](const fs::path& name) { return !fs::is_regular_file(o_.app / name); });
+            // One file under two spellings moves once: the old list and the new package may differ in case only.
+            std::set<std::wstring> seen;
+            std::erase_if(owned, [&](const fs::path& name) {
+                return !fs::is_regular_file(o_.app / name) || !seen.insert(lowered(name)).second;
+            });
             writeJournal(owned);
             for (const auto& name : owned) {
                 fs::create_directories((backup_ / name).parent_path());

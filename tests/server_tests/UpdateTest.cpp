@@ -495,6 +495,15 @@ TEST(Update, AnUpdateLeavesWhatIsNotThePackagesWhereItIs) {
     EXPECT_EQ(readText(f.dir / L"outside.txt"), "mine");
 }
 
+// A file the new version spells in another case is one file of the program folder, moved away once.
+TEST(Update, AFileRenamedOnlyInCaseIsInstalled) {
+    InstallFixture f(L"update-case-renamed");
+    writeText(f.files / L"Old-Only.dll", "new");
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    EXPECT_EQ(f.started, std::vector<std::string>{"new"});
+    EXPECT_EQ(readText(f.app / L"Old-Only.dll"), "new");
+}
+
 TEST(Update, ARollBackLeavesWhatIsNotThePackagesWhereItIs) {
     InstallFixture f(L"update-others-back");
     f.goodPlayer = "none";
