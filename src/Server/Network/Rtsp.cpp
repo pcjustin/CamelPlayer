@@ -4,6 +4,7 @@
 
 #include "Server/Network/Rtsp.h"
 
+#include <wil/resource.h>
 #include <ws2tcpip.h>
 
 #include <algorithm>
@@ -249,9 +250,8 @@ PairOutcome RtspClient::pairTransiently(std::string_view pin) {
 bool RtspClient::showPin(int userTimeoutMs) {
     const int usual = timeoutMs_;
     setTimeout(userTimeoutMs);
-    const bool shown = request("POST", "/pair-pin-start", kPairingType, {}, kPairingHeaders).status == kStatusOk;
-    setTimeout(usual);
-    return shown;
+    const auto restore = wil::scope_exit([&] { setTimeout(usual); });
+    return request("POST", "/pair-pin-start", kPairingType, {}, kPairingHeaders).status == kStatusOk;
 }
 
 PairOutcome RtspClient::pairSetup(std::string_view pin, const PairingIdentity& me, PairedReceiver& receiver) {

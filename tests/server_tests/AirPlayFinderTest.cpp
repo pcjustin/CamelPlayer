@@ -583,6 +583,17 @@ TEST(RtspClientTest, AReceiverThatDoesNotAnswerThrows) {
     WSACleanup();
 }
 
+// The long wait for a receiver's user to show a code holds for that request alone, also when it fails.
+TEST(RtspClientTest, TheWaitForACodeEndsWithItsRequest) {
+    FakeRtsp rtsp;
+    RtspClient client("127.0.0.1", rtsp.port(), 300);
+    rtsp.stopAnswering();
+    EXPECT_THROW(client.showPin(1500), std::runtime_error);
+    const auto before = std::chrono::steady_clock::now();
+    EXPECT_THROW(client.request("OPTIONS", "*"), std::runtime_error);
+    EXPECT_LT(std::chrono::steady_clock::now() - before, 1000ms);
+}
+
 TEST(AirPlayOutputsTest, ReceiversAreListedWithPlayersAndKeptByDeviceId) {
     DeviceCatalog devices;
     devices.revision = 1;
