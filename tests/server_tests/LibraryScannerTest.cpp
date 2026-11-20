@@ -169,6 +169,30 @@ TEST_F(LibraryScannerTest, ACompactDateYieldsItsYear) {
     EXPECT_EQ(count(store, "SELECT year FROM tracks"), 2020);
 }
 
+// An album's year is the one most of its tracks give, not its last track's: a track without a date, or with another, at
+// its end does not move the album in the year order.
+TEST_F(LibraryScannerTest, AnAlbumsYearIsTheOneMostOfItsTracksGive) {
+    const auto tagged = [&](const char* name, int number, const char* date) {
+        const auto file = audio(name);
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList("Years"));
+        values.insert("TRACKNUMBER", TagLib::StringList(TagLib::String::number(number)));
+        if (*date) values.insert("DATE", TagLib::StringList(date));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    };
+    tagged("one.flac", 1, "2001");
+    tagged("two.flac", 2, "2001");
+    tagged("three.flac", 3, "");
+    tagged("four.flac", 4, "1979");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    ASSERT_EQ(count(store, "SELECT COUNT(*) FROM albums"), 1);
+    EXPECT_EQ(count(store, "SELECT year FROM albums"), 2001);
+}
+
 TEST_F(LibraryScannerTest, TagValuesLoseSurroundingBlanksAndBlankValuesAreSkipped) {
     const auto file = audio();
     {

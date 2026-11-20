@@ -449,9 +449,20 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         int64_t firstFile = 0;
         bool firstHasCover = false;
         std::string title, artist;
-        int64_t year = 0, discs = 0;
+        int64_t discs = 0;
+        std::map<int64_t, int64_t> years; // tracks by the year they give
         std::set<std::string> artists;
         std::vector<int64_t> tracks;
+        // The year most of its tracks give, the earlier of two as many give; 0 when none gives one.
+        int64_t year() const {
+            int64_t best = 0, most = 0;
+            for (const auto& [value, count] : years)
+                if (count > most) {
+                    best = value;
+                    most = count;
+                }
+            return best;
+        }
     };
     std::map<std::string, Album> albums;
     auto rows = db.prepare("SELECT t.id,t.album,t.album_artist,t.artist,t.year,f.folder_id,COALESCE(d.parent_id,0),d.path,"
@@ -513,7 +524,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         auto& album = albums[keyText];
         album.folder = folder;
         album.title = titleText;
-        album.year = rows.integer(4);
+        if (const int64_t year = rows.integer(4)) ++album.years[year];
         album.discs = std::max({album.discs, rows.integer(10), rows.integer(11)});
         if (!album.firstFile) {
             album.firstFile = rows.integer(8);
@@ -536,7 +547,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             .bind(2, keyText)
             .bind(3, album.title)
             .bind(4, album.artist)
-            .bind(5, album.year)
+            .bind(5, album.year())
             .bind(6, album.discs)
             .bind(7, now())
             .bind(8, toUtf8(lower(toWide(album.title))))
