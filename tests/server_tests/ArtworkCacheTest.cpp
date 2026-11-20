@@ -5,9 +5,14 @@
 #include <wincodec.h>
 #include <winioctl.h>
 #include <wrl/client.h>
+#include <taglib/aifffile.h>
+#include <taglib/dsffile.h>
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
+#include <taglib/mpegfile.h>
 #include <taglib/tpropertymap.h>
+#include <taglib/tvariant.h>
+#include <taglib/wavfile.h>
 #include <taglib/xiphcomment.h>
 #include <webp/encode.h>
 #include <fstream>
@@ -16,6 +21,9 @@
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Playback/LocalServer.h"
 #include "Common/util/Text.h"
+#include "Tools/testaudio/TestAudio.h"
+#include "DsdFixture.h"
+#include "LameFixture.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -229,6 +237,48 @@ TEST_F(ArtworkCacheTest, AnEmbeddedPictureOfTypeOtherIsTheCoverWithoutAFrontCove
     const auto preferred = cache.get(nullptr, request);
     ASSERT_TRUE(preferred);
     EXPECT_EQ(dimensions(preferred->path), (std::pair<unsigned, unsigned>{30, 60}));
+}
+
+// The formats whose tags mark a picture's type, as ID3 does in an MP3, a WAV, an AIFF and a DSF, show a picture of type
+// Other as their cover too, as a FLAC does.
+TEST_F(ArtworkCacheTest, APictureOfTypeOtherIsTheCoverInEveryTaggedFormat) {
+    ArtworkCache cache(dir / "thumbs");
+    const auto music = dir / "music";
+    const std::vector<int32_t> silence(size_t{2} * 4410, 0);
+    testutil::writeMp3(music / "other.mp3", std::vector<int32_t>(size_t{2} * 44100, 0), 44100, 16, 2, true);
+    camel::audio::testaudio::writeWav(music / "other.wav", silence, 44100, 16, 2);
+    camel::audio::testaudio::writeAiff(music / "other.aiff", silence, 44100, 16, 2);
+    dsdfixture::writeFile(music / "other.dsf", dsdfixture::dsf(dsdfixture::rawDsd(size_t{4096} * 4, 2), {.id3 = false}));
+    const auto image = bitmap(48, 24, 120);
+    const TagLib::List<TagLib::VariantMap> other{TagLib::VariantMap{
+        {"data", TagLib::ByteVector(reinterpret_cast<const char*>(image.bytes.data()), unsigned(image.bytes.size()))},
+        {"mimeType", TagLib::String("image/bmp")},
+        {"pictureType", TagLib::String("Other")}}};
+    {
+        TagLib::MPEG::File tags((music / "other.mp3").c_str());
+        ASSERT_TRUE(tags.setComplexProperties("PICTURE", other));
+        ASSERT_TRUE(tags.save());
+    }
+    {
+        TagLib::RIFF::WAV::File tags((music / "other.wav").c_str());
+        ASSERT_TRUE(tags.setComplexProperties("PICTURE", other));
+        ASSERT_TRUE(tags.save());
+    }
+    {
+        TagLib::RIFF::AIFF::File tags((music / "other.aiff").c_str());
+        ASSERT_TRUE(tags.setComplexProperties("PICTURE", other));
+        ASSERT_TRUE(tags.save());
+    }
+    {
+        TagLib::DSF::File tags((music / "other.dsf").c_str());
+        ASSERT_TRUE(tags.setComplexProperties("PICTURE", other));
+        ASSERT_TRUE(tags.save());
+    }
+    for (const char* name : {"other.mp3", "other.wav", "other.aiff", "other.dsf"}) {
+        const auto cover = cache.get(nullptr, {ArtworkKind::Track, 0, camel::toUtf8((music / name).wstring())});
+        EXPECT_TRUE(cover) << name;
+        if (cover) EXPECT_EQ(dimensions(cover->path), (std::pair<unsigned, unsigned>{48, 24})) << name;
+    }
 }
 
 // A file whose only picture is of another kind, as a back cover, shows that rather than none; a file icon, 32 pixels
