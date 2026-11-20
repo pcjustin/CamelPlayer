@@ -3949,8 +3949,8 @@ void MainWindow::renameInNavigation(int64_t playlist) {
     }
 }
 
-void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsCompletedEventArgs const&) {
-    if (queueItems_->Size() < 2) return;
+void MainWindow::OnQueueDragItemsCompleted(ListViewBase const&, DragItemsCompletedEventArgs const& e) {
+    if (e.DropResult() != Windows::ApplicationModel::DataTransfer::DataPackageOperation::Move || queueItems_->Size() < 2) return;
     Command command;
     command.kind = CommandKind::QueueReorder;
     command.entryIds = queueItems_->ids();
