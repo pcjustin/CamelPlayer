@@ -125,7 +125,14 @@ bool discordActivityChanged(const std::optional<DiscordActivity>& shown, const s
 DiscordClient::DiscordClient(Options options)
     : options_(std::move(options)), worker_([this](const std::stop_token& stop) { run(stop); }) {}
 
-DiscordClient::~DiscordClient() = default;
+// A Discord that stopped reading, frozen, leaves a write of the pipe waiting once the pipe is full, or a read waiting
+// on a frame it never finishes: the worker's waiting I/O is cancelled until it ends.
+DiscordClient::~DiscordClient() {
+    worker_.request_stop();
+    const HANDLE worker = worker_.native_handle();
+    while (WaitForSingleObject(worker, 50) == WAIT_TIMEOUT) CancelSynchronousIo(worker);
+    worker_.join();
+}
 
 void DiscordClient::setEnabled(bool enabled) {
     std::lock_guard lock(mutex_);

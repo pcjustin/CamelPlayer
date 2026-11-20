@@ -382,6 +382,49 @@ TEST(DiscordPresence, ClosingDoesNotWaitForADiscordThatNeverAnswers) {
     EXPECT_LT(closing, std::chrono::seconds(1));
 }
 
+// A Discord that answers and then stops reading its pipe, frozen, leaves a write waiting once the pipe is full: closing
+// does not wait for it, or CamelPlayer would not end.
+TEST(DiscordPresence, ClosingDoesNotWaitForADiscordThatStoppedReading) {
+    const auto name = pipePrefix("frozen") + L"0";
+    const HANDLE pipe = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 64,
+                                         64, 0, nullptr);
+    ASSERT_NE(pipe, INVALID_HANDLE_VALUE);
+    std::atomic<bool> frozen = false;
+    std::thread discord([&] {
+        if (!ConnectNamedPipe(pipe, nullptr) && GetLastError() != ERROR_PIPE_CONNECTED) return;
+        uint32_t header[2]{};
+        DWORD read = 0;
+        if (!ReadFile(pipe, header, sizeof(header), &read, nullptr)) return;
+        std::string handshake(header[1], '\0');
+        if (!ReadFile(pipe, handshake.data(), header[1], &read, nullptr)) return;
+        const std::string ready = R"({"cmd":"DISPATCH","evt":"READY"})";
+        const uint32_t reply[2] = {1, uint32_t(ready.size())};
+        DWORD written = 0;
+        WriteFile(pipe, reply, sizeof(reply), &written, nullptr);
+        WriteFile(pipe, ready.data(), DWORD(ready.size()), &written, nullptr);
+        frozen = true;
+    });
+    auto client = std::make_unique<DiscordClient>(fastOptions("frozen"));
+    client->setEnabled(true);
+    ASSERT_TRUE(waitFor([&] { return frozen.load(); }));
+    DiscordActivity activity;
+    activity.title = std::string(100, 'x');
+    activity.artists = std::string(100, 'y');
+    client->show(activity);
+    ASSERT_TRUE(waitFor([&] { return client->state() == DiscordClient::State::Connected; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300)); // the activity's write waits on the full pipe
+    std::atomic<bool> closed = false;
+    std::thread closing([&] {
+        client.reset();
+        closed = true;
+    });
+    const bool quick = waitFor([&] { return closed.load(); }, std::chrono::seconds(3));
+    discord.join();
+    CloseHandle(pipe); // releases a write still waiting, so a failing test still ends
+    closing.join();
+    EXPECT_TRUE(quick) << "closing waited for a Discord that stopped reading";
+}
+
 // A download stuck waiting for its server ends as soon as it is cancelled, not when WinHTTP gives up on it.
 TEST(CoverTunnel, ADownloadStuckWaitingEndsWhenCancelled) {
     WSADATA wsa;
