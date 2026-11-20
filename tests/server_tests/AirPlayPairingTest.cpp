@@ -104,6 +104,40 @@ TEST(PairingCryptoTest, SrpMatchesAnotherImplementation) {
     EXPECT_EQ(checked->second, proof.expected);
 }
 
+// The numbers are padded to the group's 384 bytes on the wire and where they are hashed, as other AirPlay and HomeKit
+// implementations do: one pairing in 256 has an A, and one an S, whose first byte is zero. Vectors from a separate Python
+// SRP, which also gives SrpMatchesAnotherImplementation's.
+TEST(PairingCryptoTest, SrpPadsANumberWithALeadingZeroByte) {
+    const auto salt = range(0, 16);
+    const auto server = srpServer("Pair-Setup", "3939", salt, range(33, 32));
+    const auto a = srpClient("Pair-Setup", "3939", salt, server.publicKey, range(1, 30) + std::string{'\0', '\x13'});
+    ASSERT_EQ(a.publicKey.size(), 384u);
+    EXPECT_EQ(a.publicKey[0], '\0');
+    EXPECT_EQ(hexOf(sha512(a.publicKey)).substr(0, 32), "45fc29e1f7b8a57b9a971a2b3c55167f");
+    EXPECT_EQ(hexOf(a.sessionKey), "fb700d9051f35bb21f21a3b71a893e6f4d82af93adc6cbc50261bb96ea001ac2d3900810e3f686ba1966eb"
+                                   "18f3aeda3102105102a9df06263af58088d5231e4e");
+    EXPECT_EQ(hexOf(a.proof), "9c2b0d5a858c3f02c2e6be7fad833fbbd4d61c5b5645294c82fa6d883e3d72ceea6b5780a18781948a4ca08be"
+                              "a9321387254c006f1c1c86f178b75a051cac8c6");
+    EXPECT_EQ(hexOf(a.expected), "05b94e3a56351c8bf05f7644f1ec969b3c011dc3d47a3782e83ee043f1ef961b225dd85d3a23963ba9cfb4"
+                                 "02f2fcaabf35b6414611ce31bb1be10795959ad7fe");
+    const auto checkedA = srpServerCheck(server, "Pair-Setup", salt, a.publicKey, a.proof, range(33, 32));
+    ASSERT_TRUE(checkedA);
+    EXPECT_EQ(checkedA->first, a.sessionKey);
+
+    const auto serverSecret = range(33, 30) + std::string{'\0', 'Z'};
+    const auto withS = srpServer("Pair-Setup", "3939", salt, serverSecret);
+    const auto s = srpClient("Pair-Setup", "3939", salt, withS.publicKey, range(1, 32));
+    EXPECT_EQ(hexOf(s.sessionKey), "5c24ba9b39cc68528775e0ee48fd3c7c4ff5227233f3a8f37d8522b86a4e963abb631f2b0fb51bfc6a566a"
+                                   "3a4409825e15500f112b395675858d9db809f7c47c");
+    EXPECT_EQ(hexOf(s.proof), "671d0f73fabe012dbd8644982176d84ac9bce23f4f3fb888c5f5a363ba531a207bb0cad393e0fc0b2aed1b48a"
+                              "18c5e9105edb523de9ff77f9fd99f2d1c591c67");
+    EXPECT_EQ(hexOf(s.expected), "33b36d4724087ddfdced6747d7699eb0b98c4aa3d0c97e82313ab22db50b99ffb019477d047d95e2537722"
+                                 "dea4e953f13859a4e1cb568b88d141f3f53826e4a0");
+    const auto checkedS = srpServerCheck(withS, "Pair-Setup", salt, s.publicKey, s.proof, serverSecret);
+    ASSERT_TRUE(checkedS);
+    EXPECT_EQ(checkedS->first, s.sessionKey);
+}
+
 TEST(PairingCryptoTest, AWrongCodeFailsTheProof) {
     const auto salt = range(0, 16);
     const auto server = srpServer("Pair-Setup", "1234", salt, range(33, 32));

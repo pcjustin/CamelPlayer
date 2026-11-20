@@ -608,16 +608,17 @@ SrpProof srpClient(std::string_view user, std::string_view pin, std::string_view
     const Montgomery& group = srpGroup();
     const Limbs b = fromBigEndian(receiverKey);
     if (b.empty() || compare(reduce(b, group.modulus()), {}) == 0) return {};
-    const Limbs a = group.power({kGenerator}, secret);
-    const std::string aBytes = toBigEndian(a);
-    const std::string bBytes(receiverKey);
-    const Limbs u = hashNumber(padded(aBytes) + padded(bBytes));
+    // A, B and S are padded to the group's length on the wire and where they are hashed, as other implementations do:
+    // a number whose first byte is zero is otherwise hashed one byte short.
+    const std::string aBytes = padded(toBigEndian(group.power({kGenerator}, secret)));
+    const std::string bBytes = padded(receiverKey);
+    const Limbs u = hashNumber(aBytes + bBytes);
     const Limbs x = fromBigEndian(privateKey(user, pin, salt));
     const Limbs kv = group.product(fromBigEndian(multiplier()), group.power({kGenerator}, toBigEndian(x)));
     const Limbs reduced = reduce(b, group.modulus());
     const Limbs base = compare(reduced, kv) >= 0 ? subtract(reduced, kv) : subtract(add(reduced, group.modulus()), kv);
     const std::string exponent = toBigEndian(add(fromBigEndian(secret), multiply(u, x)));
-    const std::string key = sha512(toBigEndian(group.power(base, exponent)));
+    const std::string key = sha512(padded(toBigEndian(group.power(base, exponent))));
     SrpProof proof{aBytes, proofOf(user, salt, aBytes, bBytes, key), key, {}};
     proof.expected = sha512(aBytes + proof.proof + key);
     return proof;
@@ -628,7 +629,7 @@ SrpServer srpServer(std::string_view user, std::string_view pin, std::string_vie
     const Limbs v = group.power({kGenerator}, privateKey(user, pin, salt));
     const Limbs kv = group.product(fromBigEndian(multiplier()), v);
     const Limbs b = reduce(add(kv, group.power({kGenerator}, secret)), group.modulus());
-    return {toBigEndian(b), toBigEndian(v)};
+    return {padded(toBigEndian(b)), toBigEndian(v)};
 }
 
 std::optional<std::pair<std::string, std::string>> srpServerCheck(const SrpServer& server, std::string_view user,
@@ -637,11 +638,11 @@ std::optional<std::pair<std::string, std::string>> srpServerCheck(const SrpServe
     const Montgomery& group = srpGroup();
     const Limbs a = reduce(fromBigEndian(senderKey), group.modulus());
     if (a.empty()) return std::nullopt;
-    const Limbs u = hashNumber(padded(toBigEndian(a)) + padded(server.publicKey));
+    const std::string aBytes = padded(toBigEndian(a)), bBytes = padded(server.publicKey);
+    const Limbs u = hashNumber(aBytes + bBytes);
     const Limbs base = group.product(a, group.power(fromBigEndian(server.verifier), toBigEndian(u)));
-    const std::string key = sha512(toBigEndian(group.power(base, secret)));
-    const std::string aBytes = toBigEndian(a);
-    if (proofOf(user, salt, aBytes, server.publicKey, key) != proof) return std::nullopt;
+    const std::string key = sha512(padded(toBigEndian(group.power(base, secret))));
+    if (proofOf(user, salt, aBytes, bBytes, key) != proof) return std::nullopt;
     return std::pair(key, sha512(aBytes + std::string(proof) + key));
 }
 
