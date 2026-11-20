@@ -3324,10 +3324,11 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     appearance.Spacing(12);
     appearance.Children().Append(text(L"Guide_Theme"));
     RadioButtons themes;
-    for (const auto* key : {L"Theme_System", L"Theme_Light", L"Theme_Dark"}) themes.Items().Append(box_value(tr(key)));
+    for (const auto* key : {L"Theme_System", L"Theme_Light", L"Theme_Dark", L"Theme_Black"})
+        themes.Items().Append(box_value(tr(key)));
     themes.SelectedIndex(int32_t(settings_.theme));
     themes.SelectionChanged([this, themes, dialog](auto&&, auto&&) {
-        settings_.theme = Theme(std::clamp(themes.SelectedIndex(), 0, 2));
+        settings_.theme = Theme(std::clamp(themes.SelectedIndex(), 0, int32_t(Theme::Black)));
         applySettingsNow();
         dialog.RequestedTheme(Content().as<FrameworkElement>().ActualTheme());
     });
@@ -3355,8 +3356,9 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     backend.Header(box_value(tr(L"Settings_Backend/Header")));
     backend.Width(320);
     // In Backend's order, so an index is its Backend.
-    for (const auto& name : {hstring(L"WASAPI"), hstring(L"ASIO"), hstring(L"Kernel Streaming"),
-                             tr(L"Settings_NetworkGroup/Text"), hstring(L"AirPlay")})
+    for (const auto& name :
+         {hstring(L"WASAPI"), hstring(L"ASIO"), hstring(L"Kernel Streaming"), tr(L"Settings_NetworkGroup/Text"),
+          hstring(L"AirPlay"), ui::utf8(camel::backendName(Backend::HQPlayer))})
         backend.Items().Append(box_value(name));
     ComboBox device;
     device.Header(box_value(tr(L"Settings_Device/Header")));
@@ -3364,10 +3366,11 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     auto devices = std::make_shared<std::vector<std::string>>(); // ids in the order shown
     const auto fillDevices = [this, device, devices](Backend chosen) {
         const auto catalog = server_->snapshot().devices;
-        const auto* list =
-            std::array{&catalog.wasapi, &catalog.asio, &catalog.ks, &catalog.network, &catalog.airplay}[size_t(chosen)];
-        const std::string saved = *std::array{&settings_.wasapi.deviceId, &settings_.asio.driverClsid, &settings_.ks.deviceId,
-                                              &settings_.network.udn, &settings_.airplay.deviceId}[size_t(chosen)];
+        const auto* list = std::array{&catalog.wasapi,  &catalog.asio,    &catalog.ks,
+                                      &catalog.network, &catalog.airplay, &catalog.hqplayer}[size_t(chosen)];
+        const std::string saved =
+            *std::array{&settings_.wasapi.deviceId, &settings_.asio.driverClsid, &settings_.ks.deviceId,
+                        &settings_.network.udn,     &settings_.airplay.deviceId, &settings_.hqplayer.address}[size_t(chosen)];
         device.Items().Clear();
         devices->clear();
         if (chosen == Backend::Wasapi) {
@@ -3380,7 +3383,7 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
             devices->push_back(entry.id);
         }
         // A player or receiver not found now is still the output; nothing chosen keeps it.
-        const bool network = chosen == Backend::Network || chosen == Backend::AirPlay;
+        const bool network = camel::isStreamed(chosen);
         const auto selected = std::find(devices->begin(), devices->end(), saved);
         device.SelectedIndex(devices->empty()             ? -1
                              : selected != devices->end() ? int32_t(selected - devices->begin())
