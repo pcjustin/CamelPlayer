@@ -235,8 +235,12 @@ impl SymDecoder {
                     return Ok(true);
                 }
                 // A lossy packet that does not decode plays as silence of its length and decoding goes on, as in
-                // other decoders; the length and every later position stay as they were.
-                Err(Error::DecodeError(_)) if self.lossy => {
+                // other decoders; the length and every later position stay as they were. The length is the
+                // container's word: beyond any packet's it is an error, not memory for all of it.
+                Err(Error::DecodeError(_))
+                    if self.lossy
+                        && self.ticks.to_frames(packet.dur.get()) <= MAX_SILENT_PACKET_FRAMES =>
+                {
                     let trimmed = if self.gapless {
                         packet.trim_start.get() + packet.trim_end.get()
                     } else {
@@ -257,6 +261,9 @@ impl SymDecoder {
         }
     }
 }
+
+/// The longest undecodable packet played as silence: an AAC packet holds 2,048 frames at most.
+const MAX_SILENT_PACKET_FRAMES: u64 = 8192;
 
 /// The sampling rate an AAC AudioSpecificConfig declares (ISO/IEC 14496-3 1.6.3.4); None for an explicit rate.
 fn aac_config_rate(params: &AudioCodecParameters) -> Option<u32> {

@@ -784,6 +784,28 @@ TEST(LossyDecoderPolicy, AnMp3FrameThatDoesNotDecodePlaysToItsEnd) {
     std::filesystem::remove(out);
 }
 
+// A packet that does not decode plays as silence of the length its container declares, which a damaged file can set
+// to hours: so long a packet is an error, not memory for all of it.
+TEST(LossyDecoderPolicy, AnUndecodableAacPacketOfAbsurdLengthIsRefused) {
+    reference();
+    auto m4a = readFile(path(kFixtures[0]));
+    const size_t stts = m4a.find("stts"), stsz = m4a.find("stsz"), stco = m4a.find("stco");
+    ASSERT_NE(stts, std::string::npos);
+    ASSERT_NE(stsz, std::string::npos);
+    ASSERT_NE(stco, std::string::npos);
+    constexpr size_t kPacket = 40;
+    size_t at = be32At(m4a, stco + 12);
+    for (size_t s = 0; s < kPacket; s++) at += be32At(m4a, stsz + 16 + s * 4);
+    const size_t size = be32At(m4a, stsz + 16 + kPacket * 4);
+    m4a.replace(at, size, std::string(size, char(0)));
+    const auto damaged = writeFile("undecodable-packet.m4a", m4a);
+    EXPECT_EQ(decodeAll(*openDecoder(DecoderKind::Symphonia, damaged)).size(), reference().size())
+        << "of its own length it plays as silence";
+    for (size_t e = 0; e < be32At(m4a, stts + 8); e++) m4a.replace(stts + 16 + e * 8, 4, be32(1U << 24));
+    const auto file = writeFile("undecodable-long-packet.m4a", m4a);
+    EXPECT_ANY_THROW(decodeAll(*openDecoder(DecoderKind::Symphonia, file)));
+}
+
 // Some taggers store the iTunes genre as one byte of text; Symphonia read it as a number and refused the whole file.
 TEST(LossyDecoderPolicy, AMalformedMp4TagStopsNoDecoder) {
     reference();
