@@ -352,6 +352,27 @@ TEST(LossyDecoderPolicy, PlaysThroughTheEngineUnchanged) {
         }
 }
 
+// An edit list that counts more edits than its box holds has only those the box holds: what follows the box is not
+// read for edits, so the file's own edit still gives its length, and a count of billions is not read to the end of the
+// file. (Symphonia's own reader refuses such a file to play.)
+TEST(LossyDecoderPolicy, AnEditListCountingPastItsBoxHasOnlyTheEditsItHolds) {
+    reference();
+    const auto original = path(kFixtures[0]);
+    auto bytes = readFile(original);
+    const size_t elst = bytes.find("elst");
+    ASSERT_NE(elst, std::string::npos);
+    ASSERT_EQ(be32At(bytes, elst + 8), 1U) << "the fixture has one edit";
+    const auto trim = mp4EncoderTrim(original, kRate);
+    ASSERT_TRUE(trim);
+    for (const uint32_t count : {2U, 0xFFFFFFFFU}) {
+        bytes.replace(elst + 8, 4, be32(count));
+        const auto found = mp4EncoderTrim(writeFile("edit-count.m4a", bytes), kRate);
+        ASSERT_TRUE(found) << count;
+        EXPECT_EQ(found->priming, trim->priming) << count;
+        EXPECT_EQ(found->frames, trim->frames) << count;
+    }
+}
+
 // An edit of length 0, as a fragmented or empty_moov M4A has, says nothing of where the sound ends: the file plays whole.
 TEST(LossyDecoderPolicy, AnEditOfLengthZeroIsIgnored) {
     reference();

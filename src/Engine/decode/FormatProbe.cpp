@@ -382,10 +382,13 @@ std::optional<EncoderTrim> editTrim(const File& f, const Box& moov, const Box& t
     if (!movieScale || !mediaScale || !f.readAt(elst->start, h, sizeof h)) return std::nullopt;
     const bool wide = h[0] == 1;
     const size_t entrySize = wide ? 20 : 12;
+    // A count past the box has only the edits the box holds: what follows it is no edit.
+    const uint64_t room = elst->end - elst->start > 8 ? (elst->end - elst->start - 8) / entrySize : 0;
+    const uint64_t count = std::min<uint64_t>(be32(h + 4), room);
     std::optional<EncoderTrim> trim;
-    for (uint32_t i = 0, count = be32(h + 4); i < count; i++) {
+    for (uint64_t i = 0; i < count; i++) {
         uint8_t e[20];
-        if (!f.readAt(elst->start + 8 + uint64_t(i) * entrySize, e, entrySize)) return std::nullopt;
+        if (!f.readAt(elst->start + 8 + i * entrySize, e, entrySize)) return std::nullopt;
         const uint64_t duration = wide ? be64(e) : be32(e);
         const int64_t mediaTime = wide ? int64_t(be64(e + 8)) : int64_t(int32_t(be32(e + 4)));
         if (mediaTime == -1) continue; // an empty edit inserts silence; there is nothing to trim in it
