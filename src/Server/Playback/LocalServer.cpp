@@ -355,6 +355,7 @@ public:
                 return squarePicture(image->bytes, 512);
             });
         discord_->configure(settings_.discord);
+        deferredWorker_ = std::thread([this] { deferredMain(); });
         worker_ = std::thread([this] { run(); });
     }
 
@@ -500,7 +501,7 @@ public:
     void waitIdle() {
         std::unique_lock lock(mutex_);
         const auto target = issued_.id;
-        while (processed_ < target) idle_.wait(lock);
+        while (processed_ < target || deferredOpen_ > 0) idle_.wait(lock);
     }
 
     LibraryTrackPage browseLibrary(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
@@ -885,12 +886,14 @@ private:
                 break;
             case CommandKind::AddLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                libraryMonitor_->scanAdded(LibraryScanner(*library_).addRoot(std::filesystem::path(toWide(c.path))));
+                defer([this, path = c.path] {
+                    libraryMonitor_->scanAdded(LibraryScanner(*library_).addRoot(std::filesystem::path(toWide(path))));
+                });
                 break;
             case CommandKind::RemoveLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                LibraryScanner(*library_).removeRoot(c.rootId);
-                refreshLibraryAvailability();
+                defer([this, root = c.rootId] { LibraryScanner(*library_).removeRoot(root); },
+                      [this] { refreshLibraryAvailability(); });
                 break;
             case CommandKind::Play:
                 if (restored_)
@@ -946,22 +949,28 @@ private:
                 if (!library_) throw std::logic_error("Server library is not configured");
                 if (session_ && (c.tracks.empty() || std::ranges::find(c.tracks, session_->track()) != c.tracks.end()))
                     session_->discard();
-                resetPlayStatistics(*library_, c.tracks);
+                defer([this, tracks = c.tracks] { resetPlayStatistics(*library_, tracks); });
                 break;
             case CommandKind::SetFavorite:
             case CommandKind::SetAlbumFavorite:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                if (c.kind == CommandKind::SetFavorite)
-                    setTrackFavorite(*library_, c.tracks, c.favorite);
-                else
-                    setAlbumFavorite(*library_, c.albums, c.favorite);
-                applyMarks(entries_);
-                ++marks_;
-                queueChanged_ = true;
+                defer(
+                    [this, track = c.kind == CommandKind::SetFavorite, tracks = c.tracks, albums = c.albums,
+                     favorite = c.favorite] {
+                        if (track)
+                            setTrackFavorite(*library_, tracks, favorite);
+                        else
+                            setAlbumFavorite(*library_, albums, favorite);
+                    },
+                    [this] {
+                        applyMarks(entries_);
+                        ++marks_;
+                        queueChanged_ = true;
+                    });
                 break;
             case CommandKind::SetArtistFavorite:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                setArtistFavorite(*library_, c.artists, c.favorite);
+                defer([this, artists = c.artists, favorite = c.favorite] { setArtistFavorite(*library_, artists, favorite); });
                 break;
             case CommandKind::ApplySettings: {
                 if (c.settings) {
@@ -1003,10 +1012,10 @@ private:
                 refreshDevices();
                 break;
             case CommandKind::ShowAirPlayCode:
-                showAirPlayCode(c.receiver);
+                defer([this, id = c.receiver] { showAirPlayCode(id); });
                 break;
             case CommandKind::PairAirPlay:
-                pairAirPlay(c.receiver, c.code);
+                defer([this, id = c.receiver, code = c.code] { pairAirPlay(id, code); }, [this] { refreshDevices(); });
                 break;
             case CommandKind::ShowControlPanel:
                 try {
@@ -1654,7 +1663,8 @@ private:
             p.underruns == state_.playback.underruns && p.playerVolume == state_.playback.playerVolume &&
             p.playerVolumeDb == state_.playback.playerVolumeDb && p.playerMuted == state_.playback.playerMuted &&
             p.receivers == state_.playback.receivers && p.receiverLeft == state_.playback.receiverLeft &&
-            p.receiverAsking == state_.playback.receiverAsking && state_.devices.revision == published_.devices.revision)
+            p.receiverAsking == state_.playback.receiverAsking && state_.devices.revision == published_.devices.revision &&
+            state_.finished == published_.finished)
             return;
         state_.playback = p;
         state_.settings = settingsDto(settings_);
@@ -1893,7 +1903,6 @@ private:
             if (now && now->support == airplay::Support::Supported) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        refreshDevices();
     }
 
     void checkEnabledReceivers(const std::vector<SavedOutput>& before) {
@@ -2293,6 +2302,52 @@ private:
         refreshDevices();
     }
 
+    // What work that throws ends with, as a command's error would be.
+    static std::optional<Failure> failureOf(const std::function<void()>& work) {
+        try {
+            work();
+            return std::nullopt;
+        } catch (const audio::Error& e) {
+            return Failure{e.code(), e.what()};
+        } catch (const std::exception& e) {
+            return Failure{audio::ErrorCode::Other, e.what()};
+        } catch (...) {
+            return Failure{audio::ErrorCode::Other, "unknown Server command failure"};
+        }
+    }
+
+    // Leaves the executing command's slow part to the deferred worker; `finish` then runs on this thread.
+    void defer(std::function<void()> work, std::function<void()> finish = {}) {
+        {
+            std::lock_guard lock(mutex_);
+            ++deferredOpen_;
+        }
+        {
+            std::lock_guard lock(deferredMutex_);
+            deferredQueue_.push_back({executing_, std::move(work), std::move(finish), std::nullopt});
+        }
+        deferredWake_.notify_all();
+    }
+
+    void deferredMain() {
+        for (;;) {
+            Deferred item;
+            {
+                std::unique_lock lock(deferredMutex_);
+                deferredWake_.wait(lock, [&] { return deferredStopping_ || !deferredQueue_.empty(); });
+                if (deferredQueue_.empty()) return;
+                item = std::move(deferredQueue_.front());
+                deferredQueue_.pop_front();
+            }
+            item.failure = failureOf(item.work);
+            {
+                std::lock_guard lock(mutex_);
+                deferredDone_.push_back(std::move(item));
+            }
+            cv_.notify_all();
+        }
+    }
+
     void run() {
         const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         std::unique_ptr<audio::DeviceWatcher> deviceWatcher;
@@ -2308,7 +2363,7 @@ private:
             {
                 std::unique_lock lock(mutex_);
                 const auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
-                while (!closing_ && queue_.empty())
+                while (!closing_ && queue_.empty() && deferredDone_.empty())
                     if (cv_.wait_until(lock, due) == std::cv_status::timeout) break;
                 if (!queue_.empty()) {
                     pending = std::move(queue_.front());
@@ -2321,6 +2376,7 @@ private:
                     updatePlaySession();
                     refreshLibraryAvailability();
                     followAirPlayGroup();
+                    executing_ = pending->stamp.id;
                     execute(*pending);
                 } catch (const audio::Error& e) {
                     state_.commandError = Failure{e.code(), e.what()};
@@ -2345,16 +2401,36 @@ private:
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
+            // One deferred command's end at a time, each in a snapshot of its own.
+            std::optional<Deferred> done;
+            {
+                std::lock_guard lock(mutex_);
+                if (!deferredDone_.empty()) {
+                    done = std::move(deferredDone_.front());
+                    deferredDone_.pop_front();
+                }
+            }
+            if (done) {
+                if (!done->failure && done->finish) done->failure = failureOf(done->finish);
+                state_.finished = {done->command, std::move(done->failure)};
+            }
             saveQueueSession(false);
             publish(pending.has_value());
-            if (pending) {
+            if (pending || done) {
                 {
                     std::lock_guard lock(mutex_);
-                    processed_ = pending->stamp.id;
+                    if (pending) processed_ = pending->stamp.id;
+                    if (done) --deferredOpen_;
                 }
                 idle_.notify_all();
             }
         }
+        {
+            std::lock_guard lock(deferredMutex_);
+            deferredStopping_ = true;
+        }
+        deferredWake_.notify_all();
+        deferredWorker_.join();
         deviceWatcher.reset();
         playerVolume_.reset();
         {
@@ -2418,6 +2494,22 @@ private:
     _Guarded_by_(mutex_) CommandStamp issued_;
     _Guarded_by_(mutex_) uint64_t processed_ = 0;
     _Guarded_by_(mutex_) bool closing_ = false;
+    // A command's slow part, left beside the command thread so that no other command waits for it: pairing waits for a
+    // receiver's user, and the library writer can be in a long transaction. Its `finish` then runs on the command
+    // thread, and its outcome goes out as Snapshot::finished.
+    struct Deferred {
+        uint64_t command = 0;
+        std::function<void()> work, finish;
+        std::optional<Failure> failure;
+    };
+    _Guarded_by_(mutex_) std::deque<Deferred> deferredDone_;
+    _Guarded_by_(mutex_) size_t deferredOpen_ = 0; // deferred and not yet finished, which waitIdle waits for
+    std::mutex deferredMutex_;
+    std::condition_variable deferredWake_;
+    _Guarded_by_(deferredMutex_) std::deque<Deferred> deferredQueue_;
+    _Guarded_by_(deferredMutex_) bool deferredStopping_ = false;
+    std::thread deferredWorker_;
+    uint64_t executing_ = 0; // the command being executed, on the command thread
     std::promise<void> queueSaved_, backgroundStopped_;
     Snapshot published_, state_;
     QueuePolicy policy_;

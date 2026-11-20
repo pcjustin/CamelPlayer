@@ -19,8 +19,8 @@ inline bool movesOnlyThePosition(const camel::server::Snapshot& snapshot, const 
     return snapshot.queueEntryId == shown.queueEntryId && snapshot.queue.revision == shown.queue.revision &&
            snapshot.queue.marks == shown.queue.marks && snapshot.queue.upcomingEntryId == shown.queue.upcomingEntryId &&
            snapshot.devices.revision == shown.devices.revision && snapshot.commandError == shown.commandError &&
-           now.revision == before.revision && now.state == before.state && now.pathUtf8 == before.pathUtf8 &&
-           now.total == before.total && now.underruns == before.underruns;
+           snapshot.finished == shown.finished && now.revision == before.revision && now.state == before.state &&
+           now.pathUtf8 == before.pathUtf8 && now.total == before.total && now.underruns == before.underruns;
 }
 
 class SnapshotForward {

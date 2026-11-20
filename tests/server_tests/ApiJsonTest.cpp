@@ -51,6 +51,7 @@ Snapshot fullSnapshot() {
     Snapshot s;
     s.revision = 41;
     s.command = {9, 2, 5};
+    s.finished = {8, camel::server::Failure{audio::ErrorCode::AccessDenied, "the code is not the receiver's"}};
     s.queueEntryId = 3;
     s.track = TrackSource("C:/music/a.dsf", {}, DecoderKind::DsdNexus);
     s.queue.revision = 5;

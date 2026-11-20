@@ -329,6 +329,14 @@ struct QueueSnapshot {
     bool operator==(const QueueSnapshot&) const = default;
 };
 
+// The last command whose work went on beside the Server's command thread and has ended, and how: an AirPlay receiver
+// showing its code or pairing, a change of the library. Such a command completes at once; this tells its outcome.
+struct FinishedWork {
+    uint64_t command = 0; // its CommandStamp::id; 0 before any
+    std::optional<Failure> failure;
+    bool operator==(const FinishedWork&) const = default;
+};
+
 struct Snapshot {
     uint32_t apiVersion = kApiVersion;
     uint64_t revision = 0;
@@ -340,6 +348,7 @@ struct Snapshot {
     SettingsDto settings;
     DeviceCatalog devices;
     std::optional<Failure> commandError;
+    FinishedWork finished;
     std::optional<bool> controlPanelOpened;
     bool operator==(const Snapshot&) const = default;
 };

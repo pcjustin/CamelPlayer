@@ -563,6 +563,7 @@ json toJson(const Snapshot& s) {
               {"hqplayer", toJson(s.devices.hqplayer)},
               {"defaultWasapi", s.devices.defaultWasapi}}},
             {"commandError", optionalJson(s.commandError)},
+            {"finished", {{"command", s.finished.command}, {"failure", optionalJson(s.finished.failure)}}},
             {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
 }
 
@@ -586,6 +587,8 @@ Snapshot snapshotFromJson(const json& j) {
     s.devices.hqplayer = devicesFrom(devices, "hqplayer");
     s.devices.defaultWasapi = value<std::string>(devices, "defaultWasapi");
     s.commandError = optional<Failure>(j, "commandError", failureFrom);
+    const json& finished = field(j, "finished");
+    s.finished = {value<uint64_t>(finished, "command"), optional<Failure>(finished, "failure", failureFrom)};
     s.controlPanelOpened = optional<bool>(j, "controlPanelOpened", [](const json& v) {
         if (!v.is_boolean()) invalid("controlPanelOpened is not a boolean");
         return v.get<bool>();

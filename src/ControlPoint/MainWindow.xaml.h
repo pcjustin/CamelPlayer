@@ -335,6 +335,7 @@ private:
     uint64_t shownRevision_ = 0;
     std::string shownAsking_;
     uint64_t shownCommandId_ = 0;
+    uint64_t shownFinishedId_ = 0;
     // The pairing an AirPlay pairing dialog waits for: its command, and what it does with the command's error.
     struct PendingPairing {
         uint64_t command = 0;

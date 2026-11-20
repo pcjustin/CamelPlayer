@@ -2261,12 +2261,18 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
 
     if (snapshot.command.id != shownCommandId_) {
         shownCommandId_ = snapshot.command.id;
-        if (pairing_ && snapshot.command.id >= pairing_->command) { // its dialog says how the pairing went
+        if (snapshot.commandError)
+            showError(snapshot.commandError->code, snapshot.commandError->detail, snapshot.settings.backend);
+    }
+    // A pairing, a code shown or a change of the library ends after its command, and says how here.
+    if (snapshot.finished.command != shownFinishedId_) {
+        shownFinishedId_ = snapshot.finished.command;
+        if (pairing_ && snapshot.finished.command == pairing_->command) { // its dialog says how the pairing went
             const auto done = std::move(pairing_->done);
             pairing_.reset();
-            done(snapshot.commandError);
-        } else if (snapshot.commandError) {
-            showError(snapshot.commandError->code, snapshot.commandError->detail, snapshot.settings.backend);
+            done(snapshot.finished.failure);
+        } else if (snapshot.finished.failure) {
+            showError(snapshot.finished.failure->code, snapshot.finished.failure->detail, snapshot.settings.backend);
         }
     }
 

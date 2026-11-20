@@ -816,7 +816,10 @@ TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
     EXPECT_EQ(roots.folders.size(), 2u);
     Command missing = command(CommandKind::AddLibraryRoot);
     missing.path = toUtf8((dir / "does-not-exist").wstring());
-    EXPECT_TRUE(send(missing).commandError);
+    const auto refused = send(missing); // added beside the command thread, so it says how in `finished`
+    EXPECT_FALSE(refused.commandError);
+    EXPECT_EQ(refused.finished.command, refused.command.id);
+    EXPECT_TRUE(refused.finished.failure);
 }
 
 TEST_F(LibraryPlaybackTest, RemovingARootTakesItsTracksOutOfTheQueue) {
@@ -879,6 +882,29 @@ TEST_F(LibraryPlaybackTest, SavingTheQueueWhileItsStorageIsAwayKeepsItsTracksInT
     const auto page = server->playlistItems(saved.playlist, 0, 10);
     ASSERT_EQ(page.items.size(), 1u);
     EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a)}));
+}
+
+// A library command waits for the library writer beside the command thread: while another holds the library, the
+// Server answers the commands that follow.
+TEST_F(LibraryPlaybackTest, ALibraryCommandHoldsUpNoOtherCommandWhileTheLibraryIsBusy) {
+    const auto a = testutil::generatedFile({"busy-library", 48000, 16, 2, 0.3});
+    setUp({a});
+    std::promise<void> release;
+    const auto released = release.get_future().share();
+    auto holding = store->write([released](sqlite::Database&) { released.wait(); });
+    std::this_thread::sleep_for(100ms);
+    Command favorite = command(CommandKind::SetFavorite);
+    favorite.tracks = {LibraryTrackKey{file(a)}};
+    favorite.favorite = true;
+    server->submit(std::move(favorite));
+    Command shuffle = command(CommandKind::SetShuffle);
+    shuffle.shuffle = true;
+    const auto stamp = server->submit(std::move(shuffle));
+    const bool answered = waitFor([&] { return server->snapshot().command.id >= stamp.id; }, 1000ms);
+    release.set_value();
+    holding.get();
+    server->waitIdle();
+    EXPECT_TRUE(answered);
 }
 
 TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningTheFileUntilPlay) {

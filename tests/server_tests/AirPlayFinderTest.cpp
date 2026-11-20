@@ -897,10 +897,12 @@ public:
         return "absent";
     }
 
+    // Showing a code and pairing end beside the command thread, and say how in `finished`.
     std::optional<Failure> run(Command command) {
-        server_.submit(std::move(command));
+        const auto stamp = server_.submit(std::move(command));
         server_.waitIdle();
-        return server_.snapshot().commandError;
+        const auto now = server_.snapshot();
+        return now.finished.command == stamp.id ? now.finished.failure : now.commandError;
     }
 
     std::optional<Failure> pair(const std::string& id, const std::string& code) {
@@ -994,6 +996,33 @@ TEST(AirPlayPairingServerTest, AReceiverThatShowsACodeIsPairedWithItAndVerifiedA
     remove.settings = settingsDto(chosen);
     EXPECT_FALSE(server.run(std::move(remove)));
     EXPECT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000004") == "code"; }));
+}
+
+// A receiver whose user is still deciding whether to show a code holds up no other command.
+TEST(AirPlayPairingServerTest, ShowingACodeHoldsUpNoOtherCommand) {
+    FakeRtsp rtsp;
+    rtsp.demandPairing("4821");
+    rtsp.pairOnlyWithKeys();
+    rtsp.askUser(3000ms);
+    FakeMdns mdns;
+    auto tv = record(rtsp, "C0FFEE000006", "TV");
+    tv.airplayTxt = {"deviceid=C0:FF:EE:00:00:06", "flags=0x8", "acl=0"};
+    mdns.add(tv);
+    PairingServer server(mdns);
+    ASSERT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000006") == "code"; }));
+    Command show;
+    show.kind = CommandKind::ShowAirPlayCode;
+    show.receiver = "C0FFEE000006";
+    server.server().submit(std::move(show));
+    ASSERT_TRUE(waitFor([&] {
+        return std::ranges::any_of(rtsp.requests(), [](const std::string& r) { return r.starts_with("POST /pair-pin-start "); });
+    }));
+    Command shuffle;
+    shuffle.kind = CommandKind::SetShuffle;
+    shuffle.shuffle = true;
+    const auto stamp = server.server().submit(std::move(shuffle));
+    EXPECT_TRUE(waitFor([&] { return server.server().snapshot().command.id >= stamp.id; }, 1000ms));
+    server.server().waitIdle();
 }
 
 // A receiver reset forgets this computer: it asks for its code again rather than being refused for good.
