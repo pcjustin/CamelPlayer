@@ -355,6 +355,24 @@ UPDATE files SET name='01.flac' WHERE id=1;)");
     EXPECT_NE(text.find("M\\Album\\01.flac"), std::string::npos) << text;
 }
 
+// A write that fails only as the file is closed, as on a full disk, leaves the playlist file as it was.
+TEST_F(PlaylistsTest, AnExportThatCannotBeWrittenOutLeavesTheFileAsItWas) {
+    const auto saved = savePlaylist(*store, "Full", {{LibraryTrackKey{1}, ""}});
+    const auto file = dir / "full.m3u8";
+    std::ofstream(file, std::ios::binary) << "#EXTM3U\r\nkept.flac\r\n";
+    const HANDLE held = CreateFileW((file.wstring() + L".tmp").c_str(), GENERIC_READ | GENERIC_WRITE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, 0, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    OVERLAPPED at{};
+    ASSERT_TRUE(LockFileEx(held, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1u << 20, 0, &at));
+    EXPECT_THROW(exportPlaylistFile(*store, saved.playlist, file), std::runtime_error);
+    UnlockFileEx(held, 0, 1u << 20, 0, &at);
+    CloseHandle(held);
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(text, "#EXTM3U\r\nkept.flac\r\n");
+}
+
 TEST_F(PlaylistsTest, PlaylistFilesUseTheUsualPathFormAndTheOnDiskNameOfExtendedLibraryPaths) {
     store
         ->write([](sqlite::Database& db) {

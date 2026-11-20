@@ -539,8 +539,9 @@ void exportPlaylistFile(const LibraryStore& store, int64_t playlist, const std::
     temporary += L".tmp";
     {
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (!stream.write(out.data(), std::streamsize(out.size())))
-            throw std::runtime_error("cannot write playlist file: " + toUtf8(target.wstring()));
+        stream.write(out.data(), std::streamsize(out.size()));
+        stream.close();
+        if (!stream) throw std::runtime_error("cannot write playlist file: " + toUtf8(target.wstring()));
     }
     if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
         std::filesystem::remove(temporary);
