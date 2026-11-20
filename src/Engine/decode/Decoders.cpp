@@ -226,8 +226,11 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
         d = std::make_unique<LossySeek>(kind, path, lossyBits, lossyLengthDeclared(path));
     else
         d = openAdapter(kind, path, lossyBits);
+    // A trim that starts past the end of the stream, as a damaged edit list may say, is not kept: the file plays whole.
     if (format == AudioFormat::Aac && kind == DecoderKind::Symphonia)
-        if (const auto trim = mp4EncoderTrim(path, d->info().sampleRate)) d = std::make_unique<TrimDelay>(std::move(d), *trim);
+        if (const auto trim = mp4EncoderTrim(path, d->info().sampleRate);
+            trim && (!d->info().totalFrames || trim->priming < d->info().totalFrames))
+            d = std::make_unique<TrimDelay>(std::move(d), *trim);
     if (format == AudioFormat::Aiff && kind == DecoderKind::Symphonia)
         if (const auto frames = aiffSampleFrames(path)) d = std::make_unique<FrameLimit>(std::move(d), *frames);
     return d;

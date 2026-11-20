@@ -373,6 +373,23 @@ TEST(LossyDecoderPolicy, AnEditListCountingPastItsBoxHasOnlyTheEditsItHolds) {
     }
 }
 
+// An edit that starts past the end of the stream, as a damaged edit list may say, leaves nothing to trim: the file plays
+// whole, as it would without the edit.
+TEST(LossyDecoderPolicy, AnEditStartingPastTheStreamIsIgnored) {
+    reference();
+    auto bytes = readFile(path(kFixtures[0]));
+    const size_t elst = bytes.find("elst");
+    ASSERT_NE(elst, std::string::npos);
+    ASSERT_EQ(bytes[elst + 4], 0) << "the fixture's edits are 32-bit";
+    bytes.replace(elst + 16, 4, be32(0x7FFFFFF0U));
+    const auto file = writeFile("edit-past.m4a", bytes);
+    for (const auto kind : decodersFor(AudioFormat::Aac)) {
+        std::unique_ptr<IDecoder> decoder;
+        ASSERT_NO_THROW(decoder = openDecoder(kind, file)) << decoderName(kind);
+        EXPECT_GE(decodeAll(*decoder).size(), reference().size()) << decoderName(kind);
+    }
+}
+
 // An edit of length 0, as a fragmented or empty_moov M4A has, says nothing of where the sound ends: the file plays whole.
 TEST(LossyDecoderPolicy, AnEditOfLengthZeroIsIgnored) {
     reference();

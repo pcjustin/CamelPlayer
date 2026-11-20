@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -396,6 +397,9 @@ std::optional<EncoderTrim> editTrim(const File& f, const Box& moov, const Box& t
         const int64_t mediaTime = wide ? int64_t(be64(e + 8)) : int64_t(int32_t(be32(e + 4)));
         if (mediaTime == -1) continue; // an empty edit inserts silence; there is nothing to trim in it
         if (trim || mediaTime < 0) return std::nullopt;
+        // A 64-bit time past what the rescale holds is no trim to keep.
+        const auto fits = [&](uint64_t value, uint64_t from) { return value <= (UINT64_MAX - from / 2) / sampleRate; };
+        if (!fits(uint64_t(mediaTime), *mediaScale) || !fits(duration, *movieScale)) return std::nullopt;
         trim = EncoderTrim{rescale(uint64_t(mediaTime), sampleRate, *mediaScale), rescale(duration, sampleRate, *movieScale)};
     }
     return trim;
