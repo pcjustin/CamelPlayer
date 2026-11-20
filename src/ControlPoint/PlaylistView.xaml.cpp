@@ -150,7 +150,7 @@ void PlaylistView::load() {
     }
     struct Loaded {
         hstring name;
-        int64_t revision = 0, durationMs = 0, unavailable = 0;
+        int64_t revision = 0;
         std::vector<ui::BrowseRow> rows;
     };
     background([this, server = server_, playlist = playlist_] {
@@ -169,12 +169,11 @@ void PlaylistView::load() {
                 row.subtitle = ui::utf8(item.artist);
                 row.detail = ui::utf8(item.album);
                 if (item.durationMs > 0) row.trailing = hstring(ui::formatTime(double(item.durationMs) / 1000.0));
+                row.durationMs = item.durationMs;
                 row.file = item.track ? item.track->file : 0;
                 row.unavailable = !item.available;
                 row.marks = row.file != 0;
                 row.favorite = item.favorite;
-                loaded->durationMs += item.durationMs;
-                loaded->unavailable += !item.available;
                 loaded->rows.push_back(std::move(row));
             }
             offset += int64_t(page.items.size());
@@ -184,20 +183,28 @@ void PlaylistView::load() {
             name_ = loaded->name;
             edits_.loaded(loaded->revision);
             HeaderTitle().Text(name_);
-            const auto total = loaded->rows.size();
-            std::wstring detail(ui::format(L"Library_Tracks", {ui::count(int64_t(total))}));
-            if (loaded->durationMs) detail += L" · " + ui::formatTime(double(loaded->durationMs) / 1000.0);
-            if (loaded->unavailable)
-                detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {ui::count(loaded->unavailable)}));
-            if (total > ui::PlaylistCollection::kShown)
-                detail +=
-                    L" · " + std::wstring(ui::format(L"Playlist_Listed", {ui::count(int64_t(ui::PlaylistCollection::kShown))}));
-            HeaderDetail().Text(hstring(detail));
             entries_->reset(std::move(loaded->rows));
             EmptyText().Text(tr(L"Playlist_EmptyPlaylist"));
-            EmptyText().Visibility(total ? Visibility::Collapsed : Visibility::Visible);
+            showTotals();
         });
     });
+}
+
+void PlaylistView::showTotals() {
+    const auto& rows = entries_->rows();
+    int64_t durationMs = 0, unavailable = 0;
+    for (const auto& row : rows) {
+        durationMs += row.durationMs;
+        unavailable += row.unavailable;
+    }
+    const auto total = rows.size();
+    std::wstring detail(ui::format(L"Library_Tracks", {ui::count(int64_t(total))}));
+    if (durationMs) detail += L" · " + ui::formatTime(double(durationMs) / 1000.0);
+    if (unavailable) detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {ui::count(unavailable)}));
+    if (total > ui::PlaylistCollection::kShown)
+        detail += L" · " + std::wstring(ui::format(L"Playlist_Listed", {ui::count(int64_t(ui::PlaylistCollection::kShown))}));
+    HeaderDetail().Text(hstring(detail));
+    EmptyText().Visibility(total ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void PlaylistView::play(size_t index) {
@@ -239,7 +246,8 @@ void PlaylistView::remove(const std::vector<ui::BrowseRow>& rows) {
         ids.insert(row.id);
     }
     entries_->remove(ids);
-    edit(std::move(change), true);
+    showTotals();
+    edit(std::move(change), false);
 }
 
 void PlaylistView::edit(PlaylistEdit change, bool reloadAfter) {
@@ -273,6 +281,10 @@ void PlaylistView::send(QueuedEdit queued) {
             }
             if (self->playlist_ == change.playlist) {
                 self->edits_.answered(result->revision);
+                if (change.kind == PlaylistEdit::Kind::Rename) {
+                    self->name_ = ui::utf8(result->name);
+                    self->HeaderTitle().Text(self->name_);
+                }
                 if (reloadAfter) self->load();
             }
             if (renamedOrDeleted && self->handlers_.changed) self->handlers_.changed();
@@ -299,7 +311,7 @@ winrt::fire_and_forget PlaylistView::OnRenameClick(Windows::Foundation::IInspect
     change.kind = PlaylistEdit::Kind::Rename;
     change.playlist = playlist_;
     change.name = camel::toUtf8(std::wstring_view(text.c_str(), text.size()));
-    edit(std::move(change), true);
+    edit(std::move(change), false);
 }
 
 winrt::fire_and_forget PlaylistView::OnDeleteClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

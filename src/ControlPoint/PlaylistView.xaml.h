@@ -61,6 +61,8 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
 
 private:
     void load();
+    // The header's track count and length, and the empty note, from the entries the page holds.
+    void showTotals();
     void play(size_t index);
     // The selected entries in list order, or the right-clicked one when it is not selected.
     std::vector<ui::BrowseRow> selectedRows(Windows::Foundation::IInspectable const& clicked = nullptr);
