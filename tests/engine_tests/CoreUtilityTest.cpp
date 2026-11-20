@@ -349,6 +349,29 @@ TEST(Zip, AnEntryDeclaringMoreThanItsDataCanHoldIsRefusedBeforeItIsAllocated) {
     std::filesystem::remove(file);
 }
 
+// A small archive can name one megabyte of packed data many times, each time as a gigabyte: what its entries hold
+// together is bounded as each entry is, before any of it is unpacked.
+TEST(Zip, EntriesHoldingTooMuchTogetherAreRefused) {
+    const auto le = [](size_t value, int bytes) {
+        std::string out;
+        for (int i = 0; i < bytes; ++i) out += char(value >> (8 * i));
+        return out;
+    };
+    constexpr size_t kPacked = size_t{1} << 20, kSize = size_t{1} << 30;
+    const std::string name = "a.bin";
+    const std::string sizes = le(0, 4) + le(kPacked, 4) + le(kSize, 4) + le(name.size(), 2) + le(0, 2);
+    std::string zip = std::string("PK\x03\x04", 4) + le(20, 2) + le(0, 2) + le(8, 2) + le(0, 4) + sizes + name;
+    zip.append(kPacked, '\0');
+    const size_t directory = zip.size();
+    constexpr size_t kEntries = 3;
+    const std::string entry = std::string("PK\x01\x02", 4) + le(20, 2) + le(20, 2) + le(0, 2) + le(8, 2) + le(0, 4) + sizes +
+                              std::string(14, char(0)) + name;
+    for (size_t i = 0; i < kEntries; ++i) zip += entry;
+    zip += std::string("PK\x05\x06", 4) + le(0, 4) + le(kEntries, 2) + le(kEntries, 2) + le(zip.size() - directory, 4) +
+           le(directory, 4) + le(0, 2);
+    EXPECT_THROW(listZip(zip), std::runtime_error);
+}
+
 // scan-bench builds a library in its --data folder: it empties only a folder that is missing, empty or one it made,
 // and never one that is, or holds, the player's own data.
 TEST(ScanBench, EmptiesOnlyAFolderItMade) {

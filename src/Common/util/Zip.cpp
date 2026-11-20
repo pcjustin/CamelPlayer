@@ -24,6 +24,7 @@ uint32_t read32(const std::string& s, size_t at) {
 
 constexpr uint64_t kMaxDeflateRatio = 1032;    // the most deflate packs into one byte
 constexpr uint32_t kMaxEntryBytes = 1u << 30;  // far above an impulse response or a release's largest file
+constexpr uint64_t kMaxTotalBytes = 1u << 30;  // and what all of them hold together
 constexpr size_t kFirstOutputBytes = 1u << 16; // the output grows from this as it inflates
 
 // The entry's data, inflated: never more than `size`, which it must reach exactly.
@@ -64,6 +65,7 @@ template <class Each> void walk(const std::string& data, Each&& each) {
     }
     const uint32_t count = read16(data, end + 10);
     size_t at = read32(data, end + 16);
+    uint64_t total = 0;
     for (uint32_t i = 0; i < count; ++i) {
         if (read32(data, at) != 0x02014b50) throw std::runtime_error("zip: damaged central directory");
         const uint32_t flags = read16(data, at + 8);
@@ -89,6 +91,8 @@ template <class Each> void walk(const std::string& data, Each&& each) {
         if (item.start + item.compressed > data.size()) throw std::runtime_error("zip: truncated entry " + item.name);
         if (item.size > kMaxEntryBytes || (item.method == 8 && item.size > item.compressed * kMaxDeflateRatio))
             throw std::runtime_error("zip: " + item.name + " says it holds more than it can");
+        total += item.size;
+        if (total > kMaxTotalBytes) throw std::runtime_error("zip: the entries hold more than an archive may");
         if (item.method != 0 && item.method != 8) throw std::runtime_error("zip: unsupported compression in " + item.name);
         each(std::move(item));
     }
