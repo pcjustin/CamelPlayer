@@ -40,13 +40,18 @@ void pause(std::chrono::milliseconds wait, const CancellationToken& token) {
     }
 }
 
-// MusicBrainz counts requests per client, so every lookup in the process shares one turn.
+// MusicBrainz counts requests per client, so every lookup in the process takes its own turn; each waits for its turn
+// outside the lock, where a cancelled one sees its token at once.
 void waitForMusicBrainz(std::chrono::milliseconds interval, const CancellationToken& token) {
     static std::mutex mutex;
     static Clock::time_point next;
-    std::lock_guard lock(mutex);
-    pause(std::chrono::duration_cast<std::chrono::milliseconds>(next - Clock::now()), token);
-    next = Clock::now() + interval;
+    Clock::time_point turn;
+    {
+        std::lock_guard lock(mutex);
+        turn = std::max(next, Clock::now());
+        next = turn + interval;
+    }
+    pause(std::chrono::duration_cast<std::chrono::milliseconds>(turn - Clock::now()), token);
 }
 
 // A 200 response's body; HTTP 429 and 503 are tried twice more after a pause, anything else throws.

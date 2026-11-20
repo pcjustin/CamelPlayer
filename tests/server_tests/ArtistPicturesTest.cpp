@@ -249,6 +249,21 @@ TEST_F(ArtistPicturesTest, AsksNothingOnlineWhileOffAndKeepsWhatItFinds) {
     EXPECT_FALSE(cache.get(store.get(), {ArtworkKind::Artist, 0, {}, "Nobody"}));
 }
 
+// A lookup cancelled while it waits for its MusicBrainz turn ends at once, not after the turns ahead of it.
+TEST_F(ArtistPicturesTest, ACancelledLookupDoesNotWaitForTheTurnsAheadOfIt) {
+    publish(kMbid, "Q1", 0xFF0000);
+    services.musicbrainzInterval = std::chrono::milliseconds(1500);
+    online::pictureOf(kMbid, services, {});
+    std::thread waiting([&] { online::pictureOf(kMbid, services, {}); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CancellationToken token;
+    token.cancel();
+    const auto before = std::chrono::steady_clock::now();
+    EXPECT_ANY_THROW(online::pictureOf(kMbid, services, token));
+    EXPECT_LT(std::chrono::steady_clock::now() - before, std::chrono::milliseconds(500));
+    waiting.join();
+}
+
 TEST_F(ArtistPicturesTest, LeavesSeveralArtistsOfANameForTheUserToChoose) {
     search(R"({"id":")" + std::string(kMbid) +
            R"(","name":"John Williams","disambiguation":"film composer"},)"
