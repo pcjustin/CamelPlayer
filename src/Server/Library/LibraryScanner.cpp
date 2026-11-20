@@ -39,6 +39,7 @@
 #include <taglib/tfilestream.h>
 #include <taglib/wavfile.h>
 #include <taglib/tbytevectorstream.h>
+#include <taglib/xiphcomment.h>
 
 #include "Server/Library/LibraryIdentity.h"
 #include "Server/Library/LibraryText.h"
@@ -218,7 +219,9 @@ Metadata metadata(const Path& path, int64_t fileSize) {
         out.info.bitsPerSample = bits;
         out.info.totalFrames = properties->sampleFrames();
         out.tags = file.properties();
-        out.cover = cover;
+        // A picture may be kept in the Vorbis comments rather than in a PICTURE block, as the artwork provider reads it.
+        auto* comments = file.xiphComment();
+        out.cover = cover || (comments && (!comments->pictureList().isEmpty() || comments->contains("COVERART")));
         return out;
     }
     const auto read = readLibraryStream(path);
@@ -455,8 +458,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
     }
     struct Album {
         int64_t folder = 0;
-        int64_t firstFile = 0;
-        bool firstHasCover = false;
+        int64_t coverTrackFile = 0; // the file of its first track that holds a picture
         std::string title, artist;
         int64_t discs = 0;
         std::map<int64_t, int64_t> years; // tracks by the year they give
@@ -535,10 +537,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         album.title = titleText;
         if (const int64_t year = rows.integer(4)) ++album.years[year];
         album.discs = std::max({album.discs, rows.integer(10), rows.integer(11)});
-        if (!album.firstFile) {
-            album.firstFile = rows.integer(8);
-            album.firstHasCover = rows.integer(9) != 0;
-        }
+        if (!album.coverTrackFile && rows.integer(9) != 0) album.coverTrackFile = rows.integer(8);
         if (!explicitArtist.empty())
             album.artist = explicitArtist;
         else if (!rows.text(3).empty())
@@ -590,8 +589,8 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         } else {
             coverFile = 0;
         }
-        if (!coverFile && album.firstHasCover) {
-            coverFile = album.firstFile;
+        if (!coverFile && album.coverTrackFile) {
+            coverFile = album.coverTrackFile;
             source = "embedded";
         }
         db.prepare("UPDATE albums SET cover_id=NULL WHERE id=?").bind(1, albumId).run();

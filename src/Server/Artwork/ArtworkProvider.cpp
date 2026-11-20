@@ -13,6 +13,8 @@
 #include <optional>
 #include <utility>
 #include <taglib/flacfile.h>
+#include <taglib/flacpicture.h>
+#include <taglib/xiphcomment.h>
 #include <taglib/wavfile.h>
 #include <taglib/aifffile.h>
 #include <taglib/mp4file.h>
@@ -73,8 +75,8 @@ private:
     size_t budget_ = 64ull << 20;
     CancellationToken token_;
 };
-// The front cover, or with `artist` the picture of the lead artist or the artist (ID3 APIC and FLAC PICTURE types 7
-// and 8), the lead artist first.
+// The cover (see rankOf), or with `artist` the picture of the lead artist or the artist (ID3 APIC and FLAC PICTURE types
+// 7 and 8), the lead artist first.
 class EmbeddedProvider final : public IArtworkProvider {
 public:
     explicit EmbeddedProvider(bool artist) : artist_(artist) {}
@@ -117,25 +119,49 @@ public:
         if (!file || !file->isValid()) return {};
         std::optional<ArtworkCandidate> best;
         int bestRank = INT_MAX;
-        for (const auto& picture : file->complexProperties("PICTURE")) {
-            const auto rank = rankOf(picture.value("pictureType").toString());
-            if (!rank || *rank >= bestRank) continue;
-            const auto bytes = picture.value("data").toByteVector();
-            if (bytes.isEmpty() || bytes.size() > kMaxArtworkBytes) continue;
+        const auto consider = [&](const TagLib::String& type, const TagLib::ByteVector& bytes) {
+            const auto rank = rankOf(type);
+            if (!rank || *rank >= bestRank || bytes.isEmpty() || bytes.size() > kMaxArtworkBytes) return;
             best.emplace();
             best->source = id();
             best->bytes.assign(bytes.begin(), bytes.end());
             bestRank = *rank;
+        };
+        for (const auto& picture : file->complexProperties("PICTURE"))
+            consider(picture.value("pictureType").toString(), picture.value("data").toByteVector());
+        // Some taggers keep a FLAC's pictures in its Vorbis comments: METADATA_BLOCK_PICTURE, or the older COVERART,
+        // which has no type.
+        if (auto* flac = dynamic_cast<TagLib::FLAC::File*>(file.get()); flac && flac->hasXiphComment()) {
+            auto* comments = flac->xiphComment();
+            for (const auto* picture : comments->pictureList())
+                consider(TagLib::FLAC::Picture::typeToString(picture->type()), picture->data());
+            const auto& fields = comments->fieldListMap();
+            if (const auto coverArt = fields.find("COVERART"); coverArt != fields.end())
+                for (const auto& encoded : coverArt->second)
+                    consider({}, TagLib::ByteVector::fromBase64(encoded.data(TagLib::String::Latin1)));
         }
         if (!best) return {};
         return {std::move(*best)};
     }
 
 private:
-    // Lower wins; nothing for a picture of another kind.
+    // Lower wins; nothing for a picture of another kind. An album's cover is its front cover or a picture of no type, then
+    // one of type Other, as some taggers mark every cover, then any other kind but a file icon, 32 pixels square.
     std::optional<int> rankOf(const TagLib::String& type) const {
         if (artist_) return type == "Lead Artist" ? std::optional(0) : type == "Artist" ? std::optional(1) : std::nullopt;
-        return type == "Front Cover" || type.isEmpty() ? std::optional(0) : std::nullopt;
+        if (type.isEmpty()) return 0;
+        using Picture = TagLib::FLAC::Picture; // the picture types of ID3 and FLAC are one list
+        switch (Picture::typeFromString(type)) {
+        case Picture::FrontCover:
+            return 0;
+        case Picture::Other:
+            return 1;
+        case Picture::FileIcon:
+        case Picture::OtherFileIcon:
+            return std::nullopt;
+        default:
+            return 2;
+        }
     }
 
     bool artist_;

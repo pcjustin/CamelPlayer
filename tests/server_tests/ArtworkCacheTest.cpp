@@ -8,6 +8,7 @@
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
 #include <taglib/tpropertymap.h>
+#include <taglib/xiphcomment.h>
 #include <webp/encode.h>
 #include <fstream>
 #include <future>
@@ -198,6 +199,130 @@ TEST_F(ArtworkCacheTest, WebpWorksWithoutTheWindowsCodec) {
     ASSERT_TRUE(ref);
     EXPECT_EQ(dimensions(ref->path), (std::pair<unsigned, unsigned>{32, 16}));
 }
+// A FLAC whose only picture is of type Other, without a MIME type or size, as a user's files hold, shows it as its cover;
+// a front cover, where the file has one, still comes first.
+TEST_F(ArtworkCacheTest, AnEmbeddedPictureOfTypeOtherIsTheCoverWithoutAFrontCover) {
+    ArtworkCache cache(dir / "thumbs");
+    const auto file = dir / "music" / "other.flac";
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+    const auto other = bitmap(60, 30, 90), front = bitmap(30, 60, 50);
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::Other);
+        picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(other.bytes.data()), unsigned(other.bytes.size())));
+        tags.addPicture(picture);
+        ASSERT_TRUE(tags.save());
+    }
+    const ArtworkRequest request{ArtworkKind::Track, 0, camel::toUtf8(file.wstring())};
+    const auto shown = cache.get(nullptr, request);
+    ASSERT_TRUE(shown);
+    EXPECT_EQ(dimensions(shown->path), (std::pair<unsigned, unsigned>{60, 30}));
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::FrontCover);
+        picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(front.bytes.data()), unsigned(front.bytes.size())));
+        tags.addPicture(picture);
+        ASSERT_TRUE(tags.save());
+    }
+    const auto preferred = cache.get(nullptr, request);
+    ASSERT_TRUE(preferred);
+    EXPECT_EQ(dimensions(preferred->path), (std::pair<unsigned, unsigned>{30, 60}));
+}
+
+// A file whose only picture is of another kind, as a back cover, shows that rather than none; a file icon, 32 pixels
+// square by its definition, is no cover.
+TEST_F(ArtworkCacheTest, AnyEmbeddedPictureButAFileIconIsTheCoverWhenNothingBetterIsThere) {
+    ArtworkCache cache(dir / "thumbs");
+    const auto back = dir / "music" / "back.flac", icon = dir / "music" / "CD1" / "icon.flac";
+    const auto image = bitmap(50, 25, 80);
+    for (const auto& [file, type] :
+         {std::pair{back, TagLib::FLAC::Picture::BackCover}, std::pair{icon, TagLib::FLAC::Picture::FileIcon}}) {
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+        TagLib::FLAC::File tags(file.c_str());
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(type);
+        picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(image.bytes.data()), unsigned(image.bytes.size())));
+        tags.addPicture(picture);
+        ASSERT_TRUE(tags.save());
+    }
+    const auto shown = cache.get(nullptr, {ArtworkKind::Track, 0, camel::toUtf8(back.wstring())});
+    ASSERT_TRUE(shown);
+    EXPECT_EQ(dimensions(shown->path), (std::pair<unsigned, unsigned>{50, 25}));
+    EXPECT_FALSE(cache.get(nullptr, {ArtworkKind::Track, 0, camel::toUtf8(icon.wstring())}));
+}
+
+// An album whose first track holds no picture takes the cover of a later one that does.
+TEST_F(ArtworkCacheTest, AnAlbumTakesTheCoverOfItsFirstTrackThatHasOne) {
+    const auto album = dir / "music" / "Album";
+    std::filesystem::create_directories(album);
+    const auto image = bitmap(70, 35, 60);
+    for (const int number : {1, 2}) {
+        const auto file = album / ("0" + std::to_string(number) + ".flac");
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList("Album"));
+        values.insert("TRACKNUMBER", TagLib::StringList(TagLib::String::number(number)));
+        tags.setProperties(values);
+        if (number == 2) {
+            auto* picture = new TagLib::FLAC::Picture;
+            picture->setType(TagLib::FLAC::Picture::FrontCover);
+            picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(image.bytes.data()), unsigned(image.bytes.size())));
+            tags.addPicture(picture);
+        }
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    const auto id = store.openReader().scalar("SELECT id FROM albums WHERE title='Album'");
+    ASSERT_TRUE(id);
+    ArtworkCache cache(dir / "thumbs");
+    const auto cover = cache.get(&store, {ArtworkKind::Album, *id});
+    ASSERT_TRUE(cover);
+    EXPECT_EQ(dimensions(cover->path), (std::pair<unsigned, unsigned>{70, 35}));
+}
+
+// A FLAC whose picture is kept in its Vorbis comments, as METADATA_BLOCK_PICTURE, rather than in a PICTURE block, shows it
+// for its track and its album.
+TEST_F(ArtworkCacheTest, APictureInTheVorbisCommentsIsTheCover) {
+    const auto album = dir / "music" / "Comment album";
+    std::filesystem::create_directories(album);
+    const auto file = album / "song.flac";
+    std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+    const auto image = bitmap(64, 32, 110);
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList("Comment album"));
+        tags.setProperties(values);
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::FrontCover);
+        picture->setMimeType("image/bmp");
+        picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(image.bytes.data()), unsigned(image.bytes.size())));
+        tags.xiphComment(true)->addPicture(picture);
+        ASSERT_TRUE(tags.save());
+    }
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        ASSERT_TRUE(tags.pictureList().isEmpty()) << "the picture is in the comments alone";
+    }
+    ArtworkCache cache(dir / "thumbs");
+    const auto track = cache.get(nullptr, {ArtworkKind::Track, 0, camel::toUtf8(file.wstring())});
+    ASSERT_TRUE(track);
+    EXPECT_EQ(dimensions(track->path), (std::pair<unsigned, unsigned>{64, 32}));
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    const auto id = store.openReader().scalar("SELECT id FROM albums WHERE title='Comment album'");
+    ASSERT_TRUE(id);
+    const auto cover = cache.get(&store, {ArtworkKind::Album, *id});
+    ASSERT_TRUE(cover);
+    EXPECT_EQ(dimensions(cover->path), (std::pair<unsigned, unsigned>{64, 32}));
+}
+
 TEST_F(ArtworkCacheTest, PlaybackPrefersEmbeddedThenFolderThenDiscParent) {
     ArtworkCache cache(dir / "thumbs");
     const auto file = dir / "music" / "CD1" / "song.flac";
