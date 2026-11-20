@@ -193,8 +193,10 @@ std::vector<uint32_t> dsdUpsamplingRates(const DsdUpsamplingSettings& d, uint32_
         downFrom(dsdByteRate(d.rate));
         break;
     }
+    // Upsampling never lowers a DSD source: with no rate at or above its own, the paths without upsampling take it.
     std::erase_if(rates, [&](uint32_t rate) {
-        return rate > highest || rate < kDsd64ByteRate || rate % kDsd64ByteRate || (maxByteRate && rate > maxByteRate);
+        return rate > highest || rate < kDsd64ByteRate || rate % kDsd64ByteRate || (maxByteRate && rate > maxByteRate) ||
+               rate < sourceByteRate;
     });
     return rates;
 }

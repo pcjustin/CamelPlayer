@@ -163,7 +163,12 @@ Settings asioUpsampling(DsdUpsampling mode, bool pcm = false) {
 TEST(DsdUpsampling, ToTheHighestTakesTheHighestRateTheOutputAllows) {
     const DsdUpsamplingSettings highest{.mode = DsdUpsampling::Highest};
     for (const Carrier carrier : {Carrier::Native, Carrier::Dop}) {
-        for (const SourceInfo& src : {kDsd64Source, kDsd128Source, kPcm44, kPcm96}) {
+        // Upsampling never lowers a DSD source: below its rate the paths without upsampling take it.
+        EXPECT_EQ(picked(highest, kDsd128Source, carrier, dsd(256)), 256u);
+        EXPECT_EQ(picked(highest, kDsd128Source, carrier, dsd(128)), 128u);
+        EXPECT_EQ(picked(highest, kDsd128Source, carrier, dsd(64)), 0u);
+        EXPECT_EQ(picked(highest, kDsd128Source, carrier, dsd(256), dsd(64)), 0u);
+        for (const SourceInfo& src : {kDsd64Source, kPcm44, kPcm96}) {
             EXPECT_EQ(picked(highest, src, carrier, dsd(256)), 256u);
             EXPECT_EQ(picked(highest, src, carrier, dsd(128)), 128u);
             EXPECT_EQ(picked(highest, src, carrier, dsd(64)), 64u);
@@ -195,7 +200,10 @@ TEST(DsdUpsampling, ByAMultipleTakesTheHighestMultipleThatFits) {
 
 TEST(DsdUpsampling, ASetRateStepsDownToWhatTheOutputTakes) {
     for (const Carrier carrier : {Carrier::Native, Carrier::Dop}) {
-        for (const SourceInfo& src : {kDsd64Source, kDsd128Source, kPcm44, kPcm96}) {
+        EXPECT_EQ(picked({.mode = DsdUpsampling::Set, .rate = 256}, kDsd128Source, carrier, dsd(256)), 256u);
+        EXPECT_EQ(picked({.mode = DsdUpsampling::Set, .rate = 256}, kDsd128Source, carrier, dsd(128)), 128u);
+        EXPECT_EQ(picked({.mode = DsdUpsampling::Set, .rate = 128}, kDsd128Source, carrier, dsd(64)), 0u);
+        for (const SourceInfo& src : {kDsd64Source, kPcm44, kPcm96}) {
             EXPECT_EQ(picked({.mode = DsdUpsampling::Set, .rate = 128}, src, carrier, dsd(256)), 128u);
             EXPECT_EQ(picked({.mode = DsdUpsampling::Set, .rate = 256}, src, carrier, dsd(256)), 256u);
             EXPECT_EQ(picked({.mode = DsdUpsampling::Set, .rate = 256}, src, carrier, dsd(128)), 128u);
@@ -208,8 +216,12 @@ TEST(DsdUpsampling, OffListsNoRateAndEveryRateIsWithinDsd64ToDsd256) {
     EXPECT_TRUE(dsdUpsamplingRates({}, kDsd64Bytes, 0).empty());
     EXPECT_EQ(dsdUpsamplingRates({.mode = DsdUpsampling::Highest}, kDsd64Bytes, 0),
               (std::vector<uint32_t>{dsd(256), dsd(128), dsd(64)}));
-    // DSD512 has no multiple within DSD256; the paths without upsampling take it.
+    // DSD512 has no rate within DSD256 at or above its own; the paths without upsampling take it, and a set rate below
+    // a source's is not taken for it either.
     EXPECT_TRUE(dsdUpsamplingRates({.mode = DsdUpsampling::Multiple, .multiple = 2}, dsd(512), 0).empty());
+    EXPECT_TRUE(dsdUpsamplingRates({.mode = DsdUpsampling::Highest}, dsd(512), 0).empty());
+    EXPECT_TRUE(dsdUpsamplingRates({.mode = DsdUpsampling::Set, .rate = 128}, dsd(256), 0).empty());
+    EXPECT_EQ(dsdUpsamplingRates({.mode = DsdUpsampling::Highest}, dsd(128), 0), (std::vector<uint32_t>{dsd(256), dsd(128)}));
 }
 
 // DoP at a rate only where the output reports the carrier it needs: DSD256 needs 705.6 kHz.

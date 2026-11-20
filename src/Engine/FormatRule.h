@@ -89,7 +89,7 @@ std::optional<OutputPlan> negotiateDsd(const SourceInfo& src, bool native, std::
 // The DSD rates, as byte frame rates, that DSD upsampling `d` tries for a source of `sourceByteRate` (0 for PCM), best
 // first; none while it is off. Highest: DSD256 down to DSD64. Multiple: the source times the multiple, then the smaller
 // multiples down to the source itself; for PCM, as Set. Set: the set rate down to DSD64. Every rate lies within DSD64
-// to DSD256 and at or below a nonzero `maxByteRate` (the output's highest DSD rate).
+// to DSD256, at or below a nonzero `maxByteRate` (the output's highest DSD rate) and at or above a DSD source's own rate.
 std::vector<uint32_t> dsdUpsamplingRates(const DsdUpsamplingSettings& d, uint32_t sourceByteRate, uint32_t maxByteRate);
 
 // Any source modulated to DSD at the first of `rates` (byte frame rates) the device takes: native DSD when `native` is
