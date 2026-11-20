@@ -18,13 +18,14 @@
 #include <vector>
 
 #include "Common/util/Log.h"
+#include "Common/util/Text.h"
 
 #pragma comment(lib, "dbghelp.lib")
 
 namespace camel {
 namespace {
 
-wchar_t g_dir[MAX_PATH];
+wchar_t g_dir[32768]; // as a \\?\ path, so a data folder past MAX_PATH is written to whole
 DWORD g_fatalDumpLimitMs = 20000;
 std::atomic_flag g_fatalDumped;
 
@@ -38,8 +39,8 @@ DWORD WINAPI writeDump(void* parameter) {
     const auto& request = *static_cast<const DumpRequest*>(parameter);
     SYSTEMTIME t;
     GetLocalTime(&t);
-    wchar_t path[MAX_PATH + 64];
-    const int pathLength = swprintf(path, MAX_PATH + 64, L"%s\\crash-%04u%02u%02u-%02u%02u%02u%s.dmp", g_dir, t.wYear, t.wMonth,
+    wchar_t path[std::size(g_dir) + 64];
+    const int pathLength = swprintf(path, std::size(path), L"%s\\crash-%04u%02u%02u-%02u%02u%02u%s.dmp", g_dir, t.wYear, t.wMonth,
                                     t.wDay, t.wHour, t.wMinute, t.wSecond, request.suffix);
     if (pathLength < 0 || size_t(pathLength) >= std::size(path)) return 1;
     HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -149,7 +150,7 @@ void installCrashDumps(const std::filesystem::path& dir, std::chrono::millisecon
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     pruneCrashDumps(dir, kKeptCrashDumps);
-    wcsncpy_s(g_dir, dir.c_str(), _TRUNCATE);
+    wcsncpy_s(g_dir, longPath(dir).c_str(), _TRUNCATE);
     SetUnhandledExceptionFilter(onCrash);
     signal(SIGABRT, onAbort);
     _set_purecall_handler(onPureCall);

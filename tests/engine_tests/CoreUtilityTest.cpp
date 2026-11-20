@@ -214,6 +214,46 @@ TEST(CrashDump, ADumpWrittenBeforeAFailFastIsKept) {
     std::filesystem::remove_all(directory);
 }
 
+// A data folder longer than MAX_PATH keeps its dumps there, not at a path cut at 260 characters.
+TEST(CrashDump, AFolderLongerThanMaxPathGetsItsDumps) {
+    constexpr wchar_t marker[] = L"CAMELPLAYER_LONGDUMP_TEST_CHILD";
+    wchar_t childDirectory[32768];
+    const DWORD length = GetEnvironmentVariableW(marker, childDirectory, DWORD(std::size(childDirectory)));
+    if (length && length < std::size(childDirectory)) {
+        installCrashDumps(childDirectory);
+        writeCrashDump(L"-long");
+        return;
+    }
+    const auto root =
+        std::filesystem::path(L"\\\\?\\" + std::filesystem::absolute(testutil::tempDir()).wstring()) / "crashdump-long";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    auto directory = root;
+    for (wchar_t letter = L'a'; letter < L'f'; ++letter) directory /= std::wstring(60, letter);
+    ASSERT_GT(directory.wstring().size(), size_t{MAX_PATH});
+    std::filesystem::create_directories(directory);
+    ASSERT_TRUE(SetEnvironmentVariableW(marker, directory.c_str()));
+    wchar_t executable[32768];
+    ASSERT_NE(GetModuleFileNameW(nullptr, executable, DWORD(std::size(executable))), 0u);
+    std::wstring command = L"\"" + std::wstring(executable) + L"\" --gtest_filter=CrashDump.AFolderLongerThanMaxPathGetsItsDumps";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof startup;
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                                        &startup, &process);
+    SetEnvironmentVariableW(marker, nullptr);
+    ASSERT_TRUE(created);
+    const DWORD waited = WaitForSingleObject(process.hProcess, 30000);
+    if (waited != WAIT_OBJECT_0) TerminateProcess(process.hProcess, 1);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    ASSERT_EQ(waited, WAIT_OBJECT_0);
+    size_t dumps = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) dumps += entry.path().extension() == L".dmp";
+    EXPECT_EQ(dumps, 1u);
+    std::filesystem::remove_all(root, ec);
+}
+
 TEST(CrashDump, StartupKeepsTheNewestFiveDumpsAndOtherFiles) {
     const auto directory = testutil::tempDir() / "crashdump-retention";
     std::filesystem::remove_all(directory);
