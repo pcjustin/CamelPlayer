@@ -292,9 +292,10 @@ public:
         }
         if (!uri.empty()) {
             setLoading(true);
-            const bool loaded = link_->load(uri, didl);
+            const auto loaded = link_->load(uri, didl);
             setLoading(false);
-            if (!loaded) throw Error(ErrorCode::FormatNotSupported, "the player refused the stream");
+            if (loaded == LoadOutcome::Refused) throw Error(ErrorCode::FormatNotSupported, "the player refused the stream");
+            if (loaded == LoadOutcome::NotAnswered) throw Error(ErrorCode::DeviceLost, player_->notConnected());
         }
         {
             std::scoped_lock lock(mutex_);
@@ -664,7 +665,7 @@ private:
             uri = bodies_.front().uri;
             didl = bodies_.front().didl;
         }
-        if (link_->load(uri, didl)) {
+        if (link_->load(uri, didl) == LoadOutcome::Loaded) {
             {
                 std::scoped_lock lock(mutex_);
                 askedToPlay_ = Clock::now();

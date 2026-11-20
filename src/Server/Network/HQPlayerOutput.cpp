@@ -89,7 +89,7 @@ public:
     HQPlayerLink(const HQPlayerLink&) = delete;
     HQPlayerLink& operator=(const HQPlayerLink&) = delete;
 
-    bool load(const std::string& uri, const std::string& metadata) override {
+    LoadOutcome load(const std::string& uri, const std::string& metadata) override {
         own(0);
         {
             // HQPlayer may say nothing for seconds, as while it starts DSD: what CamelPlayer changes is expected until
@@ -99,15 +99,17 @@ public:
         }
         // A clear while paused keeps the paused track (docs/Plan.md §5.11), so the playlist is stopped first. A new
         // connection meanwhile is no loss: it starts with the same Stop and PlaylistClear.
-        if (!command("<Stop/>", true) || !command("<PlaylistClear/>", true)) return false;
+        // A command that went unanswered has reported the connection lost.
+        const auto failed = [&] { return lost_ ? LoadOutcome::NotAnswered : LoadOutcome::Refused; };
+        if (!command("<Stop/>", true) || !command("<PlaylistClear/>", true)) return failed();
         own(std::nullopt); // the add follows a wait for those replies, which may have been long
-        if (!command(add(uri, metadata))) return false;
+        if (!command(add(uri, metadata))) return failed();
         std::scoped_lock lock(mutex_);
         nextQueued_ = false;
         playedSinceLoad_ = false;
         playAgainSent_ = false;
         loadedSincePlay_ = true;
-        return true;
+        return LoadOutcome::Loaded;
     }
 
     bool loadNext(const std::string& uri, const std::string& metadata) override {

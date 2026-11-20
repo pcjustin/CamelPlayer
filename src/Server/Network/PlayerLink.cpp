@@ -355,15 +355,16 @@ void PlayerLink::expect(ExpectedTracks tracks) {
     impl_->leftSource.reset();
 }
 
-bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
+LoadOutcome PlayerLink::load(const std::string& uri, const std::string& metadata) {
     auto& link = *impl_;
     link.lastPositionMs = 0;
     link.lastStopped = false; // what the player reports next is about the new track
     link.lastPlaying = false;
     link.lastIdle = false;
     link.sawPlaying = false;
-    if (link.player.protocol == upnp::PlayerProtocol::OpenHome) {
-        try {
+    // A request that throws went unanswered; one answered with a fault was refused.
+    try {
+        if (link.player.protocol == upnp::PlayerProtocol::OpenHome) {
             // Selecting the entry makes the playlist the player's source, which it reports at once: its index is known first.
             const auto playlist = link.playlistSource();
             {
@@ -371,26 +372,27 @@ bool PlayerLink::load(const std::string& uri, const std::string& metadata) {
                 link.ownSource = playlist ? playlist : link.seenSource;
                 link.leftSource = link.seenSource != link.ownSource ? link.seenSource : std::nullopt;
             }
-            if (!link.call("Playlist", "DeleteAll", {}).ok) return false;
+            if (!link.call("Playlist", "DeleteAll", {}).ok) return LoadOutcome::Refused;
             const auto inserted = link.call("Playlist", "Insert", {{"AfterId", "0"}, {"Uri", uri}, {"Metadata", metadata}});
             const auto id = inserted.values.find("NewId");
             if (!inserted.ok || id == inserted.values.end() || !link.call("Playlist", "SeekId", {{"Value", id->second}}).ok)
-                return false;
+                return LoadOutcome::Refused;
             link.currentId = id->second;
             std::scoped_lock lock(link.mutex);
             link.follower.expectLoaded({id->second, {}, {}}, link.now());
-            return true;
-        } catch (const std::exception& e) {
-            log::warn("network player Insert: %s", e.what());
-            return false;
+            return LoadOutcome::Loaded;
         }
+        if (!link.call("AVTransport", "SetAVTransportURI",
+                       {{"InstanceID", "0"}, {"CurrentURI", uri}, {"CurrentURIMetaData", metadata}})
+                 .ok)
+            return LoadOutcome::Refused;
+    } catch (const std::exception& e) {
+        log::warn("network player load: %s", e.what());
+        return LoadOutcome::NotAnswered;
     }
-    if (!link.attempt("AVTransport", "SetAVTransportURI",
-                      {{"InstanceID", "0"}, {"CurrentURI", uri}, {"CurrentURIMetaData", metadata}}))
-        return false;
     std::scoped_lock lock(link.mutex);
     link.follower.expectLoaded({uri, {}, {}}, link.now());
-    return true;
+    return LoadOutcome::Loaded;
 }
 
 bool PlayerLink::loadNext(const std::string& uri, const std::string& metadata) {

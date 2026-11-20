@@ -17,12 +17,14 @@ namespace camel::server {
 
 struct PlayerEvent;
 
+enum class LoadOutcome : uint8_t { Loaded, Refused, NotAnswered };
+
 // Controlling the player while it plays the stream; its own changes and its loss come as PlayerEvents.
 class PlayerControl {
 public:
     virtual ~PlayerControl() = default;
+    virtual LoadOutcome load(const std::string& uri, const std::string& metadata) = 0;
     // False when the player refused or did not answer.
-    virtual bool load(const std::string& uri, const std::string& metadata) = 0;
     virtual bool loadNext(const std::string& uri, const std::string& metadata) = 0;
     virtual void advance() = 0; // the stream moved on to the next track without the player saying so
     virtual bool play() = 0;

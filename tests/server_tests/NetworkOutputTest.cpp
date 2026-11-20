@@ -172,7 +172,9 @@ public:
     }
     ScriptedControl(const ScriptedControl&) = delete;
     ScriptedControl& operator=(const ScriptedControl&) = delete;
-    bool load(const std::string& uri, const std::string&) override { return fetch(uri); }
+    LoadOutcome load(const std::string& uri, const std::string&) override {
+        return fetch(uri) ? LoadOutcome::Loaded : LoadOutcome::Refused;
+    }
     bool loadNext(const std::string& uri, const std::string&) override { return fetch(uri); }
     void advance() override {}
     bool play() override { return true; }
@@ -785,6 +787,20 @@ TEST(NetworkOutputTest, ARefusedStreamIsAFormatProblem) {
         FAIL() << "the player accepted it";
     } catch (const audio::Error& e) {
         EXPECT_EQ(e.code(), audio::ErrorCode::FormatNotSupported);
+    }
+}
+
+// A player that does not answer the load is not connected; it did not refuse the stream's format.
+TEST(NetworkOutputTest, APlayerThatDoesNotAnswerTheLoadIsNotConnected) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    CountingSource source(k16.bytesPerFrame(), 20000);
+    OutputRun output(renderer, source, k16);
+    renderer.disappear();
+    try {
+        output->start();
+        FAIL() << "the player accepted it";
+    } catch (const audio::Error& e) {
+        EXPECT_EQ(e.code(), audio::ErrorCode::DeviceLost);
     }
 }
 

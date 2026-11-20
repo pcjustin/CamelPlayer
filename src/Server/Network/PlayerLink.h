@@ -79,7 +79,7 @@ public:
 
     void expect(ExpectedTracks tracks);
     // False when the player refused or did not answer.
-    bool load(const std::string& uri, const std::string& metadata) override;
+    LoadOutcome load(const std::string& uri, const std::string& metadata) override;
     bool loadNext(const std::string& uri, const std::string& metadata) override;
     void advance() override;
     bool play() override;
