@@ -189,6 +189,7 @@ private:
     void showVolumeLevel();
     void fitStatus();
     void changeLanguage();
+    winrt::fire_and_forget replaceOnceIdle(std::shared_ptr<camel::server::IServer> server);
     void showReplayGain();
     void showCrossfade();
     void enableDependentFields();

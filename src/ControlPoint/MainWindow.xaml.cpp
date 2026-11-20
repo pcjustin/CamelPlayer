@@ -4197,16 +4197,27 @@ void MainWindow::changeLanguage() {
             return;
         }
         ui::reloadText();
-        const auto server = self->server_;
-        server->waitIdle();
-        self->replaced_ = true;
-        self->exiting_ = true;
-        self->tray_.reset();
-        self->hotkeys_.reset();
-        self->media_.reset();
-        server->setListener({});
-        self->replaceWindow_(server);
+        self->replaceOnceIdle(self->server_);
     });
+}
+
+// The window in the new language takes over once the Server has done what was asked of it, waited for off the UI thread:
+// a long command, or a library change waiting for the library, leaves the window answering meanwhile.
+winrt::fire_and_forget MainWindow::replaceOnceIdle(std::shared_ptr<camel::server::IServer> server) {
+    const auto weak = get_weak();
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    server->waitIdle();
+    co_await foreground;
+    const auto self = weak.get();
+    if (!self) co_return;
+    self->replaced_ = true;
+    self->exiting_ = true;
+    self->tray_.reset();
+    self->hotkeys_.reset();
+    self->media_.reset();
+    server->setListener({});
+    self->replaceWindow_(server);
 }
 
 void MainWindow::takeOverFrom(MainWindow& old) {
