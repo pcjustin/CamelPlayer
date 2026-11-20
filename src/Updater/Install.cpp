@@ -306,8 +306,14 @@ private:
         return true;
     }
 
+    // A file without a copy was made by the new version and goes; without the folder of copies nothing is known, and
+    // the data stays as it is.
     void restoreData(const fs::path& dataBackup) const {
         std::error_code error;
+        if (!fs::is_directory(dataBackup, error)) {
+            log(L"the data's copy is gone; the data is left as it is");
+            return;
+        }
         for (const auto* name : files::kDataFiles) {
             if (fs::exists(dataBackup / name, error))
                 fs::copy_file(dataBackup / name, o_.data / name, fs::copy_options::overwrite_existing, error);

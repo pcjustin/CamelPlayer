@@ -370,6 +370,27 @@ TEST(Update, AnUpdateEndedWhileTheNewVersionStartsIsPutRightByTheNext) {
         }
     }
 }
+// The data's copy lies in the temp folder, which may be cleaned before the next update finds the journal: the data is
+// then left as it is, never removed for want of a copy.
+TEST(Update, AnUpdateEndedWhileStartingKeepsTheDataWhenItsCopyIsGone) {
+    struct Ended {};
+    InstallFixture f(L"update-ended-copy-gone");
+    f.seal();
+    f.goodPlayer = "none";
+    const auto startPlayer = f.host.startPlayer;
+    f.host.startPlayer = [&](const fs::path& exe) {
+        startPlayer(exe);
+        throw Ended{};
+    };
+    EXPECT_THROW(camel::updater::install(f.options, f.host), Ended);
+    fs::remove_all(f.options.dataBackup);
+    f.host.startPlayer = startPlayer;
+    f.goodPlayer = "new";
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    EXPECT_EQ(readText(f.data / L"settings.json"), "settings-new");
+    EXPECT_EQ(readText(f.data / L"library.db"), "db-old");
+}
+
 // A journal is read from the program folder, but what it names is not taken on trust: a path outside that folder is
 // left alone, and so is a data folder that is not an update's own.
 TEST(Update, AJournalNamingPathsOutsideTheProgramFolderLeavesThemAlone) {
