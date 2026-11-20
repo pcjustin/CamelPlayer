@@ -200,6 +200,32 @@ TEST(Dts, ARipThatStartsWithSilenceIsStillDts) {
     EXPECT_EQ(probeFormat(pcm), AudioFormat::Wav);
 }
 
+// A frame that does not decode right after the first, as a damaged rip may hold, does not decide the track: the stream
+// plays, with silence for that frame, as it would for one further on.
+TEST(Dts, AnUndecodableSecondFrameDoesNotRefuseTheTrack) {
+    const auto& file = dtsCd();
+    std::ifstream in(dtsPath(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    const size_t data = bytes.find("data");
+    ASSERT_NE(data, std::string::npos);
+    const std::string sync("\xFF\x1F\x00\xE8", 4);
+    const size_t first = bytes.find(sync, data + 8);
+    ASSERT_NE(first, std::string::npos);
+    const size_t second = bytes.find(sync, first + 2);
+    ASSERT_NE(second, std::string::npos);
+    ASSERT_EQ(bytes.compare(2 * second - first, sync.size(), sync), 0) << "the frames follow at a steady pace";
+    // The second frame keeps its sync word but loses the header after it.
+    std::fill_n(bytes.begin() + ptrdiff_t(second + 6), 12, '\0');
+    const auto path = testutil::tempDir() / "dts-second-damaged.wav";
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+    ASSERT_EQ(probeFormat(path), AudioFormat::Dts);
+    std::unique_ptr<IDecoder> d;
+    ASSERT_NO_THROW(d = openDecoder(DecoderKind::Sndfile, path));
+    EXPECT_EQ(d->info().channels, 6u);
+    EXPECT_EQ(readAll(*d).size(), file.frames * 6);
+}
+
 TEST(Dts, ProbeFindsDtsInsideWave) {
     EXPECT_EQ(probeFormat(dtsPath()), AudioFormat::Dts);
     EXPECT_EQ(probeFormat(syncsInPcm("dts-steady.wav", {12, 4108, 8204})), AudioFormat::Dts);

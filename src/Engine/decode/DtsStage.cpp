@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -175,24 +176,35 @@ private:
         }
     }
 
-    // The layout comes from the first frames, which must also follow the PCM rate one sample per word frame.
+    // The layout comes from the first two frames that follow each other at the PCM rate, one sample per word frame: a
+    // frame near the start that does not decode, or decodes apart from the others, decides nothing.
     void probe(uint32_t wordRate) {
-        std::vector<std::pair<int64_t, uint32_t>> frames; // start, samples
+        constexpr size_t kProbedFrames = 64;
+        struct Frame {
+            int64_t start = 0;
+            uint32_t samples = 0, rate = 0, channels = 0, mask = 0;
+        };
+        std::optional<Frame> previous;
+        size_t decoded = 0;
+        bool found = false;
         bytesFrom_ = 0;
         onFrame_ = [&](int64_t start, const DtsPcm& pcm) {
-            if (frames.empty()) {
-                info_.sampleRate = pcm.sample_rate;
-                info_.channels = pcm.channels;
-                info_.channelMask = pcm.channel_mask;
+            ++decoded;
+            const Frame frame{start, pcm.frames, pcm.sample_rate, pcm.channels, pcm.channel_mask};
+            if (previous && previous->rate == wordRate && frame.rate == wordRate && frame.channels == previous->channels &&
+                frame.mask == previous->mask && start - previous->start == int64_t(previous->samples)) {
+                info_.sampleRate = frame.rate;
+                info_.channels = frame.channels;
+                info_.channelMask = frame.mask;
+                found = true;
             }
-            frames.emplace_back(start, pcm.frames);
+            previous = frame;
         };
-        while (frames.size() < 2 && decodeNextFrame()) {
+        while (!found && decoded < kProbedFrames && decodeNextFrame()) {
         }
         onFrame_ = nullptr;
-        if (frames.size() < 2) throw Error(ErrorCode::UnsupportedStream, "no DTS frames found");
-        if (info_.sampleRate != wordRate || frames[1].first - frames[0].first != int64_t(frames[0].second))
-            throw Error(ErrorCode::UnsupportedStream, "the DTS frames do not follow the PCM rate");
+        if (!decoded) throw Error(ErrorCode::UnsupportedStream, "no DTS frames found");
+        if (!found) throw Error(ErrorCode::UnsupportedStream, "the DTS frames do not follow the PCM rate");
     }
 
     // Decoding continues from `frame`, reading from shortly before it, which near the start is in the previous track.
@@ -297,9 +309,8 @@ private:
     void place(int64_t start, const DtsPcm& pcm) {
         const auto next = int64_t(next_);
         const int64_t end = std::min(start + int64_t(pcm.frames), int64_t(info_.totalFrames));
-        if (end <= next || start >= end) return;
-        if (pcm.channels != info_.channels || pcm.channel_mask != info_.channelMask)
-            throw Error(ErrorCode::DecodeFailed, "the DTS channel layout changed within the track");
+        // A frame of another layout is passed over as a chance frame is: silence fills its place.
+        if (end <= next || start >= end || pcm.channels != info_.channels || pcm.channel_mask != info_.channelMask) return;
         const size_t ch = info_.channels;
         if (start > next) {
             silence_ += uint64_t(start - next); // refill() asks only with out_ empty, so the silence comes before it
