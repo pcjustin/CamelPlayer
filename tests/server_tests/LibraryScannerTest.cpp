@@ -193,6 +193,33 @@ TEST_F(LibraryScannerTest, AnAlbumsYearIsTheOneMostOfItsTracksGive) {
     EXPECT_EQ(count(store, "SELECT year FROM albums"), 2001);
 }
 
+// A track without a disc number is on the first disc, not before it: an album whose files only partly carry one lists
+// and plays in its track order.
+TEST_F(LibraryScannerTest, ATrackWithoutADiscNumberIsOnTheFirstDisc) {
+    const auto tagged = [&](const char* name, const char* title, int number, const char* disc) {
+        const auto file = audio(name);
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList("Discs"));
+        values.insert("TITLE", TagLib::StringList(title));
+        values.insert("TRACKNUMBER", TagLib::StringList(TagLib::String::number(number)));
+        if (*disc) values.insert("DISCNUMBER", TagLib::StringList(disc));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    };
+    tagged("a.flac", "First", 1, "1");
+    tagged("b.flac", "Second", 2, "1");
+    tagged("c.flac", "Third", 3, "");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    const auto album = store.openReader().scalar("SELECT id FROM albums");
+    ASSERT_TRUE(album);
+    std::vector<std::string> titles;
+    for (const auto& track : albumDetail(store, *album).tracks) titles.push_back(track.title);
+    EXPECT_EQ(titles, (std::vector<std::string>{"First", "Second", "Third"}));
+}
+
 TEST_F(LibraryScannerTest, TagValuesLoseSurroundingBlanksAndBlankValuesAreSkipped) {
     const auto file = audio();
     {

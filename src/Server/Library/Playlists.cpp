@@ -29,7 +29,7 @@ constexpr const char* kTrackJoins = " JOIN files f ON f.id=t.file_id JOIN roots 
                                     "LEFT JOIN albums al ON al.id=t.album_id ";
 // Album, then disc and track number; the file name orders tracks without numbers.
 constexpr const char* kNaturalOrder =
-    " ORDER BY coalesce(al.sort_key,t.album_sort),t.album_id,t.disc_number,t.track_number,f.path";
+    " ORDER BY coalesce(al.sort_key,t.album_sort),t.album_id,coalesce(nullif(t.disc_number,0),1),t.track_number,f.path";
 
 int64_t nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -424,7 +424,7 @@ PlaylistChange editPlaylist(LibraryStore& store, const PlaylistEdit& edit) {
                     {"lower(t.album)"},
                     {"lower(t.album_artist)"},
                     {"t.year"},
-                    {"t.disc_number", "t.track_number"},
+                    {"coalesce(nullif(t.disc_number,0),1)", "t.track_number"},
                     {"CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate "
                      "END"},
                     {"i.added"}};

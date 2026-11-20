@@ -469,7 +469,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
                            "t.file_id,t.embedded_cover,t.disc_number,t.disc_total "
                            "FROM tracks t JOIN files f ON f.id=t.file_id JOIN folders d ON d.id=f.folder_id "
                            "WHERE f.root_id=? AND f.available=1" +
-                           scope + " ORDER BY t.disc_number,t.track_number,t.id");
+                           scope + " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,t.id");
     rows.bind(1, root);
     while (rows.step()) {
         const auto track = rows.integer(0);

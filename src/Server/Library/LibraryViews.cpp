@@ -505,12 +505,13 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
     Query q(store, expectedRevision, token);
     const std::string condition = filter ? groupCondition(*filter) : std::string{};
     const std::string direction = descending ? " DESC" : "";
-    const std::string orders[] = {"t.title_sort" + direction,
-                                  "t.artist_sort" + direction + ",t.album_sort,t.disc_number,t.track_number",
-                                  "t.album_sort" + direction + ",t.disc_number,t.track_number",
-                                  "coalesce(t.year,0)" + direction + ",t.album_sort,t.disc_number,t.track_number",
-                                  std::string(kDuration) + direction,
-                                  "coalesce(f.added,0)" + direction + ",t.id" + direction};
+    const std::string orders[] = {
+        "t.title_sort" + direction,
+        "t.artist_sort" + direction + ",t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number",
+        "t.album_sort" + direction + ",coalesce(nullif(t.disc_number,0),1),t.track_number",
+        "coalesce(t.year,0)" + direction + ",t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number",
+        std::string(kDuration) + direction,
+        "coalesce(f.added,0)" + direction + ",t.id" + direction};
     const auto order = ordered<int64_t>(store, q.revision, "tracks|" + std::to_string(int(sort)) + direction + condition, [&] {
         return ids(q.db, std::string("SELECT t.id FROM tracks t") + kJoins + "WHERE" + kVisible + condition + " ORDER BY " +
                              orders[size_t(sort)] + ",t.id");
@@ -539,10 +540,11 @@ LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter
         const auto tracks = groupTracks(store, q, artist);
         page.tracks = int64_t(tracks->size());
         if (!tracks->empty()) {
-            auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
-                                     "WHERE t.id IN (" + idList(*tracks, 0, page.tracks) +
-                                     ") ORDER BY coalesce(s.play_count,0) DESC,coalesce(s.listened_ms,0) DESC,"
-                                     "coalesce(t.year,0),t.album_sort,t.disc_number,t.track_number,t.id LIMIT ?");
+            auto rows =
+                q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                             "WHERE t.id IN (" + idList(*tracks, 0, page.tracks) +
+                             ") ORDER BY coalesce(s.play_count,0) DESC,coalesce(s.listened_ms,0) DESC,"
+                             "coalesce(t.year,0),t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number,t.id LIMIT ?");
             rows.bind(1, songs);
             while (rows.step()) page.songs.push_back(trackRow(rows));
         }
@@ -569,7 +571,7 @@ LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64
     switch (list) {
     case SmartList::RecentlyAdded:
         order = "SELECT t.id" + from + " AND f.added>=" + std::to_string((days - 30) * 86400) +
-                " ORDER BY f.added DESC,t.album_sort,t.disc_number,t.track_number,t.id";
+                " ORDER BY f.added DESC,t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number,t.id";
         break;
     case SmartList::MostPlayed:
         order = "SELECT t.id" + from + " AND s.play_count>0 ORDER BY s.play_count DESC,s.listened_ms DESC,t.id LIMIT 100";
@@ -585,7 +587,7 @@ LibraryTrackRowPage smartTracks(const LibraryStore& store, SmartList list, int64
     case SmartList::NeverPlayed:
         order = "SELECT t.id" + from +
                 " AND coalesce(s.play_count,0)=0 ORDER BY f.added DESC NULLS LAST,t.album_sort,"
-                "t.disc_number,t.track_number,t.id";
+                "coalesce(nullif(t.disc_number,0),1),t.track_number,t.id";
         break;
     }
     // Plays and the date do not change the library revision, so they are part of the cached order's key.
@@ -680,8 +682,9 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const Canc
                                kJoins + kStats + "WHERE a.id=? AND" + kVisible + " GROUP BY a.id");
     if (!header.bind(1, id).step()) throw std::invalid_argument("unknown or unavailable album");
     detail.album = album(header);
-    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
-                             "WHERE t.album_id=? AND" + kVisible + " ORDER BY t.disc_number,t.track_number,f.path");
+    auto rows =
+        q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                     "WHERE t.album_id=? AND" + kVisible + " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,f.path");
     rows.bind(1, id);
     while (rows.step()) detail.tracks.push_back(trackRow(rows));
     auto formats =
@@ -765,7 +768,8 @@ LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64
             id = parent;
         }
         auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
-                                 "WHERE f.folder_id=? AND" + kVisible + " ORDER BY t.disc_number,t.track_number,f.path");
+                                 "WHERE f.folder_id=? AND" + kVisible +
+                                 " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,f.path");
         rows.bind(1, *folder);
         while (rows.step()) listing.tracks.push_back(trackRow(rows));
     }
@@ -784,9 +788,9 @@ std::vector<LibraryTrackRow> folderTracks(const LibraryStore& store, int64_t fol
     below.bind(1, path);
     while (below.step()) children[below.integer(1)].push_back(below.integer(0));
     std::unordered_map<int64_t, std::vector<LibraryTrackRow>> tracks; // by folder
-    auto rows =
-        q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + ",f.folder_id FROM tracks t" + kJoins + kStats +
-                     "WHERE f.path>?1||'\\' AND f.path<?1||']' AND" + kVisible + " ORDER BY t.disc_number,t.track_number,f.path");
+    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + ",f.folder_id FROM tracks t" + kJoins + kStats +
+                             "WHERE f.path>?1||'\\' AND f.path<?1||']' AND" + kVisible +
+                             " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,f.path");
     rows.bind(1, path);
     while (rows.step()) {
         if (token.cancelled()) throw std::runtime_error("library query cancelled");
