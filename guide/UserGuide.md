@@ -205,4 +205,4 @@ Settings › Interface › **Show what's playing on Discord** puts the playing t
 
 ## Reporting a problem
 
-Open an issue on the project's GitHub page and fill in the form. In Settings › About, select **Create diagnostic bundle…** and attach the zip it saves. It holds the logs, settings, your output devices with the formats they accept, the result of the installation check, and the newest crash report. File and folder paths are left out unless you check **Include file and folder paths**. The crash report is a memory snapshot of CamelPlayer, so only attach the bundle where you are comfortable sharing it.
+Open an issue on the project's GitHub page and fill in the form. In Settings › About, select **Create diagnostic bundle…** and attach the zip it saves. It holds the logs, settings, your output devices with the formats they accept, and the result of the installation check. File and folder paths are left out unless you check **Include file and folder paths**; only then does it also hold the newest crash report, which is a memory snapshot of CamelPlayer with the paths in it, so attach that bundle only where you are comfortable sharing it.

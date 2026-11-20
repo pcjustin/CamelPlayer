@@ -46,7 +46,8 @@ DWORD registryNumber(const wchar_t* name) {
     return value;
 }
 
-std::string systemText(const DiagnosticInput& input) {
+// `leftOut`, when not empty, is the newest crash dump, which a bundle without paths leaves out.
+std::string systemText(const DiagnosticInput& input, const std::filesystem::path& leftOut) {
     const auto build = registryText(L"CurrentBuildNumber");
     std::ostringstream out;
     out << "CamelPlayer " << input.appVersion << "\n";
@@ -63,6 +64,9 @@ std::string systemText(const DiagnosticInput& input) {
     snprintf(time.data(), time.size(), "%04u-%02u-%02u %02u:%02u:%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
     out << "Created: " << time.data() << "\n";
     if (input.includePaths) out << "Data folder: " << toUtf8(input.dataDirectory.wstring()) << "\n";
+    if (!leftOut.empty())
+        out << "Crash report " << toUtf8(leftOut.filename().wstring())
+            << " left out: it holds file and folder paths, and goes in with them included\n";
     return out.str();
 }
 
@@ -206,13 +210,6 @@ std::string probeCapabilities(audio::IOutput& output, const Settings& settings) 
 
 void writeDiagnosticBundle(const std::filesystem::path& zip, const DiagnosticInput& input) {
     try {
-        ZipWriter writer(zip);
-        writer.add("system.txt", systemText(input));
-        writer.add("settings.json", settingsText(input));
-        writer.add("library-folders.txt", rootsText(input));
-        writer.add("playback.txt", playbackText(input));
-        writer.add("devices.txt", devicesText(input));
-        writer.add("installation.txt", update::describeInstallation(input.programDirectory));
         std::error_code ec;
         std::vector<std::filesystem::path> logs, dumps;
         for (const auto& entry : std::filesystem::directory_iterator(input.dataDirectory / L"logs", ec))
@@ -220,16 +217,23 @@ void writeDiagnosticBundle(const std::filesystem::path& zip, const DiagnosticInp
         for (const auto& entry : std::filesystem::directory_iterator(input.dataDirectory / L"crashdumps", ec))
             if (entry.path().filename().wstring().starts_with(L"crash-") && entry.path().extension() == L".dmp")
                 dumps.push_back(entry.path());
+        // crash-YYYYMMDD-hhmmss.dmp sorts by time. A dump holds the process's memory, its paths among it: no redaction
+        // reaches them, so it goes in only with paths.
+        const auto newest = dumps.empty() ? std::filesystem::path{} : *std::max_element(dumps.begin(), dumps.end());
+        ZipWriter writer(zip);
+        writer.add("system.txt", systemText(input, input.includePaths ? std::filesystem::path{} : newest));
+        writer.add("settings.json", settingsText(input));
+        writer.add("library-folders.txt", rootsText(input));
+        writer.add("playback.txt", playbackText(input));
+        writer.add("devices.txt", devicesText(input));
+        writer.add("installation.txt", update::describeInstallation(input.programDirectory));
         std::sort(logs.begin(), logs.end());
         for (const auto& log : logs) {
             const auto text = readFile(log);
             writer.add("logs/" + toUtf8(log.filename().wstring()), input.includePaths ? text : redactPaths(text));
         }
-        // crash-YYYYMMDD-hhmmss.dmp sorts by time.
-        if (!dumps.empty()) {
-            const auto newest = *std::max_element(dumps.begin(), dumps.end());
+        if (!newest.empty() && input.includePaths)
             writer.add("crashdumps/" + toUtf8(newest.filename().wstring()), readFile(newest));
-        }
         writer.finish();
     } catch (...) {
         std::error_code ec;

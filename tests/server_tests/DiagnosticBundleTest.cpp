@@ -145,11 +145,12 @@ TEST(DiagnosticBundle, LeavesPathsOutUnlessIncluded) {
 
     writeDiagnosticBundle(file, input);
     auto entries = readZip(file);
-    EXPECT_EQ(entries.size(), 9u);
+    EXPECT_EQ(entries.size(), 8u);
     for (const auto& [name, text] : entries) EXPECT_EQ(text.find("secret"), std::string::npos) << name;
     EXPECT_EQ(entries.at("logs/CamelPlayer-20261027.log"), "a\nengine: <path> via dr_flac\n");
-    EXPECT_EQ(entries.at("crashdumps/crash-20261026-061058.dmp"), "new");
-    EXPECT_FALSE(entries.contains("crashdumps/crash-20261020-010101.dmp"));
+    // A crash dump holds the process's memory, paths among it, which no redaction reaches: it goes in only with them.
+    EXPECT_FALSE(entries.contains("crashdumps/crash-20261026-061058.dmp"));
+    EXPECT_NE(entries.at("system.txt").find("crash-20261026-061058.dmp left out"), std::string::npos) << entries.at("system.txt");
     EXPECT_NE(entries.at("system.txt").find("CamelPlayer 0.1.0"), std::string::npos);
     EXPECT_NE(entries.at("installation.txt").find("No install-manifest.txt"), std::string::npos);
     EXPECT_NE(entries.at("devices.txt").find("Speakers (DAVE)"), std::string::npos);
@@ -164,6 +165,8 @@ TEST(DiagnosticBundle, LeavesPathsOutUnlessIncluded) {
     EXPECT_NE(entries.at("logs/CamelPlayer-20261027.log").find("secret.flac"), std::string::npos);
     EXPECT_NE(entries.at("playback.txt").find("secret.flac"), std::string::npos);
     EXPECT_NE(entries.at("library-folders.txt").find("\\\\nas\\music"), std::string::npos);
+    EXPECT_EQ(entries.at("crashdumps/crash-20261026-061058.dmp"), "new");
+    EXPECT_FALSE(entries.contains("crashdumps/crash-20261020-010101.dmp"));
 }
 
 // The library keeps its folders in the \\?\ form, which a local folder and a share both start with: only the share
