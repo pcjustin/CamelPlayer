@@ -240,10 +240,11 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
         } catch (const std::exception&) {
         }
     }
-    std::lock_guard lock(mutex_);
+    // The storage is read without the lock, as for an album's cover: a slow share holds up no other cover.
     auto use = [&](const std::optional<ArtworkCandidate>& candidate) -> std::optional<ArtworkReference> {
         if (!candidate || token.cancelled()) return {};
         try {
+            std::lock_guard lock(mutex_);
             return generate(*candidate, token);
         } catch (const std::exception&) {
             return {};
@@ -252,13 +253,17 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
     auto track = [&](const Path& path) -> std::optional<ArtworkReference> {
         try {
             const auto key = fileKey(path);
-            const auto found = embedded_.find(key);
-            if (found != embedded_.end()) {
-                if (!found->second) return {};
+            std::optional<std::optional<ArtworkReference>> remembered;
+            {
+                std::lock_guard lock(mutex_);
+                if (const auto found = embedded_.find(key); found != embedded_.end()) remembered = found->second;
+            }
+            if (remembered) {
+                if (!*remembered) return {};
                 std::error_code ec;
-                if (std::filesystem::exists(found->second->path, ec)) {
-                    std::filesystem::last_write_time(found->second->path, std::filesystem::file_time_type::clock::now(), ec);
-                    return found->second;
+                if (std::filesystem::exists((*remembered)->path, ec)) {
+                    std::filesystem::last_write_time((*remembered)->path, std::filesystem::file_time_type::clock::now(), ec);
+                    return *remembered;
                 }
             }
             ArtworkQuery query;
@@ -266,6 +271,7 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
             auto images = makeEmbeddedArtworkProvider()->find(query, token);
             if (token.cancelled() || fileKey(path) != key) return {};
             auto result = images.empty() ? std::nullopt : use(std::move(images.front()));
+            std::lock_guard lock(mutex_);
             if (embedded_.size() >= 256) embedded_.erase(embedded_.begin());
             if (!token.cancelled() && (images.empty() || result)) embedded_[key] = result;
             return result;

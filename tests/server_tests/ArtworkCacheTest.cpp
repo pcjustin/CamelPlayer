@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <gtest/gtest.h>
 #include <wincodec.h>
+#include <winioctl.h>
 #include <wrl/client.h>
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
@@ -61,6 +62,49 @@ std::pair<unsigned, unsigned> dimensions(const Path& file) {
     if (SUCCEEDED(hr)) CoUninitialize();
     return {w, h};
 }
+// Holds a batch oplock on a file: another program's open of it waits until this lets go, as a read from a storage that
+// does not answer does.
+class HeldOpen {
+public:
+    explicit HeldOpen(const Path& file)
+        : handle_(CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                              OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr)) {
+        overlapped_.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        granted_ = handle_ != INVALID_HANDLE_VALUE &&
+                   !DeviceIoControl(handle_, FSCTL_REQUEST_BATCH_OPLOCK, nullptr, 0, nullptr, 0, nullptr, &overlapped_) &&
+                   GetLastError() == ERROR_IO_PENDING;
+    }
+    ~HeldOpen() {
+        release();
+        CloseHandle(overlapped_.hEvent);
+    }
+    HeldOpen(const HeldOpen&) = delete;
+    HeldOpen& operator=(const HeldOpen&) = delete;
+    bool granted() const { return granted_; }
+    bool asked() const { return WaitForSingleObject(overlapped_.hEvent, 0) == WAIT_OBJECT_0; } // another open came
+    void release() {
+        if (handle_ == INVALID_HANDLE_VALUE) return;
+        CloseHandle(handle_);
+        handle_ = INVALID_HANDLE_VALUE;
+        WaitForSingleObject(overlapped_.hEvent, 5000);
+    }
+
+private:
+    HANDLE handle_;
+    OVERLAPPED overlapped_{};
+    bool granted_ = false;
+};
+
+void embedPicture(const Path& file, const ArtworkCandidate& image) {
+    TagLib::FLAC::File tags(file.c_str());
+    auto* picture = new TagLib::FLAC::Picture;
+    picture->setType(TagLib::FLAC::Picture::FrontCover);
+    picture->setMimeType("image/bmp");
+    picture->setData(TagLib::ByteVector(reinterpret_cast<const char*>(image.bytes.data()), unsigned(image.bytes.size())));
+    tags.addPicture(picture);
+    tags.save();
+}
+
 class ArtworkCacheTest : public testing::Test {
 protected:
     Path dir = testutil::tempDir() / "artwork-cache";
@@ -384,4 +428,32 @@ TEST(ArtworkCacheWarmer, TheWarmerStopsForACoverBeingAskedFor) {
     ASSERT_EQ(warming.wait_for(2s), std::future_status::ready);
     EXPECT_LT(warming.get(), size_t(kAlbums));
     EXPECT_TRUE(cache.get(&store, {ArtworkKind::Album, last}));
+}
+
+// A track's cover read from a storage that holds the read up holds up no other cover.
+TEST(ArtworkCacheHang, ACoverReadThatHangsHoldsUpNoOtherCover) {
+    using namespace std::chrono_literals;
+    const Path dir = testutil::tempDir() / "artwork-cache-hang";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+    ArtworkCache cache(dir / "thumbs");
+    const auto slow = dir / "slow.flac", other = dir / "other.flac";
+    for (const auto& file : {slow, other}) {
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+        embedPicture(file, bitmap(80, 40, 70));
+    }
+    HeldOpen held(slow);
+    ASSERT_TRUE(held.granted());
+    auto hanging = std::async(std::launch::async,
+                              [&] { return cache.get(nullptr, {ArtworkKind::Track, 0, camel::toUtf8(slow.wstring())}); });
+    for (int i = 0; i < 500 && !held.asked(); ++i) std::this_thread::sleep_for(10ms);
+    ASSERT_TRUE(held.asked());
+    auto second = std::async(std::launch::async,
+                             [&] { return cache.get(nullptr, {ArtworkKind::Track, 0, camel::toUtf8(other.wstring())}); });
+    const bool soon = second.wait_for(1s) == std::future_status::ready;
+    held.release();
+    EXPECT_TRUE(soon);
+    EXPECT_TRUE(second.get());
+    EXPECT_TRUE(hanging.get());
 }
