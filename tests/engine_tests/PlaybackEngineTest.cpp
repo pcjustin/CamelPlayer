@@ -977,6 +977,38 @@ TEST_F(EngineStateTest, LostSourcePausesWithoutEndingTheTrackAndRetriesAtTheSave
     engine->waitIdle();
 }
 
+// A file played again is measured again, as the link it is read over may have changed since; only a seek in the play
+// that measured it keeps that rate.
+TEST_F(EngineStateTest, AShareFilePlayedAgainIsMeasuredAgain) {
+    const testaudio::GenSpec spec{"share-measured", 192000, 24, 2, 3.0};
+    const auto local = std::filesystem::absolute(testutil::tempDir() / "share-measured.wav");
+    testaudio::writeWav(local, testaudio::makeSignal(spec), spec.sampleRate, spec.bits, spec.channels);
+    // The same file through the administrative share of its drive, a network path the Engine measures.
+    const auto text = local.wstring();
+    if (text.size() < 3 || text[1] != L':') GTEST_SKIP() << "not on a drive letter";
+    const std::filesystem::path shared = L"\\\\localhost\\" + text.substr(0, 1) + L"$" + text.substr(2);
+    std::error_code error;
+    if (!std::filesystem::exists(shared, error)) GTEST_SKIP() << "no administrative share";
+    const auto directory = testutil::tempDir() / "measure-log";
+    std::filesystem::remove_all(directory);
+    log::init(directory, L"measure");
+    auto restoreLog = wil::scope_exit([] { log::init(testutil::tempDir() / "log-after-tests", L"test"); });
+    for (int play = 0; play < 2; ++play) {
+        engine->openAndPlay(shared);
+        engine->waitIdle();
+        engine->stop();
+        engine->waitIdle();
+    }
+    size_t measured = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        std::ifstream lines(entry.path());
+        for (std::string line; std::getline(lines, line);)
+            if (line.find(" reads at ") != std::string::npos && line.find("as measured when it started") == std::string::npos)
+                ++measured;
+    }
+    EXPECT_EQ(measured, 2u);
+}
+
 // A share that stops answering holds reads rather than failing them; the device then underruns on every render until
 // it answers again, a minute on the owner's NAS (OP-R21), which logged a line every 60 ms.
 TEST_F(EngineStateTest, AStalledSourceLogsItsUnderrunsAtMostOnceASecond) {

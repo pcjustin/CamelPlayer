@@ -366,6 +366,7 @@ public:
         resumeOnDefault_ = false;
         waitingForSource_ = false;
         file_ = file.wstring();
+        measuredFile_.clear(); // the link may have changed since it was measured
         fileDecoder_ = decoder;
         gainDb_ = gainDb;
         fadeSkip_ = !afterEnd || !settings_.crossfade.enabled ? FadeSkip::None
@@ -408,6 +409,7 @@ public:
         waitingForSource_ = false;
         teardown();
         file_ = file.wstring();
+        measuredFile_.clear();
         fileDecoder_ = decoder;
         gainDb_ = gainDb;
         format_.reset();
@@ -1066,9 +1068,9 @@ private:
         const uint64_t size = std::filesystem::file_size(file_, error);
         const uint64_t at = error ? 0 : uint64_t(double(size) * double(from) / double(shown));
         // A seek in the file measured when it started uses that rate: measuring takes up to 4 MB from the share.
-        const auto read = measuredFile_ == file_ && measuredRate_
-                              ? measuredRate_
-                              : measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
+        const bool kept = measuredFile_ == file_ && measuredRate_;
+        const auto read =
+            kept ? measuredRate_ : measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
         measuredFile_ = file_;
         measuredRate_ = read;
         if (!read) return configured;
@@ -1077,7 +1079,8 @@ private:
         const double wait = bufferSeconds(left, *read / needed) <= 0
                                 ? 0.0
                                 : bufferSeconds(left, *read * (streamed ? kStreamReadShare : 1.0) / needed);
-        log::info("engine: %s reads at %.2f MB/s, plays at %.2f MB/s%s", toUtf8(file_).c_str(), *read / 1e6, needed / 1e6,
+        log::info("engine: %s reads at %.2f MB/s%s, plays at %.2f MB/s%s", toUtf8(file_).c_str(), *read / 1e6,
+                  kept ? " (as measured when it started)" : "", needed / 1e6,
                   wait <= 0  ? ""
                   : streamed ? "; buffering before it plays, then reading it slower while it streams"
                              : "; buffering before it plays");
