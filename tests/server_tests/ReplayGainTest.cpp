@@ -341,3 +341,34 @@ TEST(Loudness, AFileWhoseStorageWasAwayIsTriedAgainOnceItIsBack) {
     online(1);
     EXPECT_TRUE(analyzed(store, 1, std::chrono::seconds(15)));
 }
+
+// The analysis changes nothing a listing shows, so the listings' revision stays as it was.
+TEST(Loudness, AnalyzingLeavesTheLibraryRevisionAsItWas) {
+    const auto directory = testutil::tempDir() / "loudness-revision";
+    std::filesystem::remove_all(directory);
+    const auto file = sine("revision.wav", 44100, 2, -20.0, 2.0);
+    LibraryStore store(directory);
+    store
+        .write([&](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "INSERT INTO albums(id,folder_id,grouping_key,title,added) VALUES(1,1,'a','Album',0);");
+            db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(1,1,1,?,'audio',1,1,1)")
+                .bind(1, toUtf8(file.wstring()))
+                .run();
+            db.exec("INSERT INTO tracks(id,file_id,album_id,title,format) VALUES(1,1,1,'T','wav');");
+        })
+        .get();
+    const auto revision = [&] { return store.openReader().scalar("SELECT value FROM library_revision"); };
+    const auto before = revision();
+    const auto albumMeasured = [&] {
+        return store.openReader().scalar("SELECT count(*) FROM tracks WHERE rg_analysis_album_gain IS NOT NULL") == 1;
+    };
+    LoudnessAnalyzer analyzer(store, {[] { return ReplayGainSettings{ReplayGainMode::Album}; }, [] { return DecoderByFormat{}; },
+                                      [] { return std::vector<int64_t>{}; }, [] { return PlaybackReads{}; }});
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (!albumMeasured() && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ASSERT_TRUE(albumMeasured());
+    EXPECT_EQ(revision(), before);
+}

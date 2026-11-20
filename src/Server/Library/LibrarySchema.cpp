@@ -499,6 +499,17 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
             db.exec("ALTER TABLE tracks ADD COLUMN album_artist_sort_tag TEXT;"
                     "ALTER TABLE albums ADD COLUMN artist_sort_key BLOB;");
         },
+        // No listing shows the loudness measured from the audio, so writing it leaves the listings' revision alone; a
+        // column added to tracks later is added to this trigger.
+        [](sqlite::Database& db) {
+            std::string columns;
+            auto names = db.prepare("SELECT name FROM pragma_table_info('tracks') WHERE name NOT IN "
+                                    "('rg_analysis_gain','rg_analysis_peak','rg_analysis_album_gain','rg_analysis_album_peak')");
+            while (names.step()) columns += (columns.empty() ? "" : ",") + names.text(0);
+            db.exec("DROP TRIGGER tracks_revision_update;"
+                    "CREATE TRIGGER tracks_revision_update AFTER UPDATE OF " +
+                    columns + " ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;");
+        },
     };
     return migrations;
 }
