@@ -275,6 +275,32 @@ TEST(Settings, AFileThatCannotBeOpenedIsNotTakenForMissing) {
     for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
 }
 
+// A file that opens but cannot be read, under another program's lock, is not corrupt: it is left as it is, as a file
+// that cannot be opened is.
+TEST(Settings, AFileThatCannotBeReadIsNotTakenForCorrupt) {
+    const auto p = testutil::tempDir() / L"settings-locked.json";
+    const auto lastGood = std::filesystem::path(p).concat(L".last-good");
+    const auto bad = std::filesystem::path(p).concat(L".bad");
+    for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
+    Settings saved;
+    saved.backend = Backend::Asio;
+    saveSettings(saved, p);
+    {
+        const HANDLE locked = CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                          nullptr, OPEN_EXISTING, 0, nullptr);
+        ASSERT_NE(locked, INVALID_HANDLE_VALUE);
+        OVERLAPPED whole{};
+        ASSERT_TRUE(LockFileEx(locked, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &whole));
+        auto recovery = SettingsRecovery::None;
+        EXPECT_THROW(openSettings(p, recovery), SettingsUnavailableError);
+        EXPECT_THROW(loadSettings(p), SettingsUnavailableError);
+        CloseHandle(locked);
+    }
+    EXPECT_FALSE(std::filesystem::exists(bad));
+    EXPECT_EQ(loadSettings(p).backend, Backend::Asio) << "the file is as it was";
+    for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
+}
+
 TEST(Settings, OpeningKeepsALastGoodCopyThatReplacesACorruptFile) {
     const auto p = testutil::tempDir() / L"settings-open.json";
     const auto lastGood = std::filesystem::path(p).concat(L".last-good");

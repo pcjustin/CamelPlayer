@@ -1077,30 +1077,50 @@ namespace {
 
 constexpr int kOpenAttempts = 10; // 200 ms apart: a backup or antivirus program's hold is often that short
 
-// Nothing for a missing file; throws NewerSettingsError, SettingsUnavailableError for a file that exists and still
-// cannot be opened after a moment, or another exception for a corrupt file.
-std::optional<Settings> readSettings(const std::filesystem::path& path, bool migrate = true) {
-    std::ifstream in;
+// What is not valid settings, as opposed to a file that cannot be read.
+class CorruptSettingsError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// The whole file, read as it is on disk; nothing for a missing file. A file held, locked or refused by its permissions
+// is tried again for a moment, then reported as SettingsUnavailableError.
+std::optional<std::string> readWhole(const std::filesystem::path& path) {
     for (int attempt = 0;; ++attempt) {
-        in.open(path, std::ios::binary);
-        if (in) break;
         std::error_code error;
-        if (std::filesystem::status(path, error).type() == std::filesystem::file_type::not_found) return std::nullopt;
+        if (std::ifstream in(path, std::ios::binary); in) {
+            std::stringstream ss;
+            ss << in.rdbuf();
+            auto contents = ss.str();
+            if (contents.size() == std::filesystem::file_size(path, error) && !error) return contents;
+        } else if (std::filesystem::status(path, error).type() == std::filesystem::file_type::not_found) {
+            return std::nullopt;
+        }
         if (attempt == kOpenAttempts)
-            throw SettingsUnavailableError(toUtf8(path.filename().wstring()) + " cannot be opened, and was left as it is");
-        in.clear();
+            throw SettingsUnavailableError(toUtf8(path.filename().wstring()) + " cannot be read, and was left as it is");
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
-    std::stringstream ss;
-    ss << in.rdbuf();
-    in.close();
-    const auto contents = ss.str();
-    const auto parsed = json::parse(contents);
-    if (parsed.is_object() && parsed.contains("schema") && parsed["schema"].is_number_integer() &&
-        parsed["schema"].get<int>() > Settings::kSchemaVersion)
-        throw NewerSettingsError("settings.json has schema " + std::to_string(parsed["schema"].get<int>()) +
-                                 ", newer than this program (" + std::to_string(Settings::kSchemaVersion) + ")");
-    Settings settings = fromJson(contents);
+}
+
+// Nothing for a missing file; throws NewerSettingsError, SettingsUnavailableError for a file that exists and still
+// cannot be read after a moment, or CorruptSettingsError for a corrupt file.
+std::optional<Settings> readSettings(const std::filesystem::path& path, bool migrate = true) {
+    const auto contents = readWhole(path);
+    if (!contents) return std::nullopt;
+    json parsed;
+    Settings settings;
+    try {
+        parsed = json::parse(*contents);
+        if (parsed.is_object() && parsed.contains("schema") && parsed["schema"].is_number_integer() &&
+            parsed["schema"].get<int>() > Settings::kSchemaVersion)
+            throw NewerSettingsError("settings.json has schema " + std::to_string(parsed["schema"].get<int>()) +
+                                     ", newer than this program (" + std::to_string(Settings::kSchemaVersion) + ")");
+        settings = fromJson(*contents);
+    } catch (const json::exception& e) {
+        throw CorruptSettingsError(e.what());
+    } catch (const std::invalid_argument& e) {
+        throw CorruptSettingsError(e.what());
+    }
     const int schema = parsed.value("schema", 0);
     if (migrate && schema < Settings::kSchemaVersion) {
         try {
@@ -1123,11 +1143,7 @@ void keepAsBad(const std::filesystem::path& path, const std::exception& e) {
 Settings loadSettings(const std::filesystem::path& path) {
     try {
         return readSettings(path).value_or(Settings{});
-    } catch (const NewerSettingsError&) {
-        throw;
-    } catch (const SettingsUnavailableError&) {
-        throw;
-    } catch (const std::exception& e) {
+    } catch (const CorruptSettingsError& e) {
         keepAsBad(path, e);
         return {};
     }
@@ -1155,11 +1171,7 @@ Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recov
         const auto settings = readSettings(path);
         if (settings) std::filesystem::copy_file(path, lastGood, std::filesystem::copy_options::overwrite_existing, ec);
         return settings.value_or(Settings{});
-    } catch (const NewerSettingsError&) {
-        throw;
-    } catch (const SettingsUnavailableError&) {
-        throw;
-    } catch (const std::exception& e) {
+    } catch (const CorruptSettingsError& e) {
         keepAsBad(path, e);
     }
     try {
@@ -1169,11 +1181,7 @@ Settings openSettings(const std::filesystem::path& path, SettingsRecovery& recov
             log::warn("settings: restored settings.json.last-good");
             return *settings;
         }
-    } catch (const NewerSettingsError&) {
-        throw;
-    } catch (const SettingsUnavailableError&) {
-        throw;
-    } catch (const std::exception& e) {
+    } catch (const CorruptSettingsError& e) {
         log::warn("settings: settings.json.last-good is unusable too (%s)", e.what());
     }
     recovery = SettingsRecovery::Reset;
