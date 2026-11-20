@@ -19,6 +19,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "DtsFixture.h"
@@ -96,6 +97,39 @@ std::filesystem::path withSilence(const char* name, uint64_t leading, uint64_t s
     const auto path = testutil::tempDir() / name;
     std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
     return path;
+}
+
+// A WAVE file whose data is word frames `from` to `to` of the fixture's bitstream played `repeats` times over, as a
+// rip of one continuous DTS-CD is cut into tracks.
+std::filesystem::path dtsRun(const char* name, uint64_t repeats, uint64_t from, uint64_t to) {
+    std::ifstream in(dtsPath(), std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const size_t data = bytes.find("data");
+    if (data == std::string::npos) throw std::runtime_error("the fixture has no data chunk");
+    std::string stream;
+    for (uint64_t i = 0; i < repeats; i++) stream += bytes.substr(data + 8);
+    std::string out = bytes.substr(0, data + 8) + stream.substr(size_t(from * 4), size_t((to - from) * 4));
+    const auto put32 = [&](size_t at, uint64_t value) {
+        for (size_t i = 0; i < 4; i++) out[at + i] = char(uint8_t(value >> (8 * i)));
+    };
+    put32(data + 4, out.size() - data - 8);
+    put32(4, out.size() - 8);
+    const auto path = testutil::tempDir() / name;
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << out;
+    return path;
+}
+
+// The largest difference between 24-bit stereo `samples` and the downmix of the 5.1 decode `decoded` the Engine plays.
+int32_t worstDownmixDifference(const std::vector<int32_t>& samples, const std::vector<float>& decoded) {
+    const double a = std::numbers::sqrt2 / 2;
+    int32_t worst = 0;
+    for (size_t i = 0; i < samples.size() / 2; i++) {
+        const float* f = &decoded[i * 6]; // L R C LFE Ls Rs; the LFE is dropped
+        const double left = (f[0] + a * f[2] + a * f[4]) * 8388608.0, right = (f[1] + a * f[2] + a * f[5]) * 8388608.0;
+        worst = std::max({worst, std::abs(samples[i * 2] - int32_t(std::lround(left))),
+                          std::abs(samples[i * 2 + 1] - int32_t(std::lround(right)))});
+    }
+    return worst;
 }
 
 int64_t privateBytes() {
@@ -259,14 +293,83 @@ TEST(Dts, PlaysOnlyWithConversionAndThenDownmixes) {
     EXPECT_EQ(played.snapshot.format, AudioFormat::Dts);
     const auto& samples = played.samples;
     ASSERT_EQ(samples.size(), file.frames * 2);
-    const auto decoded = readAll(*openDecoder(DecoderKind::Sndfile, dtsPath()));
-    const double a = std::numbers::sqrt2 / 2;
-    int32_t worst = 0;
-    for (size_t i = 0; i < file.frames; i++) {
-        const float* f = &decoded[i * 6]; // L R C LFE Ls Rs; the LFE is dropped
-        const double left = (f[0] + a * f[2] + a * f[4]) * 8388608.0, right = (f[1] + a * f[2] + a * f[5]) * 8388608.0;
-        worst = std::max({worst, std::abs(samples[i * 2] - int32_t(std::lround(left))),
-                          std::abs(samples[i * 2 + 1] - int32_t(std::lround(right)))});
+    EXPECT_LE(worstDownmixDifference(samples, readAll(*openDecoder(DecoderKind::Sndfile, dtsPath()))),
+              2); // TPDF dither of one LSB and float rounding
+}
+
+// A continuous DTS-CD ripped track by track cuts a frame at each track change. Told which track follows, the first
+// decodes the frame's beginning with the next file's bytes, and the next decodes its rest after the first's last frames,
+// with the filters as they were: both play as the whole file does.
+TEST(Dts, AFrameCutBetweenTwoTracksPlaysInBoth) {
+    const uint64_t words = dtsCd().frames, cut = 512 * 20 + 200; // 200 word frames into a frame
+    const auto whole = dtsRun("dts-whole.wav", 1, 0, words);
+    const auto first = dtsRun("dts-first.wav", 1, 0, cut), second = dtsRun("dts-second.wav", 1, cut, words);
+    const auto expected = readAll(*openDecoder(DecoderKind::Sndfile, whole));
+    ASSERT_EQ(expected.size(), words * 6);
+    for (const DecoderKind kind : {DecoderKind::Sndfile, DecoderKind::Symphonia}) {
+        SCOPED_TRACE(decoderName(kind));
+        const auto a = openDecoder(kind, first), b = openDecoder(kind, second);
+        a->playsOnInto(second);
+        b->followsOn(first);
+        const auto gotA = readAll(*a), gotB = readAll(*b);
+        ASSERT_EQ(gotA.size(), cut * 6);
+        ASSERT_EQ(gotB.size(), (words - cut) * 6);
+        EXPECT_EQ(worstDifference(gotA.data(), expected.data(), gotA.size()), 0.0f);
+        EXPECT_EQ(worstDifference(gotB.data(), expected.data() + cut * 6, gotB.size()), 0.0f);
+        b->seek(100);
+        std::vector<float> block(size_t{256} * 6);
+        ASSERT_EQ(b->readFloat(block.data(), 256), 256u);
+        EXPECT_EQ(worstDifference(block.data(), expected.data() + (cut + 100) * 6, block.size()), 0.0f) << "after a seek";
     }
-    EXPECT_LE(worst, 2); // TPDF dither of one LSB and float rounding
+}
+
+// A track that does not follow on is not joined, though it is DTS and starts within a frame.
+TEST(Dts, AnotherTrackIsNotJoined) {
+    const uint64_t words = dtsCd().frames, cut = 512 * 20 + 200;
+    const auto first = dtsRun("dts-alone-first.wav", 1, 0, cut), other = dtsRun("dts-other.wav", 1, 333, words);
+    const auto alone = readAll(*openDecoder(DecoderKind::Sndfile, first));
+    const auto otherAlone = readAll(*openDecoder(DecoderKind::Sndfile, other));
+    const auto a = openDecoder(DecoderKind::Sndfile, first), b = openDecoder(DecoderKind::Sndfile, other);
+    a->playsOnInto(other);
+    b->followsOn(first);
+    EXPECT_EQ(readAll(*a), alone);
+    EXPECT_EQ(readAll(*b), otherAlone);
+}
+
+// The Engine tells a track queued to play on of the track before it.
+TEST(Dts, TwoTracksOfOneRipPlayOnAsTheWholeFile) {
+    const uint64_t words = dtsCd().frames, repeats = 8, cut = 6 * words + uint64_t{512} * 7 + 300;
+    const auto whole = dtsRun("dts-rip.wav", repeats, 0, repeats * words);
+    const auto first = dtsRun("dts-rip-1.wav", repeats, 0, cut), second = dtsRun("dts-rip-2.wav", repeats, cut, repeats * words);
+    const auto out = testutil::tempDir() / "dts-rip.raw";
+    std::filesystem::remove(out);
+    Settings settings;
+    settings.convertWhenUnsupported = true;
+    settings.wasapi.timing.predecodeSeconds = 1; // the next track is queued before the first is read to its end
+    CaptureOptions options;
+    options.file = out;
+    options.realtime = true;
+    options.accepts = [](const DeviceFormat& f) { return f.sampleRate == 44100 && f.type == SampleType::Int24; };
+    {
+        PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
+        engine.openAndPlay(first);
+        engine.waitIdle();
+        bool queued = false;
+        for (int i = 0; i < 400 && !queued; ++i) {
+            queued = engine.queueNext(second);
+            if (!queued) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        ASSERT_TRUE(queued);
+        ASSERT_TRUE(engine.waitForState(PlayState::Stopped, std::chrono::seconds(30)));
+        EXPECT_EQ(engine.snapshot().transitions, 1u);
+        EXPECT_FALSE(engine.snapshot().error) << engine.snapshot().errorDetail;
+    }
+    std::ifstream in(out, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    std::vector<int32_t> samples(bytes.size() / 3);
+    unpackSamples(reinterpret_cast<const uint8_t*>(bytes.data()), samples.size(), 24, SampleType::Int24, samples.data());
+    ASSERT_EQ(samples.size(), repeats * words * 2);
+    EXPECT_LE(worstDownmixDifference(samples, readAll(*openDecoder(DecoderKind::Sndfile, whole))), 2);
+    std::filesystem::remove(out);
 }

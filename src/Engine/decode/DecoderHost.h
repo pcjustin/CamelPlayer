@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string_view>
 
 #include "Engine/EngineAbi.h"
@@ -14,11 +15,16 @@
 namespace camel::audio {
 
 // A decoder already open on `path`, which the host's first open of `path` with decoder number `kind` takes rather than
-// opening the file again.
+// opening the file again; and the track the host opened last and has not closed, which a track opened after it plays on
+// from without a gap, unless a crossfade opens it.
 struct OpenedDecoder {
     std::unique_ptr<IDecoder> decoder;
     std::filesystem::path path;
     uint32_t kind = 0;
+    std::mutex mutex;
+    IDecoder* last = nullptr;
+    std::filesystem::path lastPath;
+    bool crossfading = false;
 };
 
 // `opened`, when given, outlives the host.

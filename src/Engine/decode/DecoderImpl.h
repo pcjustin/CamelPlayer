@@ -5,6 +5,8 @@
 // Constructors of the concrete decoders; only Decoders.cpp calls these. `lossyBits` (16 or 24) is the depth lossy
 // streams are quantized to; lossless streams keep their source depth.
 #pragma once
+#include <functional>
+
 #include "Engine/decode/IDecoder.h"
 
 namespace camel::audio {
@@ -17,7 +19,9 @@ std::unique_ptr<IDecoder> openMpg123(const std::filesystem::path& path, uint32_t
 // Raw DSD: SourceInfo counts byte frames (DSD rate / 8) and reports 1 bit per sample; read() returns one byte
 // per channel per frame, oldest sample in the MSB.
 std::unique_ptr<IDecoder> openDsdNexus(const std::filesystem::path& path);
+// Opens another DTS-CD file as `words` was opened, for a neighboring track's bytes.
+using WordsOpener = std::function<std::unique_ptr<IDecoder>(const std::filesystem::path&)>;
 // Decodes the DTS bitstream that `words`, a 16-bit stereo WAVE decoder, reads from a DTS-CD file.
-std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits);
+std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits, WordsOpener openWords);
 
 } // namespace camel::audio

@@ -82,6 +82,15 @@ int32_t openDecoderHost(void* context, uint32_t kind, const uint8_t* path, uint6
         result.has_md5 = source.md5.has_value() ? 1u : 0u;
         result.channel_mask = source.channelMask;
         if (source.md5) std::copy(source.md5->begin(), source.md5->end(), result.md5);
+        if (opened) {
+            std::lock_guard lock(opened->mutex);
+            if (opened->last && !opened->crossfading) {
+                opened->last->playsOnInto(file);
+                handle->decoder->followsOn(opened->lastPath);
+            }
+            opened->last = handle->decoder.get();
+            opened->lastPath = file;
+        }
         *info = result;
         *outDecoder = handle.release();
         return CAMEL_DECODER_HOST_OK;
@@ -127,8 +136,13 @@ int32_t seekDecoderHost(void*, void* opaque, uint64_t frame) noexcept {
     }
 }
 
-void closeDecoderHost(void*, void* opaque) noexcept {
-    delete static_cast<DecoderHandle*>(opaque);
+void closeDecoderHost(void* context, void* opaque) noexcept {
+    auto* handle = static_cast<DecoderHandle*>(opaque);
+    if (auto* opened = static_cast<OpenedDecoder*>(context); opened && handle) {
+        std::lock_guard lock(opened->mutex);
+        if (opened->last == handle->decoder.get()) opened->last = nullptr;
+    }
+    delete handle;
 }
 
 int32_t lengthDecoderHost(void*, void* opaque, uint64_t* totalFrames) noexcept {

@@ -227,7 +227,15 @@ bool RustSession::crossfadeTo(const std::filesystem::path& path, DecoderKind dec
     const auto utf8 = toUtf8(path.wstring());
     const auto source = trackSource(utf8, gainDb, fade);
     const auto command = nextCommand();
-    return camel_engine_crossfade_to_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_) == CAMEL_ENGINE_OK;
+    const auto crossfading = [this](bool on) {
+        std::lock_guard lock(opened_.mutex);
+        opened_.crossfading = on;
+    };
+    crossfading(true);
+    const bool started =
+        camel_engine_crossfade_to_v1(engine_, &command, &source, abiDecoder(decoderId(decoder)), &host_) == CAMEL_ENGINE_OK;
+    crossfading(false);
+    return started;
 }
 
 bool RustSession::clearNext() {

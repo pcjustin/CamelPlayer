@@ -38,6 +38,12 @@ public:
     // read() returns the same samples rounded to info().bitsPerSample. Mixing the two reads is allowed.
     virtual bool readsFloat() const { return false; }
     virtual size_t readFloat(float* dst, size_t frames);
+
+    // The track plays on without a gap into `next`, or after `previous`. A decoder whose frames can straddle two files,
+    // as a DTS-CD ripped track by track cuts one at each track change, reads what it needs of the neighbor; others
+    // ignore it. playsOnInto may be called while another thread reads.
+    virtual void playsOnInto(const std::filesystem::path& /*next*/) {}
+    virtual void followsOn(const std::filesystem::path& /*previous*/) {}
 };
 
 // Opens `path` with the chosen decoder. Lossy formats decode to 24-bit PCM.

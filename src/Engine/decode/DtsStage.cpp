@@ -4,17 +4,22 @@
 
 // DTS-CD: the chosen WAVE decoder reads the DTS bitstream as 16-bit stereo words, and dts_core turns them into the PCM
 // they carry. DTS-CD frames fill the PCM rate exactly, so a frame that starts at word frame n plays from sample n; frames
-// are placed by their position, which keeps the length and seeking exact.
+// are placed by their position, which keeps the length and seeking exact. A disc ripped track by track cuts a frame at
+// each track change; told its neighbors, a track completes the frame at its end from the next file and starts after the
+// previous file's last frames, so both tracks play as the whole disc does.
 #include "Engine/decode/DecoderImpl.h"
 
 #include <dts_abi.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
+#include "Engine/decode/FormatProbe.h"
 #include "Engine/decode/Quantize.h"
 
 namespace camel::audio {
@@ -34,7 +39,8 @@ struct FreeDts {
 
 class DtsStage final : public IDecoder {
 public:
-    DtsStage(std::unique_ptr<IDecoder> words, uint32_t bits) : words_(std::move(words)), decoder_(dts_new()) {
+    DtsStage(std::unique_ptr<IDecoder> words, uint32_t bits, WordsOpener openWords)
+        : words_(std::move(words)), openWords_(std::move(openWords)), decoder_(dts_new()) {
         const SourceInfo& in = words_->info();
         if (words_->readsFloat() || in.bitsPerSample != 16 || in.channels != 2)
             throw Error(ErrorCode::UnsupportedStream, "DTS in a WAVE file must be read as 16-bit stereo PCM");
@@ -86,20 +92,94 @@ public:
         restart(frame);
     }
 
+    void playsOnInto(const std::filesystem::path& next) override {
+        std::lock_guard lock(neighborsMutex_);
+        nextFile_ = next;
+    }
+
+    // Told before the first read.
+    void followsOn(const std::filesystem::path& previous) override {
+        {
+            std::lock_guard lock(neighborsMutex_);
+            previousFile_ = previous;
+        }
+        restart(0);
+    }
+
 private:
+    std::filesystem::path neighbor(const std::filesystem::path& file) {
+        std::lock_guard lock(neighborsMutex_);
+        return file;
+    }
+
     void startReadingAt(uint64_t wordFrame) {
         words_->seek(wordFrame);
         dts_reset(decoder_.get());
         bytes_.clear();
-        bytesFrom_ = wordFrame * kBytesPerWordFrame;
+        bytesFrom_ = int64_t(wordFrame * kBytesPerWordFrame);
         wordsDone_ = false;
+        joiningPrevious_ = false;
+        joinedNext_ = false;
+    }
+
+    // The previous track's last word frames before the file's own: its frames settle the filters and the frame cut at
+    // the track change is decoded whole, if it is one (decodeNextFrame checks).
+    void prependPrevious() {
+        const auto previous = neighbor(previousFile_);
+        if (previous.empty()) return;
+        try {
+            if (probeFormat(previous) != AudioFormat::Dts) return;
+            const auto words = openWords_(previous);
+            const uint64_t total = words->info().totalFrames;
+            words->seek(total > kPreroll ? total - kPreroll : 0);
+            std::vector<uint8_t> tail;
+            while (appendWords(*words, tail)) {
+            }
+            if (tail.empty()) return;
+            tail.insert(tail.end(), bytes_.begin(), bytes_.end());
+            bytes_ = std::move(tail);
+            bytesFrom_ -= int64_t(bytes_.size());
+            joiningPrevious_ = true;
+        } catch (const Error&) {
+            // a previous track that cannot be read is not joined
+        }
+    }
+
+    // Ends the join with the previous track: what is left of its bytes goes, and the filters start afresh.
+    void leavePrevious() {
+        if (bytesFrom_ < 0) dropBytes(std::min(bytes_.size(), size_t(-bytesFrom_)));
+        dts_reset(decoder_.get());
+        joiningPrevious_ = false;
+    }
+
+    // Completes the frame cut at the file's end, `frameBytes` long, from the next track, when the next track's own first
+    // frame starts right after it: the next file goes on with this one. False when it does not, or was tried.
+    bool joinNext(size_t frameBytes) {
+        if (joinedNext_ || bytesFrom_ < 0 || bytes_.size() >= frameBytes) return false;
+        joinedNext_ = true;
+        const auto next = neighbor(nextFile_);
+        if (next.empty()) return false;
+        try {
+            if (probeFormat(next) != AudioFormat::Dts) return false;
+            const auto words = openWords_(next);
+            const size_t missing = frameBytes - bytes_.size();
+            std::vector<uint8_t> head;
+            while (head.size() < missing + kHeaderBytes && appendWords(*words, head)) {
+            }
+            if (head.size() < missing + kHeaderBytes || dts_find_sync(head.data() + missing, head.size() - missing, 0) != 0)
+                return false;
+            bytes_.insert(bytes_.end(), head.begin(), head.begin() + ptrdiff_t(missing));
+            return true;
+        } catch (const Error&) {
+            return false;
+        }
     }
 
     // The layout comes from the first frames, which must also follow the PCM rate one sample per word frame.
     void probe(uint32_t wordRate) {
-        std::vector<std::pair<uint64_t, uint32_t>> frames; // start, samples
+        std::vector<std::pair<int64_t, uint32_t>> frames; // start, samples
         bytesFrom_ = 0;
-        onFrame_ = [&](uint64_t start, const DtsPcm& pcm) {
+        onFrame_ = [&](int64_t start, const DtsPcm& pcm) {
             if (frames.empty()) {
                 info_.sampleRate = pcm.sample_rate;
                 info_.channels = pcm.channels;
@@ -111,18 +191,19 @@ private:
         }
         onFrame_ = nullptr;
         if (frames.size() < 2) throw Error(ErrorCode::UnsupportedStream, "no DTS frames found");
-        if (info_.sampleRate != wordRate || frames[1].first - frames[0].first != uint64_t(frames[0].second))
+        if (info_.sampleRate != wordRate || frames[1].first - frames[0].first != int64_t(frames[0].second))
             throw Error(ErrorCode::UnsupportedStream, "the DTS frames do not follow the PCM rate");
     }
 
-    // Decoding continues from `frame`, reading from shortly before it.
+    // Decoding continues from `frame`, reading from shortly before it, which near the start is in the previous track.
     void restart(uint64_t frame) {
         startReadingAt(frame > kPreroll ? frame - kPreroll : 0);
+        if (frame <= kPreroll) prependPrevious();
         next_ = frame;
         silence_ = 0;
         out_.clear();
         outPos_ = 0;
-        onFrame_ = [this](uint64_t start, const DtsPcm& pcm) { place(start, pcm); };
+        onFrame_ = [this](int64_t start, const DtsPcm& pcm) { place(start, pcm); };
     }
 
     // Decodes more into out_, after the silence owed before it; false once the stream has ended at the end of the track.
@@ -136,28 +217,41 @@ private:
         return true;
     }
 
-    // Appends the next block of words as the file holds them; false at the end of the stream.
+    // Appends the next block of `words` to `to` as the file holds them; false at the end of the file.
+    bool appendWords(IDecoder& words, std::vector<uint8_t>& to) {
+        words16_.resize(kWordFrames * 2);
+        const size_t got = words.read(words16_.data(), kWordFrames);
+        for (size_t i = 0; i < got * 2; i++) {
+            to.push_back(uint8_t(words16_[i]));
+            to.push_back(uint8_t(words16_[i] >> 8));
+        }
+        return got != 0;
+    }
+
+    // Appends the next block of the file's words; false at the end of the stream.
     bool readWords() {
         if (wordsDone_) return false;
-        words16_.resize(kWordFrames * 2);
-        const size_t got = words_->read(words16_.data(), kWordFrames);
-        wordsDone_ = got == 0;
-        for (size_t i = 0; i < got * 2; i++) {
-            bytes_.push_back(uint8_t(words16_[i]));
-            bytes_.push_back(uint8_t(words16_[i] >> 8));
-        }
+        wordsDone_ = !appendWords(*words_, bytes_);
         return !wordsDone_;
     }
 
     void dropBytes(size_t count) {
         bytes_.erase(bytes_.begin(), bytes_.begin() + ptrdiff_t(count));
-        bytesFrom_ += count;
+        bytesFrom_ += int64_t(count);
+    }
+
+    // The word frame bytes_[0] is in, counted back from the file's start within the previous track.
+    int64_t wordFrameOfBytes() const {
+        constexpr auto word = int64_t(kBytesPerWordFrame);
+        return bytesFrom_ >= 0 ? bytesFrom_ / word : -((-bytesFrom_ + word - 1) / word);
     }
 
     // Decodes the next frame there is; false at the end of the stream. What only looks like a frame is passed over and
     // leaves a gap that place() fills.
     bool decodeNextFrame() {
         for (;;) {
+            // The previous track's frames all ended before the file's start: no frame was cut, nothing joins them.
+            if (joiningPrevious_ && bytesFrom_ >= 0) leavePrevious();
             const int64_t sync = dts_find_sync(bytes_.data(), bytes_.size(), 0);
             if (sync < 0) {
                 dropBytes(bytes_.size() - std::min(bytes_.size(), kLongestSyncBytes));
@@ -172,8 +266,19 @@ private:
                 continue;
             }
             if (bytes_.size() < frame.container_bytes) {
-                if (readWords()) continue;
+                if (readWords() || joinNext(frame.container_bytes)) continue;
                 return false;
+            }
+            // A frame begun in the previous track and cut at the file's start is that track's only if the file's own
+            // first frame starts right after it.
+            if (joiningPrevious_ && bytesFrom_ + int64_t(frame.container_bytes) > 0) {
+                if (bytes_.size() < frame.container_bytes + kHeaderBytes && readWords()) continue;
+                const size_t after = std::min(bytes_.size(), size_t(frame.container_bytes));
+                if (dts_find_sync(bytes_.data() + after, bytes_.size() - after, 0) != 0) {
+                    leavePrevious();
+                    continue;
+                }
+                joiningPrevious_ = false;
             }
             DtsPcm pcm{};
             pcm.struct_size = sizeof(pcm);
@@ -181,34 +286,41 @@ private:
                 dropBytes(kWordBytes);
                 continue;
             }
-            if (onFrame_) onFrame_(bytesFrom_ / kBytesPerWordFrame, pcm);
+            if (onFrame_) onFrame_(wordFrameOfBytes(), pcm);
             dropBytes(frame.container_bytes);
             return true;
         }
     }
 
-    // Appends a decoded frame at its position: silence fills a gap before it, and what precedes next_ is dropped.
-    void place(uint64_t start, const DtsPcm& pcm) {
+    // Appends a decoded frame at its position: silence fills a gap before it, and what precedes next_ is dropped, as are
+    // the previous track's frames before the file's start.
+    void place(int64_t start, const DtsPcm& pcm) {
+        const auto next = int64_t(next_);
+        const int64_t end = std::min(start + int64_t(pcm.frames), int64_t(info_.totalFrames));
+        if (end <= next || start >= end) return;
         if (pcm.channels != info_.channels || pcm.channel_mask != info_.channelMask)
             throw Error(ErrorCode::DecodeFailed, "the DTS channel layout changed within the track");
         const size_t ch = info_.channels;
-        const uint64_t end = std::min(start + uint64_t(pcm.frames), info_.totalFrames);
-        if (end <= next_ || start >= end) return;
-        if (start > next_) {
-            silence_ += start - next_; // refill() asks only with out_ empty, so the silence comes before it
-            next_ = start;
+        if (start > next) {
+            silence_ += uint64_t(start - next); // refill() asks only with out_ empty, so the silence comes before it
+            next_ = uint64_t(start);
         }
-        out_.insert(out_.end(), pcm.samples + size_t(next_ - start) * ch, pcm.samples + size_t(end - start) * ch);
-        next_ = end;
+        out_.insert(out_.end(), pcm.samples + size_t(int64_t(next_) - start) * ch, pcm.samples + size_t(end - start) * ch);
+        next_ = uint64_t(end);
     }
 
     std::unique_ptr<IDecoder> words_;
+    WordsOpener openWords_;
     std::unique_ptr<DtsDecoder, FreeDts> decoder_;
+    std::mutex neighborsMutex_;
+    std::filesystem::path nextFile_, previousFile_;
     bool wordsDone_ = false;
-    uint64_t bytesFrom_ = 0; // stream offset of bytes_[0]
-    uint64_t next_ = 0;      // track position of the next sample appended to out_
-    uint64_t silence_ = 0;   // frames of silence readFloat() gives before out_, where the bitstream has none
-    std::function<void(uint64_t, const DtsPcm&)> onFrame_;
+    bool joiningPrevious_ = false; // bytes_ begins in the previous track, whose cut frame is not yet checked
+    bool joinedNext_ = false;      // the frame cut at the end was completed from the next track, or could not be
+    int64_t bytesFrom_ = 0;        // stream offset of bytes_[0]; before the file's start in the previous track's bytes
+    uint64_t next_ = 0;            // track position of the next sample appended to out_
+    uint64_t silence_ = 0;         // frames of silence readFloat() gives before out_, where the bitstream has none
+    std::function<void(int64_t, const DtsPcm&)> onFrame_;
     std::vector<int32_t> words16_;
     std::vector<uint8_t> bytes_;
     std::vector<float> out_; // interleaved, from outPos_ on
@@ -219,8 +331,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits) {
-    return std::make_unique<DtsStage>(std::move(words), lossyBits);
+std::unique_ptr<IDecoder> openDtsStage(std::unique_ptr<IDecoder> words, uint32_t lossyBits, WordsOpener openWords) {
+    return std::make_unique<DtsStage>(std::move(words), lossyBits, std::move(openWords));
 }
 
 } // namespace camel::audio

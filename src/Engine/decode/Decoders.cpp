@@ -217,7 +217,9 @@ std::unique_ptr<IDecoder> openBuiltin(DecoderKind kind, const std::filesystem::p
     if (format == AudioFormat::Adpcm) return openAdapter(kind, path, lossyBits);
     // The WAVE decoders read the bitstream as PCM, which the DTS stage decodes and seeks exactly. One sample per word
     // frame makes the data chunk's length exact.
-    if (format == AudioFormat::Dts) return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits);
+    if (format == AudioFormat::Dts)
+        return openDtsStage(openAdapter(kind, path, lossyBits), lossyBits,
+                            [kind, lossyBits](const std::filesystem::path& file) { return openAdapter(kind, file, lossyBits); });
     std::unique_ptr<IDecoder> d;
     // mpg123 seeks an MP3 exactly by itself; Symphonia lands on an AAC target after warm-up.
     if (isLossy(format) && kind != DecoderKind::Mpg123)
