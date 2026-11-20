@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <utility>
+#include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Server/Library/Sqlite.h"
 #include "Server/Library/LibraryStore.h"
@@ -283,6 +284,10 @@ void LibraryTextIndex::run(std::stop_token stop) {
                         })
                         .get();
             }
+        } catch (const std::exception& e) {
+            log::error("library sort keys: %s", e.what());
+            std::lock_guard lock(mutex_);
+            failure_ = std::current_exception();
         } catch (...) {
             std::lock_guard lock(mutex_);
             failure_ = std::current_exception();

@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <gtest/gtest.h>
 #include <chrono>
+#include <fstream>
 #include <span>
 #include <stdexcept>
 #include <future>
+#include "Common/util/Log.h"
 #include "Server/Library/LibraryStore.h"
 #include "Server/Library/LibraryBrowse.h"
 #include "TestUtil.h"
@@ -249,4 +251,25 @@ TEST(LibraryText, AlbumsListedDuringARebuildFollowTheNewOrder) {
     for (int64_t id = 2; id <= kAlbums; id += 2) expected.push_back(id);
     for (int64_t id = 1; id < kAlbums; id += 2) expected.push_back(id);
     EXPECT_EQ(order(), expected);
+}
+
+// Nothing in the Server waits on the index, so a rebuild that fails says so in the log.
+TEST(LibraryText, ARebuildThatFailsIsLogged) {
+    const auto directory = testutil::tempDir() / "library-text-failure";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory / "db");
+    camel::log::init(directory / "logs", L"text");
+    {
+        LibraryTextIndex index(store, [](std::wstring_view) -> std::vector<uint8_t> {
+            throw std::runtime_error("no sorting version for the locale");
+        });
+        EXPECT_THROW(index.waitIdle(), std::runtime_error);
+    }
+    camel::log::init(testutil::tempDir() / "log-after-tests", L"test");
+    std::string text;
+    for (const auto& entry : std::filesystem::directory_iterator(directory / "logs")) {
+        std::ifstream input(entry.path());
+        text += std::string(std::istreambuf_iterator<char>(input), {});
+    }
+    EXPECT_NE(text.find("no sorting version for the locale"), std::string::npos) << text;
 }
