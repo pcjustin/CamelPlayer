@@ -9,11 +9,17 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <numbers>
 #include <thread>
 #include <vector>
 
+#include <wil/resource.h>
+
+#include "Common/DecoderRegistry.h"
 #include "DsdFixture.h"
+#include "Engine/decode/IDecoder.h"
 #include "Server/Library/LibraryStore.h"
 #include "Server/Library/Loudness.h"
 #include "Server/Library/Waveform.h"
@@ -98,6 +104,7 @@ struct Analysis {
     std::atomic<int> minute = 12 * 60; // noon: outside the default window
     std::atomic<bool> enabled = true;
     ReplayGainMode mode = ReplayGainMode::Off;
+    std::mutex playingMutex;
     std::vector<LoudnessAnalyzer::PlayingTrack> playing;
 
     LoudnessAnalyzer::Options options() {
@@ -115,10 +122,33 @@ struct Analysis {
             s.enabled = enabled;
             return s;
         };
-        o.playing = [this] { return playing; };
+        o.playing = [this] {
+            std::lock_guard lock(playingMutex);
+            return playing;
+        };
         o.minuteOfDay = [this] { return minute.load(); };
         return o;
     }
+};
+
+// A decoder that gives a few frames at a time, slowly: its file takes minutes to read to the end.
+class SlowDecoder final : public camel::audio::IDecoder {
+public:
+    explicit SlowDecoder(std::unique_ptr<IDecoder> inner) : inner_(std::move(inner)) {}
+    const camel::audio::SourceInfo& info() const override { return inner_->info(); }
+    size_t read(int32_t* dst, size_t frames) override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        return inner_->read(dst, std::min<size_t>(frames, 64));
+    }
+    bool readsFloat() const override { return inner_->readsFloat(); }
+    size_t readFloat(float* dst, size_t frames) override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        return inner_->readFloat(dst, std::min<size_t>(frames, 64));
+    }
+    void seek(uint64_t frame) override { inner_->seek(frame); }
+
+private:
+    std::unique_ptr<IDecoder> inner_;
 };
 
 } // namespace
@@ -264,4 +294,35 @@ TEST(Waveform, PlayingTracksGetTheirsAtOnce) {
     EXPECT_TRUE(storedWaveform(db, 2).has_value());
     EXPECT_FALSE(storedWaveform(db, 1).has_value()); // not playing, and noon is outside the window
     EXPECT_FALSE(storedWaveform(db, 3).has_value());
+}
+
+// A skip ends the waveform decoding of the track that played: the new track's waveform does not wait for the old file's end.
+TEST(Waveform, ASkipEndsTheDecodingOfTheTrackThatPlayed) {
+    using namespace camel::audio;
+    const auto dir = freshDir("skip");
+    LibraryStore store(dir);
+    const auto files = flacs(dir, 2);
+    addTracks(store, files);
+    openDecoder(DecoderKind::Sndfile, files[1]);
+    const auto original = decoderRegistry().find("sndfile").value().open;
+    auto restore = wil::scope_exit([&] { decoderRegistry().setOpener("sndfile", original); });
+    std::atomic<bool> slowOpened = false;
+    decoderRegistry().setOpener("sndfile", [&](const fs::path& path, std::string_view format, uint32_t bits) {
+        auto decoder = original(path, format, bits);
+        if (path.filename() != L"track0.flac") return decoder;
+        slowOpened = true;
+        return std::unique_ptr<IDecoder>(std::make_unique<SlowDecoder>(std::move(decoder)));
+    });
+    Analysis analysis;
+    analysis.playing = {{1, files[0]}};
+    LoudnessAnalyzer analyzer(store, analysis.options());
+    ASSERT_TRUE(waitFor([&] { return slowOpened.load(); })); // the first track's decoding has begun
+    {
+        std::lock_guard lock(analysis.playingMutex);
+        analysis.playing = {{2, files[1]}};
+    }
+    EXPECT_TRUE(waitFor([&] {
+        auto db = store.openReader();
+        return storedWaveform(db, 2).has_value();
+    }));
 }

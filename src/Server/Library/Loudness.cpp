@@ -273,12 +273,13 @@ bool LoudnessAnalyzer::waveformsOn() const {
 }
 
 // A decoding's check between chunks: it waits while playback needs the file's storage (docs/Plan.md §7.7) or covers are
-// read, and stops for good when the analysis ends or waveforms are turned off.
-std::function<bool()> LoudnessAnalyzer::givingWay(const std::stop_token& stop, const std::filesystem::path& path) const {
-    return [this, stop, path] {
-        while (!stop.stop_requested() && pace(path) == BackgroundPace::Wait)
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        return stop.stop_requested() || !waveformsOn();
+// read, and stops for good when the analysis ends, waveforms are turned off or, given `wanted`, it is wanted no more.
+std::function<bool()> LoudnessAnalyzer::givingWay(const std::stop_token& stop, const std::filesystem::path& path,
+                                                  std::function<bool()> wanted) const {
+    return [this, stop, path, wanted = std::move(wanted)] {
+        const auto over = [&] { return stop.stop_requested() || !waveformsOn() || (wanted && !wanted()); };
+        while (!over() && pace(path) == BackgroundPace::Wait) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return over();
     };
 }
 
@@ -489,13 +490,19 @@ bool LoudnessAnalyzer::waveformsNow(const std::stop_token& stop) {
             continue;
         }
         running_ = true;
+        // A skip ends the decoding of the track that played, so the new one's waveform need not wait for that file's end.
+        const auto stillPlaying = [this, path = track.path] {
+            const auto now = options_.playing ? options_.playing() : std::vector<PlayingTrack>{};
+            return std::ranges::any_of(now, [&](const PlayingTrack& t) { return t.path == path; });
+        };
         std::optional<std::vector<uint8_t>> peaks;
         try {
-            peaks = readWaveform(track.path, options_.decoders(), givingWay(stop, track.path));
+            peaks = readWaveform(track.path, options_.decoders(), givingWay(stop, track.path, stillPlaying));
         } catch (const std::exception& e) {
             log::warn("waveform: %s: %s", toUtf8(track.path.wstring()).c_str(), e.what());
         }
         if (stop.stop_requested() || !waveformsOn()) return true;
+        if (!peaks && !stillPlaying()) return true;
         if (!peaks) {
             if (track.file) waveformFailed_.insert(track.file);
             continue;

@@ -108,7 +108,8 @@ private:
     bool analyzeAlbum(const std::stop_token& stop, bool queuedOnly, bool waveforms);
     bool waveformsNow(const std::stop_token& stop);
     bool waveformsInBackground(const std::stop_token& stop);
-    std::function<bool()> givingWay(const std::stop_token& stop, const std::filesystem::path& path) const;
+    std::function<bool()> givingWay(const std::stop_token& stop, const std::filesystem::path& path,
+                                    std::function<bool()> wanted = {}) const;
     // How analysis of `path` goes now: covers being read and playback come first.
     BackgroundPace pace(const std::filesystem::path& path) const;
     bool waveformsOn() const;
