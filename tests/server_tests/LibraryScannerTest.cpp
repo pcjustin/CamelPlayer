@@ -1041,6 +1041,27 @@ TEST_F(LibraryScannerTest, UnchangedPendingFilesReuseTheirRecordedFingerprint) {
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL AND identity_state=0"), 1);
 }
 
+// The loudness measured from a file's audio stays when its tags are read again with the file as it was, as Rebuild
+// library does, and goes when the file changed, as its waveform does.
+TEST_F(LibraryScannerTest, ReadingTagsAgainKeepsTheLoudnessOfAnUnchangedFile) {
+    const auto file = audio();
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto analyzed = [&] { return count(store, "SELECT COUNT(*) FROM tracks WHERE rg_analysis_gain=-7.5"); };
+    store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET rg_analysis_gain=-7.5,rg_analysis_peak=0.9"); }).get();
+    ASSERT_EQ(analyzed(), 1);
+    requestMetadataReread(store);
+    const auto reread = scanner.scan(root);
+    ASSERT_TRUE(reread.complete);
+    ASSERT_EQ(reread.updated, 1U) << "its tags were read again";
+    EXPECT_EQ(analyzed(), 1) << "the file is as it was";
+    std::filesystem::last_write_time(file, std::filesystem::last_write_time(file) + std::chrono::seconds(10));
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(analyzed(), 0) << "the file changed";
+}
+
 TEST_F(LibraryScannerTest, ReparseDirectoriesDoNotEscapeOrLoop) {
     audio();
     fs::create_directories(dir / "outside");

@@ -301,8 +301,10 @@ int year(const Metadata& m) {
     return value;
 }
 
-// One upsert carries the derived search and sort columns, so the row is written and FTS-indexed once.
-void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::wstring_view locale, LibraryNameSplitter& names) {
+// One upsert carries the derived search and sort columns, so the row is written and FTS-indexed once. The loudness
+// measured from the audio stays while the file is as it was (`sameAudio`), as its waveform does.
+void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::wstring_view locale, LibraryNameSplitter& names,
+                   bool sameAudio) {
     auto s = db.prepare("INSERT INTO tracks(file_id,title,album,album_artist,artist,composer,genre,year,track_number,track_total,"
                         "disc_number,disc_total,format,sample_rate,bits_per_sample,channels,total_frames,embedded_cover,lyrics,"
                         "length_estimated,title_sort_tag,album_sort_tag,artist_sort_tag,rg_track_gain,rg_track_peak,"
@@ -320,8 +322,10 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
                         "rg_track_peak=excluded.rg_track_peak,rg_album_gain=excluded.rg_album_gain,"
                         "rg_album_peak=excluded.rg_album_peak,title_norm=excluded.title_norm,album_norm=excluded.album_norm,"
                         "artist_norm=excluded.artist_norm,title_sort=excluded.title_sort,album_sort=excluded.album_sort,"
-                        "artist_sort=excluded.artist_sort,rg_analysis_gain=NULL,rg_analysis_peak=NULL,"
-                        "rg_analysis_album_gain=NULL,rg_analysis_album_peak=NULL");
+                        "artist_sort=excluded.artist_sort,rg_analysis_gain=CASE WHEN ?34 THEN rg_analysis_gain END,"
+                        "rg_analysis_peak=CASE WHEN ?34 THEN rg_analysis_peak END,"
+                        "rg_analysis_album_gain=CASE WHEN ?34 THEN rg_analysis_album_gain END,"
+                        "rg_analysis_album_peak=CASE WHEN ?34 THEN rg_analysis_album_peak END");
     s.bind(1, file);
     int i = 2;
     for (const auto* field : {"TITLE", "ALBUM", "ALBUMARTIST", "ARTIST", "COMPOSER", "GENRE"}) s.bind(i++, tag(m, field));
@@ -352,6 +356,7 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
         const auto sortTag = tag(m, sortField);
         s.bind(i++, librarySortKey(librarySortSource(sortTag, tag(m, field)), locale));
     }
+    s.bind(34, int64_t(sameAudio));
     s.run();
     auto row = db.prepare("SELECT id FROM tracks WHERE file_id=?");
     row.bind(1, file).step();
@@ -1193,6 +1198,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 folders.reset();
                 folders.bind(1, key(entry.path.parent_path())).step();
                 const int64_t folderId = folders.integer(0);
+                bool sameAudio = false;
                 if (!file) {
                     db.prepare("INSERT INTO "
                                "files(folder_id,root_id,path,kind,size,mtime,volume_serial,file_index,last_seen,created,"
@@ -1216,7 +1222,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 } else {
                     const auto stored = library::storedVersion(old, 1);
                     if (stored != entry.version) db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
-                    if (stored.size != entry.version.size || stored.mtime != entry.version.mtime) report.edited++;
+                    sameAudio = stored.size == entry.version.size && stored.mtime == entry.version.mtime;
+                    if (!sameAudio) report.edited++;
                     db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
                                "volume_serial=?,file_index=?,created=?,volume_key=?,name=? WHERE id=?")
                         .bind(1, entry.version.size)
@@ -1239,7 +1246,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 if (entry.rejected || entry.metadata) trackFolders.insert(folderId);
                 if (entry.metadata) {
                     if (!names) names = loadLibraryNames(db);
-                    writeMetadata(db, file, *entry.metadata, locale, *names);
+                    writeMetadata(db, file, *entry.metadata, locale, *names, sameAudio);
                     report.updated++;
                 }
             }
