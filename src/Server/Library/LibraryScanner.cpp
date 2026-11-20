@@ -294,6 +294,13 @@ int number(const Metadata& m, const char* name, bool total = false) {
     return parsed.ec == std::errc{} ? std::max(0, value) : 0;
 }
 
+// Taggers write a total under either name, or after the number as n/m.
+int total(const Metadata& m, const char* name, const char* otherName, const char* numberName) {
+    for (const char* field : {name, otherName})
+        if (const int value = number(m, field)) return value;
+    return number(m, numberName, true);
+}
+
 // DATE holds a year, an ISO date or a compact YYYYMMDD date.
 int year(const Metadata& m) {
     int value = number(m, "DATE");
@@ -331,9 +338,9 @@ void writeMetadata(sqlite::Database& db, int64_t file, const Metadata& m, std::w
     for (const auto* field : {"TITLE", "ALBUM", "ALBUMARTIST", "ARTIST", "COMPOSER", "GENRE"}) s.bind(i++, tag(m, field));
     s.bind(8, int64_t(year(m)))
         .bind(9, int64_t(number(m, "TRACKNUMBER")))
-        .bind(10, int64_t(number(m, "TRACKTOTAL") ? number(m, "TRACKTOTAL") : number(m, "TRACKNUMBER", true)))
+        .bind(10, int64_t(total(m, "TRACKTOTAL", "TOTALTRACKS", "TRACKNUMBER")))
         .bind(11, int64_t(number(m, "DISCNUMBER")))
-        .bind(12, int64_t(number(m, "DISCTOTAL") ? number(m, "DISCTOTAL") : number(m, "DISCNUMBER", true)))
+        .bind(12, int64_t(total(m, "DISCTOTAL", "TOTALDISCS", "DISCNUMBER")))
         .bind(13, m.format)
         .bind(14, int64_t(m.info.sampleRate))
         .bind(15, int64_t(m.info.bitsPerSample))

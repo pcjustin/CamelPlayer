@@ -220,6 +220,26 @@ TEST_F(LibraryScannerTest, ATrackWithoutADiscNumberIsOnTheFirstDisc) {
     EXPECT_EQ(titles, (std::vector<std::string>{"First", "Second", "Third"}));
 }
 
+// The totals come from TOTALTRACKS and TOTALDISCS as well as from TRACKTOTAL and DISCTOTAL, both of which taggers write.
+TEST_F(LibraryScannerTest, TotalsAreReadUnderEitherName) {
+    const auto file = audio();
+    {
+        TagLib::FLAC::File tags(file.c_str());
+        TagLib::PropertyMap values;
+        values.insert("TRACKNUMBER", TagLib::StringList("3"));
+        values.insert("TOTALTRACKS", TagLib::StringList("12"));
+        values.insert("DISCNUMBER", TagLib::StringList("1"));
+        values.insert("TOTALDISCS", TagLib::StringList("2"));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    EXPECT_EQ(count(store, "SELECT track_total FROM tracks"), 12);
+    EXPECT_EQ(count(store, "SELECT disc_total FROM tracks"), 2);
+}
+
 TEST_F(LibraryScannerTest, TagValuesLoseSurroundingBlanksAndBlankValuesAreSkipped) {
     const auto file = audio();
     {
