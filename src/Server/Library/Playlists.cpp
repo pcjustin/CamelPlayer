@@ -419,10 +419,10 @@ PlaylistChange editPlaylist(LibraryStore& store, const PlaylistEdit& edit) {
             }
             case PlaylistEdit::Kind::Sort: {
                 static const std::vector<std::vector<const char*>> keys = {
-                    {"lower(t.title)"},
-                    {"lower(t.artist)"},
-                    {"lower(t.album)"},
-                    {"lower(t.album_artist)"},
+                    {"t.title_sort"},
+                    {"t.artist_sort"},
+                    {"t.album_sort"},
+                    {"a.artist_sort_key"},
                     {"t.year"},
                     {"coalesce(nullif(t.disc_number,0),1)", "t.track_number"},
                     {"CASE WHEN t.sample_rate>0 THEN (coalesce(t.end_frame,t.total_frames,0)-t.start_frame)*1000/t.sample_rate "
@@ -433,7 +433,7 @@ PlaylistChange editPlaylist(LibraryStore& store, const PlaylistEdit& edit) {
                 for (const auto* column : keys[size_t(edit.key)])
                     order += std::string(",") + column + (edit.descending ? " DESC" : "");
                 auto rows = db.prepare("SELECT i.id FROM playlist_items i LEFT JOIN tracks t ON t.file_id=i.file_id "
-                                       "WHERE i.playlist_id=? ORDER BY " +
+                                       "LEFT JOIN albums a ON a.id=t.album_id WHERE i.playlist_id=? ORDER BY " +
                                        order + ",i.position");
                 rows.bind(1, edit.playlist);
                 std::vector<int64_t> ordered;

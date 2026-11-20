@@ -12,6 +12,7 @@
 
 #include "Common/util/Text.h"
 #include "ControlPoint/EditSequence.h"
+#include "Server/Library/LibraryText.h"
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
 #include "TestUtil.h"
@@ -67,6 +68,8 @@ INSERT INTO tracks(id,file_id,album_id,title,artist,album,album_artist,year,disc
  (6,6,2,'Encore','Pekora & Miko','Live','Pekora',2022,1,2,1000,60000,0,NULL);
 INSERT INTO track_values(track_id,field,position,value) VALUES(6,'artist',0,'Pekora'),(6,'artist',1,'Miko');
 )sql");
+                for (int64_t id = 1; id <= 6; ++id) updateLibraryTrackText(db, id);
+                for (int64_t id = 1; id <= 2; ++id) updateLibraryAlbumText(db, id);
             })
             .get();
     }
@@ -192,6 +195,29 @@ TEST_F(PlaylistsTest, RemoveMoveSortAndDeleteRenumberPositions) {
     EXPECT_EQ(
         store->openReader().scalar("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=" + std::to_string(created.playlist)),
         0);
+}
+
+// A playlist sorts as the library's lists do: in the sort locale and under the sort tags.
+TEST_F(PlaylistsTest, SortingFollowsTheSortLocaleAndTheSortTags) {
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("UPDATE tracks SET title='Zebra' WHERE id=1;"
+                    "UPDATE tracks SET title='Émile' WHERE id=2;"
+                    "UPDATE tracks SET title='The Apple',title_sort_tag='Apple' WHERE id=3;"
+                    "UPDATE tracks SET album_artist='Ébène' WHERE id=6;"
+                    "UPDATE albums SET album_artist='Ébène' WHERE id=2;");
+            for (const int64_t id : {1, 2, 3, 6}) updateLibraryTrackText(db, id);
+            updateLibraryAlbumText(db, 2);
+        })
+        .get();
+    const auto created = createPlaylist(*store, "Sorted", {track(1), track(2), track(3), track(6)});
+    PlaylistEdit sort{PlaylistEdit::Kind::Sort, created.playlist};
+    sort.key = PlaylistSortKey::Title;
+    editPlaylist(*store, sort);
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{3}, {2}, {6}, {1}})); // Apple, Émile, Encore, Zebra
+    sort.key = PlaylistSortKey::AlbumArtist;
+    editPlaylist(*store, sort);
+    EXPECT_EQ(tracks(created.playlist), (std::vector<LibraryTrackKey>{{6}, {3}, {2}, {1}})); // Ébène, then Suisei
 }
 
 TEST_F(PlaylistsTest, QuickUndoRevertsOnlyAnUnchangedPlaylist) {
