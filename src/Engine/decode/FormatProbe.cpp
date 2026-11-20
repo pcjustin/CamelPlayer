@@ -28,8 +28,11 @@ public:
         : h_(CreateFileW(longPath(path).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)) {
         LARGE_INTEGER size{};
-        if (h_ == INVALID_HANDLE_VALUE || !GetFileSizeEx(h_, &size))
-            throw Error(ErrorCode::FileOpen, "cannot open " + toUtf8(path.wstring()));
+        if (h_ != INVALID_HANDLE_VALUE && !GetFileSizeEx(h_, &size)) {
+            CloseHandle(h_); // the destructor does not run for a constructor that throws
+            h_ = INVALID_HANDLE_VALUE;
+        }
+        if (h_ == INVALID_HANDLE_VALUE) throw Error(ErrorCode::FileOpen, "cannot open " + toUtf8(path.wstring()));
         size_ = uint64_t(size.QuadPart);
     }
     ~File() { CloseHandle(h_); }

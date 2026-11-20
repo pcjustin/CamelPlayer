@@ -285,6 +285,24 @@ void writeFloat64Wav(const std::filesystem::path& path, const std::vector<int32_
 
 } // namespace
 
+// A path that opens but tells no size, as the console does, is refused without keeping its handle.
+TEST(FormatProbe, AnOpenedPathWithoutASizeKeepsNoHandle) {
+    const std::filesystem::path console(L"\\\\?\\CONIN$");
+    const HANDLE probe =
+        CreateFileW(console.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (probe == INVALID_HANDLE_VALUE) GTEST_SKIP() << "no console to open";
+    LARGE_INTEGER size{};
+    const bool sized = GetFileSizeEx(probe, &size);
+    CloseHandle(probe);
+    if (sized) GTEST_SKIP() << "the console tells a size here";
+    DWORD before = 0;
+    ASSERT_TRUE(GetProcessHandleCount(GetCurrentProcess(), &before));
+    for (int i = 0; i < 50; ++i) EXPECT_THROW(probeFormat(console), Error);
+    DWORD after = 0;
+    ASSERT_TRUE(GetProcessHandleCount(GetCurrentProcess(), &after));
+    EXPECT_LT(after, before + 10);
+}
+
 TEST(FormatDecoderPolicy, RejectsOtherDepthsAndFloat) {
     const auto dir = testutil::tempDir();
     const testaudio::GenSpec spec{"depth", 44100, 16, 2, 0.2};
