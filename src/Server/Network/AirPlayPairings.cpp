@@ -63,7 +63,15 @@ AirPlayPairings::AirPlayPairings(std::filesystem::path file) : file_(std::move(f
 void AirPlayPairings::load() {
     if (file_.empty()) return;
     std::ifstream in(file_, std::ios::binary);
-    if (!in) return;
+    if (!in) {
+        std::error_code error;
+        if (std::filesystem::exists(file_, error) || error) {
+            // Held by another program or refused: left for the next start, this session's pairings kept in memory.
+            log::warn("AirPlay pairings cannot be opened and are left as they are");
+            kept_ = true;
+        }
+        return;
+    }
     try {
         const std::string sealed{std::istreambuf_iterator<char>(in), {}};
         const auto j = nlohmann::json::parse(protect(sealed, true));
@@ -77,15 +85,19 @@ void AirPlayPairings::load() {
             receivers_[id] = std::move(credentials);
         }
     } catch (const std::exception& e) {
-        // Paired receivers then ask for their password or code again.
-        log::warn("AirPlay pairings could not be read: %s", e.what());
+        // Paired receivers then ask for their password or code again; the damaged file is kept aside.
+        log::warn("AirPlay pairings could not be read and are kept with .bad added to their name: %s", e.what());
         identity_ = {};
         receivers_.clear();
+        in.close();
+        std::error_code error;
+        std::filesystem::rename(file_, std::filesystem::path(file_).concat(L".bad"), error);
+        kept_ = bool(error);
     }
 }
 
 void AirPlayPairings::store() const {
-    if (file_.empty()) return;
+    if (file_.empty() || kept_) return;
     nlohmann::json j;
     j["id"] = identity_.id;
     j["seed"] = hexOf(identity_.seed);

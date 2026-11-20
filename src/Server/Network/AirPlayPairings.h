@@ -4,7 +4,8 @@
 
 // What CamelPlayer keeps to play AirPlay receivers that ask for a password or a code (docs/Plan.md §5.10): this
 // computer's pairing identity, and for each receiver the password it took or the keys pair-setup left. One file, protected
-// with DPAPI for the Windows user; without a file it is kept in memory.
+// with DPAPI for the Windows user; without a file, or with one that cannot be opened, it is kept in memory, and a file
+// that cannot be read is kept aside as .bad.
 #pragma once
 
 #include <filesystem>
@@ -40,6 +41,7 @@ private:
 
     mutable std::mutex mutex_;
     std::filesystem::path file_;
+    bool kept_ = false; // the file could not be read and is not written over: pairings stay in memory
     airplay::PairingIdentity identity_;
     std::map<std::string, AirPlayCredentials> receivers_;
 };

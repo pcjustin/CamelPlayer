@@ -959,6 +959,40 @@ TEST(AirPlayPairingServerTest, AReceiverThatForgotThePairingAsksForItsCodeAgain)
     EXPECT_TRUE(waitFor([&] { return server.supportOf("C0FFEE000004") == "code"; }));
 }
 
+// A pairings file that cannot be read is never written over: held by another program, it stays for the next start and
+// this session's pairings are kept in memory; damaged, it is kept aside as .bad and a new one is begun.
+TEST(AirPlayPairingsTest, AFileThatCannotBeReadIsNotWrittenOver) {
+    const auto file = testutil::tempDir() / L"airplay-pairings-kept.dat";
+    const auto bad = std::filesystem::path(file).concat(L".bad");
+    const auto read = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+    for (const auto& f : {file, bad}) std::filesystem::remove(f);
+    AirPlayPairings(file).save("C0FFEE000003", {"hunter2", std::nullopt});
+    const std::string saved = read(file);
+    {
+        const HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        ASSERT_NE(held, INVALID_HANDLE_VALUE);
+        AirPlayPairings pairings(file);
+        CloseHandle(held);
+        pairings.identity();
+        pairings.save("C0FFEE000005", {"other", std::nullopt});
+        EXPECT_EQ(pairings.find("C0FFEE000005"), (AirPlayCredentials{"other", std::nullopt}));
+    }
+    EXPECT_EQ(read(file), saved);
+    EXPECT_EQ(AirPlayPairings(file).find("C0FFEE000003"), (AirPlayCredentials{"hunter2", std::nullopt}));
+
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << "not sealed";
+    {
+        AirPlayPairings pairings(file);
+        pairings.save("C0FFEE000006", {"new", std::nullopt});
+    }
+    EXPECT_EQ(read(bad), "not sealed");
+    EXPECT_EQ(AirPlayPairings(file).find("C0FFEE000006"), (AirPlayCredentials{"new", std::nullopt}));
+    for (const auto& f : {file, bad}) std::filesystem::remove(f);
+}
+
 TEST(AirPlayPairingsTest, PairingsSurviveInTheirProtectedFile) {
     const auto file = testutil::tempDir() / L"airplay-pairings.dat";
     std::filesystem::remove(file);
