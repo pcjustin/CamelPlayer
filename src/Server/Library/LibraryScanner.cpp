@@ -1130,6 +1130,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     size_t unreadFiles = 0, unlistedFolders = 0;
     // Folders this user may not list, as System Volume Information under a drive: their files are not marked missing.
     std::vector<std::string> refused;
+    std::unordered_set<std::string> listedFolders;
     for (const auto& folder : subtrees) {
         const DWORD attributes = GetFileAttributesW(folder.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -1309,6 +1310,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             ++unlistedFolders;
         }
         if (!listing.fileWork) {
+            listedFolders.insert(key(listing.path));
             report.linksPassedOver += listing.links;
             submit([&token, root, folder = key(listing.path),
                     parent = listing.path == path ? std::string{} : key(listing.path.parent_path()),
@@ -1378,11 +1380,11 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 .bind(3, int64_t(report.online))
                 .run();
             if (report.complete) {
+                const auto inRefused = [&](const std::string& path) {
+                    return std::ranges::any_of(refused, [&](const std::string& folder) { return path.starts_with(folder); });
+                };
                 const auto markMissing = [&](sqlite::Statement& listed) {
                     std::vector<int64_t> missing;
-                    const auto inRefused = [&](const std::string& path) {
-                        return std::ranges::any_of(refused, [&](const std::string& folder) { return path.starts_with(folder); });
-                    };
                     while (listed.step())
                         if (!present.contains(listed.integer(0)) && !inRefused(listed.text(1)))
                             missing.push_back(listed.integer(0));
@@ -1436,6 +1438,21 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .run();
                     report.deleted = size_t(deleteGoneFiles(db));
                     derivedChanged = derivedChanged || report.deleted;
+                    // A folder gone from the disk goes once no file, album or folder of the library is left in it, the
+                    // deepest first.
+                    std::vector<int64_t> gone;
+                    auto folders = db.prepare("SELECT id,path FROM folders WHERE root_id=? ORDER BY length(path) DESC");
+                    folders.bind(1, root);
+                    while (folders.step())
+                        if (!listedFolders.contains(folders.text(1)) && !inRefused(folders.text(1)))
+                            gone.push_back(folders.integer(0));
+                    auto drop = db.prepare("DELETE FROM folders WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM files WHERE "
+                                           "folder_id=?1) AND NOT EXISTS(SELECT 1 FROM albums WHERE folder_id=?1) AND NOT "
+                                           "EXISTS(SELECT 1 FROM folders WHERE parent_id=?1)");
+                    for (const int64_t folder : gone) {
+                        drop.bind(1, folder).run();
+                        drop.reset();
+                    }
                 }
                 if (derivedChanged)
                     db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,1)").bind(1, derivedKey).run();

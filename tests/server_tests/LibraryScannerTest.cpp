@@ -1689,3 +1689,24 @@ TEST_F(LibraryScannerTest, AlbumsByArtistFollowTheSortLocaleAndTheAlbumArtistSor
     for (const auto& initial : albumInitials(store, AlbumSort::Artist)) labels.push_back(initial.label);
     EXPECT_EQ(labels, (std::vector<std::string>{"A", "B", "E", "Z"}));
 }
+
+// A folder gone from the disk loses its row once nothing of the library is left in it.
+TEST_F(LibraryScannerTest, AFolderGoneFromTheDiskLosesItsRowOnceNothingIsLeftInIt) {
+    audio();
+    fs::create_directories(dir / "music" / "empty" / "inner");
+    fs::create_directories(dir / "music" / "left");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "left" / "two.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM folders"), 5);
+    fs::remove_all(dir / "music" / "empty");
+    fs::remove_all(dir / "music" / "left");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM folders"), 3); // left holds its missing file
+    store.write([](sqlite::Database& db) { db.exec("UPDATE files SET missing_since=missing_since-40*86400 WHERE available=0"); })
+        .get();
+    ASSERT_TRUE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM folders"), 2);
+}
