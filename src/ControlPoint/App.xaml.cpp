@@ -7,6 +7,7 @@
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
 #include "TrackColumns.h"
+#include "Common/util/CrashDump.h"
 #include "Common/util/Log.h"
 
 using namespace winrt;
@@ -23,6 +24,8 @@ App::App(std::shared_ptr<camel::server::IServer> server, bool startHidden)
         RequestedTheme(theme == camel::Theme::Light ? ApplicationTheme::Light : ApplicationTheme::Dark);
     UnhandledException([](IInspectable const&, UnhandledExceptionEventArgs const& e) {
         camel::log::error("unhandled XAML exception: %s", winrt::to_string(e.Message()).c_str());
+        // WinUI ends the program by a fail fast, which passes by the crash handler.
+        camel::writeCrashDump(L"-xaml");
 #if defined _DEBUG
         if (IsDebuggerPresent()) __debugbreak();
 #endif

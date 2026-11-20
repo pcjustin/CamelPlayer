@@ -29,6 +29,7 @@
 #include "AppIcon.h"
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
+#include "CommandSubmit.h"
 #include "OutputsFollow.h"
 #include "SnapshotForward.h"
 #include "ThemeBrush.h"
@@ -1845,7 +1846,7 @@ void MainWindow::submitCommand(Command command) {
     } else {
         repeatedPlay_.other();
     }
-    cursor_.expect(server_->submit(std::move(command)));
+    if (const auto stamp = ui::submitChecked(*server_, std::move(command))) cursor_.expect(*stamp);
 }
 
 bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {

@@ -19,6 +19,10 @@ constexpr size_t kKeptCrashDumps = 5;
 // `fatalDumpLimit`, its writer held by a lock the crashed thread holds, is given up and the process ends.
 void installCrashDumps(const std::filesystem::path& dir, std::chrono::milliseconds fatalDumpLimit = std::chrono::seconds(20));
 
+// Writes crash-…`suffix`.dmp to the installCrashDumps directory now, for an error the process is about to end on by a fail
+// fast, which passes by the crash handler, as WinUI ends the program on an unhandled exception. Once per process.
+void writeCrashDump(const wchar_t* suffix);
+
 // Deletes all but the newest `keep` crash-*.dmp files in `dir`; failures are ignored.
 void pruneCrashDumps(const std::filesystem::path& dir, size_t keep);
 

@@ -127,6 +127,10 @@ double privateMegabytes() {
 
 } // namespace
 
+void writeCrashDump(const wchar_t* suffix) {
+    dumpFatal(suffix, nullptr, kAbortCode);
+}
+
 void pruneCrashDumps(const std::filesystem::path& dir, size_t keep) {
     std::error_code ec;
     std::vector<std::filesystem::path> dumps;

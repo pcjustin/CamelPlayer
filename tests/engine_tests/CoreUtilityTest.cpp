@@ -174,6 +174,46 @@ TEST(CrashDump, UnhandledChildExceptionCreatesDump) {
     std::filesystem::remove(directory);
 }
 
+// A fail fast, as WinUI ends the program with on an unhandled XAML exception, passes by the crash handler: the dump the
+// handler of that exception writes is the only one there is.
+TEST(CrashDump, ADumpWrittenBeforeAFailFastIsKept) {
+    constexpr wchar_t marker[] = L"CAMELPLAYER_FAILFAST_TEST_CHILD";
+    wchar_t childDirectory[32768];
+    const DWORD length = GetEnvironmentVariableW(marker, childDirectory, DWORD(std::size(childDirectory)));
+    if (length && length < std::size(childDirectory)) {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        installCrashDumps(childDirectory);
+        writeCrashDump(L"-xaml");
+        RaiseFailFastException(nullptr, nullptr, 0);
+        return;
+    }
+    const auto directory = testutil::tempDir() / "crashdump-failfast";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    ASSERT_TRUE(SetEnvironmentVariableW(marker, directory.c_str()));
+    wchar_t executable[32768];
+    ASSERT_NE(GetModuleFileNameW(nullptr, executable, DWORD(std::size(executable))), 0u);
+    std::wstring command = L"\"" + std::wstring(executable) +
+                           L"\" --gtest_filter=CrashDump.ADumpWrittenBeforeAFailFastIsKept --gtest_catch_exceptions=0";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof startup;
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                                        &startup, &process);
+    SetEnvironmentVariableW(marker, nullptr);
+    ASSERT_TRUE(created);
+    const DWORD waited = WaitForSingleObject(process.hProcess, 30000);
+    if (waited != WAIT_OBJECT_0) TerminateProcess(process.hProcess, 1);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    ASSERT_EQ(waited, WAIT_OBJECT_0);
+    std::vector<std::wstring> names;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) names.push_back(entry.path().filename().wstring());
+    ASSERT_EQ(names.size(), 1u);
+    EXPECT_TRUE(names[0].starts_with(L"crash-") && names[0].ends_with(L"-xaml.dmp"));
+    std::filesystem::remove_all(directory);
+}
+
 TEST(CrashDump, StartupKeepsTheNewestFiveDumpsAndOtherFiles) {
     const auto directory = testutil::tempDir() / "crashdump-retention";
     std::filesystem::remove_all(directory);

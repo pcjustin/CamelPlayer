@@ -94,6 +94,29 @@ bool trackLocal(audio::ErrorCode code) {
     }
 }
 
+// The parts of the settings `sent` that read back otherwise, for the log to tell which.
+std::string partsReadBackOtherwise(const SettingsDto& sent, const SettingsDto& back) {
+    std::string parts;
+    const auto part = [&](bool same, const std::string& name) {
+        if (!same) parts += (parts.empty() ? "" : ", ") + name;
+    };
+    part(sent.wasapi == back.wasapi, "wasapi");
+    part(sent.asio == back.asio, "asio");
+    part(sent.ks == back.ks, "ks");
+    part(sent.network == back.network, "network");
+    part(sent.airplay == back.airplay, "airplay");
+    part(sent.hqplayer == back.hqplayer, "hqplayer");
+    part(sent.volume == back.volume, "volume");
+    part(sent.eq == back.eq && sent.crossfeed == back.crossfeed && sent.convolution == back.convolution &&
+             sent.dspOrder == back.dspOrder && sent.replayGain == back.replayGain,
+         "dsp");
+    part(sent.crossfade == back.crossfade, "crossfade");
+    part(sent.outputs.size() == back.outputs.size(), "outputs");
+    for (size_t i = 0; i < std::min(sent.outputs.size(), back.outputs.size()); ++i)
+        part(sent.outputs[i] == back.outputs[i], "output " + std::to_string(i) + " (" + backendId(sent.outputs[i].backend) + ")");
+    return parts.empty() ? "other" : parts;
+}
+
 void validate(const Command& c) {
     if (c.apiVersion != kApiVersion || c.kind > CommandKind::PairAirPlay)
         throw std::invalid_argument("unsupported Server command/version");
@@ -128,8 +151,11 @@ void validate(const Command& c) {
     const auto ranged = [](const TrackSource& source) { return source.range() != FrameRange{}; };
     if ((c.source && ranged(*c.source)) || std::any_of(c.sources.begin(), c.sources.end(), ranged))
         throw std::invalid_argument("track ranges require the future segment playback adapter");
-    if (c.settings && settingsDto(fromJson(toJson(nativeSettings(*c.settings)))) != *c.settings)
-        throw std::invalid_argument("invalid Server settings");
+    if (c.settings) {
+        const auto back = settingsDto(fromJson(toJson(nativeSettings(*c.settings))));
+        if (back != *c.settings)
+            throw std::invalid_argument("invalid Server settings: " + partsReadBackOtherwise(*c.settings, back));
+    }
 }
 
 PlaybackSnapshot playback(const audio::EngineSnapshot& s) {

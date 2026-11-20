@@ -12,6 +12,7 @@
 #include <mutex>
 #include <thread>
 
+#include "ControlPoint/CommandSubmit.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Library/LibraryScanner.h"
 #include "OutputBridge/CaptureOutput.h"
@@ -386,6 +387,24 @@ TEST_F(ServerTest, DestructorClosesActiveOutputAndDrainsCommands) {
     server->submit(command(CommandKind::Pause));
     server.reset();
     EXPECT_GT(probe.closes.load(), 0);
+}
+
+// Settings that do not read back as they are are refused, the refusal naming the part that does not; the window gets a
+// refusal as no command rather than as an exception, which ended it in a XAML event handler.
+TEST(ServerRefusalTest, RefusedSettingsNameTheirPartAndDoNotReachTheWindowAsAnException) {
+    LocalServer server(Settings{});
+    Command c;
+    c.kind = CommandKind::ApplySettings;
+    auto settings = server.snapshot().settings;
+    settings.volume.db = 5.0; // above 0 dB, read back as 0
+    c.settings = settings;
+    try {
+        server.submit(c);
+        ADD_FAILURE() << "accepted";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("volume"), std::string::npos) << e.what();
+    }
+    EXPECT_NO_THROW(EXPECT_FALSE(ui::submitChecked(server, c)));
 }
 
 TEST(ServerPersistenceTest, SavesSettingsAndProtectsServerOwnedLastFile) {
