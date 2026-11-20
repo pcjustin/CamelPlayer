@@ -1740,3 +1740,35 @@ TEST_F(LibraryScannerTest, ChangesThatGoOnDoNotPostponeTheScanPastItsLatestStart
     copy.join();
     EXPECT_TRUE(shown);
 }
+
+// A share that does not answer holds up only its own check: another storage's changes are scanned meanwhile.
+TEST_F(LibraryScannerTest, AStorageThatDoesNotAnswerHoldsUpNoOtherStorage) {
+    audio();
+    fs::create_directories(dir / "share");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    scanner.addRoot(dir / "music");
+    scanner.addRoot(dir / "share");
+    std::promise<void> release;
+    const auto released = release.get_future().share();
+    std::atomic<bool> hanging = false;
+    LibraryMonitor::Options options;
+    options.pollInterval = std::chrono::milliseconds(0);
+    options.offlineInterval = std::chrono::milliseconds(50);
+    options.coalesce = std::chrono::milliseconds(100);
+    options.reachable = [&hanging, released](const fs::path& path) {
+        if (hanging && path.filename() == L"share") released.wait();
+        return fs::is_directory(path);
+    };
+    LibraryMonitor monitor(store, options);
+    ASSERT_TRUE(waitFor([&] { return count(store) == 1; }));
+    hanging = true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300)); // the share's check hangs from now on
+    audio("two.flac");
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (count(store) != 2 && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const bool scanned = count(store) == 2;
+    release.set_value();
+    EXPECT_TRUE(scanned);
+}

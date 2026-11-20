@@ -116,6 +116,8 @@ public:
         bool refuseNotifications = false;
         // On in tests, standing for such a NAS: notifications of a file's contents or times changing are dropped.
         bool ignoreModified = false;
+        // Whether a root can be listed; set in tests, standing for a share that does not answer.
+        std::function<bool(const std::filesystem::path&)> reachable;
     };
     explicit LibraryMonitor(LibraryStore& store);
     LibraryMonitor(LibraryStore& store, const Options& options);

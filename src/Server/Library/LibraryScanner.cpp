@@ -1786,67 +1786,91 @@ private:
         // Each root scans on its own thread, so a long NAS scan neither delays other roots nor these checks.
         std::map<int64_t, std::future<ScanReport>> scans;
         std::map<int64_t, std::vector<Path>> taken; // the folders each running scan took; none for a whole one
+        // A share that does not answer holds the check that it can be listed for the SMB timeout, so each root's check runs
+        // on its own thread, and the other roots' notifications and scans go on meanwhile.
+        struct Probe {
+            Path path;
+            bool wasOnline = false;
+            std::future<bool> online;
+        };
+        std::map<int64_t, Probe> probes;
+        std::set<int64_t> live;
         auto check = Clock::time_point{};
         while (!stop.stop_requested()) {
             try {
                 const auto time = Clock::now();
                 if (time >= check || refresh_.exchange(false)) {
                     check = time + options_.offlineInterval;
-                    std::set<int64_t> live;
+                    live.clear();
                     auto db = store_.openReader();
                     auto roots = db.prepare("SELECT id,path,online FROM roots WHERE removed IS NULL");
                     while (roots.step() && !stop.stop_requested()) {
                         const int64_t id = roots.integer(0);
                         live.insert(id);
-                        const Path path(toWide(roots.text(1)));
-                        const bool online = bool(openPath(path, FILE_LIST_DIRECTORY));
-                        if (!online) {
-                            watches.erase(id);
-                            store_
-                                .write([id](sqlite::Database& w) {
-                                    w.prepare("UPDATE roots SET online=0 WHERE id=? AND online<>0").bind(1, id).run();
-                                })
-                                .get();
-                            continue;
-                        }
-                        // A first NAS scan can take hours or wait for playback; the root is browsable again meanwhile.
-                        if (!roots.integer(2))
-                            store_
-                                .write([id](sqlite::Database& w) {
-                                    w.prepare("UPDATE roots SET online=1 WHERE id=?").bind(1, id).run();
-                                })
-                                .get();
-                        if (!watches.contains(id) ||
-                            (options_.watchChanges && !watches.at(id)->pending && !watches.at(id)->unwatchable)) {
-                            watches.erase(id);
-                            auto watch = std::make_unique<Watch>();
-                            watch->pace = scanner_.pace(path);
-                            watch->directory =
-                                openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
-                            watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-                            watch->ignoreModified = options_.ignoreModified;
-                            watch->missesEdits =
-                                db.prepare("SELECT 1 FROM app_state WHERE key=?").bind(1, missedEditsKey(id)).step();
-                            if (options_.watchChanges) watch->unwatchable = !(watch->directory && watch->event && arm(*watch));
-                            watch->root = path;
-                            watch->due = time;
-                            watch->lastPoll = time;
-                            watches.emplace(id, std::move(watch));
-                        }
-                        auto& watch = *watches.at(id);
-                        // A share's change notifications are unreliable, so it is also walked periodically, like Roon's
-                        // rescan interval (4 hours by default there).
-                        auto interval = isNetworkPath(path) ? options_.networkPollInterval : options_.pollInterval;
-                        if (watch.missesEdits && options_.missedEditsPollInterval.count() &&
-                            (!interval.count() || options_.missedEditsPollInterval < interval))
-                            interval = options_.missedEditsPollInterval;
-                        if (interval.count() && time - watch.lastPoll >= interval) {
-                            watch.due = time;
-                            watch.full = true;
-                            watch.lastPoll = time;
-                        }
+                        if (probes.contains(id)) continue;
+                        Path path(toWide(roots.text(1)));
+                        auto online = std::async(std::launch::async, [this, path] {
+                            return options_.reachable ? options_.reachable(path) : bool(openPath(path, FILE_LIST_DIRECTORY));
+                        });
+                        probes.emplace(id, Probe{std::move(path), roots.integer(2) != 0, std::move(online)});
                     }
                     std::erase_if(watches, [&](const auto& pair) { return !live.contains(pair.first); });
+                }
+                for (auto it = probes.begin(); it != probes.end();) {
+                    if (it->second.online.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                        ++it;
+                        continue;
+                    }
+                    const int64_t id = it->first;
+                    const Path path = std::move(it->second.path);
+                    const bool wasOnline = it->second.wasOnline;
+                    const bool online = it->second.online.get();
+                    it = probes.erase(it);
+                    if (!live.contains(id) || stop.stop_requested()) continue;
+                    if (!online) {
+                        watches.erase(id);
+                        store_
+                            .write([id](sqlite::Database& w) {
+                                w.prepare("UPDATE roots SET online=0 WHERE id=? AND online<>0").bind(1, id).run();
+                            })
+                            .get();
+                        continue;
+                    }
+                    // A first NAS scan can take hours or wait for playback; the root is browsable again meanwhile.
+                    if (!wasOnline)
+                        store_
+                            .write([id](sqlite::Database& w) {
+                                w.prepare("UPDATE roots SET online=1 WHERE id=?").bind(1, id).run();
+                            })
+                            .get();
+                    if (!watches.contains(id) ||
+                        (options_.watchChanges && !watches.at(id)->pending && !watches.at(id)->unwatchable)) {
+                        watches.erase(id);
+                        auto watch = std::make_unique<Watch>();
+                        watch->pace = scanner_.pace(path);
+                        watch->directory = openPath(path, FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED);
+                        watch->event.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+                        watch->ignoreModified = options_.ignoreModified;
+                        watch->missesEdits =
+                            store_.openReader().prepare("SELECT 1 FROM app_state WHERE key=?").bind(1, missedEditsKey(id)).step();
+                        if (options_.watchChanges) watch->unwatchable = !(watch->directory && watch->event && arm(*watch));
+                        watch->root = path;
+                        watch->due = time;
+                        watch->lastPoll = time;
+                        watches.emplace(id, std::move(watch));
+                    }
+                    auto& watch = *watches.at(id);
+                    // A share's change notifications are unreliable, so it is also walked periodically, like Roon's
+                    // rescan interval (4 hours by default there).
+                    auto interval = isNetworkPath(path) ? options_.networkPollInterval : options_.pollInterval;
+                    if (watch.missesEdits && options_.missedEditsPollInterval.count() &&
+                        (!interval.count() || options_.missedEditsPollInterval < interval))
+                        interval = options_.missedEditsPollInterval;
+                    if (interval.count() && time - watch.lastPoll >= interval) {
+                        watch.due = time;
+                        watch.full = true;
+                        watch.lastPoll = time;
+                    }
                 }
                 const bool rescan = rescan_.exchange(false);
                 // Scan now and Scan this folder start no second scan of a root that scans already.
