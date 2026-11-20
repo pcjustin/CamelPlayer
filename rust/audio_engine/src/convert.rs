@@ -195,6 +195,10 @@ impl Converter {
     ) -> Result<Self, i32> {
         let in_channels = info.channel_count as usize;
         let out_channels = out.channel_count as usize;
+        // Every source is mixed to stereo for the modulator.
+        if out_channels != 2 {
+            return Err(ENGINE_E_UNSUPPORTED_FORMAT);
+        }
         let out_byte_rate = match out.stream_kind {
             AUDIO_DSD if out_rate.is_multiple_of(8) => out_rate / 8,
             AUDIO_DOP => out_rate.saturating_mul(2),
@@ -1663,5 +1667,25 @@ pub(crate) mod tests {
         assert!(
             Converter::new(&pcm, &native, 8 * 2_822_400, false, false, QUALITY_HIGH, 7).is_err()
         );
+    }
+    // The modulator takes the stereo mix every source is brought to, so it needs a two-channel device, as the other
+    // processed paths do.
+    #[test]
+    fn modulation_needs_a_stereo_device() {
+        let pcm = source(44_100, 2, 24, false);
+        for kind in [crate::AUDIO_DSD, crate::AUDIO_DOP] {
+            let mut mono = dsd_device(kind, 24);
+            mono.channel_count = 1;
+            let rate = if kind == crate::AUDIO_DSD {
+                8 * 352_800
+            } else {
+                176_400
+            };
+            assert_eq!(
+                Converter::new(&pcm, &mono, rate, false, false, QUALITY_HIGH, 7).err(),
+                Some(ENGINE_E_UNSUPPORTED_FORMAT),
+                "{kind}"
+            );
+        }
     }
 }
