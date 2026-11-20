@@ -471,6 +471,9 @@ unsafe fn read_frames(d: &mut SymDecoder, dst: *mut i32, frames: usize, read: *m
     let Some(want) = frames.checked_mul(d.channels) else {
         return SYM_E_ARG;
     };
+    if want == 0 {
+        return SYM_OK;
+    }
     let out = std::slice::from_raw_parts_mut(dst, want);
     let mut filled = 0;
     while filled < want {
@@ -569,5 +572,74 @@ pub unsafe extern "C" fn sym_last_error(dec: *const SymDecoder, buf: *mut c_char
 pub unsafe extern "C" fn sym_close(dec: *mut SymDecoder) {
     if !dec.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(dec))));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use std::path::{Path, PathBuf};
+
+    // A mono 48 kHz WAV of `format` (1 integer PCM, 3 IEEE float) holding 4-byte samples.
+    fn wav(name: &str, format: u16, data: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(name);
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&format.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&48000u32.to_le_bytes());
+        wav.extend_from_slice(&(48000u32 * 4).to_le_bytes());
+        wav.extend_from_slice(&4u16.to_le_bytes());
+        wav.extend_from_slice(&32u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        wav.extend_from_slice(data);
+        std::fs::write(&path, wav).unwrap();
+        path
+    }
+
+    fn open(path: &Path) -> (*mut SymDecoder, SymInfo) {
+        let name = CString::new(path.to_str().unwrap()).unwrap();
+        let mut dec = std::ptr::null_mut();
+        let mut info = SymInfo {
+            sample_rate: 0,
+            channels: 0,
+            bits_per_sample: 0,
+            total_frames: 0,
+            has_md5: 0,
+            md5: [0; 16],
+            is_float: 0,
+        };
+        let opened = unsafe { sym_open(name.as_ptr(), 24, &mut dec, &mut info) };
+        assert_eq!(opened, SYM_OK, "opening {}", path.display());
+        (dec, info)
+    }
+
+    #[test]
+    fn reading_no_frames_is_not_the_end() {
+        let samples: Vec<u8> = [1000i32, -1000]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        let path = wav("symphonia-ffi-none.wav", 1, &samples);
+        let (dec, _) = open(&path);
+        let mut out = [0i32; 2];
+        let mut read = 7;
+        assert_eq!(
+            unsafe { sym_read(dec, out.as_mut_ptr(), 0, &mut read) },
+            SYM_OK
+        );
+        assert_eq!(read, 0);
+        assert_eq!(
+            unsafe { sym_read(dec, out.as_mut_ptr(), 2, &mut read) },
+            SYM_OK
+        );
+        assert_eq!(read, 2);
+        unsafe { sym_close(dec) };
+        let _ = std::fs::remove_file(path);
     }
 }
