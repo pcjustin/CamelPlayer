@@ -20,6 +20,23 @@
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="16,12" />
         </Style>
+        <!-- A period card: the card alone, chosen as one of a group from the keyboard or by Narrator as well. -->
+        <Style x:Key="StatTileButtonStyle" TargetType="RadioButton">
+            <Setter Property="GroupName" Value="Period" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <ContentPresenter HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="SectionHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
@@ -144,41 +161,56 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource StatTileStyle}" Tag="today" Tapped="OnStatTileTapped">
-                        <StackPanel>
-                            <TextBlock x:Uid="Home_Today" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <TextBlock x:Name="TodayTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
-                            <TextBlock x:Name="TodayPlays" Style="{StaticResource CaptionTextBlockStyle}" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Column="1" Style="{StaticResource StatTileStyle}" Tag="week" Tapped="OnStatTileTapped">
-                        <StackPanel>
-                            <TextBlock x:Uid="Home_Week" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <TextBlock x:Name="WeekTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
-                            <TextBlock x:Name="WeekPlays" Style="{StaticResource CaptionTextBlockStyle}" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Column="2" Style="{StaticResource StatTileStyle}" Tag="month" Tapped="OnStatTileTapped">
-                        <StackPanel>
-                            <TextBlock x:Uid="Home_Month" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <TextBlock x:Name="MonthTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
-                            <TextBlock x:Name="MonthPlays" Style="{StaticResource CaptionTextBlockStyle}" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Column="3" Style="{StaticResource StatTileStyle}" Tag="year" Tapped="OnStatTileTapped">
-                        <StackPanel>
-                            <TextBlock x:Uid="Home_Year" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <TextBlock x:Name="YearTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
-                            <TextBlock x:Name="YearPlays" Style="{StaticResource CaptionTextBlockStyle}" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Column="4" Style="{StaticResource StatTileStyle}" Tag="all" Tapped="OnStatTileTapped">
-                        <StackPanel>
-                            <TextBlock x:Uid="Home_AllTime" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <TextBlock x:Name="AllTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
-                            <TextBlock x:Name="AllPlays" Style="{StaticResource CaptionTextBlockStyle}" />
-                        </StackPanel>
-                    </Border>
+                    <RadioButton Style="{StaticResource StatTileButtonStyle}" Tag="today" Checked="OnStatTileChecked"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=TodayLabel}">
+                        <Border Style="{StaticResource StatTileStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="TodayLabel" x:Uid="Home_Today" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="TodayTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
+                                <TextBlock x:Name="TodayPlays" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </RadioButton>
+                    <RadioButton Grid.Column="1" Style="{StaticResource StatTileButtonStyle}" Tag="week" Checked="OnStatTileChecked"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=WeekLabel}">
+                        <Border Style="{StaticResource StatTileStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="WeekLabel" x:Uid="Home_Week" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="WeekTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
+                                <TextBlock x:Name="WeekPlays" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </RadioButton>
+                    <RadioButton Grid.Column="2" Style="{StaticResource StatTileButtonStyle}" Tag="month" Checked="OnStatTileChecked"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=MonthLabel}">
+                        <Border Style="{StaticResource StatTileStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="MonthLabel" x:Uid="Home_Month" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="MonthTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
+                                <TextBlock x:Name="MonthPlays" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </RadioButton>
+                    <RadioButton Grid.Column="3" Style="{StaticResource StatTileButtonStyle}" Tag="year" Checked="OnStatTileChecked"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=YearLabel}">
+                        <Border Style="{StaticResource StatTileStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="YearLabel" x:Uid="Home_Year" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="YearTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
+                                <TextBlock x:Name="YearPlays" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </RadioButton>
+                    <RadioButton Grid.Column="4" Style="{StaticResource StatTileButtonStyle}" Tag="all" Checked="OnStatTileChecked"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=AllLabel}">
+                        <Border Style="{StaticResource StatTileStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="AllLabel" x:Uid="Home_AllTime" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="AllTime" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="WrapWholeWords" />
+                                <TextBlock x:Name="AllPlays" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </RadioButton>
                 </Grid>
                 <Border Style="{StaticResource StatTileStyle}" Height="190">
                     <Grid RowSpacing="4">

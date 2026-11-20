@@ -452,8 +452,10 @@ winrt::fire_and_forget HomeView::loadPeriod() {
 void HomeView::showTiles() {
     const auto accent = ui::themeBrush(ActualTheme(), L"AccentFillColorDefaultBrush");
     for (const auto& child : Tiles().Children()) {
-        const auto tile = child.as<Border>();
-        const bool chosen = unbox_value_or<hstring>(tile.Tag(), L"") == period_;
+        const auto card = child.as<RadioButton>();
+        const auto tile = card.Content().as<Border>();
+        const bool chosen = unbox_value_or<hstring>(card.Tag(), L"") == period_;
+        card.IsChecked(chosen);
         if (chosen) {
             tile.BorderBrush(accent);
         } else {
@@ -699,8 +701,8 @@ void HomeView::OnViewAllClick(Windows::Foundation::IInspectable const& sender, R
     // Titled by the list and the chosen card's period, as "Most played albums · This month".
     hstring period;
     for (const auto& child : Tiles().Children())
-        if (const auto tile = child.as<Border>(); unbox_value_or<hstring>(tile.Tag(), L"") == period_)
-            period = tile.Child().as<StackPanel>().Children().GetAt(0).as<TextBlock>().Text();
+        if (const auto card = child.as<RadioButton>(); unbox_value_or<hstring>(card.Tag(), L"") == period_)
+            period = card.Content().as<Border>().Child().as<StackPanel>().Children().GetAt(0).as<TextBlock>().Text();
     const hstring heading = list == L"topAlbums"    ? tr(L"Home_TopAlbums/Text")
                             : list == L"topArtists" ? tr(L"Home_TopArtists/Text")
                             : list == L"topTracks"  ? tr(L"Home_TopTracks/Text")
@@ -708,8 +710,10 @@ void HomeView::OnViewAllClick(Windows::Foundation::IInspectable const& sender, R
     handlers_.viewAll(list, heading + L" · " + period, periodFetch(list));
 }
 
-void HomeView::OnStatTileTapped(Windows::Foundation::IInspectable const& sender, Input::TappedRoutedEventArgs const&) {
-    period_ = unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L"month");
+void HomeView::OnStatTileChecked(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
+    const auto period = unbox_value_or<hstring>(sender.as<FrameworkElement>().Tag(), L"month");
+    if (period == period_) return; // showTiles checking the chosen card
+    period_ = period;
     showTiles();
     loadPeriod();
 }
