@@ -24,13 +24,16 @@ SavedOutput newOutput(Backend backend) {
     return added;
 }
 
+// The entry's ID, which every kind of output's settings in it hold as reading it back gives them.
+void setId(SavedOutput& o, const std::string& id) {
+    o.id = o.wasapi.deviceId = o.asio.driverClsid = o.ks.deviceId = o.network.udn = o.airplay.deviceId = o.hqplayer.address = id;
+}
+
 SavedOutput& savedOutput(Settings& s, Backend backend, const std::string& id) {
     const auto found = std::ranges::find_if(s.outputs, [&](const SavedOutput& o) { return o.backend == backend && o.id == id; });
     if (found != s.outputs.end()) return *found;
     SavedOutput added = newOutput(backend);
-    added.id = id;
-    added.wasapi.deviceId = added.asio.driverClsid = added.ks.deviceId = added.network.udn = added.airplay.deviceId =
-        added.hqplayer.address = id;
+    setId(added, id);
     return s.outputs.emplace_back(std::move(added));
 }
 
@@ -69,8 +72,7 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
         saved.hqplayer = s.hqplayer;
     else
         saved.wasapi = s.wasapi;
-    saved.wasapi.deviceId = saved.asio.driverClsid = saved.ks.deviceId = saved.network.udn = saved.airplay.deviceId =
-        saved.hqplayer.address = id;
+    setId(saved, id);
 }
 
 // Puts `device`'s parameters, or the defaults for a device without any, in Settings' fields for the output `selected`.
@@ -151,7 +153,7 @@ void moveReceiver(Settings& s, const std::string& from, const std::string& to) {
             kept->enabled = kept->enabled || old->enabled;
             s.outputs.erase(old);
         } else {
-            old->id = old->airplay.deviceId = to;
+            setId(*old, to);
         }
     }
     if (s.backend == Backend::AirPlay && s.airplay.deviceId == from) s.airplay.deviceId = to;
@@ -207,7 +209,7 @@ void followRenewedPlayers(Settings& s, const DeviceCatalog& devices) {
         if (std::ranges::count_if(devices.network, fits) != 1) continue;
         const std::string renewed = std::ranges::find_if(devices.network, fits)->id;
         if (s.backend == Backend::Network && s.network.udn == old.id) s.network.udn = renewed;
-        old.id = old.network.udn = renewed;
+        setId(old, renewed);
     }
 }
 

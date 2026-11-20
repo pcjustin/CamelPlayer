@@ -653,6 +653,23 @@ TEST(AirPlayOutputsTest, AStereoPairPairedAgainKeepsItsSettings) {
     EXPECT_EQ(std::ranges::count_if(after, [](const OutputRow& r) { return r.id == "32FBAAAB399D"; }), 0);
 }
 
+// A pair not in use paired again reads back as it is, as the Server takes settings back from the window.
+TEST(AirPlayOutputsTest, APairNotInUsePairedAgainReadsBackAsItIs) {
+    const std::vector<std::string> speakers{"32FBAAAB399D", "FAE2708FA125"};
+    DeviceCatalog paired;
+    paired.revision = 1;
+    paired.airplay = {{"EB1DD2A4", "主臥", "", speakers}};
+    Settings s;
+    s.adoptOutputSets = false;
+    setOutputEnabled(s, Backend::AirPlay, "EB1DD2A4", true, paired);
+    DeviceCatalog again;
+    again.revision = 2;
+    again.airplay = {{"F2C47A35", "主臥", "", speakers}};
+    syncOutputs(s, again);
+    ASSERT_TRUE(std::ranges::any_of(s.outputs, [](const SavedOutput& o) { return o.id == "F2C47A35"; }));
+    EXPECT_EQ(settingsDto(fromJson(toJson(s))), settingsDto(s));
+}
+
 // A pair saved before its speakers were recorded is known again by its name; a speaker's own entry goes into the pair.
 TEST(AirPlayOutputsTest, APairSavedWithoutItsSpeakersIsKnownByItsName) {
     DeviceCatalog before;

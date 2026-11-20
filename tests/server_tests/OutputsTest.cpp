@@ -404,6 +404,24 @@ TEST(OutputsTest, APlayerBackUnderANewUdnKeepsWhatWasSavedForIt) {
     EXPECT_EQ(saved(s, Backend::Network, "uuid:old"), nullptr);
 }
 
+// One not in use is renewed whole: the window sends the settings back with every change, and the Server takes only what
+// reads back as it was. The KECES's entry kept its old UDN for the other outputs' kinds, every change was refused, and the
+// window ended with the first (2026-11-20).
+TEST(OutputsTest, APlayerNotInUseBackUnderANewUdnReadsBackAsItIs) {
+    auto devices = catalog();
+    devices.network = {{"uuid:old", "E620"}};
+    devices.network[0].model = "MUZO Cobblestone";
+    Settings s = fresh();
+    setOutputEnabled(s, Backend::Network, "uuid:old", true, devices);
+    auto renewed = devices;
+    renewed.revision = 2;
+    renewed.network = {{"uuid:new", "E620"}};
+    renewed.network[0].model = "MUZO Cobblestone";
+    syncOutputs(s, renewed);
+    ASSERT_NE(saved(s, Backend::Network, "uuid:new"), nullptr);
+    EXPECT_EQ(settingsDto(fromJson(toJson(s))), settingsDto(s));
+}
+
 // A player of the same name but another model, or two new ones that both fit, are not taken for the saved one.
 TEST(OutputsTest, APlayerOfAnotherModelOrTwoThatFitAreNotTakenForASavedOne) {
     auto devices = catalog();
