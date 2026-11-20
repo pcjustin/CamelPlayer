@@ -47,6 +47,10 @@ std::map<std::wstring, std::wstring> readArguments(const std::wstring& commandLi
 // Whether two paths name the player's program.
 bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b);
 
+// Whether the updater at `self`, run as administrator, may install into `app`: the copy installed beside a player is
+// that player's own, and anyone can start it with a folder of their choosing.
+bool mayInstallInto(const std::filesystem::path& self, const std::filesystem::path& app);
+
 // The data folder's update-result line.
 void writeResult(const std::filesystem::path& data, const wchar_t* kind, const std::wstring& version,
                  const std::wstring& previous = {});

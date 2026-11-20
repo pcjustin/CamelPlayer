@@ -199,6 +199,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     bool elevatedRun = false;
     auto args = camel::updater::readArguments(GetCommandLineW(), elevatedRun);
+    // Before anything is written or started: as administrator, the folders are whatever the caller named.
+    wchar_t self[MAX_PATH * 4];
+    const DWORD selfLength = GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
+    if (elevated() && (selfLength == 0 || selfLength >= std::size(self) || args[L"app"].empty() ||
+                       !camel::updater::mayInstallInto(self, args[L"app"])))
+        return 1;
     if (args[L"app"].empty() || args[L"files"].empty() || args[L"data"].empty() || args[L"version"].empty()) {
         // The player has exited for the update: it is told where it reads the result, and started again.
         const fs::path data = args[L"data"].empty() ? playerData() : fs::path(args[L"data"]);
@@ -259,11 +265,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
 
     const bool asAdministrator = elevated();
-    if (asAdministrator) {
-        wchar_t self[MAX_PATH * 4];
-        GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
-        log(std::wstring(L"running as administrator from ") + self);
-    }
+    if (asAdministrator) log(std::wstring(L"running as administrator from ") + self);
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     camel::updater::Host host;
     host.log = [](const std::wstring& text) { log(text); };

@@ -370,6 +370,40 @@ TEST(Update, AnUpdateEndedWhileTheNewVersionStartsIsPutRightByTheNext) {
         }
     }
 }
+// A journal is read from the program folder, but what it names is not taken on trust: a path outside that folder is
+// left alone, and so is a data folder that is not an update's own.
+TEST(Update, AJournalNamingPathsOutsideTheProgramFolderLeavesThemAlone) {
+    InstallFixture f(L"update-journal-outside");
+    f.seal();
+    writeText(f.dir / L"beside.txt", "kept");
+    writeText(f.dir / L"precious" / L"file.txt", "kept");
+    writeText(f.app / camel::updatefiles::kBackup / L"CamelPlayer.exe", "older");
+    writeText(f.app / camel::updatefiles::kJournal,
+              "data\t" + camel::toUtf8((f.dir / L"precious").wstring()) + "\nnew\t..\\beside.txt\nmoved\t" +
+                  camel::toUtf8((f.dir / L"beside.txt").wstring()) + "\nmoved\tCamelPlayer.exe\ncomplete\nstarting\n");
+    EXPECT_EQ(camel::updater::install(f.options, f.host), camel::updater::Outcome::Installed);
+    EXPECT_EQ(readText(f.dir / L"beside.txt"), "kept");
+    EXPECT_EQ(readText(f.dir / L"precious" / L"file.txt"), "kept");
+    EXPECT_EQ(readText(f.data / L"library.db"), "db-old");
+}
+
+// Run as administrator, the copy installed beside a player installs into that player's folder and no other; the copy
+// the player starts from the temp folder has no player beside it.
+TEST(Update, AnInstalledUpdaterInstallsOnlyIntoItsOwnFolder) {
+    const auto dir = testutil::tempDir() / L"update-own-folder";
+    fs::remove_all(dir);
+    writeText(dir / L"CamelPlayer" / L"CamelPlayer.exe", "player");
+    writeText(dir / L"CamelPlayer" / L"CamelUpdater.exe", "updater");
+    writeText(dir / L"temp" / L"CamelUpdater.exe", "updater");
+    fs::create_directories(dir / L"elsewhere");
+    const auto installed = dir / L"CamelPlayer" / L"CamelUpdater.exe";
+    EXPECT_TRUE(camel::updater::mayInstallInto(installed, dir / L"CamelPlayer"));
+    EXPECT_TRUE(camel::updater::mayInstallInto(installed, dir / L"CAMELPLAYER" / L"."));
+    EXPECT_FALSE(camel::updater::mayInstallInto(installed, dir / L"elsewhere"));
+    EXPECT_FALSE(camel::updater::mayInstallInto(installed, dir / L"missing"));
+    EXPECT_TRUE(camel::updater::mayInstallInto(dir / L"temp" / L"CamelUpdater.exe", dir / L"CamelPlayer"));
+}
+
 // An elevated updater installs from a folder any program of the user can write: what changed there after the player
 // checked the download is neither installed nor started.
 TEST(Update, AFileChangedAfterTheCheckIsNotInstalled) {

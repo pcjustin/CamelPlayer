@@ -258,12 +258,14 @@ private:
             const auto tab = line.find('\t');
             const auto kind = line.substr(0, tab);
             const fs::path value = tab == std::string::npos ? fs::path() : fs::path(fromUtf8(line.substr(tab + 1)));
-            if (kind == "data")
+            // What the journal names is checked as a manifest's paths are: a file inside the program folder, and the
+            // data's copy in a folder an update made.
+            if (kind == "data" && value.is_absolute() && value.filename() == files::kDataBackup)
                 dataBackup = value;
-            else if (kind == "moved")
-                moved.push_back(value);
-            else if (kind == "new")
-                added.push_back(value);
+            else if (kind == "moved" && inside(value))
+                moved.push_back(*inside(value));
+            else if (kind == "new" && inside(value))
+                added.push_back(*inside(value));
             else if (kind == "complete")
                 complete = true;
             else if (kind == "starting")
@@ -275,7 +277,7 @@ private:
             log(L"keeping the update ended after the new version started");
             fs::remove(journal, error);
             fs::remove_all(backup_, error);
-            fs::remove_all(dataBackup, error);
+            if (!dataBackup.empty()) fs::remove_all(dataBackup, error);
             return true;
         }
         log(L"undoing an update that was ended midway");
@@ -296,11 +298,11 @@ private:
                 restored = false;
             }
         }
-        if (starting) restoreData(dataBackup);
+        if (starting && !dataBackup.empty()) restoreData(dataBackup);
         if (!restored) return false;
         fs::remove(journal, error);
         fs::remove_all(backup_, error);
-        fs::remove_all(dataBackup, error);
+        if (!dataBackup.empty()) fs::remove_all(dataBackup, error);
         return true;
     }
 
@@ -425,6 +427,12 @@ std::map<std::wstring, std::wstring> readArguments(const std::wstring& commandLi
 bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b) {
     std::error_code error;
     return std::filesystem::equivalent(a, b, error) && !error;
+}
+
+bool mayInstallInto(const std::filesystem::path& self, const std::filesystem::path& app) {
+    std::error_code error;
+    if (!std::filesystem::exists(self.parent_path() / files::kPlayer, error)) return true;
+    return sameFile(self.parent_path(), app);
 }
 
 } // namespace camel::updater
