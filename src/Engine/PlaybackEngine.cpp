@@ -509,14 +509,25 @@ public:
         if ((plan.dsd == DsdPath::Native || plan.dsd == DsdPath::Dop) && !plan.modulatorOrder)
             return dspChain(Settings{}, nullptr);
         Impulse impulse;
-        if (settings.convolution.enabled && !settings.convolution.file.empty()) {
+        const auto& file = settings.convolution.file;
+        if (settings.convolution.enabled && !file.empty() && !impulseFailedLately(file)) {
             try {
-                impulse = loadImpulse(toWide(settings.convolution.file), dspRate(plan)).impulse;
+                impulse = loadImpulse(toWide(file), dspRate(plan)).impulse;
             } catch (const ImpulseError& e) {
                 log::warn("impulse response: %s", e.what());
+                std::lock_guard lock(impulseMutex_);
+                impulseFailed_ = file;
+                impulseFailedAt_ = std::chrono::steady_clock::now();
             }
         }
         return dspChain(settings, std::move(impulse));
+    }
+
+    // A response on a share that is offline takes half a minute to fail, at every track change: one that failed is
+    // tried again after kImpulseRetry, or at once when the convolution settings change.
+    bool impulseFailedLately(const std::string& file) const {
+        std::lock_guard lock(impulseMutex_);
+        return file == impulseFailed_ && std::chrono::steady_clock::now() - impulseFailedAt_ < kImpulseRetry;
     }
 
     // Whether settings `s` send a DSD source with ReplayGain `gainDb` through the DSP: the output's switch is on and the
@@ -566,6 +577,10 @@ public:
         const bool outputChanged = !sameBackendConfig(settings_, s);
         const bool chainChanged = settings_.eq != s.eq || settings_.crossfeed != s.crossfeed ||
                                   settings_.convolution != s.convolution || settings_.dspOrder != s.dspOrder;
+        if (settings_.convolution != s.convolution) {
+            std::lock_guard lock(impulseMutex_);
+            impulseFailed_.clear();
+        }
         const bool dspChanged = chainChanged || volumeDb(settings_.volume) != volumeDb(s.volume);
         // A conversion setting reopens the stream only when the path it would choose differs; so does the DSP where it
         // takes a DSD source from raw DSD to modulated DSD or back.
@@ -1812,6 +1827,10 @@ private:
     double neededRate_ = 0;             // bytes per second neededFor_ plays at
     double streamRate_ = 0;             // bytes per second it is read at while it streams; 0 when it does not
     std::atomic<double> streamPace_{0}; // seconds of it decoded per second while it streams; 0 when unpaced
+    static constexpr auto kImpulseRetry = std::chrono::minutes(10);
+    mutable std::mutex impulseMutex_;
+    _Guarded_by_(impulseMutex_) mutable std::string impulseFailed_; // the response file that could not be read
+    _Guarded_by_(impulseMutex_) mutable std::chrono::steady_clock::time_point impulseFailedAt_;
     std::wstring neededFor_;
     std::chrono::steady_clock::time_point fillAt_; // where the read rate is being measured from
     uint64_t fillFrom_ = 0;
