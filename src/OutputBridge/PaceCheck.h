@@ -21,6 +21,9 @@ public:
 
     // `slack`: how far ahead of real time the device may get, its whole buffer included.
     PaceCheck(uint32_t sampleRate, std::chrono::milliseconds slack) : rate_(sampleRate), slack_(slack) {}
+    // A device's loop: a second ahead of real time, besides its buffer of `bufferFrames`.
+    PaceCheck(uint32_t sampleRate, uint64_t bufferFrames)
+        : PaceCheck(sampleRate, std::chrono::milliseconds(1000 + bufferFrames * 1000 / sampleRate)) {}
 
     // At each start, before the device is primed.
     void restart(Clock::time_point now) {
@@ -33,8 +36,12 @@ public:
         if (now - since_ > kWindow) restart(now);
         frames_ += frames;
         const std::chrono::duration<double> taken(double(frames_) / rate_);
-        return taken - (now - since_) > slack_;
+        const bool ahead = taken - (now - since_) > slack_;
+        fast_ = fast_ || ahead;
+        return ahead;
     }
+    // Whether took() has ever been true: the device's loop then ends.
+    bool fast() const { return fast_; }
 
 private:
     static constexpr auto kWindow = std::chrono::seconds(10);
@@ -43,6 +50,7 @@ private:
     std::chrono::milliseconds slack_;
     Clock::time_point since_;
     uint64_t frames_ = 0;
+    bool fast_ = false;
 };
 
 } // namespace camel::audio

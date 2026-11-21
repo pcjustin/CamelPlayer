@@ -595,8 +595,7 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
         out = ULONG(apos.PlayOffset % size);
         return true;
     };
-    PaceCheck pace(fmt_.sampleRate, std::chrono::milliseconds(1000 + uint64_t(size / blk) * 1000 / fmt_.sampleRate));
-    bool runsFast = false;
+    PaceCheck pace(fmt_.sampleRate, uint64_t(size / blk));
     auto fill = [&](ULONG from, ULONG to) { // circular [from, to)
         ULONG n = (to + size - from) % size;
         for (ULONG done = 0; done < n;) {
@@ -606,14 +605,14 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
             done += chunk;
         }
         if (rb.CallMemoryBarrier) MemoryBarrier();
-        if (pace.took(n / blk, PaceCheck::Clock::now())) runsFast = true;
+        pace.took(n / blk, PaceCheck::Clock::now());
     };
 
     DWORD err = 0;
     const DWORD sleepMs = std::max<DWORD>(1, DWORD(size * 1000.0 / (fmt_.sampleRate * blk) / 4));
     bool runningState = false;
     ULONG wr = 0;
-    while (!quit_ && !runsFast) {
+    while (!quit_ && !pace.fast()) {
         if (!running_) {
             if (runningState) {
                 setState(pin, KSSTATE_PAUSE);
@@ -666,7 +665,7 @@ void KsOutput::runWaveRt(HANDLE pin, bool notify, std::promise<void>& opened) {
         ksIoctl(pin, IOCTL_KS_PROPERTY, &np, sizeof np, nullptr, 0);
     }
     CloseHandle(ev);
-    if (runsFast) tooFast();
+    if (pace.fast()) tooFast();
     finish(err, "WaveRT stream");
 }
 
@@ -689,10 +688,9 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
               detailLength < 0 || size_t(detailLength) >= sizeof detail ? "streaming buffer status unavailable" : detail);
     opened.set_value();
 
-    PaceCheck pace(fmt_.sampleRate, std::chrono::milliseconds(1000 + uint64_t(pktFrames) * n * 1000 / fmt_.sampleRate));
-    bool runsFast = false;
+    PaceCheck pace(fmt_.sampleRate, uint64_t(pktFrames) * n);
     auto submit = [&](int i) -> bool {
-        if (pace.took(pktFrames, PaceCheck::Clock::now())) runsFast = true;
+        pace.took(pktFrames, PaceCheck::Clock::now());
         size_t got = source_->render(bufs[i].data(), pktFrames);
         if (got < pktFrames) memset(bufs[i].data() + got * blk, 0, (pktFrames - got) * blk);
         hdr[i] = {};
@@ -727,7 +725,7 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
     DWORD err = 0;
     bool runningState = false;
     int cur = 0;
-    while (!quit_ && !runsFast) {
+    while (!quit_ && !pace.fast()) {
         if (!running_) {
             if (runningState) {
                 drain();
@@ -772,7 +770,7 @@ void KsOutput::runStandard(HANDLE pin, std::promise<void>& opened) {
     }
     if (runningState) drain();
     for (auto& o : ov) CloseHandle(o.hEvent);
-    if (runsFast) tooFast();
+    if (pace.fast()) tooFast();
     finish(err, "standard stream");
 }
 

@@ -250,9 +250,9 @@ private:
             status_.adjustments.push_back(mmcss.adjustment());
         }
         const UINT32 bpf = fmt_.bytesPerFrame();
-        bool started = false, primed = false, runsFast = false;
+        bool started = false, primed = false;
         int timeouts = 0, tooLarge = 0;
-        PaceCheck pace(fmt_.sampleRate, std::chrono::milliseconds(1000 + uint64_t(bufferFrames) * 1000 / fmt_.sampleRate));
+        PaceCheck pace(fmt_.sampleRate, uint64_t(bufferFrames));
         auto fill = [&](UINT32 frames) -> HRESULT {
             BYTE* p = nullptr;
             HRESULT hr = render->GetBuffer(frames, &p);
@@ -260,11 +260,11 @@ private:
             const size_t got = source_->render(p, frames);
             if (got < frames) memset(p + got * bpf, 0, size_t(frames - got) * bpf);
             hr = render->ReleaseBuffer(frames, 0);
-            if (SUCCEEDED(hr) && pace.took(frames, PaceCheck::Clock::now())) runsFast = true;
+            if (SUCCEEDED(hr)) pace.took(frames, PaceCheck::Clock::now());
             return hr;
         };
         HRESULT err = S_OK;
-        while (!quit_ && !runsFast) {
+        while (!quit_ && !pace.fast()) {
             bool want = running_;
             if (want != started) {
                 if (want) {
@@ -326,7 +326,7 @@ private:
             }
         }
         if (started) client->Stop();
-        if (runsFast && !quit_) {
+        if (pace.fast() && !quit_) {
             log::warn("wasapi: %s", kDeviceRunsFast);
             applied_.notify(running_);
             raiseError(Error(ErrorCode::DriverError, kDeviceRunsFast));
