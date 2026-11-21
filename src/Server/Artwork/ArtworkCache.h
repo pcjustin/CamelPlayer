@@ -37,8 +37,8 @@ public:
     std::optional<ArtworkReference> thumbnail(const ArtworkCandidate& image, const CancellationToken& token = {});
     // Settings › Clear cover cache: deletes every generated thumbnail; later requests generate them again.
     void clear();
-    // Makes the album thumbnails the library lacks, with up to `workers` at once, until `yield` asks for the storage;
-    // returns how many it made.
+    // Makes the album thumbnails the library lacks, with up to `workers` at once, until `yield` asks for the storage or the
+    // cache is full; returns how many it made.
     size_t prepare(const LibraryStore& store, const std::function<bool()>& yield, const CancellationToken& token = {},
                    unsigned workers = 4);
     // Deletes the thumbnails of library covers whose files the library no longer holds; returns how many.
@@ -59,7 +59,7 @@ private:
     std::optional<uintmax_t> diskBytes_;
     std::map<std::string, std::optional<ArtworkReference>> embedded_;
     // The library's file and album change counts when prepare() last went through every album; it does nothing while
-    // they stay the same. Reset by whatever removes thumbnails.
+    // they stay the same. Reset when the cache is cleared: a full cache's trimmed thumbnails are made again when shown.
     std::optional<std::pair<uint64_t, uint64_t>> prepared_;
     std::mutex mutex_;
     // Covers prepare() could not make, by their key, which follows the file's version: not read again until it changes.

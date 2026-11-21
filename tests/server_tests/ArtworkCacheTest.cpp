@@ -529,6 +529,47 @@ TEST(ArtworkCachePrepare, ACoverThatCouldNotBeMadeIsNotReadAgainUntilItsFileChan
     cache.clear();
     EXPECT_EQ(cache.prepare(store, {}), 1u);
 }
+// With more covers than the cache holds, warming fills it and stops: making more would only delete thumbnails, each to be
+// read from the storage again by the next pass.
+TEST(ArtworkCachePrepare, WarmingStopsWhenTheCacheIsFull) {
+    const Path dir = testutil::tempDir() / "artwork-cache-full";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    constexpr size_t kAlbums = 12;
+    for (size_t i = 0; i < kAlbums; ++i) {
+        const auto name = "Album " + std::to_string(10 + i);
+        const auto folder = dir / "music" / name;
+        std::filesystem::create_directories(folder);
+        save(folder / "cover.jpg", bitmap(80, 40));
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), folder / "song.flac");
+        TagLib::FLAC::File tags((folder / "song.flac").c_str());
+        TagLib::PropertyMap values;
+        values.insert("ALBUM", TagLib::StringList(name));
+        tags.setProperties(values);
+        ASSERT_TRUE(tags.save());
+    }
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    std::vector<int64_t> albums;
+    for (auto rows = store.openReader().prepare("SELECT id FROM albums WHERE cover_id IS NOT NULL ORDER BY sort_key,id");
+         rows.step();)
+        albums.push_back(rows.integer(0));
+    ASSERT_EQ(albums.size(), kAlbums);
+    ArtworkCache probe(dir / "probe");
+    const auto one = probe.thumbnail(bitmap(80, 40));
+    ASSERT_TRUE(one);
+    const auto size = std::filesystem::file_size(one->path);
+    const auto thumbnails = [&] { return size_t(std::ranges::distance(std::filesystem::directory_iterator(dir / "thumbs"))); };
+
+    ArtworkCache cache(dir / "thumbs", size * 5 + size / 2);
+    const size_t made = cache.prepare(store, {});
+    EXPECT_LT(made, kAlbums);
+    EXPECT_EQ(thumbnails(), made); // none of those it made was deleted
+    // A cover shown past them is made then, and the next pass reads none from the storage.
+    ASSERT_TRUE(cache.get(&store, {ArtworkKind::Album, albums.back()}));
+    EXPECT_EQ(cache.prepare(store, {}), 0u);
+}
 // The albums a scan writes have their thumbnails made during it, so the wall finds them made once it ends.
 TEST(ArtworkCacheWarmer, AScanLeavesItsAlbumsThumbnailsMade) {
     using namespace std::chrono_literals;

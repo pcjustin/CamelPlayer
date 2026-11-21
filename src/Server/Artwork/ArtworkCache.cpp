@@ -408,6 +408,13 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
     // waits.
     auto reading = token.child();
     std::atomic<size_t> next = 0, made = 0;
+    // Past where trim() cuts the cache down to, each thumbnail made would delete another, to be read from the storage again.
+    const auto full = [this] {
+        std::lock_guard lock(mutex_);
+        std::error_code ec;
+        if (!diskBytes_ && std::filesystem::is_directory(directory_, ec)) trim();
+        return diskBytes_ && *diskBytes_ >= maxBytes_ / 10 * 9;
+    };
     const unsigned count = std::clamp(workerCount, 1u, 4u);
     std::vector<std::future<void>> workers;
     workers.reserve(count);
@@ -430,6 +437,10 @@ size_t ArtworkCache::prepare(const LibraryStore& store, const std::function<bool
                 {
                     std::lock_guard lock(failedMutex_);
                     if (failed_.contains(cover->key)) continue;
+                }
+                if (full()) {
+                    next = albums.size();
+                    break;
                 }
                 bool done = false;
                 try {
@@ -568,10 +579,7 @@ void ArtworkCache::trim() {
         if (bytes <= keep || (bytes <= maxBytes_ && &entry == &files.back())) break;
         const auto size = entry.file_size();
         std::error_code ec;
-        if (std::filesystem::remove(entry.path(), ec)) {
-            bytes -= size;
-            prepared_.reset();
-        }
+        if (std::filesystem::remove(entry.path(), ec)) bytes -= size;
     }
     diskBytes_ = bytes;
 }
