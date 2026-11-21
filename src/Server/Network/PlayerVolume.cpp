@@ -158,6 +158,13 @@ struct PlayerVolume::Impl {
     }
 
     void work() {
+        // A player without RenderingControl has no volume to read or follow; asked every read and every subscription
+        // retry, it filled the log for as long as it was chosen.
+        if (!player.service("RenderingControl")) {
+            std::unique_lock lock(mutex);
+            wake.wait(lock, [&] { return stopping; });
+            return;
+        }
         int failures = 0;
         auto nextRead = Clock::now();
         auto nextSubscribe = Clock::now();
