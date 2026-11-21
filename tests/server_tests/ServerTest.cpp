@@ -429,6 +429,43 @@ TEST(ServerPersistenceTest, SavesSettingsAndProtectsServerOwnedLastFile) {
     std::filesystem::remove(path);
 }
 
+// A receiver's level is saved once its slider stops moving, and closing saves one not yet saved.
+TEST(ServerPersistenceTest, AReceiverLevelIsSavedOnceItsSliderStops) {
+    const auto path = testutil::tempDir() / "server-receiver-level.json";
+    std::filesystem::remove(path);
+    Settings settings = withoutAutoplay();
+    settings.backend = Backend::AirPlay;
+    settings.airplay.deviceId = "800A805D016B";
+    settings.volume.mode = VolumeMode::Player;
+    const auto saved = [&] {
+        std::error_code ec;
+        return std::filesystem::exists(path, ec) ? loadSettings(path).airplayLevels["800A805D016B"].level : 0u;
+    };
+    const auto step = [](LocalServer& server, uint32_t level) {
+        Command c = command(CommandKind::SetPlayerVolume);
+        c.playerVolume = level;
+        server.submit(c);
+    };
+    {
+        LocalServer server(settings, path);
+        AirPlayFinderOptions none; // the network's receivers stay out of it
+        none.queryHost = "127.0.0.1";
+        none.queryPort = 9;
+        none.groupPort = 0;
+        server.setAirPlayFinderOptions(none);
+        for (uint32_t level = 1; level <= 40; ++level) step(server, level);
+        server.waitIdle();
+        const auto end = std::chrono::steady_clock::now() + 5s;
+        while (saved() != 40 && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(20ms);
+        EXPECT_EQ(saved(), 40u);
+        step(server, 41);
+        server.waitIdle();
+        server.shutdown();
+    }
+    EXPECT_EQ(saved(), 41u);
+    std::filesystem::remove(path);
+}
+
 TEST(ServerPersistenceTest, ReportsSaveFailureWhileApplyingSettings) {
     LocalServer server(Settings{}, testutil::tempDir() / "missing-server-directory" / "settings.json");
     Command c = command(CommandKind::ApplySettings);

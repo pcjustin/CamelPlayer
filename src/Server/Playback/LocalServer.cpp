@@ -617,6 +617,7 @@ private:
     };
 
     void persist() {
+        settingsDue_.reset();
         if (settingsFile_.empty()) return;
         try {
             saveSettings(settings_, settingsFile_);
@@ -624,6 +625,10 @@ private:
             state_.commandError = Failure{audio::ErrorCode::Other, e.what()};
         }
     }
+
+    // Levels and the last file change at each step of a slider and each track, and a save with its flush holds the
+    // command thread for about 10 ms: they are saved once they have settled.
+    void persistSoon() { settingsDue_ = std::chrono::steady_clock::now() + kSettingsSettle; }
 
     void resumePlayback() {
         if (entries_.empty() && autoplayAllowed() && appendAutoplay()) {
@@ -941,7 +946,7 @@ private:
                     std::ranges::find(settings_.airplayGroup, c.receiver) != settings_.airplayGroup.end()) {
                     settings_.airplayLevels.try_emplace(c.receiver).first->second.level = std::min(*c.playerVolume, 100u);
                     groupBaseline_.reset();
-                    persist();
+                    persistSoon();
                 }
                 break;
             case CommandKind::ResetPlayStatistics:
@@ -1308,7 +1313,7 @@ private:
         else
             engine_->load(path, source.decoder(), gainFor(position.entryId));
         waitForEngine(); // the next snapshot pairs this entry with its own playback state
-        persist();
+        persistSoon();
     }
 
     // A gapless transition already plays the queued entry; it becomes current without reopening anything.
@@ -1328,7 +1333,7 @@ private:
             settings_.lastFile = toWide(source.pathUtf8());
             queueChanged_ = true;
         }
-        persist();
+        persistSoon();
     }
 
     // mpg123 scans the whole stream while it plays, so its length, once known, replaces a scan-time estimate.
@@ -2081,7 +2086,7 @@ private:
                                   : wanted.level;
             if (wanted.muted != was.muted) level.muted = wanted.muted;
         }
-        persist();
+        persistSoon();
     }
 
     std::string receiverName(const std::string& id, const std::vector<airplay::Receiver>& found) const {
@@ -2129,7 +2134,7 @@ private:
                 continue;
             settings_.airplayLevels[id] = {uint32_t(std::lround(event.volume * 100)), event.muted};
             groupBaseline_.reset();
-            persist();
+            persistSoon();
         }
         std::vector<airplay::Receiver> found;
         {
@@ -2414,6 +2419,7 @@ private:
                 if (!done->failure && done->finish) done->failure = failureOf(done->finish);
                 state_.finished = {done->command, std::move(done->failure)};
             }
+            if (settingsDue_ && std::chrono::steady_clock::now() >= *settingsDue_) persist();
             saveQueueSession(false);
             publish(pending.has_value());
             if (pending || done) {
@@ -2439,6 +2445,7 @@ private:
             airplayFinder_.reset();
             hqplayerFinder_.reset();
         }
+        if (settingsDue_) persist();
         if (session_) session_->persist(*library_);
         saveQueueSession(true);
         queueSaved_.set_value();
@@ -2449,6 +2456,8 @@ private:
 
     Settings settings_;
     std::filesystem::path settingsFile_;
+    static constexpr auto kSettingsSettle = std::chrono::seconds(1);
+    std::optional<std::chrono::steady_clock::time_point> settingsDue_; // when a change kept by persistSoon() is saved
     audio::OutputFactory factory_;
     std::unique_ptr<audio::PlaybackEngine> engine_;
     mutable std::atomic<int> coversInFlight_{0}; // covers being read for the window; read by scan workers, so declared first
