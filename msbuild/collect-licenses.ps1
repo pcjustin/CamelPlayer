@@ -125,10 +125,8 @@ foreach ($package in $packages.packages.package) {
 }
 
 # package.ps1 ships the VC++ runtime DLLs app-local; their terms are kept under licenses/microsoft/MSVC-2026.
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$vs = & $vswhere -latest -prerelease -property installationPath
-$crt = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT') -Directory | Sort-Object FullName | Select-Object -Last 1
-if (-not $crt) { throw 'VC++ redist folder not found' }
+. (Join-Path $PSScriptRoot 'VisualStudio.ps1')
+$crt = Get-VCRuntime
 $inventory.microsoft += [ordered]@{
     name = 'Microsoft.VCRedist (msvcp140, vcruntime140, vcruntime140_1)'
     version = (Get-Item (Join-Path $crt.FullName 'msvcp140.dll')).VersionInfo.ProductVersion

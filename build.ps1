@@ -36,8 +36,8 @@ if ($freeBytes -lt 10GB) {
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
 if ((Test-Path $cargoBin) -and -not ($env:Path -split ';' -contains $cargoBin)) { $env:Path = "$cargoBin;$env:Path" }
 
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$msbuild = & $vswhere -latest -prerelease -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\amd64\MSBuild.exe' | Select-Object -First 1
+. (Join-Path $PSScriptRoot 'msbuild\VisualStudio.ps1')
+$msbuild = Get-MSBuild
 if (-not $msbuild) { throw 'MSBuild not found (Visual Studio 2026 with C++ desktop workload required)' }
 
 if ($Asan -or $Ubsan -or $Sanitizers) {

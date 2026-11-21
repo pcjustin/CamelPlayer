@@ -44,10 +44,8 @@ Get-ChildItem $app -Recurse -File | Where-Object {
 }
 
 # VC++ runtime, app-local (docs/Plan.md §15.1)
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$vs = & $vswhere -latest -prerelease -property installationPath
-$crt = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT') -Directory | Sort-Object FullName | Select-Object -Last 1
-if (-not $crt) { throw 'VC++ redist folder not found' }
+. (Join-Path $PSScriptRoot 'VisualStudio.ps1')
+$crt = Get-VCRuntime
 foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') { Copy-Item (Join-Path $crt.FullName $dll) $stage }
 
 # Preserve the complete notice collection, including nested crate and runtime notices.

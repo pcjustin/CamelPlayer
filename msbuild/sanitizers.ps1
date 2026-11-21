@@ -16,8 +16,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $logs = Join-Path $root 'build\logs'
 $rust = Join-Path $root 'rust\Cargo.toml'
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$vs = & $vswhere -latest -prerelease -property installationPath
+. (Join-Path $PSScriptRoot 'VisualStudio.ps1')
+$vs = Get-VisualStudio
 
 $fuzzSeconds = 600
 
