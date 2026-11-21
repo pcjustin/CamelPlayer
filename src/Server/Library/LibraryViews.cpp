@@ -16,6 +16,8 @@
 #include <ranges>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <sqlite3.h>
 
 #include "Common/util/Text.h"
@@ -414,11 +416,23 @@ LibraryAlbumPage recentlyPlayedAlbums(const LibraryStore& store, int64_t offset,
     LibraryAlbumPage page;
     page.revision = q.revision;
     page.total = q.db.scalar("SELECT COUNT(DISTINCT t.album_id)" + played).value_or(0);
+    // The plays newest first, each album at its latest, up to the page's last album and any played at that same moment:
+    // grouping every play of the history to order the albums took 2.4 s for 100,000 plays.
+    auto plays = q.db.prepare("SELECT t.album_id,e.started FROM play_events e INDEXED BY play_events_started CROSS JOIN "
+                              "tracks t ON t.file_id=e.file_id" +
+                              std::string(kJoins) + "WHERE" + kVisible + " AND t.album_id IS NOT NULL ORDER BY e.started DESC");
+    std::vector<std::pair<int64_t, int64_t>> latest; // album, its latest play
+    std::unordered_set<int64_t> seen;
+    const auto wanted = size_t(offset + limit);
+    while (plays.step()) {
+        const int64_t started = plays.integer(1);
+        if (latest.size() >= wanted && started < latest.back().second) break;
+        if (seen.insert(plays.integer(0)).second) latest.emplace_back(plays.integer(0), started);
+    }
+    std::ranges::sort(
+        latest, [](const auto& a, const auto& b) { return a.second != b.second ? a.second > b.second : a.first < b.first; });
     std::vector<int64_t> order;
-    auto recent = q.db.prepare("SELECT t.album_id" + played +
-                               " GROUP BY t.album_id ORDER BY MAX(e.started) DESC,t.album_id LIMIT ? OFFSET ?");
-    recent.bind(1, limit).bind(2, offset);
-    while (recent.step()) order.push_back(recent.integer(0));
+    for (auto i = size_t(offset); i < std::min(latest.size(), wanted); ++i) order.push_back(latest[i].first);
     if (order.empty()) return page;
     const auto count = int64_t(order.size());
     std::vector<LibraryAlbum> rows;
