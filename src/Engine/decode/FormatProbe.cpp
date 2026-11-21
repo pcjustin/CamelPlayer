@@ -5,8 +5,10 @@
 #include "Engine/decode/FormatProbe.h"
 
 #include <windows.h>
+#include <wil/resource.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -482,6 +484,41 @@ double XingToc::byteShare(double share) const {
     return (from + (to - from) * (percent - double(entry))) / 256.0;
 }
 
+namespace {
+
+// The four bytes at each of `offsets`, zeros where the file has none. Read all at once: one at a time, each was a round
+// trip on a share, about a third of a second for a VBRI table on the NAS.
+std::vector<std::array<uint8_t, 4>> headersAt(const std::filesystem::path& path, const std::vector<uint64_t>& offsets) {
+    std::vector<std::array<uint8_t, 4>> headers(offsets.size());
+    const wil::unique_hfile file(CreateFileW(longPath(path).c_str(), GENERIC_READ,
+                                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr));
+    if (!file) return headers;
+    constexpr size_t kInFlight = 64;
+    std::array<OVERLAPPED, kInFlight> reads{};
+    std::array<wil::unique_event, kInFlight> done;
+    for (auto& event : done) event.create(wil::EventOptions::ManualReset);
+    for (size_t first = 0; first < offsets.size(); first += kInFlight) {
+        const size_t count = std::min(kInFlight, offsets.size() - first);
+        std::array<bool, kInFlight> pending{};
+        for (size_t i = 0; i < count; i++) {
+            reads[i] = {};
+            reads[i].Offset = DWORD(offsets[first + i]);
+            reads[i].OffsetHigh = DWORD(offsets[first + i] >> 32);
+            reads[i].hEvent = done[i].get();
+            pending[i] =
+                ReadFile(file.get(), headers[first + i].data(), 4, nullptr, &reads[i]) || GetLastError() == ERROR_IO_PENDING;
+        }
+        for (size_t i = 0; i < count; i++) {
+            DWORD got = 0;
+            if (!pending[i] || !GetOverlappedResult(file.get(), &reads[i], &got, TRUE) || got != 4) headers[first + i] = {};
+        }
+    }
+    return headers;
+}
+
+} // namespace
+
 std::optional<VbriIndex> vbriIndex(const std::filesystem::path& path) {
     const File f(path);
     const uint64_t start = mpegStart(f);
@@ -493,17 +530,18 @@ std::optional<VbriIndex> vbriIndex(const std::filesystem::path& path) {
     if (!entries || !scale || !size || size > 4 || !step) return std::nullopt;
     std::vector<uint8_t> table(size_t(entries) * size);
     if (!f.readAt(start + sizeof head, table.data(), table.size())) return std::nullopt;
-    VbriIndex index{step, {}};
-    uint64_t run = start; // where run e's first frame starts
-    for (uint32_t e = 0; e <= entries; e++) {
-        uint8_t header[4] = {};
-        const uint32_t length = f.readAt(run, header, sizeof header) ? mpegFrameLength(header) : 0;
-        if (!length) break;
-        index.offsets.push_back(run + length);
-        if (e == entries) break;
+    std::vector<uint64_t> runs{start}; // where each run's first frame starts
+    for (uint32_t e = 0; e < entries; e++) {
         uint64_t bytes = 0;
         for (uint32_t b = 0; b < size; b++) bytes = bytes << 8 | table[size_t(e) * size + b];
-        run += bytes * scale;
+        runs.push_back(runs.back() + bytes * scale);
+    }
+    const auto headers = headersAt(path, runs);
+    VbriIndex index{step, {}};
+    for (size_t e = 0; e < runs.size(); e++) {
+        const uint32_t length = mpegFrameLength(headers[e].data());
+        if (!length) break;
+        index.offsets.push_back(runs[e] + length);
     }
     if (index.offsets.size() < 2) return std::nullopt;
     return index;
