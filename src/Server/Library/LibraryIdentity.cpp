@@ -419,6 +419,11 @@ size_t reconcileMoves(sqlite::Database& db, const std::vector<int64_t>& added) {
             continue;
         }
         merge(db, prior, current);
+        // Written anew, the file is added again; a move above keeps its added time.
+        db.prepare("UPDATE files SET added=(SELECT added FROM files WHERE id=?) WHERE id=?")
+            .bind(1, current)
+            .bind(2, prior)
+            .run();
         gone.erase(found);
         moved++;
     }

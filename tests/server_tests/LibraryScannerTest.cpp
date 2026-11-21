@@ -1442,6 +1442,54 @@ TEST_F(LibraryScannerTest, AScanOfAnUnchangedLibraryWritesNoFileOrFolder) {
     EXPECT_EQ(count(store), 19);
 }
 
+// An album is added when a scan first puts its files into the library, not when they were made on the disk: one copied
+// in later, with the old times a copy can keep, is recently added before one scanned earlier.
+TEST_F(LibraryScannerTest, AnAlbumIsAddedWhenAScanFirstFindsIt) {
+    fs::create_directories(dir / "music" / "earlier");
+    fs::copy_file(testutil::testFile("16-44.1k"), dir / "music" / "earlier" / "one.flac");
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto root = scanner.addRoot(dir / "music");
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto first = browseAlbums(store, AlbumSort::Added, std::nullopt, 0, 10, std::nullopt, {});
+    ASSERT_EQ(first.albums.size(), 1u);
+    const int64_t earlier = first.albums.front().id;
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100)); // added times count seconds
+    fs::create_directories(dir / "music" / "later");
+    const auto later = dir / "music" / "later" / "one.flac";
+    fs::copy_file(testutil::testFile("16-44.1k"), later);
+    {
+        const wil::unique_hfile file(CreateFileW(later.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                                 FILE_ATTRIBUTE_NORMAL, nullptr));
+        ASSERT_TRUE(file);
+        SYSTEMTIME made{2001, 1, 1, 1};
+        FILETIME old{};
+        ASSERT_TRUE(SystemTimeToFileTime(&made, &old));
+        ASSERT_TRUE(SetFileTime(file.get(), &old, nullptr, &old));
+    }
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto second = browseAlbums(store, AlbumSort::Added, std::nullopt, 0, 10, std::nullopt, {});
+    ASSERT_EQ(second.albums.size(), 2u);
+    EXPECT_NE(second.albums.front().id, earlier) << "the album scanned in later is the most recently added";
+
+    // A file changed on the disk is read in again, and its album is added again.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    {
+        const auto changed = dir / "music" / "earlier" / "one.flac";
+        const wil::unique_hfile file(CreateFileW(changed.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                                 FILE_ATTRIBUTE_NORMAL, nullptr));
+        ASSERT_TRUE(file);
+        FILETIME now{};
+        GetSystemTimeAsFileTime(&now);
+        ASSERT_TRUE(SetFileTime(file.get(), nullptr, nullptr, &now));
+    }
+    ASSERT_TRUE(scanner.scan(root).complete);
+    const auto third = browseAlbums(store, AlbumSort::Added, std::nullopt, 0, 10, std::nullopt, {});
+    ASSERT_EQ(third.albums.size(), 2u);
+    EXPECT_EQ(third.albums.front().id, earlier) << "the album whose file changed is the most recently added";
+}
+
 TEST_F(LibraryScannerTest, AFolderScanReconcilesOnlyThatSubtree) {
     audio();
     fs::create_directories(dir / "music" / "other");

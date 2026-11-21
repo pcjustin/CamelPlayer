@@ -64,12 +64,6 @@ int64_t now() {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-// A file's creation time on disk (a FILETIME) in Unix seconds; now when it reports none or one in the future.
-int64_t addedTime(int64_t created) {
-    constexpr int64_t kUnixEpoch = 116'444'736'000'000'000;
-    return created > kUnixEpoch ? std::min(now(), (created - kUnixEpoch) / 10'000'000) : now();
-}
-
 // Deletes the files listed in temp.gone with everything that hangs on them: their tracks with tags, lyrics and
 // ReplayGain analysis, covers, statistics, favorites and play history, and their queue and playlist entries. Albums and
 // covers left without tracks go too. Returns how many files went.
@@ -1306,14 +1300,20 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(10, entry.version.created)
                         .bind(11, entry.version.volumeKey)
                         .bind(12, toUtf8(entry.path.filename().wstring()))
-                        .bind(13, addedTime(entry.version.created))
+                        // Added when a scan first puts it into the library, as recently added lists it, not when it
+                        // was made on the disk; a move or a rewrite keeps the record's.
+                        .bind(13, now())
                         .run();
                     file = db.lastInsertId();
                 } else {
                     const auto stored = library::storedVersion(old, 1);
                     if (stored != entry.version) db.prepare("UPDATE files SET content_hash=NULL WHERE id=?").bind(1, file).run();
                     sameAudio = stored.size == entry.version.size && stored.mtime == entry.version.mtime;
-                    if (!sameAudio) report.edited++;
+                    // A file changed on the disk is added again, as the scan reads it in again.
+                    if (!sameAudio) {
+                        report.edited++;
+                        db.prepare("UPDATE files SET added=? WHERE id=?").bind(1, now()).bind(2, file).run();
+                    }
                     db.prepare("UPDATE files SET size=?,mtime=?,last_seen=?,folder_id=?,root_id=?,"
                                "volume_serial=?,file_index=?,created=?,volume_key=?,name=? WHERE id=?")
                         .bind(1, entry.version.size)
