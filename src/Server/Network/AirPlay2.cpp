@@ -17,6 +17,7 @@
 #include "Server/Network/AirPlay.h"
 #include "Server/Network/Pairing.h"
 #include "Server/Network/Rtsp.h"
+#include "Server/Support/Http.h"
 
 namespace camel::server::airplay {
 
@@ -125,23 +126,6 @@ namespace {
 
 constexpr size_t kMaxEventBytes = 65536;
 
-std::string headerValue(std::string_view head, std::string_view name) {
-    size_t at = 0;
-    while ((at = head.find("\r\n", at)) != std::string_view::npos) {
-        at += 2;
-        const size_t end = std::min(head.find("\r\n", at), head.size());
-        const std::string_view line = head.substr(at, end - at);
-        if (line.size() > name.size() && line[name.size()] == ':' &&
-            std::ranges::equal(line.substr(0, name.size()), name,
-                               [](char a, char b) { return std::tolower(uint8_t(a)) == std::tolower(uint8_t(b)); })) {
-            std::string_view value = line.substr(name.size() + 1);
-            value.remove_prefix(std::min(value.find_first_not_of(' '), value.size()));
-            return std::string(value);
-        }
-    }
-    return {};
-}
-
 // The channel's socket does not block: what does not go at once waits until it can.
 bool sendAll(SOCKET s, std::string_view data) {
     constexpr timeval kWait{1, 0};
@@ -165,37 +149,21 @@ bool sendAll(SOCKET s, std::string_view data) {
 EventChannel::EventChannel(const std::string& address, uint16_t port, std::string_view sessionKey, int timeoutMs)
     : channel_(hkdfSha512(sessionKey, "Events-Salt", "Events-Read-Encryption-Key", 32),
                hkdfSha512(sessionKey, "Events-Salt", "Events-Write-Encryption-Key", 32)) {
-    WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
     const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     socket_ = s;
     sockaddr_in target{};
     target.sin_family = AF_INET;
     target.sin_port = htons(port);
-    u_long nonBlocking = 1;
-    ioctlsocket(s, FIONBIO, &nonBlocking);
-    bool connected =
-        inet_pton(AF_INET, address.c_str(), &target.sin_addr) == 1 &&
-        (connect(s, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) == 0 || WSAGetLastError() == WSAEWOULDBLOCK);
-    if (connected) {
-        fd_set writable, failed;
-        FD_ZERO(&writable);
-        FD_ZERO(&failed);
-        FD_SET(s, &writable);
-        FD_SET(s, &failed);
-        const timeval wait{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
-        connected = select(0, nullptr, &writable, &failed, &wait) > 0 && !FD_ISSET(s, &failed);
-    }
-    if (!connected) {
+    if (inet_pton(AF_INET, address.c_str(), &target.sin_addr) != 1 ||
+        connectWithin(s, reinterpret_cast<const sockaddr*>(&target), sizeof(target), std::chrono::milliseconds(timeoutMs)) !=
+            Reach::Connected) {
         closesocket(s);
-        WSACleanup();
         throw std::runtime_error("the receiver's event channel does not accept a connection");
     }
 }
 
 EventChannel::~EventChannel() {
     closesocket(SOCKET(socket_));
-    WSACleanup();
 }
 
 std::vector<ReceiverEvent> EventChannel::read() {
@@ -227,7 +195,7 @@ std::vector<ReceiverEvent> EventChannel::read() {
             break;
         }
         const std::string_view head(plain_.data(), headEnd);
-        const std::string length = headerValue(head, "Content-Length");
+        const std::string length = http::headerValue(head, "Content-Length");
         size_t bodyBytes = 0;
         std::from_chars(length.data(), length.data() + length.size(), bodyBytes);
         if (bodyBytes > kMaxEventBytes) {
@@ -238,7 +206,7 @@ std::vector<ReceiverEvent> EventChannel::read() {
         // Only a request is answered, and only what is sent is sealed: each seal takes the next nonce.
         if (!head.starts_with("RTSP/")) {
             const std::string answer =
-                std::format("RTSP/1.0 200 OK\r\nCSeq: {}\r\nContent-Length: 0\r\n\r\n", headerValue(head, "CSeq"));
+                std::format("RTSP/1.0 200 OK\r\nCSeq: {}\r\nContent-Length: 0\r\n\r\n", http::headerValue(head, "CSeq"));
             if (!sendAll(s, channel_.seal(answer))) log::info("AirPlay receiver: an answer on its event channel was not sent");
         }
         if (head.starts_with("POST /command ")) {

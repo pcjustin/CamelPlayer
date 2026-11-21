@@ -141,6 +141,7 @@ struct AirPlayFinder::Impl {
         bool transient = false;
     };
 
+    WinsockScope winsock;
     AirPlayFinderOptions options;
     std::function<void()> onChange;
     SOCKET udp = INVALID_SOCKET;
@@ -173,8 +174,6 @@ struct AirPlayFinder::Impl {
 
     Impl(AirPlayFinderOptions finderOptions, std::function<void()> changed)
         : options(std::move(finderOptions)), onChange(std::move(changed)) {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
         udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -197,7 +196,6 @@ struct AirPlayFinder::Impl {
         asker.join();
         closesocket(udp);
         if (group != kNoSocket) closesocket(group);
-        WSACleanup();
     }
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;

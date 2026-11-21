@@ -7,7 +7,9 @@
 #include <windows.h>
 #include <winhttp.h>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -240,6 +242,23 @@ std::string encode(std::string_view text) {
         }
     }
     return out;
+}
+
+std::string headerValue(std::string_view head, std::string_view name) {
+    size_t at = 0;
+    while ((at = head.find("\r\n", at)) != std::string_view::npos) {
+        at += 2;
+        const size_t end = std::min(head.find("\r\n", at), head.size());
+        const std::string_view line = head.substr(at, end - at);
+        if (line.size() > name.size() && line[name.size()] == ':' &&
+            std::ranges::equal(line.substr(0, name.size()), name,
+                               [](char a, char b) { return std::tolower(uint8_t(a)) == std::tolower(uint8_t(b)); })) {
+            std::string_view value = line.substr(name.size() + 1);
+            value.remove_prefix(std::min(value.find_first_not_of(" \t"), value.size()));
+            return std::string(value);
+        }
+    }
+    return {};
 }
 
 } // namespace camel::server::http

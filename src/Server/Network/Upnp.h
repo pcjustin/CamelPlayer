@@ -99,6 +99,9 @@ struct DidlTrack {
 };
 std::string didlLite(const DidlTrack& track);
 
+// Text made safe for an XML element or a quoted attribute.
+std::string escape(std::string_view text);
+
 // The address of this computer that `host` can reach.
 std::string localAddressFor(const std::string& host);
 

@@ -50,6 +50,10 @@ struct UrlParts {
 };
 std::optional<UrlParts> crackUrl(const std::string& url);
 
+// The value of the header `name`, of any case, in `head`: CRLF-separated lines after the start line. Empty when it has
+// none.
+std::string headerValue(std::string_view head, std::string_view name);
+
 // Percent-encodes UTF-8 text for a query value or a path segment.
 std::string encode(std::string_view text);
 

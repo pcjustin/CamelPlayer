@@ -34,8 +34,6 @@ std::string ipv4Of(const std::string& host);
 // document is dropped.
 std::vector<std::string> takeDocuments(std::string& buffer);
 
-std::string escape(std::string_view text);
-
 struct Status {
     int state = 0; // 0 stopped, 1 paused, 2 playing
     uint32_t track = 0, trackSerial = 0, transportSerial = 0, tracksTotal = 0;

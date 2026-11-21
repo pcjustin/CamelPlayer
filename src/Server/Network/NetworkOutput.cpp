@@ -18,6 +18,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "Server/Network/SocketWait.h"
 #include "Server/Support/Http.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -220,15 +221,12 @@ public:
     NetworkOutput(std::unique_ptr<StreamPlayer> player, std::function<TrackDetails(const std::wstring&)> details,
                   std::function<void(const PlayerEvent&)> follow, NetworkOutputOptions options)
         : player_(std::move(player)), details_(std::move(details)), follow_(std::move(follow)), options_(options) {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
         readCapabilities();
     }
 
     _No_competing_thread_ ~NetworkOutput() override {
         close();
         link_.reset();
-        WSACleanup();
     }
     NetworkOutput(const NetworkOutput&) = delete;
     NetworkOutput& operator=(const NetworkOutput&) = delete;
@@ -1007,6 +1005,7 @@ private:
         body.retainedFrom += drop;
     }
 
+    WinsockScope winsock_;
     std::unique_ptr<StreamPlayer> player_;
     std::function<TrackDetails(const std::wstring&)> details_;
     std::function<void(const PlayerEvent&)> follow_;

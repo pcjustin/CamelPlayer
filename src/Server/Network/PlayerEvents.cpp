@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "Common/util/Log.h"
+#include "Server/Network/SocketWait.h"
 #include "Server/Support/Http.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -35,22 +36,6 @@ uint64_t number(std::string_view text) {
     uint64_t value = 0;
     std::from_chars(text.data(), text.data() + text.size(), value);
     return value;
-}
-
-std::string headerValue(const std::string& head, const char* name) {
-    const std::string wanted = std::string(name) + ":";
-    size_t start = 0;
-    while (start < head.size()) {
-        auto end = head.find("\r\n", start);
-        if (end == std::string::npos) end = head.size();
-        if (end - start > wanted.size() && _strnicmp(head.c_str() + start, wanted.c_str(), wanted.size()) == 0) {
-            auto value = head.substr(start + wanted.size(), end - start - wanted.size());
-            value.erase(0, value.find_first_not_of(" \t"));
-            return value;
-        }
-        start = end + 2;
-    }
-    return {};
 }
 
 // The body of a chunked message once its last chunk has come; nothing before, or when it is not chunked as it says.
@@ -82,6 +67,7 @@ struct PlayerEvents::Impl {
         std::string sid, body;
     };
 
+    WinsockScope winsock;
     LinkOptions options;
     SOCKET listener = INVALID_SOCKET;
     std::string callback;
@@ -94,16 +80,9 @@ struct PlayerEvents::Impl {
 
     Impl(const upnp::PlayerDescription& player, const std::vector<std::string>& kinds, LinkOptions linkOptions)
         : options(linkOptions) {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
         for (const auto& service : player.services)
             if (const auto host = upnp::hostOf(service.eventUrl); !host.empty()) playerHosts.push_back(host);
-        try {
-            openListener(player);
-        } catch (...) {
-            WSACleanup();
-            throw;
-        }
+        openListener(player);
         listening = std::thread([this] { listen(); });
         try {
             for (const auto& kind : kinds) {
@@ -141,7 +120,6 @@ struct PlayerEvents::Impl {
     void stopListening() {
         closesocket(listener);
         listening.join();
-        WSACleanup();
     }
 
     void openListener(const upnp::PlayerDescription& player) {
@@ -162,7 +140,7 @@ struct PlayerEvents::Impl {
                                       "CALLBACK: <" + callback + ">\r\nNT: upnp:event\r\nTIMEOUT: Second-" +
                                           std::to_string(options.subscribeSeconds),
                                       "", options.requestTimeoutMs, upnp::kMaxMessageBytes);
-        const auto sid = headerValue(reply.headers, "SID");
+        const auto sid = http::headerValue(reply.headers, "SID");
         if (reply.status != 200 || sid.empty()) throw std::runtime_error("the player refused a subscription");
         subscription.sid = sid;
         subscription.renewAt = renewalTime(reply.headers);
@@ -171,7 +149,7 @@ struct PlayerEvents::Impl {
     // Halfway through what the player granted, which may be less than what was asked. A grant without end, as
     // Second-infinite, is taken for what was asked.
     Clock::time_point renewalTime(const std::string& head) const {
-        const auto timeout = headerValue(head, "TIMEOUT");
+        const auto timeout = http::headerValue(head, "TIMEOUT");
         int seconds = options.subscribeSeconds;
         if (timeout.starts_with("Second-")) {
             const auto digits = std::string_view(timeout).substr(7);
@@ -224,8 +202,8 @@ struct PlayerEvents::Impl {
                     headEnd = request.find("\r\n\r\n");
                     if (headEnd == std::string::npos) continue;
                     const auto head = request.substr(0, headEnd);
-                    chunked = _stricmp(headerValue(head, "TRANSFER-ENCODING").c_str(), "chunked") == 0;
-                    total = headEnd + 4 + size_t(number(headerValue(head, "CONTENT-LENGTH")));
+                    chunked = _stricmp(http::headerValue(head, "TRANSFER-ENCODING").c_str(), "chunked") == 0;
+                    total = headEnd + 4 + size_t(number(http::headerValue(head, "CONTENT-LENGTH")));
                 }
                 if (chunked) {
                     body = dechunked(std::string_view(request).substr(headEnd + 4));
@@ -240,7 +218,7 @@ struct PlayerEvents::Impl {
             if (body && request.starts_with("NOTIFY ") && fromPlayer(peer)) {
                 const auto head = request.substr(0, headEnd);
                 std::scoped_lock lock(mutex);
-                received.push_back({headerValue(head, "SID"), std::move(*body)});
+                received.push_back({http::headerValue(head, "SID"), std::move(*body)});
                 accepted = true;
             }
             const std::string reply = accepted

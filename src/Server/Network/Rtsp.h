@@ -16,6 +16,7 @@
 #include <string_view>
 
 #include "Server/Network/Pairing.h"
+#include "Server/Network/SocketWait.h"
 
 namespace camel::server::airplay {
 
@@ -72,6 +73,7 @@ public:
     bool pairVerify(const PairingIdentity& me, const PairedReceiver& receiver);
 
 private:
+    WinsockScope winsock_;
     SOCKET socket_ = INVALID_SOCKET;
     std::string localAddress_, session_, instance_, sessionHeader_, sessionKey_;
     std::map<uint8_t, std::string> pairingStep(std::string_view path, std::string_view headers, const TlvItems& items,

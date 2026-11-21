@@ -16,6 +16,7 @@
 
 #include "Server/Network/Pairing.h"
 #include "Server/Network/Plist.h"
+#include "Server/Network/SocketWait.h"
 
 namespace camel::server::airplay {
 
@@ -64,6 +65,7 @@ public:
     std::vector<ReceiverEvent> read();
 
 private:
+    WinsockScope winsock_;
     uintptr_t socket_ = 0; // a SOCKET
     SecureChannel channel_;
     std::string sealed_, plain_;

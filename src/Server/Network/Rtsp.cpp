@@ -56,18 +56,6 @@ int numberIn(std::string_view text) {
     return value;
 }
 
-void waitForConnection(SOCKET socket, int timeoutMs) {
-    fd_set writable;
-    fd_set failed;
-    FD_ZERO(&writable);
-    FD_ZERO(&failed);
-    FD_SET(socket, &writable);
-    FD_SET(socket, &failed);
-    const timeval wait{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
-    if (select(0, nullptr, &writable, &failed, &wait) <= 0 || FD_ISSET(socket, &failed))
-        throw std::runtime_error("the receiver does not accept a connection");
-}
-
 } // namespace
 
 // Six bytes of a hash of the computer's name, marked as a locally administered address.
@@ -107,24 +95,18 @@ RtspReply parseRtspHead(std::string_view head) {
 }
 
 RtspClient::RtspClient(const std::string& address, uint16_t port, int timeoutMs) {
-    WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
     socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    try {
-        sockaddr_in target{};
-        target.sin_family = AF_INET;
-        target.sin_port = htons(port);
-        if (inet_pton(AF_INET, address.c_str(), &target.sin_addr) != 1) throw std::runtime_error("not an address");
-        u_long nonBlocking = 1;
-        ioctlsocket(socket_, FIONBIO, &nonBlocking);
-        if (connect(socket_, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) != 0 &&
-            WSAGetLastError() != WSAEWOULDBLOCK)
-            throw std::runtime_error("the receiver does not accept a connection");
-        waitForConnection(socket_, timeoutMs);
-    } catch (...) {
+    sockaddr_in target{};
+    target.sin_family = AF_INET;
+    target.sin_port = htons(port);
+    if (inet_pton(AF_INET, address.c_str(), &target.sin_addr) != 1) {
         closesocket(socket_);
-        WSACleanup();
-        throw;
+        throw std::runtime_error("not an address");
+    }
+    if (connectWithin(socket_, reinterpret_cast<const sockaddr*>(&target), sizeof(target),
+                      std::chrono::milliseconds(timeoutMs)) != Reach::Connected) {
+        closesocket(socket_);
+        throw std::runtime_error("the receiver does not accept a connection");
     }
     u_long blocking = 0;
     ioctlsocket(socket_, FIONBIO, &blocking);
@@ -144,7 +126,6 @@ RtspClient::RtspClient(const std::string& address, uint16_t port, int timeoutMs)
 
 RtspClient::~RtspClient() {
     closesocket(socket_);
-    WSACleanup();
 }
 
 std::string RtspClient::url() const {

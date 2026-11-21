@@ -185,8 +185,6 @@ void check(const RtspReply& reply, std::string_view step) {
 class AirPlayOutput final : public audio::IOutput {
 public:
     explicit AirPlayOutput(AirPlayOutputOptions options) : options_(std::move(options)) {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
         audio_ = boundUdp(audioPort_);
         control_ = boundUdp(controlPort_);
         timing_ = boundUdp(timingPort_);
@@ -213,7 +211,6 @@ public:
         closesocket(audio_);
         closesocket(control_);
         closesocket(timing_);
-        WSACleanup();
     }
     AirPlayOutput(const AirPlayOutput&) = delete;
     AirPlayOutput& operator=(const AirPlayOutput&) = delete;
@@ -864,6 +861,7 @@ private:
         moved_.notify_all();
     }
 
+    WinsockScope winsock_;
     AirPlayOutputOptions options_;
     SOCKET audio_ = INVALID_SOCKET;
     SOCKET control_ = INVALID_SOCKET;

@@ -175,7 +175,7 @@ public:
 
 private:
     static std::string add(const std::string& uri, const std::string& metadata) {
-        return std::format(R"(<PlaylistAdd uri="{}" queued="0" clear="0"><metadata {}/></PlaylistAdd>)", hqplayer::escape(uri),
+        return std::format(R"(<PlaylistAdd uri="{}" queued="0" clear="0"><metadata {}/></PlaylistAdd>)", upnp::escape(uri),
                            metadata);
     }
 
@@ -383,9 +383,9 @@ public:
     }
 
     std::string metadata(const upnp::DidlTrack& track) const override {
-        std::string attributes = std::format(R"(song="{}" artist="{}" album="{}")", hqplayer::escape(track.title),
-                                             hqplayer::escape(track.artist), hqplayer::escape(track.album));
-        if (!track.coverUrl.empty()) attributes += std::format(R"( cover="{}")", hqplayer::escape(track.coverUrl));
+        std::string attributes = std::format(R"(song="{}" artist="{}" album="{}")", upnp::escape(track.title),
+                                             upnp::escape(track.artist), upnp::escape(track.album));
+        if (!track.coverUrl.empty()) attributes += std::format(R"( cover="{}")", upnp::escape(track.coverUrl));
         return attributes;
     }
 

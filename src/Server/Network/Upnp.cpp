@@ -38,23 +38,6 @@ std::string_view trim(std::string_view text) {
     return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
 }
 
-std::string escape(std::string_view text) {
-    std::string out;
-    for (const char c : text) {
-        if (c == '&')
-            out += "&amp;";
-        else if (c == '<')
-            out += "&lt;";
-        else if (c == '>')
-            out += "&gt;";
-        else if (c == '"')
-            out += "&quot;";
-        else
-            out += c;
-    }
-    return out;
-}
-
 // "urn:schemas-upnp-org:service:AVTransport:1" is the kind "AVTransport".
 std::string kindOf(std::string_view serviceType) {
     const auto end = serviceType.rfind(':');
@@ -108,6 +91,23 @@ std::optional<std::map<std::string, std::string>> headersOf(std::string_view tex
 }
 
 } // namespace
+
+std::string escape(std::string_view text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '&')
+            out += "&amp;";
+        else if (c == '<')
+            out += "&lt;";
+        else if (c == '>')
+            out += "&gt;";
+        else if (c == '"')
+            out += "&quot;";
+        else
+            out += c;
+    }
+    return out;
+}
 
 const XmlNode* XmlNode::child(std::string_view childName) const {
     const auto found = std::ranges::find_if(children, [&](const XmlNode& node) { return node.name == childName; });

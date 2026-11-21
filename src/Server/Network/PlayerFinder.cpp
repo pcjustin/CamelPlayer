@@ -52,6 +52,7 @@ struct PlayerFinder::Impl {
         Clock::time_point seen;
     };
 
+    WinsockScope winsock;
     FinderOptions options;
     std::function<void()> onChange;
     SOCKET searcher = INVALID_SOCKET, listener = INVALID_SOCKET;
@@ -72,8 +73,6 @@ struct PlayerFinder::Impl {
 
     Impl(FinderOptions finderOptions, std::function<void()> changed)
         : options(std::move(finderOptions)), onChange(std::move(changed)) {
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
         searcher = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -104,7 +103,6 @@ struct PlayerFinder::Impl {
         thread.join();
         closesocket(searcher);
         closesocket(listener);
-        WSACleanup();
     }
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
