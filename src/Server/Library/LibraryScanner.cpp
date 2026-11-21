@@ -1157,6 +1157,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     const bool reread = dirty.step();
     dirty.reset();
     derivedChanged = derivedChanged || reread;
+    // What an earlier scan left to rebuild may lie outside the folders this one scans.
+    const bool rebuildOwed = derivedChanged;
     // The names the library knows, read by the first batch that writes tags; only the writer thread touches it.
     std::optional<LibraryNameSplitter> names;
     // Writes run in submission order on the store's writer; the dispatcher waits only when several are outstanding.
@@ -1463,7 +1465,21 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             .write([&](sqlite::Database& db) {
                 if (token.cancelled()) return;
                 log::info("library: rebuilding albums and names");
-                rebuildAlbums(db, root);
+                // A folder scan changes only the albums of its folders, unless a move took a file from elsewhere: the
+                // whole root's took 15 to 25 s on a library of 86,541 files, with the writer held.
+                if (partial && !rebuildOwed && !report.moved) {
+                    std::set<int64_t> scanned;
+                    auto folders = db.prepare("SELECT id FROM folders WHERE root_id=?1 AND (path=?2 OR (path>?2||'\\' AND "
+                                              "path<?2||']'))");
+                    for (const auto& folder : subtrees) {
+                        folders.reset();
+                        folders.bind(1, root).bind(2, key(folder));
+                        while (folders.step()) scanned.insert(folders.integer(0));
+                    }
+                    rebuildAlbums(db, root, scanned);
+                } else {
+                    rebuildAlbums(db, root);
+                }
                 // Names learned late in the scan, and names gone with removed files, can change how earlier credits split.
                 deriveLibraryNames(db, loadLibraryNames(db));
                 db.prepare("DELETE FROM app_state WHERE key=?").bind(1, derivedKey).run();
