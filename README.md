@@ -10,7 +10,7 @@ It is built with C++20, WinUI 3 and Rust, and is a separate project from the ear
 
 ## Screenshots
 
-The screenshots show a demo library with made-up albums, covers and lyrics.
+The screenshots show a demo library with made-up albums, covers and lyrics, and outputs given made-up names.
 
 | ![Home](assets/screenshots/home.png) | ![Album wall](assets/screenshots/albums.png) |
 |:---:|:---:|
@@ -20,11 +20,15 @@ The screenshots show a demo library with made-up albums, covers and lyrics.
 | ![Lyrics](assets/screenshots/lyrics.png) | ![File details](assets/screenshots/file-details.png) |
 | Lyrics over the window, a translation lit with its line | File details: every tag and the technical data |
 | ![Output menu](assets/screenshots/output-menu.png) | ![Audio outputs](assets/screenshots/outputs.png) |
-| The output menu: a DAC, network players and AirPlay | Settings: audio outputs with names of your choice |
-| ![Parametric EQ](assets/screenshots/dsp.png) | ![Folder tree](assets/screenshots/folders.png) |
-| The parametric EQ, shown as processed | The folder tree with the playing track marked |
-| ![Listening](assets/screenshots/listening.png) | ![Output status](assets/screenshots/settings.png) |
-| Listening: this year's time, plays and chart | Settings: the output status during playback |
+| The output menu: a DAC, the computer's speakers, network players, AirPlay and HQPlayer | Settings: audio outputs with names of your choice |
+| ![Output settings](assets/screenshots/output-settings.png) | ![Upsampling in the signal path](assets/screenshots/upsampling.png) |
+| An output's own settings: integer upsampling to the highest rate, with its filter | The signal path while upsampling 44.1 kHz to 705.6 kHz |
+| ![Parametric EQ](assets/screenshots/dsp.png) | ![DSP menu](assets/screenshots/dsp-menu.png) |
+| The parametric EQ of the output in use, shown as processed | The DSP menu of the output in use |
+| ![Folder tree](assets/screenshots/folders.png) | ![Listening](assets/screenshots/listening.png) |
+| The folder tree with the playing track marked | Listening: time and plays for a period, with its chart |
+| ![Output status](assets/screenshots/settings.png) | ![Black theme](assets/screenshots/black.png) |
+| Settings: the output status during playback | The black theme, for OLED screens |
 
 ## Features
 
@@ -128,6 +132,7 @@ DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where t
 | Keys | While CamelPlayer is in front |
 | --- | --- |
 | Space | Play or pause |
+| Right-click the play button | Stop, which also lets a network player, an AirPlay receiver or HQPlayer go at once |
 | Ctrl+→ / Ctrl+← | Next or previous track |
 | Ctrl+Shift+→ / Ctrl+Shift+← | Forward or back 10 seconds |
 | Alt+← or the mouse back button | Back, like the title bar's Back button |
@@ -167,9 +172,9 @@ Each build also writes `build/compile_commands.json`, so clangd (for example in 
 
 ## Testing
 
-`.\build.cmd -Test` runs the tests of every Rust crate (`cargo test --workspace` in `rust/`: the Engine, the DTS decoder and the Symphonia bridge) and the ordinary C++ tests. `.\build.cmd -Sanitizers` runs the checks every release needs, each in a build of its own that never reaches the package: the C++ suite under MSVC AddressSanitizer and under clang-cl's UndefinedBehaviorSanitizer, `/analyze` on the annotated locks, Loom on the Engine's ring, Miri on its `unsafe` code, and ten minutes each of fuzzing on the DTS frame reader, the format probe and the UPnP, SSDP, mDNS and RTSP messages. It needs Visual Studio's "C++ Clang Compiler for Windows" and "MSBuild support for LLVM (clang-cl) toolset" components, and the nightly Rust toolchain with Miri and `cargo-fuzz`. The shipped program stays built by MSVC. `.\build.cmd -Asan` and `.\build.cmd -Ubsan` run those two suites alone. Windows has no ThreadSanitizer, so no tool here finds every race in the C++ code. On 2026-11-20, for 0.5.0, a full Release run passed all 1318 enabled C++ tests, including the 100k-track library targets, and 126 Rust Engine tests, two ignored.
+`.\build.cmd -Test` runs the tests of every Rust crate (`cargo test --workspace` in `rust/`: the Engine, the DTS decoder and the Symphonia bridge) and the ordinary C++ tests. `.\build.cmd -Sanitizers` runs the checks every release needs, each in a build of its own that never reaches the package: the C++ suite under MSVC AddressSanitizer and under clang-cl's UndefinedBehaviorSanitizer, `/analyze` on the annotated locks, Loom on the Engine's ring, Miri on its `unsafe` code, and ten minutes each of fuzzing on the DTS frame reader, the format probe and the UPnP, SSDP, mDNS and RTSP messages. It needs Visual Studio's "C++ Clang Compiler for Windows" and "MSBuild support for LLVM (clang-cl) toolset" components, and the nightly Rust toolchain with Miri and `cargo-fuzz`. The shipped program stays built by MSVC. `.\build.cmd -Asan` and `.\build.cmd -Ubsan` run those two suites alone. Windows has no ThreadSanitizer, so no tool here finds every race in the C++ code.
 
-The 115 disabled tests play audio on named devices, scan a NAS or read the network players on your network, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
+The disabled tests play audio on named devices, scan a NAS or read the network players on your network, and need local files under `testdata/` that are not distributed. Lower the volume, then run the hardware tests explicitly after building:
 
 ```powershell
 .\build\Release\tests\tests.exe --gtest_also_run_disabled_tests --gtest_filter="*Hardware*"
@@ -222,6 +227,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File msbuild/collect-licenses.ps1
 
 Local planning documents, development probes, private test music, downloaded packages, build outputs and caches are kept out of Git, so GitHub's source archive of a release tag holds only the committed files, not the dependencies the package managers download.
 
-CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components keep their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD or other notices. MPL-2.0 allows CamelPlayer to be combined with the Microsoft-licensed Windows App SDK and WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release. Before the 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3 and 0.3.0 releases every dependency's version and license in the notices was checked against the inventory.
+CamelPlayer is licensed under the [Mozilla Public License 2.0](LICENSE). Versions published before the change to MPL-2.0 remain available under the GNU GPL version 3. Third-party components keep their own licenses; the root license does not relicense Microsoft binaries or replace LGPL, MPL, MIT, BSD or other notices. MPL-2.0 allows CamelPlayer to be combined with the Microsoft-licensed Windows App SDK and WinUI binaries, and no Steinberg ASIO SDK code remains, so no third-party GPL code blocks a binary release. Before every release, every dependency's version and license in the notices is checked against the inventory.
 
 A binary release must come with access to the exact corresponding source, dependency changes and build information, and all required notices. Packaging also builds `CamelPlayer-<version>-win-x64-third-party-source.zip` with the exact sources of the LGPL and MPL libraries linked into the program, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) explains how to rebuild against a modified one. `msbuild/check-licenses.ps1`, run by the build and packaging scripts, fails on a file without the MPL-2.0 header or a dependency missing from the notices. Packaging prepares the files; it does not establish permission to redistribute or publish a release.

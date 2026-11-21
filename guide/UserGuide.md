@@ -179,7 +179,7 @@ Settings › Interface › **Show what's playing on Discord** puts the playing t
 
 **DSD plays as loud noise or hiss.** The DAC does not understand DoP (or the driver does not pass it unchanged). Set DSD output to **Convert to PCM**. Turn the volume down before trying DSD on a new device.
 
-**Other programs are silent while CamelPlayer plays.** Exclusive mode, ASIO and Kernel Streaming take the device for themselves. Stop releases it at once; after a pause it is released after **Release the device after pausing** (one second by default). To play alongside other programs, use WASAPI shared mode.
+**Other programs are silent while CamelPlayer plays.** Exclusive mode, ASIO and Kernel Streaming take the device for themselves. Stop, in the play button's right-click menu, releases it at once; after a pause it is released after **Release the device after pausing** (one second by default). To play alongside other programs, use WASAPI shared mode.
 
 **Clicks, missing beginnings or a short mute when the format changes.** Some DACs need time to switch between sample rates or between PCM and DSD. Raise **Silence after a format change** (Buffers and timing) to 200–500 ms.
 
