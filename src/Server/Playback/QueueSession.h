@@ -39,10 +39,15 @@ struct SavedSession {
     SavedTrack track;
 };
 
-// Each part is written only when asked, since a large queue makes its entries and play order costly to rewrite.
+// Each part is written only when asked, since a large queue makes its entries and play order costly to rewrite. Entries
+// before `keptEntries` are left as they are stored, unless a row of them has gone from the table.
 struct SessionParts {
     bool entries = false, order = false;
+    size_t keptEntries = 0;
 };
+
+// Alike for two entries whose rows are stored alike.
+size_t rowHash(const SavedQueueEntry& entry);
 
 void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts parts);
 bool hasSavedSession(sqlite::Database& db);

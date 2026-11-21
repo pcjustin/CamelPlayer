@@ -38,13 +38,30 @@ std::vector<size_t> indexes(const nlohmann::json& list, size_t count) {
 
 } // namespace
 
+size_t rowHash(const SavedQueueEntry& entry) {
+    const auto& range = entry.source.range();
+    const auto decoder = entry.source.decoder();
+    size_t hash = std::hash<std::string>{}(entry.source.pathUtf8());
+    for (const size_t part :
+         {std::hash<std::string>{}(entry.description), size_t(range.first),
+          range.endExclusive ? size_t(*range.endExclusive) + 1 : 0, decoder ? size_t(*decoder) + 1 : 0, size_t(entry.file)})
+        hash ^= part + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    return hash;
+}
+
 void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts parts) {
     if (parts.entries) {
-        db.exec("DELETE FROM queue");
+        // A scan deletes the rows of files that are gone, which leaves the entries they kept to be written again.
+        auto kept = int64_t(std::min(parts.keptEntries, session.entries.size()));
+        if (kept) {
+            auto stored = db.prepare("SELECT count(*) FROM queue WHERE position<?");
+            if (!stored.bind(1, kept).step() || stored.integer(0) != kept) kept = 0;
+        }
+        db.prepare("DELETE FROM queue WHERE position>=?").bind(1, kept).run();
         auto insert =
             db.prepare("INSERT INTO queue(position,entry_id,file_id,path,start_frame,end_frame,decoder,source_description) "
                        "VALUES(?,?,(SELECT id FROM files WHERE id=?),?,?,?,?,?)"); // a file deleted meanwhile is unlinked
-        for (size_t i = 0; i < session.entries.size(); ++i) {
+        for (auto i = size_t(kept); i < session.entries.size(); ++i) {
             const auto& entry = session.entries[i];
             insert.bind(1, int64_t(i)).bind(2, int64_t(i) + 1);
             if (entry.file)

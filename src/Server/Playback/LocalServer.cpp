@@ -671,6 +671,7 @@ private:
         auto reader = library_->openReader();
         const auto saved = loadSession(reader);
         if (!saved) return;
+        for (const auto& item : saved->entries) savedRows_.push_back(rowHash(item));
         std::vector<QueueEntry> entries;
         entries.reserve(saved->entries.size());
         for (const auto& item : saved->entries) {
@@ -758,12 +759,13 @@ private:
             } catch (const std::exception& e) {
                 log::warn("session: %s", e.what());
                 saved_ = {}; // nothing of it is in the database: the next save writes it all
+                savedRows_.clear();
             }
         }
         const auto playback = engine_->snapshot();
         const auto now = std::chrono::steady_clock::now();
         auto policy = policy_.state();
-        const SessionParts parts{policy.entries != saved_.entries, policy.order != saved_.order};
+        SessionParts parts{policy.entries != saved_.entries, policy.order != saved_.order};
         const auto track = currentTrack(playback);
         const bool changed =
             parts.entries || parts.order || policy.current != saved_.current || policy.history != saved_.history ||
@@ -780,7 +782,7 @@ private:
             return result;
         };
         SavedSession session;
-        if (parts.entries)
+        if (parts.entries) {
             for (const auto& entry : entries_) {
                 const auto binding = libraryEntries_.find(entry.id);
                 const auto title = entry.title.empty()
@@ -789,6 +791,12 @@ private:
                 session.entries.push_back({entry.source, binding == libraryEntries_.end() ? 0 : binding->second.file,
                                            entry.artist.empty() ? title : title + " · " + entry.artist, entry.automatic});
             }
+            std::vector<size_t> rows;
+            rows.reserve(session.entries.size());
+            for (const auto& row : session.entries) rows.push_back(rowHash(row));
+            parts.keptEntries = size_t(std::ranges::mismatch(rows, savedRows_).in1 - rows.begin());
+            savedRows_ = std::move(rows);
+        }
         if (parts.order) session.order = indexes(policy.order);
         session.history = indexes(policy.history);
         if (policy.current)
@@ -2560,6 +2568,7 @@ private:
         audio::PlayState playState = audio::PlayState::Stopped;
         std::chrono::steady_clock::time_point at;
     } saved_;
+    std::vector<size_t> savedRows_; // rowHash() of each queue row as last written: rows before the first changed stay
     std::future<void> sessionWrite_;
     std::function<void(const Event&)> listener_;
     std::unique_ptr<DiscordPresence> discord_;
