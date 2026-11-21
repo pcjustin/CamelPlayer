@@ -162,6 +162,15 @@ impl Tpdf {
     }
 }
 
+/// The bytes a second, per channel, a DSD device takes at `rate` (which counts bits) or a DoP device at `rate` (frames
+/// of two bytes each); 0 for PCM and for a DSD rate that is not a whole number of bytes.
+fn dsd_byte_rate(stream_kind: u32, rate: u32) -> u32 {
+    match stream_kind {
+        AUDIO_DSD if rate.is_multiple_of(8) => rate / 8,
+        AUDIO_DOP => rate.saturating_mul(2),
+        _ => 0,
+    }
+}
 impl Converter {
     /// `allow` is the "convert when unsupported" setting; a lossy source may still be quantized to its configured
     /// depth without it. `allow_dsd` permits DSD to PCM and DSD to a lower DSD rate; downmixing DSD also needs `allow`.
@@ -199,11 +208,7 @@ impl Converter {
         if out_channels != 2 {
             return Err(ENGINE_E_UNSUPPORTED_FORMAT);
         }
-        let out_byte_rate = match out.stream_kind {
-            AUDIO_DSD if out_rate.is_multiple_of(8) => out_rate / 8,
-            AUDIO_DOP => out_rate.saturating_mul(2),
-            _ => 0,
-        };
+        let out_byte_rate = dsd_byte_rate(out.stream_kind, out_rate);
         let modulator = DsdModulator::new(out_byte_rate, out_channels, order as usize)
             .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?;
         let in_dsd = info.sample_encoding == SAMPLE_ENCODING_DSD;
@@ -315,11 +320,7 @@ impl Converter {
         }
         if in_dsd || out.stream_kind != AUDIO_PCM {
             // DSD to PCM is a separate, explicitly enabled path (docs/Plan.md §5.8).
-            let out_byte_rate = match out.stream_kind {
-                AUDIO_DSD if out_rate.is_multiple_of(8) => out_rate / 8,
-                AUDIO_DOP => out_rate.saturating_mul(2),
-                _ => 0,
-            };
+            let out_byte_rate = dsd_byte_rate(out.stream_kind, out_rate);
             let channels_kept =
                 in_channels == out_channels || (in_channels == 1 && out_channels == 2);
             if !in_dsd || out_byte_rate == 0 || !channels_kept {
@@ -478,12 +479,7 @@ impl Converter {
         match &self.resampler {
             Some(r) => ((output_frames as f64 / r.ratio()).floor() as u64).max(1),
             None if self.remodulator.is_some() => {
-                let out_byte_rate = if self.mode == Mode::Dop {
-                    self.out_rate * 2
-                } else {
-                    self.out_rate / 8
-                };
-                raw * u64::from(self.in_rate / out_byte_rate)
+                raw * u64::from(self.in_rate / dsd_byte_rate(self.out.stream_kind, self.out_rate))
             }
             None => raw,
         }
