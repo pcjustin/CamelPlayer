@@ -88,6 +88,7 @@
     <ClInclude Include="MainWindow.xaml.h">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="MainWindowParts.h" />
     <ClInclude Include="UiText.h" />
     <ClInclude Include="ThemeBrush.h" />
     <ClInclude Include="DialogPlacement.h" />
@@ -146,6 +147,15 @@
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="MainWindow.Dsp.cpp" />
+    <ClCompile Include="MainWindow.Guide.cpp" />
+    <ClCompile Include="MainWindow.Lyrics.cpp" />
+    <ClCompile Include="MainWindow.Outputs.cpp" />
+    <ClCompile Include="MainWindow.Playlists.cpp" />
+    <ClCompile Include="MainWindow.Queue.cpp" />
+    <ClCompile Include="MainWindow.Settings.cpp" />
+    <ClCompile Include="MainWindow.Updates.cpp" />
+    <ClCompile Include="MainWindow.Volume.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="UiText.cpp" />
     <ClCompile Include="ThemeBrush.cpp" />
