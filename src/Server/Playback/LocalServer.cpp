@@ -2706,6 +2706,15 @@ LibraryTrackRowPage LocalServer::browseTrackRows(TrackSort sort, bool descending
                                                  const CancellationToken& token) const {
     return camel::server::browseTrackRows(impl_->library(), sort, descending, filter, offset, limit, revision, token);
 }
+std::optional<int64_t> LocalServer::albumPosition(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, bool favorites,
+                                                  int64_t album, const CancellationToken& token) const {
+    return camel::server::albumPosition(impl_->library(), sort, filter, favorites, album, token);
+}
+std::optional<int64_t> LocalServer::trackRowPosition(TrackSort sort, bool descending,
+                                                     const std::optional<LibraryGroupFilter>& filter, int64_t file,
+                                                     const CancellationToken& token) const {
+    return camel::server::trackRowPosition(impl_->library(), sort, descending, filter, file, token);
+}
 LibraryArtistPage LocalServer::artistPage(const LibraryGroupFilter& artist, const CancellationToken& token) const {
     constexpr int64_t kSongs = 10, kAlbums = 50;
     return camel::server::artistPage(impl_->library(), artist, kSongs, kAlbums, token);

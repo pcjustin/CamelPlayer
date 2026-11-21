@@ -176,6 +176,13 @@ std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort s
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending,
                                     const std::optional<LibraryGroupFilter>& filter, int64_t offset, int64_t limit,
                                     std::optional<uint64_t> expectedRevision = std::nullopt, const CancellationToken& token = {});
+// Where an album stands in browseAlbums(sort, filter), or in favoriteAlbums with `favorites`; nothing when it is not listed.
+std::optional<int64_t> albumPosition(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
+                                     bool favorites, int64_t album, const CancellationToken& token = {});
+// Where the track of `file` stands in browseTrackRows(sort, descending, filter); nothing when it is not listed.
+std::optional<int64_t> trackRowPosition(const LibraryStore& store, TrackSort sort, bool descending,
+                                        const std::optional<LibraryGroupFilter>& filter, int64_t file,
+                                        const CancellationToken& token = {});
 // `songs` of the tracks and at most `albums` of each album listing.
 LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter& artist, int64_t songs, int64_t albums,
                              const CancellationToken& token = {});

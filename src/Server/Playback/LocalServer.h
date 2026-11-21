@@ -44,6 +44,10 @@ public:
     LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, const std::optional<LibraryGroupFilter>& filter,
                                         int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                         const CancellationToken& token = {}) const override;
+    std::optional<int64_t> albumPosition(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, bool favorites,
+                                         int64_t album, const CancellationToken& token = {}) const override;
+    std::optional<int64_t> trackRowPosition(TrackSort sort, bool descending, const std::optional<LibraryGroupFilter>& filter,
+                                            int64_t file, const CancellationToken& token = {}) const override;
     LibraryArtistPage artistPage(const LibraryGroupFilter& artist, const CancellationToken& token = {}) const override;
     LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                     const CancellationToken& token = {}) const override;

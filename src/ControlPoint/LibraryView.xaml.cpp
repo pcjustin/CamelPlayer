@@ -552,36 +552,23 @@ void LibraryView::OnGoToPlayingClick(Windows::Foundation::IInspectable const&, R
 }
 
 void LibraryView::goToPlaying() {
-    constexpr int64_t kFindPage = 500; // the most a library page holds
     const auto playing = ui::nowPlaying();
     if (!server_ || playing.file == 0) return;
     if (current_.mode == Mode::Albums && collection_ && !current_.fetch) {
         background([this, server = server_, playing, total = int64_t(collection_->Size()), favorites = current_.favoriteAlbums,
                     sort = albumSort_, filter = current_.filter] {
-            int64_t index = -1;
-            for (int64_t offset = 0; offset < total && index < 0; offset += kFindPage) {
-                const auto page = favorites ? server->favoriteAlbums(offset, kFindPage, std::nullopt)
-                                            : server->browseAlbums(sort, filter, offset, kFindPage, std::nullopt);
-                const auto found = std::ranges::find(page.albums, playing.album, &LibraryAlbum::id);
-                if (found != page.albums.end()) index = offset + (found - page.albums.begin());
-                if (page.albums.empty()) break;
-            }
-            return std::function<void()>([this, index] { index < 0 ? openPlayingAlbum() : scrollToIndex(index); });
+            const auto index = server->albumPosition(sort, filter, favorites, playing.album);
+            return std::function<void()>(
+                [this, index, total] { index && *index < total ? scrollToIndex(*index) : openPlayingAlbum(); });
         });
         return;
     }
     if (current_.mode == Mode::Tracks && collection_ && !current_.fetch && !current_.smart) {
         background([this, server = server_, playing, total = int64_t(collection_->Size()), sort = trackSort_,
                     descending = descending_, filter = current_.filter] {
-            int64_t index = -1;
-            for (int64_t offset = 0; offset < total && index < 0; offset += kFindPage) {
-                const auto page = server->browseTrackRows(sort, descending, filter, offset, kFindPage, std::nullopt);
-                const auto found =
-                    std::ranges::find_if(page.tracks, [&](const LibraryTrackRow& t) { return t.track.file == playing.file; });
-                if (found != page.tracks.end()) index = offset + (found - page.tracks.begin());
-                if (page.tracks.empty()) break;
-            }
-            return std::function<void()>([this, index] { index < 0 ? openPlayingAlbum() : scrollToIndex(index); });
+            const auto index = server->trackRowPosition(sort, descending, filter, playing.file);
+            return std::function<void()>(
+                [this, index, total] { index && *index < total ? scrollToIndex(*index) : openPlayingAlbum(); });
         });
         return;
     }

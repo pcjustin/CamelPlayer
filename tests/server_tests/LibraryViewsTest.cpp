@@ -249,6 +249,26 @@ TEST_F(LibraryViewsTest, TrackRowsSortByEachColumnInEitherDirection) {
     EXPECT_EQ(page.tracks[0].format, "flac");
 }
 
+// Go to playing finds a row where the listing shows it, in any order, and nowhere when the listing leaves it out.
+TEST_F(LibraryViewsTest, APlayingRowIsFoundWhereItsListingShowsIt) {
+    for (const auto sort :
+         {TrackSort::Title, TrackSort::Artist, TrackSort::Album, TrackSort::Year, TrackSort::Duration, TrackSort::Added})
+        for (const bool descending : {false, true}) {
+            const auto rows = browseTrackRows(*store, sort, descending, std::nullopt, 0, 50).tracks;
+            for (size_t i = 0; i < rows.size(); ++i)
+                EXPECT_EQ(trackRowPosition(*store, sort, descending, std::nullopt, rows[i].track.file), int64_t(i));
+        }
+    for (const auto sort : {AlbumSort::Title, AlbumSort::Artist, AlbumSort::Year, AlbumSort::Added}) {
+        const auto albums = browseAlbums(*store, sort, std::nullopt, 0, 10).albums;
+        for (size_t i = 0; i < albums.size(); ++i)
+            EXPECT_EQ(albumPosition(*store, sort, std::nullopt, false, albums[i].id), int64_t(i));
+    }
+    EXPECT_EQ(albumPosition(*store, AlbumSort::Title, std::nullopt, true, 1), std::nullopt);
+    setAlbumFavorite(*store, {1}, true);
+    EXPECT_EQ(albumPosition(*store, AlbumSort::Title, std::nullopt, true, 1), 0);
+    EXPECT_EQ(trackRowPosition(*store, TrackSort::Title, false, std::nullopt, 999), std::nullopt);
+}
+
 TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
     const auto before = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 50).revision;
     setTrackFavorite(*store, {{3}, {4}}, true);

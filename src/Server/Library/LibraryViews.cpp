@@ -382,14 +382,19 @@ std::vector<std::vector<uint8_t>> sortKeyStarts(sqlite::Database& db) {
     return starts;
 }
 
+std::shared_ptr<const std::vector<int64_t>> albumOrder(const LibraryStore& store, Query& q, AlbumSort sort,
+                                                       const std::string& condition) {
+    return ordered<int64_t>(store, q.orderRevision, "albums|" + std::to_string(int(sort)) + "|" + condition, [&] {
+        return ids(q.db,
+                   "SELECT a.id" + albumsFrom(condition) + " GROUP BY a.id ORDER BY " + kAlbumOrders[size_t(sort)] + ",a.id");
+    });
+}
+
 LibraryAlbumPage albumPage(const LibraryStore& store, Query& q, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
                            int64_t offset, int64_t limit) {
-    const auto& orders = kAlbumOrders;
     const std::string condition = filter ? albumCondition(store, q, *filter) : std::string{};
     const std::string from = albumsFrom(condition);
-    const auto order = ordered<int64_t>(store, q.orderRevision, "albums|" + std::to_string(int(sort)) + "|" + condition, [&] {
-        return ids(q.db, "SELECT a.id" + from + " GROUP BY a.id ORDER BY " + orders[size_t(sort)] + ",a.id");
-    });
+    const auto order = albumOrder(store, q, sort, condition);
     LibraryAlbumPage page;
     page.revision = q.revision;
     page.total = int64_t(order->size());
@@ -401,6 +406,40 @@ LibraryAlbumPage albumPage(const LibraryStore& store, Query& q, AlbumSort sort, 
     while (statement.step()) rows.push_back(album(statement));
     page.albums = inOrder(*order, offset, limit, std::move(rows), [](const LibraryAlbum& a) { return a.id; });
     return page;
+}
+
+std::string favoriteAlbumsFrom() {
+    return std::string(" FROM albums a JOIN tracks t ON t.album_id=a.id") + kJoins + kStats + "WHERE" + kVisible;
+}
+
+std::shared_ptr<const std::vector<int64_t>> favoriteAlbumOrder(const LibraryStore& store, Query& q) {
+    return ordered<int64_t>(store, q.revision, "favoriteAlbums", [&] {
+        return ids(q.db, "SELECT a.id" + favoriteAlbumsFrom() +
+                             " GROUP BY a.id HAVING MAX(coalesce(s.album_favorite,0))=1 ORDER BY "
+                             "MAX(s.album_favorite_at) DESC NULLS LAST,a.sort_key,a.id");
+    });
+}
+
+std::shared_ptr<const std::vector<int64_t>> trackOrder(const LibraryStore& store, Query& q, TrackSort sort, bool descending,
+                                                       const std::string& condition) {
+    const std::string direction = descending ? " DESC" : "";
+    const std::string orders[] = {
+        "t.title_sort" + direction,
+        "t.artist_sort" + direction + ",t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number",
+        "t.album_sort" + direction + ",coalesce(nullif(t.disc_number,0),1),t.track_number",
+        "coalesce(t.year,0)" + direction + ",t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number",
+        std::string(kDuration) + direction,
+        "coalesce(f.added,0)" + direction + ",t.id" + direction};
+    return ordered<int64_t>(store, q.orderRevision, "tracks|" + std::to_string(int(sort)) + direction + condition, [&] {
+        return ids(q.db, std::string("SELECT t.id FROM tracks t") + kJoins + "WHERE" + kVisible + condition + " ORDER BY " +
+                             orders[size_t(sort)] + ",t.id");
+    });
+}
+
+std::optional<int64_t> positionIn(const std::vector<int64_t>& order, int64_t id) {
+    const auto found = std::ranges::find(order, id);
+    if (found == order.end()) return std::nullopt;
+    return int64_t(found - order.begin());
 }
 
 } // namespace
@@ -522,20 +561,7 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
                                     std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
-    const std::string condition = filter ? groupCondition(*filter) : std::string{};
-    const std::string direction = descending ? " DESC" : "";
-    const std::string orders[] = {
-        "t.title_sort" + direction,
-        "t.artist_sort" + direction + ",t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number",
-        "t.album_sort" + direction + ",coalesce(nullif(t.disc_number,0),1),t.track_number",
-        "coalesce(t.year,0)" + direction + ",t.album_sort,coalesce(nullif(t.disc_number,0),1),t.track_number",
-        std::string(kDuration) + direction,
-        "coalesce(f.added,0)" + direction + ",t.id" + direction};
-    const auto order =
-        ordered<int64_t>(store, q.orderRevision, "tracks|" + std::to_string(int(sort)) + direction + condition, [&] {
-            return ids(q.db, std::string("SELECT t.id FROM tracks t") + kJoins + "WHERE" + kVisible + condition + " ORDER BY " +
-                                 orders[size_t(sort)] + ",t.id");
-        });
+    const auto order = trackOrder(store, q, sort, descending, filter ? groupCondition(*filter) : std::string{});
     LibraryTrackRowPage page;
     page.revision = q.revision;
     page.total = int64_t(order->size());
@@ -547,6 +573,23 @@ LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, b
     while (statement.step()) rows.push_back(trackRow(statement));
     page.tracks = inOrder(*order, offset, limit, std::move(rows), [](const LibraryTrackRow& t) { return t.id; });
     return page;
+}
+
+std::optional<int64_t> albumPosition(const LibraryStore& store, AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
+                                     bool favorites, int64_t album, const CancellationToken& token) {
+    Query q(store, std::nullopt, token);
+    if (favorites) return positionIn(*favoriteAlbumOrder(store, q), album);
+    return positionIn(*albumOrder(store, q, sort, filter ? albumCondition(store, q, *filter) : std::string{}), album);
+}
+
+std::optional<int64_t> trackRowPosition(const LibraryStore& store, TrackSort sort, bool descending,
+                                        const std::optional<LibraryGroupFilter>& filter, int64_t file,
+                                        const CancellationToken& token) {
+    Query q(store, std::nullopt, token);
+    auto track = q.db.prepare("SELECT id FROM tracks WHERE file_id=?");
+    if (!track.bind(1, file).step()) return std::nullopt;
+    return positionIn(*trackOrder(store, q, sort, descending, filter ? groupCondition(*filter) : std::string{}),
+                      track.integer(0));
 }
 
 LibraryArtistPage artistPage(const LibraryStore& store, const LibraryGroupFilter& artist, int64_t songs, int64_t albums,
@@ -631,13 +674,8 @@ LibraryAlbumPage favoriteAlbums(const LibraryStore& store, int64_t offset, int64
                                 std::optional<uint64_t> expectedRevision, const CancellationToken& token) {
     checkRange(offset, limit);
     Query q(store, expectedRevision, token);
-    const std::string from =
-        std::string(" FROM albums a JOIN tracks t ON t.album_id=a.id") + kJoins + kStats + "WHERE" + kVisible;
-    const auto order = ordered<int64_t>(store, q.revision, "favoriteAlbums", [&] {
-        return ids(q.db, "SELECT a.id" + from +
-                             " GROUP BY a.id HAVING MAX(coalesce(s.album_favorite,0))=1 ORDER BY "
-                             "MAX(s.album_favorite_at) DESC NULLS LAST,a.sort_key,a.id");
-    });
+    const std::string from = favoriteAlbumsFrom();
+    const auto order = favoriteAlbumOrder(store, q);
     LibraryAlbumPage page;
     page.revision = q.revision;
     page.total = int64_t(order->size());

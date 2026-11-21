@@ -433,6 +433,13 @@ public:
     virtual LibraryTrackRowPage browseTrackRows(TrackSort sort, bool descending, const std::optional<LibraryGroupFilter>& filter,
                                                 int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                                 const CancellationToken& token = {}) const = 0;
+    // Where an album stands in browseAlbums, or in favoriteAlbums with `favorites`; nothing when it is not listed.
+    virtual std::optional<int64_t> albumPosition(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, bool favorites,
+                                                 int64_t album, const CancellationToken& token = {}) const = 0;
+    // Where the track of `file` stands in browseTrackRows; nothing when it is not listed.
+    virtual std::optional<int64_t> trackRowPosition(TrackSort sort, bool descending,
+                                                    const std::optional<LibraryGroupFilter>& filter, int64_t file,
+                                                    const CancellationToken& token = {}) const = 0;
     // An artist's or composer's page: their ten most played tracks and the first albums of each listing.
     virtual LibraryArtistPage artistPage(const LibraryGroupFilter& artist, const CancellationToken& token = {}) const = 0;
     virtual LibraryTrackRowPage smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
