@@ -308,6 +308,48 @@ TEST(Loudness, FilesThatFailedDoNotHoldUpTheRest) {
     EXPECT_TRUE(analyzed(store, 201, std::chrono::seconds(15)));
 }
 
+// A track that cannot be read stays failed at the next start, until its file changes: its album, whose other tracks are
+// measured, is not decoded again at every start.
+TEST(Loudness, AnAlbumWithAnUnreadableTrackIsNotAnalyzedAgainAtTheNextStart) {
+    const auto directory = testutil::tempDir() / "loudness-failed-kept";
+    std::filesystem::remove_all(directory);
+    const auto good = sine("failed-kept-good.wav", 44100, 2, -20.0, 2.0);
+    const auto bad = testutil::tempDir() / "loudness" / "failed-kept-bad.wav";
+    std::ofstream(bad, std::ios::binary | std::ios::trunc) << "not a wave file at all";
+    LibraryStore store(directory);
+    store
+        .write([&](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/music',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/music');"
+                    "INSERT INTO albums(id,folder_id,grouping_key,title,added) VALUES(1,1,'a','Album',0);");
+            auto file = db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) "
+                                   "VALUES(?,1,1,?,'audio',1,1,1)");
+            auto track = db.prepare("INSERT INTO tracks(id,file_id,album_id,title,format) VALUES(?1,?1,1,'T','wav')");
+            file.bind(1, int64_t{1}).bind(2, toUtf8(good.wstring())).run();
+            track.bind(1, int64_t{1}).run();
+            file.reset();
+            track.reset();
+            file.bind(1, int64_t{2}).bind(2, toUtf8(bad.wstring())).run();
+            track.bind(1, int64_t{2}).run();
+        })
+        .get();
+    const LoudnessAnalyzer::Options album{[] { return ReplayGainSettings{ReplayGainMode::Album}; },
+                                          [] { return DecoderByFormat{}; }, [] { return std::vector<int64_t>{}; },
+                                          [] { return PlaybackReads{}; }};
+    {
+        const LoudnessAnalyzer first(store, album);
+        ASSERT_TRUE(analyzed(store, 1, std::chrono::seconds(15)));
+        std::this_thread::sleep_for(std::chrono::seconds(2)); // the album's value is written after the track's
+    }
+    // A value no measurement gives: one written again would show the album was decoded again.
+    store.write([](sqlite::Database& db) { db.exec("UPDATE tracks SET rg_analysis_gain=99 WHERE file_id=1"); }).get();
+    {
+        const LoudnessAnalyzer next(store, album);
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+    EXPECT_EQ(store.openReader().scalar("SELECT rg_analysis_gain FROM tracks WHERE file_id=1").value_or(0), 99);
+}
+
 // A file that could not be read because its storage was away is tried again once the storage has been away and is back.
 TEST(Loudness, AFileWhoseStorageWasAwayIsTriedAgainOnceItIsBack) {
     const auto directory = testutil::tempDir() / "loudness-away";

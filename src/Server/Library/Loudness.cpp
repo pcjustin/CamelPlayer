@@ -159,10 +159,16 @@ std::string leftOut(const char* column, const std::set<int64_t>& failed, const s
     return ids.empty() ? std::string() : std::string(" AND ") + column + " NOT IN (" + ids + ")";
 }
 
+// A file that could not be measured, kept with the size and time it had, so it is tried again only once it changes.
+std::string failedKey(int64_t file) {
+    return "loudness_failed:" + std::to_string(file);
+}
+
 std::string needsAnalysis() {
     return "f.available=1 AND " + std::string(rootOnline()) + " AND " + notDsd() +
            " AND (coalesce(t.rg_track_gain,t.rg_analysis_gain) IS NULL OR "
-           "(t.album_id IS NOT NULL AND coalesce(t.rg_album_gain,t.rg_analysis_album_gain) IS NULL))";
+           "(t.album_id IS NOT NULL AND coalesce(t.rg_album_gain,t.rg_analysis_album_gain) IS NULL)) AND NOT EXISTS("
+           "SELECT 1 FROM app_state s WHERE s.key='loudness_failed:'||f.id AND s.value=f.size||':'||f.mtime)";
 }
 
 } // namespace
@@ -439,6 +445,17 @@ bool LoudnessAnalyzer::analyzeAlbum(const std::stop_token& stop, bool queuedOnly
         measuring_->run(options_.decoders(), threads, yield, [&](size_t i, const std::optional<Loudness>& track) {
             if (!track) {
                 fail(failed_, album[i]);
+                // Measured again at every start, it took its whole album with it.
+                if (failed_.contains(album[i].file))
+                    store_
+                        .write([&](sqlite::Database& db) {
+                            db.prepare("INSERT OR REPLACE INTO app_state(key,value) SELECT ?,size||':'||mtime FROM files "
+                                       "WHERE id=?")
+                                .bind(1, failedKey(album[i].file))
+                                .bind(2, album[i].file)
+                                .run();
+                        })
+                        .get();
                 return;
             }
             const auto peaks = measuring_->waveform(i);
