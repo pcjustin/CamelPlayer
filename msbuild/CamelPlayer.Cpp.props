@@ -79,4 +79,11 @@
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
   </ItemDefinitionGroup>
+  <!-- The player parses media files and network answers: an indirect call may only reach the start of a function. The
+       linker follows the compiler's setting. The sanitizer builds, which look for those faults themselves, go without. -->
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release' and '$(CamelAsan)' != 'true' and '$(CamelUbsan)' != 'true' and '$(CamelFuzz)' != 'true'">
+    <ClCompile>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
+    </ClCompile>
+  </ItemDefinitionGroup>
 </Project>
