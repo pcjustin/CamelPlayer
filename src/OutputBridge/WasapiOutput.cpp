@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include "OutputBridge/KeptFrames.h"
 #include "OutputBridge/WasapiOutput.h"
 
 #include <windows.h>
@@ -224,7 +223,6 @@ private:
             if (FAILED(hr)) throw hrError("IAudioClient::Initialize", hr);
             if (cfg_.eventDriven) THROW_IF_FAILED(client->SetEventHandle(bufferEvent.get()));
             THROW_IF_FAILED(client->GetBufferSize(&bufferFrames));
-            kept_.reset(bufferFrames, fmt_.bytesPerFrame());
             THROW_IF_FAILED(client->GetService(IID_PPV_ARGS(&render)));
             {
                 std::lock_guard lock(statusMutex_);
@@ -259,10 +257,8 @@ private:
             BYTE* p = nullptr;
             HRESULT hr = render->GetBuffer(frames, &p);
             if (FAILED(hr)) return hr;
-            size_t got = kept_.take(p, frames);
-            got += source_->render(p + got * bpf, frames - got);
+            const size_t got = source_->render(p, frames);
             if (got < frames) memset(p + got * bpf, 0, size_t(frames - got) * bpf);
-            kept_.wrote(p, frames);
             hr = render->ReleaseBuffer(frames, 0);
             if (SUCCEEDED(hr) && pace.took(frames, PaceCheck::Clock::now())) runsFast = true;
             return hr;
@@ -281,9 +277,8 @@ private:
                 } else {
                     // Restart from an emptied buffer, primed again like the first start: after a plain Stop/Start the
                     // Chord DAVE in exclusive event mode never signalled the buffer event again (playback stalled on
-                    // resume). What the device still held is written first when it resumes.
-                    UINT32 queued = 0;
-                    if (SUCCEEDED(client->GetCurrentPadding(&queued))) kept_.unplayed(queued);
+                    // resume). What the device still held is the Engine's silence after a pause, as the Engine stops
+                    // a device only after two seconds of it.
                     err = client->Stop();
                     if (SUCCEEDED(err)) err = client->Reset();
                     primed = false;
@@ -367,7 +362,6 @@ private:
 
     WasapiSettings cfg_;
     DeviceFormat fmt_;
-    KeptFrames kept_; // the render thread's alone
     IRenderSource* source_ = nullptr;
     std::thread thread_;
     std::atomic<bool> quit_{false}, running_{false};
