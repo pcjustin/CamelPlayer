@@ -231,34 +231,16 @@ impl Converter {
             )
         };
         Ok(Self {
-            mode,
-            in_channels,
-            in_bits: info.valid_bits,
             in_float: info.sample_encoding == SAMPLE_ENCODING_FLOAT32,
-            out: *out,
-            out_channels,
-            quantize_bits: 0,
-            gain: 1.0,
-            dsp_bits: 0,
             matrix: Some(
                 downmix_matrix(in_channels, info.channel_mask)
                     .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
             ),
             resampler,
-            dither: Tpdf(0),
-            pending: Vec::new(),
-            pending_frames: 0,
-            finished: false,
-            bytes_per_frame: crate::packing::bytes_per_frame(out)
-                .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
-            carry: Vec::new(),
             decimator,
-            remodulator: None,
             modulator: Some(modulator),
             level: if in_dsd { 1.0 } else { 0.5 },
-            in_rate: info.sample_rate,
-            out_rate,
-            scratch: Scratch::default(),
+            ..Self::plain(mode, info, out, out_rate)?
         })
     }
 
@@ -288,14 +270,7 @@ impl Converter {
                 )
             };
             return Ok(Self {
-                mode: Mode::DsdPcm,
-                in_channels,
-                in_bits: info.valid_bits,
-                in_float: false,
-                out: *out,
-                out_channels,
                 quantize_bits: Self::device_bits(out),
-                gain: 1.0,
                 dsp_bits: Self::device_bits(out),
                 matrix: Some(
                     downmix_matrix(in_channels, info.channel_mask)
@@ -303,19 +278,8 @@ impl Converter {
                 ),
                 resampler,
                 dither: Tpdf(0x9E37_79B9_7F4A_7C15),
-                pending: Vec::new(),
-                pending_frames: 0,
-                finished: false,
-                bytes_per_frame: crate::packing::bytes_per_frame(out)
-                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
-                carry: Vec::new(),
                 decimator: Some(decimator),
-                remodulator: None,
-                modulator: None,
-                level: 1.0,
-                in_rate: info.sample_rate,
-                out_rate,
-                scratch: Scratch::default(),
+                ..Self::plain(Mode::DsdPcm, info, out, out_rate)?
             });
         }
         if in_dsd || out.stream_kind != AUDIO_PCM {
@@ -336,36 +300,14 @@ impl Converter {
             } else {
                 return Err(ENGINE_E_UNSUPPORTED_FORMAT);
             };
+            let mode = if out.stream_kind == AUDIO_DSD {
+                Mode::Dsd
+            } else {
+                Mode::Dop
+            };
             return Ok(Self {
-                mode: if out.stream_kind == AUDIO_DSD {
-                    Mode::Dsd
-                } else {
-                    Mode::Dop
-                },
-                in_channels,
-                in_bits: info.valid_bits,
-                in_float: false,
-                out: *out,
-                out_channels,
-                quantize_bits: 0,
-                gain: 1.0,
-                dsp_bits: 0,
-                matrix: None,
-                resampler: None,
-                dither: Tpdf(0),
-                pending: Vec::new(),
-                pending_frames: 0,
-                finished: false,
-                bytes_per_frame: crate::packing::bytes_per_frame(out)
-                    .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
-                carry: Vec::new(),
-                decimator: None,
                 remodulator,
-                modulator: None,
-                level: 1.0,
-                in_rate: info.sample_rate,
-                out_rate,
-                scratch: Scratch::default(),
+                ..Self::plain(mode, info, out, out_rate)?
             });
         }
         let in_float = info.sample_encoding == SAMPLE_ENCODING_FLOAT32;
@@ -418,25 +360,42 @@ impl Converter {
         } else {
             None
         };
-        let bytes_per_frame =
-            crate::packing::bytes_per_frame(out).ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?;
         Ok(Self {
-            mode,
-            in_channels,
-            in_bits: info.valid_bits,
             in_float,
-            out: *out,
-            out_channels,
             quantize_bits,
-            gain: 1.0,
             dsp_bits: Self::device_bits(out),
             matrix,
             resampler,
             dither: Tpdf(0x9E37_79B9_7F4A_7C15),
+            ..Self::plain(mode, info, out, out_rate)?
+        })
+    }
+
+    // What every converter starts from: nothing to mix, resample or quantize, no DSD stage, unity gain and level.
+    fn plain(
+        mode: Mode,
+        info: &CamelSourceInfoV1,
+        out: &AudioFormat,
+        out_rate: u32,
+    ) -> Result<Self, i32> {
+        Ok(Self {
+            mode,
+            in_channels: info.channel_count as usize,
+            in_bits: info.valid_bits,
+            in_float: false,
+            out: *out,
+            out_channels: out.channel_count as usize,
+            quantize_bits: 0,
+            gain: 1.0,
+            dsp_bits: 0,
+            matrix: None,
+            resampler: None,
+            dither: Tpdf(0),
             pending: Vec::new(),
             pending_frames: 0,
             finished: false,
-            bytes_per_frame,
+            bytes_per_frame: crate::packing::bytes_per_frame(out)
+                .ok_or(ENGINE_E_UNSUPPORTED_FORMAT)?,
             carry: Vec::new(),
             decimator: None,
             remodulator: None,
